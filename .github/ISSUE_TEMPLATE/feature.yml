@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a focused improvement to the Jecode workflow
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use Discussions for early or open-ended ideas. Use this form when the problem and desired outcome are concrete.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is difficult or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe what should become easier; avoid prescribing internals unless necessary.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example workflow
+      description: Show how a user would interact with the improvement.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: I searched existing Issues and Discussions for the same request.
+          required: true
+        - label: This request contains no credentials, private code, or sensitive transcript content.
+          required: true

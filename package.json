@@ -1,0 +1,50 @@
+{
+  "name": "jecode",
+  "version": "0.1.0",
+  "description": "An owned coding agent with zero external runtime dependencies.",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/giovannijecha/jecode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/giovannijecha/jecode/issues"
+  },
+  "homepage": "https://github.com/giovannijecha/jecode#readme",
+  "keywords": [
+    "coding-agent",
+    "terminal",
+    "tui",
+    "ollama",
+    "typescript"
+  ],
+  "type": "module",
+  "files": [
+    "bin/",
+    "src/",
+    "LICENSE",
+    "README.md"
+  ],
+  "bin": {
+    "jecode": "./bin/jecode.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "tui:lab": "node dev/tui-lab.ts",
+    "bench:transcript": "node dev/benchmark-transcript.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",
+    "check:package": "node dev/check-package.ts",
+    "check": "npm run typecheck && npm run coverage && npm run check:package"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^5.9.3"
+  }
+}

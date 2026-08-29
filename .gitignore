@@ -1,0 +1,18 @@
+.env
+.env.local
+.env.*.local
+*.log
+
+node_modules/
+dist/
+build/
+coverage/
+
+# Local product data and generated session exports
+.jecode/
+jecode-transcript-*.md
+
+# Local scratch material is not part of the shipped project
+sandbox/
+
+.DS_Store

@@ -1,0 +1,217 @@
+<p align="center">
+  <img src="docs/assets/brand/jeco-256.png" width="128" alt="Jeco, the steel-blue Jecode gecko">
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/wordmark-light.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/wordmark-dark.svg">
+    <img src="docs/assets/brand/wordmark-dark.svg" width="280" alt="Jecode">
+  </picture>
+</p>
+
+<p align="center"><strong>Your code. Your loop.</strong></p>
+
+<p align="center">
+  A focused coding agent that lives in your terminal, keeps tool use visible,
+  and stays under your control.
+</p>
+
+<p align="center">
+  <a href="https://github.com/giovannijecha/jecode/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/giovannijecha/jecode/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-669BD2"></a>
+  <img alt="Node.js 24+" src="https://img.shields.io/badge/node-%3E%3D24-86CB92">
+  <img alt="Runtime dependencies: zero" src="https://img.shields.io/badge/runtime_dependencies-0-8DB4DD">
+</p>
+
+> Jecode is an early 0.1.x release. The core loop is usable today; commands and
+> terminal interactions may still evolve before 1.0.
+
+## Why Jecode
+
+- **One controller.** One visible loop talks to the model, runs tools, and returns
+  control to you. There are no hidden workers or delegated agents.
+- **Terminal-native.** The transcript, composer, searchable menus, tool output,
+  diffs, approvals, reasoning, and status all share one full-screen TUI.
+- **Permission-aware.** Reads stay transparent; dangerous actions ask first.
+  Session approvals can be reviewed and revoked.
+- **Provider-neutral.** Use Anthropic, OpenAI, or a local/remote Ollama server
+  without changing the workflow.
+- **Lean by construction.** Jecode runs directly on Node.js 24 with zero
+  third-party runtime dependencies and no build step.
+
+## Install
+
+Jecode requires **Node.js 24 or newer**. Install the command directly from
+GitHub:
+
+~~~console
+npm install --global github:giovannijecha/jecode
+jecode --version
+~~~
+
+Then open the project you want to work on and run Jecode:
+
+~~~console
+cd path/to/your/project
+jecode
+~~~
+
+You can point at another workspace explicitly:
+
+~~~console
+jecode --root path/to/your/project
+~~~
+
+Run **jecode --help** for all startup options. Tested platforms are Windows and
+Ubuntu.
+
+### Build from source
+
+~~~console
+git clone https://github.com/giovannijecha/jecode.git
+cd jecode
+npm ci
+npm link
+jecode
+~~~
+
+## First session
+
+Jecode opens on an empty composer instead of forcing a setup wizard. Type
+**/settings** when you are ready to choose a provider, select a model, and add a
+credential. A credential can remain in memory for the current session or be
+saved explicitly under **~/.jecode**; it is never stored in the workspace.
+
+| Provider | Credential | Notes |
+|---|---|---|
+| Anthropic | ANTHROPIC_API_KEY | Cloud |
+| OpenAI | OPENAI_API_KEY | Cloud |
+| Ollama | OLLAMA_API_KEY when required | Local by default; model list comes from the server |
+
+For local Ollama, the default endpoint is loopback. Set **OLLAMA_HOST** to a
+loopback URL such as **http://127.0.0.1:11434** when needed. Remote Ollama
+endpoints must use HTTPS.
+
+## Use the TUI
+
+Type **/** to open searchable command completion inside the composer.
+
+| Command | What it does |
+|---|---|
+| /settings | Manage provider, model, limits, motion, and credentials |
+| /effort | Change and save reasoning effort directly |
+| /providers | Switch the provider for the next turn |
+| /models | Search the live model catalogue |
+| /credentials | Add, replace, inspect, or forget saved credentials |
+| /permissions | Review or revoke remembered session approvals |
+| /usage | Show normalized token usage |
+| /new | Start a clean in-memory conversation |
+| /export | Save a timestamped Markdown transcript in the launch directory |
+| /help | Show commands and controls |
+| /exit | Restore the terminal and exit |
+
+Useful controls:
+
+- **Up/Down** moves through command suggestions, menus, and input history.
+- **Tab** completes a slash command without running it; **Enter** sends.
+- **Alt+Enter** inserts a newline.
+- **Esc** closes a menu or interrupts the foreground operation.
+- **Ctrl+C** interrupts, or exits while idle. **Ctrl+D** requests a clean exit.
+- **PageUp/PageDown** and the mouse wheel scroll the transcript without losing
+  the place you are reading.
+- **Ctrl+O** expands or compacts the latest reasoning or tool-detail block.
+
+The one-line footer keeps model, effort, and workspace on the left. Live work,
+readiness guidance, and temporary feedback use the right edge without polluting
+the transcript.
+
+## Configuration
+
+Startup precedence is: command-line flags, environment variables, saved
+settings, built-in defaults.
+
+| Flag | Environment | Default |
+|---|---|---|
+| --provider | JECODE_PROVIDER | anthropic |
+| --model | JECODE_MODEL | Provider default or interactive selection |
+| --root | — | Current directory |
+| --effort | JECODE_EFFORT | high |
+| --max-tokens | JECODE_MAX_TOKENS | 64000 |
+| --max-steps | JECODE_MAX_STEPS | 40 |
+| --reduced-motion | JECODE_REDUCED_MOTION=1 | Off |
+| --auto-approve | JECODE_AUTO_APPROVE=1 | Off |
+
+Persistent preferences live in **~/.jecode/settings.json**. Explicitly saved
+credentials live in **~/.jecode/credentials.json** with owner-only permissions
+where the operating system supports them. Environment credentials always win.
+
+Jecode has one interface theme: dark Steel. **NO_COLOR** is supported for
+terminals and pipelines that disable colour.
+
+## Automation
+
+When stdin or stdout is piped, Jecode switches to a plain line-oriented mode:
+
+~~~console
+printf "explain this project\n" | jecode --root .
+~~~
+
+Dangerous tools stay denied in batch mode unless **--auto-approve** is supplied
+explicitly.
+
+## Safety model
+
+Jecode treats model output, workspace content, tool output, and terminal text as
+untrusted data.
+
+- Tool paths are confined to the selected workspace.
+- Dangerous tools require approval unless the process was started with
+  **--auto-approve**.
+- Credentials are masked, excluded from transcripts, and never printed back.
+- Terminal control characters are neutralized before rendering.
+- Remote Ollama endpoints require HTTPS and reject unsafe redirects.
+- Model and filesystem input are bounded before they reach the screen or
+  provider.
+
+Please read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
+
+## Community
+
+Jecode is built around people using the product and telling us where the loop
+can improve.
+
+- Ask questions, share workflows, and explore ideas in
+  [GitHub Discussions](https://github.com/giovannijecha/jecode/discussions).
+- Report reproducible bugs and focused feature requests through
+  [GitHub Issues](https://github.com/giovannijecha/jecode/issues).
+- Report security concerns privately through the repository Security tab.
+
+Public pull requests are not accepted at this stage; code changes remain a
+maintainer/collaborator workflow. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+short routing guide and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community
+expectations.
+
+## Development
+
+~~~console
+npm ci
+npm run check
+~~~
+
+The visual lab exercises the TUI without a provider, network access, tool
+execution, or workspace writes:
+
+~~~console
+npm run tui:lab
+~~~
+
+For a manual long-session rendering probe, run **npm run bench:transcript**.
+
+Architecture and security boundaries are documented in
+[docs/architecture.md](docs/architecture.md). Brand assets and usage rules live
+in [docs/brand.md](docs/brand.md).
+
+## License
+
+Jecode is available under the [MIT License](LICENSE).

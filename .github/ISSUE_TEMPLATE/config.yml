@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/giovannijecha/jecode/discussions
+    about: Ask for help, share a workflow, or explore an early idea.
+  - name: Private security report
+    url: https://github.com/giovannijecha/jecode/security/advisories/new
+    about: Report a vulnerability without exposing it publicly.

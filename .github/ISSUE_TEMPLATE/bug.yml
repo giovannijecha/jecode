@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible problem in Jecode
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Jecode. Search existing issues first and remove credentials, private code, personal paths, and unredacted transcripts.
+  - type: input
+    id: version
+    attributes:
+      label: Jecode version
+      description: Run jecode --version.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Node.js, OS, terminal, provider, and model versions. Never include an API key.
+      placeholder: |
+        Node.js: 24.x
+        OS: Windows 11
+        Terminal: Windows Terminal
+        Provider/model: Ollama / model-id
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the smallest exact sequence that reproduces the problem.
+      placeholder: |
+        1. Start jecode ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Add sanitized output or a screenshot only when it helps.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, private code, personal paths, and sensitive transcript content.
+          required: true
