@@ -1,6 +1,7 @@
 // A portable transcript: screen blocks in, Markdown out.
 
 import type { Block, Detail } from "./tui/blocks.ts";
+import { terminalText } from "./ui/terminal-text.ts";
 
 export function defaultTranscriptName(now = new Date()): string {
   return `jecode-transcript-${now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}.md`;
@@ -12,27 +13,35 @@ export function transcriptMarkdown(blocks: readonly Block[]): string {
   for (const block of blocks) {
     switch (block.kind) {
       case "user":
-        out.push("## You", "", block.text, "");
+        out.push("## You", "", safeMultiline(block.text), "");
         break;
       case "answer":
-        out.push("## Assistant", "", block.text, "");
+        out.push("## Assistant", "", safeMultiline(block.text), "");
         break;
       case "reasoning":
-        out.push("<details>", "<summary>Reasoning</summary>", "", block.text, "", "</details>", "");
+        out.push(
+          "<details>",
+          "<summary>Reasoning</summary>",
+          "",
+          safeMultiline(block.text),
+          "",
+          "</details>",
+          "",
+        );
         break;
       case "tool":
         out.push(
-          `- **${block.name}**${block.target === "" ? "" : ` \`${inlineCode(block.target)}\``}${block.right === "" ? "" : ` — ${block.right}`}`,
+          `- **${safeInline(block.name)}**${block.target === "" ? "" : ` \`${inlineCode(block.target)}\``}${block.right === "" ? "" : ` — ${safeInline(block.right)}`}`,
         );
         if ((block.body?.length ?? 0) > 0) {
           out.push("", "````text", ...(block.body ?? []).map(detail), "````", "");
         }
         break;
       case "notice":
-        out.push(`> ${block.tone.toUpperCase()}: ${block.text}`, "");
+        out.push(`> ${block.tone.toUpperCase()}: ${safeMultiline(block.text).replaceAll("\n", "\n> ")}`, "");
         break;
       case "list":
-        out.push(...block.items.map((item) => item.text), "");
+        out.push(...block.items.map((item) => safeInline(item.text)), "");
         break;
     }
   }
@@ -43,9 +52,17 @@ export function transcriptMarkdown(blocks: readonly Block[]): string {
 
 function detail(row: Detail): string {
   const prefix = row.kind === "add" ? "+ " : row.kind === "del" ? "- " : row.kind === "keep" ? "  " : "";
-  return `${prefix}${row.text}`;
+  return `${prefix}${safeInline(row.text)}`;
 }
 
 function inlineCode(text: string): string {
-  return text.replace(/`/g, "ˋ");
+  return safeInline(text).replace(/`/g, "ˋ");
+}
+
+function safeInline(text: string): string {
+  return terminalText(text);
+}
+
+function safeMultiline(text: string): string {
+  return terminalText(text, { multiline: true });
 }
