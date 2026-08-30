@@ -12,7 +12,7 @@ import { renderComposer } from "./components/composer.ts";
 import { renderDock } from "./components/dock.ts";
 import type { FooterInfo } from "./components/footer.ts";
 import { renderFooter } from "./components/footer.ts";
-import { renderStatus, spinner } from "./components/status.ts";
+import { renderStatus } from "./components/status.ts";
 import type { Editor } from "./editor.ts";
 import type { Feedback } from "./feedback.ts";
 import type { Cursor } from "./frame.ts";
@@ -20,7 +20,6 @@ import type { Size } from "./screen.ts";
 import type { TranscriptRenderer } from "./transcript-view.ts";
 import { transcriptRenderer } from "./transcript-view.ts";
 
-export { spinner } from "./components/status.ts";
 export type { FooterInfo } from "./components/footer.ts";
 
 const DOCK_MAX = 6;
@@ -47,6 +46,8 @@ export type View = {
   readiness?: Feedback;
   spin: number;
   reducedMotion?: boolean;
+  /** One frame timestamp shared by every live tool duration. */
+  now?: number;
   /** A choice or a field, which takes the composer over while it is open. */
   modal?: Modal;
   /** Commands the half-typed line still matches. */
@@ -77,6 +78,7 @@ export function compose(
     transcriptHeight,
     view.scroll,
     view.pal,
+    { spin: view.spin, reducedMotion: view.reducedMotion, now: view.now },
   );
 
   const cursor = dock.cursor === undefined
@@ -93,20 +95,19 @@ function dockRows(view: View, width: number, height: number): { rows: string[]; 
     status: view.modal === undefined ? view.status : undefined,
     feedback: view.feedback,
     readiness: view.readiness,
-    tick: view.spin,
-    reducedMotion: view.reducedMotion === true,
     unseen: view.unseen ?? 0,
   }, view.pal);
   const footer = renderFooter(view.footer, status, width, view.pal);
   if (view.modal !== undefined) {
+    const maxModalRows = height - FOOTER_ROWS - TRANSCRIPT_MIN - TRANSCRIPT_DOCK_GAP - DOCK_RULES;
     const body = {
       rows: modal.panel(
         view.modal,
         width,
         view.pal,
-        height - FOOTER_ROWS - TRANSCRIPT_MIN - TRANSCRIPT_DOCK_GAP - DOCK_RULES,
+        maxModalRows,
       ),
-      cursor: modal.caret(view.modal, width),
+      cursor: modal.caret(view.modal, width, maxModalRows),
     };
     const dock = renderDock(body, width, view.pal, true);
     return {
@@ -119,15 +120,21 @@ function dockRows(view: View, width: number, height: number): { rows: string[]; 
   const available = height
     - TRANSCRIPT_MIN
     - TRANSCRIPT_DOCK_GAP
-    - menu.length
+    - menu.rows.length
     - FOOTER_ROWS
     - DOCK_RULES;
-  const composer = renderComposer(view.editor, width, Math.max(1, Math.min(DOCK_MAX, available)), view.pal);
+  const composer = renderComposer(
+    view.editor,
+    width,
+    Math.max(1, Math.min(DOCK_MAX, available)),
+    view.pal,
+    menu.right,
+  );
   const dock = renderDock(
-    { rows: [...composer.rows, ...menu], cursor: composer.cursor },
+    { rows: [...composer.rows, ...menu.rows], cursor: composer.cursor },
     width,
     view.pal,
-    menu.length > 0,
+    menu.rows.length > 0,
   );
   return {
     rows: ["", ...dock.rows, ...footer],

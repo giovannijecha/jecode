@@ -39,7 +39,6 @@ export async function providersCommand(
   const at = PROVIDERS.findIndex((provider) => provider.id === session.provider.id);
   const index = await choose({
     title: heading("provider", "where the next turn runs", session.palette),
-    right: "↑↓ enter",
     options,
     index: Math.max(0, at),
   });
@@ -174,7 +173,6 @@ export async function modelsCommand(
 
   const index = await choose({
     title: heading("model", provider.id, session.palette),
-    right: "↑↓ enter",
     options: ids.map((id) => ({ label: id })),
     searchable: true,
     query: "",

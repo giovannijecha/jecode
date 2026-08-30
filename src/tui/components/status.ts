@@ -2,18 +2,10 @@ import type { Palette, RGB } from "../../ui/theme.ts";
 import type { Seg } from "../../ui/render.ts";
 import type { Feedback } from "../feedback.ts";
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
-
-export function spinner(tick: number): string {
-  return SPINNER[tick % SPINNER.length] as string;
-}
-
 export type StatusInfo = {
   status: string | undefined;
   feedback: Feedback | undefined;
   readiness: Feedback | undefined;
-  tick: number;
-  reducedMotion: boolean;
   unseen: number;
 };
 
@@ -24,10 +16,7 @@ export function renderStatus(info: StatusInfo, pal: Palette): Seg[] {
     : undefined;
   if (urgent !== undefined) return withUnseen(feedbackSegments(urgent, pal), info.unseen, pal);
   if (info.status !== undefined) {
-    return withUnseen([
-      { text: `${info.reducedMotion ? "•" : spinner(info.tick)} `, fg: pal.accent },
-      { text: `${info.status} (esc to interrupt)`, fg: pal.ink.muted },
-    ], info.unseen, pal);
+    return withUnseen([{ text: "esc to interrupt", fg: pal.ink.muted }], info.unseen, pal);
   }
   if (info.feedback !== undefined) {
     return withUnseen(feedbackSegments(info.feedback, pal), info.unseen, pal);

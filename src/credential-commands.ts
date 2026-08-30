@@ -37,7 +37,6 @@ export async function askForKey(name: string, host: Host, pal: Palette): Promise
 
   const index = await host.choose({
     title: heading("remember it?", name, pal),
-    right: "↑↓ enter",
     options: [
       { label: "just this session", hint: "nothing is written", key: "s" },
       { label: `save it to ${storeLabel()}`, hint: "owner-only file", key: "w" },
@@ -73,7 +72,6 @@ export async function credentialsCommand(session: Session, host: Host): Promise<
 
   const index = await choose({
     title: heading("credential", "values are never shown", session.palette),
-    right: "↑↓ enter · esc close",
     options: PROVIDERS.map((provider) => ({
       label: provider.keyVar,
       hint: credentialSource(provider.keyVar) ?? "missing",
@@ -104,7 +102,6 @@ export async function credentialsCommand(session: Session, host: Host): Promise<
   ];
   const action = await choose({
     title: heading(name, source ?? "missing", session.palette),
-    right: "↑↓ enter",
     options: actions,
     index: 0,
   });
@@ -120,7 +117,6 @@ async function offerForget(name: string, session: Session, host: Host, hint: str
   if (host.choose === undefined) return;
   const index = await host.choose({
     title: heading(name, hint, session.palette),
-    right: "↑↓ enter",
     options: [
       { label: "keep saved copy", key: "k" },
       { label: "forget saved copy", hint: storeLabel(), key: "f" },

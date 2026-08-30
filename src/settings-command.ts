@@ -101,8 +101,7 @@ export function settingsPicker(
 ): Picker {
   return {
     title: heading("settings", store, pal),
-    right: "↑↓ enter · esc close",
-    footer: "Changes apply now · flags and environment win at launch",
+    description: "Changes apply now · flags and environment win at launch",
     options: settingsItems(values).map((item) => item.option),
     index,
   };
@@ -180,7 +179,6 @@ async function effortSetting(session: Session, host: Host): Promise<string | und
   const current = session.config.effort;
   const index = await choose({
     title: heading("effort", "saved default", session.palette),
-    right: "↑↓ enter · esc back",
     options: EFFORTS.map((value) => ({ label: value })),
     index: Math.max(0, EFFORTS.findIndex((value) => value === current)),
   });
@@ -196,7 +194,6 @@ async function motionSetting(session: Session, host: Host): Promise<void> {
   const values = [false, true];
   const index = await choose({
     title: heading("reduced motion", "saved default", session.palette),
-    right: "↑↓ enter · esc back",
     options: values.map((value) => ({ label: value ? "on" : "off" })),
     index: session.config.reducedMotion ? 1 : 0,
   });

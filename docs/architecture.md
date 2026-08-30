@@ -146,7 +146,9 @@ timeout, jecode terminates the process tree and escalates if it does not exit.
 The child receives an explicit copy of the process environment with
 credential-like names removed. Known environment, session, and saved
 credential values are redacted from captured output before the controller can
-send it to a provider or retain it in a transcript block.
+send it to a provider or retain it in a transcript block. While the process is
+running, the same bounded and redacted capture is emitted as replaceable TUI
+snapshots; raw chunks never cross the tool boundary.
 
 The “allow this session” choice is deliberately narrow: one target file for
 file changes, or one exact shell command. `/permissions` can revoke one grant
@@ -215,25 +217,27 @@ diagram:
 user input       full-width neutral surface
 reasoning        unframed muted label and three-row live tail
 assistant        unframed Markdown
-tool activity    full-width pending/success/failure surface
-selection        shared arrow rows, with no selected card or state badge
-composer         editor and contextual menu inside one pair of rules
-footer           model/effort/workspace left, replaceable status right
+tool activity    compact state rail with evidence beneath each call
+selection        quiet inset band; arrow fallback without colour
+composer         editor, query fields, and contextual menu inside one pair of rules
+footer           identity left, feedback or interrupt hint right
 ```
 
 Operational feedback is not conversation. Slash-command confirmations,
-configuration guidance, foreground activity, and preflight blockers share the
-replaceable right side of the one-line footer. Errors and warnings take
-priority over activity; activity takes priority over informational feedback and
+configuration guidance, the interrupt hint, and preflight blockers share the
+replaceable right side of the one-line footer. Live work names itself on the
+reasoning or tool row; the footer says only `esc to interrupt`. Errors and
+warnings take priority over that hint, followed by informational feedback and
 unseen output. Informational messages expire; warnings and errors remain
 briefly or until the next key. They never become transcript blocks and
 therefore never enter Markdown exports. Turn readiness is checked before the
 editor, recall history, or model history is mutated, so a missing key or model
 leaves the unsent prompt in place.
 
-Conversation turns use one blank terminal row as their outer separator. User
-and tool surfaces keep their own top and bottom padding inside that rhythm, so
-alternating turns never visually collide with the prose before them.
+Conversation turns use one blank terminal row as their outer separator. The
+user surface keeps its own top and bottom padding. A tool trace starts after one
+blank row, then consecutive calls join on one vertical rail without card
+padding or repeated gaps.
 
 Short transcripts are bottom-aligned against the dock with one fixed blank row
 before the composer's upper rule. Unused terminal height stays above the
@@ -247,23 +251,30 @@ Jecode owns the component contracts, design tokens, interaction rules, and
 every emitted terminal cell.
 
 The lower dock has one shell. The normal editor, slash-command autocomplete,
-selectors, and credential fields provide its inner rows; none draws its own
-border. Autocomplete opens on `/`, keeps selection separate from the typed
-prefix, and assigns each key one stable job: Up/Down select, Tab completes,
-Enter runs, and Esc closes. The footer remains outside the shell, so it never
-jumps when a menu opens.
+selectors, searchable queries, and credential fields provide its inner rows;
+none draws its own border. Autocomplete opens on `/`, keeps selection separate
+from the typed prefix, and puts window progress on that input row. Searchable
+pickers use the same `→` input and a real caret. Up/Down select, Tab completes,
+Enter runs, and Esc closes. Key legends are not repeated inside every picker.
+The footer remains outside the shell, so it never jumps when a menu opens.
 
-Writable fields carry the same `→ ` active marker as selected menu rows. The
-field renderer owns that prompt, including its terminal-cell width and cursor
-offset, so numeric settings and masked credentials cannot drift apart.
+Writable fields and searchable pickers carry the same `→ ` active prompt. One
+shared renderer owns its terminal-cell width, horizontal window, secret mask,
+right-side progress, and cursor offset, so the interactions cannot drift apart.
+Selection itself is a quiet inset band on colour terminals; `NO_COLOR` restores
+the arrow marker so the active row remains structural rather than chromatic.
 
 Assistant Markdown follows the same restraint. Inline code is accent text,
 not a background chip. Fenced code shows muted opening and closing fences with
 a two-cell body indent; it has no full-width surface or decorative left rail.
 
-Tool output and diffs stay complete in state. Diffs carry old/new line numbers
-and intra-line emphasis. Rendering previews long output and `Ctrl+O` toggles
-the latest detail, so exporting or expanding never depends on discarded rows.
+Tool output and diffs stay complete in state. A pending tool owns the animated
+rail node and elapsed label. `run_command` updates that same block with the
+bounded, redacted capture while the process runs. Collapsed command output
+shows the newest rows because verdicts land at the end; collapsed diffs select
+changed rows and nearby context across hunks instead of applying a tail window.
+Diffs retain old/new line numbers and intra-line emphasis. `Ctrl+O` toggles the
+latest detail, so exporting or expanding never depends on discarded rows.
 
 Reasoning follows the same retention rule. Its semantic block stores the full
 stream, while the unframed default renderer reflows it at the current terminal
@@ -280,9 +291,9 @@ blocks. Tiny terminals receive a fixed recovery frame instead of fabricated
 dimensions or overflowing chrome.
 
 Jecode exposes one dark Steel identity through semantic colour tokens shared by
-every production component and the TUI Lab. `NO_COLOR` disables colour.
-Reduced-motion mode replaces the animated spinner and blinking cursor with
-stable marks.
+every production component and the TUI Lab. `NO_COLOR` disables colour while
+retaining structural selection and state marks. Reduced-motion mode replaces
+the animated rail node and blinking cursor with stable marks.
 
 ## Validation boundaries
 

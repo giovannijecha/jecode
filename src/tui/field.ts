@@ -7,9 +7,9 @@
 import type { Palette } from "../ui/theme.ts";
 import type { Seg } from "../ui/render.ts";
 import { row } from "../ui/render.ts";
-import { graphemes, textWidth } from "../ui/width.ts";
 
 import type { Editor } from "./editor.ts";
+import { promptCursor, promptLine } from "./components/prompt.ts";
 
 export type Field = {
   /** The question, already styled. */
@@ -30,10 +30,6 @@ export type Field = {
   note?: string;
 };
 
-const DOT = "●";
-const PROMPT = "→ ";
-const LEAD = textWidth(PROMPT);
-
 export function panel(field: Field, width: number, pal: Palette): string[] {
   const { ink } = pal;
   const head = row(
@@ -42,14 +38,9 @@ export function panel(field: Field, width: number, pal: Palette): string[] {
     field.right === undefined ? [] : [{ text: field.right, fg: ink.muted }],
   );
 
-  const view = laid(field, width);
-  const line = row(
-    width,
-    [
-      { text: PROMPT, fg: pal.accent },
-      { text: view.text, fg: ink.bright },
-    ],
-  );
+  const line = promptLine(field.editor.text, field.editor.cursor, width, pal, {
+    secret: field.secret,
+  }).row;
 
   const note =
     field.note === undefined ? [] : [row(width, [{ text: `  ${field.note}`, fg: ink.muted }])];
@@ -59,31 +50,10 @@ export function panel(field: Field, width: number, pal: Palette): string[] {
 
 /** Where the caret sits, relative to the unframed field body. */
 export function caret(field: Field, width: number): { row: number; col: number } {
-  return { row: 1, col: LEAD + laid(field, width).col };
-}
-
-/**
- * The visible slice of the line, and where the caret lands inside it.
- *
- * A key is longer than most terminals are wide, so the line scrolls under a
- * fixed window rather than wrapping: an input that grows downwards pushes the
- * rest of the dock around while it is being pasted into.
- */
-function laid(field: Field, width: number): { text: string; col: number } {
-  const inner = Math.max(1, width - LEAD);
-  const all = field.secret ? DOT.repeat(size(field.editor.text)) : field.editor.text;
-  const at = size(field.editor.text.slice(0, field.editor.cursor));
-
-  // Keep the caret in view, and prefer showing the end of what was typed —
-  // which for a pasted key is the half that says the paste arrived whole.
-  const start = Math.max(0, at - inner + 1);
-  return { text: [...all].slice(start, start + inner).join(""), col: at - start };
-}
-
-function size(text: string): number {
-  let n = 0;
-  for (const _cluster of graphemes(text)) n++;
-  return n;
+  const at = promptCursor(field.editor.text, field.editor.cursor, width, {
+    secret: field.secret,
+  });
+  return { row: 1, col: at.col };
 }
 
 /**

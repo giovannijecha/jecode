@@ -6,6 +6,13 @@ import { renderList, renderNotice } from "./components/misc.ts";
 import { renderTool } from "./components/tool.ts";
 import type { Block } from "./components/types.ts";
 
+export type RenderContext = {
+  previous?: Block;
+  spin?: number;
+  reducedMotion?: boolean;
+  now?: number;
+};
+
 export type {
   AnswerBlock,
   Block,
@@ -20,7 +27,7 @@ export type {
   UserBlock,
 } from "./components/types.ts";
 
-export function render(block: Block, width: number, pal: Palette): string[] {
+export function render(block: Block, width: number, pal: Palette, context: RenderContext = {}): string[] {
   switch (block.kind) {
     case "user":
       return renderUser(block, width, pal);
@@ -29,7 +36,12 @@ export function render(block: Block, width: number, pal: Palette): string[] {
     case "reasoning":
       return renderReasoning(block, width, pal);
     case "tool":
-      return renderTool(block, width, pal);
+      return renderTool(block, width, pal, {
+        continues: context.previous?.kind === "tool",
+        spin: context.spin,
+        reducedMotion: context.reducedMotion,
+        now: context.now,
+      });
     case "notice":
       return renderNotice(block, width, pal);
     case "list":
@@ -37,6 +49,14 @@ export function render(block: Block, width: number, pal: Palette): string[] {
   }
 }
 
-export function renderAll(blocks: readonly Block[], width: number, pal: Palette): string[] {
-  return blocks.flatMap((block) => render(block, width, pal));
+export function renderAll(
+  blocks: readonly Block[],
+  width: number,
+  pal: Palette,
+  context: Omit<RenderContext, "previous"> = {},
+): string[] {
+  return blocks.flatMap((block, index) => render(block, width, pal, {
+    ...context,
+    previous: blocks[index - 1],
+  }));
 }

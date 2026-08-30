@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as edit from "../src/tui/editor.ts";
-import { compose, spinner } from "../src/tui/view.ts";
+import { compose } from "../src/tui/view.ts";
 import { COMMANDS } from "../src/commands.ts";
 import { textWidth } from "../src/ui/width.ts";
 import type { Block } from "../src/tui/blocks.ts";
@@ -64,7 +64,7 @@ test("the footer exposes unseen output while scroll lock is active", () => {
   assert.match(strip(frame.rows).join("\n"), /3 new ↓/);
 });
 
-test("activity and readiness replace only the footer's right edge", () => {
+test("activity leaves only the interrupt hint on the footer's right edge", () => {
   const quiet = compose(base(), { rows: 24, cols: 80 });
   const active = compose(
     { ...base(), status: "Writing · 2s" },
@@ -81,7 +81,8 @@ test("activity and readiness replace only the footer's right edge", () => {
   const blockedRows = strip(blocked.rows);
 
   assert.deepEqual(active.cursor, quiet.cursor);
-  assert.equal(activeRows.findIndex((line) => line.includes("Writing · 2s")), 23);
+  assert.equal(activeRows.findIndex((line) => line.includes("esc to interrupt")), 23);
+  assert.equal(activeRows.findIndex((line) => line.includes("Writing · 2s")), -1);
   assert.equal(blockedRows.findIndex((line) => line.includes("needs an API key")), 23);
   assert.match(activeRows[23] ?? "", /claude-sonnet-5 · high/);
 });
@@ -100,7 +101,8 @@ test("urgent feedback outranks activity while informational feedback waits behin
 
   assert.match(urgent, /× request failed/);
   assert.doesNotMatch(urgent, /Writing/);
-  assert.match(informational, /Writing · 2s/);
+  assert.match(informational, /esc to interrupt/);
+  assert.doesNotMatch(informational, /Writing/);
   assert.doesNotMatch(informational, /settings saved/);
 });
 
@@ -224,10 +226,11 @@ test("command suggestions stay between the composer's two rails", () => {
     { rows: 24, cols: 80 },
   );
   const rows = strip(frame.rows);
-  const input = rows.findIndex((line) => line === "/");
+  const input = frame.cursor?.row ?? -1;
   const first = rows.findIndex((line) => line.includes("/help"));
   const last = rows.findIndex((line) => line.includes("/usage"));
   assert.equal(rows[input - 1], "─".repeat(80));
+  assert.match(rows[input] ?? "", /^\/.*1–4 \/ 12$/);
   assert.equal(first, input + 1);
   assert.equal(rows[last + 1], "─".repeat(80));
   assert.match(rows[first] ?? "", /→/);
@@ -245,21 +248,33 @@ test("a searchable picker filters without losing the original option index", () 
   assert.equal(filtered.index, 1);
   assert.equal(picker.move(filtered, 1).index, 2);
   assert.equal(picker.edge(filtered, "end").index, 2);
-  assert.match(strip(picker.panel(filtered, 50, STEEL)).join("\n"), /1–2 \/ 2 · 4 total/);
+  const rendered = strip(picker.panel(filtered, 50, STEEL)).join("\n");
+  assert.match(rendered, /→ beta.*1–2 \/ 2 · 4 total/);
+  assert.deepEqual(picker.caret(filtered, 50), { row: 1, col: 6 });
   assert.equal(picker.clear(filtered).query, "");
   const empty = picker.type(source, "missing");
   assert.equal(picker.selected(empty), undefined);
 });
 
-test("the spinner keeps one cell, so the footer does not twitch", () => {
-  const frames = Array.from({ length: 20 }, (_, i) => spinner(i));
-  assert.deepEqual(new Set(frames.map(textWidth)), new Set([1]));
-  assert.equal(new Set(frames).size, 10);
-});
-
-test("reduced motion replaces animation with a stable activity mark", () => {
-  const frame = compose({ ...base(), status: "Waiting", reducedMotion: true }, { rows: 24, cols: 80 });
-  assert.match(strip(frame.rows).join("\n"), /• Waiting/);
+test("reduced motion replaces the live rail animation with a stable node", () => {
+  const frame = compose({
+    ...base(),
+    blocks: [{
+      kind: "tool",
+      name: "run_command",
+      target: "npm test",
+      right: "running",
+      tone: "pending",
+      startedAt: 0,
+    }],
+    status: "Running run_command",
+    reducedMotion: true,
+    now: 1_000,
+  }, { rows: 24, cols: 80 });
+  const shown = strip(frame.rows).join("\n");
+  assert.match(shown, /◌ run_command\s+npm test/);
+  assert.match(shown, /running · 1\.0s/);
+  assert.match(shown, /esc to interrupt/);
 });
 
 function stage(log: string[]) {
@@ -279,7 +294,7 @@ function stage(log: string[]) {
 const callOf = (id: string, name: string, input: Record<string, unknown>) =>
   ({ kind: "tool_call", id, name, input }) as const;
 
-test("the footer says what the turn is actually doing", () => {
+test("transcription tracks the live activity phase", () => {
   const log: string[] = [];
   const { events } = stage(log);
   const call = callOf("1", "run_command", { command: "node run.js" });
@@ -322,7 +337,7 @@ test("an edit is diffed from the call, so approval is about the change", () => {
   assert.match(rendered, /\+\s+1 const x = 1;/);
 });
 
-test("a tool is one full-width semantic surface without a transcript spine", () => {
+test("a tool is a compact execution rail with evidence beneath it", () => {
   const block: Block = {
     kind: "tool",
     name: "run_command",
@@ -337,11 +352,12 @@ test("a tool is one full-width semantic surface without a transcript spine", () 
 
   const ESCAPE = String.fromCharCode(27);
   const bare = renderAll([block], 60, STEEL).map((r) => r.replace(new RegExp(`${ESCAPE}\[[0-9;]*m`, "g"), ""));
-  assert.match(bare.join("\n"), /run_command ls/);
-  assert.match(bare.join("\n"), /one/);
-  assert.match(bare.join("\n"), /two/);
-  assert.doesNotMatch(bare.join("\n"), /[│├└⎿]/);
-  assert.ok(bare.slice(1).every((line) => textWidth(line) === 60));
+  assert.match(bare.join("\n"), /✓ run_command\s+ls/);
+  assert.match(bare.join("\n"), /│ one/);
+  assert.match(bare.join("\n"), /│ two/);
+  assert.equal(bare[0], "");
+  assert.ok(bare.every((line) => textWidth(line) <= 60));
+  assert.ok(bare.slice(1).every((line) => !/[ \t]+$/.test(line)));
 });
 
 test("an approval is a menu of answers, not a key to guess at", () => {
@@ -349,11 +365,11 @@ test("an approval is a menu of answers, not a key to guess at", () => {
   const bare = strip(picker.panel(prompt, 80, STEEL));
   const shown = bare.join("\n");
 
-  assert.match(shown, /Permission required  write_file package\.json/);
-  assert.match(shown, /→ Run this call once/);
-  assert.match(shown, /Allow changes to package\.json this session/);
-  assert.match(shown, /Deny and add feedback/);
-  assert.match(shown, /Enter to select · Esc to deny/);
+  assert.match(shown, /Write this file\?.*write_file · package\.json/);
+  assert.match(shown, /→ Yes, once/);
+  assert.match(shown, /Yes, this file for the session/);
+  assert.match(shown, /No, and say why/);
+  assert.doesNotMatch(shown, /Enter to select|Permission required/);
 });
 
 test("the arrows walk the answers and wrap rather than dead-ending", () => {
@@ -496,7 +512,45 @@ test("tool output is retained in full and only collapsed while rendering", () =>
   assert.doesNotMatch(expanded, /ctrl\+o expand/);
 });
 
-test("conversation blocks use the approved hierarchy without a decorative execution spine", () => {
+test("live command output updates the existing pending rail", () => {
+  const { blocks, events } = stage([]);
+  const call = callOf("1", "run_command", { command: "many" });
+  events.onToolCall(call);
+  events.onToolOutput?.(call, Array.from({ length: 12 }, (_, index) => `line ${index}`).join("\n"));
+
+  const block = blocks[0];
+  assert.equal(block?.kind, "tool");
+  if (block?.kind !== "tool") return;
+  assert.equal(block.body?.length, 12);
+  const shown = strip(renderAll([block], 60, STEEL, { now: block.startedAt })).join("\n");
+  assert.match(shown, /12 lines so far/);
+  assert.match(shown, /line 11/);
+  assert.doesNotMatch(shown, /line 0/);
+});
+
+test("denying a preview keeps the evidence on its rail", async () => {
+  const blocks: Block[] = [];
+  const events = transcribe({
+    emit: (block) => blocks.push(block),
+    render: () => {},
+    ask: (_prompt, settle) => settle("no"),
+    approved: () => false,
+    remember: () => {},
+    status: () => {},
+    palette: STEEL,
+  });
+  const call = callOf("1", "edit_file", { path: "a.ts", old_text: "a", new_text: "b" });
+  events.onToolCall(call);
+  assert.equal(await events.approve(call), false);
+  events.onToolResult(call, { kind: "tool_result", id: "1", output: "declined", isError: true }, "declined");
+
+  const block = blocks[0];
+  assert.equal(block?.kind === "tool" ? block.tone : undefined, "deny");
+  assert.equal(block?.kind === "tool" ? block.right : undefined, "denied");
+  assert.equal(block?.kind === "tool" ? block.body?.length : undefined, 2);
+});
+
+test("conversation blocks use the approved hierarchy with one tool rail", () => {
   const blocks: Block[] = [
     { kind: "user", text: "ask" },
     { kind: "reasoning", text: "think", expanded: true },
@@ -506,9 +560,10 @@ test("conversation blocks use the approved hierarchy without a decorative execut
   const drawn = strip(renderAll(blocks, 50, STEEL)).join("\n");
   assert.match(drawn, / ask/);
   assert.match(drawn, / think/);
-  assert.match(drawn, / read_file a\.ts/);
+  assert.match(drawn, /✓ read_file\s+a\.ts/);
   assert.match(drawn, / done/);
-  assert.doesNotMatch(drawn, /[█│├└]/);
+  assert.match(drawn, /│|✓ read_file/);
+  assert.doesNotMatch(drawn, /[█├└]/);
 });
 
 test("tool identity is semantic rather than encoded in decorative glyphs", () => {

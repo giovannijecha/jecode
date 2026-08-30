@@ -174,3 +174,73 @@ export const toolTrace = {
   ] satisfies readonly ToolFixture[],
   diagnosis: "The retry loop checks the signal before backoff, but not again before the next fetch.",
 };
+
+export const suiteRun = {
+  user: "Run the focused HTTP suite and keep the useful end of its output visible.",
+  command: "node --test test/http.test.ts",
+  result: "exit 0 · 1.4s",
+  output: [
+    "TAP version 13",
+    "# request boundary",
+    "ok 1 - retries a rate limit",
+    "ok 2 - abort stops pending backoff",
+    "ok 3 - caps response bodies",
+    "ok 4 - rejects redirects",
+    "ok 5 - times out an idle stream",
+    "ok 6 - preserves caller cancellation",
+    "# provider adapters",
+    "ok 7 - Anthropic errors stay bounded",
+    "ok 8 - OpenAI errors stay bounded",
+    "ok 9 - Ollama errors stay bounded",
+    "1..9",
+    "# tests 9",
+    "# pass 9",
+    "# fail 0",
+    "# duration_ms 1398",
+  ],
+  answer: "The focused suite passes. The collapsed trace keeps the verdict and timing in view.",
+};
+
+export const outputCapDiff = {
+  user: "Cap command output at the shared text boundary and keep the diff reviewable.",
+  reasoning: "The collector is the single boundary shared by stdout and stderr.",
+  path: "src/tools/shell.ts",
+  stat: "+10 −3",
+  answer: "Command output is bounded while the diff still centers every changed hunk.",
+  lines: [
+    { kind: "keep", oldLine: 5, newLine: 5, text: 'import { spawn } from "node:child_process";' },
+    { kind: "add", newLine: 6, text: 'import { OUTPUT_CAP } from "./text-boundary.ts";' },
+    { kind: "keep", oldLine: 6, newLine: 7, text: "" },
+    { kind: "del", oldLine: 8, text: "const MAX_OUTPUT = 1_000_000;", emphasis: "1_000_000" },
+    { kind: "add", newLine: 9, text: "const MAX_OUTPUT = OUTPUT_CAP;", emphasis: "OUTPUT_CAP" },
+    { kind: "gap", text: "… 31 unchanged" },
+    { kind: "keep", oldLine: 41, newLine: 42, text: "function collect(chunk: string): void {" },
+    { kind: "del", oldLine: 42, text: "  chunks.push(chunk);" },
+    { kind: "add", newLine: 43, text: "  const room = MAX_OUTPUT - seen;" },
+    { kind: "add", newLine: 44, text: "  if (room <= 0) return;" },
+    { kind: "add", newLine: 45, text: "  chunks.push(chunk.slice(0, room));" },
+    { kind: "add", newLine: 46, text: "  seen += chunk.length;" },
+    { kind: "keep", oldLine: 43, newLine: 47, text: "}" },
+    { kind: "gap", text: "… 18 unchanged" },
+    { kind: "keep", oldLine: 62, newLine: 66, text: "const text = chunks.join(\"\");" },
+    { kind: "del", oldLine: 63, text: "return text;" },
+    { kind: "add", newLine: 67, text: "return capped(text, seen);" },
+    { kind: "keep", oldLine: 64, newLine: 68, text: "}" },
+  ] satisfies readonly DiffLine[],
+};
+
+export const commandApproval = {
+  user: "Run only the release package checks.",
+  reasoning: "This executes code, so the exact command needs an explicit decision.",
+  command: "npm run check:package",
+  context: ["package.json", "dev/check-package.ts"],
+};
+
+export const modelQuery = "cla";
+export const modelChoices = [
+  { label: "claude-sonnet-5", hint: "balanced" },
+  { label: "claude-opus-5", hint: "deep" },
+  { label: "claude-haiku-4.5", hint: "fast" },
+  { label: "gpt-5.4", hint: "OpenAI" },
+  { label: "kimi-k2.7-code", hint: "Ollama Cloud" },
+];

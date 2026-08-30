@@ -28,7 +28,7 @@ export const runCommand: Tool = {
     const command = requireString(args, "command");
     const timeoutMs = optionalInt(args, "timeout_ms") ?? DEFAULT_TIMEOUT_MS;
     if (timeoutMs <= 0) throw new Error('"timeout_ms" must be a positive integer');
-    const result = await execute(command, ctx.root, timeoutMs, ctx.signal);
+    const result = await execute(command, ctx.root, timeoutMs, ctx.signal, ctx.onOutput);
 
     const output = redactCredentials(result.output);
     const summary = result.timedOut
@@ -49,6 +49,7 @@ function execute(
   cwd: string,
   timeoutMs: number,
   signal: AbortSignal | undefined,
+  onOutput: ToolContextOutput,
 ): Promise<Outcome> {
   if (signal?.aborted === true) return Promise.reject(abortReason(signal));
 
@@ -60,7 +61,7 @@ function execute(
       windowsHide: true,
       detached: process.platform !== "win32",
     });
-    const output = capture();
+    const output = capture(onOutput);
     let timedOut = false;
     let aborted: Error | undefined;
     let settled = false;
@@ -107,30 +108,37 @@ function execute(
   });
 }
 
-function capture(): { append(chunk: string): void; value(): string } {
+type ToolContextOutput = ((output: string) => void) | undefined;
+
+function capture(onOutput?: ToolContextOutput): { append(chunk: string): void; value(): string } {
   const half = MAX_OUTPUT_CHARS / 2;
   const credentials = credentialRedactor();
   let head = "";
   let tail = "";
   let total = 0;
 
-  const append = (chunk: string): void => {
+  const appendSafe = (chunk: string): void => {
     total += chunk.length;
     const room = Math.max(0, half - head.length);
     head += chunk.slice(0, room);
     const rest = chunk.slice(room);
     if (rest !== "") tail = `${tail}${rest}`.slice(-half);
+    if (chunk !== "") onOutput?.(formatted().trimEnd());
+  };
+
+  const formatted = (): string => {
+    if (total <= MAX_OUTPUT_CHARS) return `${head}${tail}`;
+    const cut = total - head.length - tail.length;
+    return `${head}\n\n[... ${cut} characters cut ...]\n\n${tail}`;
   };
 
   return {
     append(chunk) {
-      append(credentials.write(chunk));
+      appendSafe(credentials.write(chunk));
     },
     value() {
-      append(credentials.end());
-      if (total <= MAX_OUTPUT_CHARS) return `${head}${tail}`;
-      const cut = total - head.length - tail.length;
-      return `${head}\n\n[... ${cut} characters cut ...]\n\n${tail}`;
+      appendSafe(credentials.end());
+      return formatted();
     },
   };
 }

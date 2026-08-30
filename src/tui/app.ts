@@ -6,7 +6,7 @@
 
 import type { Session } from "../session.ts";
 import type { Activity, ActivityKind } from "./activity.ts";
-import { begin, elapsed } from "./activity.ts";
+import { begin } from "./activity.ts";
 import * as overlay from "./overlay.ts";
 import type { Block } from "./blocks.ts";
 import { options as completionOptions } from "./complete.ts";
@@ -80,14 +80,12 @@ export async function runApp(
     unseen: state.unseen,
     pal: session.palette,
     footer: footerInfo(session, workspace),
-    status:
-      state.status === undefined || state.activity === undefined
-        ? state.status
-        : `${state.status} · ${elapsed(state.activity)}`,
+    status: state.status,
     feedback: state.feedback,
     readiness: turnBlocker(session),
     spin: state.spin,
     reducedMotion: session.config.reducedMotion,
+    now: Date.now(),
     modal: overlay.shown(state.open),
     menu: completionOptions(state.completing),
     menuIndex: state.completing?.index,
@@ -179,7 +177,14 @@ export async function runApp(
     state.status = label;
     spinTimer = setInterval(() => {
       if (!session.config.reducedMotion) state.spin++;
-      render();
+      let activeTool: Block | undefined;
+      for (let index = state.blocks.length - 1; index >= 0; index--) {
+        const block = state.blocks[index];
+        if (block?.kind !== "tool" || block.tone !== "pending" || block.startedAt === undefined) continue;
+        activeTool = block;
+        break;
+      }
+      render(activeTool);
     }, session.config.reducedMotion ? 1_000 : SPIN_MS);
     render();
     return activity;
@@ -208,6 +213,7 @@ export async function runApp(
     refreshSettings: () => {
       terminal.setReducedMotion(session.config.reducedMotion);
       paint.invalidate();
+      transcript.invalidate();
       render();
     },
     startActivity,

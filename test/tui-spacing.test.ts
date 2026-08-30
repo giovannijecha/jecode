@@ -36,6 +36,18 @@ test("a user turn separates its outer gap from its padded surface", () => {
   assert.equal(drawn[question - 1], " ".repeat(width));
 });
 
+test("consecutive tool calls join one execution rail without repeated gaps", () => {
+  const drawn = plain(renderAll([
+    { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
+    { kind: "tool", name: "search_text", target: "needle", right: "2 matches", tone: "ok" },
+  ], 60, STEEL));
+  const first = drawn.findIndex((line) => line.includes("read_file"));
+  const second = drawn.findIndex((line) => line.includes("search_text"));
+  assert.equal(first, 1);
+  assert.equal(second, first + 1);
+  assert.equal(drawn.filter((line) => line === "").length, 1);
+});
+
 test("a short transcript grows upward from the composer", () => {
   const frame = compose(
     {

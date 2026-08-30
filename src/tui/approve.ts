@@ -49,22 +49,30 @@ export function scopeFor(call: ToolCallBlock): PermissionScope {
 export function promptFor(call: ToolCallBlock, target: string, pal: Palette): Picker {
   const scope = scopeFor(call);
   const options: Option[] = [
-    { label: `Run this ${call.name === "edit_file" ? "edit" : "call"} once`, hint: "enter", key: "y" },
-    { label: `Allow ${scope.label} this session`, hint: "a", key: "a" },
-    { label: "Deny and add feedback", hint: "esc", key: "n" },
+    { label: "Yes, once", hint: "enter", key: "y" },
+    { label: `Yes, ${scopeNoun(scope)} for the session`, hint: "a", key: "a" },
+    { label: "No, and say why", hint: "esc", key: "n" },
   ];
 
   return {
-    title: [
-      { text: "Permission required", fg: pal.ink.attention, bold: true },
-      { text: `  ${call.name}`, fg: pal.ink.muted },
-      ...(target === "" ? [] : [{ text: ` ${target}`, fg: pal.ink.muted }]),
-    ],
-    description: "Review the exact action above, then choose.",
-    footer: "Enter to select · Esc to deny",
+    title: [{ text: question(call.name), fg: pal.ink.attention, bold: true }],
+    right: `${call.name}${target === "" ? "" : ` · ${target}`}`,
     options,
     index: 0,
   };
+}
+
+function question(name: string): string {
+  if (name === "edit_file") return "Allow this edit?";
+  if (name === "write_file") return "Write this file?";
+  if (name === "run_command") return "Run this command?";
+  return "Allow this call?";
+}
+
+function scopeNoun(scope: PermissionScope): string {
+  if (scope.key.startsWith("file\0")) return "this file";
+  if (scope.key.startsWith("command\0")) return "this command";
+  return "this call";
 }
 
 function stable(value: unknown): string {

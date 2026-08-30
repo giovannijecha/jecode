@@ -27,6 +27,11 @@ export function configureColor(enabled: boolean): void {
   colorEnabled = terminalColor && enabled;
 }
 
+/** Whether semantic colour and surfaces will be visible on this terminal. */
+export function hasColor(): boolean {
+  return colorEnabled;
+}
+
 export type Seg = {
   text: string;
   fg?: RGB;
@@ -108,14 +113,18 @@ export function row(
   padX = PAD,
 ): string {
   const inner = Math.max(0, width - padX * 2);
-  const rightW = plainLen(right);
-  const gutter = right.length > 0 ? 1 : 0;
+  // The right column normally wins over the left, but it must still obey the
+  // row boundary when it cannot fit by itself (long commands and paths do
+  // reach approval titles on narrow terminals).
+  const fittedRight = fitSegs(right, inner);
+  const rightW = plainLen(fittedRight);
+  const gutter = fittedRight.length > 0 ? 1 : 0;
   const fitted = fitSegs(left, Math.max(0, inner - rightW - gutter));
   // An empty pad is no pad at all: a zero-width segment still costs a pair of
   // escape sequences on every row of every frame.
   const lead: Seg[] = padX === 0 ? [] : [{ text: " ".repeat(padX), bg: ground }];
 
-  if (ground === undefined && right.length === 0) {
+  if (ground === undefined && fittedRight.length === 0) {
     // Nothing to draw is an empty row, not an indent: leading spaces are
     // invisible on screen and very visible in a paste buffer.
     if (plainLen(fitted) === 0) return "";
@@ -128,7 +137,7 @@ export function row(
     ...lead,
     ...fitted.map((seg) => ({ ...seg, bg: seg.bg ?? ground })),
     { text: " ".repeat(gap), bg: ground },
-    ...right.map((seg) => ({ ...seg, bg: seg.bg ?? ground })),
+    ...fittedRight.map((seg) => ({ ...seg, bg: seg.bg ?? ground })),
     ...lead,
   ]
     .map(paint)

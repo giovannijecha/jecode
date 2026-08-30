@@ -18,9 +18,11 @@ test("batch tool output keeps the content without full-screen padding", () => {
   };
 
   const rows = renderBatch(block, 80, STEEL);
-  assert.match(rows.join("\n"), /run_command npm test/);
+  assert.match(rows.join("\n"), /run_command\s+npm test/);
   assert.deepEqual(
-    rows.filter((line) => line.trim() === "one" || line.trim() === "two").map((line) => line.trim()),
+    rows
+      .filter((line) => /│ (?:one|two)$/.test(line))
+      .map((line) => line.replace(/^.*│ /, "")),
     ["one", "two"],
   );
   assert.ok(rows.every((line) => !/[ \t]+$/.test(line)));
