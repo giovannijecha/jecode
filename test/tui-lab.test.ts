@@ -131,6 +131,7 @@ test("settings is a compact selector inside the shared dock", () => {
   const shown = rows.join("\n");
   assert.match(shown, /settings.*\.jecode\/settings\.json/);
   assert.match(shown, /provider.*ollama/);
+  assert.match(shown, /ollama connection.*cloud.*ollama\.com/);
   assert.match(shown, /model.*deepseek-v4-flash:0731/);
   assert.match(rows.find((line) => line.includes("provider")) ?? "", /→/);
   assert.doesNotMatch(shown, /in use/);

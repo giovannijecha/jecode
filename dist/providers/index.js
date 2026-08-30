@@ -1,6 +1,6 @@
 import { anthropic } from "./anthropic.js";
 import { openai } from "./openai.js";
-import { ollama } from "./ollama.js";
+import { configureOllama, ollama } from "./ollama.js";
 export const PROVIDERS = [anthropic, openai, ollama];
 export function providerNames() {
     return PROVIDERS.map((provider) => provider.id);
@@ -11,4 +11,8 @@ export function selectProvider(id) {
         throw new Error(`unknown provider "${id}" (available: ${providerNames().join(", ")})`);
     }
     return found;
+}
+/** Apply provider-specific process state after startup precedence is resolved. */
+export function configureProviders(config) {
+    configureOllama(config.ollamaHost);
 }

@@ -8,6 +8,7 @@ import { PROVIDERS } from "./providers/index.ts";
 import { readSettings } from "./settings.ts";
 import type { SavedSettings } from "./settings.ts";
 import { askForKey } from "./credential-commands.ts";
+import { providerFailure } from "./provider-errors.ts";
 
 type SelectionBehavior = {
   announce?: boolean;
@@ -156,7 +157,11 @@ export async function modelsCommand(
   try {
     ids = await provider.models(host.signal, (status) => host.status?.(status));
   } catch (error) {
-    host.emit({ kind: "notice", text: `${provider.id}: ${(error as Error).message}`, tone: "error" });
+    host.emit({
+      kind: "notice",
+      text: providerFailure(provider, error as Error, true),
+      tone: "error",
+    });
     return false;
   } finally {
     host.status?.(undefined);

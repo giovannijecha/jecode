@@ -4,7 +4,7 @@ import { runBatch } from "./batch.js";
 import { showCliInfo } from "./cli-info.js";
 import { loadConfig } from "./config.js";
 import { systemPrompt } from "./prompt.js";
-import { selectProvider } from "./providers/index.js";
+import { configureProviders, selectProvider } from "./providers/index.js";
 import { builtinTools } from "./tools/index.js";
 import { configureColor } from "./ui/render.js";
 import { STEEL } from "./ui/theme.js";
@@ -18,6 +18,7 @@ export async function start(args = process.argv.slice(2), environment = {}) {
     if (await showCliInfo(args, applicationRoot, write))
         return;
     const config = loadConfig(args);
+    configureProviders(config);
     const provider = selectProvider(config.providerId);
     const hasScreen = environment.interactive?.() ?? interactive();
     // A provider whose catalogue is not fixed has no sensible default model.

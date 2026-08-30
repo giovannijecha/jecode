@@ -86,6 +86,7 @@ function settingsScene(state: LabState): View {
         {
           provider: "ollama",
           model: "deepseek-v4-flash:0731",
+          ollamaConnection: "cloud · ollama.com",
           effort: "high",
           maxTokens: 64000,
           maxSteps: 40,

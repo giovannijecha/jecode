@@ -1,5 +1,6 @@
 // Small projections of the live session used by the shell and footer.
 import { credentialSource } from "../credentials.js";
+import { providerFailure } from "../provider-errors.js";
 export function controllerOptions(session) {
     return {
         provider: session.provider,
@@ -23,7 +24,7 @@ export function footerInfo(session, workspace = session.config.root) {
 export function turnFailure(session, error, aborted) {
     if (aborted)
         return { kind: "notice", text: "[interrupted]", tone: "warn" };
-    let text = error.message;
+    let text = providerFailure(session.provider, error);
     if (/\b401\b/.test(text)) {
         const source = credentialSource(session.provider.keyVar);
         text += source === "environment"

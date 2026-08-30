@@ -3,9 +3,9 @@
 import { modelsCommand, providersCommand } from "./provider-commands.js";
 import { credentialsCommand } from "./credential-commands.js";
 import { EFFORTS, readSettings, settingsLabel, updateSettings } from "./settings.js";
+import { ollamaConnectionHint, ollamaConnectionSetting, } from "./ollama-settings-command.js";
 import { of } from "./tui/editor.js";
 import { heading } from "./tui/picker.js";
-const CLOSE = 7;
 /** A focused path to the same saved reasoning default exposed by /settings. */
 export async function effortCommand(session, host) {
     const value = await effortSetting(session, host);
@@ -19,30 +19,38 @@ export async function settingsCommand(session, host) {
         return;
     let selected = 0;
     while (true) {
-        const index = await choose(settingsPicker(settingsValues(session), session.palette, selected));
-        if (index === undefined || index === CLOSE)
+        const values = settingsValues(session);
+        const items = settingsItems(values);
+        const index = await choose(settingsPicker(values, session.palette, selected));
+        if (index === undefined)
+            return;
+        const action = items[index]?.action;
+        if (action === undefined || action === "close")
             return;
         selected = index;
-        switch (index) {
-            case 0:
+        switch (action) {
+            case "provider":
                 await providerSetting(session, host);
                 break;
-            case 1:
+            case "ollamaConnection":
+                await ollamaConnectionSetting(session, host, (patch) => persist(host, patch));
+                break;
+            case "model":
                 await modelSetting(session, host);
                 break;
-            case 2:
+            case "effort":
                 await effortSetting(session, host);
                 break;
-            case 3:
+            case "maxTokens":
                 await numberSetting(session, host, "maxTokens", "max output tokens");
                 break;
-            case 4:
+            case "maxSteps":
                 await numberSetting(session, host, "maxSteps", "max tool steps");
                 break;
-            case 5:
+            case "reducedMotion":
                 await motionSetting(session, host);
                 break;
-            case 6:
+            case "credentials":
                 await credentialsCommand(session, host);
                 break;
         }
@@ -53,23 +61,36 @@ export function settingsPicker(values, pal, index = 0, store = settingsLabel()) 
         title: heading("settings", store, pal),
         right: "↑↓ enter · esc close",
         footer: "Changes apply now · flags and environment win at launch",
-        options: [
-            { label: "provider", hint: values.provider },
-            { label: "model", hint: values.model || "choose a model" },
-            { label: "effort", hint: values.effort },
-            { label: "max output tokens", hint: String(values.maxTokens) },
-            { label: "max tool steps", hint: String(values.maxSteps) },
-            { label: "reduced motion", hint: values.reducedMotion ? "on" : "off" },
-            { label: "credentials", hint: "manage API keys" },
-            { label: "close" },
-        ],
+        options: settingsItems(values).map((item) => item.option),
         index,
     };
+}
+function settingsItems(values) {
+    return [
+        { action: "provider", option: { label: "provider", hint: values.provider } },
+        ...(values.ollamaConnection === undefined
+            ? []
+            : [{
+                    action: "ollamaConnection",
+                    option: { label: "ollama connection", hint: values.ollamaConnection },
+                }]),
+        { action: "model", option: { label: "model", hint: values.model || "choose a model" } },
+        { action: "effort", option: { label: "effort", hint: values.effort } },
+        { action: "maxTokens", option: { label: "max output tokens", hint: String(values.maxTokens) } },
+        { action: "maxSteps", option: { label: "max tool steps", hint: String(values.maxSteps) } },
+        {
+            action: "reducedMotion",
+            option: { label: "reduced motion", hint: values.reducedMotion ? "on" : "off" },
+        },
+        { action: "credentials", option: { label: "credentials", hint: "manage API keys" } },
+        { action: "close", option: { label: "close" } },
+    ];
 }
 function settingsValues(session) {
     return {
         provider: session.provider.id,
         model: session.model,
+        ...(session.provider.id === "ollama" ? { ollamaConnection: ollamaConnectionHint() } : {}),
         effort: session.config.effort,
         maxTokens: session.config.maxTokens,
         maxSteps: session.config.maxSteps,

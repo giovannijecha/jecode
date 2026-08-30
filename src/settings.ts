@@ -5,6 +5,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
 import { providerNames } from "./providers/index.ts";
+import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -12,6 +13,7 @@ export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type SavedSettings = {
   provider?: string;
   models?: Record<string, string>;
+  ollamaHost?: string;
   effort?: string;
   reducedMotion?: boolean;
   maxTokens?: number;
@@ -64,6 +66,7 @@ function normalize(value: unknown): SavedSettings {
   const providers = providerNames();
   const provider = member(value["provider"], providers);
   const models = modelsOf(value["models"], providers);
+  const ollamaHost = endpoint(value["ollamaHost"]);
   const effort = member(value["effort"], EFFORTS);
   const reducedMotion = typeof value["reducedMotion"] === "boolean" ? value["reducedMotion"] : undefined;
   const maxTokens = positiveInteger(value["maxTokens"]);
@@ -72,6 +75,7 @@ function normalize(value: unknown): SavedSettings {
   return {
     ...(provider === undefined ? {} : { provider }),
     ...(models === undefined ? {} : { models }),
+    ...(ollamaHost === undefined ? {} : { ollamaHost }),
     ...(effort === undefined ? {} : { effort }),
     ...(reducedMotion === undefined ? {} : { reducedMotion }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
@@ -92,6 +96,15 @@ function modelsOf(value: unknown, providers: readonly string[]): Record<string, 
 
 function member(value: unknown, values: readonly string[]): string | undefined {
   return typeof value === "string" && values.includes(value) ? value : undefined;
+}
+
+function endpoint(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    return parseOllamaEndpoint(value).baseUrl;
+  } catch {
+    return undefined;
+  }
 }
 
 function positiveInteger(value: unknown): number | undefined {

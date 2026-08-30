@@ -119,12 +119,12 @@ saved explicitly under **~/.jecode**; it is never stored in the workspace.
 |---|---|---|
 | Anthropic | ANTHROPIC_API_KEY | Cloud |
 | OpenAI | OPENAI_API_KEY | Cloud |
-| Ollama | OLLAMA_API_KEY when required | Local by default; model list comes from the server |
+| Ollama | OLLAMA_API_KEY for Cloud/remote | Cloud with a key, local without one |
 
-Ollama defaults to the local daemon at **http://127.0.0.1:11434** and requires
-no key there. Set **OLLAMA_HOST** only to use another local daemon or a hosted
-endpoint; remote endpoints must use HTTPS and normally require
-**OLLAMA_API_KEY**.
+Choose **cloud**, **local**, or a custom endpoint from the Ollama connection row
+in **/settings**. Existing users with an Ollama API key automatically use
+**https://ollama.com**; without a key, Jecode uses the local daemon at
+**http://127.0.0.1:11434**. Remote custom endpoints must use HTTPS.
 
 ## Use the TUI
 
@@ -132,7 +132,7 @@ Type **/** to open searchable command completion inside the composer.
 
 | Command | What it does |
 |---|---|
-| /settings | Manage provider, model, limits, motion, and credentials |
+| /settings | Manage provider, connection, model, limits, motion, and credentials |
 | /effort | Change and save reasoning effort directly |
 | /providers | Switch the provider for the next turn |
 | /models | Search the live model catalogue |
@@ -168,6 +168,7 @@ settings, built-in defaults.
 |---|---|---|
 | --provider | JECODE_PROVIDER | anthropic |
 | --model | JECODE_MODEL | Provider default or interactive selection |
+| --ollama-host | OLLAMA_HOST | Cloud with an Ollama key, local without one |
 | --root | — | Current directory |
 | --effort | JECODE_EFFORT | high |
 | --max-tokens | JECODE_MAX_TOKENS | 64000 |

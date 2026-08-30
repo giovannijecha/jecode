@@ -4,6 +4,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.js";
 import { providerNames } from "./providers/index.js";
+import { parseOllamaEndpoint } from "./providers/ollama-endpoint.js";
 import { userDataLabel, userDataPath } from "./user-data.js";
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 let saved;
@@ -49,6 +50,7 @@ function normalize(value) {
     const providers = providerNames();
     const provider = member(value["provider"], providers);
     const models = modelsOf(value["models"], providers);
+    const ollamaHost = endpoint(value["ollamaHost"]);
     const effort = member(value["effort"], EFFORTS);
     const reducedMotion = typeof value["reducedMotion"] === "boolean" ? value["reducedMotion"] : undefined;
     const maxTokens = positiveInteger(value["maxTokens"]);
@@ -56,6 +58,7 @@ function normalize(value) {
     return {
         ...(provider === undefined ? {} : { provider }),
         ...(models === undefined ? {} : { models }),
+        ...(ollamaHost === undefined ? {} : { ollamaHost }),
         ...(effort === undefined ? {} : { effort }),
         ...(reducedMotion === undefined ? {} : { reducedMotion }),
         ...(maxTokens === undefined ? {} : { maxTokens }),
@@ -70,6 +73,16 @@ function modelsOf(value, providers) {
 }
 function member(value, values) {
     return typeof value === "string" && values.includes(value) ? value : undefined;
+}
+function endpoint(value) {
+    if (typeof value !== "string")
+        return undefined;
+    try {
+        return parseOllamaEndpoint(value).baseUrl;
+    }
+    catch {
+        return undefined;
+    }
 }
 function positiveInteger(value) {
     return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;

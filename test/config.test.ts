@@ -56,6 +56,7 @@ test("saved defaults include a model for each provider", () => {
   const saved = {
     provider: "ollama",
     models: { anthropic: "claude-saved", ollama: "qwen-saved" },
+    ollamaHost: "https://models.example.test/team/",
     effort: "medium",
     maxTokens: 8192,
     maxSteps: 12,
@@ -64,10 +65,34 @@ test("saved defaults include a model for each provider", () => {
   const loaded = config([], saved);
   assert.equal(loaded.providerId, "ollama");
   assert.equal(loaded.model, "qwen-saved");
+  assert.equal(loaded.ollamaHost, "https://models.example.test/team");
   assert.equal(loaded.effort, "medium");
   assert.equal(loaded.maxTokens, 8192);
   assert.equal(loaded.maxSteps, 12);
   assert.equal(loaded.reducedMotion, true);
+});
+
+test("Ollama host precedence is flag, environment, then saved settings", () => {
+  const before = process.env["OLLAMA_HOST"];
+  process.env["OLLAMA_HOST"] = "https://environment.example.test";
+  try {
+    const saved = { ollamaHost: "https://saved.example.test" };
+    assert.equal(config([], saved).ollamaHost, "https://environment.example.test");
+    assert.equal(
+      config(["--ollama-host", "https://flag.example.test/path/"], saved).ollamaHost,
+      "https://flag.example.test/path",
+    );
+  } finally {
+    if (before === undefined) delete process.env["OLLAMA_HOST"];
+    else process.env["OLLAMA_HOST"] = before;
+  }
+});
+
+test("unsafe remote Ollama hosts are rejected at launch", () => {
+  assert.throws(
+    () => config(["--ollama-host", "http://models.example.test"]),
+    /must use HTTPS/,
+  );
 });
 
 test("flags and environment override saved defaults", () => {

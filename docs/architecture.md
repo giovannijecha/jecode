@@ -97,11 +97,13 @@ aggregate stream, reconstructed tool arguments, model catalogue, and per-step
 tool-call batch have explicit limits; overflow cancels or rejects the response
 before unbounded work reaches the controller.
 
-With no `OLLAMA_HOST`, Ollama targets `http://127.0.0.1:11434` and needs no
-credential. An explicit `OLLAMA_HOST` is parsed as an absolute URL before any
-request headers are created. HTTP is accepted only for exact loopback hosts.
-Remote endpoints must use HTTPS, and credentials embedded in the URL are
-rejected.
+Ollama initializes its endpoint from `--ollama-host`, `OLLAMA_HOST`, saved
+settings, then key-aware inference. A configured API key selects
+`https://ollama.com`; without one, Jecode targets the local daemon at
+`http://127.0.0.1:11434`. The Ollama connection row in `/settings` can replace
+that session value live with Cloud, local, or a custom endpoint. HTTP is
+accepted only for exact loopback hosts. Remote endpoints must use HTTPS, and
+credentials embedded in the URL are rejected.
 
 ## Workspace boundary
 
@@ -153,7 +155,7 @@ or all grants.
 
 Persistent user data lives under `~/.jecode`, outside every workspace.
 `settings.json` contains only non-secret defaults: provider, one remembered
-model per provider, effort, limits, and reduced motion. Runtime
+model per provider, the Ollama endpoint, effort, limits, and reduced motion. Runtime
 precedence is CLI flags, environment variables, saved settings, then built-in
 defaults. Root and auto-approval stay process-only.
 

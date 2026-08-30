@@ -2,6 +2,7 @@
 
 import type { ControllerOptions } from "../controller.ts";
 import { credentialSource } from "../credentials.ts";
+import { providerFailure } from "../provider-errors.ts";
 import type { Session } from "../session.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FooterInfo } from "./components/footer.ts";
@@ -31,7 +32,7 @@ export function footerInfo(session: Session, workspace = session.config.root): F
 export function turnFailure(session: Session, error: Error, aborted: boolean): NoticeBlock {
   if (aborted) return { kind: "notice", text: "[interrupted]", tone: "warn" };
 
-  let text = error.message;
+  let text = providerFailure(session.provider, error);
   if (/\b401\b/.test(text)) {
     const source = credentialSource(session.provider.keyVar);
     text += source === "environment"
