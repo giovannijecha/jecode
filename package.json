@@ -1,8 +1,7 @@
 {
   "name": "jecode",
-  "version": "0.1.4",
+  "version": "0.1.5-rc.0",
   "description": "An owned coding agent with zero external runtime dependencies.",
-  "private": true,
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -32,18 +31,22 @@
   "engines": {
     "node": ">=24"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
-    "build:release": "tsc --project tsconfig.release.json",
+    "prepack": "node dev/build-release.ts --quiet",
+    "build:release": "node dev/build-release.ts",
     "start": "node src/main.ts",
     "tui:lab": "node dev/tui-lab.ts",
     "bench:transcript": "node dev/benchmark-transcript.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",
-    "check:release": "node dev/check-release-tree.ts",
+    "test": "npm run build:release && node --test",
+    "coverage": "npm run build:release && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",
     "check:package": "node dev/check-package.ts",
     "check:install": "node dev/check-installed-cli.ts",
-    "check": "npm run typecheck && npm run coverage && npm run check:release && npm run check:package && npm run check:install"
+    "check": "npm run typecheck && npm run coverage && npm run check:package && npm run check:install"
   },
   "dependencies": {},
   "devDependencies": {

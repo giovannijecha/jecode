@@ -31,10 +31,22 @@ if (packed.size > 1_000_000) throw new Error(`package is unexpectedly large: ${p
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
   dependencies?: Record<string, unknown>;
+  private?: boolean;
+  publishConfig?: { access?: string; registry?: string };
   scripts?: Record<string, unknown>;
 };
 if (Object.keys(manifest.dependencies ?? {}).length !== 0) {
   throw new Error("runtime dependencies must stay empty");
+}
+if (manifest.private === true) throw new Error("release packages must be publishable");
+if (manifest.publishConfig?.access !== "public") {
+  throw new Error("release packages must publish with public access");
+}
+if (manifest.publishConfig?.registry !== "https://registry.npmjs.org/") {
+  throw new Error("release packages must target the public npm registry");
+}
+if (manifest.scripts?.prepack !== "node dev/build-release.ts --quiet") {
+  throw new Error("release packages must compile from a clean tree before packing");
 }
 const installScripts = ["preinstall", "install", "postinstall", "prepare"]
   .filter((name) => manifest.scripts?.[name] !== undefined);

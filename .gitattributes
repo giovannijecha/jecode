@@ -1,2 +1,1 @@
 src/**/*.ts text eol=lf
-dist/** text eol=lf linguist-generated=true
