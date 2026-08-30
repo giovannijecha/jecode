@@ -4,6 +4,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { editFile, listDir, readFile, writeFile } from "../src/tools/fs.ts";
+import {
+  MAX_EDITABLE_BYTES,
+  MAX_EDITABLE_LINES,
+} from "../src/tools/text-boundary.ts";
 import type { ToolContext } from "../src/tools/index.ts";
 
 let ctx: ToolContext;
@@ -44,6 +48,37 @@ test("bounds a large read before returning it", async () => {
   assert.ok(result.output.length < 61_000);
 });
 
+test("refuses to replace an existing file above the whole-file mutation limit", async () => {
+  const file = path.join(ctx.root, "too-large-to-replace.txt");
+  await fs.writeFile(file, "x".repeat(MAX_EDITABLE_BYTES + 1), "utf8");
+
+  await assert.rejects(
+    writeFile.run({ path: "too-large-to-replace.txt", content: "small" }, ctx),
+    /whole-file mutation limit/,
+  );
+  assert.equal((await fs.stat(file)).size, MAX_EDITABLE_BYTES + 1);
+});
+
+test("refuses whole-file content with too many lines", async () => {
+  const file = path.join(ctx.root, "too-many-lines.txt");
+  const content = "line\n".repeat(MAX_EDITABLE_LINES);
+
+  await assert.rejects(
+    writeFile.run({ path: "too-many-lines.txt", content }, ctx),
+    /20000 lines/,
+  );
+  await assert.rejects(fs.stat(file));
+});
+
+test("refuses to mutate a non-regular file", async () => {
+  await fs.mkdir(path.join(ctx.root, "not-a-file"), { recursive: true });
+
+  await assert.rejects(
+    writeFile.run({ path: "not-a-file", content: "replacement" }, ctx),
+    /regular file/,
+  );
+});
+
 test("scans past an unselected large line without returning it", async () => {
   await fs.writeFile(
     path.join(ctx.root, "offset.txt"),
@@ -75,6 +110,26 @@ test("refuses an ambiguous edit unless replace_all is set", async () => {
   );
   assert.match(message, /2 replacements/);
   assert.equal((await readFile.run({ path: "dup.txt" }, ctx)).output, "y\ny\n");
+});
+
+test("rejects an expansive replace_all before constructing the result", async () => {
+  const file = path.join(ctx.root, "expansive-edit.txt");
+  const before = "a".repeat(1_000);
+  await fs.writeFile(file, before, "utf8");
+
+  await assert.rejects(
+    editFile.run(
+      {
+        path: "expansive-edit.txt",
+        old_text: "a",
+        new_text: "b".repeat(1_001),
+        replace_all: true,
+      },
+      ctx,
+    ),
+    /1000000 characters/,
+  );
+  assert.equal(await fs.readFile(file, "utf8"), before);
 });
 
 test("refuses an edit whose target is absent", async () => {

@@ -11,6 +11,13 @@ import {
   resolveDirectWritableInRoot,
   resolveExistingInRoot,
 } from "./paths.ts";
+import {
+  assertEditableText,
+  assertReplacementFits,
+  MAX_EDITABLE_CHARS,
+  MAX_EDITABLE_LINES,
+  readEditableText,
+} from "./text-boundary.ts";
 import { atomicWrite } from "../atomic.ts";
 
 const MAX_READ_CHARS = 60_000;
@@ -105,7 +112,9 @@ export const writeFile: Tool = {
   name: "write_file",
   description:
     "Create a file, or replace its entire contents. Parent directories are " +
-    "created as needed. To change part of an existing file, prefer edit_file.",
+    "created as needed. Whole-file changes are limited to " +
+    `${MAX_EDITABLE_CHARS} characters and ${MAX_EDITABLE_LINES} lines. ` +
+    "To change part of an existing file, prefer edit_file.",
   dangerous: true,
   input: {
     type: "object",
@@ -118,14 +127,17 @@ export const writeFile: Tool = {
   async preview(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
     const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
+    const content = requireString(args, "content");
+    assertEditableText(content);
     // A write against a file that is already there is a replacement, and the
     // user is owed the difference rather than a wall of green.
-    return { before: await current(target), after: requireString(args, "content") };
+    return { before: await current(target), after: content };
   },
   async run(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
     const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
     const content = requireString(args, "content");
+    assertEditableText(content);
     await fs.mkdir(path.dirname(target), { recursive: true });
     const validate = () => assertDirectWritableInRoot(root, target);
     await validate();
@@ -142,7 +154,9 @@ export const editFile: Tool = {
   name: "edit_file",
   description:
     "Replace an exact string in a file. The old text must appear exactly once " +
-    "unless replace_all is true — include enough surrounding context to make it unique.",
+    "unless replace_all is true — include enough surrounding context to make it unique. " +
+    `Whole-file changes are limited to ${MAX_EDITABLE_CHARS} characters and ` +
+    `${MAX_EDITABLE_LINES} lines.`,
   dangerous: true,
   input: {
     type: "object",
@@ -169,7 +183,7 @@ export const editFile: Tool = {
   async run(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
     const target = await resolveDirectWritableInRoot(root, requireString(args, "path"), true);
-    const before = await fs.readFile(target, "utf8");
+    const before = await readEditableText(target);
     if (ctx.preview !== undefined && before !== ctx.preview.before) {
       throw new Error("file changed after the preview — inspect it and retry the edit");
     }
@@ -256,7 +270,7 @@ function applied(before: string, args: Record<string, unknown>): { after: string
   const oldText = requireString(args, "old_text");
   const newText = args.new_text === "" ? "" : requireString(args, "new_text");
   const replaceAll = optionalBool(args, "replace_all") ?? false;
-  const occurrences = before.split(oldText).length - 1;
+  const occurrences = countOccurrences(before, oldText);
 
   if (occurrences === 0) throw new Error("old_text was not found in the file");
   if (occurrences > 1 && !replaceAll) {
@@ -265,25 +279,33 @@ function applied(before: string, args: Record<string, unknown>): { after: string
     );
   }
 
-  return {
-    after: replaceAll ? before.split(oldText).join(newText) : before.replace(oldText, newText),
-    made: replaceAll ? occurrences : 1,
-  };
+  const made = replaceAll ? occurrences : 1;
+  assertReplacementFits(before, oldText, newText, made);
+  const after = replaceAll ? before.replaceAll(oldText, newText) : before.replace(oldText, newText);
+  assertEditableText(after, "edited content");
+  return { after, made };
 }
 
 /** What is on disk now, or nothing at all — a file that is not there yet. */
 async function current(target: string): Promise<string> {
-  try {
-    return await fs.readFile(target, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-    throw error;
+  return readEditableText(target, { missingAsEmpty: true });
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  let occurrences = 0;
+  for (
+    let index = haystack.indexOf(needle);
+    index !== -1;
+    index = haystack.indexOf(needle, index + needle.length)
+  ) {
+    occurrences += 1;
   }
+  return occurrences;
 }
 
 async function unchangedSinceApproval(target: string, approved: string | undefined): Promise<void> {
-  if (approved === undefined) return;
-  if ((await current(target)) !== approved) {
+  const onDisk = await current(target);
+  if (approved !== undefined && onDisk !== approved) {
     throw new Error("file changed after the preview — inspect it and retry the write");
   }
 }
