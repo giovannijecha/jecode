@@ -43,13 +43,15 @@
 
 ## Install
 
-Jecode requires **Node.js 24 or newer** and npm. Release candidates are
-published on the **next** channel:
+Jecode requires **Node.js 24 or newer** and npm:
 
 ~~~console
-npm install --global @giovannijecha/jecode@next
+npm install --global @giovannijecha/jecode
 jecode --version
 ~~~
+
+To try prereleases instead, install the opt-in **next** channel with
+`npm install --global @giovannijecha/jecode@next`.
 
 Then open the project you want to work on and run Jecode:
 
@@ -69,10 +71,10 @@ Ubuntu, and macOS.
 
 ### Update
 
-Install the current release candidate over the existing global command:
+Install the current stable release over the existing global command:
 
 ~~~console
-npm install --global @giovannijecha/jecode@next
+npm install --global @giovannijecha/jecode
 jecode --version
 ~~~
 
