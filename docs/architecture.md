@@ -109,9 +109,13 @@ reject traversal and outside absolute paths. Existing paths are then resolved
 with `realpath`, and missing write targets resolve through their nearest
 existing parent. This closes symlink and Windows junction escapes.
 
-Writes use a temporary sibling, file sync, and rename. A previewed write or
-edit compares the current file with the approved version immediately before
-replacement, so an intervening change is rejected instead of overwritten.
+Reads may follow an alias only when its canonical target remains inside the
+workspace. Writes and edits require a direct path: every symlink or junction
+component is rejected. The boundary is revalidated after the temporary sibling
+is opened but before content is written, and again immediately before rename;
+the temporary pathname must still identify the file Jecode opened. A previewed
+write or edit also compares the current file with the approved version, so an
+intervening content change is rejected instead of overwritten.
 
 The built-in tools are:
 

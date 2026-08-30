@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 
 // Every filesystem tool resolves through here. The agent works inside one
 // root and cannot be talked into reaching outside it — including via "..",
@@ -53,6 +53,65 @@ export async function resolveWritableInRoot(root: string, candidate: string): Pr
   }
 }
 
+/**
+ * Resolve a write target without permitting a symlink or junction component.
+ *
+ * Reads may follow an in-workspace alias. Writes stay on the direct path so a
+ * later boundary check can detect a component replaced during the operation.
+ */
+export async function resolveDirectWritableInRoot(
+  root: string,
+  candidate: string,
+  mustExist = false,
+): Promise<string> {
+  const { canonicalRoot, target } = await directPath(root, candidate);
+  await assertDirectWritableInRoot(canonicalRoot, target, mustExist);
+  return target;
+}
+
+/** Revalidate a previously resolved direct write target. */
+export async function assertDirectWritableInRoot(
+  root: string,
+  target: string,
+  mustExist = false,
+): Promise<void> {
+  const { canonicalRoot, target: direct } = await directPath(root, target);
+  const relative = path.relative(canonicalRoot, direct);
+  let current = canonicalRoot;
+
+  for (const part of relative.split(path.sep).filter((value) => value !== "")) {
+    current = path.join(current, part);
+    try {
+      const details = await lstat(current);
+      if (details.isSymbolicLink()) throw writeLinkError();
+    } catch (error) {
+      if (!missing(error)) throw error;
+      if (mustExist) throw error;
+      break;
+    }
+  }
+
+  const resolved = mustExist
+    ? await realpath(direct)
+    : await resolveWritableInRoot(canonicalRoot, direct);
+  if (!samePath(direct, resolved)) throw writeLinkError();
+}
+
+async function directPath(
+  root: string,
+  candidate: string,
+): Promise<{ canonicalRoot: string; target: string }> {
+  const lexicalRoot = path.resolve(root);
+  const lexicalTarget = resolveInRoot(lexicalRoot, candidate);
+  const relative = path.relative(lexicalRoot, lexicalTarget);
+  const canonicalRoot = await realpath(lexicalRoot);
+  const target = path.resolve(canonicalRoot, relative);
+  if (!inside(canonicalRoot, target)) {
+    throw new Error(`path escapes the workspace root: ${candidate}`);
+  }
+  return { canonicalRoot, target };
+}
+
 export function displayPath(root: string, absolute: string): string {
   const relative = path.relative(root, absolute);
   return relative === "" ? "." : relative.split(path.sep).join("/");
@@ -61,6 +120,14 @@ export function displayPath(root: string, absolute: string): string {
 function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+
+function samePath(left: string, right: string): boolean {
+  return path.relative(left, right) === "";
+}
+
+function writeLinkError(): Error {
+  return new Error("write path contains a symbolic link or junction — use a direct workspace path");
 }
 
 function missing(error: unknown): boolean {

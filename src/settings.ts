@@ -31,7 +31,7 @@ export async function updateSettings(patch: Partial<SavedSettings>): Promise<str
   const directory = path.dirname(file);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(directory, 0o700);
-  await atomicWrite(file, `${JSON.stringify(next, null, 2)}\n`, 0o600);
+  await atomicWrite(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
   saved = next;
   return file;
 }

@@ -119,12 +119,40 @@ test("refuses reads and writes through a junction that leaves the root", async (
     );
     await assert.rejects(
       writeFile.run({ path: "outside-link/new.txt", content: "no" }, ctx),
-      /escapes the workspace root/,
+      /symbolic link or junction/,
     );
     await assert.rejects(fs.stat(path.join(outside, "new.txt")));
   } finally {
     await fs.rm(path.join(ctx.root, "outside-link"), { force: true }).catch(() => undefined);
     await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("allows an internal directory alias for reads but not writes", async (t) => {
+  const direct = path.join(ctx.root, "direct-target");
+  const alias = path.join(ctx.root, "direct-alias");
+  await fs.mkdir(direct);
+  await fs.writeFile(path.join(direct, "inside.txt"), "safe", "utf8");
+  try {
+    try {
+      await fs.symlink(direct, alias, process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") {
+        t.skip("creating directory aliases is unavailable for this account");
+        return;
+      }
+      throw error;
+    }
+
+    assert.equal((await readFile.run({ path: "direct-alias/inside.txt" }, ctx)).output, "safe");
+    await assert.rejects(
+      writeFile.run({ path: "direct-alias/new.txt", content: "no" }, ctx),
+      /symbolic link or junction/,
+    );
+    await assert.rejects(fs.stat(path.join(direct, "new.txt")));
+  } finally {
+    await fs.rm(alias, { force: true }).catch(() => undefined);
+    await fs.rm(direct, { recursive: true, force: true });
   }
 });
 

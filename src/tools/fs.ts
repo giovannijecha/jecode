@@ -5,7 +5,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Tool } from "./types.ts";
 import { optionalBool, optionalInt, requireString } from "./args.ts";
-import { displayPath, resolveExistingInRoot, resolveWritableInRoot } from "./paths.ts";
+import {
+  assertDirectWritableInRoot,
+  displayPath,
+  resolveDirectWritableInRoot,
+  resolveExistingInRoot,
+} from "./paths.ts";
 import { atomicWrite } from "../atomic.ts";
 
 const MAX_READ_CHARS = 60_000;
@@ -112,18 +117,20 @@ export const writeFile: Tool = {
   },
   async preview(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
-    const target = await resolveWritableInRoot(root, requireString(args, "path"));
+    const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
     // A write against a file that is already there is a replacement, and the
     // user is owed the difference rather than a wall of green.
     return { before: await current(target), after: requireString(args, "content") };
   },
   async run(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
-    const target = await resolveWritableInRoot(root, requireString(args, "path"));
+    const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
     const content = requireString(args, "content");
     await fs.mkdir(path.dirname(target), { recursive: true });
+    const validate = () => assertDirectWritableInRoot(root, target);
+    await validate();
     await unchangedSinceApproval(target, ctx.preview?.before);
-    await atomicWrite(target, content);
+    await atomicWrite(target, content, { validate });
     return {
       output: `wrote ${displayPath(root, target)} (${content.length} characters)`,
       summary: count(content, "line"),
@@ -149,7 +156,7 @@ export const editFile: Tool = {
   },
   async preview(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
-    const target = await resolveExistingInRoot(root, requireString(args, "path"));
+    const target = await resolveDirectWritableInRoot(root, requireString(args, "path"), true);
     const before = await current(target);
     // An edit that will not apply gets no preview: the run is about to say so
     // properly, and a diff of a match that does not exist would be a lie.
@@ -161,14 +168,15 @@ export const editFile: Tool = {
   },
   async run(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
-    const target = await resolveExistingInRoot(root, requireString(args, "path"));
+    const target = await resolveDirectWritableInRoot(root, requireString(args, "path"), true);
     const before = await fs.readFile(target, "utf8");
     if (ctx.preview !== undefined && before !== ctx.preview.before) {
       throw new Error("file changed after the preview — inspect it and retry the edit");
     }
     const { after, made } = applied(before, args);
 
-    await atomicWrite(target, after);
+    const validate = () => assertDirectWritableInRoot(root, target, true);
+    await atomicWrite(target, after, { validate });
     return {
       output: `edited ${displayPath(root, target)} (${made} replacement${made === 1 ? "" : "s"})`,
       summary: plural(made, "replacement", "replacements"),

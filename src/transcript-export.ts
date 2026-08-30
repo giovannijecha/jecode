@@ -2,7 +2,12 @@
 
 import type { Block } from "./tui/blocks.ts";
 import { atomicWrite } from "./atomic.ts";
-import { displayPath, resolveExistingInRoot, resolveWritableInRoot } from "./tools/paths.ts";
+import {
+  assertDirectWritableInRoot,
+  displayPath,
+  resolveDirectWritableInRoot,
+  resolveExistingInRoot,
+} from "./tools/paths.ts";
 import { defaultTranscriptName, transcriptMarkdown } from "./transcript.ts";
 
 export async function saveTranscript(
@@ -11,7 +16,8 @@ export async function saveTranscript(
   now = new Date(),
 ): Promise<string> {
   const root = await resolveExistingInRoot(applicationRoot, ".");
-  const target = await resolveWritableInRoot(root, defaultTranscriptName(now));
-  await atomicWrite(target, transcriptMarkdown(blocks));
+  const target = await resolveDirectWritableInRoot(root, defaultTranscriptName(now));
+  const validate = () => assertDirectWritableInRoot(root, target);
+  await atomicWrite(target, transcriptMarkdown(blocks), { validate });
   return displayPath(root, target);
 }
