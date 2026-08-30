@@ -207,6 +207,8 @@ untrusted data.
 - Terminal control characters are neutralized before rendering.
 - Remote Ollama endpoints require HTTPS. Provider HTTP redirects are rejected
   rather than followed across an implicit trust boundary.
+- Provider handshakes and idle response bodies have finite deadlines. Only
+  idempotent catalogue reads retry; generation requests are never replayed.
 - Model and filesystem input are bounded before they reach the screen or
   provider.
 
