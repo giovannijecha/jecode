@@ -35,3 +35,25 @@ test("a transcript preserves conversation, reasoning, and full tool details", ()
   assert.match(markdown, /- old\n\+ new/);
   assert.match(markdown, /## Assistant\n\nDone\./);
 });
+
+test("an exported transcript keeps terminal controls inert", () => {
+  const escape = String.fromCharCode(27);
+  const bell = String.fromCharCode(7);
+  const blocks: Block[] = [
+    { kind: "answer", text: `before${escape}]52;c;payload${bell}after\nsecond line` },
+    {
+      kind: "tool",
+      name: `run${escape}_command`,
+      target: "fixture",
+      right: "exit 0",
+      tone: "ok",
+      body: [{ kind: "out", text: "reversed\u202efile" }],
+    },
+  ];
+
+  const markdown = transcriptMarkdown(blocks);
+  assert.equal(markdown.includes(escape), false);
+  assert.equal(markdown.includes(bell), false);
+  assert.match(markdown, /before␛\]52;c;payload␇after\nsecond line/);
+  assert.match(markdown, /reversed\\u202efile/);
+});
