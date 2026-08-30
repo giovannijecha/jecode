@@ -1,6 +1,6 @@
 {
   "name": "@giovannijecha/jecode",
-  "version": "0.1.5-rc.2",
+  "version": "0.1.5-rc.3",
   "description": "An owned coding agent with zero external runtime dependencies.",
   "license": "MIT",
   "repository": {
@@ -44,6 +44,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build:release && node --test",
     "coverage": "npm run build:release && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",
+    "check:release-tag": "node dev/check-release-tag.ts",
     "check:package": "node dev/check-package.ts",
     "check:install": "node dev/check-installed-cli.ts",
     "check": "npm run typecheck && npm run coverage && npm run check:package && npm run check:install"
