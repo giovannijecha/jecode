@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getJson } from "../src/providers/http.ts";
+import { getJson, postJson, postSse } from "../src/providers/http.ts";
 
 test("retries a rate limit and reports the wait", async (context) => {
   const previousFetch = globalThis.fetch;
@@ -40,6 +40,106 @@ test("an abort stops a pending retry", async (context) => {
     control.abort(new Error("cancelled"));
   });
   await assert.rejects(pending, /cancelled/);
+});
+
+test("does not replay a POST after a retryable response", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  const statuses: string[] = [];
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response("busy", { status: 503, statusText: "Unavailable" });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  await assert.rejects(
+    postJson("https://example.test/generate", {}, { prompt: "hello" }, undefined, (status) => {
+      statuses.push(status);
+    }),
+    (error: Error & { status?: number }) => {
+      assert.equal(error.status, 503);
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(statuses, []);
+});
+
+test("does not replay a POST after an ambiguous network error", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("socket reset");
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  await assert.rejects(
+    postJson("https://example.test/generate", {}, { prompt: "hello" }),
+    /network error calling .*socket reset/,
+  );
+  assert.equal(calls, 1);
+});
+
+test("times out a response handshake even without a caller signal", async (context) => {
+  const previousFetch = globalThis.fetch;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  globalThis.fetch = ((_url, init) => new Promise((_resolve, reject) => {
+    const signal = init?.signal;
+    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+  })) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const pending = getJson("https://example.test/models", {});
+  context.mock.timers.tick(60_000);
+
+  await assert.rejects(pending, /timed out waiting for response headers after 60000ms/);
+});
+
+test("times out an idle SSE response body", async (context) => {
+  const previousFetch = globalThis.fetch;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>(), {
+    status: 200,
+  })) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const events = await postSse("https://example.test/generate", {}, {}, undefined);
+  const pending = events.next();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  context.mock.timers.tick(120_000);
+
+  await assert.rejects(pending, /response body was idle for 120000ms/);
+});
+
+test("keeps caller cancellation attached after response headers", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const control = new AbortController();
+  globalThis.fetch = (async (_url, init) => new Response(new ReadableStream<Uint8Array>({
+    start(stream) {
+      const signal = init?.signal;
+      signal?.addEventListener("abort", () => stream.error(signal.reason), { once: true });
+    },
+  }), { status: 200 })) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  const events = await postSse("https://example.test/generate", {}, {}, control.signal);
+  const pending = events.next();
+  control.abort(new Error("cancelled after headers"));
+
+  await assert.rejects(pending, /cancelled after headers/);
 });
 
 test("a non-retryable response keeps status and a bounded body", async (context) => {

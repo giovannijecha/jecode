@@ -1,12 +1,15 @@
-// The entire HTTP layer: one retrying request, then either a JSON body or an
-// event stream. Retries wrap only the handshake — once bytes are flowing, a
-// failure is the caller's to surface, never something to silently replay.
+// The entire HTTP layer: one bounded request, then either a JSON body or an
+// event stream. Only idempotent reads retry. Once a POST starts or response
+// bytes flow, a failure is surfaced rather than silently replayed.
 
 import { readSseJson } from "./sse.ts";
 
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
 const MAX_JSON_CHARS = 5_000_000;
 const MAX_ERROR_CHARS = 2_000;
+const HANDSHAKE_TIMEOUT_MS = 60_000;
+const BODY_IDLE_TIMEOUT_MS = 120_000;
+const GET_RETRIES = 3;
 
 export type HttpError = Error & { status?: number; body?: string };
 export type HttpStatus = (text: string) => void;
@@ -39,7 +42,7 @@ export async function getJson(
 }
 
 async function asJson(url: string, res: Response): Promise<unknown> {
-  const { text, truncated } = await boundedText(res, MAX_JSON_CHARS);
+  const { text, truncated } = await boundedText(url, res, MAX_JSON_CHARS);
   if (truncated) {
     throw httpError(`${url} returned JSON over ${MAX_JSON_CHARS} characters`, res.status, text);
   }
@@ -59,7 +62,7 @@ export async function postSse(
 ): Promise<AsyncGenerator<unknown>> {
   const res = await request(url, { accept: "text/event-stream", ...headers }, body, signal, onStatus);
   if (res.body === null) throw httpError(`${url} returned no body`, res.status);
-  return readSseJson(res.body);
+  return readSseJson(withIdleTimeout(url, res.body));
 }
 
 async function request(
@@ -68,8 +71,8 @@ async function request(
   body: unknown,
   signal: AbortSignal | undefined,
   onStatus: HttpStatus | undefined,
-  maxRetries = 3,
 ): Promise<Response> {
+  const maxRetries = body === undefined ? GET_RETRIES : 0;
   let lastError: HttpError | undefined;
   let waitMs = 0;
 
@@ -77,6 +80,7 @@ async function request(
     if (waitMs > 0) await sleep(waitMs, signal);
 
     let res: Response;
+    const handshake = handshakeSignal(url, signal);
     try {
       // No body, no method: a request with nothing to send is a read, and
       // saying so is what keeps the retry and error handling in one place.
@@ -85,14 +89,19 @@ async function request(
         headers: body === undefined ? headers : { "content-type": "application/json", ...headers },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         redirect: "manual",
-        signal,
+        signal: handshake.signal,
       });
     } catch (cause) {
+      const timeout = handshake.timeout();
+      if (timeout !== undefined) throw timeout;
       if (signal?.aborted === true) throw cause;
-      lastError = httpError(`network error calling ${url}: ${(cause as Error).message}`);
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      lastError = httpError(`network error calling ${url}: ${detail}`);
       waitMs = backoff(attempt);
       if (attempt < maxRetries) onStatus?.(`Network error · retrying in ${waitLabel(waitMs)}`);
       continue;
+    } finally {
+      handshake.clear();
     }
 
     if (res.status >= 300 && res.status < 400) {
@@ -101,7 +110,7 @@ async function request(
     }
     if (res.ok) return res;
 
-    const { text } = await boundedText(res, MAX_ERROR_CHARS);
+    const { text } = await boundedText(url, res, MAX_ERROR_CHARS);
     lastError = httpError(
       `${url} -> ${res.status} ${res.statusText}`,
       res.status,
@@ -118,26 +127,108 @@ async function request(
   throw lastError ?? httpError(`${url} failed`);
 }
 
-async function boundedText(res: Response, max: number): Promise<{ text: string; truncated: boolean }> {
+async function boundedText(
+  url: string,
+  res: Response,
+  max: number,
+): Promise<{ text: string; truncated: boolean }> {
   if (res.body === null) return { text: "", truncated: false };
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let text = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      text += decoder.decode();
-      return text.length > max
-        ? { text: text.slice(0, max), truncated: true }
-        : { text, truncated: false };
+  try {
+    while (true) {
+      const { done, value } = await timedRead(url, reader);
+      if (done) {
+        text += decoder.decode();
+        return text.length > max
+          ? { text: text.slice(0, max), truncated: true }
+          : { text, truncated: false };
+      }
+      text += decoder.decode(value, { stream: true });
+      if (text.length > max) {
+        await reader.cancel().catch(() => undefined);
+        return { text: text.slice(0, max), truncated: true };
+      }
     }
-    text += decoder.decode(value, { stream: true });
-    if (text.length > max) {
-      await reader.cancel().catch(() => undefined);
-      return { text: text.slice(0, max), truncated: true };
-    }
+  } finally {
+    reader.releaseLock();
   }
+}
+
+function handshakeSignal(
+  url: string,
+  signal: AbortSignal | undefined,
+): { signal: AbortSignal; timeout(): HttpError | undefined; clear(): void } {
+  const controller = new AbortController();
+  let timeout: HttpError | undefined;
+  const timer = setTimeout(() => {
+    timeout = httpError(
+      `${url} timed out waiting for response headers after ${HANDSHAKE_TIMEOUT_MS}ms`,
+    );
+    controller.abort(timeout);
+  }, HANDSHAKE_TIMEOUT_MS);
+
+  return {
+    signal: signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]),
+    timeout: () => timeout,
+    clear: () => clearTimeout(timer),
+  };
+}
+
+async function timedRead(
+  url: string,
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  const timeout = httpError(
+    `${url} response body was idle for ${BODY_IDLE_TIMEOUT_MS}ms`,
+  );
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(timeout), BODY_IDLE_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([reader.read(), expired]);
+  } catch (error) {
+    if (error === timeout) await reader.cancel(timeout).catch(() => undefined);
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function withIdleTimeout(url: string, body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    reader.releaseLock();
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await timedRead(url, reader);
+        if (done) {
+          release();
+          controller.close();
+        } else {
+          controller.enqueue(value);
+        }
+      } catch (error) {
+        await reader.cancel(error).catch(() => undefined);
+        release();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason).catch(() => undefined);
+      release();
+    },
+  });
 }
 
 function waitLabel(ms: number): string {
