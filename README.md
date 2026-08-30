@@ -200,11 +200,18 @@ untrusted data.
 - Tool paths are confined to the selected workspace.
 - Dangerous tools require approval unless the process was started with
   **--auto-approve**.
-- Credentials are masked, excluded from transcripts, and never printed back.
+- Credential fields are masked and excluded from transcripts. Approved shell
+  commands receive no credential-like environment variables, and recognized
+  credential values are redacted before tool output reaches the model, screen,
+  history, or export.
 - Terminal control characters are neutralized before rendering.
 - Remote Ollama endpoints require HTTPS and reject unsafe redirects.
 - Model and filesystem input are bounded before they reach the screen or
   provider.
+
+`run_command` is not an operating-system sandbox: an approved shell command can
+still access files and account resources available to the current user. Review
+commands carefully and reserve **--auto-approve** for controlled environments.
 
 Please read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 

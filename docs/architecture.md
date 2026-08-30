@@ -121,6 +121,10 @@ The built-in tools are:
 user account can address, which is why every exact command requires approval
 unless the process was started with `--auto-approve`. On cancellation or
 timeout, jecode terminates the process tree and escalates if it does not exit.
+The child receives an explicit copy of the process environment with
+credential-like names removed. Known environment, session, and saved
+credential values are redacted from captured output before the controller can
+send it to a provider or retain it in a transcript block.
 
 The “allow this session” choice is deliberately narrow: one target file for
 file changes, or one exact shell command. `/permissions` can revoke one grant
