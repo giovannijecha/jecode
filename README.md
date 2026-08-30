@@ -121,9 +121,10 @@ saved explicitly under **~/.jecode**; it is never stored in the workspace.
 | OpenAI | OPENAI_API_KEY | Cloud |
 | Ollama | OLLAMA_API_KEY when required | Local by default; model list comes from the server |
 
-For local Ollama, the default endpoint is loopback. Set **OLLAMA_HOST** to a
-loopback URL such as **http://127.0.0.1:11434** when needed. Remote Ollama
-endpoints must use HTTPS.
+Ollama defaults to the local daemon at **http://127.0.0.1:11434** and requires
+no key there. Set **OLLAMA_HOST** only to use another local daemon or a hosted
+endpoint; remote endpoints must use HTTPS and normally require
+**OLLAMA_API_KEY**.
 
 ## Use the TUI
 

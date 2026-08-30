@@ -1,7 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseOllamaEndpoint } from "../src/providers/ollama-endpoint.ts";
+import { DEFAULT_OLLAMA_HOST, parseOllamaEndpoint } from "../src/providers/ollama-endpoint.ts";
 import { ollama } from "../src/providers/ollama.ts";
+
+test("defaults Ollama to the local daemon without requiring a key", () => {
+  const beforeHost = process.env["OLLAMA_HOST"];
+  delete process.env["OLLAMA_HOST"];
+
+  try {
+    assert.equal(DEFAULT_OLLAMA_HOST, "http://127.0.0.1:11434");
+    assert.deepEqual(parseOllamaEndpoint(DEFAULT_OLLAMA_HOST), {
+      baseUrl: "http://127.0.0.1:11434",
+      loopback: true,
+    });
+    assert.equal(ollama.blocked(), undefined);
+    assert.equal(ollama.location?.(), "local");
+  } finally {
+    if (beforeHost === undefined) delete process.env["OLLAMA_HOST"];
+    else process.env["OLLAMA_HOST"] = beforeHost;
+  }
+});
 
 test("allows HTTP only for exact loopback endpoints", () => {
   assert.deepEqual(parseOllamaEndpoint("http://127.0.0.1:11434/"), {
