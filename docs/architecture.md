@@ -118,6 +118,12 @@ the temporary pathname must still identify the file Jecode opened. A previewed
 write or edit also compares the current file with the approved version, so an
 intervening content change is rejected instead of overwritten.
 
+Whole-file mutations accept regular files only and enforce independent byte,
+character, and line budgets. Existing content is read through a bounded file
+handle, and `replace_all` checks its projected size before allocating the
+result. Files above that budget remain available through ranged `read_file`
+calls, but `write_file` and `edit_file` will not replace them wholesale.
+
 The built-in tools are:
 
 | Tool | Approval | Boundary |
@@ -126,8 +132,8 @@ The built-in tools are:
 | `list_dir` | No | Bounded entries and output from one canonical directory |
 | `find_files` | No | Bounded recursive glob; skips VCS, dependencies, symlinks |
 | `search_text` | No | Bounded literal search; skips binary and files over 1 MB |
-| `edit_file` | Yes | Exact replacement, atomic write, preview check |
-| `write_file` | Yes | Atomic whole-file replacement, preview check |
+| `edit_file` | Yes | Bounded exact replacement, atomic write, preview check |
+| `write_file` | Yes | Bounded whole-file replacement, atomic write, preview check |
 | `run_command` | Yes | Workspace working directory, timeout, bounded output |
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
