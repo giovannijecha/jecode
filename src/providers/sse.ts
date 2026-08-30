@@ -4,20 +4,30 @@
 // `data` matters here — both providers put the event discriminator inside the
 // JSON payload, so the `event:` line is redundant and skipped.
 
-import { MAX_SSE_EVENT_CHARS } from "./stream-limits.ts";
+import {
+  addBounded,
+  MAX_SSE_EVENT_CHARS,
+  MAX_SSE_STREAM_CHARS,
+} from "./stream-limits.ts";
 
 export async function* readSseJson(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let finished = false;
+  let total = 0;
+
+  const append = (text: string): void => {
+    total = addBounded(total, text.length, MAX_SSE_STREAM_CHARS, "SSE stream");
+    buffer += text;
+  };
 
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
+      append(decoder.decode(value, { stream: true }));
 
       for (;;) {
         const boundary = findBoundary(buffer);
@@ -34,7 +44,7 @@ export async function* readSseJson(body: ReadableStream<Uint8Array>): AsyncGener
 
     // A stream that ends without a trailing blank line still owes us its last
     // event.
-    buffer += decoder.decode();
+    append(decoder.decode());
     assertEventSize(buffer.length);
     const payload = parseData(buffer);
     if (payload !== undefined) yield payload;

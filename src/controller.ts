@@ -16,6 +16,8 @@ import { isToolCall } from "./types.ts";
 import type { Tool, ToolContext, ToolPreview, ToolRun } from "./tools/index.ts";
 import { findTool, runTool, toolSpecs } from "./tools/index.ts";
 
+export const MAX_TOOL_CALLS_PER_STEP = 32;
+
 export type ControllerOptions = {
   provider: Provider;
   tools: Tool[];
@@ -70,10 +72,15 @@ export async function runTurn(
       onStatus: (status) => events.onStatus?.(status),
     });
 
+    const calls = assistant.content.filter(isToolCall);
+    if (calls.length > MAX_TOOL_CALLS_PER_STEP) {
+      throw new Error(
+        `provider returned ${calls.length} tool calls in one step (maximum ${MAX_TOOL_CALLS_PER_STEP})`,
+      );
+    }
+
     history.push(assistant);
     if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
-
-    const calls = assistant.content.filter(isToolCall);
     if (calls.length === 0) return; // the model is done — hand back to the user
 
     // Calls run one after another because approval prompts serialise anyway,

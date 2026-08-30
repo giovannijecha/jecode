@@ -92,9 +92,10 @@ to receive response headers, and an open JSON or SSE body can remain idle for
 at most 120 seconds. These internal deadlines also cover batch mode, where no
 interactive cancellation signal exists. The client handles redirects manually
 and rejects every 3xx response without retrying or forwarding headers to
-another endpoint. Retry state is surfaced in the TUI. Each SSE event and the
-reconstructed tool arguments have explicit size limits; overflow cancels the
-reader and ends the turn with a descriptive error.
+another endpoint. Retry state is surfaced in the TUI. Each SSE event, the
+aggregate stream, reconstructed tool arguments, model catalogue, and per-step
+tool-call batch have explicit limits; overflow cancels or rejects the response
+before unbounded work reaches the controller.
 
 With no `OLLAMA_HOST`, Ollama targets `http://127.0.0.1:11434` and needs no
 credential. An explicit `OLLAMA_HOST` is parsed as an absolute URL before any
