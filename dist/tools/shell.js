@@ -2,6 +2,7 @@
 // much of it comes back.
 import { spawn } from "node:child_process";
 import { optionalInt, requireString } from "./args.js";
+import { credentialRedactor, redactCredentials, shellEnvironment } from "../credential-safety.js";
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_CHARS = 30_000;
 export const runCommand = {
@@ -24,7 +25,7 @@ export const runCommand = {
         if (timeoutMs <= 0)
             throw new Error('"timeout_ms" must be a positive integer');
         const result = await execute(command, ctx.root, timeoutMs, ctx.signal);
-        const output = result.output;
+        const output = redactCredentials(result.output);
         const summary = result.timedOut
             ? `timed out after ${timeoutMs}ms`
             : `exit ${result.code ?? "?"}`;
@@ -40,6 +41,7 @@ function execute(command, cwd, timeoutMs, signal) {
     return new Promise((resolve, reject) => {
         const child = spawn(command, {
             cwd,
+            env: shellEnvironment(),
             shell: true,
             windowsHide: true,
             detached: process.platform !== "win32",
@@ -91,19 +93,24 @@ function execute(command, cwd, timeoutMs, signal) {
 }
 function capture() {
     const half = MAX_OUTPUT_CHARS / 2;
+    const credentials = credentialRedactor();
     let head = "";
     let tail = "";
     let total = 0;
+    const append = (chunk) => {
+        total += chunk.length;
+        const room = Math.max(0, half - head.length);
+        head += chunk.slice(0, room);
+        const rest = chunk.slice(room);
+        if (rest !== "")
+            tail = `${tail}${rest}`.slice(-half);
+    };
     return {
         append(chunk) {
-            total += chunk.length;
-            const room = Math.max(0, half - head.length);
-            head += chunk.slice(0, room);
-            const rest = chunk.slice(room);
-            if (rest !== "")
-                tail = `${tail}${rest}`.slice(-half);
+            append(credentials.write(chunk));
         },
         value() {
+            append(credentials.end());
             if (total <= MAX_OUTPUT_CHARS)
                 return `${head}${tail}`;
             const cut = total - head.length - tail.length;

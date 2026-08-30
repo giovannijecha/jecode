@@ -4,6 +4,7 @@ import type { Message, Provider, SendRequest } from "../src/types.ts";
 import type { ControllerEvents, ControllerOptions } from "../src/controller.ts";
 import { runTurn } from "../src/controller.ts";
 import type { Tool } from "../src/tools/index.ts";
+import { runCommand } from "../src/tools/shell.ts";
 
 type FakeProvider = Provider & { seen: SendRequest[] };
 
@@ -201,3 +202,46 @@ test("reports provider usage and controller progress", async () => {
 
   assert.deepEqual(progress, ["step:1", "usage:10", "tool:1/1", "step:2"]);
 });
+
+test("a shell credential cannot reach the provider follow-up or display events", async (context) => {
+  const secret = "fixture-controller-credential-4902";
+  const keyBefore = process.env["OPENAI_API_KEY"];
+  const visibleBefore = process.env["JECODE_REVIEW_VISIBLE"];
+  process.env["OPENAI_API_KEY"] = secret;
+  process.env["JECODE_REVIEW_VISIBLE"] = secret;
+  context.after(() => {
+    restoreEnvironment("OPENAI_API_KEY", keyBefore);
+    restoreEnvironment("JECODE_REVIEW_VISIBLE", visibleBefore);
+  });
+
+  const provider = scripted([
+    {
+      role: "assistant",
+      content: [{
+        kind: "tool_call",
+        id: "shell",
+        name: "run_command",
+        input: { command: "node -e \"process.stdout.write(process.env.JECODE_REVIEW_VISIBLE ?? '')\"" },
+      }],
+    },
+    assistantText("done"),
+  ]);
+  const history: Message[] = [];
+  const shown: string[] = [];
+  const sink = events();
+  sink.onToolResult = (_call, result) => shown.push(result.output);
+
+  await runTurn(history, options(provider, { tools: [runCommand] }), sink);
+
+  const result = history[1]?.content[0];
+  assert.equal(result?.kind, "tool_result");
+  const sent = result?.kind === "tool_result" ? result.output : "";
+  assert.match(sent, /\[credential redacted\]/);
+  assert.doesNotMatch(sent, /fixture-controller-credential-4902/);
+  assert.deepEqual(shown, [sent]);
+});
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}

@@ -49,3 +49,83 @@ test("rejects a non-positive timeout", async () => {
     /must be a positive integer/,
   );
 });
+
+test("does not pass credential-like variables to a shell command", async (context) => {
+  const name = "JECODE_REVIEW_API_KEY";
+  const before = process.env[name];
+  process.env[name] = "fixture-child-environment-secret";
+  context.after(() => restoreEnvironment(name, before));
+
+  const result = await runCommand.run(
+    { command: `node -e "process.stdout.write(process.env.${name} ?? 'missing')"` },
+    { root },
+  );
+
+  assert.match(result.output, /^missing/);
+  assert.doesNotMatch(result.output, /fixture-child-environment-secret/);
+});
+
+test("does not pass a credential-bearing connection URL to a shell command", async (context) => {
+  const name = "JECODE_REVIEW_DATABASE_URL";
+  const before = process.env[name];
+  process.env[name] = "postgres://fixture-user:fixture-password@localhost/database";
+  context.after(() => restoreEnvironment(name, before));
+
+  const result = await runCommand.run(
+    { command: `node -e "process.stdout.write(process.env.${name} ?? 'missing')"` },
+    { root },
+  );
+
+  assert.match(result.output, /^missing/);
+  assert.doesNotMatch(result.output, /fixture-password/);
+});
+
+test("redacts a known credential before shell output leaves the tool", async (context) => {
+  const secret = "fixture-visible-credential-8173";
+  const keyBefore = process.env["OPENAI_API_KEY"];
+  const visibleBefore = process.env["JECODE_REVIEW_VISIBLE"];
+  process.env["OPENAI_API_KEY"] = secret;
+  process.env["JECODE_REVIEW_VISIBLE"] = secret;
+  context.after(() => {
+    restoreEnvironment("OPENAI_API_KEY", keyBefore);
+    restoreEnvironment("JECODE_REVIEW_VISIBLE", visibleBefore);
+  });
+
+  const result = await runCommand.run(
+    { command: "node -e \"process.stdout.write(process.env.JECODE_REVIEW_VISIBLE ?? '')\"" },
+    { root },
+  );
+
+  assert.match(result.output, /\[credential redacted\]/);
+  assert.doesNotMatch(result.output, /fixture-visible-credential-8173/);
+});
+
+test("redacts a credential before a bounded head-tail output split", async (context) => {
+  const secret = "fixture-boundary-credential-762918";
+  const keyBefore = process.env["OPENAI_API_KEY"];
+  const visibleBefore = process.env["JECODE_REVIEW_VISIBLE"];
+  process.env["OPENAI_API_KEY"] = secret;
+  process.env["JECODE_REVIEW_VISIBLE"] = secret;
+  context.after(() => {
+    restoreEnvironment("OPENAI_API_KEY", keyBefore);
+    restoreEnvironment("JECODE_REVIEW_VISIBLE", visibleBefore);
+  });
+
+  const result = await runCommand.run(
+    {
+      command:
+        "node -e \"const value = process.env.JECODE_REVIEW_VISIBLE ?? ''; " +
+        "process.stdout.write('A'.repeat(14990) + value + 'B'.repeat(20000))\"",
+    },
+    { root },
+  );
+
+  assert.doesNotMatch(result.output, /fixture-boundary/);
+  assert.doesNotMatch(result.output, /credential-762918/);
+  assert.match(result.output, /characters cut/);
+});
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}

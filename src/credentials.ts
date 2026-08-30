@@ -34,6 +34,18 @@ export function credentialSource(name: string): CredentialSource | undefined {
   return use(fromDisk()[name]) === undefined ? undefined : "saved";
 }
 
+/** Values that must never survive in shell output, regardless of their source. */
+export function credentialValues(): string[] {
+  const stored = fromDisk();
+  const names = new Set([...held.keys(), ...Object.keys(stored)]);
+  const values = new Set([...held.values(), ...Object.values(stored)]);
+  for (const name of names) {
+    const environment = use(process.env[name]);
+    if (environment !== undefined) values.add(environment);
+  }
+  return [...values].filter((value) => use(value) !== undefined);
+}
+
 export function hasSaved(name: string): boolean {
   return use(fromDisk()[name]) !== undefined;
 }
