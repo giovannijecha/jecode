@@ -100,13 +100,15 @@ report 24 or newer.
 git clone https://github.com/giovannijecha/jecode.git
 cd jecode
 npm ci
+npm run build:release
 npm link
 jecode
 ~~~
 
-Development runs TypeScript directly with **npm run start**. The committed
-**dist/** tree is the dependency-free JavaScript runtime used only by installed
-packages; regenerate it with **npm run build:release** after changing **src/**.
+Development runs TypeScript directly with **npm run start**. **dist/** is an
+ignored, generated tree used only by linked commands and release tarballs.
+**npm pack** and **npm publish** rebuild it from a clean target; installing the
+published package runs no compilation or installation scripts.
 
 ## First session
 

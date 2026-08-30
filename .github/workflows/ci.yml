@@ -45,8 +45,8 @@ jobs:
       - name: Test with coverage gates
         run: npm run coverage
 
-      - name: Verify compiled runtime
-        run: npm run check:release
+      - name: Build release runtime
+        run: npm run build:release
 
       - name: Verify release package
         run: npm run check:package
