@@ -84,6 +84,7 @@ async function request(
         method: body === undefined ? "GET" : "POST",
         headers: body === undefined ? headers : { "content-type": "application/json", ...headers },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        redirect: "manual",
         signal,
       });
     } catch (cause) {
@@ -94,6 +95,10 @@ async function request(
       continue;
     }
 
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel().catch(() => undefined);
+      throw httpError(`${url} -> ${res.status} redirect rejected`, res.status);
+    }
     if (res.ok) return res;
 
     const { text } = await boundedText(res, MAX_ERROR_CHARS);

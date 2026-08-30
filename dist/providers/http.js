@@ -50,6 +50,7 @@ async function request(url, headers, body, signal, onStatus, maxRetries = 3) {
                 method: body === undefined ? "GET" : "POST",
                 headers: body === undefined ? headers : { "content-type": "application/json", ...headers },
                 ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+                redirect: "manual",
                 signal,
             });
         }
@@ -61,6 +62,10 @@ async function request(url, headers, body, signal, onStatus, maxRetries = 3) {
             if (attempt < maxRetries)
                 onStatus?.(`Network error · retrying in ${waitLabel(waitMs)}`);
             continue;
+        }
+        if (res.status >= 300 && res.status < 400) {
+            await res.body?.cancel().catch(() => undefined);
+            throw httpError(`${url} -> ${res.status} redirect rejected`, res.status);
         }
         if (res.ok)
             return res;

@@ -205,7 +205,8 @@ untrusted data.
   credential values are redacted before tool output reaches the model, screen,
   history, or export.
 - Terminal control characters are neutralized before rendering.
-- Remote Ollama endpoints require HTTPS and reject unsafe redirects.
+- Remote Ollama endpoints require HTTPS. Provider HTTP redirects are rejected
+  rather than followed across an implicit trust boundary.
 - Model and filesystem input are bounded before they reach the screen or
   provider.
 

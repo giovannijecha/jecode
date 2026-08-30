@@ -60,6 +60,34 @@ test("a non-retryable response keeps status and a bounded body", async (context)
   );
 });
 
+test("rejects redirects without following or retrying them", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  let redirect: RequestRedirect | undefined;
+  globalThis.fetch = (async (_url, init) => {
+    calls += 1;
+    redirect = init?.redirect;
+    return new Response(null, {
+      status: 302,
+      headers: { location: "https://redirected.example.test/models" },
+    });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  await assert.rejects(
+    getJson("https://example.test/models", { authorization: "Bearer fixture" }),
+    (error: Error & { status?: number }) => {
+      assert.equal(error.status, 302);
+      assert.match(error.message, /redirect rejected/);
+      return true;
+    },
+  );
+  assert.equal(redirect, "manual");
+  assert.equal(calls, 1);
+});
+
 test("an error response cannot accumulate an unbounded body", async (context) => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = (async () =>

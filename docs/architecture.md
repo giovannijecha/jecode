@@ -86,9 +86,11 @@ failures, and usage are normalized rather than disappearing at the stream
 boundary.
 
 The shared HTTP client retries transient network errors, rate limits, and 5xx
-responses with an abortable delay. Retry state is surfaced in the TUI. Each
-SSE event and the reconstructed tool arguments have explicit size limits;
-overflow cancels the reader and ends the turn with a descriptive error.
+responses with an abortable delay. It handles redirects manually and rejects
+every 3xx response without retrying or forwarding headers to another endpoint.
+Retry state is surfaced in the TUI. Each SSE event and the reconstructed tool
+arguments have explicit size limits; overflow cancels the reader and ends the
+turn with a descriptive error.
 
 `OLLAMA_HOST` is parsed as an absolute URL before any request headers are
 created. HTTP is accepted only for exact loopback hosts. Remote endpoints must
