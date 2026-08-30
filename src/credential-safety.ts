@@ -4,7 +4,8 @@ import { credentialValues } from "./credentials.ts";
 
 const REDACTED = "[credential redacted]";
 const SENSITIVE_ENVIRONMENT_NAME =
-  /(?:^|_)(?:API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|CREDENTIALS?|AUTH|JWT|COOKIE)(?:_|$)/i;
+  /(?:^|_)(?:API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|AUTH|JWT|COOKIE|PAT)(?:_|$)/i;
+const COMPACT_SENSITIVE_ENVIRONMENT_NAME = /^(?:PGPASSWORD)$/i;
 
 /** Preserve ordinary tool configuration while withholding credential-like values. */
 export function shellEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -61,7 +62,14 @@ export function credentialRedactor(source: NodeJS.ProcessEnv = process.env): {
 }
 
 function sensitiveEnvironmentName(name: string): boolean {
-  return SENSITIVE_ENVIRONMENT_NAME.test(name);
+  const normalized = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^a-z0-9]+/gi, "_")
+    .replace(/^_+|_+$/g, "");
+  return (
+    SENSITIVE_ENVIRONMENT_NAME.test(normalized) ||
+    COMPACT_SENSITIVE_ENVIRONMENT_NAME.test(normalized)
+  );
 }
 
 function secrets(source: NodeJS.ProcessEnv): string[] {
