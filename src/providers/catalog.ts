@@ -11,6 +11,10 @@
 
 import { getJson } from "./http.ts";
 
+export const MAX_MODEL_CATALOG_ENTRIES = 1_000;
+export const MAX_MODEL_CATALOG_ITEMS = 4_000;
+export const MAX_MODEL_ID_CHARS = 256;
+
 export async function listModels(
   url: string,
   headers: Record<string, string>,
@@ -21,7 +25,24 @@ export async function listModels(
   const data = (body as { data?: unknown }).data;
   if (!Array.isArray(data)) throw new Error(`${url} did not return a model list`);
 
-  return data
-    .map((entry) => (entry as { id?: unknown }).id)
-    .filter((id): id is string => typeof id === "string" && id !== "");
+  const models: string[] = [];
+  const unique = new Set<string>();
+  const inspected = Math.min(data.length, MAX_MODEL_CATALOG_ITEMS);
+
+  for (let index = 0; index < inspected && models.length < MAX_MODEL_CATALOG_ENTRIES; index++) {
+    const entry = data[index];
+    const id = typeof entry === "object" && entry !== null
+      ? (entry as { id?: unknown }).id
+      : undefined;
+    if (
+      typeof id !== "string" ||
+      id === "" ||
+      id.length > MAX_MODEL_ID_CHARS ||
+      unique.has(id)
+    ) continue;
+    unique.add(id);
+    models.push(id);
+  }
+
+  return models;
 }

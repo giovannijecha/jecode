@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readSseJson } from "../src/providers/sse.ts";
-import { MAX_SSE_EVENT_CHARS } from "../src/providers/stream-limits.ts";
+import {
+  MAX_SSE_EVENT_CHARS,
+  MAX_SSE_STREAM_CHARS,
+} from "../src/providers/stream-limits.ts";
 
 // Feeds the parser exactly the chunk boundaries given, so a test can put a
 // split anywhere — including in the middle of an event's framing.
@@ -74,6 +77,25 @@ test("rejects and cancels an event that exceeds the buffer limit", async () => {
   });
 
   await assert.rejects(collect(body), /SSE event exceeded/);
+  assert.equal(cancelled, true);
+});
+
+test("rejects and cancels an aggregate stream that exceeds the response budget", async () => {
+  const encoder = new TextEncoder();
+  const payload = `data: {"text":"${"x".repeat(850_000)}"}\n\n`;
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let total = 0; total <= MAX_SSE_STREAM_CHARS; total += payload.length) {
+        controller.enqueue(encoder.encode(payload));
+      }
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  await assert.rejects(collect(body), /SSE stream exceeded/);
   assert.equal(cancelled, true);
 });
 

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import type { ControllerEvents, ControllerOptions } from "../src/controller.ts";
-import { runTurn } from "../src/controller.ts";
+import { MAX_TOOL_CALLS_PER_STEP, runTurn } from "../src/controller.ts";
 import type { Tool } from "../src/tools/index.ts";
 import { runCommand } from "../src/tools/shell.ts";
 
@@ -120,6 +120,32 @@ test("returns every result of one step in a single message", async () => {
     results?.content.map((block) => (block.kind === "tool_result" ? block.output : "")),
     ["one", "two"],
   );
+});
+
+test("refuses an oversized batch of tool calls before executing it", async () => {
+  let runs = 0;
+  const counted: Tool = {
+    ...echo,
+    async run() {
+      runs++;
+      return { output: "ran" };
+    },
+  };
+  const calls = Array.from({ length: MAX_TOOL_CALLS_PER_STEP + 1 }, (_, index) => ({
+    kind: "tool_call" as const,
+    id: String(index),
+    name: "echo",
+    input: { text: "many" },
+  }));
+  const provider = scripted([{ role: "assistant", content: calls }]);
+  const history: Message[] = [];
+
+  await assert.rejects(
+    runTurn(history, options(provider, { tools: [counted] }), events()),
+    /tool calls in one step/,
+  );
+  assert.equal(runs, 0);
+  assert.equal(history.length, 0);
 });
 
 test("a declined call comes back as an error result, and the loop continues", async () => {
