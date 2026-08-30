@@ -32,10 +32,14 @@ if (packed.size > 1_000_000) throw new Error(`package is unexpectedly large: ${p
 const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
   bin?: Record<string, unknown>;
   dependencies?: Record<string, unknown>;
+  name?: string;
   private?: boolean;
   publishConfig?: { access?: string; registry?: string };
   scripts?: Record<string, unknown>;
 };
+if (manifest.name !== "@giovannijecha/jecode") {
+  throw new Error("release packages must use the canonical npm scope");
+}
 if (manifest.bin?.jecode !== "bin/jecode.js") {
   throw new Error("the jecode executable path must use npm's canonical bin form");
 }

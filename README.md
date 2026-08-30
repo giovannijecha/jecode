@@ -43,11 +43,11 @@
 
 ## Install
 
-Jecode requires **Node.js 24 or newer**, npm, and Git. Install the command
-directly from GitHub:
+Jecode requires **Node.js 24 or newer** and npm. Release candidates are
+published on the **next** channel:
 
 ~~~console
-npm install --global "github:giovannijecha/jecode#v0.1.4"
+npm install --global @giovannijecha/jecode@next
 jecode --version
 ~~~
 
@@ -69,17 +69,17 @@ Ubuntu, and macOS.
 
 ### Update
 
-Install the current version over the existing global command:
+Install the current release candidate over the existing global command:
 
 ~~~console
-npm install --global "github:giovannijecha/jecode#v0.1.4"
+npm install --global @giovannijecha/jecode@next
 jecode --version
 ~~~
 
 ### Uninstall
 
 ~~~console
-npm uninstall --global jecode
+npm uninstall --global @giovannijecha/jecode
 ~~~
 
 Uninstalling the command preserves **~/.jecode** so saved settings and

@@ -1,6 +1,6 @@
 {
-  "name": "jecode",
-  "version": "0.1.5-rc.1",
+  "name": "@giovannijecha/jecode",
+  "version": "0.1.5-rc.2",
   "description": "An owned coding agent with zero external runtime dependencies.",
   "license": "MIT",
   "repository": {
