@@ -30,11 +30,15 @@ if (paths.some((file) => file.endsWith(".ts"))) throw new Error("release package
 if (packed.size > 1_000_000) throw new Error(`package is unexpectedly large: ${packed.size} bytes`);
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
+  bin?: Record<string, unknown>;
   dependencies?: Record<string, unknown>;
   private?: boolean;
   publishConfig?: { access?: string; registry?: string };
   scripts?: Record<string, unknown>;
 };
+if (manifest.bin?.jecode !== "bin/jecode.js") {
+  throw new Error("the jecode executable path must use npm's canonical bin form");
+}
 if (Object.keys(manifest.dependencies ?? {}).length !== 0) {
   throw new Error("runtime dependencies must stay empty");
 }
