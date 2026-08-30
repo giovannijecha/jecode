@@ -19,7 +19,7 @@ bin/jecode.js → dist/main.js → start.js
                                      └─ tools/     workspace capabilities
 
 npm run start → src/main.ts    direct development path
-npm pack      → clean build → dist/ inside the release tarball
+npm run pack:release → clean build → dist/ inside the release tarball
 ```
 
 There are no subagents, workers, delegated tasks, or concurrent controller
@@ -299,18 +299,19 @@ Canonical checks:
 npm run check
 ```
 
-The check enforces type safety, line/branch/function coverage thresholds, zero
-runtime dependencies, a freshly compiled runtime, and a bounded package
-containing only the executable, plain JavaScript runtime, license, manifest,
-and README. It then installs that package into an isolated global prefix and
-runs its version command.
+The check enforces a source-only Git tree, type safety, line/branch/function
+coverage thresholds, zero runtime dependencies, a freshly compiled runtime,
+and a bounded package containing only the executable, plain JavaScript runtime,
+license, manifest, and README. It then installs that package into an isolated
+global prefix and runs its version command.
 
 ## Deliberate omissions
 
 - No runtime dependency, SDK, curses layer, install-time compiler, or bundler.
   TypeScript remains the development source; the ignored release-only `dist/`
-  tree is emitted by the existing development compiler while packing. Registry
-  users receive that JavaScript runtime and execute no installation scripts.
+  tree is emitted by the existing development compiler before packing. Registry
+  users receive that JavaScript runtime and execute no installation scripts;
+  Git dependency installs are intentionally unsupported.
 - No automatic conversation persistence.
 - No client-side history summarizer or second model loop. Usage and latest
   input context are visible; context compaction belongs at the provider seam

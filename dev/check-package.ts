@@ -53,13 +53,33 @@ if (manifest.publishConfig?.access !== "public") {
 if (manifest.publishConfig?.registry !== "https://registry.npmjs.org/") {
   throw new Error("release packages must target the public npm registry");
 }
-if (manifest.scripts?.prepack !== "node dev/build-release.ts --quiet") {
-  throw new Error("release packages must compile from a clean tree before packing");
+if (manifest.scripts?.["build:release"] !== "node dev/build-release.ts") {
+  throw new Error("release packages must keep one explicit clean build command");
 }
-const installScripts = ["preinstall", "install", "postinstall", "prepare"]
+if (manifest.scripts?.["pack:release"] !== "npm run build:release && npm pack --ignore-scripts") {
+  throw new Error("release tarballs must build explicitly and disable lifecycle scripts while packing");
+}
+const implicitLifecycleScripts = [
+  "build",
+  "dependencies",
+  "preinstall",
+  "install",
+  "postinstall",
+  "prepublish",
+  "prepublishOnly",
+  "preprepare",
+  "prepare",
+  "postprepare",
+  "prepack",
+  "postpack",
+  "publish",
+  "postpublish",
+]
   .filter((name) => manifest.scripts?.[name] !== undefined);
-if (installScripts.length > 0) {
-  throw new Error(`release packages must not run installation scripts: ${installScripts.join(", ")}`);
+if (implicitLifecycleScripts.length > 0) {
+  throw new Error(
+    `release packages must not define implicit lifecycle scripts: ${implicitLifecycleScripts.join(", ")}`,
+  );
 }
 
 process.stdout.write(`package: ${paths.length} files, ${packed.size} bytes, zero runtime dependencies\n`);

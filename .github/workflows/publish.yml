@@ -48,7 +48,10 @@ jobs:
       - name: Run release gates
         run: npm run check
 
+      - name: Build release package
+        run: npm run build:release
+
       - name: Publish to npm
         env:
           NPM_DIST_TAG: ${{ steps.release.outputs.channel }}
-        run: npm publish --access public --tag "$NPM_DIST_TAG"
+        run: npm publish --ignore-scripts --access public --tag "$NPM_DIST_TAG"

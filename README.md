@@ -53,6 +53,10 @@ jecode --version
 To try prereleases instead, install the opt-in **next** channel with
 `npm install --global @giovannijecha/jecode@next`.
 
+Published npm packages are the supported installation artifacts. Git URL
+installs are intentionally unsupported: the source tree contains no generated
+runtime and defines no install-time build hook.
+
 Then open the project you want to work on and run Jecode:
 
 ~~~console
@@ -101,7 +105,7 @@ report 24 or newer.
 ~~~console
 git clone https://github.com/giovannijecha/jecode.git
 cd jecode
-npm ci
+npm ci --ignore-scripts
 npm run build:release
 npm link
 jecode
@@ -109,7 +113,8 @@ jecode
 
 Development runs TypeScript directly with **npm run start**. **dist/** is an
 ignored, generated tree used only by linked commands and release tarballs.
-**npm pack** and **npm publish** rebuild it from a clean target; installing the
+**npm run pack:release** rebuilds it from a clean target before packing; the
+trusted publish workflow performs the same explicit build. Installing the
 published package runs no compilation or installation scripts.
 
 ## First session
@@ -244,7 +249,7 @@ expectations.
 ## Development
 
 ~~~console
-npm ci
+npm ci --ignore-scripts
 npm run check
 ~~~
 
