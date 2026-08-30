@@ -243,7 +243,7 @@ test("/export writes without a picker to the directory where Jecode was launched
 });
 
 test("the packaged jecode executable reaches batch help without a developer script", async () => {
-  const result = await runExecutable(["--help"], "");
+  const result = await runExecutable(["--help"]);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Usage:\s+jecode \[options\]/);
   assert.match(result.stdout, /--provider/);
@@ -252,16 +252,16 @@ test("the packaged jecode executable reaches batch help without a developer scri
 });
 
 test("the packaged executable reports its manifest version", async () => {
-  const result = await runExecutable(["--version"], "");
+  const result = await runExecutable(["--version"]);
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.stdout.trim(), "0.1.2");
 });
 
-function runExecutable(args: string[], stdin: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function runExecutable(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.resolve("bin/jecode.js"), ...args], {
       cwd: process.cwd(),
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -275,7 +275,6 @@ function runExecutable(args: string[], stdin: string): Promise<{ code: number | 
     });
     child.once("error", reject);
     child.once("close", (code) => resolve({ code, stdout, stderr }));
-    child.stdin.end(stdin);
   });
 }
 
