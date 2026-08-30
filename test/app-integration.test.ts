@@ -254,7 +254,7 @@ test("the packaged jecode executable reaches batch help without a developer scri
 test("the packaged executable reports its manifest version", async () => {
   const result = await runExecutable(["--version"], "");
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "0.1.1");
+  assert.equal(result.stdout.trim(), "0.1.2");
 });
 
 function runExecutable(args: string[], stdin: string): Promise<{ code: number | null; stdout: string; stderr: string }> {

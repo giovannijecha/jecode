@@ -47,7 +47,7 @@ Jecode requires **Node.js 24 or newer**, npm, and Git. Install the command
 directly from GitHub:
 
 ~~~console
-npm install --global "github:giovannijecha/jecode#v0.1.1"
+npm install --global "github:giovannijecha/jecode#v0.1.2"
 jecode --version
 ~~~
 
@@ -72,7 +72,7 @@ Ubuntu, and macOS.
 Install the current version over the existing global command:
 
 ~~~console
-npm install --global "github:giovannijecha/jecode#v0.1.1"
+npm install --global "github:giovannijecha/jecode#v0.1.2"
 jecode --version
 ~~~
 
