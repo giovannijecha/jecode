@@ -43,6 +43,7 @@ test("saved defaults and provider-specific models survive a reload", async () =>
     const legacyVisualSettings = {
       provider: "ollama",
       models: { anthropic: "claude-sonnet-5", ollama: "qwen3-coder" },
+      ollamaHost: "https://models.example.test/team/",
       effort: "medium",
       theme: "mono",
       palette: "violet",
@@ -56,6 +57,7 @@ test("saved defaults and provider-specific models survive a reload", async () =>
     assert.deepEqual(readSettings(), {
       provider: "ollama",
       models: { anthropic: "claude-sonnet-5", ollama: "qwen3-coder" },
+      ollamaHost: "https://models.example.test/team",
       effort: "medium",
       reducedMotion: true,
       maxTokens: 8192,
@@ -63,6 +65,7 @@ test("saved defaults and provider-specific models survive a reload", async () =>
     });
     const saved = JSON.parse(await readFile(settingsPath(), "utf8"));
     assert.equal(saved.provider, "ollama");
+    assert.equal(saved.ollamaHost, "https://models.example.test/team");
     assert.equal(saved.theme, undefined);
     assert.equal(saved.palette, undefined);
   });
@@ -73,6 +76,7 @@ test("invalid saved values are discarded rather than breaking startup", async ()
     await updateSettings({
       provider: "unknown",
       models: { unknown: "model", ollama: "" },
+      ollamaHost: "http://models.example.test",
       effort: "turbo",
       maxTokens: -1,
     } as SavedSettings);

@@ -3,10 +3,12 @@
 import * as path from "node:path";
 import { EFFORTS, readSettings } from "./settings.ts";
 import type { SavedSettings } from "./settings.ts";
+import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
 
 export type Config = {
   providerId: string;
   model: string;
+  ollamaHost?: string;
   reducedMotion: boolean;
   effort: string;
   maxTokens: number;
@@ -18,6 +20,7 @@ export type Config = {
 const FLAGS = [
   "provider",
   "model",
+  "ollama-host",
   "reduced-motion",
   "effort",
   "max-tokens",
@@ -39,6 +42,7 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
   }
 
   const providerId = pick(flags.provider, process.env.JECODE_PROVIDER, saved.provider ?? "anthropic");
+  const ollamaHost = optional(flags["ollama-host"], process.env.OLLAMA_HOST, saved.ollamaHost);
   const effort = pick(flags.effort, process.env.JECODE_EFFORT, saved.effort ?? "high");
   if (!(EFFORTS as readonly string[]).includes(effort)) {
     throw new Error(`unknown effort "${effort}" (expected one of: ${EFFORTS.join(", ")})`);
@@ -47,6 +51,9 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
   return {
     providerId,
     model: pick(flags.model, process.env.JECODE_MODEL, saved.models?.[providerId] ?? ""),
+    ...(ollamaHost === undefined
+      ? {}
+      : { ollamaHost: parseOllamaEndpoint(ollamaHost).baseUrl }),
     reducedMotion: bool(
       flags["reduced-motion"],
       process.env.JECODE_REDUCED_MOTION,
@@ -74,6 +81,16 @@ function bool(flag: string | undefined, env: string | undefined, fallback: boole
 }
 
 function pick(flag: string | undefined, env: string | undefined, fallback: string): string {
+  if (flag !== undefined && flag !== "") return flag;
+  if (env !== undefined && env !== "") return env;
+  return fallback;
+}
+
+function optional(
+  flag: string | undefined,
+  env: string | undefined,
+  fallback: string | undefined,
+): string | undefined {
   if (flag !== undefined && flag !== "") return flag;
   if (env !== undefined && env !== "") return env;
   return fallback;

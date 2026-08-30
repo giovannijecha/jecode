@@ -1,9 +1,11 @@
 // Runtime configuration: flags, environment, saved defaults, built-ins.
 import * as path from "node:path";
 import { EFFORTS, readSettings } from "./settings.js";
+import { parseOllamaEndpoint } from "./providers/ollama-endpoint.js";
 const FLAGS = [
     "provider",
     "model",
+    "ollama-host",
     "reduced-motion",
     "effort",
     "max-tokens",
@@ -22,6 +24,7 @@ export function loadConfig(argv, saved = readSettings()) {
         }
     }
     const providerId = pick(flags.provider, process.env.JECODE_PROVIDER, saved.provider ?? "anthropic");
+    const ollamaHost = optional(flags["ollama-host"], process.env.OLLAMA_HOST, saved.ollamaHost);
     const effort = pick(flags.effort, process.env.JECODE_EFFORT, saved.effort ?? "high");
     if (!EFFORTS.includes(effort)) {
         throw new Error(`unknown effort "${effort}" (expected one of: ${EFFORTS.join(", ")})`);
@@ -29,6 +32,9 @@ export function loadConfig(argv, saved = readSettings()) {
     return {
         providerId,
         model: pick(flags.model, process.env.JECODE_MODEL, saved.models?.[providerId] ?? ""),
+        ...(ollamaHost === undefined
+            ? {}
+            : { ollamaHost: parseOllamaEndpoint(ollamaHost).baseUrl }),
         reducedMotion: bool(flags["reduced-motion"], process.env.JECODE_REDUCED_MOTION, saved.reducedMotion ?? false),
         effort,
         // Every request streams, so a large ceiling costs nothing in timeout risk.
@@ -46,6 +52,13 @@ function bool(flag, env, fallback) {
     return fallback;
 }
 function pick(flag, env, fallback) {
+    if (flag !== undefined && flag !== "")
+        return flag;
+    if (env !== undefined && env !== "")
+        return env;
+    return fallback;
+}
+function optional(flag, env, fallback) {
     if (flag !== undefined && flag !== "")
         return flag;
     if (env !== undefined && env !== "")

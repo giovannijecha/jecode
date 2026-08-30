@@ -87,3 +87,15 @@ test("a real authentication failure remains one actionable transcript notice", (
   assert.match(failure.text, /^401 unauthorized · /);
   assert.match(failure.text, /credentials|environment/);
 });
+
+test("an Ollama network failure becomes one actionable transcript notice", () => {
+  const ollama: Provider = { ...provider(), id: "ollama", location: () => "cloud" };
+  const failure = turnFailure(
+    session(ollama),
+    new Error("network error calling https://ollama.com/v1/chat/completions: fetch failed"),
+    false,
+  );
+
+  assert.equal(failure.text, "Ollama is not reachable · check its connection in /settings");
+  assert.equal(failure.tone, "error");
+});

@@ -1,17 +1,27 @@
 // Ollama, spoken through its OpenAI-compatible Chat Completions endpoint.
 //
-// One provider covers both deployments. Left unset, `OLLAMA_HOST` points at the
-// local daemon (http://127.0.0.1:11434, no key). A hosted endpoint is explicit
-// and requires `OLLAMA_API_KEY`. There is no default model — the catalogue is
-// whatever the host has pulled or the subscription grants — so the model has
-// to be named with --model.
+// One provider covers both deployments. An explicit session endpoint wins;
+// otherwise a configured key selects Ollama Cloud and no key selects the local
+// daemon. There is no default model — the catalogue is whatever the host has
+// pulled or the subscription grants — so the model has to be named with
+// --model.
 import { postSse } from "./http.js";
 import { listModels } from "./catalog.js";
 import { keyFor } from "../credentials.js";
 import { assembleOllama } from "./ollama-stream.js";
-import { DEFAULT_OLLAMA_HOST, parseOllamaEndpoint } from "./ollama-endpoint.js";
+import { OLLAMA_CLOUD_HOST, OLLAMA_LOCAL_HOST, ollamaConnectionKind, parseOllamaEndpoint, } from "./ollama-endpoint.js";
 import { fromWireReply, stopNotice, toWireMessages, toWireTool } from "./ollama-wire.js";
 const KEY = "OLLAMA_API_KEY";
+let configuredHost;
+/** Set the endpoint selected for this process. Undefined restores key-aware inference. */
+export function configureOllama(host) {
+    configuredHost = host === undefined ? undefined : parseOllamaEndpoint(host).baseUrl;
+}
+export function ollamaConnection() {
+    const inferred = configuredHost === undefined;
+    const endpoint = parseOllamaEndpoint(configuredHost ?? (apiKey() === undefined ? OLLAMA_LOCAL_HOST : OLLAMA_CLOUD_HOST));
+    return { ...endpoint, kind: ollamaConnectionKind(endpoint), inferred };
+}
 export const ollama = {
     id: "ollama",
     defaultModel: "",
@@ -62,16 +72,16 @@ export const ollama = {
     },
 };
 function endpoint() {
-    return parseOllamaEndpoint(process.env.OLLAMA_HOST ?? DEFAULT_OLLAMA_HOST);
+    return ollamaConnection();
 }
 function apiKey() {
     return keyFor(KEY);
 }
 function headers(at) {
+    if (at.loopback)
+        return {};
     const key = apiKey();
     if (key !== undefined)
         return { authorization: `Bearer ${key}` };
-    if (!at.loopback)
-        throw new Error(`${KEY} is not set (required by ${at.baseUrl})`);
-    return {};
+    throw new Error(`${KEY} is not set (required by ${at.baseUrl})`);
 }

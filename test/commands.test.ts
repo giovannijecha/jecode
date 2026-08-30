@@ -13,6 +13,8 @@ import {
   MAX_MODEL_CATALOG_ITEMS,
   MAX_MODEL_ID_CHARS,
 } from "../src/providers/catalog.ts";
+import { OLLAMA_LOCAL_HOST } from "../src/providers/ollama-endpoint.ts";
+import { configureOllama } from "../src/providers/ollama.ts";
 import { keyFor, reload } from "../src/credentials.ts";
 import type { SavedSettings } from "../src/settings.ts";
 import { STEEL } from "../src/ui/theme.ts";
@@ -204,16 +206,14 @@ test("a direct provider choice is offered to the interactive settings store", as
     saved.push(patch);
     return Promise.resolve();
   };
-  const beforeHost = process.env["OLLAMA_HOST"];
-  process.env["OLLAMA_HOST"] = "http://127.0.0.1:11434";
+  configureOllama(OLLAMA_LOCAL_HOST);
 
   try {
     await handleCommand("/providers", live, screen);
     assert.equal(live.provider.id, "ollama");
     assert.equal(saved[0]?.provider, "ollama");
   } finally {
-    if (beforeHost === undefined) delete process.env["OLLAMA_HOST"];
-    else process.env["OLLAMA_HOST"] = beforeHost;
+    configureOllama(undefined);
   }
 });
 
@@ -221,8 +221,7 @@ test("a direct provider choice rolls back when its default cannot be saved", asy
   const live = session(provider("fake", ["a"]));
   const screen = host(2);
   screen.saveSettings = () => Promise.reject(new Error("disk unavailable"));
-  const beforeHost = process.env["OLLAMA_HOST"];
-  process.env["OLLAMA_HOST"] = "http://127.0.0.1:11434";
+  configureOllama(OLLAMA_LOCAL_HOST);
 
   try {
     await handleCommand("/providers", live, screen);
@@ -232,8 +231,7 @@ test("a direct provider choice rolls back when its default cannot be saved", asy
     assert.equal(live.config.model, "a");
     assert.match(texts(screen.blocks).join("\n"), /could not save settings · disk unavailable/);
   } finally {
-    if (beforeHost === undefined) delete process.env["OLLAMA_HOST"];
-    else process.env["OLLAMA_HOST"] = beforeHost;
+    configureOllama(undefined);
   }
 });
 
@@ -247,6 +245,23 @@ test("a failure fetching models is reported, not thrown", async () => {
   await handleCommand("/models", live, screen);
 
   assert.deepEqual(texts(screen.blocks), ["fake: network error"]);
+});
+
+test("an unreachable local Ollama catalogue points back to settings", async () => {
+  const live = session({
+    ...provider("ollama", []),
+    location: () => "local",
+    models: () => Promise.reject(
+      new Error("network error calling http://127.0.0.1:11434/v1/models: fetch failed"),
+    ),
+  });
+  const screen = host(0);
+
+  await handleCommand("/models", live, screen);
+
+  assert.deepEqual(texts(screen.blocks), [
+    "Ollama is not reachable on this computer · start Ollama or choose cloud in /settings",
+  ]);
 });
 
 test("the model request receives the command cancellation signal and retry status", async () => {

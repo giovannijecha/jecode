@@ -3,6 +3,7 @@ import { heading } from "./tui/picker.js";
 import { PROVIDERS } from "./providers/index.js";
 import { readSettings } from "./settings.js";
 import { askForKey } from "./credential-commands.js";
+import { providerFailure } from "./provider-errors.js";
 /**
  * The provider menu.
  *
@@ -132,7 +133,11 @@ export async function modelsCommand(session, host, behavior = {}) {
         ids = await provider.models(host.signal, (status) => host.status?.(status));
     }
     catch (error) {
-        host.emit({ kind: "notice", text: `${provider.id}: ${error.message}`, tone: "error" });
+        host.emit({
+            kind: "notice",
+            text: providerFailure(provider, error, true),
+            tone: "error",
+        });
         return false;
     }
     finally {

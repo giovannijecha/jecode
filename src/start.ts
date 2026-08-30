@@ -5,7 +5,7 @@ import { runBatch } from "./batch.ts";
 import { showCliInfo } from "./cli-info.ts";
 import { loadConfig } from "./config.ts";
 import { systemPrompt } from "./prompt.ts";
-import { selectProvider } from "./providers/index.ts";
+import { configureProviders, selectProvider } from "./providers/index.ts";
 import type { Session } from "./session.ts";
 import { builtinTools } from "./tools/index.ts";
 import { configureColor } from "./ui/render.ts";
@@ -32,6 +32,7 @@ export async function start(
   const write = environment.write ?? ((text: string) => process.stdout.write(text));
   if (await showCliInfo(args, applicationRoot, write)) return;
   const config = loadConfig(args);
+  configureProviders(config);
   const provider = selectProvider(config.providerId);
   const hasScreen = environment.interactive?.() ?? interactive();
 
