@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { runBatch } from "../src/batch.ts";
@@ -254,12 +254,39 @@ test("the packaged jecode executable reaches batch help without a developer scri
 test("the packaged executable reports its manifest version", async () => {
   const result = await runExecutable(["--version"]);
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "0.1.5");
+  assert.equal(result.stdout.trim(), "0.1.6-rc.0");
+});
+
+test("a source-only executable explains how to obtain its missing runtime", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-missing-runtime-"));
+  const bin = path.join(directory, "bin");
+
+  try {
+    await mkdir(bin);
+    await copyFile("package.json", path.join(directory, "package.json"));
+    await copyFile("bin/jecode.js", path.join(bin, "jecode.js"));
+
+    const result = await runNode(path.join(bin, "jecode.js"), []);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /install @giovannijecha\/jecode from npm/);
+    assert.match(result.stderr, /npm run build:release/);
+    assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 function runExecutable(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return runNode(path.resolve("bin/jecode.js"), args);
+}
+
+function runNode(
+  executable: string,
+  args: string[],
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.resolve("bin/jecode.js"), ...args], {
+    const child = spawn(process.execPath, [executable, ...args], {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
     });

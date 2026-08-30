@@ -1,6 +1,6 @@
 {
   "name": "@giovannijecha/jecode",
-  "version": "0.1.5",
+  "version": "0.1.6-rc.0",
   "description": "An owned coding agent with zero external runtime dependencies.",
   "license": "MIT",
   "repository": {
@@ -36,18 +36,19 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "prepack": "node dev/build-release.ts --quiet",
     "build:release": "node dev/build-release.ts",
+    "pack:release": "npm run build:release && npm pack --ignore-scripts",
     "start": "node src/main.ts",
     "tui:lab": "node dev/tui-lab.ts",
     "bench:transcript": "node dev/benchmark-transcript.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:release && node --test",
     "coverage": "npm run build:release && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",
+    "check:source-tree": "node dev/check-source-tree.ts",
     "check:release-tag": "node dev/check-release-tag.ts",
-    "check:package": "node dev/check-package.ts",
-    "check:install": "node dev/check-installed-cli.ts",
-    "check": "npm run typecheck && npm run coverage && npm run check:package && npm run check:install"
+    "check:package": "npm run build:release -- --quiet && node dev/check-package.ts",
+    "check:install": "npm run build:release -- --quiet && node dev/check-installed-cli.ts",
+    "check": "npm run check:source-tree && npm run typecheck && npm run coverage && npm run check:package && npm run check:install"
   },
   "dependencies": {},
   "devDependencies": {
