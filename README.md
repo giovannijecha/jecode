@@ -37,16 +37,17 @@
   Session approvals can be reviewed and revoked.
 - **Provider-neutral.** Use Anthropic, OpenAI, or a local/remote Ollama server
   without changing the workflow.
-- **Lean by construction.** Jecode runs directly on Node.js 24 with zero
-  third-party runtime dependencies and no build step.
+- **Lean by construction.** Jecode installs as plain JavaScript, runs on
+  Node.js 24, executes no installation scripts, and has zero third-party
+  runtime dependencies.
 
 ## Install
 
-Jecode requires **Node.js 24 or newer**. Install the command directly from
-GitHub:
+Jecode requires **Node.js 24 or newer**, npm, and Git. Install the command
+directly from GitHub:
 
 ~~~console
-npm install --global github:giovannijecha/jecode
+npm install --global "github:giovannijecha/jecode#v0.1.1"
 jecode --version
 ~~~
 
@@ -63,8 +64,35 @@ You can point at another workspace explicitly:
 jecode --root path/to/your/project
 ~~~
 
-Run **jecode --help** for all startup options. Tested platforms are Windows and
-Ubuntu.
+Run **jecode --help** for all startup options. Tested platforms are Windows,
+Ubuntu, and macOS.
+
+### Update
+
+Install the current version over the existing global command:
+
+~~~console
+npm install --global "github:giovannijecha/jecode#v0.1.1"
+jecode --version
+~~~
+
+### Uninstall
+
+~~~console
+npm uninstall --global jecode
+~~~
+
+Uninstalling the command preserves **~/.jecode** so saved settings and
+credentials remain available after a reinstall. Remove that directory only
+when you intentionally want to erase Jecode's local data.
+
+### Linux and WSL
+
+WSL has its own Node.js installation and `PATH`; the Node.js version installed
+on Windows does not apply inside it. If installation succeeds but `jecode` is
+not found, run **npm config get prefix** and ensure its **bin/** directory is on
+your Linux `PATH`. Do not ignore an `EBADENGINE` warning: **node --version** must
+report 24 or newer.
 
 ### Build from source
 
@@ -75,6 +103,10 @@ npm ci
 npm link
 jecode
 ~~~
+
+Development runs TypeScript directly with **npm run start**. The committed
+**dist/** tree is the dependency-free JavaScript runtime used only by installed
+packages; regenerate it with **npm run build:release** after changing **src/**.
 
 ## First session
 

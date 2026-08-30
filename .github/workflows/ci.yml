@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Check out repository
@@ -45,5 +45,11 @@ jobs:
       - name: Test with coverage gates
         run: npm run coverage
 
+      - name: Verify compiled runtime
+        run: npm run check:release
+
       - name: Verify release package
         run: npm run check:package
+
+      - name: Install packaged CLI
+        run: npm run check:install

@@ -17,21 +17,29 @@ const allowed = paths.every((file) =>
   file === "README.md" ||
   file === "package.json" ||
   file.startsWith("bin/") ||
-  file.startsWith("src/")
+  file.startsWith("dist/")
 );
 if (!allowed) {
   throw new Error(`unexpected package files: ${paths.filter((file) =>
-    !(file === "LICENSE" || file === "README.md" || file === "package.json" || file.startsWith("bin/") || file.startsWith("src/"))
+    !(file === "LICENSE" || file === "README.md" || file === "package.json" || file.startsWith("bin/") || file.startsWith("dist/"))
   ).join(", ")}`);
 }
 if (!paths.includes("bin/jecode.js")) throw new Error("the jecode executable is missing from the package");
+if (!paths.includes("dist/main.js")) throw new Error("the compiled entry point is missing from the package");
+if (paths.some((file) => file.endsWith(".ts"))) throw new Error("release packages must not contain TypeScript runtime files");
 if (packed.size > 1_000_000) throw new Error(`package is unexpectedly large: ${packed.size} bytes`);
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
   dependencies?: Record<string, unknown>;
+  scripts?: Record<string, unknown>;
 };
 if (Object.keys(manifest.dependencies ?? {}).length !== 0) {
   throw new Error("runtime dependencies must stay empty");
+}
+const installScripts = ["preinstall", "install", "postinstall", "prepare"]
+  .filter((name) => manifest.scripts?.[name] !== undefined);
+if (installScripts.length > 0) {
+  throw new Error(`release packages must not run installation scripts: ${installScripts.join(", ")}`);
 }
 
 process.stdout.write(`package: ${paths.length} files, ${packed.size} bytes, zero runtime dependencies\n`);

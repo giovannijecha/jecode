@@ -1,6 +1,6 @@
 {
   "name": "jecode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An owned coding agent with zero external runtime dependencies.",
   "private": true,
   "license": "MIT",
@@ -22,7 +22,7 @@
   "type": "module",
   "files": [
     "bin/",
-    "src/",
+    "dist/",
     "LICENSE",
     "README.md"
   ],
@@ -33,14 +33,17 @@
     "node": ">=24"
   },
   "scripts": {
+    "build:release": "tsc --project tsconfig.release.json",
     "start": "node src/main.ts",
     "tui:lab": "node dev/tui-lab.ts",
     "bench:transcript": "node dev/benchmark-transcript.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",
+    "check:release": "node dev/check-release-tree.ts",
     "check:package": "node dev/check-package.ts",
-    "check": "npm run typecheck && npm run coverage && npm run check:package"
+    "check:install": "node dev/check-installed-cli.ts",
+    "check": "npm run typecheck && npm run coverage && npm run check:release && npm run check:package && npm run check:install"
   },
   "dependencies": {},
   "devDependencies": {

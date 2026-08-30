@@ -1,0 +1,20 @@
+// Asking a provider what it will answer to.
+//
+// Nothing here is a list of models. A catalogue written into this repo is
+// wrong the week after it is written, and wrong in the worst way — it names
+// models that no longer exist and hides the ones that do. So the question goes
+// to the provider, every time the user opens the menu.
+//
+// All three happen to answer the same GET at `/v1/models` with the same shape,
+// `{ data: [{ id }] }`, so the asking is written once and a provider supplies
+// only its URL and its headers.
+import { getJson } from "./http.js";
+export async function listModels(url, headers, signal, onStatus) {
+    const body = await getJson(url, headers, signal, onStatus);
+    const data = body.data;
+    if (!Array.isArray(data))
+        throw new Error(`${url} did not return a model list`);
+    return data
+        .map((entry) => entry.id)
+        .filter((id) => typeof id === "string" && id !== "");
+}

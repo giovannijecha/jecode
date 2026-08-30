@@ -7,16 +7,18 @@ the controller sends it to one provider, executes requested tools, and repeats
 until the model returns no tool calls.
 
 ```text
-bin/jecode.js → main.ts → start.ts
-                          ├─ tui/app.ts       interactive control plane
-                          │    ├─ app-input.ts
-                          │    └─ app-workflows.ts ─ commands.ts
-                          └─ batch.ts         piped control plane
-                                   │
-                                   ▼
-                              controller.ts   the only agent loop
-                                ├─ providers/ wire-format boundaries
-                                └─ tools/     workspace capabilities
+bin/jecode.js → dist/main.js → start.js
+                               ├─ tui/app.js       interactive control plane
+                               │    ├─ app-input.js
+                               │    └─ app-workflows.js ─ commands.js
+                               └─ batch.js         piped control plane
+                                        │
+                                        ▼
+                                   controller.js   the only agent loop
+                                     ├─ providers/ wire-format boundaries
+                                     └─ tools/     workspace capabilities
+
+npm run start → src/main.ts    direct development path
 ```
 
 There are no subagents, workers, delegated tasks, or concurrent controller
@@ -272,12 +274,17 @@ npm run check
 ```
 
 The check enforces type safety, line/branch/function coverage thresholds, zero
-runtime dependencies, and a bounded package containing only the executable,
-runtime source, license, manifest, and README.
+runtime dependencies, an up-to-date compiled runtime, and a bounded package
+containing only the executable, plain JavaScript runtime, license, manifest,
+and README. It then installs that package into an isolated global prefix and
+runs its version command.
 
 ## Deliberate omissions
 
-- No runtime dependency, SDK, curses layer, build step, or bundler.
+- No runtime dependency, SDK, curses layer, install-time compiler, or bundler.
+  TypeScript remains the development source; the release-only `dist/` tree is
+  emitted by the existing development compiler and committed for script-free
+  installation from GitHub.
 - No automatic conversation persistence.
 - No client-side history summarizer or second model loop. Usage and latest
   input context are visible; context compaction belongs at the provider seam
