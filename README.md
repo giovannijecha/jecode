@@ -198,7 +198,8 @@ explicitly.
 Jecode treats model output, workspace content, tool output, and terminal text as
 untrusted data.
 
-- Tool paths are confined to the selected workspace.
+- Tool paths are confined to the selected workspace. Writes reject symlink and
+  junction components, then revalidate the boundary during atomic replacement.
 - Dangerous tools require approval unless the process was started with
   **--auto-approve**.
 - Credential fields are masked and excluded from transcripts. Approved shell

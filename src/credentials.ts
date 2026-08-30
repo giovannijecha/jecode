@@ -134,7 +134,7 @@ async function persist(file: string, values: Record<string, string>): Promise<vo
   const directory = path.dirname(file);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(directory, 0o700);
-  await atomicWrite(file, `${JSON.stringify(values, null, 2)}\n`, 0o600);
+  await atomicWrite(file, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
 }
 
 /** An empty variable is an unset variable — an exported "" is not a key. */
