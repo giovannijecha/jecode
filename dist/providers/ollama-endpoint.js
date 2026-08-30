@@ -1,5 +1,5 @@
 // Turning OLLAMA_HOST into one safe, normalized endpoint.
-export const DEFAULT_OLLAMA_HOST = "https://ollama.com";
+export const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
 export function parseOllamaEndpoint(value) {
     let url;
     try {

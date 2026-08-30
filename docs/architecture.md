@@ -96,9 +96,11 @@ another endpoint. Retry state is surfaced in the TUI. Each SSE event and the
 reconstructed tool arguments have explicit size limits; overflow cancels the
 reader and ends the turn with a descriptive error.
 
-`OLLAMA_HOST` is parsed as an absolute URL before any request headers are
-created. HTTP is accepted only for exact loopback hosts. Remote endpoints must
-use HTTPS, and credentials embedded in the URL are rejected.
+With no `OLLAMA_HOST`, Ollama targets `http://127.0.0.1:11434` and needs no
+credential. An explicit `OLLAMA_HOST` is parsed as an absolute URL before any
+request headers are created. HTTP is accepted only for exact loopback hosts.
+Remote endpoints must use HTTPS, and credentials embedded in the URL are
+rejected.
 
 ## Workspace boundary
 

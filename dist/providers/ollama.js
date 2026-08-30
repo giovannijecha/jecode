@@ -1,9 +1,9 @@
 // Ollama, spoken through its OpenAI-compatible Chat Completions endpoint.
 //
-// One provider covers both deployments. `OLLAMA_HOST` points at a local daemon
-// (http://127.0.0.1:11434, no key); left unset it points at the hosted service,
-// where `OLLAMA_API_KEY` is required. There is no default model — the catalogue
-// is whatever the host has pulled or the subscription grants — so the model has
+// One provider covers both deployments. Left unset, `OLLAMA_HOST` points at the
+// local daemon (http://127.0.0.1:11434, no key). A hosted endpoint is explicit
+// and requires `OLLAMA_API_KEY`. There is no default model — the catalogue is
+// whatever the host has pulled or the subscription grants — so the model has
 // to be named with --model.
 import { postSse } from "./http.js";
 import { listModels } from "./catalog.js";
