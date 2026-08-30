@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 type Packed = { filename: string };
+type Manifest = { name: string; version: string };
 
 const npm = process.env.npm_execpath ?? fail("run this check through npm run check:install");
+const manifest = JSON.parse(await readFile("package.json", "utf8")) as Manifest;
+const packagePath = manifest.name.split("/");
 
 const root = await mkdtemp(path.join(tmpdir(), "jecode-install-check-"));
 const packRoot = path.join(root, "pack");
@@ -29,8 +32,8 @@ try {
   await access(launcher);
 
   const entry = process.platform === "win32"
-    ? path.join(prefix, "node_modules", "jecode", "bin", "jecode.js")
-    : path.join(prefix, "lib", "node_modules", "jecode", "bin", "jecode.js");
+    ? path.join(prefix, "node_modules", ...packagePath, "bin", "jecode.js")
+    : path.join(prefix, "lib", "node_modules", ...packagePath, "bin", "jecode.js");
   await access(entry);
   const command = process.platform === "win32"
     ? { file: process.execPath, args: [entry, "--version"] }
@@ -45,7 +48,6 @@ try {
     throw new Error(`installed jecode failed (${result.status})\n${result.stderr}`);
   }
 
-  const manifest = JSON.parse(await readFile("package.json", "utf8")) as { version: string };
   if (result.stdout.trim() !== manifest.version) {
     throw new Error(`installed jecode reported ${JSON.stringify(result.stdout.trim())}, expected ${manifest.version}`);
   }
