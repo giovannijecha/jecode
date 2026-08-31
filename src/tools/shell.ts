@@ -13,7 +13,7 @@ export const runCommand: Tool = {
   name: "run_command",
   description:
     "Run a shell command starting in the workspace root and return its combined stdout " +
-    "and stderr. The shell is not a filesystem sandbox, so every call requires approval. Output is " +
+    "and stderr. The shell is not a filesystem sandbox, so calls ask for approval by default. Output is " +
     "truncated past 30000 characters.",
   dangerous: true,
   input: {

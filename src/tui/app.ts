@@ -24,6 +24,7 @@ import { transcriptRenderer } from "./transcript-view.ts";
 import { appState } from "./app-state.ts";
 import { appInput } from "./app-input.ts";
 import { appWorkflows } from "./app-workflows.ts";
+import { sessionPermissions } from "../permissions.ts";
 
 const FRAME_MS = 16;
 const SPIN_MS = 80;
@@ -57,9 +58,7 @@ export async function runApp(
 
   const state = appState();
 
-  // Tools the user said "always" to. It lives for the window and dies with it:
-  // a permission granted once, in one conversation, is not a setting.
-  const allowed = new Map<string, string>();
+  const permissions = sessionPermissions(session.tools, session.config.autoApprove);
 
   let closed: (() => void) | undefined;
   let frameTimer: NodeJS.Timeout | undefined;
@@ -203,7 +202,7 @@ export async function runApp(
     session,
     transcriptRoot,
     state,
-    allowed,
+    permissions,
     feedback,
     emit,
     commandNotice,

@@ -18,7 +18,7 @@ export type Stage = {
   render(block?: Block): void;
   /** Put a question up and call back once the user has picked an answer. */
   ask(prompt: Picker, settle: (answer: Answer) => void): void;
-  /** Whether this tool may run without asking — the flag, or an earlier "always". */
+  /** Whether this call may run under the current session policy or a remembered grant. */
   approved(call: ToolCallBlock): boolean;
   /** Stop asking about this narrow call scope for the rest of the session. */
   remember(call: ToolCallBlock): void;

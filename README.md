@@ -171,8 +171,8 @@ Type **/** to open searchable command completion inside the composer.
 | /providers | Switch the provider for the next turn |
 | /models | Search the live model catalogue |
 | /credentials | Add, replace, inspect, or forget saved credentials |
-| /permissions | Review or revoke remembered session approvals |
-| /new | Start a clean in-memory conversation |
+| /permissions | Manage session tool access and remembered approvals |
+| /new | Start a clean conversation and reset session tool permissions |
 | /export | Save a timestamped Markdown transcript in the launch directory |
 | /help | Open a temporary keyboard reference in the composer dock |
 | /exit | Restore the terminal and exit |
@@ -238,8 +238,8 @@ untrusted data.
 
 - Tool paths are confined to the selected workspace. Writes reject symlink and
   junction components, then revalidate the boundary during atomic replacement.
-- Dangerous tools require approval unless the process was started with
-  **--auto-approve**.
+- Dangerous tools ask by default unless explicitly allowed for the session in
+  **/permissions** or the process started with **--auto-approve**.
 - Credential fields are masked and excluded from transcripts. Approved shell
   commands receive no credential-like environment variables, and recognized
   credential values are redacted before tool output reaches the model, screen,

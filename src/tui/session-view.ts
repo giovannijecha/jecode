@@ -7,10 +7,13 @@ import type { Session } from "../session.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FooterInfo } from "./components/footer.ts";
 
-export function controllerOptions(session: Session): ControllerOptions {
+export function controllerOptions(
+  session: Session,
+  tools: Session["tools"] = session.tools,
+): ControllerOptions {
   return {
     provider: session.provider,
-    tools: session.tools,
+    tools,
     model: session.model,
     system: session.system,
     maxTokens: session.config.maxTokens,

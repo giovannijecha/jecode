@@ -8,11 +8,12 @@
 import type { Session } from "./session.ts";
 import type { NoticeBlock } from "./tui/blocks.ts";
 import type { Picker } from "./tui/picker.ts";
-import { heading } from "./tui/picker.ts";
 import type { Field } from "./tui/field.ts";
 import type { SavedSettings } from "./settings.ts";
+import type { SessionPermissions } from "./permissions.ts";
 import { modelsCommand, providersCommand } from "./provider-commands.ts";
 import { credentialsCommand } from "./credential-commands.ts";
+import { permissionsCommand } from "./permission-command.ts";
 import { effortCommand, settingsCommand } from "./settings-command.ts";
 import { emptyUsage } from "./usage.ts";
 
@@ -35,10 +36,9 @@ export type Host = {
   type?(field: Field): Promise<string | undefined>;
   status?(text?: string): void;
   signal?: AbortSignal;
-  /** Clear transcript-local state such as remembered approvals. */
+  /** Clear conversation-local state, including tool policies and approvals. */
   reset?(): void;
-  permissions?(): readonly { key: string; label: string }[];
-  revokePermission?(key?: string): void;
+  permissions?: SessionPermissions;
   exportTranscript?(): Promise<string>;
   /** Persist non-secret defaults when the host owns an interactive settings store. */
   saveSettings?(patch: Partial<SavedSettings>): Promise<void>;
@@ -58,9 +58,9 @@ export type Command = { name: string; blurb: string };
 export const COMMANDS: readonly Command[] = [
   { name: "help", blurb: "show keyboard controls" },
   { name: "exit", blurb: "exit and restore the terminal" },
-  { name: "new", blurb: "start a clean in-memory session" },
+  { name: "new", blurb: "start clean and reset tool permissions" },
   { name: "export", blurb: "save this transcript as Markdown" },
-  { name: "permissions", blurb: "review or revoke remembered approvals" },
+  { name: "permissions", blurb: "manage session tool access" },
   { name: "settings", blurb: "change and save jecode defaults" },
   { name: "effort", blurb: "set the reasoning effort" },
   { name: "credentials", blurb: "inspect, replace, or forget API keys" },
@@ -108,7 +108,7 @@ export async function handleCommand(
       return "handled";
 
     case "permissions":
-      await permissions(session, host);
+      await permissionsCommand(session, host);
       return "handled";
 
     case "settings":
@@ -139,44 +139,6 @@ export async function handleCommand(
       });
       return "handled";
   }
-}
-
-async function permissions(session: Session, host: Host): Promise<void> {
-  const choose = chooser(host);
-  if (choose === undefined) return;
-  if (session.config.autoApprove) {
-    host.emit({
-      kind: "notice",
-      text: "--auto-approve is active · every dangerous call is allowed for this process",
-      tone: "warn",
-    });
-  }
-
-  const entries = host.permissions?.() ?? [];
-  if (entries.length === 0) {
-    host.emit({ kind: "notice", text: "no remembered session permissions", tone: "info" });
-    return;
-  }
-
-  const index = await choose({
-    title: heading("revoke permission", "applies only to this session", session.palette),
-    options: [
-      ...entries.map((entry) => ({ label: entry.label, hint: "revoke" })),
-      { label: "all remembered permissions", hint: "revoke all" },
-    ],
-    index: 0,
-  });
-  if (index === undefined) return;
-  if (index === entries.length) {
-    host.revokePermission?.();
-    host.emit({ kind: "notice", text: "all remembered permissions revoked", tone: "info" });
-    return;
-  }
-
-  const entry = entries[index];
-  if (entry === undefined) return;
-  host.revokePermission?.(entry.key);
-  host.emit({ kind: "notice", text: `revoked · ${entry.label}`, tone: "info" });
 }
 
 function chooser(host: Host): Host["choose"] {

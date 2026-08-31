@@ -162,6 +162,21 @@ test("settings is a compact selector without key legends", () => {
   assert.equal(frame.cursor, undefined);
 });
 
+test("permissions exposes every tool and its session policy", () => {
+  const frame = composeLab(state("menu-permissions"), { rows: 24, cols: 100 });
+  const shown = plain(frame.rows).join("\n");
+  const tail = plain(
+    composeLab({ ...state("menu-permissions"), selected: 6 }, { rows: 24, cols: 100 }).rows,
+  ).join("\n");
+  assert.match(shown, /permissions.*session only/);
+  assert.match(shown, /read_file.*allow.*read only/);
+  assert.match(shown, /search_text.*deny.*read only/);
+  assert.match(shown, /edit_file.*ask.*2 remembered/);
+  assert.match(tail, /run_command.*ask.*1 remembered/);
+  assert.doesNotMatch(shown, /close|in use|Enter to select/);
+  assert.equal(frame.cursor, undefined);
+});
+
 test("help is a temporary keyboard reference inside the shared dock", () => {
   const frame = composeLab(state("help"), { rows: 24, cols: 100 });
   const shown = plain(frame.rows).join("\n");
