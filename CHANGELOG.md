@@ -4,6 +4,28 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.1.9] - 2026-08-31
+
+### Added
+
+- Added a session-only `/permissions` control plane for every built-in tool,
+  with allow, ask, and deny policies plus granular remembered approvals.
+- Added a compact `/help` reference inside the composer dock.
+
+### Changed
+
+- Kept slash commands and operational feedback out of conversation transcripts
+  and Markdown exports, while leaving token accounting internal.
+- Simplified footer feedback, menu navigation, and row alignment around one
+  consistent composer interaction model.
+- Removed the redundant `/setup` and public `/usage` commands; `/settings` now
+  remains the single persistent configuration surface.
+
+### Fixed
+
+- Kept the Jecode wordmark legible on npm and other README renderers with dark
+  backgrounds.
+
 ## [0.1.8] - 2026-08-31
 
 ### Added
@@ -103,6 +125,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.1.9]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.9
 [0.1.8]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.8
 [0.1.7]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.7
 [0.1.6]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.6
