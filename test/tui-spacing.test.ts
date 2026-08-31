@@ -17,7 +17,6 @@ test("every conversation block owns one leading rhythm row", () => {
     { kind: "answer", text: "answer" },
     { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
     { kind: "notice", text: "ready", tone: "info" },
-    { kind: "list", items: [{ text: "item", dim: false }] },
   ];
 
   for (const block of blocks) assert.equal(render(block, 50, STEEL)[0], "", block.kind);

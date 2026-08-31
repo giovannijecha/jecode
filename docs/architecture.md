@@ -234,6 +234,13 @@ therefore never enter Markdown exports. Turn readiness is checked before the
 editor, recall history, or model history is mutated, so a missing key or model
 leaves the unsent prompt in place.
 
+The command boundary enforces that separation in its types: commands can emit
+only transient notices, open a dock interaction, or request a lifecycle action.
+They cannot create semantic transcript blocks. `/help` is a read-only keyboard
+reference inside the dock and closes with Esc; command discovery remains on the
+`/` completion surface. Token accounting stays internal instead of becoming a
+persistent `/usage` report.
+
 Conversation turns use one blank terminal row as their outer separator. The
 user surface keeps its own top and bottom padding. A tool trace starts after one
 blank row, then consecutive calls join on one vertical rail without card
@@ -251,12 +258,13 @@ Jecode owns the component contracts, design tokens, interaction rules, and
 every emitted terminal cell.
 
 The lower dock has one shell. The normal editor, slash-command autocomplete,
-selectors, searchable queries, and credential fields provide its inner rows;
-none draws its own border. Autocomplete opens on `/`, keeps selection separate
-from the typed prefix, and puts window progress on that input row. Searchable
-pickers use the same `→` input and a real caret. Up/Down select, Tab completes,
-Enter runs, and Esc closes. Key legends are not repeated inside every picker.
-The footer remains outside the shell, so it never jumps when a menu opens.
+selectors, searchable queries, credential fields, and the temporary keyboard
+reference provide its inner rows; none draws its own border. Autocomplete opens
+on `/`, keeps selection separate from the typed prefix, and puts window progress
+on that input row. Searchable pickers use the same `→` input and a real caret.
+Up/Down select, Tab completes, Enter runs, and Esc closes. Key legends are not
+repeated inside every picker. The footer remains outside the shell, so it never
+jumps when a menu opens.
 
 Writable fields and searchable pickers carry the same `→ ` active prompt. One
 shared renderer owns its terminal-cell width, horizontal window, secret mask,

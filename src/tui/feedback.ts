@@ -1,7 +1,7 @@
 // Operational feedback belongs in the footer, not in the conversation.
 
 import type { Session } from "../session.ts";
-import type { Block, NoticeTone } from "./blocks.ts";
+import type { NoticeBlock, NoticeTone } from "./blocks.ts";
 
 export type Feedback = {
   text: string;
@@ -59,8 +59,7 @@ export function feedbackController(
 }
 
 /** Turn a command notice into one replaceable message in the footer status channel. */
-export function commandFeedback(block: Block): Feedback | undefined {
-  if (block.kind !== "notice") return undefined;
+export function commandFeedback(block: NoticeBlock): Feedback {
   return {
     text: block.text,
     tone: block.tone,

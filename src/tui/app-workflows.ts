@@ -10,7 +10,7 @@ import type { Activity } from "./activity.ts";
 import type { AppActions } from "./app-input.ts";
 import type { AppState } from "./app-state.ts";
 import { answerAt, scopeFor } from "./approve.ts";
-import type { Block } from "./blocks.ts";
+import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FeedbackController } from "./feedback.ts";
 import { controllerOptions, turnFailure } from "./session-view.ts";
 import { transcribe } from "./turn.ts";
@@ -24,7 +24,7 @@ type WorkflowOptions = {
   allowed: Map<string, string>;
   feedback: FeedbackController;
   emit(block: Block): void;
-  commandOutput(block: Block): void;
+  commandNotice(notice: NoticeBlock): void;
   render(block?: Block): void;
   refreshSettings(): void;
   startActivity(kind: Activity["kind"], label: string): Activity | undefined;
@@ -40,8 +40,13 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
 
     try {
       const outcome = await handleCommand(text, session, {
-        emit: options.commandOutput,
+        emit: options.commandNotice,
         signal: activity.control.signal,
+        showHelp: () =>
+          new Promise<void>((resolve) => {
+            state.open = { help: true, settle: resolve };
+            options.render();
+          }),
         choose: (picker) =>
           new Promise<number | undefined>((resolve) => {
             state.open = { picker, settle: resolve };

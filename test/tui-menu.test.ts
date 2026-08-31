@@ -22,7 +22,7 @@ test("colour menu rows align with the composer while writable prompts keep their
     const { configureColor } = await import("../src/ui/render.ts");
 
     const commands = plain(renderCommandMenu([
-      { name: "help", blurb: "this list" },
+      { name: "help", blurb: "show keyboard controls" },
       { name: "exit", blurb: "exit" },
     ], 0, 60, STEEL).rows);
     assert.match(commands[0] ?? "", /^\/help/);

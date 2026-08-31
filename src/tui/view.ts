@@ -48,7 +48,7 @@ export type View = {
   reducedMotion?: boolean;
   /** One frame timestamp shared by every live tool duration. */
   now?: number;
-  /** A choice or a field, which takes the composer over while it is open. */
+  /** A modal surface which takes the composer over while it is open. */
   modal?: Modal;
   /** Commands the half-typed line still matches. */
   menu?: readonly Command[];

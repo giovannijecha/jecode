@@ -172,10 +172,9 @@ Type **/** to open searchable command completion inside the composer.
 | /models | Search the live model catalogue |
 | /credentials | Add, replace, inspect, or forget saved credentials |
 | /permissions | Review or revoke remembered session approvals |
-| /usage | Show normalized token usage |
 | /new | Start a clean in-memory conversation |
 | /export | Save a timestamped Markdown transcript in the launch directory |
-| /help | Show commands and controls |
+| /help | Open a temporary keyboard reference in the composer dock |
 | /exit | Restore the terminal and exit |
 
 Useful controls:
@@ -192,7 +191,9 @@ Useful controls:
 The one-line footer keeps model, effort, and workspace on the left. Live work
 stays visible on the reasoning and tool rail; the right edge carries the
 interrupt hint, readiness guidance, and temporary feedback without polluting
-the transcript.
+the transcript. Slash commands never append content to the conversation or its
+Markdown export; **/help** closes with **Esc**, and token accounting remains
+internal to the active session.
 
 ## Configuration
 

@@ -123,7 +123,7 @@ test("command autocomplete shares the composer and carries its count", () => {
   const frame = composeLab(state("menu-commands"), { rows: 24, cols: 100 });
   const rows = plain(frame.rows);
   const input = frame.cursor?.row ?? -1;
-  assert.match(rows[input] ?? "", /^\/.*1–4 \/ 12$/);
+  assert.match(rows[input] ?? "", /^\/.*1–4 \/ 11$/);
   assert.equal(rows.findIndex((line) => line.includes("/help")), input + 1);
   assert.match(rows[input - 1] ?? "", /^─+$/);
   assert.match(rows[input + 5] ?? "", /^─+$/);
@@ -158,6 +158,15 @@ test("settings is a compact selector without key legends", () => {
   assert.match(shown, /provider.*ollama/);
   assert.match(shown, /ollama connection.*cloud.*ollama\.com/);
   assert.doesNotMatch(shown, /in use|↑↓ enter|Enter to select/);
+  assert.equal(frame.cursor, undefined);
+});
+
+test("help is a temporary keyboard reference inside the shared dock", () => {
+  const frame = composeLab(state("help"), { rows: 24, cols: 100 });
+  const shown = plain(frame.rows).join("\n");
+  assert.match(shown, /help\s+keyboard controls.*esc close/);
+  assert.match(shown, /alt\+enter\s+insert a new line/);
+  assert.match(shown, /ctrl\+l\s+redraw the screen/);
   assert.equal(frame.cursor, undefined);
 });
 

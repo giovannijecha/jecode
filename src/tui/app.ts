@@ -8,7 +8,7 @@ import type { Session } from "../session.ts";
 import type { Activity, ActivityKind } from "./activity.ts";
 import { begin } from "./activity.ts";
 import * as overlay from "./overlay.ts";
-import type { Block } from "./blocks.ts";
+import type { Block, NoticeBlock } from "./blocks.ts";
 import { options as completionOptions } from "./complete.ts";
 import { decoder } from "./keys.ts";
 import type { Painter } from "./frame.ts";
@@ -135,10 +135,8 @@ export async function runApp(
     else state.unseen++;
   };
 
-  const commandOutput = (block: Block): void => {
-    const next = commandFeedback(block);
-    if (next === undefined) emit(block);
-    else feedback.show(next);
+  const commandNotice = (notice: NoticeBlock): void => {
+    feedback.show(commandFeedback(notice));
   };
 
   const scrollBy = (amount: number): void => {
@@ -208,7 +206,7 @@ export async function runApp(
     allowed,
     feedback,
     emit,
-    commandOutput,
+    commandNotice,
     render,
     refreshSettings: () => {
       terminal.setReducedMotion(session.config.reducedMotion);
