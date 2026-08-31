@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-const major = Number.parseInt(process.versions.node, 10);
-if (major < 24) {
+const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+const supported = major >= 24 || (major === 22 && minor >= 18);
+if (!supported) {
   process.stderr.write(
-    `jecode requires Node.js 24 or newer (current: ${process.versions.node})\n`,
+    `jecode requires Node.js 22.18+ (22.x) or Node.js 24+ (current: ${process.versions.node})\n`,
   );
   process.exitCode = 1;
 } else {
