@@ -359,7 +359,7 @@ test("the packaged batch executable reports terminal failures on stderr", async 
 test("the packaged executable reports its manifest version", async () => {
   const result = await runExecutable(["--version"]);
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "0.1.6");
+  assert.equal(result.stdout.trim(), "0.1.7");
 });
 
 test("a source-only executable explains how to obtain its missing runtime", async () => {
