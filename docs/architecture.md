@@ -79,8 +79,9 @@ Each provider has three responsibilities:
 Streamed text is display-only. The complete message returned by `send` is the
 only assistant message appended to history. Anthropic thinking signatures and
 OpenAI reasoning items are retained as provider-tagged opaque data so a later
-request can echo them without corrupting or inventing fields. Cross-provider
-history falls back to normalized content.
+request can echo them without corrupting or inventing fields. Ollama reasoning
+is retained with the assistant tool call for compatible Chat Completions
+continuations. Cross-provider history falls back to normalized content.
 
 OpenAI Responses requests use `store: false` and request encrypted reasoning
 content for stateless continuation. The `openai` provider authenticates with
@@ -125,11 +126,13 @@ the temporary pathname must still identify the file Jecode opened. A previewed
 write or edit also compares the current file with the approved version, so an
 intervening content change is rejected instead of overwritten.
 
-Whole-file mutations accept regular files only and enforce independent byte,
-character, and line budgets. Existing content is read through a bounded file
-handle, and `replace_all` checks its projected size before allocating the
-result. Files above that budget remain available through ranged `read_file`
-calls, but `write_file` and `edit_file` will not replace them wholesale.
+File reads and whole-file mutations accept regular files only. Reads use
+bounded, cancellable handles that cannot wait on FIFOs or other special files.
+Mutations enforce independent byte, character, and line budgets; existing
+content is read through a bounded file handle, and `replace_all` checks its
+projected size before allocating the result. Files above that budget remain
+available through ranged `read_file` calls, but `write_file` and `edit_file`
+will not replace them wholesale.
 
 The built-in tools are:
 
@@ -153,7 +156,9 @@ credential-like names removed. Known environment, session, and saved
 credential values are redacted from captured output before the controller can
 send it to a provider or retain it in a transcript block. While the process is
 running, the same bounded and redacted capture is emitted as replaceable TUI
-snapshots; raw chunks never cross the tool boundary.
+snapshots; raw chunks never cross the tool boundary. The redaction snapshot
+re-reads canonical credential stores at the command boundary, so a token
+rotated by another Jecode process is covered alongside the cached value.
 
 The “allow this session” choice is deliberately narrow: one target file for
 file changes, or one exact shell command. `/permissions` exposes every tool in

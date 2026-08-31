@@ -37,8 +37,20 @@ export function credentialSource(name: string): CredentialSource | undefined {
 /** Values that must never survive in shell output, regardless of their source. */
 export function credentialValues(): string[] {
   const stored = fromDisk();
-  const names = new Set([...held.keys(), ...Object.keys(stored)]);
-  const values = new Set([...held.values(), ...Object.values(stored)]);
+  // A second process can replace the saved store after this session cached it.
+  // Redact both snapshots so neither a stale nor a newly persisted key can
+  // cross the shell boundary.
+  const current = readSavedStore();
+  const names = new Set([
+    ...held.keys(),
+    ...Object.keys(stored),
+    ...Object.keys(current),
+  ]);
+  const values = new Set([
+    ...held.values(),
+    ...Object.values(stored),
+    ...Object.values(current),
+  ]);
   for (const name of names) {
     const environment = use(process.env[name]);
     if (environment !== undefined) values.add(environment);
@@ -106,12 +118,14 @@ export function reload(): void {
 
 function fromDisk(): Record<string, string> {
   if (saved !== undefined) return saved;
+  saved = readSavedStore();
+  return saved;
+}
 
+function readSavedStore(): Record<string, string> {
   const current = readStore(storePath());
   const legacy = legacyUserDataPath("credentials.json");
-  saved = current ?? (legacy === undefined ? undefined : readStore(legacy)) ?? {};
-
-  return saved;
+  return current ?? (legacy === undefined ? undefined : readStore(legacy)) ?? {};
 }
 
 function readStore(file: string): Record<string, string> | undefined {
