@@ -37,6 +37,20 @@ test("a basename glob also matches nested files", async () => {
   assert.equal(result.output, "readme.md");
 });
 
+test("globstar can match zero directories and question matches one character", async () => {
+  const rootFile = await findFiles.run({ pattern: "**/*.md" }, ctx);
+  const oneCharacter = await findFiles.run({ pattern: "**/?.ts" }, ctx);
+  assert.equal(rootFile.output, "readme.md");
+  assert.deepEqual(oneCharacter.output.split("\n"), ["src/a.ts", "src/nested/b.ts"]);
+});
+
+test("rejects a glob too large to evaluate predictably", async () => {
+  await assert.rejects(
+    findFiles.run({ pattern: "a*".repeat(300) }, ctx),
+    /must be at most 512 characters/,
+  );
+});
+
 test("search_text reports relative path, line, and literal match", async () => {
   const result = await searchText.run({ query: "needle", pattern: "**/*.ts" }, ctx);
   assert.deepEqual(result.output.split("\n"), [

@@ -29,6 +29,44 @@ const WIDE: readonly (readonly [number, number])[] = [
   [0x20000, 0x3fffd],
 ];
 
+/** Default emoji-presentation ranges below the main supplementary blocks. */
+const EMOJI_WIDE: readonly (readonly [number, number])[] = [
+  [0x231a, 0x231b],
+  [0x23e9, 0x23ec],
+  [0x23f0, 0x23f0],
+  [0x23f3, 0x23f3],
+  [0x25fd, 0x25fe],
+  [0x2614, 0x2615],
+  [0x2648, 0x2653],
+  [0x267f, 0x267f],
+  [0x2693, 0x2693],
+  [0x26a1, 0x26a1],
+  [0x26aa, 0x26ab],
+  [0x26bd, 0x26be],
+  [0x26c4, 0x26c5],
+  [0x26ce, 0x26ce],
+  [0x26d4, 0x26d4],
+  [0x26ea, 0x26ea],
+  [0x26f2, 0x26f3],
+  [0x26f5, 0x26f5],
+  [0x26fa, 0x26fa],
+  [0x26fd, 0x26fd],
+  [0x2705, 0x2705],
+  [0x270a, 0x270b],
+  [0x2728, 0x2728],
+  [0x274c, 0x274c],
+  [0x274e, 0x274e],
+  [0x2753, 0x2755],
+  [0x2757, 0x2757],
+  [0x2795, 0x2797],
+  [0x27b0, 0x27b0],
+  [0x27bf, 0x27bf],
+  [0x2b1b, 0x2b1c],
+  [0x2b50, 0x2b50],
+  [0x2b55, 0x2b55],
+  [0x1f1e6, 0x1f1ff],
+];
+
 /** Ranges that occupy no cell of their own: they attach to what precedes. */
 const ZERO: readonly (readonly [number, number])[] = [
   [0x0300, 0x036f],
@@ -56,6 +94,7 @@ function inRanges(code: number, ranges: readonly (readonly [number, number])[]):
 
 // The emoji presentation selector, built rather than typed: an invisible byte
 // in source is a byte nobody reviews.
+const VS15 = String.fromCodePoint(0xfe0e);
 const VS16 = String.fromCodePoint(0xfe0f);
 
 // Grapheme segmentation is in the standard library, so a family emoji built
@@ -81,8 +120,9 @@ export function charWidth(cluster: string): number {
   if (code === undefined) return 0;
   if (code < 0x20 || code === 0x7f) return 0;
   if (inRanges(code, ZERO)) return 0;
+  if (cluster.includes(VS15)) return inRanges(code, WIDE) ? 2 : 1;
   if (cluster.includes(VS16)) return 2;
-  return inRanges(code, WIDE) ? 2 : 1;
+  return inRanges(code, WIDE) || inRanges(code, EMOJI_WIDE) ? 2 : 1;
 }
 
 export function textWidth(text: string): number {

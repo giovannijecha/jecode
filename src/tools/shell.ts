@@ -7,7 +7,9 @@ import { optionalInt, requireString } from "./args.ts";
 import { credentialRedactor, redactCredentials, shellEnvironment } from "../credential-safety.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_OUTPUT_CHARS = 30_000;
+const PIPE_DRAIN_MS = 100;
 
 export const runCommand: Tool = {
   name: "run_command",
@@ -28,6 +30,9 @@ export const runCommand: Tool = {
     const command = requireString(args, "command");
     const timeoutMs = optionalInt(args, "timeout_ms") ?? DEFAULT_TIMEOUT_MS;
     if (timeoutMs <= 0) throw new Error('"timeout_ms" must be a positive integer');
+    if (timeoutMs > MAX_TIMEOUT_MS) {
+      throw new Error(`"timeout_ms" must be at most ${MAX_TIMEOUT_MS}ms`);
+    }
     const result = await execute(command, ctx.root, timeoutMs, ctx.signal, ctx.onOutput);
 
     const output = redactCredentials(result.output);
@@ -68,6 +73,7 @@ function execute(
     let aborted: Error | undefined;
     let settled = false;
     let forceTimer: NodeJS.Timeout | undefined;
+    let drainTimer: NodeJS.Timeout | undefined;
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -85,7 +91,16 @@ function execute(
     const cleanup = () => {
       clearTimeout(timer);
       if (forceTimer !== undefined) clearTimeout(forceTimer);
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
       signal?.removeEventListener("abort", onAbort);
+    };
+
+    const finish = (code: number | null): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (aborted !== undefined) reject(aborted);
+      else resolve({ output: output.value().trimEnd(), code, timedOut });
     };
 
     child.stdout.setEncoding("utf8");
@@ -100,13 +115,17 @@ function execute(
       reject(error);
     });
 
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      if (aborted !== undefined) reject(aborted);
-      else resolve({ output: output.value().trimEnd(), code, timedOut });
+    child.on("exit", (code) => {
+      // `close` normally follows once both pipes drain. A detached descendant
+      // can inherit those descriptors after the command itself has exited,
+      // though, so bound that final drain instead of hanging the tool on it.
+      drainTimer = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        finish(code);
+      }, PIPE_DRAIN_MS);
     });
+    child.on("close", finish);
   });
 }
 

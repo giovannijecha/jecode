@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { reloadAccounts, updateOpenAICodexAccount } from "../src/accounts.ts";
+import { hold, reload as reloadCredentials } from "../src/credentials.ts";
 import {
   credentialRedactor,
   redactCredentials,
@@ -19,13 +20,43 @@ test("redacts one credential split across stream chunks", () => {
 });
 
 test("keeps the streaming buffer bounded for an overlapping credential", () => {
-  const redact = credentialRedactor({ JECODE_TEST_KEY: "aa" });
+  const redact = credentialRedactor({ JECODE_TEST_KEY: "aaaaaaaa" });
 
   assert.equal(
-    redact.write("aaaaaaaa"),
-    "[credential redacted]".repeat(4),
+    redact.write("aaaaaaaaaaaaaaaa"),
+    "[credential redacted]".repeat(2),
   );
   assert.equal(redact.end(), "");
+});
+
+test("does not redact ordinary text that matches a short heuristic secret", () => {
+  assert.equal(
+    redactCredentials("build 1 of 21", { DEBUG_AUTH: "1" }),
+    "build 1 of 21",
+  );
+});
+
+test("always redacts an explicitly held credential even when it is short", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-redact-short-"));
+  const before = process.env["JECODE_HOME"];
+  process.env["JECODE_HOME"] = directory;
+  reloadCredentials();
+  try {
+    hold("OPENAI_API_KEY", "1");
+    assert.equal(redactCredentials("key=1", {}), "key=[credential redacted]");
+  } finally {
+    if (before === undefined) delete process.env["JECODE_HOME"];
+    else process.env["JECODE_HOME"] = before;
+    reloadCredentials();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("always redacts a provider API key supplied directly by the environment", () => {
+  assert.equal(
+    redactCredentials("key=1", { OPENAI_API_KEY: "1" }),
+    "key=[credential redacted]",
+  );
 });
 
 test("preserves ordinary shell configuration", () => {

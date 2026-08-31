@@ -34,6 +34,20 @@ test("holds an escape sequence split across reads instead of guessing", () => {
   assert.deepEqual(names(dec.push("A")), ["up"]);
 });
 
+test("swallows complete terminal sequences it does not bind", () => {
+  const dec = decoder();
+  assert.deepEqual(names(dec.push(`${ESC}[2~`)), []);
+  assert.deepEqual(names(dec.push(`${ESC}OP`)), []);
+  assert.deepEqual(names(dec.push("ok")), ["char:ok"]);
+});
+
+test("holds an unbound CSI sequence until its final byte arrives", () => {
+  const dec = decoder();
+  assert.deepEqual(names(dec.push(`${ESC}[?25`)), []);
+  assert.deepEqual(names(dec.push("l")), []);
+  assert.deepEqual(names(dec.push("ok")), ["char:ok"]);
+});
+
 test("a lone escape only resolves on flush", () => {
   const dec = decoder();
   assert.deepEqual(names(dec.push(ESC)), []);
@@ -51,6 +65,19 @@ test("a paste split across reads does not leak its terminator", () => {
   dec.push(`${ESC}[200~alpha`);
   const keys = dec.push(`beta${ESC}[201~`);
   assert.deepEqual(names(keys), ["paste:alphabeta"]);
+});
+
+test("ctrl+c escapes a bracketed paste whose terminator was lost", () => {
+  const dec = decoder();
+  dec.push(`${ESC}[200~incomplete paste`);
+  assert.deepEqual(dec.flush(), []);
+
+  const interrupted = dec.push(String.fromCharCode(3));
+  assert.deepEqual(
+    interrupted.map((key) => `${key.ctrl ? "ctrl+" : ""}${key.name}`),
+    ["ctrl+c"],
+  );
+  assert.deepEqual(names(dec.push("ok")), ["char:ok"]);
 });
 
 test("pasted terminal controls become inert editor text", () => {

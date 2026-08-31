@@ -42,6 +42,7 @@ const SYNC_END = `${CSI}?2026l`;
 export type Size = { rows: number; cols: number };
 
 let active = false;
+let handlersRegistered = false;
 
 export function interactive(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
@@ -62,9 +63,7 @@ export function enter(reducedMotion = false): void {
   if (active) return;
   active = true;
 
-  process.on("exit", leave);
-  process.on("SIGTERM", onFatalSignal);
-  process.on("SIGHUP", onFatalSignal);
+  registerProcessHandlers();
 
   write(ALT_ON + WRAP_OFF + CURSOR_HIDE + (reducedMotion ? CURSOR_STEADY : CURSOR_BLOCK) + PASTE_ON + MOUSE_ON);
   process.stdin.setRawMode(true);
@@ -85,9 +84,26 @@ export function setReducedMotion(reducedMotion: boolean): void {
   if (active) write(reducedMotion ? CURSOR_STEADY : CURSOR_BLOCK);
 }
 
-function onFatalSignal(): void {
+function registerProcessHandlers(): void {
+  if (handlersRegistered) return;
+  handlersRegistered = true;
+  process.on("exit", leave);
+  process.on("uncaughtExceptionMonitor", leave);
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGHUP", onSighup);
+}
+
+function onSigterm(): void {
+  onFatalSignal(15);
+}
+
+function onSighup(): void {
+  onFatalSignal(1);
+}
+
+function onFatalSignal(number: number): void {
   leave();
-  process.exit(0);
+  process.exit(128 + number);
 }
 
 export function onResize(handler: () => void): () => void {

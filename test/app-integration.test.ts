@@ -261,6 +261,30 @@ test("a TUI submit reaches the provider and returns to an editable session", asy
   assert.equal(harness.left(), true);
 });
 
+test("only the latest input chunk owns the escape grace timer", async () => {
+  const harness = virtualScreen();
+  const current = session();
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  try {
+    feed("draft");
+    await delay(15);
+    feed(String.fromCharCode(27));
+    await delay(15);
+    feed("[A");
+    await delay(35);
+    feed("\r");
+
+    await waitFor(() => current.history.length === 2, "turn after split cursor sequence");
+    const prompt = current.history[0]?.content[0];
+    assert.equal(prompt?.kind === "text" ? prompt.text : undefined, "draft");
+  } finally {
+    feed("/exit\r");
+    await running;
+  }
+});
+
 test("escape cancels the active provider request before the TUI closes", async () => {
   let signal: AbortSignal | undefined;
   const waiting: Provider = {
@@ -503,4 +527,8 @@ async function waitFor(
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
