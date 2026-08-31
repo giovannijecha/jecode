@@ -11,7 +11,7 @@ import type { Picker } from "./tui/picker.ts";
 import { heading } from "./tui/picker.ts";
 import type { Field } from "./tui/field.ts";
 import type { SavedSettings } from "./settings.ts";
-import { modelsCommand, providersCommand, setupCommand } from "./provider-commands.ts";
+import { modelsCommand, providersCommand } from "./provider-commands.ts";
 import { credentialsCommand } from "./credential-commands.ts";
 import { effortCommand, settingsCommand } from "./settings-command.ts";
 import { emptyUsage } from "./usage.ts";
@@ -52,8 +52,8 @@ export type Command = { name: string; blurb: string };
  * The commands, declared once.
  *
  * Deliberately short. `/settings` owns persistent defaults; the narrower
- * provider, model, effort, credential, and setup commands remain useful direct
- * paths into the same interactions.
+ * provider, model, effort, and credential commands remain useful direct paths
+ * into the same interactions.
  */
 export const COMMANDS: readonly Command[] = [
   { name: "help", blurb: "show keyboard controls" },
@@ -64,7 +64,6 @@ export const COMMANDS: readonly Command[] = [
   { name: "settings", blurb: "change and save jecode defaults" },
   { name: "effort", blurb: "set the reasoning effort" },
   { name: "credentials", blurb: "inspect, replace, or forget API keys" },
-  { name: "setup", blurb: "make the current provider ready" },
   { name: "models", blurb: "pick a model, from what the provider offers" },
   { name: "providers", blurb: "pick a provider" },
 ];
@@ -96,7 +95,7 @@ export async function handleCommand(
       session.history.length = 0;
       session.usage = emptyUsage();
       host.reset?.();
-      host.emit({ kind: "notice", text: "new session · history, usage, and approvals cleared", tone: "info" });
+      host.emit({ kind: "notice", text: "new session", tone: "info" });
       return "handled";
 
     case "export":
@@ -104,7 +103,7 @@ export async function handleCommand(
         host.emit({ kind: "notice", text: "export needs the interactive screen", tone: "warn" });
       } else {
         const saved = await host.exportTranscript();
-        host.emit({ kind: "notice", text: `transcript saved to ${saved}`, tone: "info" });
+        host.emit({ kind: "notice", text: `saved · ${saved}`, tone: "info" });
       }
       return "handled";
 
@@ -122,10 +121,6 @@ export async function handleCommand(
 
     case "credentials":
       await credentialsCommand(session, host);
-      return "handled";
-
-    case "setup":
-      await setupCommand(session, host);
       return "handled";
 
     case "models":

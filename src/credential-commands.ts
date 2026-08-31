@@ -1,4 +1,4 @@
-// Credential command flows shared by setup and provider selection.
+// Credential command flows shared by settings and provider selection.
 
 import type { Session } from "./session.ts";
 import type { Host } from "./commands.ts";
@@ -47,22 +47,21 @@ export async function askForKey(name: string, host: Host, pal: Palette): Promise
 
   if (index === 0) {
     hold(name, value);
-    host.emit({ kind: "notice", text: "credential available for this session", tone: "info" });
+    host.emit({ kind: "notice", text: "API key ready · this session", tone: "info" });
     return true;
   }
 
   if (index === 1) {
     try {
       await keep(name, value);
-      host.emit({ kind: "notice", text: `credential saved · ${storeLabel()}`, tone: "info" });
+      host.emit({ kind: "notice", text: "API key saved", tone: "info" });
       return true;
     } catch (error) {
-      host.emit({ kind: "notice", text: `could not save credential · ${(error as Error).message}`, tone: "error" });
+      host.emit({ kind: "notice", text: `could not save API key · ${(error as Error).message}`, tone: "error" });
       return false;
     }
   }
 
-  host.emit({ kind: "notice", text: "credential discarded", tone: "warn" });
   return false;
 }
 
@@ -88,7 +87,7 @@ export async function credentialsCommand(session: Session, host: Host): Promise<
   if (source === "environment") {
     host.emit({
       kind: "notice",
-      text: `${name} comes from the environment · update it outside jecode and restart`,
+      text: `${name} comes from the environment · restart after changing it`,
       tone: "info",
     });
     if (hasSaved(name)) await offerForget(name, session, host, "a saved copy is currently shadowed");
@@ -130,11 +129,11 @@ async function forget(name: string, host: Host): Promise<void> {
     const removed = await forgetSaved(name);
     host.emit({
       kind: "notice",
-      text: removed ? "saved credential removed" : "no saved credential to remove",
+      text: removed ? "API key removed" : "no saved API key",
       tone: removed ? "info" : "warn",
     });
   } catch (error) {
-    host.emit({ kind: "notice", text: `could not forget: ${(error as Error).message}`, tone: "error" });
+    host.emit({ kind: "notice", text: `could not remove API key · ${(error as Error).message}`, tone: "error" });
   }
 }
 

@@ -1,4 +1,4 @@
-import type { Palette, RGB } from "../../ui/theme.ts";
+import type { Palette } from "../../ui/theme.ts";
 import type { Seg } from "../../ui/render.ts";
 import type { Feedback } from "../feedback.ts";
 
@@ -26,15 +26,15 @@ export function renderStatus(info: StatusInfo, pal: Palette): Seg[] {
 }
 
 function feedbackSegments(feedback: Feedback, pal: Palette): Seg[] {
-  const mark = feedback.tone === "error" ? "×" : feedback.tone === "warn" ? "!" : "·";
-  const markColor: Record<Feedback["tone"], RGB> = {
-    info: pal.accent,
-    warn: pal.ink.attention,
-    error: pal.ink.removed,
-  };
+  if (feedback.tone === "info") {
+    return [{ text: feedback.text, fg: pal.ink.muted }];
+  }
+
+  const mark = feedback.tone === "error" ? "×" : "!";
+  const markColor = feedback.tone === "error" ? pal.ink.removed : pal.ink.attention;
   const textColor = feedback.tone === "error" ? pal.ink.removed : pal.ink.muted;
   return [
-    { text: `${mark} `, fg: markColor[feedback.tone], bold: true },
+    { text: `${mark} `, fg: markColor, bold: true },
     { text: feedback.text, fg: textColor },
   ];
 }

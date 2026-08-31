@@ -16,7 +16,7 @@ export type FeedbackController = {
   close(): void;
 };
 
-const INFO_MS = 2_800;
+const INFO_MS = 2_200;
 const WARN_MS = 4_200;
 const ERROR_MS = 6_000;
 

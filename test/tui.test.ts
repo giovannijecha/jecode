@@ -236,7 +236,7 @@ test("command suggestions stay between the composer's two rails", () => {
   const first = rows.findIndex((line) => line.includes("/help"));
   const last = rows.findIndex((line) => line.includes("/export"));
   assert.equal(rows[input - 1], "─".repeat(80));
-  assert.match(rows[input] ?? "", /^\/.*1–4 \/ 11$/);
+  assert.match(rows[input] ?? "", new RegExp(`^/.*1–4 / ${COMMANDS.length}$`));
   assert.equal(first, input + 1);
   assert.equal(rows[last + 1], "─".repeat(80));
   assert.match(rows[first] ?? "", /→/);

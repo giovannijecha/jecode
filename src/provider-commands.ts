@@ -1,4 +1,4 @@
-// Provider, model, and setup command flows.
+// Provider and model command flows.
 
 import type { Session } from "./session.ts";
 import type { Host } from "./commands.ts";
@@ -21,7 +21,7 @@ type SelectionBehavior = {
  * Every provider is offered, including the ones that cannot run: the reason
  * one is unusable — the variable it wants, by name — is worth more on screen
  * than the row would be worth hidden. A blocked choice opens the same masked
- * credential flow used by setup and settings, and cancellation leaves the old choice.
+ * credential flow used by settings, and cancellation leaves the old choice.
  */
 export async function providersCommand(
   session: Session,
@@ -111,7 +111,7 @@ export async function providersCommand(
   if (behavior.announce !== false) {
     host.emit({
       kind: "notice",
-      text: session.model === "" ? `${chosen.id} — pick a model with /models` : `${chosen.id} · ${session.model}`,
+      text: session.model === "" ? `provider · ${chosen.id} · pick a model` : `provider · ${chosen.id}`,
       tone: "info",
     });
   }
@@ -196,40 +196,9 @@ export async function modelsCommand(
     }
   }
   if (behavior.announce !== false) {
-    host.emit({ kind: "notice", text: `${provider.id} · ${chosen}`, tone: "info" });
+    host.emit({ kind: "notice", text: `model · ${chosen}`, tone: "info" });
   }
   return true;
-}
-
-/** Make the provider selected by flags/environment usable without leaving the TUI. */
-export async function setupCommand(session: Session, host: Host): Promise<void> {
-  const blocked = session.provider.blocked();
-  if (blocked !== undefined) {
-    if (!isCredentialBlocker(session.provider, blocked)) {
-      host.emit({ kind: "notice", text: blocked, tone: "error" });
-      return;
-    }
-    const accepted = await askForKey(session.provider.keyVar, host, session.palette);
-    if (!accepted || session.provider.blocked() !== undefined) {
-      host.emit({
-        kind: "notice",
-        text: `${providerName(session.provider.id)} still needs an API key · /setup`,
-        tone: "warn",
-      });
-      return;
-    }
-  }
-
-  if (session.model === "") {
-    await modelsCommand(session, host);
-    return;
-  }
-
-  host.emit({
-    kind: "notice",
-    text: `${session.provider.id} · ${session.model} · ${session.provider.location?.() ?? "cloud"} · ready`,
-    tone: "info",
-  });
 }
 
 /** The way to put a menu up, or nothing — and the reason, already said. */

@@ -231,7 +231,7 @@ async function persist(host: Host, patch: Partial<SavedSettings>): Promise<boole
     await updateSettings(patch);
     return true;
   } catch (error) {
-    host.emit({ kind: "notice", text: `could not save settings: ${(error as Error).message}`, tone: "error" });
+    host.emit({ kind: "notice", text: `could not save settings · ${(error as Error).message}`, tone: "error" });
     return false;
   }
 }

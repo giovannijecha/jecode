@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { COMMANDS } from "../src/commands.ts";
 import { textWidth } from "../src/ui/width.ts";
 import { composeLab, SCENES } from "../dev/tui-lab/view.ts";
 import type { LabState, Scene } from "../dev/tui-lab/view.ts";
@@ -123,7 +124,7 @@ test("command autocomplete shares the composer and carries its count", () => {
   const frame = composeLab(state("menu-commands"), { rows: 24, cols: 100 });
   const rows = plain(frame.rows);
   const input = frame.cursor?.row ?? -1;
-  assert.match(rows[input] ?? "", /^\/.*1–4 \/ 11$/);
+  assert.match(rows[input] ?? "", new RegExp(`^/.*1–4 / ${COMMANDS.length}$`));
   assert.equal(rows.findIndex((line) => line.includes("/help")), input + 1);
   assert.match(rows[input - 1] ?? "", /^─+$/);
   assert.match(rows[input + 5] ?? "", /^─+$/);
