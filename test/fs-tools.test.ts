@@ -27,6 +27,13 @@ test("writes a file, creating parent directories", async () => {
   assert.equal(await fs.readFile(path.join(ctx.root, "src/deep/a.txt"), "utf8"), "hello");
 });
 
+test("writes and truncates a file to truly empty content", async () => {
+  await writeFile.run({ path: "empty-write.txt", content: "before" }, ctx);
+  const result = await writeFile.run({ path: "empty-write.txt", content: "" }, ctx);
+  assert.equal(await fs.readFile(path.join(ctx.root, "empty-write.txt"), "utf8"), "");
+  assert.equal(result.summary, "empty");
+});
+
 test("reads a file back, whole and by line range", async () => {
   await writeFile.run({ path: "lines.txt", content: "one\ntwo\nthree\nfour" }, ctx);
   assert.equal((await readFile.run({ path: "lines.txt" }, ctx)).output, "one\ntwo\nthree\nfour");
@@ -96,6 +103,21 @@ test("edits an exact string", async () => {
   await writeFile.run({ path: "edit.txt", content: "keep this, change that" }, ctx);
   await editFile.run({ path: "edit.txt", old_text: "change that", new_text: "changed it" }, ctx);
   assert.equal((await readFile.run({ path: "edit.txt" }, ctx)).output, "keep this, changed it");
+});
+
+test("edits replacement text containing JavaScript replacement tokens literally", async () => {
+  await writeFile.run({ path: "replacement.txt", content: "echo hello\necho hello\n" }, ctx);
+  const replacement = "echo pid=$$ && echo '$&' && echo '$`' && echo \"$'\"";
+  await editFile.run({
+    path: "replacement.txt",
+    old_text: "echo hello",
+    new_text: replacement,
+    replace_all: true,
+  }, ctx);
+  assert.equal(
+    await fs.readFile(path.join(ctx.root, "replacement.txt"), "utf8"),
+    `${replacement}\n${replacement}\n`,
+  );
 });
 
 test("refuses an ambiguous edit unless replace_all is set", async () => {

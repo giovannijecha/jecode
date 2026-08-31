@@ -121,6 +121,27 @@ test("a direct model choice is offered to the interactive settings store", async
   assert.equal(saved[0]?.models?.ollama, "second");
 });
 
+test("choosing a model reconciles and saves an unsupported effort", async () => {
+  const fake = provider("fake", ["first", "second"]);
+  fake.efforts = (model) => Promise.resolve(
+    model === "second" ? ["low", "medium", "high"] : ["low", "medium", "high", "max"],
+  );
+  const live = session(fake);
+  live.config.effort = "max";
+  const screen = host(1);
+  const saved: Partial<SavedSettings>[] = [];
+  screen.saveSettings = (patch) => {
+    saved.push(patch);
+    return Promise.resolve();
+  };
+
+  await handleCommand("/models", live, screen);
+
+  assert.equal(live.model, "second");
+  assert.equal(live.config.effort, "high");
+  assert.equal(saved[0]?.effort, "high");
+});
+
 test("a direct model choice rolls back when its default cannot be saved", async () => {
   const live = session(provider("ollama", ["first", "second"]));
   const screen = host(1);

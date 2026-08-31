@@ -64,22 +64,24 @@ async function refreshAccount(
   onStatus: ((status: string) => void) | undefined,
 ): Promise<OpenAICodexAccount> {
   if (refreshing !== undefined) return abortable(refreshing, signal);
+  if (signal?.aborted === true) throw abortReason(signal);
   onStatus?.("Refreshing ChatGPT sign-in");
   const task = updateOpenAICodexAccount(async (current) => {
     if (current === undefined) throw new Error("ChatGPT account is not connected");
     if (forceToken !== undefined && current.accessToken !== forceToken) return current;
     if (forceToken === undefined && !expiresSoon(current)) return current;
-    return refreshOpenAITokens(current, signal);
-  }, signal).then((account) => {
+    return refreshOpenAITokens(current);
+  }).then((account) => {
     if (account === undefined) throw new Error("ChatGPT account is not connected");
     return account;
   });
   refreshing = task;
-  try {
-    return await abortable(task, signal);
-  } finally {
+  void task.then(() => {
     if (refreshing === task) refreshing = undefined;
-  }
+  }, () => {
+    if (refreshing === task) refreshing = undefined;
+  });
+  return abortable(task, signal);
 }
 
 function expiresSoon(account: OpenAICodexAccount): boolean {

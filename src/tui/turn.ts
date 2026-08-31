@@ -147,7 +147,10 @@ export function transcribe(stage: Stage): Transcription {
       stage.status(waiting(step, steps));
       const block = tools.get(call.id);
       if (block === undefined || block.kind !== "tool") return;
-      if (block.tone === "deny") {
+      // Explicit refusal stays a refusal. Cancellation can first settle an
+      // approval overlay as `no`, though, so its synthesized result must be
+      // allowed to reconcile that rail with the interrupted history.
+      if (block.tone === "deny" && summary !== "interrupted") {
         stage.render(block);
         return;
       }

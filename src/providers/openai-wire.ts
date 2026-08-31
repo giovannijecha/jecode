@@ -17,12 +17,6 @@ export type OpenAIResponse = {
   } | null;
 };
 
-// The Responses API has no `xhigh`; collapse it onto the nearest level rather
-// than passing through a value it will reject.
-export function normalizeEffort(effort: string): string {
-  return effort === "xhigh" || effort === "max" ? "high" : effort;
-}
-
 export function toWireTool(tool: ToolSpec) {
   return {
     type: "function",

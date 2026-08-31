@@ -8,11 +8,16 @@ import { STEEL } from "../src/ui/theme.ts";
 const blockCount = 20_000;
 const stableFrames = 500;
 const streamingFrames = 200;
+const reasoningChars = 200_000;
 const blocks: Block[] = Array.from(
   { length: blockCount },
   (_, index) => ({ kind: "answer", text: `answer ${index}: one concise line` }),
 );
-const live: Block = { kind: "reasoning", text: "working", live: true };
+const live: Block = {
+  kind: "reasoning",
+  text: "working ".repeat(Math.ceil(reasoningChars / 8)).slice(0, reasoningChars),
+  live: true,
+};
 blocks.push(live);
 
 const transcript = transcriptRenderer();
@@ -29,12 +34,29 @@ const streaming = measure(() => {
     transcript.viewport(blocks, 100, 40, 0, STEEL);
   }
 });
+const sealed = measure(() => {
+  live.live = false;
+  transcript.invalidate(live);
+  transcript.viewport(blocks, 100, 40, 0, STEEL);
+});
+const expandedLive = measure(() => {
+  live.live = true;
+  live.expanded = true;
+  for (let frame = 0; frame < streamingFrames; frame++) {
+    live.text += ` expanded-${frame}`;
+    transcript.invalidate(live);
+    transcript.viewport(blocks, 100, 40, 0, STEEL);
+  }
+});
 
 process.stdout.write([
   `blocks: ${blocks.length.toLocaleString()}`,
+  `live reasoning: ${live.text.length.toLocaleString()} characters`,
   `cold layout: ${coldStart.toFixed(2)} ms`,
   `stable viewport: ${(stable / stableFrames).toFixed(3)} ms/frame`,
   `streaming tail: ${(streaming / streamingFrames).toFixed(3)} ms/frame`,
+  `seal transition: ${sealed.toFixed(3)} ms`,
+  `expanded live tail: ${(expandedLive / streamingFrames).toFixed(3)} ms/frame`,
 ].join("\n") + "\n");
 
 function measure(run: () => void): number {

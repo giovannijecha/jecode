@@ -13,6 +13,7 @@ import {
 } from "./credential-commands.ts";
 import { providerFailure } from "./provider-errors.ts";
 import { providerLabel } from "./provider-label.ts";
+import { compatibleEffort } from "./effort.ts";
 
 type SelectionBehavior = {
   announce?: boolean;
@@ -81,6 +82,7 @@ export async function providersCommand(
     model: session.model,
     providerId: session.config.providerId,
     configModel: session.config.model,
+    effort: session.config.effort,
   };
   session.provider = chosen;
   // The model belonged to the old provider. Carrying it across would send
@@ -89,23 +91,30 @@ export async function providersCommand(
   session.config.providerId = chosen.id;
   session.config.model = session.model;
 
-  if (session.model === "" && !(await modelsCommand(session, host, { announce: false, save: false }))) {
-    session.provider = before.provider;
-    session.model = before.model;
-    session.config.providerId = before.providerId;
-    session.config.model = before.configModel;
-    return false;
+  if (session.model === "") {
+    if (!(await modelsCommand(session, host, { announce: false, save: false }))) {
+      restoreProvider(session, before);
+      return false;
+    }
+  } else {
+    const alignment = await alignEffort(session, host);
+    if (!alignment.ok) {
+      restoreProvider(session, before);
+      return false;
+    }
   }
 
   if (behavior.save !== false) {
     const saved = readSettings();
     const models = { ...saved.models };
     if (session.model !== "") models[chosen.id] = session.model;
-    if (!(await saveDefaults(host, { provider: chosen.id, models }))) {
-      session.provider = before.provider;
-      session.model = before.model;
-      session.config.providerId = before.providerId;
-      session.config.model = before.configModel;
+    const patch = {
+      provider: chosen.id,
+      models,
+      ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
+    };
+    if (!(await saveDefaults(host, patch))) {
+      restoreProvider(session, before);
       return false;
     }
   }
@@ -181,15 +190,31 @@ export async function modelsCommand(
   const chosen = ids[index];
   if (chosen === undefined) return false;
 
-  const before = { model: session.model, configModel: session.config.model };
+  const before = {
+    model: session.model,
+    configModel: session.config.model,
+    effort: session.config.effort,
+  };
   session.model = chosen;
   session.config.model = chosen;
+  const alignment = await alignEffort(session, host);
+  if (!alignment.ok) {
+    session.model = before.model;
+    session.config.model = before.configModel;
+    session.config.effort = before.effort;
+    return false;
+  }
   if (behavior.save !== false) {
     const saved = readSettings();
     const models = { ...saved.models, [provider.id]: chosen };
-    if (!(await saveDefaults(host, { models }))) {
+    const patch = {
+      models,
+      ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
+    };
+    if (!(await saveDefaults(host, patch))) {
       session.model = before.model;
       session.config.model = before.configModel;
+      session.config.effort = before.effort;
       return false;
     }
   }
@@ -200,6 +225,49 @@ export async function modelsCommand(
 }
 
 /** The way to put a menu up, or nothing — and the reason, already said. */
+type ProviderBefore = {
+  provider: Session["provider"];
+  model: string;
+  providerId: string;
+  configModel: string;
+  effort: string;
+};
+
+function restoreProvider(session: Session, before: ProviderBefore): void {
+  session.provider = before.provider;
+  session.model = before.model;
+  session.config.providerId = before.providerId;
+  session.config.model = before.configModel;
+  session.config.effort = before.effort;
+}
+
+async function alignEffort(
+  session: Session,
+  host: Host,
+): Promise<{ ok: true; adjusted?: string } | { ok: false }> {
+  if (session.provider.efforts === undefined) return { ok: true };
+  let supported: readonly string[];
+  try {
+    supported = await session.provider.efforts(
+      session.model,
+      host.signal,
+      (status) => host.status?.(status),
+    );
+  } catch (error) {
+    host.emit({
+      kind: "notice",
+      text: providerFailure(session.provider, error as Error, true),
+      tone: "error",
+    });
+    return { ok: false };
+  }
+
+  const adjusted = compatibleEffort(session.config.effort, supported);
+  if (adjusted === undefined || adjusted === session.config.effort) return { ok: true };
+  session.config.effort = adjusted;
+  return { ok: true, adjusted };
+}
+
 function chooser(host: Host): Host["choose"] {
   if (host.choose === undefined) {
     host.emit({ kind: "notice", text: "that command needs the screen", tone: "warn" });

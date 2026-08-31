@@ -95,6 +95,12 @@ export type Provider = {
   blocked(): string | undefined;
   /** What it will answer to, asked of it rather than remembered here. */
   models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]>;
+  /** Reasoning depths accepted by one model; an empty list means model-controlled. */
+  efforts?(
+    model: string,
+    signal?: AbortSignal,
+    onStatus?: (status: string) => void,
+  ): Promise<readonly string[]>;
   send(req: SendRequest): Promise<Message>;
 };
 

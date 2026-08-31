@@ -20,8 +20,9 @@ export async function assembleAnthropic(
   let stopReason: string | undefined;
   let stopDetails: AnthropicResponse["stop_details"];
   let usage: AnthropicResponse["usage"];
+  let complete = false;
 
-  for await (const raw of events) {
+  stream: for await (const raw of events) {
     const event = raw as WireEvent;
 
     switch (event.type) {
@@ -66,10 +67,16 @@ export async function assembleAnthropic(
         );
       }
 
+      case "message_stop":
+        complete = true;
+        break stream;
+
       default:
-        break; // message_start, ping, message_stop: nothing to accumulate
+        break; // ping and unknown forward-compatible events
     }
   }
+
+  if (!complete) throw new Error("anthropic stream ended before message_stop");
 
   const content = [...blocks.entries()]
     .sort(([a], [b]) => a - b)

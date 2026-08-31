@@ -255,9 +255,10 @@ untrusted data.
 - Dangerous tools ask by default unless explicitly allowed for the session in
   **/permissions** or the process started with **--auto-approve**.
 - Credential fields are masked and excluded from transcripts. Approved shell
-  commands receive no credential-like environment variables, and recognized
-  credential values are redacted before tool output reaches the model, screen,
-  history, or export.
+  commands receive no secret-bearing environment variables; `SSH_AUTH_SOCK`
+  is preserved so Git and SSH can use the user's agent, which means an approved
+  command can request that agent to authenticate. Recognized credential values
+  are redacted before tool output reaches the model, screen, history, or export.
 - ChatGPT OAuth uses PKCE and an exact loopback callback or the OpenAI device
   flow. Refresh-token rotation is serialized across Jecode processes; OAuth
   tokens are withheld and redacted like API keys.

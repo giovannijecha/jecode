@@ -83,6 +83,10 @@ export async function assembleOllama(
     }
   }
 
+  if (finishReason === undefined) {
+    throw new Error("ollama stream ended before a finish reason");
+  }
+
   const toolCalls = [...calls.entries()]
     .sort(([a], [b]) => a - b)
     // Not every server sends an id, and the loop needs one to pair the result

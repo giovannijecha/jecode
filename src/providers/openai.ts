@@ -7,10 +7,10 @@ import type { Message, Provider, SendRequest } from "../types.ts";
 import { postSse } from "./http.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
+import { EFFORTS, requireSupportedEffort } from "../effort.ts";
 import { assembleOpenAI } from "./openai-stream.ts";
 import {
   fromWireResponse,
-  normalizeEffort,
   stopNotice,
   toWireItems,
   toWireTool,
@@ -20,16 +20,28 @@ const ENDPOINT = "https://api.openai.com/v1/responses";
 const MODELS = "https://api.openai.com/v1/models";
 const KEY = "OPENAI_API_KEY";
 
-/**
- * What this account can reach that is not a chat model.
- *
- * The list is an exclusion rather than an allow-list on purpose: an unknown
- * `gpt-`something is far more likely to be a model worth offering than one
- * worth hiding, and an allow-list would quietly bury every family shipped
- * after this line was written.
- */
-const NOT_CHAT = /^(text-|tts-|whisper|dall-e|sora|gpt-image|omni-moderation|davinci|babbage)/;
-const NON_TEXT_MODE = /(?:^|[-_])(audio|realtime|transcribe|tts)(?:[-_]|$)/;
+const RESPONSES_REASONING_MODEL = /^(?:gpt-5(?:[.-]|$)|o(?:1|3|4)(?:[.-]|$)|codex-mini(?:[.-]|$))/;
+// Jecode's transport always streams and always declares local tools. Hide
+// catalog entries that cannot satisfy either half of that contract.
+const INCOMPATIBLE_MODEL = /^(?:gpt-5(?:\.[1-3])?-chat-latest|gpt-5\.5-pro|o1-mini|o(?:1|3)-pro|o3-deep-research|o4-mini-deep-research)(?:-|$)/;
+const STANDARD_EFFORTS = ["low", "medium", "high"] as const;
+const XHIGH_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+const PRO_EFFORTS = ["medium", "high", "xhigh"] as const;
+const HIGH_ONLY_EFFORT = ["high"] as const;
+
+export function supportsOpenAIModel(model: string): boolean {
+  return RESPONSES_REASONING_MODEL.test(model) && !INCOMPATIBLE_MODEL.test(model);
+}
+
+export function openAIEfforts(model: string): readonly string[] {
+  if (!supportsOpenAIModel(model)) return [];
+  if (/^gpt-5-pro(?:-|$)/.test(model)) return HIGH_ONLY_EFFORT;
+  if (/^gpt-5\.[2-5]-pro(?:-|$)/.test(model)) return PRO_EFFORTS;
+  if (/^gpt-5\.6(?:[.-]|$)/.test(model)) return EFFORTS;
+  if (/^gpt-5\.[2-5](?:[.-]|$)/.test(model)) return XHIGH_EFFORTS;
+  if (/^(?:o(?:1|3|4)|codex-mini)(?:[.-]|$)/.test(model)) return STANDARD_EFFORTS;
+  return STANDARD_EFFORTS;
+}
 
 export const openai: Provider = {
   id: "openai",
@@ -45,14 +57,19 @@ export const openai: Provider = {
   async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
     const ids = await listModels(MODELS, headers(requireKey()), signal, onStatus);
     return ids
-      .filter((id) => !NOT_CHAT.test(id) && !NON_TEXT_MODE.test(id))
+      .filter(supportsOpenAIModel)
       .sort((a, b) => b.localeCompare(a));
+  },
+
+  async efforts(model: string): Promise<readonly string[]> {
+    return openAIEfforts(model);
   },
 
   location: () => "cloud",
 
   async send(req: SendRequest): Promise<Message> {
     const key = requireKey();
+    const effort = requireSupportedEffort(req.model, req.effort, openAIEfforts(req.model));
 
     const events = await postSse(
       ENDPOINT,
@@ -63,7 +80,7 @@ export const openai: Provider = {
         input: req.messages.flatMap((message) => toWireItems(message)),
         tools: req.tools.map(toWireTool),
         max_output_tokens: req.maxTokens,
-        reasoning: { effort: normalizeEffort(req.effort), summary: "auto" },
+        reasoning: { effort, summary: "auto" },
         store: false,
         include: ["reasoning.encrypted_content"],
         stream: true,

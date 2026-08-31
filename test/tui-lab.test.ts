@@ -186,7 +186,7 @@ test("help is a temporary keyboard reference inside the shared dock", () => {
   assert.equal(frame.cursor, undefined);
 });
 
-test("reasoning stays a bounded unframed live viewport", () => {
+test("reasoning stays bounded and defers full expansion while live", () => {
   const compact = plain(
     composeLab({ ...state("reasoning"), expanded: false }, { rows: 24, cols: 100 }).rows,
   ).join("\n");
@@ -195,7 +195,7 @@ test("reasoning stays a bounded unframed live viewport", () => {
   ).join("\n");
   assert.match(compact, /thinking/);
   assert.match(compact, /ctrl\+o full/);
-  assert.match(expanded, /ctrl\+o compact/);
+  assert.match(expanded, /full when done/);
   assert.doesNotMatch(compact, /─ thinking|thinking ─/);
 });
 

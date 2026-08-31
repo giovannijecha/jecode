@@ -38,6 +38,22 @@ test("preserves ordinary shell configuration", () => {
   assert.deepEqual(environment, { PATH: "fixture-path", JECODE_MODE: "review" });
 });
 
+test("preserves safe agent and workspace paths whose names contain credential words", () => {
+  const environment = shellEnvironment({
+    SSH_AUTH_SOCK: "/tmp/agent.sock",
+    PWD: "/workspace",
+    OLDPWD: "/previous",
+    PASSWORD_STORE_DIR: "/home/person/.password-store",
+  });
+
+  assert.deepEqual(environment, {
+    SSH_AUTH_SOCK: "/tmp/agent.sock",
+    PWD: "/workspace",
+    OLDPWD: "/previous",
+    PASSWORD_STORE_DIR: "/home/person/.password-store",
+  });
+});
+
 test("withholds common credential names with compact or registry-specific syntax", () => {
   const environment = shellEnvironment({
     PATH: "fixture-path",

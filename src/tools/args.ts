@@ -4,10 +4,15 @@
 // Every throw here becomes an is_error tool result the model can read and
 // correct on the next step, so the messages are written for that reader.
 
-export function requireString(args: Record<string, unknown>, name: string): string {
+export function requireString(
+  args: Record<string, unknown>,
+  name: string,
+  allowEmpty = false,
+): string {
   const value = args[name];
-  if (typeof value !== "string" || value === "") {
-    throw new Error(`"${name}" is required and must be a non-empty string`);
+  if (typeof value !== "string" || (!allowEmpty && value === "")) {
+    const kind = allowEmpty ? "a string" : "a non-empty string";
+    throw new Error(`"${name}" is required and must be ${kind}`);
   }
   return value;
 }

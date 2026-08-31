@@ -59,6 +59,7 @@ export async function runTurn(
   const specs = toolSpecs(options.tools);
 
   for (let step = 0; step < options.maxSteps; step++) {
+    throwIfAborted(signal);
     events.onStep?.(step + 1, options.maxSteps);
     // The message is displayed as it streams; what comes back here is the
     // assembled version, which exists to be appended to the history.
@@ -73,6 +74,7 @@ export async function runTurn(
       onStream: (event) => events.onStream(event),
       onStatus: (status) => events.onStatus?.(status),
     });
+    throwIfAborted(signal);
 
     const calls = assistant.content.filter(isToolCall);
     if (assistant.content.length === 0) {
@@ -92,14 +94,31 @@ export async function runTurn(
     // but every result from this step goes back in a SINGLE message. Splitting
     // them teaches the model to stop batching its calls.
     const results: ToolResultBlock[] = [];
-    for (let index = 0; index < calls.length; index++) {
-      const call = calls[index] as ToolCallBlock;
-      events.onToolProgress?.(index + 1, calls.length);
-      const preview = await look(call, options);
-      events.onToolCall(call, preview);
-      const { result, summary } = await settle(call, options, events, signal, preview);
-      events.onToolResult(call, result, summary);
-      results.push(result);
+    const announced = new Set<string>();
+    try {
+      for (let index = 0; index < calls.length; index++) {
+        throwIfAborted(signal);
+        const call = calls[index] as ToolCallBlock;
+        events.onToolProgress?.(index + 1, calls.length);
+        const preview = await look(call, options, signal);
+        throwIfAborted(signal);
+        events.onToolCall(call, preview);
+        announced.add(call.id);
+        const { result, summary } = await settle(call, options, events, signal, preview);
+        events.onToolResult(call, result, summary);
+        results.push(result);
+      }
+    } catch (error) {
+      if (signal?.aborted !== true) throw error;
+      for (const call of calls.slice(results.length)) {
+        const interrupted = refuse(call, "interrupted before completion", "interrupted");
+        if (announced.has(call.id)) {
+          events.onToolResult(call, interrupted.result, interrupted.summary);
+        }
+        results.push(interrupted.result);
+      }
+      history.push({ role: "user", content: results });
+      throw abortReason(signal);
     }
 
     history.push({ role: "user", content: results });
@@ -122,10 +141,14 @@ async function settle(
   if (tool === undefined) {
     return refuse(call, `no such tool: ${call.name}`, "unknown tool");
   }
-  if (tool.dangerous && !(await events.approve(call))) {
+  throwIfAborted(signal);
+  const approved = !tool.dangerous || await events.approve(call);
+  throwIfAborted(signal);
+  if (!approved) {
     return refuse(call, "the user declined this call — ask them how to proceed", "declined");
   }
 
+  throwIfAborted(signal);
   return runTool(tool, call, {
     ...options.toolContext,
     signal,
@@ -151,13 +174,22 @@ function refuse(call: ToolCallBlock, reason: string, summary: string): ToolRun {
 async function look(
   call: ToolCallBlock,
   options: ControllerOptions,
+  signal: AbortSignal | undefined,
 ): Promise<ToolPreview | undefined> {
   const tool = findTool(options.tools, call.name);
   if (tool?.preview === undefined) return undefined;
 
   try {
-    return await tool.preview(call.input, options.toolContext);
+    return await tool.preview(call.input, { ...options.toolContext, signal });
   } catch {
     return undefined;
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw abortReason(signal);
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("interrupted");
 }

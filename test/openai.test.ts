@@ -4,11 +4,14 @@ import type { StreamEvent } from "../src/types.ts";
 import { assembleOpenAI } from "../src/providers/openai-stream.ts";
 import {
   fromWireResponse,
-  normalizeEffort,
   toWireItems,
   toWireTool,
 } from "../src/providers/openai-wire.ts";
-import { openai } from "../src/providers/openai.ts";
+import {
+  openai,
+  openAIEfforts,
+  supportsOpenAIModel,
+} from "../src/providers/openai.ts";
 
 async function* feed(events: unknown[]): AsyncGenerator<unknown> {
   for (const event of events) yield event;
@@ -175,6 +178,23 @@ test("uses the error nested in a failed response", async () => {
   );
 });
 
+test("rejects a stream that ends before a terminal response event", async () => {
+  await assert.rejects(
+    assembleOpenAI(feed([
+      {
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          call_id: "call-1",
+          name: "write_file",
+          arguments: '{"path":"partial.txt","content":"unsafe"}',
+        },
+      },
+    ])),
+    /ended before a terminal response event/,
+  );
+});
+
 test("keeps raw reasoning items when echoing OpenAI history", () => {
   const raw = [{ type: "reasoning", encrypted_content: "opaque" }];
   assert.equal(
@@ -184,9 +204,6 @@ test("keeps raw reasoning items when echoing OpenAI history", () => {
 });
 
 test("translates normalized messages and tool declarations to Responses items", () => {
-  assert.equal(normalizeEffort("max"), "high");
-  assert.equal(normalizeEffort("xhigh"), "high");
-  assert.equal(normalizeEffort("medium"), "medium");
   assert.deepEqual(
     toWireTool({
       name: "read_file",
@@ -222,6 +239,32 @@ test("translates normalized messages and tool declarations to Responses items", 
       { type: "function_call_output", call_id: "call-0", output: "done" },
     ],
   );
+});
+
+test("offers only reasoning-capable Responses models and keeps their real effort levels", () => {
+  assert.equal(supportsOpenAIModel("gpt-5.6-sol"), true);
+  assert.equal(supportsOpenAIModel("o4-mini"), true);
+  assert.equal(supportsOpenAIModel("gpt-5.4-pro"), true);
+  assert.equal(supportsOpenAIModel("gpt-5-chat-latest"), false);
+  assert.equal(supportsOpenAIModel("gpt-5.1-chat-latest"), false);
+  assert.equal(supportsOpenAIModel("gpt-5.2-chat-latest"), false);
+  assert.equal(supportsOpenAIModel("gpt-5.3-chat-latest"), false);
+  assert.equal(supportsOpenAIModel("gpt-5.5-pro"), false);
+  assert.equal(supportsOpenAIModel("o1-mini"), false);
+  assert.equal(supportsOpenAIModel("o1-pro"), false);
+  assert.equal(supportsOpenAIModel("o3-pro"), false);
+  assert.equal(supportsOpenAIModel("o3-deep-research"), false);
+  assert.equal(supportsOpenAIModel("o4-mini-deep-research"), false);
+  assert.equal(supportsOpenAIModel("gpt-4.1"), false);
+  assert.equal(supportsOpenAIModel("chatgpt-image-latest"), false);
+  assert.deepEqual(openAIEfforts("gpt-5.6-sol"), ["low", "medium", "high", "xhigh", "max"]);
+  assert.deepEqual(openAIEfforts("gpt-5.4"), ["low", "medium", "high", "xhigh"]);
+  assert.deepEqual(openAIEfforts("gpt-5"), ["low", "medium", "high"]);
+  assert.deepEqual(openAIEfforts("gpt-5-pro"), ["high"]);
+  assert.deepEqual(openAIEfforts("gpt-5.4-pro"), ["medium", "high", "xhigh"]);
+  assert.deepEqual(openAIEfforts("gpt-5-chat-latest"), []);
+  assert.deepEqual(openAIEfforts("o1-mini"), []);
+  assert.deepEqual(openAIEfforts("gpt-5.5-pro"), []);
 });
 
 test("normalizes tool calls and sparse usage from a completed response", () => {
@@ -284,4 +327,34 @@ test("sends a stateless Responses request with encrypted reasoning included", as
   assert.equal(requestBody?.store, false);
   assert.deepEqual(requestBody?.include, ["reasoning.encrypted_content"]);
   assert.equal(requestBody?.stream, true);
+});
+
+test("passes max effort through to a model that supports it", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.OPENAI_API_KEY;
+  let requestBody: Record<string, unknown> | undefined;
+  process.env.OPENAI_API_KEY = "test-key";
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  });
+
+  await openai.send({
+    model: "gpt-5.6-sol",
+    system: "be useful",
+    messages: [],
+    tools: [],
+    maxTokens: 100,
+    effort: "max",
+  });
+
+  assert.deepEqual(requestBody?.reasoning, { effort: "max", summary: "auto" });
 });

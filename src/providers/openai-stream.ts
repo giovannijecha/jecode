@@ -62,7 +62,7 @@ export async function assembleOpenAI(
     }
   }
 
-  return { output: items };
+  throw new Error("openai stream ended before a terminal response event");
 }
 
 function reconcileOutput(completed: OpenAIResponse | undefined, items: unknown[]): OpenAIResponse {

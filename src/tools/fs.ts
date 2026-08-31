@@ -127,7 +127,7 @@ export const writeFile: Tool = {
   async preview(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
     const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
-    const content = requireString(args, "content");
+    const content = requireString(args, "content", true);
     assertEditableText(content);
     // A write against a file that is already there is a replacement, and the
     // user is owed the difference rather than a wall of green.
@@ -136,7 +136,7 @@ export const writeFile: Tool = {
   async run(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
     const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
-    const content = requireString(args, "content");
+    const content = requireString(args, "content", true);
     assertEditableText(content);
     await fs.mkdir(path.dirname(target), { recursive: true });
     const validate = () => assertDirectWritableInRoot(root, target);
@@ -281,7 +281,10 @@ function applied(before: string, args: Record<string, unknown>): { after: string
 
   const made = replaceAll ? occurrences : 1;
   assertReplacementFits(before, oldText, newText, made);
-  const after = replaceAll ? before.replaceAll(oldText, newText) : before.replace(oldText, newText);
+  const replacement = () => newText;
+  const after = replaceAll
+    ? before.replaceAll(oldText, replacement)
+    : before.replace(oldText, replacement);
   assertEditableText(after, "edited content");
   return { after, made };
 }
@@ -311,6 +314,7 @@ async function unchangedSinceApproval(target: string, approved: string | undefin
 }
 
 function count(text: string, noun: string): string {
+  if (text === "") return "empty";
   return plural(text.split("\n").length, noun, `${noun}s`);
 }
 
