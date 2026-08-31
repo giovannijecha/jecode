@@ -1,6 +1,6 @@
 // Filesystem tools: read, list, write, edit.
 
-import { createReadStream } from "node:fs";
+import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Tool } from "./types.ts";
@@ -23,11 +23,12 @@ import { atomicWrite } from "../atomic.ts";
 const MAX_READ_CHARS = 60_000;
 const MAX_LIST_CHARS = 60_000;
 const MAX_LIST_ENTRIES = 2_000;
+const READ_CHUNK_BYTES = 64 * 1024;
 
 export const readFile: Tool = {
   name: "read_file",
   description:
-    "Read a UTF-8 text file inside the workspace. Optionally start at a line " +
+    "Read a regular UTF-8 text file inside the workspace. Optionally start at a line " +
     "(1-based) and cap how many lines come back. Large files are truncated.",
   dangerous: false,
   input: {
@@ -45,7 +46,7 @@ export const readFile: Tool = {
     const offset = optionalInt(args, "offset");
     const limit = optionalInt(args, "limit");
 
-    const { text, truncated } = await readRange(target, offset, limit);
+    const { text, truncated } = await readRange(target, offset, limit, ctx.signal);
 
     if (truncated) {
       return {
@@ -202,13 +203,23 @@ async function readRange(
   target: string,
   offset: number | undefined,
   limit: number | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<{ text: string; truncated: boolean }> {
+  throwIfAborted(signal);
   const firstLine = Math.max(1, offset ?? 1);
   const lineCount = limit === undefined ? undefined : Math.max(0, limit);
   const endLine = lineCount === undefined ? Number.POSITIVE_INFINITY : firstLine + lineCount;
   if (lineCount === 0) return { text: "", truncated: false };
 
-  const source = createReadStream(target);
+  if (!(await fs.lstat(target)).isFile()) throw new Error("path must be a regular file");
+
+  // O_NONBLOCK prevents a path swapped to a FIFO between lstat and open from
+  // waiting forever for a writer. The handle stat closes that race before any
+  // content is accepted.
+  const flags = process.platform === "win32"
+    ? "r"
+    : constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
+  const handle = await fs.open(target, flags);
   const decoder = new TextDecoder();
   let text = "";
   let line = 1;
@@ -247,16 +258,29 @@ async function readRange(
   };
 
   try {
-    for await (const chunk of source as AsyncIterable<Uint8Array>) {
-      consume(decoder.decode(chunk, { stream: true }));
-      if (stopped) break;
+    if (!(await handle.stat()).isFile()) throw new Error("path must be a regular file");
+
+    let position = 0;
+    const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES);
+    while (!stopped) {
+      throwIfAborted(signal);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      throwIfAborted(signal);
+      if (bytesRead === 0) break;
+      position += bytesRead;
+      consume(decoder.decode(buffer.subarray(0, bytesRead), { stream: true }));
     }
     if (!stopped) consume(decoder.decode());
   } finally {
-    source.destroy();
+    await handle.close();
   }
 
   return { text, truncated };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error("interrupted");
 }
 
 /**

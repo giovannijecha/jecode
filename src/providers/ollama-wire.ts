@@ -13,6 +13,7 @@ export type ChatToolCall = { id: string; name: string; args: string };
 
 export type ChatReply = {
   content: string;
+  reasoning: string;
   toolCalls: ChatToolCall[];
   finishReason?: string;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -52,6 +53,8 @@ export function toWireMessages(system: string, messages: Message[]): unknown[] {
     if (message.role === "assistant") {
       if (texts.length === 0 && toolCalls.length === 0) continue;
       const turn: Record<string, unknown> = { role: "assistant", content: texts.join("\n") };
+      const reasoning = ollamaReasoning(message);
+      if (reasoning !== undefined) turn["reasoning"] = reasoning;
       // An empty tool_calls array is not the same as no tool_calls to every
       // server, so the key is omitted rather than sent empty.
       if (toolCalls.length > 0) turn["tool_calls"] = toolCalls;
@@ -72,9 +75,24 @@ export function fromWireReply(reply: ChatReply): Message {
     content.push({ kind: "tool_call", id: call.id, name: call.name, input: parseArgs(call.args) });
   }
 
-  // No `raw`: unlike the other two providers, nothing in this shape has to be
-  // echoed back verbatim, so the normalized blocks are the whole message.
-  return { role: "assistant", content, usage: normalizeUsage(reply) };
+  const raw = reply.reasoning === "" ? undefined : { reasoning: reply.reasoning };
+  return {
+    role: "assistant",
+    content,
+    ...(raw === undefined ? {} : { raw, rawFrom: "ollama" }),
+    usage: normalizeUsage(reply),
+  };
+}
+
+function ollamaReasoning(message: Message): string | undefined {
+  if (
+    message.rawFrom !== "ollama" ||
+    typeof message.raw !== "object" ||
+    message.raw === null ||
+    Array.isArray(message.raw)
+  ) return undefined;
+  const reasoning = (message.raw as Record<string, unknown>)["reasoning"];
+  return typeof reasoning === "string" && reasoning !== "" ? reasoning : undefined;
 }
 
 function normalizeUsage(reply: ChatReply): Usage | undefined {

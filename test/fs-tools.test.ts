@@ -1,8 +1,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import { editFile, listDir, readFile, writeFile } from "../src/tools/fs.ts";
 import {
   MAX_EDITABLE_BYTES,
@@ -11,6 +13,7 @@ import {
 import type { ToolContext } from "../src/tools/index.ts";
 
 let ctx: ToolContext;
+const execFile = promisify(execFileCallback);
 
 before(async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-test-"));
@@ -44,6 +47,30 @@ test("reports an empty file rather than returning nothing", async () => {
   await writeFile.run({ path: "empty.txt", content: " " }, ctx);
   await fs.writeFile(path.join(ctx.root, "empty.txt"), "", "utf8");
   assert.equal((await readFile.run({ path: "empty.txt" }, ctx)).output, "[file is empty]");
+});
+
+test("refuses a FIFO without waiting for a writer", {
+  skip: process.platform === "win32",
+  timeout: 2_000,
+}, async () => {
+  const fifo = path.join(ctx.root, "read.pipe");
+  await execFile("mkfifo", [fifo]);
+
+  await assert.rejects(
+    readFile.run({ path: "read.pipe" }, ctx),
+    /regular file/,
+  );
+});
+
+test("honors cancellation before reading file content", async () => {
+  await fs.writeFile(path.join(ctx.root, "cancelled-read.txt"), "content", "utf8");
+  const control = new AbortController();
+  control.abort(new Error("stop reading"));
+
+  await assert.rejects(
+    readFile.run({ path: "cancelled-read.txt" }, { ...ctx, signal: control.signal }),
+    /stop reading/,
+  );
 });
 
 test("bounds a large read before returning it", async () => {

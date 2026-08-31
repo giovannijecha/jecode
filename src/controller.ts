@@ -85,6 +85,7 @@ export async function runTurn(
         `provider returned ${calls.length} tool calls in one step (maximum ${MAX_TOOL_CALLS_PER_STEP})`,
       );
     }
+    assertToolCallIds(calls);
 
     history.push(assistant);
     if (calls.length === 0) {
@@ -142,6 +143,17 @@ export async function runTurn(
   throw new Error(
     `gave up after ${options.maxSteps} steps without finishing (raise --max-steps)`,
   );
+}
+
+function assertToolCallIds(calls: readonly ToolCallBlock[]): void {
+  const seen = new Set<string>();
+  for (const call of calls) {
+    if (call.id.trim() === "") throw new Error("provider returned a tool call without an id");
+    if (seen.has(call.id)) {
+      throw new Error("provider returned duplicate tool call ids in one step");
+    }
+    seen.add(call.id);
+  }
 }
 
 async function settle(

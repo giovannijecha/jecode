@@ -1,10 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { reloadAccounts, updateOpenAICodexAccount } from "../src/accounts.ts";
-import { hold, reload as reloadCredentials } from "../src/credentials.ts";
+import {
+  accountsPath,
+  reloadAccounts,
+  updateOpenAICodexAccount,
+} from "../src/accounts.ts";
+import {
+  hold,
+  keep,
+  reload as reloadCredentials,
+  storePath,
+} from "../src/credentials.ts";
 import {
   credentialRedactor,
   redactCredentials,
@@ -129,6 +138,53 @@ test("redacts saved OAuth access and refresh tokens", async () => {
     if (before === undefined) delete process.env["JECODE_HOME"];
     else process.env["JECODE_HOME"] = before;
     reloadAccounts();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("redacts API and OAuth credentials replaced by another process", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-redact-rotated-"));
+  const before = process.env["JECODE_HOME"];
+  process.env["JECODE_HOME"] = directory;
+  reloadAccounts();
+  reloadCredentials();
+  try {
+    await keep("OPENAI_API_KEY", "fixture-api-old");
+    await updateOpenAICodexAccount(async () => ({
+      accessToken: "fixture-oauth-access-old",
+      refreshToken: "fixture-oauth-refresh-old",
+      expiresAt: 2_000_000_000_000,
+      accountId: "account-1",
+    }));
+
+    // Stand in for another Jecode process replacing both stores after this
+    // process populated its caches.
+    await writeFile(storePath(), JSON.stringify({ OPENAI_API_KEY: "fixture-api-new" }), "utf8");
+    await writeFile(accountsPath(), JSON.stringify({
+      version: 1,
+      accounts: {
+        "openai-codex": {
+          accessToken: "fixture-oauth-access-new",
+          refreshToken: "fixture-oauth-refresh-new",
+          expiresAt: 2_000_000_000_001,
+          accountId: "account-1",
+        },
+      },
+    }), "utf8");
+
+    assert.equal(
+      redactCredentials(
+        "fixture-api-old fixture-api-new fixture-oauth-access-old " +
+          "fixture-oauth-access-new fixture-oauth-refresh-old fixture-oauth-refresh-new",
+        {},
+      ),
+      "[credential redacted] ".repeat(5) + "[credential redacted]",
+    );
+  } finally {
+    if (before === undefined) delete process.env["JECODE_HOME"];
+    else process.env["JECODE_HOME"] = before;
+    reloadAccounts();
+    reloadCredentials();
     await rm(directory, { recursive: true, force: true });
   }
 });

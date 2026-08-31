@@ -29,8 +29,17 @@ export function openAICodexAccount(): OpenAICodexAccount | undefined {
 }
 
 export function accountValues(): string[] {
-  const account = store().accounts["openai-codex"];
-  return account === undefined ? [] : [account.accessToken, account.refreshToken];
+  // Keep both snapshots. Another Jecode process may rotate the refresh token
+  // after this process populated its account cache; shell-output redaction
+  // must recognize the newly persisted values without forgetting the old ones.
+  const values = new Set<string>();
+  for (const source of [store(), readStore(accountsPath())]) {
+    const account = source.accounts["openai-codex"];
+    if (account === undefined) continue;
+    values.add(account.accessToken);
+    values.add(account.refreshToken);
+  }
+  return [...values];
 }
 
 export function accountsPath(): string {

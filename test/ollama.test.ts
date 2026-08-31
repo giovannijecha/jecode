@@ -83,11 +83,12 @@ test("keeps parallel calls apart by index and invents an id when none is sent", 
 
 test("streams reasoning under either field name", async () => {
   const seen: StreamEvent[] = [];
-  await assembleOllama(
+  const reply = await assembleOllama(
     feed([chunk({ reasoning: "hm" }), chunk({ reasoning_content: "ok" }), chunk({}, "stop")]),
     (event) => seen.push(event),
   );
 
+  assert.equal(reply.reasoning, "hmok");
   assert.deepEqual(seen, [
     { kind: "thinking", text: "hm" },
     { kind: "thinking", text: "ok" },
@@ -97,12 +98,39 @@ test("streams reasoning under either field name", async () => {
 test("malformed arguments degrade to an empty object rather than throwing", () => {
   const message = fromWireReply({
     content: "",
+    reasoning: "",
     toolCalls: [{ id: "c1", name: "read_file", args: "{not json" }],
   });
 
   assert.deepEqual(message.content, [
     { kind: "tool_call", id: "c1", name: "read_file", input: {} },
   ]);
+});
+
+test("echoes Ollama reasoning with an assistant tool call on continuation", async () => {
+  const reply = await assembleOllama(feed([
+    chunk({ reasoning: "inspect first" }),
+    chunk({
+      tool_calls: [{
+        index: 0,
+        id: "c1",
+        function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+      }],
+    }),
+    chunk({}, "tool_calls"),
+  ]));
+  const assistant = fromWireReply(reply);
+
+  assert.deepEqual(toWireMessages("", [assistant]), [{
+    role: "assistant",
+    content: "",
+    reasoning: "inspect first",
+    tool_calls: [{
+      id: "c1",
+      type: "function",
+      function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+    }],
+  }]);
 });
 
 test("lifts every tool result into its own message, in order", () => {

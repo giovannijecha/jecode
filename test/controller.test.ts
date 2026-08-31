@@ -157,6 +157,55 @@ test("refuses an oversized batch of tool calls before executing it", async () =>
   assert.equal(history.length, 0);
 });
 
+test("rejects duplicate tool call ids before executing or changing history", async () => {
+  let runs = 0;
+  const counted: Tool = {
+    ...echo,
+    async run() {
+      runs++;
+      return { output: "ran" };
+    },
+  };
+  const provider = scripted([{
+    role: "assistant",
+    content: [
+      { kind: "tool_call", id: "same", name: "echo", input: { text: "one" } },
+      { kind: "tool_call", id: "same", name: "echo", input: { text: "two" } },
+    ],
+  }]);
+  const history: Message[] = [];
+
+  await assert.rejects(
+    runTurn(history, options(provider, { tools: [counted] }), events()),
+    /duplicate tool call ids/,
+  );
+  assert.equal(runs, 0);
+  assert.deepEqual(history, []);
+});
+
+test("rejects a blank tool call id before executing or changing history", async () => {
+  let runs = 0;
+  const counted: Tool = {
+    ...echo,
+    async run() {
+      runs++;
+      return { output: "ran" };
+    },
+  };
+  const provider = scripted([{
+    role: "assistant",
+    content: [{ kind: "tool_call", id: " ", name: "echo", input: { text: "one" } }],
+  }]);
+  const history: Message[] = [];
+
+  await assert.rejects(
+    runTurn(history, options(provider, { tools: [counted] }), events()),
+    /tool call without an id/,
+  );
+  assert.equal(runs, 0);
+  assert.deepEqual(history, []);
+});
+
 test("a declined call comes back as an error result, and the loop continues", async () => {
   const provider = scripted([
     { role: "assistant", content: [{ kind: "tool_call", id: "a", name: "destroy", input: {} }] },

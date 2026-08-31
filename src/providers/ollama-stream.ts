@@ -28,6 +28,7 @@ export async function assembleOllama(
   const calls = new Map<number, ChatToolCall>();
   let toolArgumentChars = 0;
   let content = "";
+  let reasoning = "";
   let finishReason: string | undefined;
   let usage: ChatReply["usage"];
 
@@ -53,9 +54,12 @@ export async function assembleOllama(
 
     // Reasoning has no standardized field name across the models Ollama
     // serves, so both spellings in circulation are accepted.
-    const reasoning = delta.reasoning ?? delta.reasoning_content;
-    if (typeof reasoning === "string" && reasoning !== "") {
-      onStream?.({ kind: "thinking", text: reasoning });
+    const reasoningDelta = delta.reasoning ?? delta.reasoning_content;
+    if (typeof reasoningDelta === "string" && reasoningDelta !== "") {
+      // Keep the authoritative copy as well as the display event. Ollama
+      // expects reasoning to accompany an assistant tool call on continuation.
+      reasoning += reasoningDelta;
+      onStream?.({ kind: "thinking", text: reasoningDelta });
     }
 
     if (typeof delta.content === "string" && delta.content !== "") {
@@ -93,5 +97,5 @@ export async function assembleOllama(
     // back to its call.
     .map(([index, call]) => (call.id === "" ? { ...call, id: `call_${index}` } : call));
 
-  return { content, toolCalls, finishReason, usage };
+  return { content, reasoning, toolCalls, finishReason, usage };
 }
