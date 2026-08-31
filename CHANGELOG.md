@@ -4,7 +4,7 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
-## Unreleased
+## [0.2.0] - 2026-08-31
 
 ### Added
 
@@ -27,6 +27,11 @@ install artifacts and provenance are published with the [npm package].
   kept authorization details out of the completed browser URL.
 - Decoupled ChatGPT model-catalogue compatibility from Jecode's own version so
   eligible Codex models remain available.
+
+### Fixed
+
+- Rejected invalid OAuth callback state without cancelling the valid sign-in
+  still in progress.
 
 ## [0.1.9] - 2026-08-31
 
@@ -149,6 +154,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.2.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.0
 [0.1.9]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.9
 [0.1.8]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.8
 [0.1.7]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.7
