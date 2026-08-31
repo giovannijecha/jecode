@@ -309,7 +309,7 @@ test("new clears conversation usage and screen-local state", async () => {
   assert.deepEqual(live.history, []);
   assert.equal(live.usage.requests, 0);
   assert.equal(live.usage.inputTokens, 0);
-  assert.match(texts(screen.blocks)[0] ?? "", /approvals cleared/);
+  assert.deepEqual(texts(screen.blocks), ["new session"]);
 });
 
 test("help opens a temporary surface without emitting transcript content", async () => {
@@ -330,6 +330,15 @@ test("usage remains internal and is absent from the command surface", async () =
   assert.match(texts(screen.blocks)[0] ?? "", /unknown command \/usage/);
 });
 
+test("setup is absent because settings and direct provider commands own configuration", async () => {
+  const screen = host();
+
+  assert.equal(COMMANDS.some((command) => command.name === "setup"), false);
+  await handleCommand("/setup", session(provider("fake", ["a"])), screen);
+
+  assert.match(texts(screen.blocks)[0] ?? "", /unknown command \/setup/);
+});
+
 test("export saves immediately to its automatic destination", async () => {
   const screen = host();
   let exports = 0;
@@ -343,7 +352,7 @@ test("export saves immediately to its automatic destination", async () => {
   assert.equal(exports, 1);
   assert.equal(screen.pickers.length, 0);
   assert.equal(screen.fields.length, 0);
-  assert.match(texts(screen.blocks)[0] ?? "", /jecode-transcript-20260829T123456Z\.md/);
+  assert.deepEqual(texts(screen.blocks), ["saved · jecode-transcript-20260829T123456Z.md"]);
 });
 
 test("permissions revokes one selected session grant", async () => {
@@ -361,7 +370,7 @@ test("permissions revokes one selected session grant", async () => {
   assert.match(texts(screen.blocks)[0] ?? "", /command · npm test/);
 });
 
-test("cancelling setup for a blocked provider leaves the previous provider intact", async () => {
+test("cancelling the credential flow for a blocked provider leaves the previous provider intact", async () => {
   const live = session(provider("fake", ["a"]));
   const screen = host(1); // openai, then cancel the secret field
   const before = process.env["OPENAI_API_KEY"];

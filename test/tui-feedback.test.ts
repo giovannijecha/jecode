@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Session } from "../src/session.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import { commandFeedback, feedbackController, turnBlocker } from "../src/tui/feedback.ts";
+import { renderStatus } from "../src/tui/components/status.ts";
 import { footerInfo, turnFailure } from "../src/tui/session-view.ts";
 import { STEEL } from "../src/ui/theme.ts";
 import { emptyUsage } from "../src/usage.ts";
@@ -44,6 +45,29 @@ test("command notices become expiring footer feedback", () => {
   const feedback = commandFeedback({ kind: "notice", text: "credential saved", tone: "info" });
   assert.equal(feedback?.text, "credential saved");
   assert.ok((feedback?.timeoutMs ?? 0) > 0);
+});
+
+test("informational feedback has no decorative marker", () => {
+  const status = renderStatus(
+    { status: undefined, feedback: { text: "new session", tone: "info" }, readiness: undefined, unseen: 0 },
+    STEEL,
+  );
+
+  assert.equal(status.map((segment) => segment.text).join(""), "new session");
+});
+
+test("warnings and errors keep their priority markers", () => {
+  const warning = renderStatus(
+    { status: undefined, feedback: { text: "check settings", tone: "warn" }, readiness: undefined, unseen: 0 },
+    STEEL,
+  );
+  const error = renderStatus(
+    { status: undefined, feedback: { text: "request failed", tone: "error" }, readiness: undefined, unseen: 0 },
+    STEEL,
+  );
+
+  assert.equal(warning.map((segment) => segment.text).join(""), "! check settings");
+  assert.equal(error.map((segment) => segment.text).join(""), "× request failed");
 });
 
 test("the feedback channel replaces its message instead of accumulating copies", () => {

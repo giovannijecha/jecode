@@ -140,6 +140,17 @@ test("the credentials command saves only after the explicit disk choice", async 
   });
 });
 
+test("discarding a typed credential is a silent cancellation", async () => {
+  await inStore(async () => {
+    const screen = host([1, 0, 2], "discarded-secret");
+
+    await credentialsCommand(session(), screen);
+
+    assert.equal(credentialSource(KEY), undefined);
+    assert.deepEqual(screen.blocks, []);
+  });
+});
+
 test("an environment key can forget a shadowed saved copy without exposing either", async () => {
   await inStore(async () => {
     await keep(KEY, "saved-secret");
@@ -152,7 +163,7 @@ test("an environment key can forget a shadowed saved copy without exposing eithe
     assert.equal(credentialSource(KEY), "environment");
     assert.equal(hasSaved(KEY), false);
     const output = screen.blocks.map((block) => "text" in block ? block.text : "").join("\n");
-    assert.match(output, /saved credential removed/);
+    assert.match(output, /API key removed/);
     assert.doesNotMatch(output, /saved-secret|environment-secret/);
   });
 });
