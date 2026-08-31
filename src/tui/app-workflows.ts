@@ -113,12 +113,15 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       usage: (usage) => recordUsage(session.usage, usage),
     });
 
+    let finishReason: "interrupted" | "failed" | undefined;
     try {
       await runTurn(session.history, controllerOptions(session), events, activity.control.signal);
     } catch (error) {
-      options.emit(turnFailure(session, error as Error, activity.control.signal.aborted));
+      const interrupted = activity.control.signal.aborted;
+      finishReason = interrupted ? "interrupted" : "failed";
+      options.emit(turnFailure(session, error as Error, interrupted));
     } finally {
-      events.finish();
+      events.finish(finishReason);
       options.finishActivity(activity);
     }
   }

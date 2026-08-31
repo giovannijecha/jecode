@@ -4,6 +4,7 @@ import * as edit from "../src/tui/editor.ts";
 import { compose } from "../src/tui/view.ts";
 import { COMMANDS } from "../src/commands.ts";
 import { textWidth } from "../src/ui/width.ts";
+import { row } from "../src/ui/render.ts";
 import type { Block } from "../src/tui/blocks.ts";
 import { renderAll } from "../src/tui/blocks.ts";
 import { transcribe } from "../src/tui/turn.ts";
@@ -25,6 +26,11 @@ test("a frame is exactly as tall as the terminal", () => {
     const frame = compose(base(), { rows, cols: 80 });
     assert.equal(frame.rows.length, rows);
   }
+});
+
+test("a right column that fills the row never adds an extra gutter cell", () => {
+  const rendered = row(5, [{ text: "left" }], [{ text: "12345" }]);
+  assert.equal(textWidth(rendered), 5);
 });
 
 test("the cursor starts on the same column as the transcript", () => {
@@ -471,6 +477,18 @@ test("a reasoning-only stream is sealed when transcription finishes", () => {
   events.finish();
   const reasoning = blocks[0];
   assert.equal(reasoning?.kind === "reasoning" ? reasoning.live : undefined, false);
+});
+
+test("finishing an interrupted transcription settles its running tool", () => {
+  const { blocks, events } = stage([]);
+  events.onToolCall(callOf("1", "run_command", { command: "npm test" }));
+
+  events.finish("interrupted");
+
+  const tool = blocks[0];
+  assert.equal(tool?.kind === "tool" ? tool.tone : undefined, "fail");
+  assert.equal(tool?.kind === "tool" ? tool.right : undefined, "interrupted");
+  assert.equal(tool?.kind === "tool" ? tool.startedAt : undefined, undefined);
 });
 
 function strip(rows: readonly string[]): string[] {

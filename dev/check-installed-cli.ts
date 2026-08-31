@@ -18,7 +18,7 @@ const prefix = path.join(root, "prefix");
 
 try {
   await mkdir(packRoot);
-  const packed = runNpm(["pack", "--json", "--pack-destination", packRoot]);
+  const packed = runNpm(["pack", "--ignore-scripts", "--json", "--pack-destination", packRoot]);
   const [artifact] = JSON.parse(packed.stdout) as Packed[];
   if (artifact === undefined) throw new Error("npm did not create a package");
 

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 const npm = process.env.npm_execpath;
 if (npm === undefined) throw new Error("run this check through npm run check:package");
-const output = execFileSync(process.execPath, [npm, "pack", "--dry-run", "--json"], {
+const output = execFileSync(process.execPath, [npm, "pack", "--dry-run", "--ignore-scripts", "--json"], {
   encoding: "utf8",
 });
 const [packed] = JSON.parse(output) as [{ size: number; files: { path: string }[] }];
