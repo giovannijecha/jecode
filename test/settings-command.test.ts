@@ -10,6 +10,7 @@ import { hold, reload as reloadCredentials } from "../src/credentials.ts";
 import { OLLAMA_CLOUD_HOST, OLLAMA_LOCAL_HOST } from "../src/providers/ollama-endpoint.ts";
 import { configureOllama, ollama, ollamaConnection } from "../src/providers/ollama.ts";
 import { reloadSettings, settingsPath, updateSettings } from "../src/settings.ts";
+import { settingsPicker } from "../src/settings-command.ts";
 import type { Session } from "../src/session.ts";
 import type { Field } from "../src/tui/field.ts";
 import type { Picker } from "../src/tui/picker.ts";
@@ -37,7 +38,7 @@ test("settings uses nested dock pickers and persists a live change", async () =>
       "max output tokens",
       "max tool steps",
       "reduced motion",
-      "credentials",
+      "authentication",
     ]);
     assert.equal(session.config.effort, "medium");
     assert.equal(JSON.parse(await readFile(settingsPath(), "utf8")).effort, "medium");
@@ -74,10 +75,23 @@ test("effort is a direct picker that applies and persists the next-turn default"
   });
 });
 
+test("OpenAI Codex settings omit a token limit the backend does not accept", () => {
+  const picker = settingsPicker({
+    provider: "openai-codex",
+    model: "gpt-codex",
+    effort: "high",
+    maxSteps: 40,
+    reducedMotion: false,
+  }, STEEL);
+
+  assert.equal(picker.options.some((option) => option.label === "max output tokens"), false);
+  assert.equal(picker.options.some((option) => option.label === "authentication"), true);
+});
+
 test("settings remembers a provider and its own model together", async () => {
   await inSettingsHome(async () => {
     await updateSettings({ models: { ollama: "qwen3-coder" } });
-    const answers: (number | undefined)[] = [0, 2, undefined]; // provider, ollama, escape
+    const answers: (number | undefined)[] = [0, 3, undefined]; // provider, ollama, escape
     const host: Host = {
       emit: () => {},
       choose: () => Promise.resolve(answers.shift()),
@@ -196,7 +210,7 @@ test("a direct provider choice becomes the provider on the next launch", async (
     await updateSettings({ models: { ollama: "qwen3-coder" } });
     const host: Host = {
       emit: () => {},
-      choose: () => Promise.resolve(2),
+      choose: () => Promise.resolve(3),
       saveSettings: async (patch) => {
         await updateSettings(patch);
       },
@@ -260,7 +274,7 @@ function fakeSession(): Session {
     provider: {
       id: "fake",
       defaultModel: "model-a",
-      keyVar: "FAKE_API_KEY",
+      auth: { kind: "api-key", keyVar: "FAKE_API_KEY" },
       blocked: () => undefined,
       models: () => Promise.resolve(["model-a"]),
       send: () => Promise.reject(new Error("not called")),

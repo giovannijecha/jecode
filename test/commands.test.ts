@@ -13,8 +13,6 @@ import {
   MAX_MODEL_CATALOG_ITEMS,
   MAX_MODEL_ID_CHARS,
 } from "../src/providers/catalog.ts";
-import { OLLAMA_LOCAL_HOST } from "../src/providers/ollama-endpoint.ts";
-import { configureOllama } from "../src/providers/ollama.ts";
 import { keyFor, reload } from "../src/credentials.ts";
 import type { SavedSettings } from "../src/settings.ts";
 import { STEEL } from "../src/ui/theme.ts";
@@ -26,7 +24,7 @@ function provider(id: string, models: string[], why?: string): Provider {
   return {
     id,
     defaultModel: models[0] ?? "",
-    keyVar: `${id.toUpperCase()}_API_KEY`,
+    auth: { kind: "api-key", keyVar: `${id.toUpperCase()}_API_KEY` },
     blocked: () => why,
     models: () => Promise.resolve(models),
     send: (_req: SendRequest): Promise<Message> => Promise.reject(new Error("not called")),
@@ -199,7 +197,7 @@ test("the provider menu names every provider and what stops it", async () => {
   const options = screen.pickers[0]?.options ?? [];
   assert.deepEqual(
     options.map((option) => option.label),
-    ["anthropic", "openai", "ollama"],
+    ["anthropic", "openai", "openai-codex", "ollama"],
   );
   // Either a reason or "ready" — never an empty hint, which would read as a
   // provider that has nothing to say about itself.
@@ -208,28 +206,34 @@ test("the provider menu names every provider and what stops it", async () => {
 
 test("a direct provider choice is offered to the interactive settings store", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(2);
+  const screen = host(0);
   const saved: Partial<SavedSettings>[] = [];
   screen.saveSettings = (patch) => {
     saved.push(patch);
     return Promise.resolve();
   };
-  configureOllama(OLLAMA_LOCAL_HOST);
+  const before = process.env["ANTHROPIC_API_KEY"];
+  process.env["ANTHROPIC_API_KEY"] = "fixture-key";
+  reload();
 
   try {
     await handleCommand("/providers", live, screen);
-    assert.equal(live.provider.id, "ollama");
-    assert.equal(saved[0]?.provider, "ollama");
+    assert.equal(live.provider.id, "anthropic");
+    assert.equal(saved[0]?.provider, "anthropic");
   } finally {
-    configureOllama(undefined);
+    if (before === undefined) delete process.env["ANTHROPIC_API_KEY"];
+    else process.env["ANTHROPIC_API_KEY"] = before;
+    reload();
   }
 });
 
 test("a direct provider choice rolls back when its default cannot be saved", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(2);
+  const screen = host(0);
   screen.saveSettings = () => Promise.reject(new Error("disk unavailable"));
-  configureOllama(OLLAMA_LOCAL_HOST);
+  const before = process.env["ANTHROPIC_API_KEY"];
+  process.env["ANTHROPIC_API_KEY"] = "fixture-key";
+  reload();
 
   try {
     await handleCommand("/providers", live, screen);
@@ -239,7 +243,9 @@ test("a direct provider choice rolls back when its default cannot be saved", asy
     assert.equal(live.config.model, "a");
     assert.match(texts(screen.blocks).join("\n"), /could not save settings · disk unavailable/);
   } finally {
-    configureOllama(undefined);
+    if (before === undefined) delete process.env["ANTHROPIC_API_KEY"];
+    else process.env["ANTHROPIC_API_KEY"] = before;
+    reload();
   }
 });
 

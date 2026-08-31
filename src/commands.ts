@@ -32,6 +32,8 @@ export type Host = {
   /** Open the non-persistent keyboard reference. Resolves when it closes. */
   showHelp?(): Promise<void>;
   choose?(picker: Picker): Promise<number | undefined>;
+  /** Close the active modal after an asynchronous interaction completes. */
+  dismiss?(): void;
   /** Take a line from the user. Resolves with nothing if they backed out. */
   type?(field: Field): Promise<string | undefined>;
   status?(text?: string): void;
@@ -63,7 +65,7 @@ export const COMMANDS: readonly Command[] = [
   { name: "permissions", blurb: "manage session tool access" },
   { name: "settings", blurb: "change and save jecode defaults" },
   { name: "effort", blurb: "set the reasoning effort" },
-  { name: "credentials", blurb: "inspect, replace, or forget API keys" },
+  { name: "credentials", blurb: "manage API keys and connected accounts" },
   { name: "models", blurb: "pick a model, from what the provider offers" },
   { name: "providers", blurb: "pick a provider" },
 ];

@@ -10,10 +10,10 @@ Usage:
 
 Options:
   --root <path>          workspace root (default: current directory)
-  --provider <id>        anthropic, openai, or ollama
+  --provider <id>        anthropic, openai, openai-codex, or ollama
   --model <id>           model for the selected provider
   --ollama-host <url>    Ollama Cloud, local, or custom endpoint
-  --effort <level>       low, medium, high, or max
+  --effort <level>       low, medium, high, xhigh, or max
   --max-tokens <number>  output-token ceiling
   --max-steps <number>   tool-loop ceiling
   --reduced-motion       disable animated terminal states

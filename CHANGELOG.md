@@ -4,6 +4,30 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## Unreleased
+
+### Added
+
+- Added an experimental `openai-codex` provider that signs in with ChatGPT via
+  browser PKCE or device code, refreshes rotated tokens safely, and remains
+  separate from the existing OpenAI API-key provider.
+- Added connected-account management to `/settings` and `/credentials`, with
+  owner-only OAuth storage under `~/.jecode/accounts.json`.
+
+### Changed
+
+- Generalized provider authentication so API keys and OAuth accounts retain
+  distinct persistence, feedback, and setup flows.
+- Preserved ChatGPT Codex tool calls when its final streamed response carries
+  an empty output envelope after complete output-item events.
+- Finished OpenAI streams at their terminal event, rejected malformed SSE, and
+  surfaced empty provider replies instead of ending a turn silently.
+- Hid the unsupported max-output-token setting while OpenAI Codex is active.
+- Branded the browser callback, made it close the TUI wait state reliably, and
+  kept authorization details out of the completed browser URL.
+- Decoupled ChatGPT model-catalogue compatibility from Jecode's own version so
+  eligible Codex models remain available.
+
 ## [0.1.9] - 2026-08-31
 
 ### Added

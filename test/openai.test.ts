@@ -51,6 +51,71 @@ test("takes the final completed response as authoritative", async () => {
   });
 });
 
+test("keeps completed stream items when the Codex final envelope has empty output", async () => {
+  const data = await assembleOpenAI(
+    feed([
+      {
+        type: "response.output_item.done",
+        item: { type: "reasoning", encrypted_content: "opaque" },
+      },
+      {
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          call_id: "call-1",
+          name: "list_dir",
+          arguments: '{"path":"."}',
+        },
+      },
+      {
+        type: "response.completed",
+        response: { status: "completed", output: [] },
+      },
+    ]),
+  );
+
+  assert.deepEqual(fromWireResponse(data).content, [
+    { kind: "tool_call", id: "call-1", name: "list_dir", input: { path: "." } },
+  ]);
+  assert.deepEqual(data.output, [
+    { type: "reasoning", encrypted_content: "opaque" },
+    {
+      type: "function_call",
+      call_id: "call-1",
+      name: "list_dir",
+      arguments: '{"path":"."}',
+    },
+  ]);
+});
+
+test("accepts the Codex response.done alias and stops reading after the terminal event", async () => {
+  let transportClosed = false;
+  async function* heldOpen(): AsyncGenerator<unknown> {
+    try {
+      yield {
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          call_id: "call-1",
+          name: "list_dir",
+          arguments: "{}",
+        },
+      };
+      yield { type: "response.done", response: { status: "completed", output: [] } };
+      await new Promise<never>(() => undefined);
+    } finally {
+      transportClosed = true;
+    }
+  }
+
+  const data = await assembleOpenAI(heldOpen());
+
+  assert.equal(transportClosed, true);
+  assert.deepEqual(fromWireResponse(data).content, [
+    { kind: "tool_call", id: "call-1", name: "list_dir", input: {} },
+  ]);
+});
+
 test("keeps an incomplete final response and explains why it stopped", async () => {
   const data = await assembleOpenAI(
     feed([

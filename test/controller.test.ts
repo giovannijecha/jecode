@@ -14,7 +14,7 @@ function scripted(replies: Message[]): FakeProvider {
   return {
     id: "fake",
     defaultModel: "fake-1",
-    keyVar: "FAKE_API_KEY",
+    auth: { kind: "api-key", keyVar: "FAKE_API_KEY" },
     seen,
     blocked: () => undefined,
     models: () => Promise.resolve(["fake-1"]),
@@ -96,6 +96,15 @@ test("returns as soon as the model stops asking for tools", async () => {
   assert.deepEqual(sink.texts, ["all done"]);
   assert.equal(provider.seen.length, 1);
   assert.equal(history.length, 2);
+});
+
+test("rejects an empty provider response instead of ending the turn silently", async () => {
+  const provider = scripted([{ role: "assistant", content: [] }]);
+
+  await assert.rejects(
+    runTurn([], options(provider), events()),
+    /completed without an answer or tool call/,
+  );
 });
 
 test("returns every result of one step in a single message", async () => {

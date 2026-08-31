@@ -53,11 +53,12 @@ test("survives a CRLF boundary split between the \r and the \n", async () => {
   assert.deepEqual(events, [{ type: "a" }, { type: "b" }]);
 });
 
-test("skips [DONE] and unparseable payloads without stopping", async () => {
-  const events = await collect(
-    stream('data: [DONE]\n\ndata: not json\n\ndata: {"type":"a"}\n\n'),
+test("skips [DONE] but rejects an invalid JSON payload", async () => {
+  assert.deepEqual(
+    await collect(stream('data: [DONE]\n\ndata: {"type":"a"}\n\n')),
+    [{ type: "a" }],
   );
-  assert.deepEqual(events, [{ type: "a" }]);
+  await assert.rejects(collect(stream("data: not json\n\n")), /invalid JSON/);
 });
 
 test("yields a final event that arrives without a trailing blank line", async () => {

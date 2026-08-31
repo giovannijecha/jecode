@@ -2,6 +2,7 @@
 
 import type { Session } from "../session.ts";
 import type { NoticeBlock, NoticeTone } from "./blocks.ts";
+import { providerLabel } from "../provider-label.ts";
 
 export type Feedback = {
   text: string;
@@ -70,24 +71,26 @@ export function commandFeedback(block: NoticeBlock): Feedback {
 /** Explain why a model turn cannot start, without exposing configuration internals. */
 export function turnBlocker(session: Session): Feedback | undefined {
   const blocked = session.provider.blocked();
-  if (blocked !== undefined && !blocked.startsWith(`${session.provider.keyVar} `)) {
+  const auth = session.provider.auth;
+  const expected = auth.kind === "api-key"
+    ? blocked?.startsWith(`${auth.keyVar} `) === true
+    : blocked !== undefined;
+  if (blocked !== undefined && !expected) {
     return { text: blocked, tone: "error" };
   }
   if (blocked !== undefined) {
     return {
-      text: `${providerName(session.provider.id)} needs an API key · /settings`,
+      text: auth.kind === "oauth"
+        ? `${providerLabel(session.provider.id)} needs ${auth.label} sign-in · /settings`
+        : `${providerLabel(session.provider.id)} needs an API key · /settings`,
       tone: "warn",
     };
   }
   if (session.model === "") {
     return {
-      text: `${providerName(session.provider.id)} needs a model · /models`,
+      text: `${providerLabel(session.provider.id)} needs a model · /models`,
       tone: "warn",
     };
   }
   return undefined;
-}
-
-function providerName(id: string): string {
-  return id === "" ? "Provider" : `${id[0]?.toUpperCase() ?? ""}${id.slice(1)}`;
 }

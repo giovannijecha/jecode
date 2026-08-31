@@ -7,8 +7,12 @@ import { heading } from "./tui/picker.ts";
 import { PROVIDERS } from "./providers/index.ts";
 import { readSettings } from "./settings.ts";
 import type { SavedSettings } from "./settings.ts";
-import { askForKey } from "./credential-commands.ts";
+import {
+  authenticationNeed,
+  ensureProviderAuthentication,
+} from "./credential-commands.ts";
 import { providerFailure } from "./provider-errors.ts";
+import { providerLabel } from "./provider-label.ts";
 
 type SelectionBehavior = {
   announce?: boolean;
@@ -50,32 +54,22 @@ export async function providersCommand(
   // Picking the provider already in use is not a no-op when it cannot run:
   // it is how the user asks to fix the reason it cannot.
   if (chosen.id === session.provider.id) {
-    const blocked = chosen.blocked();
-    if (blocked !== undefined) {
-      if (!isCredentialBlocker(chosen, blocked)) {
-        host.emit({ kind: "notice", text: blocked, tone: "error" });
-        return false;
-      }
-      await askForKey(chosen.keyVar, host, session.palette);
-      if (chosen.blocked() !== undefined) return false;
-    }
-    return true;
+    if (!(await ensureProviderAuthentication(chosen, session, host))) return false;
+    return session.model === ""
+      ? modelsCommand(session, host, { announce: false, save: behavior.save })
+      : true;
   }
 
   // A provider that cannot run is worth one offer to fix it, here, rather
   // than a note telling the user to leave and export something.
   const blocked = chosen.blocked();
   if (blocked !== undefined) {
-    if (!isCredentialBlocker(chosen, blocked)) {
-      host.emit({ kind: "notice", text: blocked, tone: "error" });
-      return false;
-    }
-    await askForKey(chosen.keyVar, host, session.palette);
+    await ensureProviderAuthentication(chosen, session, host);
     const still = chosen.blocked();
     if (still !== undefined) {
       host.emit({
         kind: "notice",
-        text: `${providerName(chosen.id)} still needs an API key · provider unchanged`,
+        text: `${providerLabel(chosen.id)} still needs ${authenticationNeed(chosen)} · provider unchanged`,
         tone: "warn",
       });
       return false;
@@ -94,6 +88,14 @@ export async function providersCommand(
   session.model = readSettings().models?.[chosen.id] ?? chosen.defaultModel;
   session.config.providerId = chosen.id;
   session.config.model = session.model;
+
+  if (session.model === "" && !(await modelsCommand(session, host, { announce: false, save: false }))) {
+    session.provider = before.provider;
+    session.model = before.model;
+    session.config.providerId = before.providerId;
+    session.config.model = before.configModel;
+    return false;
+  }
 
   if (behavior.save !== false) {
     const saved = readSettings();
@@ -135,16 +137,12 @@ export async function modelsCommand(
   // to pick a model, and "go and export a variable" is not an answer.
   const blocked = provider.blocked();
   if (blocked !== undefined) {
-    if (!isCredentialBlocker(provider, blocked)) {
-      host.emit({ kind: "notice", text: blocked, tone: "error" });
-      return false;
-    }
-    await askForKey(provider.keyVar, host, session.palette);
+    await ensureProviderAuthentication(provider, session, host);
     const still = provider.blocked();
     if (still !== undefined) {
       host.emit({
         kind: "notice",
-        text: `${providerName(provider.id)} still needs an API key`,
+        text: `${providerLabel(provider.id)} still needs ${authenticationNeed(provider)}`,
         tone: "warn",
       });
       return false;
@@ -207,14 +205,6 @@ function chooser(host: Host): Host["choose"] {
     host.emit({ kind: "notice", text: "that command needs the screen", tone: "warn" });
   }
   return host.choose;
-}
-
-function providerName(id: string): string {
-  return id === "" ? "Provider" : `${id[0]?.toUpperCase() ?? ""}${id.slice(1)}`;
-}
-
-function isCredentialBlocker(provider: Session["provider"], blocked: string): boolean {
-  return blocked.startsWith(`${provider.keyVar} `);
 }
 
 async function saveDefaults(host: Host, patch: Partial<SavedSettings>): Promise<boolean> {

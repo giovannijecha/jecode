@@ -1,9 +1,9 @@
 // Reassembling an OpenAI Responses reply from its event stream.
 //
-// Unlike Anthropic, this stream ends with the whole finished response in
-// `response.completed`, so there is nothing to rebuild: the deltas drive the
-// display, and the final event is taken as authoritative. Items collected
-// along the way are only a fallback for a stream that ends without it.
+// Unlike Anthropic, a standard Responses stream ends with the whole finished
+// response in `response.completed`. The ChatGPT Codex backend can instead send
+// an empty final `output` after complete `response.output_item.done` events, so
+// those streamed items remain the fallback when the final envelope is empty.
 
 import type { StreamEvent } from "../types.ts";
 import type { OpenAIResponse } from "./openai-wire.ts";
@@ -13,7 +13,6 @@ export async function assembleOpenAI(
   onStream?: (event: StreamEvent) => void,
 ): Promise<OpenAIResponse> {
   const items: unknown[] = [];
-  let completed: OpenAIResponse | undefined;
   let refusal = false;
 
   for await (const raw of events) {
@@ -46,10 +45,10 @@ export async function assembleOpenAI(
         if (event.item !== undefined) items.push(event.item);
         break;
 
+      case "response.done":
       case "response.completed":
       case "response.incomplete":
-        if (event.response !== undefined) completed = event.response as OpenAIResponse;
-        break;
+        return reconcileOutput(event.response as OpenAIResponse | undefined, items);
 
       case "response.failed": {
         const response = event.response as OpenAIResponse | undefined;
@@ -63,5 +62,11 @@ export async function assembleOpenAI(
     }
   }
 
-  return completed ?? { output: items };
+  return { output: items };
+}
+
+function reconcileOutput(completed: OpenAIResponse | undefined, items: unknown[]): OpenAIResponse {
+  if (completed === undefined) return { output: items };
+  const finalCount = Array.isArray(completed.output) ? completed.output.length : 0;
+  return items.length > finalCount ? { ...completed, output: items } : completed;
 }

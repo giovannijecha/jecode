@@ -77,17 +77,18 @@ export type SendRequest = {
   onStatus?: (status: string) => void;
 };
 
+export type ProviderAuth =
+  | { kind: "api-key"; keyVar: string }
+  | { kind: "oauth"; account: "openai-codex"; label: string };
+
 export type Provider = {
   readonly id: string;
   readonly defaultModel: string;
   /**
-   * The environment variable this provider reads its key from.
-   *
-   * Named, never read outside the provider and never stored: the menu that
-   * offers a provider has to be able to say why one of them will not work,
-   * and "set OPENAI_API_KEY" is the whole of that answer.
+   * How this provider proves who the user is. The controller never inspects
+   * it; commands use the metadata to open the right authentication flow.
    */
-  readonly keyVar: string;
+  readonly auth: ProviderAuth;
   /** Where prompts leave the machine for the current provider configuration. */
   location?(): "cloud" | "local";
   /** What stands between this provider and a request, if anything does. */

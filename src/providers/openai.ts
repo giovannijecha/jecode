@@ -34,7 +34,7 @@ const NON_TEXT_MODE = /(?:^|[-_])(audio|realtime|transcribe|tts)(?:[-_]|$)/;
 export const openai: Provider = {
   id: "openai",
   defaultModel: "gpt-5",
-  keyVar: KEY,
+  auth: { kind: "api-key", keyVar: KEY },
 
   blocked(): string | undefined {
     return apiKey() === undefined ? `${KEY} is not set` : undefined;
@@ -60,7 +60,7 @@ export const openai: Provider = {
       {
         model: req.model,
         instructions: req.system,
-        input: req.messages.flatMap(toWireItems),
+        input: req.messages.flatMap((message) => toWireItems(message)),
         tools: req.tools.map(toWireTool),
         max_output_tokens: req.maxTokens,
         reasoning: { effort: normalizeEffort(req.effort), summary: "auto" },

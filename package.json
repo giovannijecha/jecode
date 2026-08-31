@@ -16,12 +16,16 @@
     "terminal",
     "tui",
     "ollama",
+    "openai",
+    "chatgpt",
+    "oauth",
     "typescript"
   ],
   "type": "module",
   "files": [
     "bin/",
     "dist/",
+    "docs/assets/brand/jeco-256.png",
     "LICENSE",
     "README.md"
   ],

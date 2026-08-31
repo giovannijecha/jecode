@@ -1,6 +1,7 @@
 // The shell needs a useful process environment, not the application's secrets.
 
 import { credentialValues } from "./credentials.ts";
+import { accountValues } from "./accounts.ts";
 
 const REDACTED = "[credential redacted]";
 const SENSITIVE_ENVIRONMENT_NAME =
@@ -73,7 +74,7 @@ function sensitiveEnvironmentName(name: string): boolean {
 }
 
 function secrets(source: NodeJS.ProcessEnv): string[] {
-  const values = new Set(credentialValues());
+  const values = new Set([...credentialValues(), ...accountValues()]);
   for (const [name, value] of Object.entries(source)) {
     if (value !== undefined && value !== "" && sensitiveEnvironment(name, value)) values.add(value);
   }

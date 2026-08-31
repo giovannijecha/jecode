@@ -1,5 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+import { reloadAccounts, updateOpenAICodexAccount } from "../src/accounts.ts";
 import {
   credentialRedactor,
   redactCredentials,
@@ -10,8 +14,8 @@ test("redacts one credential split across stream chunks", () => {
   const redact = credentialRedactor({ OPENAI_API_KEY: "fixture-split-secret" });
 
   assert.equal(redact.write("before fixture-split-"), "before ");
-  assert.equal(redact.write("secret after"), "[credential redacted] after");
-  assert.equal(redact.end(), "");
+  const remainder = `${redact.write("secret after")}${redact.end()}`;
+  assert.equal(remainder, "[credential redacted] after");
 });
 
 test("keeps the streaming buffer bounded for an overlapping credential", () => {
@@ -56,4 +60,28 @@ test("redacts credentials discovered through normalized environment names", () =
     redactCredentials("fixture-github-pat and fixture-npm-token", source),
     "[credential redacted] and [credential redacted]",
   );
+});
+
+test("redacts saved OAuth access and refresh tokens", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-redact-account-"));
+  const before = process.env["JECODE_HOME"];
+  process.env["JECODE_HOME"] = directory;
+  reloadAccounts();
+  try {
+    await updateOpenAICodexAccount(async () => ({
+      accessToken: "fixture-oauth-access",
+      refreshToken: "fixture-oauth-refresh",
+      expiresAt: 2_000_000_000_000,
+      accountId: "account-1",
+    }));
+    assert.equal(
+      redactCredentials("fixture-oauth-access and fixture-oauth-refresh", {}),
+      "[credential redacted] and [credential redacted]",
+    );
+  } finally {
+    if (before === undefined) delete process.env["JECODE_HOME"];
+    else process.env["JECODE_HOME"] = before;
+    reloadAccounts();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

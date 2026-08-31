@@ -53,7 +53,7 @@ prevents a network-backed `/models` request from overlapping a turn and gives
 There is no startup banner, permanent preamble, or automatic menu. Every launch
 opens on an empty transcript and composer; readiness remains visible in the
 footer, and `/settings` opens only when the user invokes it. Its nested
-provider, model, and credential flows use the same dock interaction as every
+provider, model, and authentication flows use the same dock interaction as every
 other selector. Cancelling a new provider leaves the previous provider and
 model unchanged.
 
@@ -61,12 +61,13 @@ model unchanged.
 
 The controller uses the normalized types in `src/types.ts`: messages contain
 text, tool calls, tool results, optional opaque provider data, and optional
-usage. Providers translate this vocabulary to three different APIs:
+usage. Providers translate this vocabulary to four transport/authentication paths:
 
 | Provider | API | Deployment |
 |---|---|---|
 | Anthropic | Messages | Cloud |
 | OpenAI | Responses | Cloud |
+| OpenAI Codex | ChatGPT Codex Responses | Cloud |
 | Ollama | OpenAI-compatible Chat Completions | Local loopback or hosted |
 
 Each provider has three responsibilities:
@@ -82,9 +83,12 @@ request can echo them without corrupting or inventing fields. Cross-provider
 history falls back to normalized content.
 
 OpenAI Responses requests use `store: false` and request encrypted reasoning
-content for stateless continuation. Refusals, incomplete responses, nested
-failures, and usage are normalized rather than disappearing at the stream
-boundary.
+content for stateless continuation. The `openai` provider authenticates with
+`OPENAI_API_KEY`; the separate `openai-codex` provider uses an explicitly
+connected ChatGPT account and the ChatGPT Codex backend. Their opaque history
+is tagged separately so it is never replayed across those trust boundaries.
+Refusals, incomplete responses, nested failures, and usage are normalized
+rather than disappearing at the stream boundary.
 
 The shared HTTP client retries transient network errors, rate limits, and 5xx
 responses only for idempotent catalogue GETs. Generation POSTs are never
@@ -167,16 +171,22 @@ model per provider, the Ollama endpoint, effort, limits, and reduced motion. Run
 precedence is CLI flags, environment variables, saved settings, then built-in
 defaults. Root and auto-approval stay process-only.
 
-Credentials resolve from environment, then in-memory session values, then the
-saved `~/.jecode/credentials.json` file. The environment wins. The TUI never
-prints a secret, and credential values never enter message history or
-transcript blocks. Older config-directory credentials remain a read-only
-fallback until the canonical file is first written.
+API keys resolve from environment, then in-memory session values, then the
+saved `~/.jecode/credentials.json` file. The environment wins. ChatGPT OAuth is
+an independent authentication kind stored in `~/.jecode/accounts.json`; it
+never shadows an API key or turns the OpenAI API provider into a subscription
+provider. The TUI never prints a secret, and authentication values never enter
+message history or transcript blocks. Older config-directory API keys remain a
+read-only fallback until the canonical file is first written.
 
-Saving is explicit. The credential directory and file use owner-only modes on
-POSIX; Windows relies on the user profile ACL. Replacement uses the same atomic
-writer as workspace files. `/credentials` shows only `environment`, `session`,
-`saved`, or `missing` and can remove a saved copy.
+Saving is explicit. Secret files use owner-only modes on POSIX; Windows relies
+on the user profile ACL. Replacement uses the same atomic writer as workspace
+files. `/credentials` shows only API-key sources or a non-secret ChatGPT
+identity and plan hint. OAuth uses PKCE for browser login, supports OpenAI's
+device-code path for WSL/headless terminals, refreshes early, retries one 401
+after refresh, and serializes rotating refresh-token writes with a bounded
+cross-process lock. Logout removes the local account even when remote
+revocation cannot be confirmed.
 
 jecode writes no conversation state automatically. `/export` is an explicit,
 argument-free operation that writes an automatically named Markdown transcript

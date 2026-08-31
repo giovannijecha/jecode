@@ -17,7 +17,7 @@ function provider(blocked?: string): Provider {
   return {
     id: "anthropic",
     defaultModel: "claude-sonnet-5",
-    keyVar: "ANTHROPIC_API_KEY",
+    auth: { kind: "api-key", keyVar: "ANTHROPIC_API_KEY" },
     blocked: () => blocked,
     models: () => Promise.resolve([]),
     send: (_request: SendRequest): Promise<Message> => Promise.reject(new Error("not called")),

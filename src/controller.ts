@@ -75,6 +75,9 @@ export async function runTurn(
     });
 
     const calls = assistant.content.filter(isToolCall);
+    if (assistant.content.length === 0) {
+      throw new Error(`${options.provider.id} completed without an answer or tool call`);
+    }
     if (calls.length > MAX_TOOL_CALLS_PER_STEP) {
       throw new Error(
         `provider returned ${calls.length} tool calls in one step (maximum ${MAX_TOOL_CALLS_PER_STEP})`,
