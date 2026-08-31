@@ -10,15 +10,23 @@ const config: Config = {
   effort: "high",
   maxTokens: 1_000,
   maxSteps: 4,
-  root: "/workspace/example",
+  root: "/workspace/jecode",
   autoApprove: false,
 };
 
 test("the system prompt stays product-neutral while retaining runtime context", () => {
   const prompt = systemPrompt(config);
+  const runtimeLines = new Set([
+    `Workspace root: ${config.root}`,
+    `Platform: ${process.platform}`,
+  ]);
+  const globalRules = prompt
+    .split("\n")
+    .filter((line) => !runtimeLines.has(line))
+    .join("\n");
 
-  assert.doesNotMatch(prompt, /\bjecode\b/i);
-  assert.doesNotMatch(prompt, /^You are\b/im);
+  assert.doesNotMatch(globalRules, /\bjecode\b/i);
+  assert.doesNotMatch(globalRules, /^You are\b/im);
   assert.ok(prompt.includes(`Workspace root: ${config.root}`));
   assert.ok(prompt.includes(`Platform: ${process.platform}`));
 });

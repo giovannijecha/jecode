@@ -28,9 +28,9 @@ loops. Complex work advances through more iterations of the same loop.
 ## One turn
 
 `src/prompt.ts` contributes runtime context plus tool and response rules. It
-does not assign Jecode's product identity to the model or automatically ingest
-repository files. Project identity enters context only through workspace
-content the model reads or content the user supplies.
+does not assign an assistant or product identity to the model or automatically
+ingest repository files. Project identity enters context only through
+workspace content the model reads or content the user supplies.
 
 `runTurn` owns the protocol:
 
