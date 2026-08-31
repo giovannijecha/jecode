@@ -13,6 +13,7 @@ import * as screen from "../src/tui/screen.ts";
 import {
   choiceCount,
   composeLab,
+  ANIMATED,
   SCENES,
 } from "./tui-lab/view.ts";
 import type { LabState, Scene } from "./tui-lab/view.ts";
@@ -25,7 +26,7 @@ async function run(): Promise<void> {
   }
 
   let state: LabState = {
-    scene: "conversation",
+    scene: "golden",
     palette: STEEL,
     expanded: true,
     selected: 0,
@@ -76,31 +77,31 @@ async function run(): Promise<void> {
   const handleChar = (char: string): void => {
     switch (char.toLocaleLowerCase()) {
       case "1":
-        setState({ scene: "conversation", selected: 0 });
+        setState({ scene: "golden", selected: 0 });
         return;
       case "2":
-        setState({ scene: "tools", selected: 0 });
+        setState({ scene: "conversation", selected: 0 });
         return;
       case "3":
-        setState({ scene: "diff", selected: 0 });
+        setState({ scene: "tools-live", selected: 0 });
         return;
       case "4":
-        setState({ scene: "commands", selected: 0 });
+        setState({ scene: "tools-trace", selected: 0 });
         return;
       case "5":
-        setState({ scene: "field", selected: 0 });
+        setState({ scene: "tools-output", selected: 0 });
         return;
       case "6":
-        setState({ scene: "markdown", selected: 0 });
+        setState({ scene: "tools-stream", selected: 0 });
         return;
       case "7":
-        setState({ scene: "settings", selected: 0 });
+        setState({ scene: "tools-diff", selected: 0 });
         return;
       case "8":
-        setState({ scene: "reasoning", selected: 0 });
+        setState({ scene: "approve-edit", selected: 0 });
         return;
       case "9":
-        setState({ scene: "feedback", selected: 0 });
+        setState({ scene: "approve-command", selected: 0 });
         return;
       case "o":
         setState({ expanded: !state.expanded });
@@ -122,8 +123,8 @@ async function run(): Promise<void> {
     }
 
     if (key.name === "escape") {
-      if (state.scene === "diff") {
-        setState({ selected: choiceCount("diff") - 1 });
+      if (state.scene === "approve-edit" || state.scene === "approve-command") {
+        setState({ selected: choiceCount(state.scene) - 1 });
       }
       return;
     }
@@ -162,7 +163,7 @@ async function run(): Promise<void> {
 
   screen.enter(false);
   const animation = setInterval(() => {
-    if (!live || state.scene !== "tools") return;
+    if (!live || !ANIMATED.has(state.scene)) return;
     state = { ...state, tick: state.tick + 1 };
     draw();
   }, 80);

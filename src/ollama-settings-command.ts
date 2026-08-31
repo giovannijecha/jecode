@@ -36,7 +36,6 @@ export async function ollamaConnectionSetting(
   const current = ollamaConnection();
   const index = await host.choose({
     title: heading("Ollama connection", "where Ollama requests run", session.palette),
-    right: "↑↓ enter · esc back",
     options: [
       { label: "cloud", hint: "ollama.com · API key" },
       { label: "local", hint: "this computer · no API key" },

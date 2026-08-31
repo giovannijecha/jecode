@@ -7,7 +7,7 @@ import { SCENES } from "./model.ts";
 import type { LabFrame, LabState, Scene } from "./model.ts";
 import { sceneView } from "./scenes.ts";
 
-export { SCENES } from "./model.ts";
+export { ANIMATED, SCENES } from "./model.ts";
 export type { LabFrame, LabState, Scene } from "./model.ts";
 
 export function composeLab(state: LabState, size: Size): LabFrame {
@@ -16,8 +16,9 @@ export function composeLab(state: LabState, size: Size): LabFrame {
 }
 
 export function choiceCount(scene: Scene): number {
-  if (scene === "diff") return 3;
-  if (scene === "commands") return Math.min(4, matches("/").length);
-  if (scene === "settings") return 10;
+  if (scene === "approve-edit" || scene === "approve-command") return 3;
+  if (scene === "menu-commands") return Math.min(4, matches("/").length);
+  if (scene === "menu-settings") return 10;
+  if (scene === "menu-search") return 3;
   return 1;
 }

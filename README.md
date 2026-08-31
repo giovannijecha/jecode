@@ -164,8 +164,9 @@ Useful controls:
   the place you are reading.
 - **Ctrl+O** expands or compacts the latest reasoning or tool-detail block.
 
-The one-line footer keeps model, effort, and workspace on the left. Live work,
-readiness guidance, and temporary feedback use the right edge without polluting
+The one-line footer keeps model, effort, and workspace on the left. Live work
+stays visible on the reasoning and tool rail; the right edge carries the
+interrupt hint, readiness guidance, and temporary feedback without polluting
 the transcript.
 
 ## Configuration
@@ -253,8 +254,9 @@ npm ci --ignore-scripts
 npm run check
 ~~~
 
-The visual lab exercises the TUI without a provider, network access, tool
-execution, or workspace writes:
+The visual lab exercises the complete production TUI—golden conversation,
+live tool trace, output tails, change-centric diffs, approvals, menus, and
+fields—without a provider, network access, tool execution, or workspace writes:
 
 ~~~console
 npm run tui:lab

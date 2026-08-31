@@ -1,6 +1,6 @@
 import type { Palette } from "../../ui/theme.ts";
 import { row } from "../../ui/render.ts";
-import { charWidth, graphemes } from "../../ui/width.ts";
+import { charWidth, graphemes, textWidth } from "../../ui/width.ts";
 import type { Editor } from "../editor.ts";
 import type { Cursor } from "../frame.ts";
 
@@ -11,13 +11,19 @@ export function renderComposer(
   width: number,
   maxInputRows: number,
   pal: Palette,
+  right = "",
 ): Composer {
-  const laid = layout(editor, Math.max(1, width));
+  const rightRoom = right === "" ? 0 : textWidth(right) + 1;
+  const laid = layout(editor, Math.max(1, width - rightRoom));
   const room = Math.max(1, maxInputRows);
   const first = Math.max(0, Math.min(laid.lines.length - room, laid.cursor.row));
   const shown = laid.lines.slice(first, first + room);
   return {
-    rows: shown.map((line) => row(width, [{ text: line, fg: pal.ink.bright }])),
+    rows: shown.map((line, index) => row(
+      width,
+      [{ text: line, fg: pal.ink.bright }],
+      index === 0 && right !== "" ? [{ text: right, fg: pal.ink.muted }] : [],
+    )),
     cursor: { row: laid.cursor.row - first, col: laid.cursor.col },
   };
 }

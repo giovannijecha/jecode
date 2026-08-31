@@ -6,6 +6,8 @@ export type ToolContext = {
   signal?: AbortSignal;
   /** The exact state the user approved, when this call presented a preview. */
   preview?: ToolPreview;
+  /** Current bounded, credential-redacted output while a command is running. */
+  onOutput?(output: string): void;
 };
 
 export type ToolOutput = {

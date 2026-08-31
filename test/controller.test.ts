@@ -254,8 +254,10 @@ test("a shell credential cannot reach the provider follow-up or display events",
   ]);
   const history: Message[] = [];
   const shown: string[] = [];
+  const live: string[] = [];
   const sink = events();
   sink.onToolResult = (_call, result) => shown.push(result.output);
+  sink.onToolOutput = (_call, output) => live.push(output);
 
   await runTurn(history, options(provider, { tools: [runCommand] }), sink);
 
@@ -265,6 +267,9 @@ test("a shell credential cannot reach the provider follow-up or display events",
   assert.match(sent, /\[credential redacted\]/);
   assert.doesNotMatch(sent, /fixture-controller-credential-4902/);
   assert.deepEqual(shown, [sent]);
+  assert.ok(live.length > 0);
+  assert.ok(live.every((output) => !output.includes(secret)));
+  assert.ok(live.some((output) => output.includes("[credential redacted]")));
 });
 
 function restoreEnvironment(name: string, value: string | undefined): void {

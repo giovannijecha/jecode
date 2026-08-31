@@ -25,9 +25,11 @@ export function panel(modal: Modal, width: number, pal: Palette, maxRows?: numbe
 /**
  * Where the caret goes while this is open, if it goes anywhere.
  *
- * A menu is read, not typed into, so it hides the caret entirely — a blinking
- * block on a row nobody is editing is an invitation to type into it.
+ * Menus without search hide the caret; searchable menus expose the shared
+ * query prompt and place the terminal caret at its real editing position.
  */
-export function caret(modal: Modal, width: number): Cursor | undefined {
-  return modal.kind === "type" ? field.caret(modal.field, width) : undefined;
+export function caret(modal: Modal, width: number, maxRows?: number): Cursor | undefined {
+  return modal.kind === "type"
+    ? field.caret(modal.field, width)
+    : picker.caret(modal.picker, width, maxRows);
 }

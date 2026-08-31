@@ -36,6 +36,8 @@ export type ControllerEvents = {
   onToolCall(call: ToolCallBlock, look?: ToolPreview): void;
   /** `summary` is the tool's own one-phrase measure of what it did. */
   onToolResult(call: ToolCallBlock, result: ToolResultBlock, summary?: string): void;
+  /** A safe, bounded snapshot of output from a tool that can report progress. */
+  onToolOutput?(call: ToolCallBlock, output: string): void;
   approve(call: ToolCallBlock): Promise<boolean>;
   onUsage?(usage: Usage): void;
   onStep?(step: number, total: number): void;
@@ -121,7 +123,12 @@ async function settle(
     return refuse(call, "the user declined this call — ask them how to proceed", "declined");
   }
 
-  return runTool(tool, call, { ...options.toolContext, signal, preview });
+  return runTool(tool, call, {
+    ...options.toolContext,
+    signal,
+    preview,
+    onOutput: (output) => events.onToolOutput?.(call, output),
+  });
 }
 
 function refuse(call: ToolCallBlock, reason: string, summary: string): ToolRun {

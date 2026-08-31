@@ -35,6 +35,8 @@ export type ToolBlock = {
   tone: ToolTone;
   body?: Detail[];
   expanded?: boolean;
+  /** Wall-clock start for the live elapsed label; absent while approval waits. */
+  startedAt?: number;
 };
 export type NoticeBlock = { kind: "notice"; text: string; tone: NoticeTone };
 export type ListBlock = { kind: "list"; items: { text: string; dim: boolean }[] };

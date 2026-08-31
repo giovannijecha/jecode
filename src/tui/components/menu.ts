@@ -2,7 +2,7 @@
 
 import type { Palette } from "../../ui/theme.ts";
 import type { Seg } from "../../ui/render.ts";
-import { plainLen, row } from "../../ui/render.ts";
+import { hasColor, plainLen, row } from "../../ui/render.ts";
 import { elide } from "../../ui/width.ts";
 
 export type MenuEntry = {
@@ -28,24 +28,29 @@ export function menuWindow(length: number, selected: number, visible: number): {
 }
 
 function renderEntry(entry: MenuEntry, labelWidth: number, width: number, pal: Palette): string {
-  const fg = entry.selected ? pal.accent : pal.ink.fg;
+  // Colour terminals use one quiet selection band. In monochrome the arrow is
+  // structural rather than decorative, so selection remains unambiguous.
+  const monochrome = !hasColor();
+  const selectedMark = entry.selected && monochrome ? "→ " : "  ";
+  const fg = entry.selected ? pal.ink.bright : pal.ink.fg;
   const primary: Seg[] = [
-    { text: entry.selected ? "→ " : "  ", fg },
+    { text: selectedMark, fg: entry.selected ? pal.accent : fg },
     { text: entry.label, fg },
   ];
 
   if (width > 40 && entry.description !== undefined) {
     const gap = Math.max(2, labelWidth - primaryWidth(entry));
-    primary.push({ text: `${" ".repeat(gap)}${entry.description}`, fg: entry.selected ? pal.accent : pal.ink.muted });
+    primary.push({ text: `${" ".repeat(gap)}${entry.description}`, fg: entry.selected ? pal.ink.fg : pal.ink.muted });
   }
 
   const right = width > 40 && entry.hint !== undefined
     ? [{
         text: elide(entry.hint, Math.max(1, Math.floor(width / 4))),
-        fg: entry.selected ? pal.accent : pal.ink.muted,
+        fg: entry.selected ? pal.ink.fg : pal.ink.muted,
       }]
     : [];
-  return row(width, primary, right);
+  const ground = entry.selected && !monochrome ? pal.surface.inset : undefined;
+  return row(width, primary, right, ground);
 }
 
 function primaryWidth(entry: Pick<MenuEntry, "label">): number {

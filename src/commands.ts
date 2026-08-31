@@ -176,7 +176,6 @@ async function permissions(session: Session, host: Host): Promise<void> {
 
   const index = await choose({
     title: heading("revoke permission", "applies only to this session", session.palette),
-    right: "↑↓ enter · esc close",
     options: [
       ...entries.map((entry) => ({ label: entry.label, hint: "revoke" })),
       { label: "all remembered permissions", hint: "revoke all" },

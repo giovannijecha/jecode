@@ -2,9 +2,11 @@
 
 import type { Palette } from "../ui/theme.ts";
 import type { Block } from "./blocks.ts";
+import type { RenderContext } from "./blocks.ts";
 import { render } from "./blocks.ts";
 
-type DrawBlock = (block: Block, width: number, palette: Palette) => string[];
+type DrawBlock = (block: Block, width: number, palette: Palette, context?: RenderContext) => string[];
+type RenderState = Omit<RenderContext, "previous">;
 
 type Entry = {
   block: Block;
@@ -23,6 +25,7 @@ export type TranscriptRenderer = {
     height: number,
     scroll: number,
     palette: Palette,
+    state?: RenderState,
   ): TranscriptViewport;
   /** Reflow everything, or only one block whose semantic state changed. */
   invalidate(block?: Block): void;
@@ -46,8 +49,8 @@ export function transcriptRenderer(draw: DrawBlock = render): TranscriptRenderer
   const dirty = new Set<Block>();
 
   return {
-    viewport(blocks, width, height, scroll, palette) {
-      sync(blocks, width, palette);
+    viewport(blocks, width, height, scroll, palette, state = {}) {
+      sync(blocks, width, palette, state);
       const visibleHeight = Math.max(0, height);
       const totalRows = ends.at(-1) ?? 0;
       const maxScroll = Math.max(0, totalRows - visibleHeight);
@@ -82,7 +85,7 @@ export function transcriptRenderer(draw: DrawBlock = render): TranscriptRenderer
     },
   };
 
-  function sync(blocks: readonly Block[], width: number, palette: Palette): void {
+  function sync(blocks: readonly Block[], width: number, palette: Palette, state: RenderState): void {
     if (
       source !== blocks ||
       layoutWidth !== width ||
@@ -90,15 +93,15 @@ export function transcriptRenderer(draw: DrawBlock = render): TranscriptRenderer
       blocks.length < entries.length ||
       edgeChanged(blocks)
     ) {
-      rebuild(blocks, width, palette);
+      rebuild(blocks, width, palette, state);
       return;
     }
 
-    append(blocks, width, palette);
-    refreshDirty(width, palette);
+    append(blocks, width, palette, state);
+    refreshDirty(width, palette, state);
   }
 
-  function rebuild(blocks: readonly Block[], width: number, palette: Palette): void {
+  function rebuild(blocks: readonly Block[], width: number, palette: Palette, state: RenderState): void {
     source = blocks;
     layoutWidth = width;
     layoutPalette = palette;
@@ -106,15 +109,15 @@ export function transcriptRenderer(draw: DrawBlock = render): TranscriptRenderer
     ends = [];
     positions = new WeakMap<Block, number>();
     dirty.clear();
-    append(blocks, width, palette);
+    append(blocks, width, palette, state);
   }
 
-  function append(blocks: readonly Block[], width: number, palette: Palette): void {
+  function append(blocks: readonly Block[], width: number, palette: Palette, state: RenderState): void {
     let total = ends.at(-1) ?? 0;
     for (let index = entries.length; index < blocks.length; index++) {
       const block = blocks[index];
       if (block === undefined) continue;
-      const rows = draw(block, width, palette);
+      const rows = draw(block, width, palette, { ...state, previous: blocks[index - 1] });
       entries.push({ block, rows });
       positions.set(block, index);
       dirty.delete(block);
@@ -123,7 +126,7 @@ export function transcriptRenderer(draw: DrawBlock = render): TranscriptRenderer
     }
   }
 
-  function refreshDirty(width: number, palette: Palette): void {
+  function refreshDirty(width: number, palette: Palette, state: RenderState): void {
     if (dirty.size === 0) return;
     const changed = [...dirty]
       .map((block) => positions.get(block))
@@ -135,7 +138,12 @@ export function transcriptRenderer(draw: DrawBlock = render): TranscriptRenderer
     const first = changed[0] as number;
     for (const index of changed) {
       const entry = entries[index];
-      if (entry !== undefined) entry.rows = draw(entry.block, width, palette);
+      if (entry !== undefined) {
+        entry.rows = draw(entry.block, width, palette, {
+          ...state,
+          previous: entries[index - 1]?.block,
+        });
+      }
     }
     recomputeEnds(first);
   }

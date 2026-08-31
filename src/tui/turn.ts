@@ -22,7 +22,7 @@ export type Stage = {
   approved(call: ToolCallBlock): boolean;
   /** Stop asking about this narrow call scope for the rest of the session. */
   remember(call: ToolCallBlock): void;
-  /** What the footer says is happening, in the words of what is happening. */
+  /** Track whether a turn is active so the footer can offer interruption. */
   status(text: string): void;
   usage?(usage: Usage): void;
   palette: Palette;
@@ -33,15 +33,9 @@ export type Transcription = ControllerEvents & {
   finish(): void;
 };
 
-/**
- * What the footer can truthfully say.
- *
- * Every one of these is read off an event that has actually arrived, never
- * from a guess about where the turn probably is. A status line that says one
- * thing for the whole turn is decoration; this one is the only window into a
- * process that is otherwise silent for seconds at a time, so it has to be
- * worth believing.
- */
+// Semantic activity labels remain useful state even though the quiet footer
+// reduces them to one stable interruption hint. Reasoning and tools identify
+// the live work in the transcript itself.
 const WAITING = "Waiting";
 const THINKING = "Thinking";
 const WRITING = "Writing";
@@ -125,12 +119,20 @@ export function transcribe(stage: Stage): Transcription {
         kind: "tool",
         name: call.name,
         target: target(call.input),
-        right: "pending",
+        right: "running",
         tone: "pending",
         body: preview(call, look),
+        startedAt: Date.now(),
       };
       tools.set(call.id, block);
       stage.emit(block);
+      stage.render(block);
+    },
+
+    onToolOutput(call, output) {
+      const block = tools.get(call.id);
+      if (block === undefined || block.kind !== "tool" || block.tone !== "pending") return;
+      block.body = details(output, "out");
       stage.render(block);
     },
 
@@ -138,9 +140,14 @@ export function transcribe(stage: Stage): Transcription {
       stage.status(waiting(step, steps));
       const block = tools.get(call.id);
       if (block === undefined || block.kind !== "tool") return;
+      if (block.tone === "deny") {
+        stage.render(block);
+        return;
+      }
 
       block.tone = result.isError ? "fail" : "ok";
       block.right = summary ?? "";
+      block.startedAt = undefined;
 
       // A failure replaces the preview: what the call was going to do stops
       // being the interesting part the moment it did not do it.
@@ -153,29 +160,55 @@ export function transcribe(stage: Stage): Transcription {
     },
 
     approve(call) {
-      if (stage.approved(call)) return Promise.resolve(true);
+      const block = tools.get(call.id);
+      if (stage.approved(call)) {
+        if (block !== undefined && block.kind === "tool") {
+          block.right = "running";
+          block.startedAt ??= Date.now();
+          stage.render(block);
+        }
+        return Promise.resolve(true);
+      }
       const changed = close();
       if (changed !== undefined) stage.render(changed);
       stage.status(ASKING);
+      if (block !== undefined && block.kind === "tool") {
+        block.right = pendingApproval(block.body);
+        block.startedAt = undefined;
+        stage.render(block);
+      }
 
       return new Promise<boolean>((resolve) => {
         stage.ask(promptFor(call, target(call.input), stage.palette), (answer) => {
           if (answer === "always") stage.remember(call);
           const approved = answer !== "no";
 
-          const block = tools.get(call.id);
-          if (!approved && block !== undefined && block.kind === "tool") {
-            block.tone = "deny";
-            block.right = "declined";
-            block.body = undefined;
+          const settled = tools.get(call.id);
+          if (settled !== undefined && settled.kind === "tool") {
+            if (approved) {
+              settled.tone = "pending";
+              settled.right = "running";
+              settled.startedAt = Date.now();
+            } else {
+              settled.tone = "deny";
+              settled.right = "denied";
+              settled.startedAt = undefined;
+            }
           }
           stage.status(approved ? `Running ${call.name}` : waiting(step, steps));
-          stage.render(block);
+          stage.render(settled);
           resolve(approved);
         });
       });
     },
   };
+}
+
+function pendingApproval(body: Detail[] | undefined): string {
+  const added = body?.filter((detail) => detail.kind === "add").length ?? 0;
+  const removed = body?.filter((detail) => detail.kind === "del").length ?? 0;
+  const summary = added + removed === 0 ? "" : `+${added} −${removed} · `;
+  return `${summary}pending approval`;
 }
 
 function waiting(step: number, total: number): string {

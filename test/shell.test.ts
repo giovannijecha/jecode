@@ -100,6 +100,32 @@ test("redacts a known credential before shell output leaves the tool", async (co
   assert.doesNotMatch(result.output, /fixture-visible-credential-8173/);
 });
 
+test("live command snapshots are bounded and redacted before the TUI sees them", async (context) => {
+  const secret = "fixture-live-credential-91827";
+  const keyBefore = process.env["OPENAI_API_KEY"];
+  const visibleBefore = process.env["JECODE_REVIEW_VISIBLE"];
+  process.env["OPENAI_API_KEY"] = secret;
+  process.env["JECODE_REVIEW_VISIBLE"] = secret;
+  context.after(() => {
+    restoreEnvironment("OPENAI_API_KEY", keyBefore);
+    restoreEnvironment("JECODE_REVIEW_VISIBLE", visibleBefore);
+  });
+
+  const snapshots: string[] = [];
+  await runCommand.run(
+    {
+      command:
+        "node -e \"process.stdout.write('start\\n' + (process.env.JECODE_REVIEW_VISIBLE ?? '') + '\\n' + 'x'.repeat(40000))\"",
+    },
+    { root, onOutput: (output) => snapshots.push(output) },
+  );
+
+  assert.ok(snapshots.length > 0);
+  assert.ok(snapshots.some((output) => output.includes("[credential redacted]")));
+  assert.ok(snapshots.every((output) => !output.includes(secret)));
+  assert.ok(snapshots.every((output) => output.length < 31_000));
+});
+
 test("redacts a credential before a bounded head-tail output split", async (context) => {
   const secret = "fixture-boundary-credential-762918";
   const keyBefore = process.env["OPENAI_API_KEY"];
