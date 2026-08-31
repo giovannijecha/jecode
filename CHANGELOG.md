@@ -4,6 +4,29 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.2.1] - 2026-08-31
+
+### Changed
+
+- Limited provider model and effort menus to capabilities that each transport
+  can satisfy, including the authenticated ChatGPT model catalogue.
+- Bounded live reasoning rendering while retaining complete thought content
+  for expansion and transcript export.
+
+### Fixed
+
+- Kept provider history and tool rails consistent when a tool batch is
+  interrupted.
+- Preserved replacement tokens such as `$$` and `$&` literally in `edit_file`.
+- Sent immediate EOF to shell commands and reported non-zero exits and timeouts
+  as tool errors.
+- Completed OAuth refresh-token rotation independently from caller
+  cancellation.
+- Rejected Anthropic, OpenAI, and Ollama streams that end without their required
+  terminal event.
+- Preserved SSH agent access for approved commands without forwarding
+  secret-bearing environment variables.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added
@@ -154,6 +177,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.2.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.1
 [0.2.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.0
 [0.1.9]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.9
 [0.1.8]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.8
