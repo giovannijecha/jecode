@@ -5,8 +5,6 @@ import type { Config } from "./config.ts";
 
 export function systemPrompt(config: Config): string {
   return [
-    "You are jecode, a coding agent working in a terminal alongside the user.",
-    "",
     `Workspace root: ${config.root}`,
     `Platform: ${process.platform}`,
     "",
