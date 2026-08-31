@@ -2,7 +2,7 @@
 
 import type { Palette } from "../ui/theme.ts";
 import { renderAnswer, renderReasoning, renderUser } from "./components/messages.ts";
-import { renderList, renderNotice } from "./components/misc.ts";
+import { renderNotice } from "./components/misc.ts";
 import { renderTool } from "./components/tool.ts";
 import type { Block } from "./components/types.ts";
 
@@ -18,7 +18,6 @@ export type {
   Block,
   Detail,
   Emphasis,
-  ListBlock,
   NoticeBlock,
   NoticeTone,
   ReasoningBlock,
@@ -44,8 +43,6 @@ export function render(block: Block, width: number, pal: Palette, context: Rende
       });
     case "notice":
       return renderNotice(block, width, pal);
-    case "list":
-      return renderList(block, width, pal);
   }
 }
 

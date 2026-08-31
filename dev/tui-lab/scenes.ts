@@ -39,6 +39,7 @@ export function sceneView(state: LabState): View {
     case "menu-commands": return commandsScene(state);
     case "menu-search": return searchScene(state);
     case "menu-settings": return settingsScene(state);
+    case "help": return helpScene(state);
     case "field": return fieldScene(state);
     case "markdown": return markdownScene(state);
     case "reasoning": return reasoningScene(state);
@@ -306,6 +307,16 @@ function settingsScene(state: LabState): View {
         reducedMotion: false,
       }, state.palette, state.selected, "~/.jecode/settings.json"),
     },
+  };
+}
+
+function helpScene(state: LabState): View {
+  return {
+    ...base(state),
+    blocks: [{ kind: "answer", text: "Operational reference stays outside the conversation." }],
+    editor: edit.EMPTY,
+    scroll: 0,
+    modal: { kind: "help" },
   };
 }
 

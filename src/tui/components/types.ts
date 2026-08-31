@@ -39,12 +39,10 @@ export type ToolBlock = {
   startedAt?: number;
 };
 export type NoticeBlock = { kind: "notice"; text: string; tone: NoticeTone };
-export type ListBlock = { kind: "list"; items: { text: string; dim: boolean }[] };
 
 export type Block =
   | UserBlock
   | AnswerBlock
   | ReasoningBlock
   | ToolBlock
-  | NoticeBlock
-  | ListBlock;
+  | NoticeBlock;

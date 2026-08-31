@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Key } from "../src/tui/keys.ts";
 import type { Open } from "../src/tui/overlay.ts";
-import { handle } from "../src/tui/overlay.ts";
+import { handle, shown } from "../src/tui/overlay.ts";
 import * as edit from "../src/tui/editor.ts";
 
 const key = (name: string, text = "", ctrl = false): Key => ({ name, text, ctrl });
@@ -135,4 +135,20 @@ test("a field remains single-line when pasted text contains newlines", () => {
   open = handle(open, key("paste", "abc\ndef\n")).open;
   assert.ok(open !== undefined && "field" in open);
   assert.equal(open.field.editor.text, "abcdef");
+});
+
+test("help is read-only and escape closes it", () => {
+  let settled = 0;
+  const open: Open = {
+    help: true,
+    settle: () => {
+      settled++;
+    },
+  };
+
+  assert.deepEqual(shown(open), { kind: "help" });
+  assert.equal(handle(open, key("char", "x")).open, open);
+  assert.equal(settled, 0);
+  assert.equal(handle(open, key("escape")).open, undefined);
+  assert.equal(settled, 1);
 });

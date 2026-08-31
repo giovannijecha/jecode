@@ -2,11 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import type { Session } from "../src/session.ts";
-import type { Block } from "../src/tui/blocks.ts";
+import type { NoticeBlock } from "../src/tui/blocks.ts";
 import type { Picker } from "../src/tui/picker.ts";
 import type { Field } from "../src/tui/field.ts";
 import type { Host } from "../src/commands.ts";
-import { handleCommand } from "../src/commands.ts";
+import { COMMANDS, handleCommand } from "../src/commands.ts";
 import {
   listModels,
   MAX_MODEL_CATALOG_ENTRIES,
@@ -54,9 +54,10 @@ function session(from: Provider): Session {
 }
 
 type Screen = Host & {
-  blocks: Block[];
+  blocks: NoticeBlock[];
   pickers: Picker[];
   fields: Field[];
+  helps: number;
   /** What the next field hands back. Unset means the user backed out. */
   typed?: string;
 };
@@ -67,6 +68,7 @@ function host(...answers: (number | undefined)[]): Screen {
     blocks: [],
     pickers: [],
     fields: [],
+    helps: 0,
     emit: (block) => {
       screen.blocks.push(block);
     },
@@ -78,12 +80,16 @@ function host(...answers: (number | undefined)[]): Screen {
       screen.fields.push(field);
       return Promise.resolve(screen.typed);
     },
+    showHelp: () => {
+      screen.helps++;
+      return Promise.resolve();
+    },
   };
   return screen;
 }
 
-function texts(blocks: Block[]): string[] {
-  return blocks.map((block) => ("text" in block ? block.text : block.kind));
+function texts(blocks: NoticeBlock[]): string[] {
+  return blocks.map((block) => block.text);
 }
 
 test("the model menu offers what the provider says it has", async () => {
@@ -174,7 +180,7 @@ test("a menu command without a screen says so, and asks nothing", async () => {
       return Promise.resolve(["a"]);
     },
   });
-  const blocks: Block[] = [];
+  const blocks: NoticeBlock[] = [];
 
   await handleCommand("/models", live, { emit: (block) => blocks.push(block) });
 
@@ -306,26 +312,22 @@ test("new clears conversation usage and screen-local state", async () => {
   assert.match(texts(screen.blocks)[0] ?? "", /approvals cleared/);
 });
 
-test("usage reports cumulative tokens and the latest context", async () => {
-  const live = session(provider("fake", ["a"]));
-  Object.assign(live.usage, {
-    requests: 3,
-    lastInputTokens: 1_250,
-    inputTokens: 12_000,
-    outputTokens: 900,
-    cachedInputTokens: 4_000,
-  });
+test("help opens a temporary surface without emitting transcript content", async () => {
   const screen = host();
 
-  await handleCommand("/usage", live, screen);
+  await handleCommand("/help", session(provider("fake", ["a"])), screen);
 
-  const block = screen.blocks[0];
-  assert.equal(block?.kind, "list");
-  const report = block?.kind === "list" ? block.items.map((item) => item.text).join("\n") : "";
-  assert.match(report, /requests\s+3/);
-  assert.match(report, /latest context\s+1\.3k/);
-  assert.match(report, /input\s+12k/);
-  assert.match(report, /cached input\s+4\.0k/);
+  assert.equal(screen.helps, 1);
+  assert.deepEqual(screen.blocks, []);
+});
+
+test("usage remains internal and is absent from the command surface", async () => {
+  const screen = host();
+
+  assert.equal(COMMANDS.some((command) => command.name === "usage"), false);
+  await handleCommand("/usage", session(provider("fake", ["a"])), screen);
+
+  assert.match(texts(screen.blocks)[0] ?? "", /unknown command \/usage/);
 });
 
 test("export saves immediately to its automatic destination", async () => {

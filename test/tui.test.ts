@@ -222,8 +222,8 @@ test("the command menu follows an arrow selection beyond its first window", () =
     { rows: 24, cols: 80 },
   );
   const shown = strip(frame.rows).join("\n");
-  assert.match(shown, /→ \/permissions/);
-  assert.doesNotMatch(shown, /\/help\s+this list/);
+  assert.match(shown, /→ \/settings/);
+  assert.doesNotMatch(shown, /\/help\s+show keyboard controls/);
 });
 
 test("command suggestions stay between the composer's two rails", () => {
@@ -234,9 +234,9 @@ test("command suggestions stay between the composer's two rails", () => {
   const rows = strip(frame.rows);
   const input = frame.cursor?.row ?? -1;
   const first = rows.findIndex((line) => line.includes("/help"));
-  const last = rows.findIndex((line) => line.includes("/usage"));
+  const last = rows.findIndex((line) => line.includes("/export"));
   assert.equal(rows[input - 1], "─".repeat(80));
-  assert.match(rows[input] ?? "", /^\/.*1–4 \/ 12$/);
+  assert.match(rows[input] ?? "", /^\/.*1–4 \/ 11$/);
   assert.equal(first, input + 1);
   assert.equal(rows[last + 1], "─".repeat(80));
   assert.match(rows[first] ?? "", /→/);
@@ -680,4 +680,21 @@ test("an open menu shows no caret at all", () => {
   );
 
   assert.equal(frame.cursor, undefined);
+});
+
+test("help is a compact dock surface with no transcript caret", () => {
+  const frame = compose(
+    {
+      ...base(),
+      modal: { kind: "help" },
+    },
+    { rows: 24, cols: 80 },
+  );
+
+  const shown = strip(frame.rows).join("\n");
+  assert.match(shown, /help\s+keyboard controls.*esc close/);
+  assert.match(shown, /ctrl\+o\s+toggle reasoning or tool details/);
+  assert.doesNotMatch(shown, /\/usage/);
+  assert.equal(frame.cursor, undefined);
+  assert.equal(frame.rows.length, 24);
 });

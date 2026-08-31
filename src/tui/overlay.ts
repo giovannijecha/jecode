@@ -1,4 +1,4 @@
-// The modal interaction layer: one picker or one single-line field.
+// The modal interaction layer: a picker, a single-line field, or read-only help.
 
 import type { Key } from "./keys.ts";
 import type { Picker } from "./picker.ts";
@@ -10,18 +10,22 @@ import type { Modal } from "./modal.ts";
 
 export type Open =
   | { picker: Picker; settle(index?: number): void }
-  | { field: Field; settle(text?: string): void };
+  | { field: Field; settle(text?: string): void }
+  | { help: true; settle(): void };
 
 export type Outcome = { open?: Open; abort?: boolean; quit?: boolean };
 
 export function shown(open: Open | undefined): Modal | undefined {
   if (open === undefined) return undefined;
-  return "picker" in open ? { kind: "pick", picker: open.picker } : { kind: "type", field: open.field };
+  if ("picker" in open) return { kind: "pick", picker: open.picker };
+  if ("field" in open) return { kind: "type", field: open.field };
+  return { kind: "help" };
 }
 
 export function cancel(open: Open | undefined): undefined {
   if (open === undefined) return undefined;
-  open.settle(undefined);
+  if ("help" in open) open.settle();
+  else open.settle(undefined);
   return undefined;
 }
 
@@ -38,7 +42,9 @@ export function handle(open: Open, key: Key): Outcome {
     cancel(open);
     return {};
   }
-  return "picker" in open ? handlePicker(open, key) : handleField(open, key);
+  if ("picker" in open) return handlePicker(open, key);
+  if ("field" in open) return handleField(open, key);
+  return { open };
 }
 
 function handlePicker(open: Extract<Open, { picker: Picker }>, key: Key): Outcome {

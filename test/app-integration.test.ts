@@ -69,7 +69,7 @@ test("batch mode carries input through the controller, renderer, commands, and e
   const current = session();
 
   await runBatch(current, {
-    lines: input("hello", "/usage", "/exit", "ignored"),
+    lines: input("hello", "/help", "/exit", "ignored"),
     width: 60,
     write: (text) => output.push(text),
   });
@@ -77,7 +77,7 @@ test("batch mode carries input through the controller, renderer, commands, and e
   const shown = output.join("");
   assert.match(shown, /> hello/);
   assert.match(shown, /Hello from fake\./);
-  assert.match(shown, /requests\s+1/);
+  assert.match(shown, /interactive help needs the TUI/);
   assert.doesNotMatch(shown, /ignored/);
   assert.equal(current.history.length, 2);
 });
@@ -314,6 +314,30 @@ test("/export writes without a picker to the directory where Jecode was launched
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("/help stays in the dock and disappears when escape closes it", async () => {
+  const harness = virtualScreen();
+  const running = runApp(session(), process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  feed("/help\r");
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("keyboard controls"),
+    "help dock",
+  );
+  const openedAt = harness.frames.length;
+
+  feed(String.fromCharCode(27));
+  await waitFor(
+    () => harness.frames.length > openedAt &&
+      !(harness.frames.at(-1) ?? []).join("\n").includes("keyboard controls"),
+    "closed help dock",
+  );
+
+  feed("/exit\r");
+  await running;
+  assert.equal(harness.left(), true);
 });
 
 test("the packaged jecode executable reaches batch help without a developer script", async () => {

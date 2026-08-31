@@ -1,9 +1,9 @@
 // Completing a slash command.
 //
-// A command the user cannot remember is a command that does not exist, and
-// `/help` only helps someone who already knows to ask. So the menu appears
-// while the line is being typed. Selection is state, not an edit: arrows move
-// through the list without rewriting what the user typed.
+// A command the user cannot remember is a command that does not exist. `/help`
+// owns keyboard controls; discovery belongs here, while the line is being
+// typed. Selection is state, not an edit: arrows move through the list without
+// rewriting what the user typed.
 
 import type { Command } from "../commands.ts";
 import { COMMANDS } from "../commands.ts";

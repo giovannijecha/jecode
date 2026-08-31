@@ -40,9 +40,6 @@ export function transcriptMarkdown(blocks: readonly Block[]): string {
       case "notice":
         out.push(`> ${block.tone.toUpperCase()}: ${safeMultiline(block.text).replaceAll("\n", "\n> ")}`, "");
         break;
-      case "list":
-        out.push(...block.items.map((item) => safeInline(item.text)), "");
-        break;
     }
   }
 

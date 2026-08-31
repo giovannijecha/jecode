@@ -40,11 +40,10 @@ function session(from: Provider, model = from.defaultModel): Session {
   };
 }
 
-test("command notices become expiring feedback while semantic output stays transcribed", () => {
+test("command notices become expiring footer feedback", () => {
   const feedback = commandFeedback({ kind: "notice", text: "credential saved", tone: "info" });
   assert.equal(feedback?.text, "credential saved");
   assert.ok((feedback?.timeoutMs ?? 0) > 0);
-  assert.equal(commandFeedback({ kind: "answer", text: "keep me" }), undefined);
 });
 
 test("the feedback channel replaces its message instead of accumulating copies", () => {
