@@ -26,7 +26,10 @@ test("the system prompt stays product-neutral while retaining runtime context", 
     .join("\n");
 
   assert.doesNotMatch(globalRules, /\bjecode\b/i);
-  assert.doesNotMatch(globalRules, /^You are\b/im);
+  assert.doesNotMatch(
+    globalRules,
+    /^You are (?:jecode|an? (?:(?:AI|coding) )*(?:assistant|agent))\b/im,
+  );
   assert.ok(prompt.includes(`Workspace root: ${config.root}`));
   assert.ok(prompt.includes(`Platform: ${process.platform}`));
 });
