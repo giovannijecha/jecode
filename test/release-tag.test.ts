@@ -11,7 +11,7 @@ test("the release guard accepts the exact package tag", () => {
   const result = runGuard(`v${manifest.version}`);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, new RegExp(`release tag: v${escapeRegex(manifest.version)} -> npm latest`));
+  assert.match(result.stdout, new RegExp(`release tag: v${escapeRegex(manifest.version)} -> npm next`));
 });
 
 test("the release guard rejects a tag for another version", () => {
@@ -29,7 +29,7 @@ test("the release guard exports the npm channel for GitHub Actions", () => {
     const result = runGuard(`v${manifest.version}`, { GITHUB_OUTPUT: output });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(readFileSync(output, "utf8"), "channel=latest\n");
+    assert.equal(readFileSync(output, "utf8"), "channel=next\n");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
