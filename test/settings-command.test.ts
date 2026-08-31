@@ -19,7 +19,7 @@ import { emptyUsage } from "../src/usage.ts";
 test("settings uses nested dock pickers and persists a live change", async () => {
   await inSettingsHome(async () => {
     const pickers: Picker[] = [];
-    const answers: (number | undefined)[] = [2, 1, 7]; // effort, medium, close
+    const answers: (number | undefined)[] = [2, 1, undefined]; // effort, medium, escape
     const host: Host = {
       emit: () => {},
       choose: (picker) => {
@@ -38,7 +38,6 @@ test("settings uses nested dock pickers and persists a live change", async () =>
       "max tool steps",
       "reduced motion",
       "credentials",
-      "close",
     ]);
     assert.equal(session.config.effort, "medium");
     assert.equal(JSON.parse(await readFile(settingsPath(), "utf8")).effort, "medium");
@@ -78,7 +77,7 @@ test("effort is a direct picker that applies and persists the next-turn default"
 test("settings remembers a provider and its own model together", async () => {
   await inSettingsHome(async () => {
     await updateSettings({ models: { ollama: "qwen3-coder" } });
-    const answers: (number | undefined)[] = [0, 2, 8]; // provider, ollama, close
+    const answers: (number | undefined)[] = [0, 2, undefined]; // provider, ollama, escape
     const host: Host = {
       emit: () => {},
       choose: () => Promise.resolve(answers.shift()),
@@ -102,7 +101,7 @@ test("settings remembers a provider and its own model together", async () => {
 test("settings changes the Ollama connection live and persists it", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_CLOUD_HOST);
-    const answers: (number | undefined)[] = [1, 1, 8]; // connection, local, close
+    const answers: (number | undefined)[] = [1, 1, undefined]; // connection, local, escape
     const pickers: Picker[] = [];
     const host: Host = {
       emit: () => {},
@@ -131,7 +130,7 @@ test("settings changes the Ollama connection live and persists it", async () => 
 test("settings configures Ollama Cloud and collects a missing key in the dock", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_LOCAL_HOST);
-    const answers: (number | undefined)[] = [1, 0, 0, 8]; // connection, cloud, session key, close
+    const answers: (number | undefined)[] = [1, 0, 0, undefined]; // connection, cloud, session key, escape
     const fields: Field[] = [];
     const host: Host = {
       emit: () => {},
@@ -162,7 +161,7 @@ test("settings validates and normalizes a custom Ollama endpoint", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_LOCAL_HOST);
     hold("OLLAMA_API_KEY", "fixture-key");
-    const answers: (number | undefined)[] = [1, 2, 8]; // connection, custom, close
+    const answers: (number | undefined)[] = [1, 2, undefined]; // connection, custom, escape
     const fields: Field[] = [];
     const host: Host = {
       emit: () => {},

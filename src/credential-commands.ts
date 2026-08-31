@@ -98,14 +98,13 @@ export async function credentialsCommand(session: Session, host: Host): Promise<
   const actions: Option[] = [
     { label: source === undefined ? "add credential" : "replace credential", key: "r" },
     ...(hasSaved(name) ? [{ label: "forget saved copy", hint: storeLabel(), key: "f" }] : []),
-    { label: "close", key: "c" },
   ];
   const action = await choose({
     title: heading(name, source ?? "missing", session.palette),
     options: actions,
     index: 0,
   });
-  if (action === undefined || action === actions.length - 1) return;
+  if (action === undefined) return;
   if (actions[action]?.key === "f") {
     await forget(name, host);
     return;

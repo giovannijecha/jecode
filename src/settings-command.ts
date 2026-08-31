@@ -25,8 +25,7 @@ type SettingsAction =
   | "maxTokens"
   | "maxSteps"
   | "reducedMotion"
-  | "credentials"
-  | "close";
+  | "credentials";
 
 type SettingsItem = {
   action: SettingsAction;
@@ -51,7 +50,7 @@ export async function settingsCommand(session: Session, host: Host): Promise<voi
     const index = await choose(settingsPicker(values, session.palette, selected));
     if (index === undefined) return;
     const action = items[index]?.action;
-    if (action === undefined || action === "close") return;
+    if (action === undefined) return;
     selected = index;
 
     switch (action) {
@@ -125,7 +124,6 @@ function settingsItems(values: SettingsValues): SettingsItem[] {
       option: { label: "reduced motion", hint: values.reducedMotion ? "on" : "off" },
     },
     { action: "credentials", option: { label: "credentials", hint: "manage API keys" } },
-    { action: "close", option: { label: "close" } },
   ];
 }
 
