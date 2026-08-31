@@ -2,7 +2,29 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../src/config.ts";
 
-const config = (argv: string[], saved = {}) => loadConfig(argv, saved);
+const CONFIG_ENV = [
+  "JECODE_PROVIDER",
+  "JECODE_MODEL",
+  "OLLAMA_HOST",
+  "JECODE_EFFORT",
+  "JECODE_MAX_TOKENS",
+  "JECODE_MAX_STEPS",
+  "JECODE_REDUCED_MOTION",
+  "JECODE_AUTO_APPROVE",
+] as const;
+
+const config = (argv: string[], saved = {}) => {
+  const before = new Map(CONFIG_ENV.map((name) => [name, process.env[name]]));
+  for (const name of CONFIG_ENV) delete process.env[name];
+  try {
+    return loadConfig(argv, saved);
+  } finally {
+    for (const [name, value] of before) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+};
 
 test("falls back to defaults", () => {
   const defaults = config([]);
@@ -77,9 +99,9 @@ test("Ollama host precedence is flag, environment, then saved settings", () => {
   process.env["OLLAMA_HOST"] = "https://environment.example.test";
   try {
     const saved = { ollamaHost: "https://saved.example.test" };
-    assert.equal(config([], saved).ollamaHost, "https://environment.example.test");
+    assert.equal(loadConfig([], saved).ollamaHost, "https://environment.example.test");
     assert.equal(
-      config(["--ollama-host", "https://flag.example.test/path/"], saved).ollamaHost,
+      loadConfig(["--ollama-host", "https://flag.example.test/path/"], saved).ollamaHost,
       "https://flag.example.test/path",
     );
   } finally {
@@ -99,7 +121,7 @@ test("flags and environment override saved defaults", () => {
   const before = process.env["JECODE_PROVIDER"];
   process.env["JECODE_PROVIDER"] = "openai";
   try {
-    const loaded = config(["--provider", "ollama", "--model", "flag-model"], {
+    const loaded = loadConfig(["--provider", "ollama", "--model", "flag-model"], {
       provider: "anthropic",
       models: { anthropic: "saved-model" },
     });
