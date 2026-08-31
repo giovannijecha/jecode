@@ -82,6 +82,80 @@ test("batch mode carries input through the controller, renderer, commands, and e
   assert.equal(current.history.length, 2);
 });
 
+test("batch mode propagates provider failures outside the transcript", async () => {
+  const failed: Provider = {
+    ...provider(),
+    async send(): Promise<Message> {
+      throw new Error("fixture provider failed");
+    },
+  };
+  const output: string[] = [];
+
+  await assert.rejects(
+    runBatch(session(failed), {
+      lines: input("hello"),
+      width: 60,
+      write: (text) => output.push(text),
+    }),
+    /fixture provider failed/,
+  );
+
+  const shown = output.join("");
+  assert.match(shown, /> hello/);
+  assert.doesNotMatch(shown, /fixture provider failed/);
+});
+
+test("batch mode discards an incomplete streamed answer when the provider fails", async () => {
+  const failed: Provider = {
+    ...provider(),
+    async send(request: SendRequest): Promise<Message> {
+      request.onStream?.({ kind: "text", text: "partial answer" });
+      throw new Error("stream failed");
+    },
+  };
+  const output: string[] = [];
+
+  await assert.rejects(
+    runBatch(session(failed), {
+      lines: input("hello"),
+      width: 60,
+      write: (text) => output.push(text),
+    }),
+    /stream failed/,
+  );
+
+  assert.doesNotMatch(output.join(""), /partial answer|stream failed/);
+});
+
+test("batch mode propagates controller step exhaustion", async () => {
+  let sends = 0;
+  const looping: Provider = {
+    ...provider(),
+    async send(): Promise<Message> {
+      sends++;
+      return {
+        role: "assistant",
+        content: [{ kind: "tool_call", id: String(sends), name: "missing", input: {} }],
+      };
+    },
+  };
+  const current = session(looping);
+  current.config.maxSteps = 2;
+  const output: string[] = [];
+
+  await assert.rejects(
+    runBatch(current, {
+      lines: input("hello"),
+      width: 60,
+      write: (text) => output.push(text),
+    }),
+    /gave up after 2 steps/,
+  );
+
+  assert.equal(sends, 2);
+  assert.doesNotMatch(output.join(""), /gave up after/);
+});
+
 test("the bootstrap selects the interactive surface and builds one complete session", async () => {
   let opened: Session | undefined;
   let transcriptRoot: string | undefined;
@@ -251,6 +325,37 @@ test("the packaged jecode executable reaches batch help without a developer scri
   assert.equal(result.stderr, "");
 });
 
+test("the packaged batch executable reports terminal failures on stderr", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-batch-home-"));
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: directory,
+    USERPROFILE: directory,
+    APPDATA: directory,
+    LOCALAPPDATA: directory,
+    JECODE_HOME: directory,
+    XDG_CONFIG_HOME: directory,
+  };
+  for (const name of Object.keys(environment)) {
+    if (name.toUpperCase() === "ANTHROPIC_API_KEY") delete environment[name];
+  }
+
+  try {
+    const result = await runNode(
+      path.resolve("bin/jecode.js"),
+      ["--provider", "anthropic", "--model", "fixture-model"],
+      { input: "hello\n", environment },
+    );
+
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /> hello/);
+    assert.doesNotMatch(result.stdout, /ANTHROPIC_API_KEY is not set/);
+    assert.match(result.stderr, /^jecode: ANTHROPIC_API_KEY is not set/m);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("the packaged executable reports its manifest version", async () => {
   const result = await runExecutable(["--version"]);
   assert.equal(result.code, 0, result.stderr);
@@ -284,11 +389,13 @@ function runExecutable(args: string[]): Promise<{ code: number | null; stdout: s
 function runNode(
   executable: string,
   args: string[],
+  options: { input?: string; environment?: NodeJS.ProcessEnv } = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [executable, ...args], {
       cwd: process.cwd(),
-      stdio: ["ignore", "pipe", "pipe"],
+      env: options.environment,
+      stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -300,6 +407,7 @@ function runNode(
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
+    child.stdin.end(options.input ?? "");
     child.once("error", reject);
     child.once("close", (code) => resolve({ code, stdout, stderr }));
   });

@@ -45,13 +45,8 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       session.history.push({ role: "user", content: [{ kind: "text", text: line }] });
 
       const turn = events(emit, session);
-      try {
-        await runTurn(session.history, options(session), turn);
-      } catch (error) {
-        emit({ kind: "notice", text: (error as Error).message, tone: "error" });
-      } finally {
-        turn.flush();
-      }
+      await runTurn(session.history, options(session), turn);
+      turn.flush();
     }
   } finally {
     rl?.close();

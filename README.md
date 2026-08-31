@@ -202,7 +202,8 @@ printf "explain this project\n" | jecode --root .
 ~~~
 
 Dangerous tools stay denied in batch mode unless **--auto-approve** is supplied
-explicitly.
+explicitly. A terminal batch failure is written to stderr and exits non-zero,
+so shell pipelines can stop reliably.
 
 ## Safety model
 
