@@ -24,6 +24,11 @@
   <img alt="Runtime dependencies: zero" src="https://img.shields.io/badge/runtime_dependencies-0-8DB4DD">
 </p>
 
+<p align="center">
+  <a href="https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/giovannijecha/jecode/releases">Releases</a>
+</p>
+
 > Jecode is an early 0.1.x release. The core loop is usable today; commands and
 > terminal interactions may still evolve before 1.0.
 
