@@ -7,6 +7,7 @@ import { promptFor } from "../../src/tui/approve.ts";
 import type { Picker } from "../../src/tui/picker.ts";
 import { heading } from "../../src/tui/picker.ts";
 import { settingsPicker } from "../../src/settings-command.ts";
+import { permissionsPicker } from "../../src/permission-command.ts";
 import type { View } from "../../src/tui/view.ts";
 import {
   commandApproval,
@@ -39,6 +40,7 @@ export function sceneView(state: LabState): View {
     case "menu-commands": return commandsScene(state);
     case "menu-search": return searchScene(state);
     case "menu-settings": return settingsScene(state);
+    case "menu-permissions": return permissionsScene(state);
     case "help": return helpScene(state);
     case "field": return fieldScene(state);
     case "markdown": return markdownScene(state);
@@ -306,6 +308,27 @@ function settingsScene(state: LabState): View {
         maxSteps: 40,
         reducedMotion: false,
       }, state.palette, state.selected, "~/.jecode/settings.json"),
+    },
+  };
+}
+
+function permissionsScene(state: LabState): View {
+  return {
+    ...base(state),
+    blocks: [],
+    editor: edit.EMPTY,
+    scroll: 0,
+    modal: {
+      kind: "pick",
+      picker: permissionsPicker([
+        { name: "read_file", dangerous: false, mode: "allow", remembered: 0, locked: false },
+        { name: "list_dir", dangerous: false, mode: "allow", remembered: 0, locked: false },
+        { name: "find_files", dangerous: false, mode: "allow", remembered: 0, locked: false },
+        { name: "search_text", dangerous: false, mode: "deny", remembered: 0, locked: false },
+        { name: "edit_file", dangerous: true, mode: "ask", remembered: 2, locked: false },
+        { name: "write_file", dangerous: true, mode: "ask", remembered: 2, locked: false },
+        { name: "run_command", dangerous: true, mode: "ask", remembered: 1, locked: false },
+      ], state.palette, state.selected),
     },
   };
 }

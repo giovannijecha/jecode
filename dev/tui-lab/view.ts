@@ -19,6 +19,7 @@ export function choiceCount(scene: Scene): number {
   if (scene === "approve-edit" || scene === "approve-command") return 3;
   if (scene === "menu-commands") return Math.min(4, matches("/").length);
   if (scene === "menu-settings") return 10;
+  if (scene === "menu-permissions") return 7;
   if (scene === "menu-search") return 3;
   return 1;
 }

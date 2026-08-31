@@ -19,6 +19,8 @@ import { keyFor, reload } from "../src/credentials.ts";
 import type { SavedSettings } from "../src/settings.ts";
 import { STEEL } from "../src/ui/theme.ts";
 import { emptyUsage } from "../src/usage.ts";
+import { builtinTools } from "../src/tools/index.ts";
+import { sessionPermissions } from "../src/permissions.ts";
 
 function provider(id: string, models: string[], why?: string): Provider {
   return {
@@ -355,19 +357,87 @@ test("export saves immediately to its automatic destination", async () => {
   assert.deepEqual(texts(screen.blocks), ["saved · jecode-transcript-20260829T123456Z.md"]);
 });
 
-test("permissions revokes one selected session grant", async () => {
-  const screen = host(1);
-  const revoked: (string | undefined)[] = [];
-  screen.permissions = () => [
-    { key: "one", label: "file changes · a.ts" },
-    { key: "two", label: "command · npm test" },
-  ];
-  screen.revokePermission = (key) => revoked.push(key);
+test("permissions always opens the tool control plane without footer noise", async () => {
+  const screen = host(undefined);
+  screen.permissions = sessionPermissions(builtinTools(), false);
 
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
-  assert.deepEqual(revoked, ["two"]);
-  assert.match(texts(screen.blocks)[0] ?? "", /command · npm test/);
+  assert.deepEqual(screen.pickers[0]?.options.map((option) => option.label), [
+    "read_file",
+    "list_dir",
+    "find_files",
+    "search_text",
+    "edit_file",
+    "write_file",
+    "run_command",
+  ]);
+  assert.deepEqual(screen.blocks, []);
+});
+
+test("permissions changes one dangerous tool for the session", async () => {
+  const screen = host(6, 1, undefined);
+  const control = sessionPermissions(builtinTools(), false);
+  screen.permissions = control;
+
+  await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
+
+  assert.equal(control.listTools().find((tool) => tool.name === "run_command")?.mode, "allow");
+  assert.deepEqual(
+    screen.pickers[1]?.options.map((option) => `${option.label}:${option.hint}`),
+    [
+      "ask:prompt when needed",
+      "allow:every call this session",
+      "deny:hide from the model",
+    ],
+  );
+  assert.deepEqual(screen.blocks, []);
+});
+
+test("permissions reviews and revokes a remembered approval", async () => {
+  const screen = host(6, 3, 0, undefined);
+  const control = sessionPermissions(builtinTools(), false);
+  control.remember({ kind: "tool_call", id: "1", name: "run_command", input: { command: "npm test" } });
+  screen.permissions = control;
+
+  await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
+
+  assert.deepEqual(control.listGrants("run_command"), []);
+  assert.deepEqual(screen.blocks, []);
+});
+
+test("permissions can hide a read-only tool from later turns", async () => {
+  const screen = host(0, 1, undefined);
+  const control = sessionPermissions(builtinTools(), false);
+  screen.permissions = control;
+
+  await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
+
+  assert.equal(control.listTools()[0]?.mode, "deny");
+  assert.equal(control.availableTools().some((tool) => tool.name === "read_file"), false);
+});
+
+test("permissions can revoke every remembered approval for one tool", async () => {
+  const screen = host(6, 3, 2, undefined);
+  const control = sessionPermissions(builtinTools(), false);
+  control.remember({ kind: "tool_call", id: "1", name: "run_command", input: { command: "npm test" } });
+  control.remember({ kind: "tool_call", id: "2", name: "run_command", input: { command: "npm run check" } });
+  screen.permissions = control;
+
+  await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
+
+  assert.deepEqual(control.listGrants("run_command"), []);
+});
+
+test("permissions explains a launch-time auto-approve override in the dock", async () => {
+  const screen = host(6, undefined, undefined);
+  screen.permissions = sessionPermissions(builtinTools(), true);
+
+  await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
+
+  assert.match(screen.pickers[0]?.title.map((segment) => segment.text).join("") ?? "", /auto approve at launch/);
+  assert.match(screen.pickers[1]?.description ?? "", /Restart without --auto-approve/);
+  assert.deepEqual(screen.blocks, []);
 });
 
 test("cancelling the credential flow for a blocked provider leaves the previous provider intact", async () => {

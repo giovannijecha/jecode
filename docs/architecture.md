@@ -129,19 +129,20 @@ calls, but `write_file` and `edit_file` will not replace them wholesale.
 
 The built-in tools are:
 
-| Tool | Approval | Boundary |
+| Tool | Default | Boundary |
 |---|---|---|
-| `read_file` | No | Progressive UTF-8 read, bounded output, canonical path |
-| `list_dir` | No | Bounded entries and output from one canonical directory |
-| `find_files` | No | Bounded recursive glob; skips VCS, dependencies, symlinks |
-| `search_text` | No | Bounded literal search; skips binary and files over 1 MB |
-| `edit_file` | Yes | Bounded exact replacement, atomic write, preview check |
-| `write_file` | Yes | Bounded whole-file replacement, atomic write, preview check |
-| `run_command` | Yes | Workspace working directory, timeout, bounded output |
+| `read_file` | Allow | Progressive UTF-8 read, bounded output, canonical path |
+| `list_dir` | Allow | Bounded entries and output from one canonical directory |
+| `find_files` | Allow | Bounded recursive glob; skips VCS, dependencies, symlinks |
+| `search_text` | Allow | Bounded literal search; skips binary and files over 1 MB |
+| `edit_file` | Ask | Bounded exact replacement, atomic write, preview check |
+| `write_file` | Ask | Bounded whole-file replacement, atomic write, preview check |
+| `run_command` | Ask | Workspace working directory, timeout, bounded output |
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
-user account can address, which is why every exact command requires approval
-unless the process was started with `--auto-approve`. On cancellation or
+user account can address, which is why every exact command asks by default
+unless its session policy allows it or the process started with
+`--auto-approve`. On cancellation or
 timeout, jecode terminates the process tree and escalates if it does not exit.
 The child receives an explicit copy of the process environment with
 credential-like names removed. Known environment, session, and saved
@@ -151,8 +152,12 @@ running, the same bounded and redacted capture is emitted as replaceable TUI
 snapshots; raw chunks never cross the tool boundary.
 
 The “allow this session” choice is deliberately narrow: one target file for
-file changes, or one exact shell command. `/permissions` can revoke one grant
-or all grants.
+file changes, or one exact shell command. `/permissions` exposes every tool in
+one session-only control plane. Read-only tools can be allowed or denied;
+dangerous tools can ask, allow, or deny. Denied tools are omitted from the next
+model request, and changing a tool policy clears its remembered grants. `/new`
+restores the defaults. A launch-time `--auto-approve` keeps dangerous tools
+locked to allow for that process.
 
 ## Settings, credentials, and local data
 

@@ -6,10 +6,11 @@ import type { Session } from "../session.ts";
 import { updateSettings } from "../settings.ts";
 import { saveTranscript } from "../transcript-export.ts";
 import { recordUsage } from "../usage.ts";
+import type { SessionPermissions } from "../permissions.ts";
 import type { Activity } from "./activity.ts";
 import type { AppActions } from "./app-input.ts";
 import type { AppState } from "./app-state.ts";
-import { answerAt, scopeFor } from "./approve.ts";
+import { answerAt } from "./approve.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FeedbackController } from "./feedback.ts";
 import { controllerOptions, turnFailure } from "./session-view.ts";
@@ -21,7 +22,7 @@ type WorkflowOptions = {
   session: Session;
   transcriptRoot: string;
   state: AppState;
-  allowed: Map<string, string>;
+  permissions: SessionPermissions;
   feedback: FeedbackController;
   emit(block: Block): void;
   commandNotice(notice: NoticeBlock): void;
@@ -32,7 +33,7 @@ type WorkflowOptions = {
 };
 
 export function appWorkflows(options: WorkflowOptions): AppActions {
-  const { session, state, allowed, feedback } = options;
+  const { session, state, permissions, feedback } = options;
 
   async function command(text: string): Promise<void> {
     const activity = options.startActivity("command", `Running ${text.split(/\s+/)[0]}`);
@@ -64,17 +65,13 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         reset: () => {
           state.blocks.splice(0);
           state.past.length = 0;
-          allowed.clear();
+          permissions.reset();
           state.scroll = 0;
           state.follow = true;
           state.unseen = 0;
           state.lastMaxScroll = 0;
         },
-        permissions: () => [...allowed].map(([key, label]) => ({ key, label })),
-        revokePermission: (key) => {
-          if (key === undefined) allowed.clear();
-          else allowed.delete(key);
-        },
+        permissions,
         exportTranscript: () => saveTranscript(options.transcriptRoot, state.blocks),
         saveSettings: async (patch) => {
           await updateSettings(patch);
@@ -103,11 +100,8 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       emit: options.emit,
       render: options.render,
       palette: session.palette,
-      approved: (call) => session.config.autoApprove || allowed.has(scopeFor(call).key),
-      remember: (call) => {
-        const scope = scopeFor(call);
-        allowed.set(scope.key, scope.summary);
-      },
+      approved: (call) => permissions.approved(call),
+      remember: (call) => permissions.remember(call),
       ask: (prompt, settle) => {
         state.open = { picker: prompt, settle: (index?: number) => settle(answerAt(index)) };
         options.render();
@@ -120,7 +114,12 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
 
     let finishReason: "interrupted" | "failed" | undefined;
     try {
-      await runTurn(session.history, controllerOptions(session), events, activity.control.signal);
+      await runTurn(
+        session.history,
+        controllerOptions(session, permissions.availableTools()),
+        events,
+        activity.control.signal,
+      );
     } catch (error) {
       const interrupted = activity.control.signal.aborted;
       finishReason = interrupted ? "interrupted" : "failed";

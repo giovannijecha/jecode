@@ -7,7 +7,11 @@
 
 import type { Palette } from "../ui/theme.ts";
 import type { ToolCallBlock } from "../types.ts";
+import { scopeFor } from "../permissions.ts";
+import type { PermissionScope } from "../permissions.ts";
 import type { Option, Picker } from "./picker.ts";
+
+export { scopeFor };
 
 /** What the user decided. `always` also stops the question coming back. */
 export type Answer = "once" | "always" | "no";
@@ -19,33 +23,6 @@ export type Answer = "once" | "always" | "no";
  * asked about `write_file` twenty times in a row, not a setting that outlives
  * the window it was granted in.
  */
-export type PermissionScope = { key: string; label: string; summary: string };
-
-/**
- * The narrow permission represented by "always".
- *
- * File-changing tools share a grant for one displayed path. Shell grants are
- * tied to the exact command line. Unknown dangerous tools fall back to their
- * exact, stable input rather than silently inheriting a tool-wide grant.
- */
-export function scopeFor(call: ToolCallBlock): PermissionScope {
-  const path = typeof call.input.path === "string" ? call.input.path : undefined;
-  if ((call.name === "write_file" || call.name === "edit_file") && path !== undefined) {
-    return { key: `file\0${path}`, label: `changes to ${path}`, summary: `file changes · ${path}` };
-  }
-
-  const command = typeof call.input.command === "string" ? call.input.command : undefined;
-  if (call.name === "run_command" && command !== undefined) {
-    return { key: `command\0${command}`, label: "this exact command", summary: `command · ${command}` };
-  }
-
-  return {
-    key: `${call.name}\0${stable(call.input)}`,
-    label: "this exact call",
-    summary: `${call.name} · ${target(call.input)}`,
-  };
-}
-
 export function promptFor(call: ToolCallBlock, target: string, pal: Palette): Picker {
   const scope = scopeFor(call);
   const options: Option[] = [
@@ -73,22 +50,6 @@ function scopeNoun(scope: PermissionScope): string {
   if (scope.key.startsWith("file\0")) return "this file";
   if (scope.key.startsWith("command\0")) return "this command";
   return "this call";
-}
-
-function stable(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function target(input: Record<string, unknown>): string {
-  const value = input.path ?? input.command;
-  return typeof value === "string" ? value : stable(input);
 }
 
 const ANSWERS: readonly Answer[] = ["once", "always", "no"];
