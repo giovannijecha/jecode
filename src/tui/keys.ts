@@ -31,6 +31,8 @@ export type Key = {
 // one packs the coordinates into single bytes and simply stops being able to
 // say where the pointer is past column 223.
 const MOUSE = /^\[<(\d+);(\d+);(\d+)([Mm])/;
+const CSI_SEQUENCE = /^\[[0-?]*[ -/]*[@-~]/;
+const SS3_SEQUENCE = /^O[ -~]/;
 const BUTTONS = ["left", "middle", "right", "none"] as const;
 
 // Both the normal and the application-cursor forms, because a terminal sends
@@ -89,6 +91,16 @@ export function decoder(): Decoder {
       if (pasting) {
         const end = held.indexOf(ESC + PASTE_END);
         if (end === -1) {
+          const interrupt = firstInterrupt(held);
+          if (interrupt !== -1) {
+            // A missing bracketed-paste terminator must not trap the decoder
+            // forever. Ctrl+C/Ctrl+D are emergency exits: discard the partial
+            // paste, then let the normal control-key path handle the byte.
+            held = held.slice(interrupt);
+            pasted = "";
+            pasting = false;
+            continue;
+          }
           // Hold back a possible partial terminator rather than pasting it.
           const safe = held.length - PASTE_END.length - 1;
           if (safe > 0) {
@@ -128,6 +140,13 @@ export function decoder(): Decoder {
         if (match !== undefined) {
           held = rest.slice(match.length);
           keys.push({ name: SEQUENCES[match] as string, text: "", ctrl: false });
+          continue;
+        }
+        const unbound = completeTerminalSequence(rest);
+        if (unbound !== undefined) {
+          // Terminals have many optional keys and mode reports. An unbound but
+          // complete CSI/SS3 sequence is terminal protocol, never editor text.
+          held = rest.slice(unbound.length);
           continue;
         }
         if (!final && couldGrow(rest)) break;
@@ -178,6 +197,14 @@ export function decoder(): Decoder {
   };
 }
 
+function firstInterrupt(text: string): number {
+  const ctrlC = text.indexOf(String.fromCharCode(3));
+  const ctrlD = text.indexOf(String.fromCharCode(4));
+  if (ctrlC === -1) return ctrlD;
+  if (ctrlD === -1) return ctrlC;
+  return Math.min(ctrlC, ctrlD);
+}
+
 function matchSequence(rest: string): string | undefined {
   for (const seq of Object.keys(SEQUENCES)) {
     if (rest.startsWith(seq)) return seq;
@@ -185,9 +212,14 @@ function matchSequence(rest: string): string | undefined {
   return undefined;
 }
 
+function completeTerminalSequence(rest: string): string | undefined {
+  return CSI_SEQUENCE.exec(rest)?.[0] ?? SS3_SEQUENCE.exec(rest)?.[0];
+}
+
 /** Whether `rest` is still a viable prefix of something we know. */
 function couldGrow(rest: string): boolean {
   if (PASTE_START.startsWith(rest)) return true;
+  if (/^\[[0-?]*[ -/]*$/.test(rest)) return true;
   // A mouse report has no fixed length, so it grows until its final letter.
   if (/^\[<?\d*;?\d*;?\d*$/.test(rest)) return true;
   return Object.keys(SEQUENCES).some((seq) => seq.startsWith(rest));

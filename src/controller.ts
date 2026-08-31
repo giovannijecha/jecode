@@ -87,8 +87,10 @@ export async function runTurn(
     }
 
     history.push(assistant);
-    if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
-    if (calls.length === 0) return; // the model is done — hand back to the user
+    if (calls.length === 0) {
+      if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
+      return; // the model is done — hand back to the user
+    }
 
     // Calls run one after another because approval prompts serialise anyway,
     // but every result from this step goes back in a SINGLE message. Splitting
@@ -96,29 +98,42 @@ export async function runTurn(
     const results: ToolResultBlock[] = [];
     const announced = new Set<string>();
     try {
+      if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
       for (let index = 0; index < calls.length; index++) {
         throwIfAborted(signal);
         const call = calls[index] as ToolCallBlock;
         events.onToolProgress?.(index + 1, calls.length);
         const preview = await look(call, options, signal);
         throwIfAborted(signal);
-        events.onToolCall(call, preview);
         announced.add(call.id);
+        events.onToolCall(call, preview);
         const { result, summary } = await settle(call, options, events, signal, preview);
-        events.onToolResult(call, result, summary);
         results.push(result);
+        events.onToolResult(call, result, summary);
       }
     } catch (error) {
-      if (signal?.aborted !== true) throw error;
+      const interrupted = signal?.aborted === true;
+      const repairs: { call: ToolCallBlock; run: ToolRun }[] = [];
       for (const call of calls.slice(results.length)) {
-        const interrupted = refuse(call, "interrupted before completion", "interrupted");
-        if (announced.has(call.id)) {
-          events.onToolResult(call, interrupted.result, interrupted.summary);
-        }
-        results.push(interrupted.result);
+        const run = interrupted
+          ? refuse(call, "interrupted before completion", "interrupted")
+          : refuse(call, "tool processing stopped before completion", "failed");
+        repairs.push({ call, run });
+        results.push(run.result);
       }
       history.push({ role: "user", content: results });
-      throw abortReason(signal);
+      // History repair is the invariant. UI recovery is best-effort and must
+      // never replace the original exception or leave the conversation open.
+      for (const { call, run } of repairs) {
+        if (!announced.has(call.id)) continue;
+        try {
+          events.onToolResult(call, run.result, run.summary);
+        } catch {
+          // The surface is already failing; the next turn can still proceed.
+        }
+      }
+      if (interrupted) throw abortReason(signal as AbortSignal);
+      throw error;
     }
 
     history.push({ role: "user", content: results });

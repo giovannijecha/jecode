@@ -63,6 +63,7 @@ export async function runApp(
   let closed: (() => void) | undefined;
   let frameTimer: NodeJS.Timeout | undefined;
   let spinTimer: NodeJS.Timeout | undefined;
+  let escapeTimer: NodeJS.Timeout | undefined;
   let stopResize = (): void => {};
   let stopInput = (): void => {};
   // Timers outlive the teardown they were scheduled before. Painting after the
@@ -151,6 +152,7 @@ export async function runApp(
     stopResize();
     if (spinTimer !== undefined) clearInterval(spinTimer);
     if (frameTimer !== undefined) clearTimeout(frameTimer);
+    if (escapeTimer !== undefined) clearTimeout(escapeTimer);
     feedback.close();
     terminal.leave();
     closed?.();
@@ -236,10 +238,17 @@ export async function runApp(
     draw();
   });
   stopInput = terminal.onInput((chunk) => {
-    for (const key of keys.push(chunk)) input.handle(key);
-    setTimeout(() => {
+    if (escapeTimer !== undefined) clearTimeout(escapeTimer);
+    for (const key of keys.push(chunk)) {
+      if (!live) break;
+      input.handle(key);
+    }
+    if (!live) return;
+    escapeTimer = setTimeout(() => {
+      escapeTimer = undefined;
+      if (!live) return;
       for (const key of keys.flush()) input.handle(key);
-      render();
+      if (live) render();
     }, ESCAPE_MS);
     render();
   });

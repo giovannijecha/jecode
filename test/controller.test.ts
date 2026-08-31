@@ -248,6 +248,63 @@ test("an interrupted tool leaves one result for every assistant call", async () 
   });
 });
 
+test("an unexpected approval failure leaves tool history consistent", async () => {
+  const provider = scripted([{
+    role: "assistant",
+    content: [{ kind: "tool_call", id: "a", name: "destroy", input: {} }],
+  }]);
+  const history: Message[] = [];
+  const sink = events();
+  sink.approve = async () => {
+    throw new Error("approval surface failed");
+  };
+
+  await assert.rejects(
+    runTurn(history, options(provider), sink),
+    /approval surface failed/,
+  );
+
+  assert.equal(history.length, 2);
+  assert.deepEqual(history[1], {
+    role: "user",
+    content: [{
+      kind: "tool_result",
+      id: "a",
+      output: "tool processing stopped before completion",
+      isError: true,
+    }],
+  });
+});
+
+test("a result-surface failure preserves completed and pending tool results", async () => {
+  const provider = scripted([{
+    role: "assistant",
+    content: [
+      { kind: "tool_call", id: "a", name: "echo", input: { text: "completed" } },
+      { kind: "tool_call", id: "b", name: "echo", input: { text: "pending" } },
+    ],
+  }]);
+  const history: Message[] = [];
+  const sink = events();
+  sink.onToolResult = () => {
+    throw new Error("result surface failed");
+  };
+
+  await assert.rejects(
+    runTurn(history, options(provider), sink),
+    /result surface failed/,
+  );
+
+  const blocks = history[1]?.content ?? [];
+  assert.equal(blocks[0]?.kind === "tool_result" ? blocks[0].output : undefined, "completed");
+  assert.deepEqual(blocks[1], {
+    kind: "tool_result",
+    id: "b",
+    output: "tool processing stopped before completion",
+    isError: true,
+  });
+});
+
 test("a throwing tool is reported to the model rather than crashing the turn", async () => {
   const provider = scripted([
     { role: "assistant", content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "boom" } }] },

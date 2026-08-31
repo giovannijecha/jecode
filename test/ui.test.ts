@@ -12,6 +12,14 @@ test("a glyph the terminal draws wide is measured as two cells", () => {
   assert.equal(charWidth("🙂"), 2);
 });
 
+test("default emoji and regional flags occupy two terminal cells", () => {
+  for (const code of [0x231a, 0x26a1, 0x2705, 0x274c, 0x2b50]) {
+    assert.equal(charWidth(String.fromCodePoint(code)), 2);
+  }
+  assert.equal(charWidth(String.fromCodePoint(0x1f1ee, 0x1f1f9)), 2);
+  assert.equal(charWidth(String.fromCodePoint(0x231a, 0xfe0e)), 1);
+});
+
 test("a combining accent takes no cell of its own", () => {
   const composed = `e${String.fromCodePoint(0x0301)}`;
   assert.equal(textWidth(composed), 1);

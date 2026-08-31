@@ -90,6 +90,35 @@ test("rejects a non-positive timeout", async () => {
   );
 });
 
+test("rejects a timeout larger than Node can schedule", async () => {
+  await assert.rejects(
+    runCommand.run(
+      { command: "node -e \"process.exit(0)\"", timeout_ms: 2_147_483_648 },
+      { root },
+    ),
+    /must be at most 2147483647ms/,
+  );
+});
+
+test("does not wait indefinitely for a descendant holding output pipes", { timeout: 5_000 }, async () => {
+  const source = [
+    "const { spawn } = require('node:child_process');",
+    "const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 2000)'],",
+    "  { detached: true, stdio: 'inherit', windowsHide: true });",
+    "child.unref();",
+  ].join("\n");
+  const encoded = Buffer.from(source).toString("base64");
+  const started = Date.now();
+
+  const result = await runCommand.run(
+    { command: `"${process.execPath}" -e "eval(Buffer.from('${encoded}','base64').toString())"` },
+    { root },
+  );
+
+  assert.equal(result.summary, "exit 0");
+  assert.ok(Date.now() - started < 1_000, "command waited for a detached descendant's pipe");
+});
+
 test("does not pass credential-like variables to a shell command", async (context) => {
   const name = "JECODE_REVIEW_API_KEY";
   const before = process.env[name];
