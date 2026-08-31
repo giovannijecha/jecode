@@ -4,6 +4,13 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.2.4] - 2026-08-31
+
+### Fixed
+
+- Kept the model-facing system prompt product-neutral so assistant identity can
+  come only from explicit workspace content.
+
 ## [0.2.3] - 2026-08-31
 
 ### Fixed
@@ -205,6 +212,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.2.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.4
 [0.2.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.3
 [0.2.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.2
 [0.2.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.1
