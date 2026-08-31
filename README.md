@@ -87,6 +87,18 @@ npm install --global @giovannijecha/jecode
 jecode --version
 ~~~
 
+If you installed Jecode from GitHub before the scoped npm package existed,
+remove the old unscoped package once before updating:
+
+~~~console
+npm uninstall --global jecode
+npm install --global @giovannijecha/jecode
+~~~
+
+An `EEXIST` error for a `bin/jecode` path usually means that this legacy
+executable still owns the command. Remove it instead of installing with
+`--force`.
+
 ### Uninstall
 
 ~~~console
@@ -100,10 +112,22 @@ when you intentionally want to erase Jecode's local data.
 ### Linux and WSL
 
 WSL has its own Node.js installation and `PATH`; the Node.js version installed
-on Windows does not apply inside it. If installation succeeds but `jecode` is
-not found, run **npm config get prefix** and ensure its **bin/** directory is on
-your Linux `PATH`. Do not ignore an `EBADENGINE` warning: **node --version** must
-report 22.18+ on the 22.x line, or 24+.
+on Windows does not apply inside it. Keep user-installed npm commands in the
+Linux user path and put that path before inherited Windows entries:
+
+~~~console
+npm config set prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+npm install --global @giovannijecha/jecode
+hash -r
+command -v jecode
+jecode --version
+~~~
+
+Persist the `PATH` export in `~/.profile` or your shell's startup file. Inside
+WSL, **command -v jecode** should resolve below `/home/...`, not below
+`/mnt/c/.../Volta`. Do not ignore an `EBADENGINE` warning: **node --version**
+must report 22.18+ on the 22.x line, or 24+.
 
 ### Build from source
 
