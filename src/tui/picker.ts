@@ -97,7 +97,7 @@ function layout(
   const options = colors === undefined
     ? []
     : shown.length === 0
-    ? [row(width, [{ text: "  no matches", fg: colors.ink.muted }])]
+    ? [row(width, [{ text: "no matches", fg: colors.ink.muted }])]
     : renderMenuRows(
         shown.map(({ option, index }) => ({
           label: option.label,

@@ -28,10 +28,11 @@ export function menuWindow(length: number, selected: number, visible: number): {
 }
 
 function renderEntry(entry: MenuEntry, labelWidth: number, width: number, pal: Palette): string {
-  // Colour terminals use one quiet selection band. In monochrome the arrow is
-  // structural rather than decorative, so selection remains unambiguous.
+  // Colour terminals use one quiet selection band and keep every label on the
+  // composer's content edge. Monochrome has no band, so it alone reserves a
+  // fixed arrow column to keep selection visible without shifting peer rows.
   const monochrome = !hasColor();
-  const selectedMark = entry.selected && monochrome ? "→ " : "  ";
+  const selectedMark = monochrome ? (entry.selected ? "→ " : "  ") : "";
   const fg = entry.selected ? pal.ink.bright : pal.ink.fg;
   const primary: Seg[] = [
     { text: selectedMark, fg: entry.selected ? pal.accent : fg },
