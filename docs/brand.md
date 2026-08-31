@@ -36,6 +36,7 @@ do not recolor the mascot.
 
 | Asset | Use |
 |---|---|
+| docs/assets/brand/wordmark-steel.svg | Universal wordmark for README and renderer-neutral surfaces |
 | docs/assets/brand/wordmark-dark.svg | Wordmark on light surfaces |
 | docs/assets/brand/wordmark-light.svg | Wordmark on dark surfaces |
 | docs/assets/brand/jeco-256.png | Standalone mascot |

@@ -3,11 +3,7 @@
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/wordmark-light.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/wordmark-dark.svg">
-    <img src="docs/assets/brand/wordmark-dark.svg" width="280" alt="Jecode">
-  </picture>
+  <img src="docs/assets/brand/wordmark-steel.svg" width="280" alt="Jecode">
 </p>
 
 <p align="center"><strong>Your code. Your loop.</strong></p>
