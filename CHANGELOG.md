@@ -4,6 +4,22 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.2.2] - 2026-08-31
+
+### Fixed
+
+- Kept split and unbound terminal escape sequences out of the composer, used a
+  single escape timer, and made an interrupted bracketed paste recoverable.
+- Bounded shell timeout scheduling and output-pipe draining when detached
+  descendants outlive the command that launched them.
+- Replaced model-authored glob regular expressions with bounded,
+  predictable-complexity wildcard matching.
+- Avoided over-redacting ordinary text that matches short heuristic
+  environment secrets while retaining explicit API and OAuth redaction.
+- Repaired tool-result history after unexpected approval or display failures.
+- Restored the terminal before crash diagnostics, preserved conventional signal
+  exit codes, and corrected cell widths for default emoji and regional flags.
+
 ## [0.2.1] - 2026-08-31
 
 ### Changed
@@ -177,6 +193,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.2.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.2
 [0.2.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.1
 [0.2.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.0
 [0.1.9]: https://github.com/giovannijecha/jecode/releases/tag/v0.1.9
