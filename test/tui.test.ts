@@ -7,6 +7,7 @@ import { textWidth } from "../src/ui/width.ts";
 import { row } from "../src/ui/render.ts";
 import type { Block } from "../src/tui/blocks.ts";
 import { renderAll } from "../src/tui/blocks.ts";
+import { reasoningPreviewSource } from "../src/tui/components/messages.ts";
 import { transcribe } from "../src/tui/turn.ts";
 import * as approve from "../src/tui/approve.ts";
 import * as picker from "../src/tui/picker.ts";
@@ -446,6 +447,42 @@ test("reasoning keeps an unframed three-row tail and expands without losing text
   assert.match(full, /ctrl\+o compact/);
 });
 
+test("compact reasoning bounds the markdown source without discarding the full block", () => {
+  const text = `old context ${"analysis ".repeat(20_000)}visible tail`;
+  const source = reasoningPreviewSource(text, 80);
+
+  assert.equal(source.truncated, true);
+  assert.ok(source.text.length <= 4_097);
+  assert.doesNotMatch(source.text, /old context/);
+  assert.match(source.text, /visible tail$/);
+
+  const block: Block = { kind: "reasoning", text, live: true };
+  const shown = strip(renderAll([block], 80, STEEL)).join("\n");
+  assert.match(shown, /visible tail/);
+  assert.match(shown, /ctrl\+o full/);
+  assert.equal(block.text, text);
+
+  block.live = false;
+  const settled = strip(renderAll([block], 80, STEEL)).join("\n");
+  assert.doesNotMatch(settled, /old context/);
+  assert.match(settled, /visible tail/);
+});
+
+test("a live expansion waits for the complete thought before rendering the full source", () => {
+  const text = `old context ${"analysis ".repeat(20_000)}visible tail`;
+  const block: Block = { kind: "reasoning", text, live: true, expanded: true };
+
+  const live = strip(renderAll([block], 80, STEEL)).join("\n");
+  assert.doesNotMatch(live, /old context/);
+  assert.match(live, /visible tail/);
+  assert.match(live, /full when done/);
+
+  block.live = false;
+  const sealed = strip(renderAll([block], 80, STEEL)).join("\n");
+  assert.match(sealed, /old context/);
+  assert.match(sealed, /ctrl\+o compact/);
+});
+
 test("reasoning changes from live to retained preview at the next stream kind", () => {
   const { blocks, events } = stage([]);
   events.onStream({ kind: "thinking", text: "inspect" });
@@ -566,6 +603,36 @@ test("denying a preview keeps the evidence on its rail", async () => {
   assert.equal(block?.kind === "tool" ? block.tone : undefined, "deny");
   assert.equal(block?.kind === "tool" ? block.right : undefined, "denied");
   assert.equal(block?.kind === "tool" ? block.body?.length : undefined, 2);
+});
+
+test("an interrupted approval reconciles a provisional denial on its rail", async () => {
+  const blocks: Block[] = [];
+  const events = transcribe({
+    emit: (block) => blocks.push(block),
+    render: () => {},
+    ask: (_prompt, settle) => settle("no"),
+    approved: () => false,
+    remember: () => {},
+    status: () => {},
+    palette: STEEL,
+  });
+  const call = callOf("1", "write_file", { path: "a.ts", content: "value" });
+  events.onToolCall(call);
+  assert.equal(await events.approve(call), false);
+  events.onToolResult(
+    call,
+    {
+      kind: "tool_result",
+      id: "1",
+      output: "interrupted before completion",
+      isError: true,
+    },
+    "interrupted",
+  );
+
+  const block = blocks[0];
+  assert.equal(block?.kind === "tool" ? block.tone : undefined, "fail");
+  assert.equal(block?.kind === "tool" ? block.right : undefined, "interrupted");
 });
 
 test("conversation blocks use the approved hierarchy with one tool rail", () => {

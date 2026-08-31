@@ -5,6 +5,7 @@ import type { Message, Provider, SendRequest } from "../types.ts";
 import { openAICodexAccount } from "../accounts.ts";
 import { openAIAuthorization } from "../openai-account.ts";
 import { applicationVersion } from "../version.ts";
+import { EFFORTS, isEffort, requireSupportedEffort } from "../effort.ts";
 import { getJson, postSse } from "./http.ts";
 import { assembleOpenAI } from "./openai-stream.ts";
 import {
@@ -24,6 +25,8 @@ const SESSION_ID = randomUUID();
 const MAX_CATALOG_ITEMS = 4_000;
 const MAX_MODELS = 1_000;
 const MAX_MODEL_CHARS = 256;
+const XHIGH_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+let effortByModel = new Map<string, readonly string[]>();
 
 export const openaiCodex: Provider = {
   id: ID,
@@ -37,18 +40,26 @@ export const openaiCodex: Provider = {
   location: () => "cloud",
 
   async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
-    return withAuthorization(async (authorization) => {
-      const body = await getJson(
-        `${BASE}/models?client_version=${CATALOG_COMPATIBILITY_VERSION}`,
-        headers(authorization, randomUUID()),
-        signal,
-        onStatus,
-      );
-      return modelIds(body);
-    }, signal, onStatus);
+    const catalog = await loadCatalog(signal, onStatus);
+    effortByModel = catalog.efforts;
+    return catalog.ids;
+  },
+
+  async efforts(
+    model: string,
+    signal?: AbortSignal,
+    onStatus?: (status: string) => void,
+  ): Promise<readonly string[]> {
+    const cached = effortByModel.get(model);
+    if (cached !== undefined) return cached;
+    const catalog = await loadCatalog(signal, onStatus);
+    effortByModel = catalog.efforts;
+    return effortByModel.get(model) ?? fallbackEfforts(model);
   },
 
   async send(req: SendRequest): Promise<Message> {
+    const efforts = effortByModel.get(req.model) ?? fallbackEfforts(req.model);
+    const effort = requireSupportedEffort(req.model, req.effort, efforts);
     return withAuthorization(async (authorization) => {
       const events = await postSse(
         `${BASE}/responses`,
@@ -65,7 +76,7 @@ export const openaiCodex: Provider = {
           tools: req.tools.map(toWireTool),
           tool_choice: "auto",
           parallel_tool_calls: true,
-          reasoning: { effort: req.effort, summary: "auto" },
+          reasoning: { effort, summary: "auto" },
           text: { verbosity: "low" },
           include: ["reasoning.encrypted_content"],
           prompt_cache_key: SESSION_ID,
@@ -80,6 +91,21 @@ export const openaiCodex: Provider = {
     }, req.signal, req.onStatus);
   },
 };
+
+async function loadCatalog(
+  signal?: AbortSignal,
+  onStatus?: (status: string) => void,
+): Promise<{ ids: string[]; efforts: Map<string, readonly string[]> }> {
+  return withAuthorization(async (authorization) => {
+    const body = await getJson(
+      `${BASE}/models?client_version=${CATALOG_COMPATIBILITY_VERSION}`,
+      headers(authorization, randomUUID()),
+      signal,
+      onStatus,
+    );
+    return modelCatalog(body);
+  }, signal, onStatus);
+}
 
 async function withAuthorization<T>(
   operation: (authorization: Awaited<ReturnType<typeof openAIAuthorization>>) => Promise<T>,
@@ -111,14 +137,17 @@ function headers(
   };
 }
 
-function modelIds(value: unknown): string[] {
+function modelCatalog(value: unknown): {
+  ids: string[];
+  efforts: Map<string, readonly string[]>;
+} {
   const source = record(value) && Array.isArray(value["models"]) ? value["models"] : undefined;
   if (source === undefined) throw new Error("OpenAI Codex did not return a model list");
 
   const seen = new Set<string>();
-  return source
+  const models = source
     .slice(0, MAX_CATALOG_ITEMS)
-    .flatMap((entry): { id: string; priority: number }[] => {
+    .flatMap((entry): { id: string; priority: number; efforts: readonly string[] }[] => {
       if (!record(entry)) return [];
       const id = entry["slug"];
       if (
@@ -129,11 +158,35 @@ function modelIds(value: unknown): string[] {
         seen.has(id)
       ) return [];
       seen.add(id);
-      return [{ id, priority: typeof entry["priority"] === "number" ? entry["priority"] : 0 }];
+      return [{
+        id,
+        priority: typeof entry["priority"] === "number" ? entry["priority"] : 0,
+        efforts: reasoningLevels(entry, id),
+      }];
     })
     .sort((left, right) => left.priority - right.priority)
-    .slice(0, MAX_MODELS)
-    .map((entry) => entry.id);
+    .slice(0, MAX_MODELS);
+  return {
+    ids: models.map((entry) => entry.id),
+    efforts: new Map(models.map((entry) => [entry.id, entry.efforts])),
+  };
+}
+
+function reasoningLevels(entry: Record<string, unknown>, model: string): readonly string[] {
+  const source = entry["supported_reasoning_levels"];
+  if (!Array.isArray(source)) return fallbackEfforts(model);
+  const seen = new Set<string>();
+  const efforts = source.flatMap((level): string[] => {
+    if (!record(level) || !isEffort(level["effort"]) || seen.has(level["effort"])) return [];
+    seen.add(level["effort"]);
+    return [level["effort"]];
+  });
+  return efforts.length === 0 ? fallbackEfforts(model) : efforts;
+}
+
+function fallbackEfforts(model: string): readonly string[] {
+  if (/^gpt-5\.6-(?:sol|terra|luna)(?:-|$)/.test(model)) return EFFORTS;
+  return XHIGH_EFFORTS;
 }
 
 function statusOf(error: unknown): number | undefined {

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runCommand } from "../src/tools/shell.ts";
+import { runTool } from "../src/tools/index.ts";
 
 const root = process.cwd();
 
@@ -30,6 +31,45 @@ test("times out a process tree and reports the timeout", { timeout: 5_000 }, asy
   );
   assert.equal(result.summary, "timed out after 50ms");
   assert.match(result.output, /timed out after 50ms/);
+  assert.equal(result.isError, true);
+});
+
+test("marks a non-zero command as an error result", async () => {
+  const result = await runCommand.run(
+    { command: "node -e \"process.exit(7)\"" },
+    { root },
+  );
+  assert.equal(result.summary, "exit 7");
+  assert.equal(result.isError, true);
+});
+
+test("propagates a failed command as a model-visible tool error", async () => {
+  const result = await runTool(
+    runCommand,
+    {
+      kind: "tool_call",
+      id: "failed-command",
+      name: "run_command",
+      input: { command: "node -e \"process.exit(7)\"" },
+    },
+    { root },
+  );
+
+  assert.equal(result.result.isError, true);
+  assert.match(result.result.output, /exit 7/);
+});
+
+test("commands that read stdin receive EOF instead of hanging", { timeout: 5_000 }, async () => {
+  const result = await runCommand.run(
+    {
+      command:
+        "node -e \"process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('eof'))\"",
+      timeout_ms: 1_000,
+    },
+    { root },
+  );
+  assert.equal(result.summary, "exit 0");
+  assert.match(result.output, /^eof/);
 });
 
 test("keeps bounded head and tail output", async () => {

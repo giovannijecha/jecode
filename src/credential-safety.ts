@@ -7,6 +7,12 @@ const REDACTED = "[credential redacted]";
 const SENSITIVE_ENVIRONMENT_NAME =
   /(?:^|_)(?:API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?|AUTH|JWT|COOKIE|PAT)(?:_|$)/i;
 const COMPACT_SENSITIVE_ENVIRONMENT_NAME = /^(?:PGPASSWORD)$/i;
+const SAFE_ENVIRONMENT_NAMES = new Set([
+  "SSH_AUTH_SOCK",
+  "PWD",
+  "OLDPWD",
+  "PASSWORD_STORE_DIR",
+]);
 
 /** Preserve ordinary tool configuration while withholding credential-like values. */
 export function shellEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -67,6 +73,7 @@ function sensitiveEnvironmentName(name: string): boolean {
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[^a-z0-9]+/gi, "_")
     .replace(/^_+|_+$/g, "");
+  if (SAFE_ENVIRONMENT_NAMES.has(normalized.toUpperCase())) return false;
   return (
     SENSITIVE_ENVIRONMENT_NAME.test(normalized) ||
     COMPACT_SENSITIVE_ENVIRONMENT_NAME.test(normalized)

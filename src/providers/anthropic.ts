@@ -11,6 +11,7 @@ import type { Message, Provider, SendRequest } from "../types.ts";
 import { postSse } from "./http.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
+import { EFFORTS, requireSupportedEffort } from "../effort.ts";
 import { assembleAnthropic } from "./anthropic-stream.ts";
 import { fromWireResponse, stopNotice, toWireMessage, toWireTool } from "./anthropic-wire.ts";
 
@@ -19,13 +20,20 @@ const MODELS = "https://api.anthropic.com/v1/models?limit=100";
 const API_VERSION = "2023-06-01";
 const KEY = "ANTHROPIC_API_KEY";
 
-// Adaptive thinking and `output_config.effort` exist on the 4.6-and-later
-// families only. Older models reject both with a 400, so `/model claude-haiku-4-5`
-// would fail on send if the request shape were fixed. It follows the model.
-const ADAPTIVE = /^claude-(fable-5|opus-(5|4-[678])|sonnet-(5|4-6))/;
+const ADAPTIVE = /^claude-(?:fable-5|mythos-(?:5|preview)|opus-(?:5|4-[678])|sonnet-(?:5|4-6))(?:-|$)/;
+const MAX_WITHOUT_XHIGH = ["low", "medium", "high", "max"] as const;
+const ANTHROPIC_45_EFFORTS = ["low", "medium", "high"] as const;
 
 export function supportsAdaptiveThinking(model: string): boolean {
   return ADAPTIVE.test(model);
+}
+
+export function anthropicEfforts(model: string): readonly string[] {
+  if (/^claude-(?:(?:opus|sonnet)-4-6|mythos-preview)(?:-|$)/.test(model)) {
+    return MAX_WITHOUT_XHIGH;
+  }
+  if (/^claude-opus-4-5(?:-|$)/.test(model)) return ANTHROPIC_45_EFFORTS;
+  return supportsAdaptiveThinking(model) ? EFFORTS : [];
 }
 
 export const anthropic: Provider = {
@@ -45,6 +53,10 @@ export const anthropic: Provider = {
     return listModels(MODELS, headers(requireKey()), signal, onStatus);
   },
 
+  async efforts(model: string): Promise<readonly string[]> {
+    return anthropicEfforts(model);
+  },
+
   location: () => "cloud",
 
   async send(req: SendRequest): Promise<Message> {
@@ -61,7 +73,12 @@ export const anthropic: Provider = {
 
     if (supportsAdaptiveThinking(req.model)) {
       body["thinking"] = { type: "adaptive", display: "summarized" };
-      body["output_config"] = { effort: req.effort };
+    }
+    const efforts = anthropicEfforts(req.model);
+    if (efforts.length > 0) {
+      body["output_config"] = {
+        effort: requireSupportedEffort(req.model, req.effort, efforts),
+      };
     }
 
     const events = await postSse(ENDPOINT, headers(key), body, req.signal, req.onStatus);

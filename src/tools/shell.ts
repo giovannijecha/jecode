@@ -38,6 +38,7 @@ export const runCommand: Tool = {
     return {
       output: output === "" ? `[${summary}]` : `${output}\n[${summary}]`,
       summary,
+      isError: result.timedOut || result.code !== 0,
     };
   },
 };
@@ -60,6 +61,7 @@ function execute(
       shell: true,
       windowsHide: true,
       detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
     });
     const output = capture(onOutput);
     let timedOut = false;

@@ -22,8 +22,18 @@ test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded
       seenUrl = String(input);
       seenHeaders = new Headers(init?.headers);
       return json({ models: [
-        { slug: "later", visibility: "list", priority: 20 },
-        { slug: "first", visibility: "list", priority: 10 },
+        {
+          slug: "later",
+          visibility: "list",
+          priority: 20,
+          supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }],
+        },
+        {
+          slug: "first",
+          visibility: "list",
+          priority: 10,
+          supported_reasoning_levels: [{ effort: "low" }, { effort: "xhigh" }],
+        },
         { slug: "private", visibility: "hidden", priority: 0 },
         { slug: "first", visibility: "list", priority: 1 },
       ] });
@@ -36,6 +46,44 @@ test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded
     assert.equal(seenHeaders?.get("chatgpt-account-id"), "account-1");
     assert.equal(seenHeaders?.get("originator"), "jecode");
     assert.match(seenHeaders?.get("user-agent") ?? "", /^jecode\//);
+    assert.deepEqual(await openaiCodex.efforts?.("first"), ["low", "xhigh"]);
+  });
+});
+
+test("the ChatGPT provider rejects an effort omitted by the live model catalogue", async (context) => {
+  await inStore(async () => {
+    await saveAccount("catalog-access", "catalog-refresh");
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (String(input).includes("/models?")) {
+        return json({ models: [{
+          slug: "limited-model",
+          visibility: "list",
+          priority: 1,
+          supported_reasoning_levels: [
+            { effort: "low" },
+            { effort: "medium" },
+            { effort: "high" },
+            { effort: "xhigh" },
+          ],
+        }] });
+      }
+      throw new Error("a rejected effort must not reach the response endpoint");
+    }) as typeof fetch;
+    context.after(() => { globalThis.fetch = previousFetch; });
+
+    assert.deepEqual(await openaiCodex.models(), ["limited-model"]);
+    await assert.rejects(
+      openaiCodex.send({
+        model: "limited-model",
+        system: "be useful",
+        messages: [],
+        tools: [],
+        maxTokens: 100,
+        effort: "max",
+      }),
+      /does not support effort "max"/,
+    );
   });
 });
 
@@ -59,12 +107,12 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
     context.after(() => { globalThis.fetch = previousFetch; });
 
     const message = await openaiCodex.send({
-      model: "gpt-codex",
+      model: "gpt-5.6-luna",
       system: "be useful",
       messages: [{ role: "user", content: [{ kind: "text", text: "hello" }] }],
       tools: [],
       maxTokens: 123,
-      effort: "xhigh",
+      effort: "max",
     });
 
     assert.deepEqual(message.content, [{ kind: "text", text: "done" }]);
@@ -72,7 +120,7 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
     assert.equal(body["max_output_tokens"], undefined);
     assert.equal(body["store"], false);
     assert.equal(body["stream"], true);
-    assert.deepEqual(body["reasoning"], { effort: "xhigh", summary: "auto" });
+    assert.deepEqual(body["reasoning"], { effort: "max", summary: "auto" });
     assert.deepEqual(body["include"], ["reasoning.encrypted_content"]);
     assert.equal(headers.get("authorization"), "Bearer send-access");
     assert.equal(headers.get("openai-beta"), "responses=experimental");

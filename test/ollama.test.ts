@@ -68,6 +68,7 @@ test("keeps parallel calls apart by index and invents an id when none is sent", 
           { index: 1, function: { name: "read_file", arguments: '{"path":"b.ts"}' } },
         ],
       }),
+      chunk({}, "tool_calls"),
     ]),
   );
 
@@ -82,8 +83,9 @@ test("keeps parallel calls apart by index and invents an id when none is sent", 
 
 test("streams reasoning under either field name", async () => {
   const seen: StreamEvent[] = [];
-  await assembleOllama(feed([chunk({ reasoning: "hm" }), chunk({ reasoning_content: "ok" })]), (event) =>
-    seen.push(event),
+  await assembleOllama(
+    feed([chunk({ reasoning: "hm" }), chunk({ reasoning_content: "ok" }), chunk({}, "stop")]),
+    (event) => seen.push(event),
   );
 
   assert.deepEqual(seen, [
@@ -148,7 +150,10 @@ test("adaptive thinking is sent only to the models that accept it", () => {
 
 test("normalizes usage from the final compatible chunk", async () => {
   const reply = await assembleOllama(
-    feed([{ choices: [], usage: { prompt_tokens: 14, completion_tokens: 4 } }]),
+    feed([
+      chunk({}, "stop"),
+      { choices: [], usage: { prompt_tokens: 14, completion_tokens: 4 } },
+    ]),
   );
 
   assert.deepEqual(fromWireReply(reply).usage, {
@@ -158,4 +163,11 @@ test("normalizes usage from the final compatible chunk", async () => {
     cacheWriteInputTokens: 0,
     reasoningTokens: 0,
   });
+});
+
+test("rejects a stream that ends before a finish reason", async () => {
+  await assert.rejects(
+    assembleOllama(feed([chunk({ content: "partial" })])),
+    /ended before a finish reason/,
+  );
 });

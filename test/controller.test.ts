@@ -172,6 +172,82 @@ test("a declined call comes back as an error result, and the loop continues", as
   assert.match(result?.kind === "tool_result" ? result.output : "", /declined/);
 });
 
+test("cancelling one approval stops the remaining tool batch", async () => {
+  const control = new AbortController();
+  let approvals = 0;
+  let runs = 0;
+  const counted: Tool = {
+    ...destroy,
+    async run() {
+      runs++;
+      return { output: "destroyed" };
+    },
+  };
+  const provider = scripted([{
+    role: "assistant",
+    content: [
+      { kind: "tool_call", id: "a", name: "destroy", input: {} },
+      { kind: "tool_call", id: "b", name: "destroy", input: {} },
+    ],
+  }]);
+  const history: Message[] = [];
+  const sink = events();
+  const shown: string[] = [];
+  sink.onToolResult = (_call, _result, summary) => shown.push(summary ?? "");
+  sink.approve = async () => {
+    approvals++;
+    control.abort(new Error("interrupted"));
+    return false;
+  };
+
+  await assert.rejects(
+    runTurn(history, options(provider, { tools: [counted] }), sink, control.signal),
+    /interrupted/,
+  );
+
+  assert.equal(approvals, 1);
+  assert.equal(runs, 0);
+  assert.equal(history.length, 2);
+  assert.deepEqual(
+    history[1]?.content.map((block) => block.kind === "tool_result" && block.isError),
+    [true, true],
+  );
+  assert.deepEqual(shown, ["interrupted"]);
+});
+
+test("an interrupted tool leaves one result for every assistant call", async () => {
+  const control = new AbortController();
+  const interrupted: Tool = {
+    ...echo,
+    async run() {
+      const error = new Error("interrupted");
+      control.abort(error);
+      throw error;
+    },
+  };
+  const provider = scripted([{
+    role: "assistant",
+    content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "wait" } }],
+  }]);
+  const history: Message[] = [];
+
+  await assert.rejects(
+    runTurn(history, options(provider, { tools: [interrupted] }), events(), control.signal),
+    /interrupted/,
+  );
+
+  assert.equal(history.length, 2);
+  assert.deepEqual(history[1], {
+    role: "user",
+    content: [{
+      kind: "tool_result",
+      id: "a",
+      output: "interrupted before completion",
+      isError: true,
+    }],
+  });
+});
+
 test("a throwing tool is reported to the model rather than crashing the turn", async () => {
   const provider = scripted([
     { role: "assistant", content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "boom" } }] },

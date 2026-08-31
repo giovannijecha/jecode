@@ -36,8 +36,8 @@ export async function runTool(
   ctx: ToolContext,
 ): Promise<ToolRun> {
   try {
-    const { output, summary } = await tool.run(call.input, ctx);
-    return { result: { kind: "tool_result", id: call.id, output, isError: false }, summary };
+    const { output, summary, isError = false } = await tool.run(call.input, ctx);
+    return { result: { kind: "tool_result", id: call.id, output, isError }, summary };
   } catch (error) {
     if (ctx.signal?.aborted === true) throw error;
     return {

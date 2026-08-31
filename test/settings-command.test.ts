@@ -75,6 +75,26 @@ test("effort is a direct picker that applies and persists the next-turn default"
   });
 });
 
+test("effort offers only the levels accepted by the selected model", async () => {
+  await inSettingsHome(async () => {
+    const pickers: Picker[] = [];
+    const host: Host = {
+      emit: () => {},
+      choose: (picker) => {
+        pickers.push(picker);
+        return Promise.resolve(1);
+      },
+    };
+    const session = fakeSession();
+    session.provider.efforts = () => Promise.resolve(["low", "high"]);
+
+    await handleCommand("/effort", session, host);
+
+    assert.deepEqual(pickers[0]?.options.map((option) => option.label), ["low", "high"]);
+    assert.equal(session.config.effort, "high");
+  });
+});
+
 test("OpenAI Codex settings omit a token limit the backend does not accept", () => {
   const picker = settingsPicker({
     provider: "openai-codex",

@@ -13,6 +13,8 @@ export type ToolContext = {
 export type ToolOutput = {
   /** What the model reads. */
   output: string;
+  /** Whether the tool completed but its underlying operation failed. */
+  isError?: boolean;
   /**
    * What the user sees at the right of the tool's row — the size of what
    * happened, not a story about it: "214 lines", "18 entries", "exit 0".

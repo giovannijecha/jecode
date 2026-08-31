@@ -65,6 +65,10 @@ export const ollama: Provider = {
     return listModels(`${at.baseUrl}/v1/models`, headers(at), signal, onStatus);
   },
 
+  async efforts(): Promise<readonly string[]> {
+    return [];
+  },
+
   location: () => {
     try {
       return endpoint().loopback ? "local" : "cloud";

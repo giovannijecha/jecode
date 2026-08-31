@@ -7,6 +7,7 @@ import { modelsCommand, providersCommand } from "./provider-commands.ts";
 import { credentialsCommand } from "./credential-commands.ts";
 import { EFFORTS, readSettings, settingsLabel, updateSettings } from "./settings.ts";
 import type { SavedSettings } from "./settings.ts";
+import { providerFailure } from "./provider-errors.ts";
 import {
   ollamaConnectionHint,
   ollamaConnectionSetting,
@@ -153,45 +154,95 @@ async function providerSetting(session: Session, host: Host): Promise<void> {
     model: session.model,
     providerId: session.config.providerId,
     configModel: session.config.model,
+    effort: session.config.effort,
   };
   if (!(await providersCommand(session, host, { announce: false, save: false }))) return;
 
   const current = readSettings();
   const models = { ...current.models };
   if (session.model !== "") models[session.provider.id] = session.model;
-  if (await persist(host, { provider: session.provider.id, models })) return;
+  const patch = {
+    provider: session.provider.id,
+    models,
+    ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
+  };
+  if (await persist(host, patch)) return;
 
   session.provider = before.provider;
   session.model = before.model;
   session.config.providerId = before.providerId;
   session.config.model = before.configModel;
+  session.config.effort = before.effort;
 }
 
 async function modelSetting(session: Session, host: Host): Promise<void> {
-  const before = { model: session.model, configModel: session.config.model };
+  const before = {
+    model: session.model,
+    configModel: session.config.model,
+    effort: session.config.effort,
+  };
   if (!(await modelsCommand(session, host, { announce: false, save: false }))) return;
 
   const current = readSettings();
   const models = { ...current.models, [session.provider.id]: session.model };
-  if (await persist(host, { models })) return;
+  const patch = {
+    models,
+    ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
+  };
+  if (await persist(host, patch)) return;
 
   session.model = before.model;
   session.config.model = before.configModel;
+  session.config.effort = before.effort;
 }
 
 async function effortSetting(session: Session, host: Host): Promise<string | undefined> {
   const choose = chooser(host);
   if (choose === undefined) return;
+  const efforts = await availableEfforts(session, host);
+  if (efforts === undefined) return;
+  if (efforts.length === 0) {
+    host.emit({
+      kind: "notice",
+      text: `${session.model || session.provider.id} controls its own reasoning depth`,
+      tone: "info",
+    });
+    return;
+  }
   const current = session.config.effort;
   const index = await choose({
     title: heading("effort", "saved default", session.palette),
-    options: EFFORTS.map((value) => ({ label: value })),
-    index: Math.max(0, EFFORTS.findIndex((value) => value === current)),
+    options: efforts.map((value) => ({ label: value })),
+    index: Math.max(0, efforts.findIndex((value) => value === current)),
   });
-  const value = index === undefined ? undefined : EFFORTS[index];
+  const value = index === undefined ? undefined : efforts[index];
   if (value === undefined || !(await persist(host, { effort: value }))) return;
   session.config.effort = value;
   return value;
+}
+
+async function availableEfforts(
+  session: Session,
+  host: Host,
+): Promise<readonly string[] | undefined> {
+  if (session.provider.efforts === undefined) return EFFORTS;
+  host.status?.(`Asking ${session.provider.id}`);
+  try {
+    return await session.provider.efforts(
+      session.model,
+      host.signal,
+      (status) => host.status?.(status),
+    );
+  } catch (error) {
+    host.emit({
+      kind: "notice",
+      text: providerFailure(session.provider, error as Error, true),
+      tone: "error",
+    });
+    return undefined;
+  } finally {
+    host.status?.(undefined);
+  }
 }
 
 async function motionSetting(session: Session, host: Host): Promise<void> {

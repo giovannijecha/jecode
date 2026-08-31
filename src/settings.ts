@@ -4,11 +4,12 @@ import { readFileSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
+import { EFFORTS } from "./effort.ts";
 import { providerNames } from "./providers/index.ts";
 import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
 
-export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export { EFFORTS } from "./effort.ts";
 
 export type SavedSettings = {
   provider?: string;
