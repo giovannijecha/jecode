@@ -113,6 +113,20 @@ test("the credentials command can keep a missing key for this session", async ()
   });
 });
 
+test("credential actions rely on escape instead of a redundant close row", async () => {
+  await inStore(async () => {
+    const screen = host([1, undefined]);
+
+    await credentialsCommand(session(), screen);
+
+    assert.deepEqual(
+      screen.pickers[1]?.options.map((option) => option.label),
+      ["add credential"],
+    );
+    assert.equal(screen.fields.length, 0);
+  });
+});
+
 test("the credentials command saves only after the explicit disk choice", async () => {
   await inStore(async () => {
     const screen = host([1, 0, 1], "saved-secret");
