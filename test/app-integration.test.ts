@@ -362,6 +362,14 @@ test("the packaged executable reports its manifest version", async () => {
   assert.equal(result.stdout.trim(), "0.1.7");
 });
 
+test("the launcher rejects the unverified Node 23 type-stripping gap", async () => {
+  const result = await runLauncherAsVersion("23.5.0");
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /requires Node\.js 22\.18\+ \(22\.x\) or Node\.js 24\+/);
+  assert.match(result.stderr, /current: 23\.5\.0/);
+});
+
 test("a source-only executable explains how to obtain its missing runtime", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "jecode-missing-runtime-"));
   const bin = path.join(directory, "bin");
@@ -384,6 +392,17 @@ test("a source-only executable explains how to obtain its missing runtime", asyn
 
 function runExecutable(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return runNode(path.resolve("bin/jecode.js"), args);
+}
+
+function runLauncherAsVersion(
+  version: string,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const launcher = new URL("../bin/jecode.js", import.meta.url).href;
+  const source = [
+    `Object.defineProperty(process.versions, "node", { value: ${JSON.stringify(version)} });`,
+    `await import(${JSON.stringify(launcher)});`,
+  ].join("\n");
+  return runNode("--input-type=module", ["--eval", source]);
 }
 
 function runNode(

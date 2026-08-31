@@ -2,7 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { StreamEvent } from "../src/types.ts";
 import { assembleOpenAI } from "../src/providers/openai-stream.ts";
-import { fromWireResponse, toWireItems } from "../src/providers/openai-wire.ts";
+import {
+  fromWireResponse,
+  normalizeEffort,
+  toWireItems,
+  toWireTool,
+} from "../src/providers/openai-wire.ts";
 import { openai } from "../src/providers/openai.ts";
 
 async function* feed(events: unknown[]): AsyncGenerator<unknown> {
@@ -111,6 +116,75 @@ test("keeps raw reasoning items when echoing OpenAI history", () => {
     toWireItems({ role: "assistant", content: [], raw, rawFrom: "openai" }),
     raw,
   );
+});
+
+test("translates normalized messages and tool declarations to Responses items", () => {
+  assert.equal(normalizeEffort("max"), "high");
+  assert.equal(normalizeEffort("xhigh"), "high");
+  assert.equal(normalizeEffort("medium"), "medium");
+  assert.deepEqual(
+    toWireTool({
+      name: "read_file",
+      description: "Read one file",
+      input: { type: "object", properties: { path: { type: "string" } } },
+    }),
+    {
+      type: "function",
+      name: "read_file",
+      description: "Read one file",
+      parameters: { type: "object", properties: { path: { type: "string" } } },
+    },
+  );
+
+  assert.deepEqual(
+    toWireItems({
+      role: "assistant",
+      content: [
+        { kind: "text", text: "First" },
+        { kind: "text", text: "Second" },
+        { kind: "tool_call", id: "call-1", name: "read_file", input: { path: "README.md" } },
+        { kind: "tool_result", id: "call-0", output: "done", isError: false },
+      ],
+    }),
+    [
+      { role: "assistant", content: [{ type: "output_text", text: "First\nSecond" }] },
+      {
+        type: "function_call",
+        call_id: "call-1",
+        name: "read_file",
+        arguments: '{"path":"README.md"}',
+      },
+      { type: "function_call_output", call_id: "call-0", output: "done" },
+    ],
+  );
+});
+
+test("normalizes tool calls and sparse usage from a completed response", () => {
+  const message = fromWireResponse({
+    output: [
+      { type: "function_call", call_id: "valid", name: "read_file", arguments: '{"path":"a.ts"}' },
+      { type: "function_call", call_id: "empty", name: "list_dir", arguments: "" },
+      { type: "function_call", call_id: "broken", name: "edit_file", arguments: "{" },
+      { type: "future_item", value: "retained only in raw" },
+    ],
+    usage: { input_tokens: 4 },
+  });
+
+  assert.deepEqual(message.content, [
+    { kind: "tool_call", id: "valid", name: "read_file", input: { path: "a.ts" } },
+    { kind: "tool_call", id: "empty", name: "list_dir", input: {} },
+    { kind: "tool_call", id: "broken", name: "edit_file", input: {} },
+  ]);
+  assert.deepEqual(message.usage, {
+    inputTokens: 4,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    reasoningTokens: 0,
+  });
+  assert.equal(message.rawFrom, "openai");
+  assert.ok(Array.isArray(message.raw));
+  assert.equal(message.raw.length, 4);
 });
 
 test("sends a stateless Responses request with encrypted reasoning included", async (context) => {

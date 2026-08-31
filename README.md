@@ -20,7 +20,7 @@
 <p align="center">
   <a href="https://github.com/giovannijecha/jecode/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/giovannijecha/jecode/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-669BD2"></a>
-  <img alt="Node.js 24+" src="https://img.shields.io/badge/node-%3E%3D24-86CB92">
+  <img alt="Node.js 22.18+ or 24+" src="https://img.shields.io/badge/node-22.18%2B%20%7C%2024%2B-86CB92">
   <img alt="Runtime dependencies: zero" src="https://img.shields.io/badge/runtime_dependencies-0-8DB4DD">
 </p>
 
@@ -43,12 +43,12 @@
 - **Provider-neutral.** Use Anthropic, OpenAI, or a local/remote Ollama server
   without changing the workflow.
 - **Lean by construction.** Jecode installs as plain JavaScript, runs on
-  Node.js 24, executes no installation scripts, and has zero third-party
-  runtime dependencies.
+  Node.js 22.18+ (22.x) or Node.js 24+, executes no installation scripts, and
+  has zero third-party runtime dependencies.
 
 ## Install
 
-Jecode requires **Node.js 24 or newer** and npm:
+Jecode requires **Node.js 22.18+ on the 22.x line, or Node.js 24+**, and npm:
 
 ~~~console
 npm install --global @giovannijecha/jecode
@@ -103,7 +103,7 @@ WSL has its own Node.js installation and `PATH`; the Node.js version installed
 on Windows does not apply inside it. If installation succeeds but `jecode` is
 not found, run **npm config get prefix** and ensure its **bin/** directory is on
 your Linux `PATH`. Do not ignore an `EBADENGINE` warning: **node --version** must
-report 24 or newer.
+report 22.18+ on the 22.x line, or 24+.
 
 ### Build from source
 
