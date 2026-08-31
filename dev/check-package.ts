@@ -12,20 +12,21 @@ const [packed] = JSON.parse(output) as [{ size: number; files: { path: string }[
 if (packed === undefined) throw new Error("npm did not describe a package");
 
 const paths = packed.files.map((file) => file.path.replaceAll("\\", "/"));
-const allowed = paths.every((file) =>
+const allowedPackageFile = (file: string): boolean =>
   file === "LICENSE" ||
   file === "README.md" ||
   file === "package.json" ||
+  file === "docs/assets/brand/jeco-256.png" ||
   file.startsWith("bin/") ||
-  file.startsWith("dist/")
-);
-if (!allowed) {
-  throw new Error(`unexpected package files: ${paths.filter((file) =>
-    !(file === "LICENSE" || file === "README.md" || file === "package.json" || file.startsWith("bin/") || file.startsWith("dist/"))
-  ).join(", ")}`);
+  file.startsWith("dist/");
+if (!paths.every(allowedPackageFile)) {
+  throw new Error(
+    `unexpected package files: ${paths.filter((file) => !allowedPackageFile(file)).join(", ")}`,
+  );
 }
 if (!paths.includes("bin/jecode.js")) throw new Error("the jecode executable is missing from the package");
 if (!paths.includes("dist/main.js")) throw new Error("the compiled entry point is missing from the package");
+if (!paths.includes("docs/assets/brand/jeco-256.png")) throw new Error("the OAuth callback mascot is missing from the package");
 if (paths.some((file) => file.endsWith(".ts"))) throw new Error("release packages must not contain TypeScript runtime files");
 if (packed.size > 1_000_000) throw new Error(`package is unexpectedly large: ${packed.size} bytes`);
 

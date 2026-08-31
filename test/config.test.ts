@@ -38,6 +38,7 @@ test("falls back to defaults", () => {
 test("reads --key value and --key=value alike", () => {
   assert.equal(config(["--provider", "openai"]).providerId, "openai");
   assert.equal(config(["--provider=openai"]).providerId, "openai");
+  assert.equal(config(["--provider", "openai-codex"]).providerId, "openai-codex");
 });
 
 test("treats a bare flag as true", () => {

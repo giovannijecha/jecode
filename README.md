@@ -36,8 +36,8 @@
   diffs, approvals, reasoning, and status all share one full-screen TUI.
 - **Permission-aware.** Reads stay transparent; dangerous actions ask first.
   Session approvals can be reviewed and revoked.
-- **Provider-neutral.** Use Anthropic, OpenAI, or a local/remote Ollama server
-  without changing the workflow.
+- **Provider-neutral.** Use Anthropic or OpenAI API keys, a ChatGPT account, or
+  a local/remote Ollama server without changing the workflow.
 - **Lean by construction.** Jecode installs as plain JavaScript, runs on
   Node.js 22.18+ (22.x) or Node.js 24+, executes no installation scripts, and
   has zero third-party runtime dependencies.
@@ -145,15 +145,27 @@ published package runs no compilation or installation scripts.
 ## First session
 
 Jecode opens on an empty composer instead of forcing a setup wizard. Type
-**/settings** when you are ready to choose a provider, select a model, and add a
-credential. A credential can remain in memory for the current session or be
-saved explicitly under **~/.jecode**; it is never stored in the workspace.
+**/settings** when you are ready to choose a provider, select a model, and
+configure authentication. An API key can remain in memory for the current
+session or be saved explicitly under **~/.jecode**; it is never stored in the
+workspace.
 
-| Provider | Credential | Notes |
+| Provider ID | Authentication | Notes |
 |---|---|---|
-| Anthropic | ANTHROPIC_API_KEY | Cloud |
-| OpenAI | OPENAI_API_KEY | Cloud |
-| Ollama | OLLAMA_API_KEY for Cloud/remote | Cloud with a key, local without one |
+| anthropic | ANTHROPIC_API_KEY | Anthropic API |
+| openai | OPENAI_API_KEY | OpenAI API |
+| openai-codex | ChatGPT OAuth | Experimental; uses eligible ChatGPT Codex access |
+| ollama | OLLAMA_API_KEY for Cloud/remote | Cloud with a key, local without one |
+
+Choose **openai-codex** to sign in on OpenAI's website without pasting a key.
+Jecode offers a local browser callback and a device-code flow; WSL and remote
+terminals default to the device code. The connection is saved only after the
+flow completes. Availability and usage limits are determined by the ChatGPT
+account and plan, not by OpenAI API credits. This integration is experimental
+and is not an endorsement of Jecode by OpenAI.
+
+Anthropic remains API-key only. Jecode does not reuse a Claude consumer
+subscription or copy credentials from another client.
 
 Choose **cloud**, **local**, or a custom endpoint from the Ollama connection row
 in **/settings**. Existing users with an Ollama API key automatically use
@@ -166,11 +178,11 @@ Type **/** to open searchable command completion inside the composer.
 
 | Command | What it does |
 |---|---|
-| /settings | Manage provider, connection, model, limits, motion, and credentials |
+| /settings | Manage provider, connection, model, limits, motion, and authentication |
 | /effort | Change and save reasoning effort directly |
 | /providers | Switch the provider for the next turn |
 | /models | Search the live model catalogue |
-| /credentials | Add, replace, inspect, or forget saved credentials |
+| /credentials | Manage API keys and the connected ChatGPT account |
 | /permissions | Manage session tool access and remembered approvals |
 | /new | Start a clean conversation and reset session tool permissions |
 | /export | Save a timestamped Markdown transcript in the launch directory |
@@ -207,14 +219,16 @@ settings, built-in defaults.
 | --ollama-host | OLLAMA_HOST | Cloud with an Ollama key, local without one |
 | --root | — | Current directory |
 | --effort | JECODE_EFFORT | high |
-| --max-tokens | JECODE_MAX_TOKENS | 64000 |
+| --max-tokens | JECODE_MAX_TOKENS | 64000; not sent by openai-codex |
 | --max-steps | JECODE_MAX_STEPS | 40 |
 | --reduced-motion | JECODE_REDUCED_MOTION=1 | Off |
 | --auto-approve | JECODE_AUTO_APPROVE=1 | Off |
 
 Persistent preferences live in **~/.jecode/settings.json**. Explicitly saved
-credentials live in **~/.jecode/credentials.json** with owner-only permissions
-where the operating system supports them. Environment credentials always win.
+API keys live in **~/.jecode/credentials.json**; the ChatGPT OAuth account lives
+separately in **~/.jecode/accounts.json**. Both secret stores use owner-only
+permissions where the operating system supports them. Environment API keys
+always win.
 
 Jecode has one interface theme: dark Steel. **NO_COLOR** is supported for
 terminals and pipelines that disable colour.
@@ -244,6 +258,9 @@ untrusted data.
   commands receive no credential-like environment variables, and recognized
   credential values are redacted before tool output reaches the model, screen,
   history, or export.
+- ChatGPT OAuth uses PKCE and an exact loopback callback or the OpenAI device
+  flow. Refresh-token rotation is serialized across Jecode processes; OAuth
+  tokens are withheld and redacted like API keys.
 - Terminal control characters are neutralized before rendering.
 - Remote Ollama endpoints require HTTPS. Provider HTTP redirects are rejected
   rather than followed across an implicit trust boundary.

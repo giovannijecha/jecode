@@ -13,6 +13,7 @@ import type { AppState } from "./app-state.ts";
 import { answerAt } from "./approve.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FeedbackController } from "./feedback.ts";
+import { cancel as cancelOpen } from "./overlay.ts";
 import { controllerOptions, turnFailure } from "./session-view.ts";
 import { transcribe } from "./turn.ts";
 
@@ -53,6 +54,10 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
             state.open = { picker, settle: resolve };
             options.render();
           }),
+        dismiss: () => {
+          state.open = state.open === undefined ? undefined : cancelOpen(state.open);
+          options.render();
+        },
         type: (field) =>
           new Promise<string | undefined>((resolve) => {
             state.open = { field, settle: resolve };

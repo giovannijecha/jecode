@@ -37,10 +37,15 @@ export function turnFailure(session: Session, error: Error, aborted: boolean): N
 
   let text = providerFailure(session.provider, error);
   if (/\b401\b/.test(text)) {
-    const source = credentialSource(session.provider.keyVar);
-    text += source === "environment"
-      ? ` · update ${session.provider.keyVar} in the environment and restart`
-      : " · check credentials with /settings";
+    const auth = session.provider.auth;
+    if (auth.kind === "oauth") {
+      text += ` · reconnect ${auth.label} in /settings`;
+    } else {
+      const source = credentialSource(auth.keyVar);
+      text += source === "environment"
+        ? ` · update ${auth.keyVar} in the environment and restart`
+        : " · check credentials with /settings";
+    }
   }
   return { kind: "notice", text, tone: "error" };
 }

@@ -83,6 +83,6 @@ function parseData(chunk: string): unknown {
   try {
     return JSON.parse(data) as unknown;
   } catch {
-    return undefined;
+    throw new Error("SSE event contained invalid JSON");
   }
 }

@@ -18,7 +18,7 @@ function provider(reply = "Hello from fake."): Provider {
   return {
     id: "fake",
     defaultModel: "fake-1",
-    keyVar: "FAKE_API_KEY",
+    auth: { kind: "api-key", keyVar: "FAKE_API_KEY" },
     blocked: () => undefined,
     models: () => Promise.resolve(["fake-1"]),
     async send(request: SendRequest): Promise<Message> {

@@ -44,7 +44,7 @@ export function ollamaConnection(): OllamaConnection {
 export const ollama: Provider = {
   id: "ollama",
   defaultModel: "",
-  keyVar: KEY,
+  auth: { kind: "api-key", keyVar: KEY },
 
   // The only provider whose key is conditional: a daemon on this machine is
   // reached over loopback and asks for nothing, so demanding a key there

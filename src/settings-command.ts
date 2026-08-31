@@ -87,7 +87,7 @@ export type SettingsValues = {
   model: string;
   ollamaConnection?: string;
   effort: string;
-  maxTokens: number;
+  maxTokens?: number;
   maxSteps: number;
   reducedMotion: boolean;
 };
@@ -117,13 +117,21 @@ function settingsItems(values: SettingsValues): SettingsItem[] {
         }]),
     { action: "model", option: { label: "model", hint: values.model || "choose a model" } },
     { action: "effort", option: { label: "effort", hint: values.effort } },
-    { action: "maxTokens", option: { label: "max output tokens", hint: String(values.maxTokens) } },
+    ...(values.maxTokens === undefined
+      ? []
+      : [{
+          action: "maxTokens" as const,
+          option: { label: "max output tokens", hint: String(values.maxTokens) },
+        }]),
     { action: "maxSteps", option: { label: "max tool steps", hint: String(values.maxSteps) } },
     {
       action: "reducedMotion",
       option: { label: "reduced motion", hint: values.reducedMotion ? "on" : "off" },
     },
-    { action: "credentials", option: { label: "credentials", hint: "manage API keys" } },
+    {
+      action: "credentials",
+      option: { label: "authentication", hint: "manage API keys and accounts" },
+    },
   ];
 }
 
@@ -133,7 +141,7 @@ function settingsValues(session: Session): SettingsValues {
     model: session.model,
     ...(session.provider.id === "ollama" ? { ollamaConnection: ollamaConnectionHint() } : {}),
     effort: session.config.effort,
-    maxTokens: session.config.maxTokens,
+    ...(session.provider.id === "openai-codex" ? {} : { maxTokens: session.config.maxTokens }),
     maxSteps: session.config.maxSteps,
     reducedMotion: session.config.reducedMotion,
   };

@@ -7,6 +7,11 @@ import { heading } from "./tui/picker.ts";
 import type { Field } from "./tui/field.ts";
 import { EMPTY } from "./tui/editor.ts";
 import { PROVIDERS } from "./providers/index.ts";
+import { openAIAccountHint } from "./openai-account.ts";
+import {
+  ensureOpenAIAccount,
+  openAIAccountCommand,
+} from "./openai-account-command.ts";
 import {
   credentialSource,
   forgetSaved,
@@ -70,10 +75,12 @@ export async function credentialsCommand(session: Session, host: Host): Promise<
   if (choose === undefined) return;
 
   const index = await choose({
-    title: heading("credential", "values are never shown", session.palette),
+    title: heading("authentication", "secrets are never shown", session.palette),
     options: PROVIDERS.map((provider) => ({
-      label: provider.keyVar,
-      hint: credentialSource(provider.keyVar) ?? "missing",
+      label: provider.auth.kind === "api-key" ? provider.auth.keyVar : `${provider.auth.label} account`,
+      hint: provider.auth.kind === "api-key"
+        ? credentialSource(provider.auth.keyVar) ?? "missing"
+        : openAIAccountHint(),
     })),
     index: Math.max(0, PROVIDERS.findIndex((provider) => provider.id === session.provider.id)),
   });
@@ -81,7 +88,11 @@ export async function credentialsCommand(session: Session, host: Host): Promise<
 
   const provider = PROVIDERS[index];
   if (provider === undefined) return;
-  const name = provider.keyVar;
+  if (provider.auth.kind === "oauth") {
+    await openAIAccountCommand(session, host);
+    return;
+  }
+  const name = provider.auth.keyVar;
   const source = credentialSource(name);
 
   if (source === "environment") {
@@ -109,6 +120,31 @@ export async function credentialsCommand(session: Session, host: Host): Promise<
     return;
   }
   await askForKey(name, host, session.palette);
+}
+
+/** Offer the authentication flow owned by a provider, if that is its blocker. */
+export async function ensureProviderAuthentication(
+  provider: Session["provider"],
+  session: Session,
+  host: Host,
+): Promise<boolean> {
+  const blocked = provider.blocked();
+  if (blocked === undefined) return true;
+  if (provider.auth.kind === "oauth") {
+    return provider.auth.account === "openai-codex"
+      ? ensureOpenAIAccount(session, host)
+      : false;
+  }
+  if (!blocked.startsWith(`${provider.auth.keyVar} `)) {
+    host.emit({ kind: "notice", text: blocked, tone: "error" });
+    return false;
+  }
+  await askForKey(provider.auth.keyVar, host, session.palette);
+  return provider.blocked() === undefined;
+}
+
+export function authenticationNeed(provider: Session["provider"]): string {
+  return provider.auth.kind === "oauth" ? `${provider.auth.label} sign-in` : "an API key";
 }
 
 async function offerForget(name: string, session: Session, host: Host, hint: string): Promise<void> {

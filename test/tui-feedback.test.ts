@@ -12,7 +12,7 @@ function provider(blocked?: string): Provider {
   return {
     id: "anthropic",
     defaultModel: "claude-sonnet-5",
-    keyVar: "ANTHROPIC_API_KEY",
+    auth: { kind: "api-key", keyVar: "ANTHROPIC_API_KEY" },
     blocked: () => blocked,
     models: () => Promise.resolve([]),
     send: (_request: SendRequest): Promise<Message> => Promise.reject(new Error("not called")),
@@ -101,6 +101,23 @@ test("turn blockers use user-facing copy and remain until the next key", () => {
     tone: "warn",
   });
   assert.equal(turnBlocker(session(provider())), undefined);
+});
+
+test("the ChatGPT provider asks for sign-in instead of an API key", () => {
+  const codex: Provider = {
+    ...provider(),
+    id: "openai-codex",
+    defaultModel: "",
+    auth: { kind: "oauth", account: "openai-codex", label: "ChatGPT" },
+    blocked: () => "ChatGPT account is not connected",
+  };
+
+  assert.deepEqual(turnBlocker(session(codex)), {
+    text: "OpenAI Codex needs ChatGPT sign-in · /settings",
+    tone: "warn",
+  });
+  const failure = turnFailure(session(codex, "gpt-codex"), new Error("401 unauthorized"), false);
+  assert.match(failure.text, /reconnect ChatGPT in \/settings/);
 });
 
 test("a real authentication failure remains one actionable transcript notice", () => {

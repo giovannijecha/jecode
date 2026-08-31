@@ -1,0 +1,216 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+import {
+  openAICodexAccount,
+  reloadAccounts,
+  updateOpenAICodexAccount,
+} from "../src/accounts.ts";
+import { openaiCodex } from "../src/providers/openai-codex.ts";
+
+const CLAIMS = "https://api.openai.com/auth";
+
+test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded", async (context) => {
+  await inStore(async () => {
+    await saveAccount("catalog-access", "catalog-refresh");
+    const previousFetch = globalThis.fetch;
+    let seenUrl = "";
+    let seenHeaders: Headers | undefined;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      seenUrl = String(input);
+      seenHeaders = new Headers(init?.headers);
+      return json({ models: [
+        { slug: "later", visibility: "list", priority: 20 },
+        { slug: "first", visibility: "list", priority: 10 },
+        { slug: "private", visibility: "hidden", priority: 0 },
+        { slug: "first", visibility: "list", priority: 1 },
+      ] });
+    }) as typeof fetch;
+    context.after(() => { globalThis.fetch = previousFetch; });
+
+    assert.deepEqual(await openaiCodex.models(), ["first", "later"]);
+    assert.equal(seenUrl, "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99");
+    assert.equal(seenHeaders?.get("authorization"), "Bearer catalog-access");
+    assert.equal(seenHeaders?.get("chatgpt-account-id"), "account-1");
+    assert.equal(seenHeaders?.get("originator"), "jecode");
+    assert.match(seenHeaders?.get("user-agent") ?? "", /^jecode\//);
+  });
+});
+
+test("the ChatGPT provider sends a stateless Codex response without API token settings", async (context) => {
+  await inStore(async () => {
+    await saveAccount("send-access", "send-refresh");
+    const previousFetch = globalThis.fetch;
+    let body: Record<string, unknown> = {};
+    let headers = new Headers();
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      headers = new Headers(init?.headers);
+      return sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+        },
+      });
+    }) as typeof fetch;
+    context.after(() => { globalThis.fetch = previousFetch; });
+
+    const message = await openaiCodex.send({
+      model: "gpt-codex",
+      system: "be useful",
+      messages: [{ role: "user", content: [{ kind: "text", text: "hello" }] }],
+      tools: [],
+      maxTokens: 123,
+      effort: "xhigh",
+    });
+
+    assert.deepEqual(message.content, [{ kind: "text", text: "done" }]);
+    assert.equal(message.rawFrom, "openai-codex");
+    assert.equal(body["max_output_tokens"], undefined);
+    assert.equal(body["store"], false);
+    assert.equal(body["stream"], true);
+    assert.deepEqual(body["reasoning"], { effort: "xhigh", summary: "auto" });
+    assert.deepEqual(body["include"], ["reasoning.encrypted_content"]);
+    assert.equal(headers.get("authorization"), "Bearer send-access");
+    assert.equal(headers.get("openai-beta"), "responses=experimental");
+  });
+});
+
+test("the ChatGPT provider retains a streamed tool call when completed output is empty", async (context) => {
+  await inStore(async () => {
+    await saveAccount("send-access", "send-refresh");
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async () => sseEvents([
+      {
+        type: "response.output_item.done",
+        item: { type: "reasoning", encrypted_content: "opaque" },
+      },
+      {
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          call_id: "call-list",
+          name: "list_dir",
+          arguments: '{"path":"."}',
+        },
+      },
+      {
+        type: "response.completed",
+        response: { status: "completed", output: [] },
+      },
+    ])) as typeof fetch;
+    context.after(() => { globalThis.fetch = previousFetch; });
+
+    const message = await openaiCodex.send({
+      model: "gpt-codex",
+      system: "be useful",
+      messages: [{ role: "user", content: [{ kind: "text", text: "inspect" }] }],
+      tools: [{
+        name: "list_dir",
+        description: "List a directory",
+        input: { type: "object", properties: { path: { type: "string" } } },
+      }],
+      maxTokens: 123,
+      effort: "high",
+    });
+
+    assert.deepEqual(message.content, [
+      { kind: "tool_call", id: "call-list", name: "list_dir", input: { path: "." } },
+    ]);
+  });
+});
+
+test("one 401 refreshes the account once and retries with the rotated access token", async (context) => {
+  await inStore(async () => {
+    await saveAccount("old-access", "old-refresh");
+    const previousFetch = globalThis.fetch;
+    const authorizations: string[] = [];
+    let refreshes = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("https://auth.openai.com/oauth/token")) {
+        refreshes++;
+        return json({
+          access_token: accessToken("new-access"),
+          refresh_token: "new-refresh",
+          expires_in: 3_600,
+          id_token: jwt({ email: "person@example.test" }, "identity"),
+        });
+      }
+      const authorization = new Headers(init?.headers).get("authorization") ?? "";
+      authorizations.push(authorization);
+      if (authorizations.length === 1) return new Response("unauthorized", { status: 401 });
+      return sse({ type: "response.completed", response: { status: "completed", output: [] } });
+    }) as typeof fetch;
+    context.after(() => { globalThis.fetch = previousFetch; });
+
+    await openaiCodex.send({
+      model: "gpt-codex",
+      system: "be useful",
+      messages: [],
+      tools: [],
+      maxTokens: 100,
+      effort: "high",
+    });
+
+    assert.equal(refreshes, 1);
+    assert.equal(authorizations[0], "Bearer old-access");
+    assert.equal(authorizations[1], `Bearer ${accessToken("new-access")}`);
+    assert.equal(openAICodexAccount()?.refreshToken, "new-refresh");
+  });
+});
+
+async function inStore(body: () => Promise<void>): Promise<void> {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-openai-codex-"));
+  const before = process.env["JECODE_HOME"];
+  process.env["JECODE_HOME"] = directory;
+  reloadAccounts();
+  try {
+    await body();
+  } finally {
+    if (before === undefined) delete process.env["JECODE_HOME"];
+    else process.env["JECODE_HOME"] = before;
+    reloadAccounts();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function saveAccount(accessTokenValue: string, refreshToken: string): Promise<void> {
+  await updateOpenAICodexAccount(async () => ({
+    accessToken: accessTokenValue,
+    refreshToken,
+    expiresAt: Date.now() + 3_600_000,
+    accountId: "account-1",
+  }));
+}
+
+function accessToken(signature: string): string {
+  return jwt({ [CLAIMS]: { chatgpt_account_id: "account-1", chatgpt_plan_type: "plus" } }, signature);
+}
+
+function jwt(payload: Record<string, unknown>, signature: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.${signature}`;
+}
+
+function json(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function sse(event: unknown): Response {
+  return sseEvents([event]);
+}
+
+function sseEvents(events: unknown[]): Response {
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}

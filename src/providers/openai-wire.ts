@@ -32,8 +32,8 @@ export function toWireTool(tool: ToolSpec) {
   };
 }
 
-export function toWireItems(message: Message): unknown[] {
-  if (message.rawFrom === "openai" && Array.isArray(message.raw)) {
+export function toWireItems(message: Message, providerId = "openai"): unknown[] {
+  if (message.rawFrom === providerId && Array.isArray(message.raw)) {
     return message.raw;
   }
 
@@ -71,7 +71,7 @@ export function stopNotice(data: OpenAIResponse): string | undefined {
     : `[incomplete: ${reason}]`;
 }
 
-export function fromWireResponse(data: OpenAIResponse): Message {
+export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): Message {
   const raw = Array.isArray(data.output) ? data.output : [];
   const content: Block[] = [];
 
@@ -111,7 +111,7 @@ export function fromWireResponse(data: OpenAIResponse): Message {
   const notice = stopNotice(data);
   if (notice !== undefined) content.push({ kind: "text", text: notice });
 
-  return { role: "assistant", content, raw, rawFrom: "openai", usage: normalizeUsage(data) };
+  return { role: "assistant", content, raw, rawFrom: providerId, usage: normalizeUsage(data) };
 }
 
 function normalizeUsage(data: OpenAIResponse): Usage | undefined {

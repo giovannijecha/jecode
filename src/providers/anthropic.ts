@@ -33,7 +33,7 @@ export const anthropic: Provider = {
   // Sonnet is the default because it is the one that can be left running.
   // Opus via `--model claude-opus-5`, Haiku via `--model claude-haiku-4-5`.
   defaultModel: "claude-sonnet-5",
-  keyVar: KEY,
+  auth: { kind: "api-key", keyVar: KEY },
 
   blocked(): string | undefined {
     return apiKey() === undefined ? `${KEY} is not set` : undefined;

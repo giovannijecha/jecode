@@ -2,9 +2,10 @@ import type { Provider } from "../types.ts";
 import type { Config } from "../config.ts";
 import { anthropic } from "./anthropic.ts";
 import { openai } from "./openai.ts";
+import { openaiCodex } from "./openai-codex.ts";
 import { configureOllama, ollama } from "./ollama.ts";
 
-export const PROVIDERS: readonly Provider[] = [anthropic, openai, ollama];
+export const PROVIDERS: readonly Provider[] = [anthropic, openai, openaiCodex, ollama];
 
 export function providerNames(): string[] {
   return PROVIDERS.map((provider) => provider.id);
