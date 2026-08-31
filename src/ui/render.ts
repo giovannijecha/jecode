@@ -118,7 +118,7 @@ export function row(
   // reach approval titles on narrow terminals).
   const fittedRight = fitSegs(right, inner);
   const rightW = plainLen(fittedRight);
-  const gutter = fittedRight.length > 0 ? 1 : 0;
+  const gutter = fittedRight.length > 0 && rightW < inner ? 1 : 0;
   const fitted = fitSegs(left, Math.max(0, inner - rightW - gutter));
   // An empty pad is no pad at all: a zero-width segment still costs a pair of
   // escape sequences on every row of every frame.

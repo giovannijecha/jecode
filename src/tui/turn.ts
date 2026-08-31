@@ -29,8 +29,8 @@ export type Stage = {
 };
 
 export type Transcription = ControllerEvents & {
-  /** Seal a final reasoning-only stream when the controller returns or fails. */
-  finish(): void;
+  /** Seal the final stream and settle any tool whose result was interrupted. */
+  finish(reason?: "interrupted" | "failed"): void;
 };
 
 // Semantic activity labels remain useful state even though the quiet footer
@@ -63,9 +63,16 @@ export function transcribe(stage: Stage): Transcription {
   };
 
   return {
-    finish() {
+    finish(reason) {
       const changed = close();
       if (changed !== undefined) stage.render(changed);
+      for (const block of tools.values()) {
+        if (block.kind !== "tool" || block.tone !== "pending") continue;
+        block.tone = "fail";
+        block.right = reason ?? "failed";
+        block.startedAt = undefined;
+        stage.render(block);
+      }
     },
 
     onStep(current, total) {
