@@ -323,6 +323,25 @@ test("provider access management never changes the runtime selection", async () 
   assert.deepEqual(saved, []);
 });
 
+test("ctrl+c inside provider management does not reopen the parent menu", async () => {
+  const live = session(provider("fake", ["a"]));
+  const screen = host();
+  const control = new AbortController();
+  let calls = 0;
+  screen.signal = control.signal;
+  screen.choose = (picker) => {
+    screen.pickers.push(picker);
+    calls++;
+    if (calls === 1) return Promise.resolve(3); // Ollama
+    if (calls === 2) control.abort(new Error("interrupted"));
+    return Promise.resolve(undefined);
+  };
+
+  await assert.rejects(handleCommand("/providers", live, screen), /interrupted/);
+
+  assert.equal(calls, 2);
+});
+
 test("credentials is absent because providers owns access", async () => {
   const live = session(provider("fake", ["a"]));
   const screen = host();

@@ -66,7 +66,7 @@ function renderEntry(entry: MenuEntry, labelWidth: number, width: number, pal: P
           Math.max(1, Math.floor(entry.value === undefined ? width / 4 : width * 0.45)),
         ),
         fg: rightColor,
-        bold: entry.selected && entry.adjustable === true,
+        bold: entry.selected || undefined,
       }];
   return row(width, primary, right);
 }

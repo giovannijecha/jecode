@@ -85,11 +85,16 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       });
       if (outcome === "exit") state.closeWhenIdle = true;
     } catch (error) {
-      feedback.show({
-        text: activity.control.signal.aborted ? "interrupted" : (error as Error).message,
-        tone: activity.control.signal.aborted ? "warn" : "error",
-        timeoutMs: activity.control.signal.aborted ? 4_200 : 6_000,
-      });
+      // Command cancellation is already visible through the dock closing and
+      // the activity ending. Keep it silent instead of replacing the footer
+      // with a redundant warning.
+      if (!activity.control.signal.aborted) {
+        feedback.show({
+          text: (error as Error).message,
+          tone: "error",
+          timeoutMs: 6_000,
+        });
+      }
     } finally {
       options.finishActivity(activity);
     }

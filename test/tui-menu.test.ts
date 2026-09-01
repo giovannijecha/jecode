@@ -64,12 +64,17 @@ test("colour menu rows align with the composer while writable prompts keep their
     assert.match(narrow[0] ?? "", /^run_command.*‹ deny ›/);
     assert.doesNotMatch(narrow[0] ?? "", /remembered/);
 
-    const essential = plain(renderMenuRows([
+    const essentialRows = renderMenuRows([
       { label: "gpt-5.6-terra", value: "ChatGPT", selected: true },
       { label: "claude-sonnet-5", value: "Anthropic", selected: false },
-    ], 38, STEEL));
+    ], 38, STEEL);
+    const essential = plain(essentialRows);
     assert.match(essential[0] ?? "", /^gpt-5\.6-terra.*ChatGPT/);
     assert.match(essential[1] ?? "", /^claude-sonnet-5.*Anthropic/);
+    assert.match(
+      essentialRows[0] ?? "",
+      /\x1b\[1m\x1b\[38;2;102;155;210mChatGPT/,
+    );
 
     const input = plain([promptLine("secret", 6, 60, STEEL).row]);
     assert.match(input[0] ?? "", /^→ secret/);

@@ -42,6 +42,9 @@ export async function providersCommand(session: Session, host: Host): Promise<vo
     if (provider === undefined) return;
     selected = index;
     await manageProvider(provider, session, host);
+    // Esc closes only the nested provider flow. Ctrl+C also settles that
+    // picker, but aborts the command signal and must not reopen the parent.
+    throwIfAborted(host.signal);
   }
 }
 
@@ -97,4 +100,9 @@ function chooser(host: Host): Host["choose"] {
     host.emit({ kind: "notice", text: "that command needs the screen", tone: "warn" });
   }
   return host.choose;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error("interrupted");
 }
