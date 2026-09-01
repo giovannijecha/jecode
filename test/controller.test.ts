@@ -2,7 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import type { ControllerEvents, ControllerOptions } from "../src/controller.ts";
-import { MAX_TOOL_CALLS_PER_STEP, runTurn } from "../src/controller.ts";
+import {
+  MAX_CONCURRENT_TOOL_CALLS,
+  MAX_TOOL_CALLS_PER_STEP,
+  runTurn,
+} from "../src/controller.ts";
 import type { Tool } from "../src/tools/index.ts";
 import { runCommand } from "../src/tools/shell.ts";
 
@@ -36,6 +40,7 @@ const echo: Tool = {
   name: "echo",
   description: "echoes",
   dangerous: false,
+  concurrency: "shared",
   input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
   async run(args) {
     if (args.text === "boom") throw new Error("exploded");
@@ -47,6 +52,7 @@ const destroy: Tool = {
   name: "destroy",
   description: "needs approval",
   dangerous: true,
+  concurrency: "exclusive",
   input: { type: "object", properties: {}, required: [] },
   async run() {
     return { output: "destroyed" };
@@ -129,6 +135,115 @@ test("returns every result of one step in a single message", async () => {
     results?.content.map((block) => (block.kind === "tool_result" ? block.output : "")),
     ["one", "two"],
   );
+});
+
+test("runs shared calls concurrently while preserving result order", async () => {
+  let active = 0;
+  let peak = 0;
+  const shared: Tool = {
+    ...echo,
+    async run(args) {
+      active++;
+      peak = Math.max(peak, active);
+      await delay(args.text === "one" ? 30 : 5);
+      active--;
+      return { output: String(args.text) };
+    },
+  };
+  const provider = scripted([
+    {
+      role: "assistant",
+      content: [
+        { kind: "tool_call", id: "a", name: "echo", input: { text: "one" } },
+        { kind: "tool_call", id: "b", name: "echo", input: { text: "two" } },
+      ],
+    },
+    assistantText("done"),
+  ]);
+  const history: Message[] = [];
+  const completed: string[] = [];
+  const sink = events();
+  sink.onToolResult = (call) => completed.push(call.id);
+
+  await runTurn(history, options(provider, { tools: [shared] }), sink);
+
+  assert.equal(peak, 2);
+  assert.deepEqual(completed, ["a", "b"]);
+  assert.deepEqual(
+    history[1]?.content.map((block) => block.kind === "tool_result" ? block.output : ""),
+    ["one", "two"],
+  );
+});
+
+test("bounds shared-call concurrency", async () => {
+  let active = 0;
+  let peak = 0;
+  const shared: Tool = {
+    ...echo,
+    async run(args) {
+      active++;
+      peak = Math.max(peak, active);
+      await delay(10);
+      active--;
+      return { output: String(args.text) };
+    },
+  };
+  const calls = Array.from({ length: MAX_CONCURRENT_TOOL_CALLS + 3 }, (_, index) => ({
+    kind: "tool_call" as const,
+    id: String(index),
+    name: "echo",
+    input: { text: String(index) },
+  }));
+  const provider = scripted([
+    { role: "assistant", content: calls },
+    assistantText("done"),
+  ]);
+
+  await runTurn([], options(provider, { tools: [shared] }), events());
+
+  assert.equal(peak, MAX_CONCURRENT_TOOL_CALLS);
+});
+
+test("keeps exclusive calls as ordered barriers between shared batches", async () => {
+  const timeline: string[] = [];
+  const shared: Tool = {
+    ...echo,
+    async run(args) {
+      timeline.push(`start:${String(args.text)}`);
+      await delay(10);
+      timeline.push(`end:${String(args.text)}`);
+      return { output: String(args.text) };
+    },
+  };
+  const exclusive: Tool = {
+    ...echo,
+    name: "exclusive",
+    concurrency: "exclusive",
+    async run() {
+      timeline.push("start:exclusive");
+      await delay(5);
+      timeline.push("end:exclusive");
+      return { output: "exclusive" };
+    },
+  };
+  const provider = scripted([
+    {
+      role: "assistant",
+      content: [
+        { kind: "tool_call", id: "a", name: "echo", input: { text: "one" } },
+        { kind: "tool_call", id: "b", name: "echo", input: { text: "two" } },
+        { kind: "tool_call", id: "c", name: "exclusive", input: {} },
+        { kind: "tool_call", id: "d", name: "echo", input: { text: "three" } },
+      ],
+    },
+    assistantText("done"),
+  ]);
+
+  await runTurn([], options(provider, { tools: [shared, exclusive] }), events());
+
+  assert.ok(timeline.indexOf("start:exclusive") > timeline.indexOf("end:one"));
+  assert.ok(timeline.indexOf("start:exclusive") > timeline.indexOf("end:two"));
+  assert.ok(timeline.indexOf("start:three") > timeline.indexOf("end:exclusive"));
 });
 
 test("refuses an oversized batch of tool calls before executing it", async () => {
@@ -295,6 +410,45 @@ test("an interrupted tool leaves one result for every assistant call", async () 
       isError: true,
     }],
   });
+});
+
+test("an interrupted shared batch repairs every call in deterministic order", async () => {
+  const control = new AbortController();
+  const interrupted: Tool = {
+    ...echo,
+    async run(args, ctx) {
+      if (args.text === "stop") {
+        await new Promise((resolve) => setImmediate(resolve));
+        const error = new Error("interrupted");
+        control.abort(error);
+        throw error;
+      }
+      await aborted(ctx.signal);
+      return { output: "unreachable" };
+    },
+  };
+  const provider = scripted([{
+    role: "assistant",
+    content: [
+      { kind: "tool_call", id: "a", name: "echo", input: { text: "stop" } },
+      { kind: "tool_call", id: "b", name: "echo", input: { text: "wait" } },
+    ],
+  }]);
+  const history: Message[] = [];
+  const shown: string[] = [];
+  const sink = events();
+  sink.onToolResult = (call, _result, summary) => shown.push(`${call.id}:${summary}`);
+
+  await assert.rejects(
+    runTurn(history, options(provider, { tools: [interrupted] }), sink, control.signal),
+    /interrupted/,
+  );
+
+  assert.deepEqual(history[1]?.content, [
+    { kind: "tool_result", id: "a", output: "interrupted before completion", isError: true },
+    { kind: "tool_result", id: "b", output: "interrupted before completion", isError: true },
+  ]);
+  assert.deepEqual(shown, ["a:interrupted", "b:interrupted"]);
 });
 
 test("an unexpected approval failure leaves tool history consistent", async () => {
@@ -466,4 +620,18 @@ test("a shell credential cannot reach the provider follow-up or display events",
 function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function aborted(signal: AbortSignal | undefined): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    const stop = () => reject(
+      signal?.reason instanceof Error ? signal.reason : new Error("interrupted"),
+    );
+    if (signal?.aborted === true) stop();
+    else signal?.addEventListener("abort", stop, { once: true });
+  });
 }

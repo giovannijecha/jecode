@@ -33,9 +33,13 @@ export type ToolOutput = {
  */
 export type ToolPreview = { before: string; after: string };
 
+export type ToolConcurrency = "shared" | "exclusive";
+
 export type Tool = ToolSpec & {
   /** Whether the call is governed by the session's dangerous-tool policy. */
   readonly dangerous: boolean;
+  /** Shared calls may overlap; exclusive calls form an ordered barrier. */
+  readonly concurrency: ToolConcurrency;
   /**
    * What the user is shown before being asked to approve the call.
    *

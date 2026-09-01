@@ -31,7 +31,8 @@
 ## Why Jecode
 
 - **One controller.** One visible loop talks to the model, runs tools, and returns
-  control to you. There are no hidden workers or delegated agents.
+  control to you. Independent reads can overlap inside one step; writes and
+  commands remain ordered. There are no hidden workers or delegated agents.
 - **Terminal-native.** The transcript, composer, searchable menus, tool output,
   diffs, approvals, reasoning, and status all share one full-screen TUI.
 - **Permission-aware.** Reads stay transparent; dangerous actions ask first.

@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { findFiles, searchText } from "../src/tools/search.ts";
+import { trySearchWithRipgrep } from "../src/tools/ripgrep.ts";
 import { builtinTools } from "../src/tools/index.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 
@@ -18,6 +19,7 @@ before(async () => {
   await fs.writeFile(path.join(root, "src", "a.ts"), "const Needle = 1;\nsecond\n", "utf8");
   await fs.writeFile(path.join(root, "src", "nested", "b.ts"), "needle here\n", "utf8");
   await fs.writeFile(path.join(root, "readme.md"), "No needle in this sentence.\n", "utf8");
+  await fs.writeFile(path.join(root, "binary.dat"), Buffer.from([0, 110, 101, 101, 100, 108, 101]));
   await fs.writeFile(path.join(root, "node_modules", "pkg", "hidden.ts"), "needle\n", "utf8");
   await fs.writeFile(path.join(root, ".git", "secret.ts"), "needle\n", "utf8");
 });
@@ -75,10 +77,58 @@ test("search results stop at the requested bound", async () => {
 });
 
 test("search skips binary files", async () => {
-  await fs.writeFile(path.join(ctx.root, "binary.dat"), Buffer.from([0, 110, 101, 101, 100, 108, 101]));
   const result = await searchText.run({ query: "needle", pattern: "*.dat" }, ctx);
   assert.equal(result.output, "[no matches]");
   assert.match(result.summary ?? "", /skipped 1/);
+});
+
+test("the optional ripgrep backend preserves matches and binary filtering", async (t) => {
+  const paths = ["src/a.ts", "src/nested/b.ts", "binary.dat"]
+    .map((relative) => path.join(ctx.root, relative));
+  const files = await Promise.all(paths.map(async (file) => ({
+    path: file,
+    bytes: (await fs.stat(file)).size,
+  })));
+  const result = await trySearchWithRipgrep({
+    files,
+    query: "needle",
+    caseSensitive: false,
+    limit: 100,
+  });
+  if (result === undefined) {
+    t.skip("ripgrep is not installed");
+    return;
+  }
+
+  assert.deepEqual(
+    result.matches.map((match) => `${path.basename(match.path)}:${match.line}:${match.text}`),
+    ["a.ts:1:const Needle = 1;", "b.ts:1:needle here"],
+  );
+  assert.deepEqual(result.binaryPaths.map((file) => path.basename(file)), ["binary.dat"]);
+});
+
+test("search falls back to the dependency-free scanner when ripgrep is unavailable", async () => {
+  const before = process.env["PATH"];
+  process.env["PATH"] = "";
+  try {
+    const file = path.join(ctx.root, "src", "a.ts");
+    const accelerated = await trySearchWithRipgrep({
+      files: [{ path: file, bytes: (await fs.stat(file)).size }],
+      query: "needle",
+      caseSensitive: false,
+      limit: 100,
+    });
+    assert.equal(accelerated, undefined);
+
+    const result = await searchText.run({ query: "needle", pattern: "**/*.ts" }, ctx);
+    assert.deepEqual(result.output.split("\n"), [
+      "src/a.ts:1:const Needle = 1;",
+      "src/nested/b.ts:1:needle here",
+    ]);
+  } finally {
+    if (before === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = before;
+  }
 });
 
 test("search never follows a junction outside the workspace", async (t) => {
@@ -109,9 +159,22 @@ test("an aborted search stops before walking", async () => {
 });
 
 test("the safe discovery tools are part of the built-in registry", () => {
-  const names = builtinTools().map((tool) => tool.name);
+  const tools = builtinTools();
+  const names = tools.map((tool) => tool.name);
   assert.ok(names.includes("find_files"));
   assert.ok(names.includes("search_text"));
+  assert.deepEqual(
+    tools.map((tool) => [tool.name, tool.concurrency]),
+    [
+      ["read_file", "shared"],
+      ["list_dir", "shared"],
+      ["find_files", "shared"],
+      ["search_text", "shared"],
+      ["edit_file", "exclusive"],
+      ["write_file", "exclusive"],
+      ["run_command", "exclusive"],
+    ],
+  );
 });
 
 test("search accepts an aliased workspace root", async (t) => {
