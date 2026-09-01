@@ -81,8 +81,8 @@ export function turnBlocker(session: Session): Feedback | undefined {
   if (blocked !== undefined) {
     return {
       text: auth.kind === "oauth"
-        ? `${providerLabel(session.provider.id)} needs ${auth.label} sign-in · /settings`
-        : `${providerLabel(session.provider.id)} needs an API key · /settings`,
+        ? `${providerLabel(session.provider.id)} needs sign-in · /providers`
+        : `${providerLabel(session.provider.id)} needs an API key · /providers`,
       tone: "warn",
     };
   }

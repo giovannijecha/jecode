@@ -55,6 +55,17 @@ test("markdown spends the notation instead of printing it", () => {
   assert.ok(text.includes("codice"));
   const code = rows.flatMap((r) => r.segs).find((seg) => seg.text === "codice");
   assert.equal(code?.bg, undefined);
+  assert.deepEqual(code?.fg, STEEL.technical);
+});
+
+test("technical text is vivid while structural and secondary text stay distinct", () => {
+  const [list] = markdown("- read `src/main.ts` and [docs](https://example.test)", 60, STEEL);
+  const segments = list?.segs ?? [];
+  assert.deepEqual(segments.find((segment) => segment.text === "- ")?.fg, STEEL.technical);
+  assert.deepEqual(segments.find((segment) => segment.text === "src/main.ts")?.fg, STEEL.technical);
+  assert.deepEqual(segments.find((segment) => segment.text === "docs")?.fg, STEEL.technical);
+  assert.notDeepEqual(STEEL.technical, STEEL.accent);
+  assert.notDeepEqual(STEEL.ink.muted, STEEL.ink.dim);
 });
 
 test("a paragraph is its lines joined, not one row each", () => {
@@ -172,11 +183,14 @@ test("a fenced block carries muted fences rather than the legacy rail", () => {
 
 test("the renderer receives one complete dark Steel identity", () => {
   assert.deepEqual(STEEL.accent, [102, 155, 210]);
+  assert.deepEqual(STEEL.technical, [78, 201, 232]);
   assert.deepEqual(STEEL.rule, [53, 80, 110]);
-  assert.deepEqual(STEEL.ink.fg, [212, 218, 225]);
+  assert.deepEqual(STEEL.ink.fg, [220, 224, 229]);
+  assert.deepEqual(STEEL.ink.muted, [156, 169, 183]);
+  assert.deepEqual(STEEL.ink.dim, [112, 124, 137]);
   assert.deepEqual(STEEL.ink.added, [134, 203, 146]);
   assert.deepEqual(STEEL.ink.removed, [232, 112, 112]);
-  assert.deepEqual(STEEL.surface.inset, [42, 52, 66]);
+  assert.equal("inset" in STEEL.surface, false);
 });
 
 test("prose can use a readable measure while code keeps the full row", () => {

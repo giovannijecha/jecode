@@ -28,11 +28,11 @@ export function inline(text: string, base: RGB, pal: Palette, bold = false): Seg
     }
 
     const [, mono, strong, strongAlt, emphasis, label] = match;
-    if (mono !== undefined) segs.push({ text: mono, fg: pal.accentSoft });
+    if (mono !== undefined) segs.push({ text: mono, fg: pal.technical });
     else if (strong !== undefined) segs.push({ text: strong, fg: ink.bright, bold: true });
     else if (strongAlt !== undefined) segs.push({ text: strongAlt, fg: ink.bright, bold: true });
     else if (emphasis !== undefined) segs.push({ text: emphasis, fg: ink.bright });
-    else if (label !== undefined) segs.push({ text: label, fg: pal.accent });
+    else if (label !== undefined) segs.push({ text: label, fg: pal.technical });
 
     last = match.index + match[0].length;
   }

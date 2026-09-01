@@ -9,6 +9,8 @@ export type MenuEntry = {
   label: string;
   description?: string;
   hint?: string;
+  value?: string;
+  adjustable?: boolean;
   selected: boolean;
 };
 
@@ -28,30 +30,45 @@ export function menuWindow(length: number, selected: number, visible: number): {
 }
 
 function renderEntry(entry: MenuEntry, labelWidth: number, width: number, pal: Palette): string {
-  // Colour terminals use one quiet selection band and keep every label on the
-  // composer's content edge. Monochrome has no band, so it alone reserves a
-  // fixed arrow column to keep selection visible without shifting peer rows.
+  // Colour terminals spend focus on the active label instead of painting a
+  // full-width band. Monochrome has no colour, so it alone reserves a fixed
+  // arrow column to keep selection visible without shifting peer rows.
   const monochrome = !hasColor();
   const selectedMark = monochrome ? (entry.selected ? "→ " : "  ") : "";
-  const fg = entry.selected ? pal.ink.bright : pal.ink.fg;
+  const fg = entry.selected ? pal.focus : pal.ink.fg;
   const primary: Seg[] = [
-    { text: selectedMark, fg: entry.selected ? pal.accent : fg },
-    { text: entry.label, fg },
+    { text: selectedMark, fg },
+    { text: entry.label, fg, bold: entry.selected || undefined },
   ];
 
   if (width > 40 && entry.description !== undefined) {
     const gap = Math.max(2, labelWidth - primaryWidth(entry));
-    primary.push({ text: `${" ".repeat(gap)}${entry.description}`, fg: entry.selected ? pal.ink.fg : pal.ink.muted });
+    primary.push({
+      text: `${" ".repeat(gap)}${entry.description}`,
+      fg: entry.selected ? pal.ink.bright : pal.ink.muted,
+    });
   }
 
-  const right = width > 40 && entry.hint !== undefined
-    ? [{
-        text: elide(entry.hint, Math.max(1, Math.floor(width / 4))),
-        fg: entry.selected ? pal.ink.fg : pal.ink.muted,
-      }]
-    : [];
-  const ground = entry.selected && !monochrome ? pal.surface.inset : undefined;
-  return row(width, primary, right, ground);
+  const value = entry.value === undefined
+    ? undefined
+    : entry.selected && entry.adjustable === true
+    ? `‹ ${entry.value} ›`
+    : entry.value;
+  const summary = [entry.hint, value]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
+  const rightColor = entry.selected ? pal.focus : pal.ink.muted;
+  const right = summary === "" || (width <= 40 && entry.value === undefined)
+    ? []
+    : [{
+        text: elide(
+          summary,
+          Math.max(1, Math.floor(entry.value === undefined ? width / 4 : width * 0.45)),
+        ),
+        fg: rightColor,
+        bold: entry.selected || undefined,
+      }];
+  return row(width, primary, right);
 }
 
 function primaryWidth(entry: Pick<MenuEntry, "label">): number {

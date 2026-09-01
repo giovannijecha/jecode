@@ -1,25 +1,20 @@
-// Credential command flows shared by settings and provider selection.
+// Masked API-key interaction shared by provider connection flows.
 
-import type { Session } from "./session.ts";
 import type { Host } from "./commands.ts";
-import type { Option } from "./tui/picker.ts";
-import { heading } from "./tui/picker.ts";
-import type { Field } from "./tui/field.ts";
-import { EMPTY } from "./tui/editor.ts";
-import { PROVIDERS } from "./providers/index.ts";
-import { openAIAccountHint } from "./openai-account.ts";
-import {
-  ensureOpenAIAccount,
-  openAIAccountCommand,
-} from "./openai-account-command.ts";
 import {
   credentialSource,
   forgetSaved,
+  forgetSession,
   hasSaved,
   hold,
   keep,
   storeLabel,
 } from "./credentials.ts";
+import type { Session } from "./session.ts";
+import { EMPTY } from "./tui/editor.ts";
+import type { Field } from "./tui/field.ts";
+import { heading } from "./tui/picker.ts";
+import type { Option } from "./tui/picker.ts";
 import type { Palette } from "./ui/theme.ts";
 
 /** Ask for a key, then ask separately whether it may be written to disk. */
@@ -62,7 +57,11 @@ export async function askForKey(name: string, host: Host, pal: Palette): Promise
       host.emit({ kind: "notice", text: "API key saved", tone: "info" });
       return true;
     } catch (error) {
-      host.emit({ kind: "notice", text: `could not save API key · ${(error as Error).message}`, tone: "error" });
+      host.emit({
+        kind: "notice",
+        text: `could not save API key · ${(error as Error).message}`,
+        tone: "error",
+      });
       return false;
     }
   }
@@ -70,106 +69,88 @@ export async function askForKey(name: string, host: Host, pal: Palette): Promise
   return false;
 }
 
-export async function credentialsCommand(session: Session, host: Host): Promise<void> {
+/** Manage one provider key without ever placing its value on screen. */
+export async function apiKeyCommand(
+  name: string,
+  label: string,
+  session: Session,
+  host: Host,
+): Promise<void> {
   const choose = chooser(host);
   if (choose === undefined) return;
 
-  const index = await choose({
-    title: heading("authentication", "secrets are never shown", session.palette),
-    options: PROVIDERS.map((provider) => ({
-      label: provider.auth.kind === "api-key" ? provider.auth.keyVar : `${provider.auth.label} account`,
-      hint: provider.auth.kind === "api-key"
-        ? credentialSource(provider.auth.keyVar) ?? "missing"
-        : openAIAccountHint(),
-    })),
-    index: Math.max(0, PROVIDERS.findIndex((provider) => provider.id === session.provider.id)),
-  });
-  if (index === undefined) return;
-
-  const provider = PROVIDERS[index];
-  if (provider === undefined) return;
-  if (provider.auth.kind === "oauth") {
-    await openAIAccountCommand(session, host);
-    return;
-  }
-  const name = provider.auth.keyVar;
   const source = credentialSource(name);
-
   if (source === "environment") {
-    host.emit({
-      kind: "notice",
-      text: `${name} comes from the environment · restart after changing it`,
-      tone: "info",
+    if (!hasSaved(name)) {
+      host.emit({
+        kind: "notice",
+        text: `${label} API key comes from the environment · restart after changing it`,
+        tone: "info",
+      });
+      return;
+    }
+    const action = await choose({
+      title: heading(`${label} API key`, `${name} · environment`, session.palette),
+      description: "The environment value is read-only. A saved copy is currently shadowed.",
+      options: [{ label: "forget saved copy", hint: storeLabel(), key: "f" }],
+      index: 0,
     });
-    if (hasSaved(name)) await offerForget(name, session, host, "a saved copy is currently shadowed");
+    if (action === 0) await forgetSavedKey(name, host);
     return;
   }
 
   const actions: Option[] = [
-    { label: source === undefined ? "add credential" : "replace credential", key: "r" },
-    ...(hasSaved(name) ? [{ label: "forget saved copy", hint: storeLabel(), key: "f" }] : []),
+    {
+      label: source === undefined ? "add API key" : "replace API key",
+      hint: source === undefined ? "session or owner-only file" : `currently ${source}`,
+      key: "r",
+    },
+    ...(source === "session"
+      ? [{ label: "clear session key", hint: "this process only", key: "c" }]
+      : []),
+    ...(hasSaved(name)
+      ? [{ label: "forget saved copy", hint: storeLabel(), key: "f" }]
+      : []),
   ];
-  const action = await choose({
-    title: heading(name, source ?? "missing", session.palette),
+  const index = await choose({
+    title: heading(`${label} API key`, `${name} · ${source ?? "missing"}`, session.palette),
     options: actions,
     index: 0,
   });
-  if (action === undefined) return;
-  if (actions[action]?.key === "f") {
-    await forget(name, host);
-    return;
-  }
-  await askForKey(name, host, session.palette);
+  const action = index === undefined ? undefined : actions[index]?.key;
+  if (action === "r") await askForKey(name, host, session.palette);
+  else if (action === "c") clearSessionKey(name, host);
+  else if (action === "f") await forgetSavedKey(name, host);
 }
 
-/** Offer the authentication flow owned by a provider, if that is its blocker. */
-export async function ensureProviderAuthentication(
-  provider: Session["provider"],
-  session: Session,
-  host: Host,
-): Promise<boolean> {
-  const blocked = provider.blocked();
-  if (blocked === undefined) return true;
-  if (provider.auth.kind === "oauth") {
-    return provider.auth.account === "openai-codex"
-      ? ensureOpenAIAccount(session, host)
-      : false;
-  }
-  if (!blocked.startsWith(`${provider.auth.keyVar} `)) {
-    host.emit({ kind: "notice", text: blocked, tone: "error" });
-    return false;
-  }
-  await askForKey(provider.auth.keyVar, host, session.palette);
-  return provider.blocked() === undefined;
-}
-
-export function authenticationNeed(provider: Session["provider"]): string {
-  return provider.auth.kind === "oauth" ? `${provider.auth.label} sign-in` : "an API key";
-}
-
-async function offerForget(name: string, session: Session, host: Host, hint: string): Promise<void> {
-  if (host.choose === undefined) return;
-  const index = await host.choose({
-    title: heading(name, hint, session.palette),
-    options: [
-      { label: "keep saved copy", key: "k" },
-      { label: "forget saved copy", hint: storeLabel(), key: "f" },
-    ],
-    index: 0,
+function clearSessionKey(name: string, host: Host): void {
+  const removed = forgetSession(name);
+  const fallback = credentialSource(name);
+  host.emit({
+    kind: "notice",
+    text: removed
+      ? fallback === undefined
+        ? "session API key removed"
+        : `session API key removed · ${fallback} copy now active`
+      : "no session API key",
+    tone: removed ? "info" : "warn",
   });
-  if (index === 1) await forget(name, host);
 }
 
-async function forget(name: string, host: Host): Promise<void> {
+async function forgetSavedKey(name: string, host: Host): Promise<void> {
   try {
     const removed = await forgetSaved(name);
     host.emit({
       kind: "notice",
-      text: removed ? "API key removed" : "no saved API key",
+      text: removed ? "saved API key removed" : "no saved API key",
       tone: removed ? "info" : "warn",
     });
   } catch (error) {
-    host.emit({ kind: "notice", text: `could not remove API key · ${(error as Error).message}`, tone: "error" });
+    host.emit({
+      kind: "notice",
+      text: `could not remove API key · ${(error as Error).message}`,
+      tone: "error",
+    });
   }
 }
 

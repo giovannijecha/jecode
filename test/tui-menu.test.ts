@@ -25,8 +25,9 @@ test("colour menu rows align with the composer while writable prompts keep their
       { name: "help", blurb: "show keyboard controls" },
       { name: "exit", blurb: "exit" },
     ], 0, 60, STEEL).rows;
-    assert.match(commandRows[0] ?? "", /\x1b\[48;2;42;52;66m/);
-    assert.doesNotMatch(commandRows[1] ?? "", /\x1b\[48;2;42;52;66m/);
+    assert.ok(commandRows.every((row) => !row.includes("\x1b[48;2;")));
+    assert.match(commandRows[0] ?? "", /\x1b\[38;2;102;155;210m\/help/);
+    assert.doesNotMatch(commandRows[1] ?? "", /\x1b\[38;2;102;155;210m\/exit/);
 
     const commands = plain(commandRows);
     assert.match(commands[0] ?? "", /^\/help/);
@@ -39,6 +40,41 @@ test("colour menu rows align with the composer while writable prompts keep their
     }, 60, STEEL));
     assert.match(settings.find((row) => row.includes("provider")) ?? "", /^provider/);
     assert.match(settings.find((row) => row.includes("effort")) ?? "", /^effort/);
+
+    const adjustable = plain(renderMenuRows([
+      {
+        label: "run_command",
+        description: "1 remembered",
+        value: "ask",
+        adjustable: true,
+        selected: true,
+      },
+    ], 60, STEEL));
+    assert.match(adjustable[0] ?? "", /^run_command.*1 remembered.*‹ ask ›/);
+
+    const narrow = plain(renderMenuRows([
+      {
+        label: "run_command",
+        description: "1 remembered",
+        value: "deny",
+        adjustable: true,
+        selected: true,
+      },
+    ], 32, STEEL));
+    assert.match(narrow[0] ?? "", /^run_command.*‹ deny ›/);
+    assert.doesNotMatch(narrow[0] ?? "", /remembered/);
+
+    const essentialRows = renderMenuRows([
+      { label: "gpt-5.6-terra", value: "ChatGPT", selected: true },
+      { label: "claude-sonnet-5", value: "Anthropic", selected: false },
+    ], 38, STEEL);
+    const essential = plain(essentialRows);
+    assert.match(essential[0] ?? "", /^gpt-5\.6-terra.*ChatGPT/);
+    assert.match(essential[1] ?? "", /^claude-sonnet-5.*Anthropic/);
+    assert.match(
+      essentialRows[0] ?? "",
+      /\x1b\[1m\x1b\[38;2;102;155;210mChatGPT/,
+    );
 
     const input = plain([promptLine("secret", 6, 60, STEEL).row]);
     assert.match(input[0] ?? "", /^→ secret/);

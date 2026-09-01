@@ -55,6 +55,12 @@ function handlePicker(open: Extract<Open, { picker: Picker }>, key: Key): Outcom
     case "down":
       open.picker = picker.move(open.picker, 1);
       break;
+    case "left":
+      open.picker = picker.adjust(open.picker, -1);
+      break;
+    case "right":
+      open.picker = picker.adjust(open.picker, 1);
+      break;
     case "home":
       open.picker = picker.edge(open.picker, "home");
       break;

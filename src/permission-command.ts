@@ -22,73 +22,62 @@ export async function permissionsCommand(session: Session, host: Host): Promise<
 
   let selected = 0;
   while (true) {
-    const tools = control.listTools();
-    const index = await choose(permissionsPicker(tools, session.palette, selected));
+    const index = await choose(permissionControlPicker(control, host, selected));
     if (index === undefined) return;
-    const tool = tools[index];
+    const tool = control.listTools()[index];
     if (tool === undefined) return;
     selected = index;
-    await configureTool(tool, control, choose, session.palette);
+    if (tool.locked) {
+      lockedNotice(tool.name, host);
+      continue;
+    }
+    if (tool.remembered > 0) {
+      await reviewGrants(tool.name, control, choose, session.palette);
+    }
   }
 }
 
 export function permissionsPicker(
   tools: readonly PermissionTool[],
-  pal: Palette,
   index = 0,
+  adjust?: NonNullable<Picker["adjust"]>,
 ): Picker {
-  const launchOverride = tools.some((tool) => tool.locked);
   return {
-    title: heading(
-      "permissions",
-      launchOverride ? "session only · auto approve at launch" : "session only",
-      pal,
-    ),
-    description: "Changes apply now · /new resets them",
-    options: tools.map((tool) => ({ label: tool.name, hint: toolHint(tool) })),
+    title: [],
+    options: tools.map((tool) => {
+      const description = toolDescription(tool);
+      return {
+        label: tool.name,
+        ...(description === undefined ? {} : { description }),
+        value: tool.locked ? `${tool.mode} · locked` : tool.mode,
+        adjustable: !tool.locked,
+      };
+    }),
+    visible: tools.length,
+    ...(adjust === undefined ? {} : { adjust }),
     index: Math.min(Math.max(0, index), Math.max(0, tools.length - 1)),
   };
 }
 
-async function configureTool(
-  tool: PermissionTool,
+function permissionControlPicker(
   control: SessionPermissions,
-  choose: NonNullable<Host["choose"]>,
-  pal: Palette,
-): Promise<void> {
-  if (tool.locked) {
-    await choose({
-      title: heading(tool.name, "launch override", pal),
-      description: "Restart without --auto-approve to change this tool",
-      options: [{ label: "allow", hint: "locked for this process" }],
-      index: 0,
-    });
-    return;
-  }
+  host: Host,
+  selected: number,
+): Picker {
+  return permissionsPicker(control.listTools(), selected, (index, step) => {
+    const tool = control.listTools()[index];
+    if (tool === undefined) return permissionControlPicker(control, host, selected);
+    if (tool.locked) {
+      lockedNotice(tool.name, host);
+      return permissionControlPicker(control, host, index);
+    }
 
-  const modes: PermissionMode[] = tool.dangerous ? ["ask", "allow", "deny"] : ["allow", "deny"];
-  const grants = control.listGrants(tool.name);
-  const index = await choose({
-    title: heading(tool.name, tool.dangerous ? "dangerous tool" : "read-only tool", pal),
-    description: tool.dangerous
-      ? "Session only · ask is the safe default"
-      : "Session only · deny hides this tool from the model",
-    options: [
-      ...modes.map((mode) => ({ label: mode, hint: modeHint(mode, tool.dangerous) })),
-      ...(grants.length === 0
-        ? []
-        : [{ label: "remembered approvals", hint: String(grants.length) }]),
-    ],
-    index: Math.max(0, modes.indexOf(tool.mode)),
+    const modes = modesFor(tool);
+    const at = Math.max(0, modes.indexOf(tool.mode));
+    const next = modes[(at + step + modes.length) % modes.length];
+    if (next !== undefined) control.set(tool.name, next);
+    return permissionControlPicker(control, host, index);
   });
-  if (index === undefined) return;
-  const mode = modes[index];
-  if (mode !== undefined) {
-    control.set(tool.name, mode);
-    return;
-  }
-
-  await reviewGrants(tool.name, control, choose, pal);
 }
 
 async function reviewGrants(
@@ -107,7 +96,6 @@ async function reviewGrants(
     ];
     const index = await choose({
       title: heading("remembered", tool, pal),
-      description: "Allowed without asking · this session",
       options,
       index: Math.min(selected, options.length - 1),
     });
@@ -124,15 +112,22 @@ async function reviewGrants(
   }
 }
 
-function toolHint(tool: PermissionTool): string {
-  const kind = tool.dangerous ? "" : " · read only";
-  const remembered = tool.remembered === 0 ? "" : ` · ${tool.remembered} remembered`;
-  const locked = tool.locked ? " · launch override" : "";
-  return `${tool.mode}${kind}${remembered}${locked}`;
+function modesFor(tool: PermissionTool): readonly PermissionMode[] {
+  return tool.dangerous ? ["ask", "allow", "deny"] : ["allow", "deny"];
 }
 
-function modeHint(mode: PermissionMode, dangerous: boolean): string {
-  if (mode === "deny") return "hide from the model";
-  if (mode === "ask") return "prompt when needed";
-  return dangerous ? "every call this session" : "offer to the model";
+function toolDescription(tool: PermissionTool): string | undefined {
+  const parts = [
+    tool.dangerous ? undefined : "read only",
+    tool.remembered === 0 ? undefined : `${tool.remembered} remembered`,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length === 0 ? undefined : parts.join(" · ");
+}
+
+function lockedNotice(tool: string, host: Host): void {
+  host.emit({
+    kind: "notice",
+    text: `restart without --auto-approve to change ${tool}`,
+    tone: "warn",
+  });
 }

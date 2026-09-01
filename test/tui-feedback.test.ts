@@ -91,7 +91,7 @@ test("the footer projection omits provider, usage, location, and ready noise", (
 test("turn blockers use user-facing copy and remain until the next key", () => {
   const needsKey = turnBlocker(session(provider("ANTHROPIC_API_KEY is not set")));
   assert.deepEqual(needsKey, {
-    text: "Anthropic needs an API key · /settings",
+    text: "Anthropic needs an API key · /providers",
     tone: "warn",
   });
 
@@ -113,11 +113,11 @@ test("the ChatGPT provider asks for sign-in instead of an API key", () => {
   };
 
   assert.deepEqual(turnBlocker(session(codex)), {
-    text: "OpenAI Codex needs ChatGPT sign-in · /settings",
+    text: "ChatGPT needs sign-in · /providers",
     tone: "warn",
   });
   const failure = turnFailure(session(codex, "gpt-codex"), new Error("401 unauthorized"), false);
-  assert.match(failure.text, /reconnect ChatGPT in \/settings/);
+  assert.match(failure.text, /reconnect ChatGPT in \/providers/);
 });
 
 test("a real authentication failure remains one actionable transcript notice", () => {
@@ -125,7 +125,7 @@ test("a real authentication failure remains one actionable transcript notice", (
   assert.equal(failure.kind, "notice");
   assert.equal(failure.tone, "error");
   assert.match(failure.text, /^401 unauthorized · /);
-  assert.match(failure.text, /credentials|environment/);
+  assert.match(failure.text, /access|environment/);
 });
 
 test("an Ollama network failure becomes one actionable transcript notice", () => {
@@ -136,6 +136,6 @@ test("an Ollama network failure becomes one actionable transcript notice", () =>
     false,
   );
 
-  assert.equal(failure.text, "Ollama is not reachable · check its connection in /settings");
+  assert.equal(failure.text, "Ollama is not reachable · check its connection in /providers");
   assert.equal(failure.tone, "error");
 });

@@ -33,6 +33,10 @@ export function applyKey(state: Editor, key: Key): Editor | undefined {
       return edit.wordLeft(state);
     case "wordright":
       return edit.wordRight(state);
+    case "deletewordleft":
+      return edit.killWord(state);
+    case "deletewordright":
+      return edit.killNextWord(state);
     case "home":
       return edit.home(state);
     case "end":

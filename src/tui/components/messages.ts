@@ -58,14 +58,14 @@ export function renderReasoning(block: ReasoningBlock, width: number, pal: Palet
           bold: true,
         },
       ],
-      action === undefined ? [] : [{ text: action, fg: pal.ink.muted }],
+      action === undefined ? [] : [{ text: action, fg: pal.ink.dim }],
       undefined,
       PAD,
     ),
     ...visible.map((line) =>
       row(
         width,
-        line.segs.map((seg) => ({ ...seg, fg: pal.ink.muted, italic: true })),
+        line.segs.map((seg) => ({ ...seg, fg: pal.ink.dim, italic: true })),
         [],
         undefined,
         PAD,

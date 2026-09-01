@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { Host } from "../src/commands.ts";
-import { credentialsCommand } from "../src/credential-commands.ts";
+import { apiKeyCommand } from "../src/credential-commands.ts";
 import {
   credentialSource,
   hasSaved,
@@ -100,11 +100,11 @@ function restore(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
-test("the credentials command can keep a missing key for this session", async () => {
+test("an API key can be kept for this session", async () => {
   await inStore(async () => {
-    const screen = host([1, 0, 0], "session-secret");
+    const screen = host([0, 0], "session-secret");
 
-    await credentialsCommand(session(), screen);
+    await apiKeyCommand(KEY, "OpenAI API", session(), screen);
 
     assert.equal(screen.fields[0]?.secret, true);
     assert.equal(credentialSource(KEY), "session");
@@ -113,25 +113,25 @@ test("the credentials command can keep a missing key for this session", async ()
   });
 });
 
-test("credential actions rely on escape instead of a redundant close row", async () => {
+test("API key actions rely on escape instead of a redundant close row", async () => {
   await inStore(async () => {
-    const screen = host([1, undefined]);
+    const screen = host([undefined]);
 
-    await credentialsCommand(session(), screen);
+    await apiKeyCommand(KEY, "OpenAI API", session(), screen);
 
     assert.deepEqual(
-      screen.pickers[1]?.options.map((option) => option.label),
-      ["add credential"],
+      screen.pickers[0]?.options.map((option) => option.label),
+      ["add API key"],
     );
     assert.equal(screen.fields.length, 0);
   });
 });
 
-test("the credentials command saves only after the explicit disk choice", async () => {
+test("an API key is saved only after the explicit disk choice", async () => {
   await inStore(async () => {
-    const screen = host([1, 0, 1], "saved-secret");
+    const screen = host([0, 1], "saved-secret");
 
-    await credentialsCommand(session(), screen);
+    await apiKeyCommand(KEY, "OpenAI API", session(), screen);
 
     assert.equal(hasSaved(KEY), true);
     const stored = JSON.parse(await readFile(storePath(), "utf8")) as Record<string, string>;
@@ -142,9 +142,9 @@ test("the credentials command saves only after the explicit disk choice", async 
 
 test("discarding a typed credential is a silent cancellation", async () => {
   await inStore(async () => {
-    const screen = host([1, 0, 2], "discarded-secret");
+    const screen = host([0, 2], "discarded-secret");
 
-    await credentialsCommand(session(), screen);
+    await apiKeyCommand(KEY, "OpenAI API", session(), screen);
 
     assert.equal(credentialSource(KEY), undefined);
     assert.deepEqual(screen.blocks, []);
@@ -156,22 +156,22 @@ test("an environment key can forget a shadowed saved copy without exposing eithe
     await keep(KEY, "saved-secret");
     reload();
     process.env[KEY] = "environment-secret";
-    const screen = host([1, 1]);
+    const screen = host([0]);
 
-    await credentialsCommand(session(), screen);
+    await apiKeyCommand(KEY, "OpenAI API", session(), screen);
 
     assert.equal(credentialSource(KEY), "environment");
     assert.equal(hasSaved(KEY), false);
     const output = screen.blocks.map((block) => "text" in block ? block.text : "").join("\n");
-    assert.match(output, /API key removed/);
+    assert.match(output, /saved API key removed/);
     assert.doesNotMatch(output, /saved-secret|environment-secret/);
   });
 });
 
-test("the credentials command explains when no interactive screen is available", async () => {
+test("API key management explains when no interactive screen is available", async () => {
   const blocks: Block[] = [];
 
-  await credentialsCommand(session(), { emit: (block) => blocks.push(block) });
+  await apiKeyCommand(KEY, "OpenAI API", session(), { emit: (block) => blocks.push(block) });
 
   assert.equal(blocks[0]?.kind, "notice");
   assert.match(blocks[0]?.kind === "notice" ? blocks[0].text : "", /needs the screen/);

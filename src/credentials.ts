@@ -68,6 +68,11 @@ export function hold(name: string, value: string): void {
   held.set(name, value);
 }
 
+/** Remove only the value held by this process. Saved and environment values remain. */
+export function forgetSession(name: string): boolean {
+  return held.delete(name);
+}
+
 /**
  * Take a key and write it down, returning the path it went to.
  *
@@ -82,8 +87,10 @@ export async function keep(name: string, value: string): Promise<string> {
   return withStoreLock(file, async () => {
     const all = { ...readSavedStore(), [name]: value };
     await persist(file, all);
-    hold(name, value);
     saved = all;
+    // A newly saved replacement must become active immediately. Otherwise an
+    // older session-only value would keep shadowing the value just written.
+    held.delete(name);
     return file;
   });
 }

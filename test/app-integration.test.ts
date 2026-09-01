@@ -311,6 +311,36 @@ test("escape cancels the active provider request before the TUI closes", async (
   assert.equal(harness.left(), true);
 });
 
+test("escape cancels a command without leaving interrupted feedback", async () => {
+  let signal: AbortSignal | undefined;
+  const waiting: Provider = {
+    ...provider(),
+    efforts: (_model, current) => {
+      signal = current;
+      return new Promise<readonly string[]>((_resolve, reject) => {
+        current?.addEventListener("abort", () => reject(current.reason), { once: true });
+      });
+    },
+  };
+  const harness = virtualScreen();
+  const running = runApp(session(waiting), process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  feed("/effort\r");
+  await waitFor(() => signal !== undefined, "effort discovery");
+  feed(String.fromCharCode(27));
+  await waitFor(() => signal?.aborted === true, "command cancellation");
+  await waitFor(
+    () => !(harness.frames.at(-1) ?? []).join("\n").includes("esc to interrupt"),
+    "quiet command footer",
+  );
+  assert.doesNotMatch((harness.frames.at(-1) ?? []).join("\n"), /interrupted/);
+
+  feed("/exit\r");
+  await running;
+  assert.equal(harness.left(), true);
+});
+
 test("/export writes without a picker to the directory where Jecode was launched", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "jecode-tui-export-"));
   const harness = virtualScreen();

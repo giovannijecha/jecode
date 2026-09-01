@@ -146,10 +146,11 @@ published package runs no compilation or installation scripts.
 ## First session
 
 Jecode opens on an empty composer instead of forcing a setup wizard. Type
-**/settings** when you are ready to choose a provider, select a model, and
-configure authentication. An API key can remain in memory for the current
-session or be saved explicitly under **~/.jecode**; it is never stored in the
-workspace.
+**/providers** to connect the services you use, then **/models** to choose from
+their combined live catalogues. **/settings** keeps the selected model and the
+remaining non-secret defaults together. An API key can remain in memory for
+the current session or be saved explicitly under **~/.jecode**; it is never
+stored in the workspace.
 
 | Provider ID | Authentication | Notes |
 |---|---|---|
@@ -158,7 +159,8 @@ workspace.
 | openai-codex | ChatGPT OAuth | Experimental; uses eligible ChatGPT Codex access |
 | ollama | OLLAMA_API_KEY for Cloud/remote | Cloud with a key, local without one |
 
-Choose **openai-codex** to sign in on OpenAI's website without pasting a key.
+Choose **ChatGPT** in **/providers** to sign in on OpenAI's website without
+pasting a key.
 Jecode offers a local browser callback and a device-code flow; WSL and remote
 terminals default to the device code. The connection is saved only after the
 flow completes. Availability and usage limits are determined by the ChatGPT
@@ -168,10 +170,10 @@ and is not an endorsement of Jecode by OpenAI.
 Anthropic remains API-key only. Jecode does not reuse a Claude consumer
 subscription or copy credentials from another client.
 
-Choose **cloud**, **local**, or a custom endpoint from the Ollama connection row
-in **/settings**. Existing users with an Ollama API key automatically use
-**https://ollama.com**; without a key, Jecode uses the local daemon at
-**http://127.0.0.1:11434**. Remote custom endpoints must use HTTPS.
+Choose **Ollama** in **/providers** to manage its API key and select **cloud**,
+**local**, or a custom endpoint. Existing users with an Ollama API key
+automatically use **https://ollama.com**; without a key, Jecode uses the local
+daemon at **http://127.0.0.1:11434**. Remote custom endpoints must use HTTPS.
 
 ## Use the TUI
 
@@ -179,12 +181,11 @@ Type **/** to open searchable command completion inside the composer.
 
 | Command | What it does |
 |---|---|
-| /settings | Manage provider, connection, model, limits, motion, and authentication |
+| /settings | Manage the selected model, limits, effort, motion, and provider access |
 | /effort | Change and save reasoning effort directly |
-| /providers | Switch the provider for the next turn |
-| /models | Search the live model catalogue |
-| /credentials | Manage API keys and the connected ChatGPT account |
-| /permissions | Manage session tool access and remembered approvals |
+| /providers | Manage API keys, ChatGPT sign-in, and Ollama connections |
+| /models | Search models across every available provider and select one |
+| /permissions | Change session tool access inline and review remembered approvals |
 | /new | Start a clean conversation and reset session tool permissions |
 | /export | Save a timestamped Markdown transcript in the launch directory |
 | /help | Open a temporary keyboard reference in the composer dock |
@@ -193,6 +194,10 @@ Type **/** to open searchable command completion inside the composer.
 Useful controls:
 
 - **Up/Down** moves through command suggestions, menus, and input history.
+- **Left/Right** moves the composer cursor or changes an inline menu value;
+  **Ctrl+Left/Right** moves by word.
+- **Backspace/Delete** removes one character; **Ctrl+Backspace/Delete** removes
+  one word. **Home/End** moves to the start or end of the composer.
 - **Tab** completes a slash command without running it; **Enter** sends.
 - **Alt+Enter** inserts a newline.
 - **Esc** closes a menu or interrupts the foreground operation.
@@ -229,7 +234,9 @@ Persistent preferences live in **~/.jecode/settings.json**. Explicitly saved
 API keys live in **~/.jecode/credentials.json**; the ChatGPT OAuth account lives
 separately in **~/.jecode/accounts.json**. Both secret stores use owner-only
 permissions where the operating system supports them. Environment API keys
-always win.
+always win. Model selection saves the provider and model as one change; the
+separate startup flags remain available for automation and override that saved
+choice.
 
 Jecode has one interface theme: dark Steel. **NO_COLOR** is supported for
 terminals and pipelines that disable colour.

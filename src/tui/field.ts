@@ -35,7 +35,7 @@ export function panel(field: Field, width: number, pal: Palette): string[] {
   const head = row(
     width,
     field.title,
-    field.right === undefined ? [] : [{ text: field.right, fg: ink.muted }],
+    field.right === undefined ? [] : [{ text: field.right, fg: ink.dim }],
   );
 
   const line = promptLine(field.editor.text, field.editor.cursor, width, pal, {
