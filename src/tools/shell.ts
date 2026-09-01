@@ -18,6 +18,7 @@ export const runCommand: Tool = {
     "and stderr. The shell is not a filesystem sandbox, so calls ask for approval by default. Output is " +
     "truncated past 30000 characters.",
   dangerous: true,
+  concurrency: "exclusive",
   input: {
     type: "object",
     properties: {

@@ -6,7 +6,7 @@ import { editFile, listDir, readFile, writeFile } from "./fs.ts";
 import { runCommand } from "./shell.ts";
 import { findFiles, searchText } from "./search.ts";
 
-export type { Tool, ToolContext, ToolOutput, ToolPreview } from "./types.ts";
+export type { Tool, ToolConcurrency, ToolContext, ToolOutput, ToolPreview } from "./types.ts";
 
 /** A finished call: what the model reads, and what the user sees beside it. */
 export type ToolRun = { result: ToolResultBlock; summary?: string };

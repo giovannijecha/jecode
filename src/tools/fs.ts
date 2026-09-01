@@ -31,6 +31,7 @@ export const readFile: Tool = {
     "Read a regular UTF-8 text file inside the workspace. Optionally start at a line " +
     "(1-based) and cap how many lines come back. Large files are truncated.",
   dangerous: false,
+  concurrency: "shared",
   input: {
     type: "object",
     properties: {
@@ -63,6 +64,7 @@ export const listDir: Tool = {
   name: "list_dir",
   description: "List the entries of a directory inside the workspace. Directories end with a slash.",
   dangerous: false,
+  concurrency: "shared",
   input: {
     type: "object",
     properties: {
@@ -117,6 +119,7 @@ export const writeFile: Tool = {
     `${MAX_EDITABLE_CHARS} characters and ${MAX_EDITABLE_LINES} lines. ` +
     "To change part of an existing file, prefer edit_file.",
   dangerous: true,
+  concurrency: "exclusive",
   input: {
     type: "object",
     properties: {
@@ -159,6 +162,7 @@ export const editFile: Tool = {
     `Whole-file changes are limited to ${MAX_EDITABLE_CHARS} characters and ` +
     `${MAX_EDITABLE_LINES} lines.`,
   dangerous: true,
+  concurrency: "exclusive",
   input: {
     type: "object",
     properties: {

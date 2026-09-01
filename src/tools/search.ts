@@ -6,6 +6,8 @@ import * as path from "node:path";
 import type { Tool, ToolContext } from "./types.ts";
 import { optionalBool, optionalInt, optionalString, requireString } from "./args.ts";
 import { displayPath, resolveExistingInRoot } from "./paths.ts";
+import { trySearchWithRipgrep } from "./ripgrep.ts";
+import type { SearchFile } from "./ripgrep.ts";
 
 const DEFAULT_RESULTS = 100;
 const MAX_RESULTS = 500;
@@ -13,6 +15,10 @@ const MAX_VISITED = 20_000;
 const MAX_FILE_BYTES = 1_000_000;
 const MAX_MATCH_LINE = 500;
 const MAX_GLOB_CHARS = 512;
+const RG_PREFIX_BYTES = 2_000_000;
+const RG_PREFIX_FILES = 500;
+const MIN_RG_TAIL_BYTES = 2_000_000;
+const MIN_RG_TAIL_FILES = 500;
 const SKIP = new Set([".git", ".hg", ".svn", "node_modules"]);
 
 export const findFiles: Tool = {
@@ -21,6 +27,7 @@ export const findFiles: Tool = {
     "Find files inside the workspace by glob (for example **/*.ts). Skips dependency and VCS " +
     "directories, never follows symlinks, and returns a bounded list.",
   dangerous: false,
+  concurrency: "shared",
   input: {
     type: "object",
     properties: {
@@ -58,6 +65,7 @@ export const searchText: Tool = {
     "Search UTF-8 text files inside the workspace for a literal string. Skips dependencies, VCS " +
     "directories, symlinks, binary files, and files over 1 MB; results are bounded.",
   dangerous: false,
+  concurrency: "shared",
   input: {
     type: "object",
     properties: {
@@ -82,7 +90,11 @@ export const searchText: Tool = {
     const match = pattern === undefined || pattern === "" ? () => true : glob(pattern);
     const limit = resultLimit(args);
     const found: string[] = [];
+    const tail: SearchFile[] = [];
     let skipped = 0;
+    let prefixBytes = 0;
+    let prefixFiles = 0;
+    let tailBytes = 0;
 
     const walked = await walk(start, scoped, async (lexical) => {
       const relative = displayPath(scoped.root, lexical);
@@ -95,31 +107,46 @@ export const searchText: Tool = {
         return false;
       }
 
-      let text: string;
-      try {
-        const data = await fs.readFile(file);
-        if (data.includes(0)) {
-          skipped++;
-          return false;
-        }
-        text = data.toString("utf8");
-      } catch (error) {
-        if (skippable(error)) {
-          skipped++;
-          return false;
-        }
-        throw error;
+      const candidate = { path: file, bytes: info.size };
+      if (
+        prefixFiles + 1 > RG_PREFIX_FILES ||
+        prefixBytes + info.size > RG_PREFIX_BYTES
+      ) {
+        tail.push(candidate);
+        tailBytes += info.size;
+        return false;
       }
 
-      for (const [index, line] of text.replace(/\r\n?/g, "\n").split("\n").entries()) {
-        checkAbort(ctx.signal);
-        const haystack = sensitive ? line : line.toLocaleLowerCase();
-        if (!haystack.includes(needle)) continue;
-        found.push(`${relative}:${index + 1}:${clip(line)}`);
-        if (found.length >= limit) return true;
-      }
-      return false;
+      prefixFiles++;
+      prefixBytes += info.size;
+      const searched = await portableSearch(
+        [candidate],
+        scoped,
+        needle,
+        sensitive,
+        limit - found.length,
+      );
+      found.push(...searched.matches);
+      skipped += searched.skipped;
+      return found.length >= limit;
     });
+
+    const accelerated = preferRipgrep(tail, tailBytes)
+      ? await trySearchWithRipgrep({
+          files: tail,
+          query,
+          caseSensitive: sensitive,
+          limit: limit - found.length,
+          signal: ctx.signal,
+        })
+      : undefined;
+    const portable = accelerated === undefined && tail.length > 0
+      ? await portableSearch(tail, scoped, needle, sensitive, limit - found.length)
+      : undefined;
+    found.push(...(portable?.matches ?? accelerated?.matches.map((match) => (
+      `${displayPath(scoped.root, match.path)}:${match.line}:${clip(match.text)}`
+    )) ?? []));
+    skipped += portable?.skipped ?? accelerated?.binaryPaths.length ?? 0;
 
     const extra = skipped === 0 ? "" : ` · skipped ${skipped} binary/large/unreadable`;
     return {
@@ -128,6 +155,49 @@ export const searchText: Tool = {
     };
   },
 };
+
+async function portableSearch(
+  files: readonly SearchFile[],
+  ctx: ToolContext,
+  needle: string,
+  sensitive: boolean,
+  limit: number,
+): Promise<{ matches: string[]; skipped: number }> {
+  const found: string[] = [];
+  let skipped = 0;
+  for (const file of files) {
+    checkAbort(ctx.signal);
+
+    let text: string;
+    try {
+      const data = await fs.readFile(file.path);
+      if (data.includes(0)) {
+        skipped++;
+        continue;
+      }
+      text = data.toString("utf8");
+    } catch (error) {
+      if (skippable(error)) {
+        skipped++;
+        continue;
+      }
+      throw error;
+    }
+
+    for (const [index, line] of text.replace(/\r\n?/g, "\n").split("\n").entries()) {
+      checkAbort(ctx.signal);
+      const haystack = sensitive ? line : line.toLocaleLowerCase();
+      if (!haystack.includes(needle)) continue;
+      found.push(`${displayPath(ctx.root, file.path)}:${index + 1}:${clip(line)}`);
+      if (found.length >= limit) return { matches: found, skipped };
+    }
+  }
+  return { matches: found, skipped };
+}
+
+function preferRipgrep(files: readonly SearchFile[], bytes: number): boolean {
+  return files.length >= MIN_RG_TAIL_FILES || bytes >= MIN_RG_TAIL_BYTES;
+}
 
 type WalkResult = { capped: boolean };
 

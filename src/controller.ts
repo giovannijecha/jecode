@@ -17,6 +17,8 @@ import type { Tool, ToolContext, ToolPreview, ToolRun } from "./tools/index.ts";
 import { findTool, runTool, toolSpecs } from "./tools/index.ts";
 
 export const MAX_TOOL_CALLS_PER_STEP = 32;
+/** Independent read calls share one bounded execution wave. */
+export const MAX_CONCURRENT_TOOL_CALLS = 4;
 
 export type ControllerOptions = {
   provider: Provider;
@@ -93,24 +95,38 @@ export async function runTurn(
       return; // the model is done — hand back to the user
     }
 
-    // Calls run one after another because approval prompts serialise anyway,
-    // but every result from this step goes back in a SINGLE message. Splitting
-    // them teaches the model to stop batching its calls.
+    // Consecutive shared reads run together. An exclusive call is an ordered
+    // barrier, so writes, approvals, and commands never overlap other work.
+    // Every result still goes back in a SINGLE message and in call order.
     const results: ToolResultBlock[] = [];
     const announced = new Set<string>();
     try {
       if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
-      for (let index = 0; index < calls.length; index++) {
-        throwIfAborted(signal);
-        const call = calls[index] as ToolCallBlock;
-        events.onToolProgress?.(index + 1, calls.length);
-        const preview = await look(call, options, signal);
-        throwIfAborted(signal);
-        announced.add(call.id);
-        events.onToolCall(call, preview);
-        const { result, summary } = await settle(call, options, events, signal, preview);
-        results.push(result);
-        events.onToolResult(call, result, summary);
+      while (results.length < calls.length) {
+        const start = results.length;
+        const batch = nextBatch(calls, start, options.tools);
+        const prepared: { call: ToolCallBlock; preview?: ToolPreview }[] = [];
+
+        for (let offset = 0; offset < batch.length; offset++) {
+          throwIfAborted(signal);
+          const call = batch[offset] as ToolCallBlock;
+          events.onToolProgress?.(start + offset + 1, calls.length);
+          const preview = await look(call, options, signal);
+          throwIfAborted(signal);
+          announced.add(call.id);
+          events.onToolCall(call, preview);
+          prepared.push({ call, preview });
+        }
+
+        const runs = await Promise.all(
+          prepared.map(({ call, preview }) => settle(call, options, events, signal, preview)),
+        );
+        for (let offset = 0; offset < runs.length; offset++) {
+          const call = prepared[offset]?.call as ToolCallBlock;
+          const run = runs[offset] as ToolRun;
+          results.push(run.result);
+          events.onToolResult(call, run.result, run.summary);
+        }
       }
     } catch (error) {
       const interrupted = signal?.aborted === true;
@@ -143,6 +159,32 @@ export async function runTurn(
   throw new Error(
     `gave up after ${options.maxSteps} steps without finishing (raise --max-steps)`,
   );
+}
+
+function nextBatch(
+  calls: readonly ToolCallBlock[],
+  start: number,
+  tools: Tool[],
+): ToolCallBlock[] {
+  const first = calls[start];
+  if (first === undefined) return [];
+  if (!shared(findTool(tools, first.name))) return [first];
+
+  const batch: ToolCallBlock[] = [];
+  for (
+    let index = start;
+    index < calls.length && batch.length < MAX_CONCURRENT_TOOL_CALLS;
+    index++
+  ) {
+    const call = calls[index] as ToolCallBlock;
+    if (!shared(findTool(tools, call.name))) break;
+    batch.push(call);
+  }
+  return batch;
+}
+
+function shared(tool: Tool | undefined): boolean {
+  return tool?.concurrency === "shared" && !tool.dangerous;
 }
 
 function assertToolCallIds(calls: readonly ToolCallBlock[]): void {

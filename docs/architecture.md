@@ -23,7 +23,9 @@ npm run pack:release → clean build → dist/ inside the release tarball
 ```
 
 There are no subagents, workers, delegated tasks, or concurrent controller
-loops. Complex work advances through more iterations of the same loop.
+loops. One step may overlap consecutive read-only tool calls inside a bounded
+four-call wave; writes, commands, approvals, and unknown tools remain ordered
+barriers. Complex work advances through more iterations of the same loop.
 
 ## One turn
 
@@ -40,8 +42,10 @@ workspace content the model reads or content the user supplies.
    assistant message.
 3. Append that message to history and record normalized usage.
 4. Return when it contains no tool calls.
-5. Otherwise preview each call, request approval when required, run it, and
-   collect every result from the step into one user message.
+5. Otherwise preview each call, request approval when required, and execute it.
+   Consecutive shared reads run in bounded parallel waves; exclusive calls
+   remain ordered barriers. Collect every result in original call order inside
+   one user message.
 6. Repeat up to `maxSteps`.
 
 A tool failure becomes an error result the model can act on. Cancellation is
@@ -141,15 +145,21 @@ will not replace them wholesale.
 
 The built-in tools are:
 
-| Tool | Default | Boundary |
-|---|---|---|
-| `read_file` | Allow | Progressive UTF-8 read, bounded output, canonical path |
-| `list_dir` | Allow | Bounded entries and output from one canonical directory |
-| `find_files` | Allow | Bounded recursive glob; skips VCS, dependencies, symlinks |
-| `search_text` | Allow | Bounded literal search; skips binary and files over 1 MB |
-| `edit_file` | Ask | Bounded exact replacement, atomic write, preview check |
-| `write_file` | Ask | Bounded whole-file replacement, atomic write, preview check |
-| `run_command` | Ask | Workspace working directory, timeout, bounded output |
+| Tool | Default | Execution | Boundary |
+|---|---|---|---|
+| `read_file` | Allow | Shared | Progressive UTF-8 read, bounded output, canonical path |
+| `list_dir` | Allow | Shared | Bounded entries and output from one canonical directory |
+| `find_files` | Allow | Shared | Bounded recursive glob; skips VCS, dependencies, symlinks |
+| `search_text` | Allow | Shared | Bounded literal search; optional `rg`, built-in fallback |
+| `edit_file` | Ask | Exclusive | Bounded exact replacement, atomic write, preview check |
+| `write_file` | Ask | Exclusive | Bounded whole-file replacement, atomic write, preview check |
+| `run_command` | Ask | Exclusive | Workspace working directory, timeout, bounded output |
+
+`search_text` enumerates and validates candidates through Jecode's own bounded
+workspace walk. For larger candidate sets, `rg` on `PATH` accelerates literal
+matching over those files with a credential-filtered environment; smaller
+searches and machines without `rg` use the dependency-free TypeScript scanner.
+`rg` is never required at install or runtime.
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
 user account can address, which is why every exact command asks by default
