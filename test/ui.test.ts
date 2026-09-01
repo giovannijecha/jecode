@@ -176,7 +176,7 @@ test("the renderer receives one complete dark Steel identity", () => {
   assert.deepEqual(STEEL.ink.fg, [212, 218, 225]);
   assert.deepEqual(STEEL.ink.added, [134, 203, 146]);
   assert.deepEqual(STEEL.ink.removed, [232, 112, 112]);
-  assert.deepEqual(STEEL.surface.inset, [18, 24, 31]);
+  assert.deepEqual(STEEL.surface.inset, [42, 52, 66]);
 });
 
 test("prose can use a readable measure while code keeps the full row", () => {
