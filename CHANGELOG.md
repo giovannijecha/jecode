@@ -4,6 +4,34 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.3.0] - 2026-09-01
+
+### Added
+
+- Added bounded parallel execution for consecutive read-only tool calls while
+  preserving original result order and keeping writes, commands, approvals,
+  and unknown tools as ordered barriers.
+- Added optional native `rg` acceleration for large literal searches, with the
+  dependency-free scanner retained as the portable fallback.
+
+### Changed
+
+- Refreshed the dark Steel palette with clearer structural blues and distinct
+  success, warning, and failure colors while preserving the established TUI
+  layout and interaction model.
+
+### Fixed
+
+- Resolved native helpers to canonical absolute executables outside the active
+  workspace, preventing repositories from shadowing `rg` or browser and
+  process-control launchers.
+- Force-terminated command descendants that survive graceful timeout or
+  interruption after their shell leader exits.
+- Serialized settings, API-key, and OAuth-account mutations through bounded
+  cross-process locks that reread each store before writing.
+- Treated an omitted or empty `list_dir` path as the workspace root and kept
+  rapid transcript exports distinct with millisecond timestamps.
+
 ## [0.2.4] - 2026-08-31
 
 ### Fixed
@@ -212,6 +240,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.3.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.0
 [0.2.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.4
 [0.2.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.3
 [0.2.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.2.2
