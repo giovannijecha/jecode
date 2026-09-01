@@ -39,6 +39,8 @@
   Session approvals can be reviewed and revoked.
 - **Durable by default.** Interactive conversations survive terminal exits and
   can be resumed without replaying tools. Batch runs remain stateless.
+- **Context-bounded.** Older model context is summarized automatically while
+  the complete conversation and transcript remain available in the session.
 - **Provider-neutral.** Use Anthropic or OpenAI API keys, a ChatGPT account, or
   a local/remote Ollama server without changing the workflow.
 - **Lean by construction.** Jecode installs as plain JavaScript, runs on
@@ -193,7 +195,7 @@ Type **/** to open searchable command completion inside the composer.
 
 | Command | What it does |
 |---|---|
-| /settings | Manage the selected model, limits, effort, motion, and provider access |
+| /settings | Manage the selected model, limits, context compaction, effort, motion, and provider access |
 | /effort | Change and save reasoning effort directly |
 | /providers | Manage API keys, ChatGPT sign-in, and Ollama connections |
 | /models | Search models across every available provider and select one |
@@ -239,6 +241,7 @@ settings, built-in defaults.
 | --effort | JECODE_EFFORT | high |
 | --max-tokens | JECODE_MAX_TOKENS | 64000; not sent by openai-codex |
 | --max-steps | JECODE_MAX_STEPS | 40 |
+| --compaction-percent | JECODE_COMPACTION_PERCENT | 85; accepts 50 through 95 |
 | --reduced-motion | JECODE_REDUCED_MOTION=1 | Off |
 | --auto-approve | JECODE_AUTO_APPROVE=1 | Off |
 | --ephemeral | JECODE_EPHEMERAL=1 | Off |
@@ -265,6 +268,20 @@ logical session. Resume never executes an old tool call. If a crash left the
 newest turn inside a tool loop, the same session resumes from its latest
 completed ancestor and the next turn becomes a branch inside its tree because
 provider-only continuation data is intentionally not stored.
+
+When the model-facing context approaches the selected model's usable capacity,
+Jecode asks the provider for one bounded summary of its older prefix and keeps
+the recent turn exact. The trigger defaults to 85% and can be changed from 50%
+through 95% in **/settings**. Live provider metadata or Ollama's allocated
+runtime context determines the budget when available; a metadata failure falls
+back safely without blocking the turn. Only the provider projection is
+replaced: complete messages, tool evidence, transcript, and conversation tree
+remain unchanged. The branch-local summary anchor is checkpointed with the
+session, so resume reuses it instead of summarizing the same prefix again. A
+failed or cancelled optional summary leaves the original context intact; a
+definite provider context-limit rejection may trigger one compacted retry.
+Internal summary requests count toward provider usage but never appear in the
+transcript or Markdown export.
 
 Jecode has one interface theme: dark Steel. **NO_COLOR** is supported for
 terminals and pipelines that disable colour.

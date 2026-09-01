@@ -81,6 +81,14 @@ export type ProviderAuth =
   | { kind: "api-key"; keyVar: string }
   | { kind: "oauth"; account: "openai-codex"; label: string };
 
+/** Provider-advertised input capacity for one model. */
+export type ModelContextWindow = Readonly<{
+  /** Input tokens available after provider-specific headroom is reserved. */
+  tokens: number;
+  /** Optional provider safety ceiling for automatic compaction. */
+  compactAtTokens?: number;
+}>;
+
 export type Provider = {
   readonly id: string;
   readonly defaultModel: string;
@@ -101,6 +109,12 @@ export type Provider = {
     signal?: AbortSignal,
     onStatus?: (status: string) => void,
   ): Promise<readonly string[]>;
+  /** Best available context capacity for one model; absence uses a safe fallback. */
+  contextWindow?(
+    model: string,
+    signal?: AbortSignal,
+    onStatus?: (status: string) => void,
+  ): Promise<ModelContextWindow | undefined>;
   send(req: SendRequest): Promise<Message>;
 };
 

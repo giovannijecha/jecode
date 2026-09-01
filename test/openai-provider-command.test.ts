@@ -70,6 +70,7 @@ function session(): Session {
       model: provider.defaultModel,
       maxTokens: 64_000,
       maxSteps: 40,
+      compactionPercent: 85,
       effort: "high",
       autoApprove: false,
       ephemeral: false,

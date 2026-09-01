@@ -2,10 +2,15 @@
 
 import { handleCommand } from "../commands.ts";
 import { runTurn } from "../controller.ts";
+import { resolveContextPolicy } from "../context/capacity.ts";
+import { compactContext } from "../context/compactor.ts";
+import type { ContextAnchor } from "../context/projection.ts";
+import type { ContextPolicy } from "../context/policy.ts";
+import { isContextOverflow, shouldResolveContextPolicy } from "../context/policy.ts";
 import type { Session } from "../session.ts";
 import { updateSettings } from "../settings.ts";
 import { saveTranscript } from "../transcript-export.ts";
-import { recordUsage } from "../usage.ts";
+import { recordAuxiliaryUsage, recordUsage } from "../usage.ts";
 import type { SessionPermissions } from "../permissions.ts";
 import type { Activity } from "./activity.ts";
 import type { AppActions } from "./app-input.ts";
@@ -106,12 +111,18 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     if (activity === undefined) return;
     const parentId = session.conversation.activeNodeId;
     const history = session.conversation.history;
+    const modelHistory = session.conversation.contextHistory;
     const historyStart = history.length;
     const blockStart = state.blocks.length;
     const createdAt = new Date().toISOString();
+    const prospectiveNodeId = session.conversation.nodes.length + 1;
     let nodeId: number | undefined;
+    let context: ContextAnchor | undefined;
+    let contextPolicy: Promise<ContextPolicy> | undefined;
     options.emit({ kind: "user", text });
-    history.push({ role: "user", content: [{ kind: "text", text }] });
+    const user = { role: "user" as const, content: [{ kind: "text" as const, text }] };
+    history.push(user);
+    modelHistory.push(structuredClone(user));
 
     const events = transcribe({
       emit: options.emit,
@@ -128,7 +139,10 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       },
       usage: (usage) => recordUsage(session.usage, usage),
     });
-    events.onCheckpoint = async (checkpoint, settlement) => {
+    const persist = async (
+      checkpoint: readonly (typeof history)[number][],
+      settlement: "checkpointed" | "completed",
+    ): Promise<void> => {
       const next = session.conversation.commit({
         ...(nodeId === undefined ? {} : { nodeId }),
         parentId,
@@ -140,10 +154,76 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         },
         messages: checkpoint.slice(historyStart),
         blocks: state.blocks.slice(blockStart),
+        ...(context === undefined ? {} : { context }),
       }, settlement);
       await session.persistence?.checkpoint(next);
       session.conversation = next;
       nodeId = next.activeNodeId;
+    };
+
+    const compact = async (
+      checkpoint: readonly (typeof history)[number][],
+      projected: readonly (typeof history)[number][],
+      reason: "budget" | "overflow",
+      error?: Error,
+    ) => {
+      if (reason === "overflow" && (error === undefined || !isContextOverflow(error))) {
+        return undefined;
+      }
+      const force = reason === "overflow";
+      if (!shouldResolveContextPolicy(projected, session.usage.lastInputTokens, force)) {
+        return undefined;
+      }
+      if (contextPolicy === undefined) {
+        state.status = "Checking context";
+        options.render();
+        contextPolicy = resolveContextPolicy({
+          provider: session.provider,
+          model: session.model,
+          compactionPercent: session.config.compactionPercent,
+          signal: activity.control.signal,
+          onStatus: (status) => {
+            state.status = status;
+            options.render();
+          },
+        }).finally(() => {
+          state.status = WAITING;
+          options.render();
+        });
+      }
+      const result = await compactContext({
+        provider: session.provider,
+        model: session.model,
+        effort: session.config.effort,
+        context: projected,
+        turn: checkpoint.slice(historyStart),
+        nodeId: nodeId ?? prospectiveNodeId,
+        coveredMessages: context?.messageCount ?? 0,
+        lastInputTokens: session.usage.lastInputTokens,
+        signal: activity.control.signal,
+        force,
+        policy: await contextPolicy,
+        onBegin: () => {
+          state.status = "Compacting";
+          options.render();
+        },
+        onEnd: () => {
+          state.status = WAITING;
+          options.render();
+        },
+      });
+      if (result === undefined) return undefined;
+      context = result.anchor;
+      if (result.usage !== undefined) recordAuxiliaryUsage(session.usage, result.usage);
+      return result.messages;
+    };
+
+    events.onContext = compact;
+    events.onCheckpoint = async (checkpoint, settlement, projected) => {
+      await persist(checkpoint, settlement);
+      const compacted = await compact(checkpoint, projected, "budget");
+      if (compacted !== undefined) await persist(checkpoint, settlement);
+      return compacted;
     };
 
     let finishReason: "interrupted" | "failed" | undefined;
@@ -153,6 +233,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         controllerOptions(session, permissions.availableTools()),
         events,
         activity.control.signal,
+        modelHistory,
       );
     } catch (error) {
       const interrupted = activity.control.signal.aborted;

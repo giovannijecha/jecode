@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
+import { MAX_COMPACTION_PERCENT, MIN_COMPACTION_PERCENT } from "./context/policy.ts";
 import { EFFORTS } from "./effort.ts";
 import { providerNames } from "./providers/index.ts";
 import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
@@ -20,6 +21,7 @@ export type SavedSettings = {
   reducedMotion?: boolean;
   maxTokens?: number;
   maxSteps?: number;
+  compactionPercent?: number;
 };
 
 let saved: SavedSettings | undefined;
@@ -75,6 +77,7 @@ function normalize(value: unknown): SavedSettings {
   const reducedMotion = typeof value["reducedMotion"] === "boolean" ? value["reducedMotion"] : undefined;
   const maxTokens = positiveInteger(value["maxTokens"]);
   const maxSteps = positiveInteger(value["maxSteps"]);
+  const compactionPercent = percentage(value["compactionPercent"]);
 
   return {
     ...(provider === undefined ? {} : { provider }),
@@ -84,6 +87,7 @@ function normalize(value: unknown): SavedSettings {
     ...(reducedMotion === undefined ? {} : { reducedMotion }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(maxSteps === undefined ? {} : { maxSteps }),
+    ...(compactionPercent === undefined ? {} : { compactionPercent }),
   };
 }
 
@@ -113,6 +117,13 @@ function endpoint(value: unknown): string | undefined {
 
 function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function percentage(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+      value >= MIN_COMPACTION_PERCENT && value <= MAX_COMPACTION_PERCENT
+    ? value
+    : undefined;
 }
 
 function record(value: unknown): value is Record<string, unknown> {

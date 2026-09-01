@@ -15,10 +15,13 @@ import type {
 import { isToolCall } from "./types.ts";
 import type { Tool, ToolContext, ToolPreview, ToolRun } from "./tools/index.ts";
 import { findTool, runTool, toolSpecs } from "./tools/index.ts";
+import { requestAssistant } from "./controller-request.ts";
 
 export const MAX_TOOL_CALLS_PER_STEP = 32;
 /** Independent read calls share one bounded execution wave. */
 export const MAX_CONCURRENT_TOOL_CALLS = 4;
+
+export type ContextReason = "budget" | "overflow";
 
 export type ControllerOptions = {
   provider: Provider;
@@ -45,11 +48,19 @@ export type ControllerEvents = {
   onStep?(step: number, total: number): void;
   onToolProgress?(current: number, total: number): void;
   onStatus?(status: string): void;
+  /** Replace only the provider-facing projection, never canonical history. */
+  onContext?(
+    history: readonly Message[],
+    context: readonly Message[],
+    reason: ContextReason,
+    error?: Error,
+  ): Promise<readonly Message[] | undefined>;
   /** A consistent history boundary, awaited before another request can open. */
   onCheckpoint?(
     history: readonly Message[],
     settlement: "checkpointed" | "completed",
-  ): Promise<void>;
+    context: readonly Message[],
+  ): Promise<readonly Message[] | void>;
 };
 
 /**
@@ -62,25 +73,29 @@ export async function runTurn(
   options: ControllerOptions,
   events: ControllerEvents,
   signal?: AbortSignal,
+  modelHistory: Message[] = history,
 ): Promise<void> {
   const specs = toolSpecs(options.tools);
+  let context = modelHistory;
+
+  const append = (message: Message): void => {
+    history.push(message);
+    if (context !== history) context.push(message);
+  };
+
+  const checkpoint = async (settlement: "checkpointed" | "completed"): Promise<void> => {
+    const projected = await events.onCheckpoint?.(history, settlement, context);
+    if (projected !== undefined) context = clone([...projected]);
+  };
 
   for (let step = 0; step < options.maxSteps; step++) {
     throwIfAborted(signal);
     events.onStep?.(step + 1, options.maxSteps);
     // The message is displayed as it streams; what comes back here is the
     // assembled version, which exists to be appended to the history.
-    const assistant = await options.provider.send({
-      model: options.model,
-      system: options.system,
-      messages: history,
-      tools: specs,
-      maxTokens: options.maxTokens,
-      effort: options.effort,
-      signal,
-      onStream: (event) => events.onStream(event),
-      onStatus: (status) => events.onStatus?.(status),
-    });
+    const response = await requestAssistant(history, context, specs, options, events, signal);
+    const assistant = response.message;
+    context = response.context;
     throwIfAborted(signal);
 
     const calls = assistant.content.filter(isToolCall);
@@ -94,10 +109,10 @@ export async function runTurn(
     }
     assertToolCallIds(calls);
 
-    history.push(assistant);
+    append(assistant);
     if (calls.length === 0) {
       if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
-      await events.onCheckpoint?.(history, "completed");
+      await checkpoint("completed");
       return; // the model is done — hand back to the user
     }
 
@@ -144,7 +159,7 @@ export async function runTurn(
         repairs.push({ call, run });
         results.push(run.result);
       }
-      history.push({ role: "user", content: results });
+      append({ role: "user", content: results });
       // History repair is the invariant. UI recovery is best-effort and must
       // never replace the original exception or leave the conversation open.
       for (const { call, run } of repairs) {
@@ -155,13 +170,13 @@ export async function runTurn(
           // The surface is already failing; the next turn can still proceed.
         }
       }
-      await events.onCheckpoint?.(history, "checkpointed");
+      await checkpoint("checkpointed");
       if (interrupted) throw abortReason(signal as AbortSignal);
       throw error;
     }
 
-    history.push({ role: "user", content: results });
-    await events.onCheckpoint?.(history, "checkpointed");
+    append({ role: "user", content: results });
+    await checkpoint("checkpointed");
   }
 
   throw new Error(
@@ -269,4 +284,8 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error("interrupted");
+}
+
+function clone<T>(value: T): T {
+  return structuredClone(value);
 }

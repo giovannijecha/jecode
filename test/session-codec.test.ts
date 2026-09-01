@@ -48,6 +48,12 @@ test("session node codec round-trips normalized history without provider raw dat
         body: [{ kind: "add", text: "", newLine: 1, emphasis: { start: 0, length: 1 } }],
       },
     ],
+    context: {
+      throughNodeId: 1,
+      messageCount: 1,
+      createdAt: "2026-09-01T10:00:30.000Z",
+      summary: "The user requested a safe edit.",
+    },
   }, "checkpointed");
 
   const encoded = encodeNode(
@@ -77,6 +83,31 @@ test("session node codec round-trips normalized history without provider raw dat
       body: [{ kind: "add", text: "", newLine: 1, emphasis: { start: 0, length: 1 } }],
     },
   ]);
+  assert.deepEqual(decoded.node.context, tree.activeNode?.context);
+});
+
+test("schema 1 session nodes remain readable without a context anchor", () => {
+  const decoded = decodeNode({
+    version: 1,
+    sequence: 1,
+    updatedAt: "2026-09-01T10:01:00.000Z",
+    node: {
+      id: 1,
+      parentId: 0,
+      revision: 1,
+      createdAt: "2026-09-01T10:00:00.000Z",
+      settlement: "completed",
+      identity: { providerId: "ollama", model: "m", effort: "high" },
+      messages: [
+        { role: "user", content: [{ kind: "text", text: "hello" }], usage: null },
+        { role: "assistant", content: [{ kind: "text", text: "hi" }], usage: null },
+      ],
+      blocks: [],
+    },
+  });
+
+  assert.equal(decoded.node.context, undefined);
+  assert.equal(decoded.node.messages.length, 2);
 });
 
 test("session metadata and head codecs reject unknown fields", () => {

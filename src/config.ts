@@ -1,6 +1,11 @@
 // Runtime configuration: flags, environment, saved defaults, built-ins.
 
 import * as path from "node:path";
+import {
+  DEFAULT_COMPACTION_PERCENT,
+  MAX_COMPACTION_PERCENT,
+  MIN_COMPACTION_PERCENT,
+} from "./context/policy.ts";
 import { EFFORTS, readSettings } from "./settings.ts";
 import type { SavedSettings } from "./settings.ts";
 import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
@@ -13,6 +18,7 @@ export type Config = {
   effort: string;
   maxTokens: number;
   maxSteps: number;
+  compactionPercent: number;
   root: string;
   autoApprove: boolean;
   ephemeral: boolean;
@@ -26,6 +32,7 @@ const FLAGS = [
   "effort",
   "max-tokens",
   "max-steps",
+  "compaction-percent",
   "root",
   "auto-approve",
   "ephemeral",
@@ -71,6 +78,13 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
       pick(flags["max-steps"], process.env.JECODE_MAX_STEPS, String(saved.maxSteps ?? 40)),
       "max-steps",
     ),
+    compactionPercent: toPercent(
+      pick(
+        flags["compaction-percent"],
+        process.env.JECODE_COMPACTION_PERCENT,
+        String(saved.compactionPercent ?? DEFAULT_COMPACTION_PERCENT),
+      ),
+    ),
     root: path.resolve(pick(flags.root, undefined, process.cwd())),
     autoApprove: flags["auto-approve"] === "true" || process.env.JECODE_AUTO_APPROVE === "1",
     ephemeral: bool(flags.ephemeral, process.env.JECODE_EPHEMERAL, false),
@@ -103,6 +117,20 @@ function toInt(value: string, name: string): number {
   const n = Number(value);
   if (!Number.isInteger(n) || n <= 0) throw new Error(`--${name} must be a positive integer`);
   return n;
+}
+
+function toPercent(value: string): number {
+  const percent = Number(value);
+  if (
+    !Number.isSafeInteger(percent) ||
+    percent < MIN_COMPACTION_PERCENT ||
+    percent > MAX_COMPACTION_PERCENT
+  ) {
+    throw new Error(
+      `--compaction-percent must be an integer from ${MIN_COMPACTION_PERCENT} to ${MAX_COMPACTION_PERCENT}`,
+    );
+  }
+  return percent;
 }
 
 // Accepts --key value, --key=value, and bare --flag (which reads as "true").

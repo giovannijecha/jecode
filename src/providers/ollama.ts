@@ -6,9 +6,9 @@
 // pulled or the subscription grants — so the model has to be named with
 // --model.
 
-import type { Message, Provider, SendRequest } from "../types.ts";
+import type { Message, ModelContextWindow, Provider, SendRequest } from "../types.ts";
 import { requireSupportedEffort } from "../effort.ts";
-import { postSse } from "./http.ts";
+import { getJson, postJson, postSse } from "./http.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
 import { assembleOllama } from "./ollama-stream.ts";
@@ -25,6 +25,8 @@ const KEY = "OLLAMA_API_KEY";
 // Ollama also accepts `none`; Jecode's product-wide reasoning floor is `low`.
 const OLLAMA_EFFORTS = ["low", "medium", "high"] as const;
 let configuredHost: string | undefined;
+const CONTEXT_CACHE_MS = 30_000;
+const contextByEndpoint = new Map<string, { value: ModelContextWindow; expiresAt: number }>();
 
 export type OllamaConnection = OllamaEndpoint & {
   kind: "cloud" | "local" | "custom";
@@ -72,6 +74,25 @@ export const ollama: Provider = {
     return OLLAMA_EFFORTS;
   },
 
+  async contextWindow(
+    model: string,
+    signal?: AbortSignal,
+    onStatus?: (status: string) => void,
+  ): Promise<ModelContextWindow | undefined> {
+    const at = endpoint();
+    const cacheKey = `${at.baseUrl}\u0000${model}`;
+    const cached = contextByEndpoint.get(cacheKey);
+    if (cached !== undefined && cached.expiresAt > Date.now()) return cached.value;
+    const observed = await nativeContextWindow(at, model, signal, onStatus);
+    if (observed?.runtime === true) {
+      contextByEndpoint.set(cacheKey, {
+        value: observed.value,
+        expiresAt: Date.now() + CONTEXT_CACHE_MS,
+      });
+    }
+    return observed?.value;
+  },
+
   location: () => {
     try {
       return endpoint().loopback ? "local" : "cloud";
@@ -109,6 +130,73 @@ export const ollama: Provider = {
     return fromWireReply(reply);
   },
 };
+
+async function nativeContextWindow(
+  at: ReturnType<typeof endpoint>,
+  model: string,
+  signal?: AbortSignal,
+  onStatus?: (status: string) => void,
+): Promise<{ value: ModelContextWindow; runtime: boolean } | undefined> {
+  try {
+    const running = await getJson(`${at.baseUrl}/api/ps`, headers(at), signal, onStatus);
+    const allocated = runningContext(running, model);
+    if (allocated !== undefined) return { value: usableContext(allocated), runtime: true };
+  } catch (error) {
+    throwIfAborted(signal, error);
+  }
+
+  try {
+    const details = await postJson(
+      `${at.baseUrl}/api/show`,
+      headers(at),
+      { model },
+      signal,
+      onStatus,
+    );
+    const capacity = modelCapacity(details);
+    return capacity === undefined
+      ? undefined
+      : { value: usableContext(capacity), runtime: false };
+  } catch (error) {
+    throwIfAborted(signal, error);
+    return undefined;
+  }
+}
+
+function runningContext(value: unknown, model: string): number | undefined {
+  if (!record(value) || !Array.isArray(value["models"])) return undefined;
+  for (const entry of value["models"]) {
+    if (!record(entry)) continue;
+    if (entry["name"] !== model && entry["model"] !== model) continue;
+    if (validTokenCount(entry["context_length"])) return entry["context_length"];
+  }
+  return undefined;
+}
+
+function modelCapacity(value: unknown): number | undefined {
+  if (!record(value) || !record(value["model_info"])) return undefined;
+  const capacities = Object.entries(value["model_info"])
+    .filter(([name, count]) => name.endsWith(".context_length") && validTokenCount(count))
+    .map(([, count]) => count as number);
+  return capacities.length === 0 ? undefined : Math.max(...capacities);
+}
+
+function validTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+    value >= 4_096 && value <= 10_000_000;
+}
+
+function usableContext(tokens: number): ModelContextWindow {
+  return Object.freeze({ tokens: Math.floor(tokens * 95 / 100) });
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, error: unknown): void {
+  if (signal?.aborted === true) throw error;
+}
 
 function endpoint() {
   return ollamaConnection();

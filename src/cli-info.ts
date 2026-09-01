@@ -2,6 +2,11 @@
 
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
+import {
+  DEFAULT_COMPACTION_PERCENT,
+  MAX_COMPACTION_PERCENT,
+  MIN_COMPACTION_PERCENT,
+} from "./context/policy.ts";
 
 const HELP = `jecode — an owned coding agent for the terminal
 
@@ -17,6 +22,8 @@ Options:
   --effort <level>       low, medium, high, xhigh, or max
   --max-tokens <number>  output-token ceiling
   --max-steps <number>   tool-loop ceiling
+  --compaction-percent <${MIN_COMPACTION_PERCENT}-${MAX_COMPACTION_PERCENT}>
+                          context usage that triggers compaction (default: ${DEFAULT_COMPACTION_PERCENT})
   --reduced-motion       disable animated terminal states
   --auto-approve         allow dangerous tools for this process
   --ephemeral            do not save this conversation

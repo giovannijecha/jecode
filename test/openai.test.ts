@@ -9,6 +9,7 @@ import {
 } from "../src/providers/openai-wire.ts";
 import {
   openai,
+  openAIContextWindow,
   openAIEfforts,
   supportsOpenAIModel,
 } from "../src/providers/openai.ts";
@@ -265,6 +266,9 @@ test("offers only reasoning-capable Responses models and keeps their real effort
   assert.deepEqual(openAIEfforts("gpt-5-chat-latest"), []);
   assert.deepEqual(openAIEfforts("o1-mini"), []);
   assert.deepEqual(openAIEfforts("gpt-5.5-pro"), []);
+  assert.deepEqual(openAIContextWindow("gpt-5.6-sol"), { tokens: 997_500 });
+  assert.deepEqual(openAIContextWindow("gpt-5"), { tokens: 380_000 });
+  assert.deepEqual(openAIContextWindow("o4-mini"), { tokens: 190_000 });
 });
 
 test("normalizes tool calls and sparse usage from a completed response", () => {

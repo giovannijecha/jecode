@@ -36,8 +36,8 @@ workspace content the model reads or content the user supplies.
 
 `runTurn` owns the protocol:
 
-1. Send normalized history, tool declarations, and request settings to the
-   selected provider.
+1. Materialize the current model-facing context projection, then send it with
+   tool declarations and request settings to the selected provider.
 2. Stream display events while the provider assembles the authoritative
    assistant message.
 3. Append that message to history and record normalized usage.
@@ -52,6 +52,12 @@ The controller awaits a checkpoint after every complete tool-result batch and
 after the final assistant response. It never begins the next provider request
 until that checkpoint succeeds. Batch mode commits only to memory; the TUI
 commits the same canonical turn to its durable session owner first.
+
+Canonical history and provider context are separate arrays. The controller
+always appends authoritative assistant messages and tool results to both, but a
+context hook may replace only the provider-facing array. One definite 400/413
+context-limit rejection can therefore be retried after compaction without
+replaying an ambiguous generation failure or rewriting durable history.
 
 A tool failure becomes an error result the model can act on. Cancellation is
 the exception: it propagates through provider HTTP, retry waits, filesystem
@@ -234,13 +240,45 @@ then clears history, usage, transcript, and session approvals.
 
 ## Conversation state and resume
 
-`ConversationTree` is the single semantic source for provider history and the
-settled TUI transcript. One node owns one user turn and its model/tool messages,
-visible transcript blocks, provider/model/effort identity, revision, and
-settlement. The selected root-to-leaf path is materialized for providers and
-the screen. This tree shape is already branch-capable; the current resume UI
-selects whole sessions, while a later timeline can expose alternate nodes
-without replacing the storage model.
+`ConversationTree` is the single semantic source for complete normalized
+history and the settled TUI transcript. One node owns one user turn and its
+model/tool messages, visible transcript blocks, provider/model/effort identity,
+revision, and settlement. The selected root-to-leaf path is materialized in
+full for the screen, export, and audit. A separate `contextHistory` projection
+is materialized for providers. This tree shape is already branch-capable; the
+current resume UI selects whole sessions, while a later timeline can expose
+alternate nodes without replacing the storage model.
+
+Context compaction is automatic and model-aware. Pressure combines the most
+recent normalized input-token count with a conservative byte estimate. The
+provider boundary can advertise one model's usable input window and a stricter
+automatic-compaction ceiling: ChatGPT retains those fields from its live model
+catalogue, Anthropic retains `max_input_tokens`, and Ollama prefers the context
+currently allocated by `/api/ps` before falling back to `/api/show`. The OpenAI
+API model list does not include capacities, so its accepted reasoning families
+use isolated conservative metadata. Discovery failures use a 200k fallback and
+never prevent a model request.
+
+The saved `compactionPercent` setting accepts 50 through 95 and defaults to 85.
+It applies to the usable model window while a lower provider safety ceiling
+still wins. The post-compaction target is one quarter of that window and the
+recent exact tail is bounded to half that target; both therefore scale from a
+small Ollama allocation to million-token models. Capacity discovery starts
+only after meaningful pressure, is cached for the turn, and Ollama refreshes
+its runtime observation periodically. The selected provider receives one
+streamed, tool-free summary request with a neutral instruction that treats all
+source content as untrusted data. Opaque provider blocks are removed from that
+request. The resulting user-level summary never enters the system prompt and is
+never rendered as transcript content.
+
+A context anchor records the summary and its exact node/message boundary. The
+anchor lives on the active branch, so projection uses the newest anchor on the
+selected path and timeline branching can choose another one later. The
+canonical prefix remains untouched. TUI checkpoints persist the ordinary turn
+before attempting optional compaction, then atomically revise that same leaf if
+a summary succeeds. Cancellation or failure therefore cannot discard a
+completed response or a settled tool batch. Batch mode applies the same policy
+in memory.
 
 Interactive sessions publish lazily after the first completed response or
 consistent tool checkpoint. They live under
@@ -250,7 +288,9 @@ The node lands before the head. After a crash, the loader accepts only one
 strictly adjacent node mutation and advances the head; any ambiguous state is
 rejected. Files and decoded values are size-bounded, unknown fields fail
 closed, and persisted provider messages drop opaque `raw` data before crossing
-the disk boundary.
+the disk boundary. Schema 2 adds bounded context anchors while the strict
+decoder continues to accept schema 1 sessions and upgrades their active node on
+the next checkpoint.
 
 Session catalogues use the canonical real workspace path, so another project
 cannot appear in the resume picker. A process lease prevents simultaneous
@@ -421,10 +461,11 @@ the animated rail node and blinking cursor with stable marks.
 
 Pure translation, layout, width, activity, scroll, permission, and transcript
 logic is unit tested. Integration tests cover the packaged command, bootstrap
-routing, batch conversations, TUI screen ownership and restoration, stream
-assembly, HTTP retry and cancellation, provider request bodies, tool-loop
-semantics, symlink/junction confinement, atomic preview checks, shell
-process-tree termination, credential precedence, and bounded search.
+routing, batch conversations, durable session recovery, context projection and
+compaction, TUI screen ownership and restoration, stream assembly, HTTP retry
+and cancellation, provider request bodies, tool-loop semantics,
+symlink/junction confinement, atomic preview checks, shell process-tree
+termination, credential precedence, and bounded search.
 
 Canonical checks:
 
@@ -445,9 +486,9 @@ global prefix and runs its version command.
   tree is emitted by the existing development compiler before packing. Registry
   users receive that JavaScript runtime and execute no installation scripts;
   Git dependency installs are intentionally unsupported.
-- No client-side history summarizer or second model loop. Future compaction
-  belongs on the model-facing path while the complete durable tree and
-  transcript remain available to the user.
+- No manual compact command, fixed token threshold, provider-native history
+  mutation, or second agent loop. One bounded percentage controls the automatic
+  model-aware policy while the durable tree remains complete.
 - No navigable in-session timeline yet. Stable session identity and the
   canonical branch-capable tree are present, but branch selection remains
   future UI work.

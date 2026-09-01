@@ -24,6 +24,16 @@ export function emptyUsage(): UsageTotals {
 export function recordUsage(total: UsageTotals, next: Usage): void {
   total.requests += 1;
   total.lastInputTokens = next.inputTokens;
+  addUsage(total, next);
+}
+
+/** Account for an internal request without replacing the main context signal. */
+export function recordAuxiliaryUsage(total: UsageTotals, next: Usage): void {
+  total.requests += 1;
+  addUsage(total, next);
+}
+
+function addUsage(total: UsageTotals, next: Usage): void {
   total.inputTokens += next.inputTokens;
   total.outputTokens += next.outputTokens;
   total.cachedInputTokens += next.cachedInputTokens;

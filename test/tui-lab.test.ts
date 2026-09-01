@@ -166,6 +166,7 @@ test("settings is a compact selector without key legends", () => {
   const frame = composeLab(state("menu-settings"), { rows: 24, cols: 100 });
   const shown = plain(frame.rows).join("\n");
   assert.match(shown, /model.*Ollama/);
+  assert.match(shown, /context compaction.*85%/);
   assert.match(shown, /providers.*manage.*connections/);
   assert.doesNotMatch(shown, /settings.*\.jecode|Changes apply|ollama connection|authentication/);
   assert.doesNotMatch(shown, /in use|↑↓ enter|Enter to select/);

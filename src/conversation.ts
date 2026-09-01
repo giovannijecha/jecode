@@ -1,10 +1,12 @@
 // Canonical settled conversation state.
 //
 // A node owns one complete user-turn delta. The selected root-to-node path is
-// the only history sent to a provider and the only transcript shown by the
-// TUI. Provider traffic and live screen blocks remain prospective until the
-// controller reaches a consistent completion or tool checkpoint.
+// the durable source for the transcript and full history; context anchors can
+// project an older prefix before it is sent to a provider. Provider traffic
+// and live screen blocks remain prospective until a consistent checkpoint.
 
+import type { ContextAnchor } from "./context/projection.ts";
+import { projectContext, validContextAnchor } from "./context/projection.ts";
 import type { TranscriptBlock } from "./transcript-types.ts";
 import type { Message } from "./types.ts";
 
@@ -12,6 +14,7 @@ export const CONVERSATION_LIMITS = Object.freeze({
   nodes: 1_024,
   messageCodeUnits: 8_388_608,
   transcriptCodeUnits: 8_388_608,
+  contextCodeUnits: 8_388_608,
 });
 
 export type TurnSettlement = "checkpointed" | "completed";
@@ -31,6 +34,7 @@ export type TurnNode = Readonly<{
   identity: TurnIdentity;
   messages: readonly Message[];
   blocks: readonly TranscriptBlock[];
+  context?: ContextAnchor;
 }>;
 
 export type TurnDraft = Readonly<{
@@ -40,6 +44,7 @@ export type TurnDraft = Readonly<{
   identity: TurnIdentity;
   messages: readonly Message[];
   blocks: readonly TranscriptBlock[];
+  context?: ContextAnchor;
 }>;
 
 /** Immutable tree with one selected model/transcript path. */
@@ -70,6 +75,7 @@ export class ConversationTree {
         identity: node.identity,
         messages: node.messages,
         blocks: node.blocks,
+        ...(node.context === undefined ? {} : { context: node.context }),
       }, node.settlement);
       const restored = tree.activeNode;
       if (restored === undefined || restored.id !== node.id) {
@@ -134,6 +140,10 @@ export class ConversationTree {
     return this.#path().flatMap((node) => clone(node.messages));
   }
 
+  get contextHistory(): Message[] {
+    return projectContext(this.#path());
+  }
+
   get transcript(): TranscriptBlock[] {
     return this.#path().flatMap((node) => clone(node.blocks));
   }
@@ -151,6 +161,7 @@ export class ConversationTree {
       identity: draft.identity,
       messages: draft.messages,
       blocks: settledBlocks(draft.blocks),
+      ...(draft.context === undefined ? {} : { context: draft.context }),
     });
     assertTurn(node);
     const nodes = [...this.#nodes, node];
@@ -171,6 +182,7 @@ export class ConversationTree {
       identity: draft.identity,
       messages: draft.messages,
       blocks: settledBlocks(draft.blocks),
+      context: draft.context ?? current.context,
     });
     assertTurn(node);
     const nodes = [...this.#nodes];
@@ -199,6 +211,7 @@ function ownedNode(node: TurnNode): TurnNode {
     identity: Object.freeze({ ...node.identity }),
     messages: Object.freeze(clone(node.messages)),
     blocks: Object.freeze(clone(node.blocks)),
+    ...(node.context === undefined ? {} : { context: Object.freeze({ ...node.context }) }),
   });
 }
 
@@ -237,9 +250,12 @@ function assertTurn(node: TurnNode): void {
 function assertBounds(nodes: readonly TurnNode[]): void {
   let messageCodeUnits = 0;
   let transcriptCodeUnits = 0;
+  let contextCodeUnits = 0;
   for (const node of nodes) {
     messageCodeUnits += JSON.stringify(node.messages).length;
     transcriptCodeUnits += JSON.stringify(node.blocks).length;
+    contextCodeUnits += node.context?.summary.length ?? 0;
+    if (node.context !== undefined) assertContextPath(nodes, node);
   }
   if (messageCodeUnits > CONVERSATION_LIMITS.messageCodeUnits) {
     throw new Error("conversation model history reached its session limit — start /new");
@@ -247,6 +263,20 @@ function assertBounds(nodes: readonly TurnNode[]): void {
   if (transcriptCodeUnits > CONVERSATION_LIMITS.transcriptCodeUnits) {
     throw new Error("conversation transcript reached its session limit — start /new");
   }
+  if (contextCodeUnits > CONVERSATION_LIMITS.contextCodeUnits) {
+    throw new Error("conversation context summaries reached their session limit — start /new");
+  }
+}
+
+function assertContextPath(nodes: readonly TurnNode[], owner: TurnNode): void {
+  const context = owner.context as ContextAnchor;
+  const boundary = nodes[context.throughNodeId - 1];
+  if (boundary === undefined || !validContextAnchor(context, boundary.messages.length)) {
+    throw new Error("turn context checkpoint is invalid");
+  }
+  let id = owner.id;
+  while (id !== 0 && id !== boundary.id) id = nodes[id - 1]?.parentId ?? 0;
+  if (id !== boundary.id) throw new Error("turn context checkpoint is outside its branch");
 }
 
 function validNodeId(value: number): boolean {
