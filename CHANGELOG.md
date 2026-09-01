@@ -4,7 +4,7 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
-## [Unreleased]
+## [0.4.0] - 2026-09-01
 
 ### Added
 
@@ -33,8 +33,9 @@ install artifacts and provenance are published with the [npm package].
 
 - Preserved provider identity and current setting values in minimum-width
   menus instead of hiding them with optional descriptive hints.
-- Kept cancellation during model-catalogue and effort discovery on the
-  interruption path instead of reporting it as a provider failure.
+- Kept cancellation during model-catalogue, effort discovery, and nested
+  provider management on the interruption path without reopening menus or
+  leaving redundant footer warnings.
 
 ## [0.3.2] - 2026-09-01
 
@@ -291,7 +292,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
-[Unreleased]: https://github.com/giovannijecha/jecode/compare/v0.3.2...HEAD
+[0.4.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.4.0
 [0.3.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.2
 [0.3.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.1
 [0.3.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.0

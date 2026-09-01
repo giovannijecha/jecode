@@ -490,11 +490,17 @@ function runNode(
   options: { input?: string; environment?: NodeJS.ProcessEnv } = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [executable, ...args], {
-      cwd: process.cwd(),
-      env: options.environment,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const spawnOptions = { cwd: process.cwd(), env: options.environment };
+    const child =
+      options.input === undefined
+        ? spawn(process.execPath, [executable, ...args], {
+            ...spawnOptions,
+            stdio: ["ignore", "pipe", "pipe"],
+          })
+        : spawn(process.execPath, [executable, ...args], {
+            ...spawnOptions,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -505,7 +511,7 @@ function runNode(
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
-    child.stdin.end(options.input ?? "");
+    if (options.input !== undefined) child.stdin?.end(options.input);
     child.once("error", reject);
     child.once("close", (code) => resolve({ code, stdout, stderr }));
   });
