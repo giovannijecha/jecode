@@ -5,7 +5,7 @@
 // with snapshots they cached before the other process wrote.
 
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rmdir, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, rmdir, stat, unlink } from "node:fs/promises";
 import * as path from "node:path";
 
 const WAIT_MS = 50;
@@ -63,14 +63,42 @@ async function recoverStale(directory: string): Promise<void> {
   try {
     const details = await stat(directory);
     if (Date.now() - details.mtimeMs < STALE_MS) return;
+    if (await ownerIsAlive(directory)) return;
 
-    const quarantined = `${directory}.${randomUUID()}.stale`;
-    await rename(directory, quarantined);
-    await unlink(path.join(quarantined, "owner")).catch(() => undefined);
-    await rmdir(quarantined).catch(() => undefined);
+    // Remove the owner first, then the now-empty directory. `rmdir` cannot
+    // erase a fresh lock acquired after another waiter wins this recovery,
+    // whereas renaming the shared path can steal that new lock in an ABA race.
+    await removeLock(directory);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT" && code !== "EACCES" && code !== "EPERM") throw error;
+  }
+}
+
+async function ownerIsAlive(directory: string): Promise<boolean> {
+  let token: string;
+  try {
+    token = await readFile(path.join(directory, "owner"), "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return false;
+    if (code === "EACCES" || code === "EPERM") return true;
+    throw error;
+  }
+
+  const match = /^([1-9]\d*):/.exec(token.trim());
+  if (match === null) return false;
+  const pid = Number(match[1]);
+  if (!Number.isSafeInteger(pid) || pid > 0x7fff_ffff) return false;
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // ESRCH is the one portable proof that the owner no longer exists.
+    // Permission failures and unknown platform errors must not authorize a
+    // second writer to enter the same store.
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
 }
 

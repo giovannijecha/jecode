@@ -108,6 +108,73 @@ test("the optional ripgrep backend preserves matches and binary filtering", asyn
   assert.deepEqual(result.binaryPaths.map((file) => path.basename(file)), ["binary.dat"]);
 });
 
+test("the ripgrep accelerator rejects output beyond the requested result bound", {
+  skip: process.platform === "win32",
+}, async () => {
+  const area = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-ripgrep-bound-"));
+  const workspace = path.join(area, "workspace");
+  const bin = path.join(area, "bin");
+  const executable = path.join(bin, "rg");
+  const marker = path.join(area, "finished");
+  const before = process.env["PATH"];
+
+  try {
+    await fs.mkdir(workspace);
+    await fs.mkdir(bin);
+    const paths = await Promise.all(Array.from({ length: 4 }, async (_, index) => {
+      const file = path.join(workspace, `file-${index}.txt`);
+      await fs.writeFile(file, "needle\nneedle\nneedle\n", "utf8");
+      return file;
+    }));
+    const source = [
+      "#!/usr/bin/env node",
+      'const fs = require("node:fs");',
+      `const paths = ${JSON.stringify(paths)};`,
+      `const marker = ${JSON.stringify(marker)};`,
+      "let index = 0;",
+      "const timer = setInterval(() => {",
+      "  if (index < 12) {",
+      "    const file = paths[Math.floor(index / 3) % paths.length];",
+      "    const event = { type: 'match', data: {",
+      "      path: { text: file },",
+      "      lines: { text: `needle ${index}\\n` },",
+      "      line_number: index % 3 + 1,",
+      "    } };",
+      "    process.stdout.write(`${JSON.stringify(event)}\\n`);",
+      "    index++;",
+      "    return;",
+      "  }",
+      "  clearInterval(timer);",
+      "  fs.writeFileSync(marker, 'finished');",
+      "}, 10);",
+    ].join("\n");
+    await fs.writeFile(executable, source, "utf8");
+    await fs.chmod(executable, 0o755);
+    process.env["PATH"] = [bin, path.dirname(process.execPath), before ?? ""]
+      .filter((entry) => entry !== "")
+      .join(path.delimiter);
+
+    const files = await Promise.all(paths.map(async (file) => ({
+      path: file,
+      bytes: (await fs.stat(file)).size,
+    })));
+    const result = await trySearchWithRipgrep({
+      root: workspace,
+      files,
+      query: "needle",
+      caseSensitive: true,
+      limit: 3,
+    });
+
+    assert.equal(result, undefined);
+    await assert.rejects(fs.access(marker), { code: "ENOENT" });
+  } finally {
+    if (before === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = before;
+    await fs.rm(area, { recursive: true, force: true });
+  }
+});
+
 test("search falls back to the dependency-free scanner when ripgrep is unavailable", async () => {
   const before = process.env["PATH"];
   process.env["PATH"] = "";
