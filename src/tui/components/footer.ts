@@ -20,7 +20,7 @@ export function renderFooter(
   const leftRoom = Math.max(0, width - plainLen(right) - (right.length === 0 ? 0 : 1));
   const left = identity(info, leftRoom);
 
-  return [row(width, left === "" ? [] : [{ text: left, fg: pal.ink.muted }], right)];
+  return [row(width, left === "" ? [] : [{ text: left, fg: pal.ink.dim }], right)];
 }
 
 function identity(info: FooterInfo, cols: number): string {

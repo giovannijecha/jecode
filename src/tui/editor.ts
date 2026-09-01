@@ -55,14 +55,24 @@ export function wordLeft(state: Editor): Editor {
 }
 
 export function wordRight(state: Editor): Editor {
-  return { ...state, cursor: endOfWordAfter(state.text, state.cursor) };
+  return { ...state, cursor: startOfWordAfter(state.text, state.cursor) };
 }
 
 /** ctrl+w — delete the word behind the cursor. */
 export function killWord(state: Editor): Editor {
-  const from = startOfWordBefore(state.text, state.cursor);
+  const from = startOfDeletionBefore(state.text, state.cursor);
   if (from === state.cursor) return state;
   return { text: state.text.slice(0, from) + state.text.slice(state.cursor), cursor: from };
+}
+
+/** ctrl+delete — delete the word ahead of the cursor. */
+export function killNextWord(state: Editor): Editor {
+  const to = endOfDeletionAfter(state.text, state.cursor);
+  if (to === state.cursor) return state;
+  return {
+    text: state.text.slice(0, state.cursor) + state.text.slice(to),
+    cursor: state.cursor,
+  };
 }
 
 /** ctrl+u — delete everything behind the cursor. */
@@ -104,14 +114,46 @@ function after(text: string, cursor: number): number {
 
 function startOfWordBefore(text: string, cursor: number): number {
   let i = cursor;
-  while (i > 0 && text[i - 1] === " ") i--;
-  while (i > 0 && text[i - 1] !== " ") i--;
+  while (i > 0 && whitespace(text[i - 1])) i--;
+  while (i > 0 && !whitespace(text[i - 1])) i--;
   return i;
 }
 
-function endOfWordAfter(text: string, cursor: number): number {
+function startOfWordAfter(text: string, cursor: number): number {
   let i = cursor;
-  while (i < text.length && text[i] === " ") i++;
-  while (i < text.length && text[i] !== " ") i++;
+  while (i < text.length && !whitespace(text[i])) i++;
+  while (i < text.length && whitespace(text[i])) i++;
   return i;
+}
+
+function startOfDeletionBefore(text: string, cursor: number): number {
+  if (text[cursor - 1] === "\n") return cursor - 1;
+  let i = cursor;
+  while (i > 0 && horizontalWhitespace(text[i - 1])) i--;
+  if (text[i - 1] === "\n") return i;
+  while (i > 0 && !whitespace(text[i - 1])) i--;
+  return i;
+}
+
+function endOfDeletionAfter(text: string, cursor: number): number {
+  if (text[cursor] === "\n") return cursor + 1;
+  let i = cursor;
+  if (horizontalWhitespace(text[i])) {
+    while (i < text.length && horizontalWhitespace(text[i])) i++;
+    if (text[i] === "\n") return i;
+    while (i < text.length && !whitespace(text[i])) i++;
+    return i;
+  }
+
+  while (i < text.length && !whitespace(text[i])) i++;
+  while (i < text.length && horizontalWhitespace(text[i])) i++;
+  return i;
+}
+
+function horizontalWhitespace(value: string | undefined): boolean {
+  return value !== undefined && value !== "\n" && /\s/u.test(value);
+}
+
+function whitespace(value: string | undefined): boolean {
+  return value !== undefined && /\s/u.test(value);
 }

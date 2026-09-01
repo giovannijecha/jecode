@@ -7,6 +7,7 @@ import type { Picker } from "../src/tui/picker.ts";
 import type { Field } from "../src/tui/field.ts";
 import type { Host } from "../src/commands.ts";
 import { COMMANDS, handleCommand } from "../src/commands.ts";
+import { modelsCommand } from "../src/model-command.ts";
 import {
   listModels,
   MAX_MODEL_CATALOG_ENTRIES,
@@ -97,12 +98,13 @@ test("the model menu offers what the provider says it has", async () => {
   const live = session(fake);
   const screen = host(1);
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, { save: false }, [live.provider]);
 
   assert.deepEqual(
     screen.pickers[0]?.options.map((option) => option.label),
     ["big", "small"],
   );
+  assert.deepEqual(screen.pickers[0]?.title, []);
   assert.equal(live.model, "small");
 });
 
@@ -115,7 +117,7 @@ test("a direct model choice is offered to the interactive settings store", async
     return Promise.resolve();
   };
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, {}, [live.provider]);
 
   assert.equal(live.model, "second");
   assert.equal(saved[0]?.models?.ollama, "second");
@@ -135,7 +137,7 @@ test("choosing a model reconciles and saves an unsupported effort", async () => 
     return Promise.resolve();
   };
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, {}, [fake]);
 
   assert.equal(live.model, "second");
   assert.equal(live.config.effort, "high");
@@ -147,7 +149,7 @@ test("a direct model choice rolls back when its default cannot be saved", async 
   const screen = host(1);
   screen.saveSettings = () => Promise.reject(new Error("disk unavailable"));
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, {}, [live.provider]);
 
   assert.equal(live.model, "first");
   assert.equal(live.config.model, "first");
@@ -159,7 +161,7 @@ test("the model menu opens with the current model selected", async () => {
   live.model = "c";
   const screen = host();
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, { save: false }, [live.provider]);
 
   assert.equal(screen.pickers[0]?.index, 2);
 });
@@ -168,7 +170,7 @@ test("cancelling the model menu leaves the model alone", async () => {
   const live = session(provider("fake", ["a", "b"]));
   const screen = host(undefined);
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, { save: false }, [live.provider]);
 
   assert.equal(live.model, "a");
 });
@@ -185,11 +187,88 @@ test("a provider with no key is never asked for its models", async () => {
   });
   const screen = host(0);
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, { save: false }, [live.provider]);
 
   assert.equal(asked, false);
   assert.equal(screen.pickers.length, 0);
-  assert.deepEqual(texts(screen.blocks), ["Fake still needs an API key"]);
+  assert.deepEqual(texts(screen.blocks), ["no providers are connected · use /providers"]);
+});
+
+test("the model menu aggregates providers and switches provider and model atomically", async () => {
+  const first = provider("first", ["shared", "first-only"]);
+  const second = provider("second", ["shared", "second-only"]);
+  const blocked = provider("blocked", ["hidden"], "BLOCKED_API_KEY is not set");
+  const live = session(first);
+  const screen = host(3);
+  const saved: Partial<SavedSettings>[] = [];
+  screen.saveSettings = (patch) => {
+    saved.push(patch);
+    return Promise.resolve();
+  };
+
+  await modelsCommand(live, screen, {}, [first, second, blocked]);
+
+  assert.deepEqual(
+    screen.pickers[0]?.options.map((option) => `${option.label}:${option.value}`),
+    ["shared:First", "first-only:First", "shared:Second", "second-only:Second"],
+  );
+  assert.match(screen.pickers[0]?.description ?? "", /Not connected: Blocked/);
+  assert.equal(live.provider, second);
+  assert.equal(live.model, "second-only");
+  assert.equal(live.config.providerId, "second");
+  assert.equal(live.config.model, "second-only");
+  assert.equal(saved[0]?.provider, "second");
+  assert.equal(saved[0]?.models?.second, "second-only");
+});
+
+test("one failed catalogue does not hide models from another provider", async () => {
+  const good = provider("good", ["usable"]);
+  const failed = {
+    ...provider("failed", []),
+    models: () => Promise.reject(new Error("offline")),
+  };
+  const live = session(good);
+  const screen = host(undefined);
+
+  await modelsCommand(live, screen, { save: false }, [good, failed]);
+
+  assert.deepEqual(screen.pickers[0]?.options.map((option) => option.label), ["usable"]);
+  assert.match(screen.pickers[0]?.description ?? "", /Unavailable: Failed/);
+  assert.deepEqual(screen.blocks, []);
+});
+
+test("model catalogues start concurrently", async () => {
+  let resolveFirst!: (models: string[]) => void;
+  let resolveSecond!: (models: string[]) => void;
+  const firstReady = new Promise<string[]>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const secondReady = new Promise<string[]>((resolve) => {
+    resolveSecond = resolve;
+  });
+  const started: string[] = [];
+  const first = {
+    ...provider("first", ["one"]),
+    models: () => {
+      started.push("first");
+      return firstReady;
+    },
+  };
+  const second = {
+    ...provider("second", ["two"]),
+    models: () => {
+      started.push("second");
+      return secondReady;
+    },
+  };
+  const pending = modelsCommand(session(first), host(undefined), { save: false }, [first, second]);
+
+  await Promise.resolve();
+  assert.deepEqual(started, ["first", "second"]);
+
+  resolveFirst(["one"]);
+  resolveSecond(["two"]);
+  await pending;
 });
 
 test("a menu command without a screen says so, and asks nothing", async () => {
@@ -203,13 +282,13 @@ test("a menu command without a screen says so, and asks nothing", async () => {
   });
   const blocks: NoticeBlock[] = [];
 
-  await handleCommand("/models", live, { emit: (block) => blocks.push(block) });
+  await modelsCommand(live, { emit: (block) => blocks.push(block) }, { save: false }, [live.provider]);
 
   assert.equal(asked, false);
   assert.equal(blocks.length, 1);
 });
 
-test("the provider menu names every provider and what stops it", async () => {
+test("the provider menu names every provider and its access state", async () => {
   const live = session(provider("fake", ["a"]));
   const screen = host();
 
@@ -218,56 +297,40 @@ test("the provider menu names every provider and what stops it", async () => {
   const options = screen.pickers[0]?.options ?? [];
   assert.deepEqual(
     options.map((option) => option.label),
-    ["anthropic", "openai", "openai-codex", "ollama"],
+    ["Anthropic", "OpenAI API", "ChatGPT", "Ollama"],
   );
   // Either a reason or "ready" — never an empty hint, which would read as a
   // provider that has nothing to say about itself.
-  for (const option of options) assert.notEqual(option.hint, undefined);
+  for (const option of options) assert.notEqual(option.value, undefined);
+  assert.deepEqual(screen.pickers[0]?.title, []);
+  assert.equal(screen.pickers[0]?.description, undefined);
+  assert.equal(live.provider.id, "fake");
 });
 
-test("a direct provider choice is offered to the interactive settings store", async () => {
+test("provider access management never changes the runtime selection", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(0);
+  const screen = host(undefined);
   const saved: Partial<SavedSettings>[] = [];
   screen.saveSettings = (patch) => {
     saved.push(patch);
     return Promise.resolve();
   };
-  const before = process.env["ANTHROPIC_API_KEY"];
-  process.env["ANTHROPIC_API_KEY"] = "fixture-key";
-  reload();
 
-  try {
-    await handleCommand("/providers", live, screen);
-    assert.equal(live.provider.id, "anthropic");
-    assert.equal(saved[0]?.provider, "anthropic");
-  } finally {
-    if (before === undefined) delete process.env["ANTHROPIC_API_KEY"];
-    else process.env["ANTHROPIC_API_KEY"] = before;
-    reload();
-  }
+  await handleCommand("/providers", live, screen);
+
+  assert.equal(live.provider.id, "fake");
+  assert.equal(live.model, "a");
+  assert.deepEqual(saved, []);
 });
 
-test("a direct provider choice rolls back when its default cannot be saved", async () => {
+test("credentials is absent because providers owns access", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(0);
-  screen.saveSettings = () => Promise.reject(new Error("disk unavailable"));
-  const before = process.env["ANTHROPIC_API_KEY"];
-  process.env["ANTHROPIC_API_KEY"] = "fixture-key";
-  reload();
+  const screen = host();
 
-  try {
-    await handleCommand("/providers", live, screen);
-    assert.equal(live.provider.id, "fake");
-    assert.equal(live.model, "a");
-    assert.equal(live.config.providerId, "fake");
-    assert.equal(live.config.model, "a");
-    assert.match(texts(screen.blocks).join("\n"), /could not save settings · disk unavailable/);
-  } finally {
-    if (before === undefined) delete process.env["ANTHROPIC_API_KEY"];
-    else process.env["ANTHROPIC_API_KEY"] = before;
-    reload();
-  }
+  assert.equal(COMMANDS.some((command) => command.name === "credentials"), false);
+  await handleCommand("/credentials", live, screen);
+
+  assert.match(texts(screen.blocks)[0] ?? "", /unknown command \/credentials/);
 });
 
 test("a failure fetching models is reported, not thrown", async () => {
@@ -275,14 +338,14 @@ test("a failure fetching models is reported, not thrown", async () => {
     ...provider("fake", []),
     models: () => Promise.reject(new Error("network error")),
   });
-  const screen = host(0);
+  const screen = host();
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, { save: false }, [live.provider]);
 
-  assert.deepEqual(texts(screen.blocks), ["fake: network error"]);
+  assert.deepEqual(texts(screen.blocks), ["Fake: network error"]);
 });
 
-test("an unreachable local Ollama catalogue points back to settings", async () => {
+test("an unreachable local Ollama catalogue points back to providers", async () => {
   const live = session({
     ...provider("ollama", []),
     location: () => "local",
@@ -290,12 +353,12 @@ test("an unreachable local Ollama catalogue points back to settings", async () =
       new Error("network error calling http://127.0.0.1:11434/v1/models: fetch failed"),
     ),
   });
-  const screen = host(0);
+  const screen = host();
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, { save: false }, [live.provider]);
 
   assert.deepEqual(texts(screen.blocks), [
-    "Ollama is not reachable on this computer · start Ollama or choose cloud in /settings",
+    "Ollama is not reachable on this computer · start Ollama or choose cloud in /providers",
   ]);
 });
 
@@ -315,10 +378,32 @@ test("the model request receives the command cancellation signal and retry statu
   screen.signal = control.signal;
   screen.status = (status) => statuses.push(status);
 
-  await handleCommand("/models", live, screen);
+  await modelsCommand(live, screen, { save: false }, [live.provider]);
 
   assert.equal(received, control.signal);
-  assert.ok(statuses.includes("Rate limited · retrying in 1s"));
+  assert.ok(statuses.some((status) => status?.endsWith("Rate limited · retrying in 1s")));
+});
+
+test("cancelling catalogue loading propagates interruption instead of a provider error", async () => {
+  const control = new AbortController();
+  const statuses: (string | undefined)[] = [];
+  const live = session({
+    ...provider("fake", ["a"]),
+    models: (signal) => new Promise<string[]>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  });
+  const screen = host();
+  screen.signal = control.signal;
+  screen.status = (status) => statuses.push(status);
+
+  const pending = modelsCommand(live, screen, { save: false }, [live.provider]);
+  control.abort(new Error("interrupted"));
+
+  await assert.rejects(pending, /interrupted/);
+  assert.deepEqual(screen.blocks, []);
+  assert.equal(screen.pickers.length, 0);
+  assert.equal(statuses.at(-1), undefined);
 });
 
 test("new clears conversation usage and screen-local state", async () => {
@@ -399,30 +484,45 @@ test("permissions always opens the tool control plane without footer noise", asy
     "write_file",
     "run_command",
   ]);
+  assert.deepEqual(screen.pickers[0]?.title, []);
+  assert.equal(screen.pickers[0]?.description, undefined);
+  assert.equal(screen.pickers[0]?.visible, 7);
   assert.deepEqual(screen.blocks, []);
 });
 
-test("permissions changes one dangerous tool for the session", async () => {
-  const screen = host(6, 1, undefined);
+test("enter on a tool without remembered approvals keeps the control plane open", async () => {
+  const screen = host(0, undefined);
+  screen.permissions = sessionPermissions(builtinTools(), false);
+
+  await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
+
+  assert.equal(screen.pickers.length, 2);
+  assert.deepEqual(screen.pickers[1]?.title, []);
+  assert.deepEqual(screen.pickers[1]?.options, screen.pickers[0]?.options);
+  assert.deepEqual(screen.blocks, []);
+});
+
+test("permissions changes one dangerous tool inline for the session", async () => {
+  const screen = host();
   const control = sessionPermissions(builtinTools(), false);
   screen.permissions = control;
+  let changed: Picker | undefined;
+  screen.choose = (picker) => {
+    screen.pickers.push(picker);
+    changed = picker.adjust?.(6, 1);
+    return Promise.resolve(undefined);
+  };
 
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
   assert.equal(control.listTools().find((tool) => tool.name === "run_command")?.mode, "allow");
-  assert.deepEqual(
-    screen.pickers[1]?.options.map((option) => `${option.label}:${option.hint}`),
-    [
-      "ask:prompt when needed",
-      "allow:every call this session",
-      "deny:hide from the model",
-    ],
-  );
+  assert.equal(changed?.options[6]?.value, "allow");
+  assert.equal(changed?.index, 6);
   assert.deepEqual(screen.blocks, []);
 });
 
-test("permissions reviews and revokes a remembered approval", async () => {
-  const screen = host(6, 3, 0, undefined);
+test("enter reviews and revokes a remembered approval", async () => {
+  const screen = host(6, 0, undefined);
   const control = sessionPermissions(builtinTools(), false);
   control.remember({ kind: "tool_call", id: "1", name: "run_command", input: { command: "npm test" } });
   screen.permissions = control;
@@ -434,9 +534,14 @@ test("permissions reviews and revokes a remembered approval", async () => {
 });
 
 test("permissions can hide a read-only tool from later turns", async () => {
-  const screen = host(0, 1, undefined);
+  const screen = host();
   const control = sessionPermissions(builtinTools(), false);
   screen.permissions = control;
+  screen.choose = (picker) => {
+    screen.pickers.push(picker);
+    picker.adjust?.(0, 1);
+    return Promise.resolve(undefined);
+  };
 
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
@@ -445,7 +550,7 @@ test("permissions can hide a read-only tool from later turns", async () => {
 });
 
 test("permissions can revoke every remembered approval for one tool", async () => {
-  const screen = host(6, 3, 2, undefined);
+  const screen = host(6, 2, undefined);
   const control = sessionPermissions(builtinTools(), false);
   control.remember({ kind: "tool_call", id: "1", name: "run_command", input: { command: "npm test" } });
   control.remember({ kind: "tool_call", id: "2", name: "run_command", input: { command: "npm run check" } });
@@ -456,26 +561,26 @@ test("permissions can revoke every remembered approval for one tool", async () =
   assert.deepEqual(control.listGrants("run_command"), []);
 });
 
-test("permissions explains a launch-time auto-approve override in the dock", async () => {
-  const screen = host(6, undefined, undefined);
+test("permissions keeps a launch-time auto-approve override locked inline", async () => {
+  const screen = host(6, undefined);
   screen.permissions = sessionPermissions(builtinTools(), true);
 
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
-  assert.match(screen.pickers[0]?.title.map((segment) => segment.text).join("") ?? "", /auto approve at launch/);
-  assert.match(screen.pickers[1]?.description ?? "", /Restart without --auto-approve/);
-  assert.deepEqual(screen.blocks, []);
+  assert.equal(screen.pickers[0]?.options[6]?.value, "allow · locked");
+  assert.equal(screen.pickers[0]?.options[6]?.adjustable, false);
+  assert.match(texts(screen.blocks)[0] ?? "", /restart without --auto-approve/);
 });
 
-test("cancelling the credential flow for a blocked provider leaves the previous provider intact", async () => {
+test("cancelling provider access leaves the runtime selection intact", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(1); // openai, then cancel the secret field
+  const screen = host(1, undefined, undefined); // OpenAI API, back, providers back
   const before = process.env["OPENAI_API_KEY"];
   delete process.env["OPENAI_API_KEY"];
   try {
     await handleCommand("/providers", live, screen);
     assert.equal(live.provider.id, "fake");
-    assert.match(texts(screen.blocks)[0] ?? "", /provider unchanged/);
+    assert.equal(live.model, "a");
   } finally {
     if (before !== undefined) process.env["OPENAI_API_KEY"] = before;
     reload();
@@ -555,9 +660,9 @@ test("a model catalogue stops inspecting an oversized invalid list", async () =>
   }
 });
 
-test("picking a provider that cannot run asks for its key, masked", async () => {
+test("provider access can collect a missing API key, masked", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(1, 0); // openai, then "just this session"
+  const screen = host(1, 0, 0, undefined); // OpenAI API, add, session, back
   screen.typed = "typed-key";
 
   const before = process.env["OPENAI_API_KEY"];
@@ -576,7 +681,7 @@ test("picking a provider that cannot run asks for its key, masked", async () => 
 
 test("the key never reaches the transcript", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(1, 0);
+  const screen = host(1, 0, 0, undefined);
   screen.typed = "fixture-credential-value";
 
   const before = process.env["OPENAI_API_KEY"];
@@ -594,7 +699,7 @@ test("the key never reaches the transcript", async () => {
 
 test("discarding a typed key keeps it out of the session", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(1, 2); // openai, then "discard it"
+  const screen = host(1, 0, 2, undefined); // OpenAI API, add, discard, back
   screen.typed = "throwaway";
 
   const before = process.env["OPENAI_API_KEY"];
@@ -610,7 +715,7 @@ test("discarding a typed key keeps it out of the session", async () => {
 
 test("a provider that can already run is not asked for a key", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(0, 0);
+  const screen = host(0, undefined);
 
   const before = process.env["ANTHROPIC_API_KEY"];
   process.env["ANTHROPIC_API_KEY"] = "already-there";

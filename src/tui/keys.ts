@@ -6,6 +6,7 @@
 // interpreted key by key, or a pasted newline submits half the paste.
 
 const ESC = String.fromCharCode(27);
+const BS = String.fromCharCode(8);
 const DEL = String.fromCharCode(127);
 const PASTE_START = "[200~";
 const PASTE_END = "[201~";
@@ -55,10 +56,18 @@ const SEQUENCES: Record<string, string> = {
   "[7~": "home",
   "[8~": "end",
   "[3~": "delete",
+  "[3;5~": "deletewordright",
   "[5~": "pageup",
   "[6~": "pagedown",
   "[1;5C": "wordright",
   "[1;5D": "wordleft",
+  // Explicit modified-key forms used by terminals with CSI-u support.
+  "[127;5u": "deletewordleft",
+  "[8;5u": "deletewordleft",
+  // Readline-compatible Alt bindings. VS Code also sends Alt+D for
+  // Ctrl+Delete and Ctrl+W for Ctrl+Backspace in its integrated terminal.
+  d: "deletewordright",
+  [DEL]: "deletewordleft",
   "[Z": "backtab",
   // alt+enter, which arrives as an escape followed by the return itself. It is
   // how a multi-line message gets written when enter is what sends one.
@@ -69,8 +78,13 @@ const CONTROL: Record<string, string> = {
   "\r": "enter",
   "\n": "enter",
   "\t": "tab",
-  "\b": "backspace",
+  [BS]: "backspace",
   [DEL]: "backspace",
+};
+
+export type DecoderOptions = {
+  /** Windows Terminal's default mode uses DEL, then BS when Ctrl is held. */
+  ctrlBackspaceIsBs?: boolean;
 };
 
 export type Decoder = {
@@ -79,7 +93,7 @@ export type Decoder = {
   flush(): Key[];
 };
 
-export function decoder(): Decoder {
+export function decoder(options: DecoderOptions = {}): Decoder {
   let held = "";
   let pasting = false;
   let pasted = "";
@@ -156,7 +170,9 @@ export function decoder(): Decoder {
         continue;
       }
 
-      const named = CONTROL[ch];
+      const named = ch === BS && options.ctrlBackspaceIsBs === true
+        ? "deletewordleft"
+        : CONTROL[ch];
       if (named !== undefined) {
         held = held.slice(1);
         keys.push({ name: named, text: "", ctrl: false });

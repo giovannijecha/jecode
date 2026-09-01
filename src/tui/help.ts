@@ -8,6 +8,9 @@ const CONTROL_WIDTH = 18;
 
 const CONTROLS: readonly { key: string; description: string }[] = [
   { key: "up / down", description: "move through menus or history" },
+  { key: "left / right", description: "move cursor or change a value" },
+  { key: "ctrl+left / right", description: "move cursor by word" },
+  { key: "ctrl+backspace/del", description: "delete a word" },
   { key: "enter / tab", description: "select or send · complete" },
   { key: "alt+enter", description: "insert a new line" },
   { key: "esc", description: "close UI or interrupt work" },
@@ -24,7 +27,7 @@ export function panel(width: number, pal: Palette, maxRows = CONTROLS.length + 1
       { text: "help  ", fg: pal.accent, bold: true },
       { text: "keyboard controls", fg: pal.ink.fg },
     ],
-    [{ text: "esc close", fg: pal.ink.muted }],
+    [{ text: "esc close", fg: pal.ink.dim }],
   );
   const controls = CONTROLS.map((control) => {
     const gap = Math.max(2, CONTROL_WIDTH - textWidth(control.key));

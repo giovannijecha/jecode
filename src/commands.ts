@@ -2,8 +2,8 @@
 //
 // One of them does reach the network — a menu of models cannot be built
 // without asking the provider what it has — but none of them ever sends a
-// message. Provider and credential interaction lives in provider-commands.ts;
-// this file keeps command discovery, dispatch, and local session operations.
+// message. Provider access and model selection stay in their own commands;
+// this file keeps discovery, dispatch, and local session operations.
 
 import type { Session } from "./session.ts";
 import type { NoticeBlock } from "./tui/blocks.ts";
@@ -11,8 +11,8 @@ import type { Picker } from "./tui/picker.ts";
 import type { Field } from "./tui/field.ts";
 import type { SavedSettings } from "./settings.ts";
 import type { SessionPermissions } from "./permissions.ts";
-import { modelsCommand, providersCommand } from "./provider-commands.ts";
-import { credentialsCommand } from "./credential-commands.ts";
+import { modelsCommand } from "./model-command.ts";
+import { providersCommand } from "./provider-commands.ts";
 import { permissionsCommand } from "./permission-command.ts";
 import { effortCommand, settingsCommand } from "./settings-command.ts";
 import { emptyUsage } from "./usage.ts";
@@ -54,8 +54,8 @@ export type Command = { name: string; blurb: string };
  * The commands, declared once.
  *
  * Deliberately short. `/settings` owns persistent defaults; the narrower
- * provider, model, effort, and credential commands remain useful direct paths
- * into the same interactions.
+ * model, provider-access, and effort commands remain useful direct paths into
+ * the same interactions.
  */
 export const COMMANDS: readonly Command[] = [
   { name: "help", blurb: "show keyboard controls" },
@@ -65,9 +65,8 @@ export const COMMANDS: readonly Command[] = [
   { name: "permissions", blurb: "manage session tool access" },
   { name: "settings", blurb: "change and save jecode defaults" },
   { name: "effort", blurb: "set the reasoning effort" },
-  { name: "credentials", blurb: "manage API keys and connected accounts" },
-  { name: "models", blurb: "pick a model, from what the provider offers" },
-  { name: "providers", blurb: "pick a provider" },
+  { name: "models", blurb: "choose from every available provider" },
+  { name: "providers", blurb: "manage provider access and connections" },
 ];
 
 export async function handleCommand(
@@ -119,10 +118,6 @@ export async function handleCommand(
 
     case "effort":
       await effortCommand(session, host);
-      return "handled";
-
-    case "credentials":
-      await credentialsCommand(session, host);
       return "handled";
 
     case "models":

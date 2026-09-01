@@ -103,6 +103,36 @@ test("a searchable picker handles navigation, paste, and query clearing", () => 
   assert.equal(open.picker.query, "");
 });
 
+test("left and right adjust a picker row without settling it", () => {
+  let settled = false;
+  let value = "ask";
+  const build = (): Extract<Open, { picker: unknown }> => ({
+    picker: {
+      title: [],
+      options: [{ label: "run_command", value, adjustable: true }],
+      adjust: (_index, step) => {
+        value = step === 1 ? "allow" : "ask";
+        return build().picker;
+      },
+      index: 0,
+    },
+    settle: () => {
+      settled = true;
+    },
+  });
+  let open: Open | undefined = build();
+
+  open = handle(open, key("right")).open;
+  assert.ok(open !== undefined && "picker" in open);
+  assert.equal(open.picker.options[0]?.value, "allow");
+  assert.equal(settled, false);
+
+  open = handle(open, key("left")).open;
+  assert.ok(open !== undefined && "picker" in open);
+  assert.equal(open.picker.options[0]?.value, "ask");
+  assert.equal(settled, false);
+});
+
 test("a field trims its answer and escape settles it as cancelled", () => {
   let answer = "unsettled";
   let open: Open | undefined = {

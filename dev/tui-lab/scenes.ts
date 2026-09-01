@@ -268,7 +268,7 @@ function commandsScene(state: LabState): View {
 function searchScene(state: LabState): View {
   const hits = matchingModels();
   const picker: Picker = {
-    title: heading("model", "switch the model for this session", state.palette),
+    title: [],
     options: modelChoices,
     searchable: true,
     query: modelQuery,
@@ -302,12 +302,11 @@ function settingsScene(state: LabState): View {
       picker: settingsPicker({
         provider: "ollama",
         model: "deepseek-v4-flash:0731",
-        ollamaConnection: "cloud · ollama.com",
         effort: "high",
         maxTokens: 64000,
         maxSteps: 40,
         reducedMotion: false,
-      }, state.palette, state.selected, "~/.jecode/settings.json"),
+      }, state.selected),
     },
   };
 }
@@ -328,7 +327,7 @@ function permissionsScene(state: LabState): View {
         { name: "edit_file", dangerous: true, mode: "ask", remembered: 2, locked: false },
         { name: "write_file", dangerous: true, mode: "ask", remembered: 2, locked: false },
         { name: "run_command", dangerous: true, mode: "ask", remembered: 1, locked: false },
-      ], state.palette, state.selected),
+      ], state.selected),
     },
   };
 }
@@ -388,7 +387,7 @@ function feedbackScene(state: LabState): View {
     blocks: [],
     editor: edit.of("keep this prompt in the composer"),
     scroll: 0,
-    feedback: { text: "Anthropic needs an API key · /settings", tone: "warn" },
+    feedback: { text: "Anthropic needs an API key · /providers", tone: "warn" },
   };
 }
 

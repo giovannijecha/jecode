@@ -154,7 +154,7 @@ function tooSmall(height: number, width: number, view: View): Frame {
   ]);
   if (middle + 1 < height) {
     rows[middle + 1] = row(width, [
-      { text: elide(`need ${MIN_COLS}×${MIN_ROWS}`, Math.max(1, width)), fg: view.pal.ink.muted },
+      { text: elide(`need ${MIN_COLS}×${MIN_ROWS}`, Math.max(1, width)), fg: view.pal.ink.dim },
     ]);
   }
   return { rows, maxScroll: 0 };

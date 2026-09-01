@@ -27,10 +27,10 @@ export function promptLine(
 ): PromptLine {
   const right: Seg[] = options.right === undefined || options.right === ""
     ? []
-    : [{ text: options.right, fg: pal.ink.muted }];
+    : [{ text: options.right, fg: pal.ink.dim }];
   const laid = layout(text, cursor, width, options);
   const content: Seg = laid.visible === "" && options.placeholder !== undefined
-    ? { text: options.placeholder, fg: pal.ink.muted }
+    ? { text: options.placeholder, fg: pal.ink.dim }
     : { text: laid.visible, fg: pal.ink.bright };
 
   return {

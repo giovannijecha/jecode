@@ -4,14 +4,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { reloadAccounts, updateOpenAICodexAccount } from "../src/accounts.ts";
-import { handleCommand, type Host } from "../src/commands.ts";
+import type { Host } from "../src/commands.ts";
+import { modelsCommand } from "../src/model-command.ts";
+import { openaiCodex } from "../src/providers/openai-codex.ts";
 import { reloadSettings, readSettings, updateSettings } from "../src/settings.ts";
 import type { Session } from "../src/session.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import { STEEL } from "../src/ui/theme.ts";
 import { emptyUsage } from "../src/usage.ts";
 
-test("selecting OpenAI Codex authenticates, picks a live model, and saves both", async (context) => {
+test("selecting a ChatGPT model switches provider and saves both", async (context) => {
   const directory = await mkdtemp(path.join(tmpdir(), "jecode-openai-provider-command-"));
   const beforeHome = process.env["JECODE_HOME"];
   const previousFetch = globalThis.fetch;
@@ -35,7 +37,7 @@ test("selecting OpenAI Codex authenticates, picks a live model, and saves both",
   globalThis.fetch = (async () => new Response(JSON.stringify({
     models: [{ slug: "gpt-codex", visibility: "list", priority: 1 }],
   }), { status: 200 })) as typeof fetch;
-  const answers = [2, 0];
+  const answers = [0];
   const host: Host = {
     emit: () => {},
     choose: () => Promise.resolve(answers.shift()),
@@ -43,7 +45,7 @@ test("selecting OpenAI Codex authenticates, picks a live model, and saves both",
   };
   const live = session();
 
-  await handleCommand("/providers", live, host);
+  await modelsCommand(live, host, {}, [openaiCodex]);
 
   assert.equal(live.provider.id, "openai-codex");
   assert.equal(live.model, "gpt-codex");

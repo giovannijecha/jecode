@@ -16,7 +16,7 @@ export function renderStatus(info: StatusInfo, pal: Palette): Seg[] {
     : undefined;
   if (urgent !== undefined) return withUnseen(feedbackSegments(urgent, pal), info.unseen, pal);
   if (info.status !== undefined) {
-    return withUnseen([{ text: "esc to interrupt", fg: pal.ink.muted }], info.unseen, pal);
+    return withUnseen([{ text: "esc to interrupt", fg: pal.ink.dim }], info.unseen, pal);
   }
   if (info.feedback !== undefined) {
     return withUnseen(feedbackSegments(info.feedback, pal), info.unseen, pal);
@@ -42,7 +42,7 @@ function feedbackSegments(feedback: Feedback, pal: Palette): Seg[] {
 function withUnseen(status: Seg[], unseen: number, pal: Palette): Seg[] {
   return unseen === 0
     ? status
-    : [...status, { text: " · ", fg: pal.ink.muted }, ...unseenSegments(unseen, pal)];
+    : [...status, { text: " · ", fg: pal.ink.dim }, ...unseenSegments(unseen, pal)];
 }
 
 function unseenSegments(unseen: number, pal: Palette): Seg[] {

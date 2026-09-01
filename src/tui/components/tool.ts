@@ -31,7 +31,7 @@ export function renderTool(
         { text: " " },
         { text: `${stateGlyph(block, context)} `, fg: statusInk(block.tone, pal), bold: true },
         { text: block.name, fg: pal.ink.bright, bold: true },
-        ...(block.target === "" ? [] : [{ text: `  ${block.target}`, fg: pal.accent }]),
+        ...(block.target === "" ? [] : [{ text: `  ${block.target}`, fg: pal.technical }]),
       ],
       right === "" ? [] : [{ text: right, fg: statusInk(block.tone, pal) }],
     ),
@@ -64,7 +64,7 @@ function renderDetail(detail: Detail, tone: ToolTone, width: number, pal: Palett
     return row(width, [lead, rail, { text: detail.text === "" ? " " : detail.text, fg }]);
   }
   if (detail.kind === "gap") {
-    return row(width, [lead, rail, { text: detail.text, fg: pal.ink.muted, italic: true }]);
+    return row(width, [lead, rail, { text: detail.text, fg: pal.ink.dim, italic: true }]);
   }
 
   const number = detail.kind === "add" ? detail.newLine : detail.oldLine;
@@ -73,7 +73,7 @@ function renderDetail(detail: Detail, tone: ToolTone, width: number, pal: Palett
     ? pal.ink.added
     : detail.kind === "del"
       ? pal.ink.removed
-      : pal.ink.muted;
+      : pal.ink.dim;
   return row(width, [lead, rail, { text: prefix, fg }, ...emphasized(detail.text, detail.emphasis, fg)]);
 }
 

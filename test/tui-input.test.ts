@@ -28,6 +28,27 @@ test("both backspace spellings arrive as backspace", () => {
   assert.deepEqual(names(decoder().push(`${DEL}\b`)), ["backspace", "backspace"]);
 });
 
+test("Windows Terminal distinguishes Ctrl+Backspace from plain Backspace", () => {
+  assert.deepEqual(
+    names(decoder({ ctrlBackspaceIsBs: true }).push(`${DEL}\b`)),
+    ["backspace", "deletewordleft"],
+  );
+});
+
+test("common terminal word-editing sequences become semantic keys", () => {
+  const keys = decoder().push(
+    `${ESC}[1;5D${ESC}[1;5C${ESC}[3;5~${ESC}[127;5u${ESC}d${ESC}${DEL}`,
+  );
+  assert.deepEqual(names(keys), [
+    "wordleft",
+    "wordright",
+    "deletewordright",
+    "deletewordleft",
+    "deletewordright",
+    "deletewordleft",
+  ]);
+});
+
 test("holds an escape sequence split across reads instead of guessing", () => {
   const dec = decoder();
   assert.deepEqual(names(dec.push(`${ESC}[`)), []);
@@ -102,9 +123,42 @@ test("editor inserts at the cursor and deletes behind it", () => {
   assert.equal(state.text, "helXlo");
 });
 
+test("ctrl+left and ctrl+right move between word starts", () => {
+  const text = "alpha beta gamma";
+  assert.equal(edit.wordRight({ text, cursor: 2 }).cursor, 6);
+  assert.equal(edit.wordRight({ text, cursor: 6 }).cursor, 11);
+  assert.equal(edit.wordLeft({ text, cursor: 13 }).cursor, 11);
+  assert.equal(edit.wordLeft({ text, cursor: 11 }).cursor, 6);
+});
+
 test("ctrl+w deletes the word behind the cursor, not the whole line", () => {
   const state = edit.killWord(edit.of("git commit -m wip"));
   assert.equal(state.text, "git commit -m ");
+});
+
+test("ctrl+delete removes the next word without joining its neighbours", () => {
+  const state = edit.killNextWord({ text: "alpha beta gamma", cursor: 5 });
+  assert.deepEqual(state, { text: "alpha gamma", cursor: 5 });
+});
+
+test("word deletion treats a line break as one editor boundary", () => {
+  const text = "alpha\nbeta";
+  assert.deepEqual(edit.killWord({ text, cursor: 6 }), { text: "alphabeta", cursor: 5 });
+  assert.deepEqual(edit.killNextWord({ text, cursor: 5 }), { text: "alphabeta", cursor: 5 });
+});
+
+test("decoded word deletion edits through the shared keymap", () => {
+  let state = edit.of("one two three");
+  const left = decoder({ ctrlBackspaceIsBs: true }).push("\b")[0];
+  assert.ok(left !== undefined);
+  state = applyKey(state, left) ?? state;
+  assert.equal(state.text, "one two ");
+
+  state = edit.home(state);
+  const right = decoder().push(`${ESC}[3;5~`)[0];
+  assert.ok(right !== undefined);
+  state = applyKey(state, right) ?? state;
+  assert.equal(state.text, "two ");
 });
 
 test("ctrl+u keeps what is ahead of the cursor", () => {

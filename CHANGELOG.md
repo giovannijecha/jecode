@@ -4,6 +4,38 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [Unreleased]
+
+### Added
+
+- Added one searchable model catalogue across every currently available
+  provider, with concurrent loading and partial-failure isolation.
+
+### Changed
+
+- Made model selection an atomic provider-and-model choice while retaining the
+  existing saved-settings and CLI compatibility contract.
+- Consolidated API keys, ChatGPT OAuth, and Ollama connections under
+  `/providers`; removed the redundant `/credentials` command and made
+  `/settings` model-first.
+- Simplified direct control menus by removing redundant headings and guidance;
+  `/permissions` now changes each tool policy inline with Left/Right while
+  Enter opens only that tool's remembered approvals.
+- Expanded composer editing with word navigation and deletion through
+  Ctrl+Left/Right, Ctrl+Backspace, and Ctrl+Delete across common terminal
+  encodings, including Windows Terminal and VS Code.
+- Raised transcript contrast and separated structural Steel, technical cyan,
+  readable secondary text, and deliberately dim metadata into distinct roles.
+- Replaced full-row menu selection bands with a bold Steel focus on the active
+  command or value while retaining the arrow fallback under `NO_COLOR`.
+
+### Fixed
+
+- Preserved provider identity and current setting values in minimum-width
+  menus instead of hiding them with optional descriptive hints.
+- Kept cancellation during model-catalogue and effort discovery on the
+  interruption path instead of reporting it as a provider failure.
+
 ## [0.3.2] - 2026-09-01
 
 ### Fixed
@@ -259,6 +291,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[Unreleased]: https://github.com/giovannijecha/jecode/compare/v0.3.2...HEAD
 [0.3.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.2
 [0.3.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.1
 [0.3.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.0

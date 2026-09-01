@@ -6,6 +6,7 @@ import * as path from "node:path";
 import {
   credentialSource,
   forgetSaved,
+  forgetSession,
   hasSaved,
   hold,
   keep,
@@ -105,6 +106,16 @@ test("a kept key survives a reload, and keeps the others", async () => {
   });
 });
 
+test("saving a replacement makes it active over an older session key", async () => {
+  await inStore(async () => {
+    hold(VAR, "old-session-value");
+    await keep(VAR, "new-saved-value");
+
+    assert.equal(credentialSource(VAR), "saved");
+    assert.equal(keyFor(VAR), "new-saved-value");
+  });
+});
+
 test("concurrent credential updates preserve every saved key", async () => {
   await inStore(async () => {
     await Promise.all([
@@ -182,6 +193,19 @@ test("forgets only the saved copy", async () => {
 
     const parsed = JSON.parse(await readFile(storePath(), "utf8")) as Record<string, string>;
     assert.equal(parsed[VAR], undefined);
+  });
+});
+
+test("forgets only the session copy and reveals the saved fallback", async () => {
+  await inStore(async () => {
+    await keep(VAR, "saved-secret");
+    hold(VAR, "session-secret");
+
+    assert.equal(credentialSource(VAR), "session");
+    assert.equal(forgetSession(VAR), true);
+    assert.equal(forgetSession(VAR), false);
+    assert.equal(credentialSource(VAR), "saved");
+    assert.equal(keyFor(VAR), "saved-secret");
   });
 });
 

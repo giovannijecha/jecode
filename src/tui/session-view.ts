@@ -39,12 +39,12 @@ export function turnFailure(session: Session, error: Error, aborted: boolean): N
   if (/\b401\b/.test(text)) {
     const auth = session.provider.auth;
     if (auth.kind === "oauth") {
-      text += ` · reconnect ${auth.label} in /settings`;
+      text += ` · reconnect ${auth.label} in /providers`;
     } else {
       const source = credentialSource(auth.keyVar);
       text += source === "environment"
         ? ` · update ${auth.keyVar} in the environment and restart`
-        : " · check credentials with /settings";
+        : " · check access with /providers";
     }
   }
   return { kind: "notice", text, tone: "error" };

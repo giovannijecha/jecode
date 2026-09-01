@@ -1,32 +1,26 @@
-// The persistent settings hub. Every interaction uses the shared dock picker
-// and field contracts; this module owns choices and persistence, not drawing.
+// The persistent settings hub. Provider access and model selection reuse the
+// same command flows exposed directly through /providers and /models.
 
-import type { Session } from "./session.ts";
+import { saveCommandSettings } from "./command-settings.ts";
 import type { Host } from "./commands.ts";
-import { modelsCommand, providersCommand } from "./provider-commands.ts";
-import { credentialsCommand } from "./credential-commands.ts";
-import { EFFORTS, readSettings, settingsLabel, updateSettings } from "./settings.ts";
-import type { SavedSettings } from "./settings.ts";
+import { modelsCommand } from "./model-command.ts";
 import { providerFailure } from "./provider-errors.ts";
-import {
-  ollamaConnectionHint,
-  ollamaConnectionSetting,
-} from "./ollama-settings-command.ts";
-import type { Palette } from "./ui/theme.ts";
+import { providerLabel } from "./provider-label.ts";
+import { providersCommand } from "./provider-commands.ts";
+import type { Session } from "./session.ts";
+import { EFFORTS } from "./settings.ts";
 import { of } from "./tui/editor.ts";
 import type { Field } from "./tui/field.ts";
 import type { Picker } from "./tui/picker.ts";
 import { heading } from "./tui/picker.ts";
 
 type SettingsAction =
-  | "provider"
-  | "ollamaConnection"
   | "model"
   | "effort"
   | "maxTokens"
   | "maxSteps"
   | "reducedMotion"
-  | "credentials";
+  | "providers";
 
 type SettingsItem = {
   action: SettingsAction;
@@ -48,21 +42,15 @@ export async function settingsCommand(session: Session, host: Host): Promise<voi
   while (true) {
     const values = settingsValues(session);
     const items = settingsItems(values);
-    const index = await choose(settingsPicker(values, session.palette, selected));
+    const index = await choose(settingsPicker(values, selected));
     if (index === undefined) return;
     const action = items[index]?.action;
     if (action === undefined) return;
     selected = index;
 
     switch (action) {
-      case "provider":
-        await providerSetting(session, host);
-        break;
-      case "ollamaConnection":
-        await ollamaConnectionSetting(session, host, (patch) => persist(host, patch));
-        break;
       case "model":
-        await modelSetting(session, host);
+        await modelsCommand(session, host, { announce: false });
         break;
       case "effort":
         await effortSetting(session, host);
@@ -76,8 +64,8 @@ export async function settingsCommand(session: Session, host: Host): Promise<voi
       case "reducedMotion":
         await motionSetting(session, host);
         break;
-      case "credentials":
-        await credentialsCommand(session, host);
+      case "providers":
+        await providersCommand(session, host);
         break;
     }
   }
@@ -86,7 +74,6 @@ export async function settingsCommand(session: Session, host: Host): Promise<voi
 export type SettingsValues = {
   provider: string;
   model: string;
-  ollamaConnection?: string;
   effort: string;
   maxTokens?: number;
   maxSteps: number;
@@ -95,13 +82,10 @@ export type SettingsValues = {
 
 export function settingsPicker(
   values: SettingsValues,
-  pal: Palette,
   index = 0,
-  store = settingsLabel(),
 ): Picker {
   return {
-    title: heading("settings", store, pal),
-    description: "Changes apply now · flags and environment win at launch",
+    title: [],
     options: settingsItems(values).map((item) => item.option),
     index,
   };
@@ -109,29 +93,28 @@ export function settingsPicker(
 
 function settingsItems(values: SettingsValues): SettingsItem[] {
   return [
-    { action: "provider", option: { label: "provider", hint: values.provider } },
-    ...(values.ollamaConnection === undefined
-      ? []
-      : [{
-          action: "ollamaConnection" as const,
-          option: { label: "ollama connection", hint: values.ollamaConnection },
-        }]),
-    { action: "model", option: { label: "model", hint: values.model || "choose a model" } },
-    { action: "effort", option: { label: "effort", hint: values.effort } },
+    {
+      action: "model",
+      option: {
+        label: "model",
+        value: `${providerLabel(values.provider)} · ${values.model || "choose a model"}`,
+      },
+    },
+    { action: "effort", option: { label: "effort", value: values.effort } },
     ...(values.maxTokens === undefined
       ? []
       : [{
           action: "maxTokens" as const,
-          option: { label: "max output tokens", hint: String(values.maxTokens) },
+          option: { label: "max output tokens", value: String(values.maxTokens) },
         }]),
-    { action: "maxSteps", option: { label: "max tool steps", hint: String(values.maxSteps) } },
+    { action: "maxSteps", option: { label: "max tool steps", value: String(values.maxSteps) } },
     {
       action: "reducedMotion",
-      option: { label: "reduced motion", hint: values.reducedMotion ? "on" : "off" },
+      option: { label: "reduced motion", value: values.reducedMotion ? "on" : "off" },
     },
     {
-      action: "credentials",
-      option: { label: "authentication", hint: "manage API keys and accounts" },
+      action: "providers",
+      option: { label: "providers", hint: "manage access and connections" },
     },
   ];
 }
@@ -140,7 +123,6 @@ function settingsValues(session: Session): SettingsValues {
   return {
     provider: session.provider.id,
     model: session.model,
-    ...(session.provider.id === "ollama" ? { ollamaConnection: ollamaConnectionHint() } : {}),
     effort: session.config.effort,
     ...(session.provider.id === "openai-codex" ? {} : { maxTokens: session.config.maxTokens }),
     maxSteps: session.config.maxSteps,
@@ -148,58 +130,11 @@ function settingsValues(session: Session): SettingsValues {
   };
 }
 
-async function providerSetting(session: Session, host: Host): Promise<void> {
-  const before = {
-    provider: session.provider,
-    model: session.model,
-    providerId: session.config.providerId,
-    configModel: session.config.model,
-    effort: session.config.effort,
-  };
-  if (!(await providersCommand(session, host, { announce: false, save: false }))) return;
-
-  const current = readSettings();
-  const models = { ...current.models };
-  if (session.model !== "") models[session.provider.id] = session.model;
-  const patch = {
-    provider: session.provider.id,
-    models,
-    ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
-  };
-  if (await persist(host, patch)) return;
-
-  session.provider = before.provider;
-  session.model = before.model;
-  session.config.providerId = before.providerId;
-  session.config.model = before.configModel;
-  session.config.effort = before.effort;
-}
-
-async function modelSetting(session: Session, host: Host): Promise<void> {
-  const before = {
-    model: session.model,
-    configModel: session.config.model,
-    effort: session.config.effort,
-  };
-  if (!(await modelsCommand(session, host, { announce: false, save: false }))) return;
-
-  const current = readSettings();
-  const models = { ...current.models, [session.provider.id]: session.model };
-  const patch = {
-    models,
-    ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
-  };
-  if (await persist(host, patch)) return;
-
-  session.model = before.model;
-  session.config.model = before.configModel;
-  session.config.effort = before.effort;
-}
-
 async function effortSetting(session: Session, host: Host): Promise<string | undefined> {
   const choose = chooser(host);
   if (choose === undefined) return;
   const efforts = await availableEfforts(session, host);
+  throwIfAborted(host.signal);
   if (efforts === undefined) return;
   if (efforts.length === 0) {
     host.emit({
@@ -211,12 +146,12 @@ async function effortSetting(session: Session, host: Host): Promise<string | und
   }
   const current = session.config.effort;
   const index = await choose({
-    title: heading("effort", "saved default", session.palette),
+    title: [],
     options: efforts.map((value) => ({ label: value })),
     index: Math.max(0, efforts.findIndex((value) => value === current)),
   });
   const value = index === undefined ? undefined : efforts[index];
-  if (value === undefined || !(await persist(host, { effort: value }))) return;
+  if (value === undefined || !(await saveCommandSettings(host, { effort: value }))) return;
   session.config.effort = value;
   return value;
 }
@@ -226,14 +161,18 @@ async function availableEfforts(
   host: Host,
 ): Promise<readonly string[] | undefined> {
   if (session.provider.efforts === undefined) return EFFORTS;
-  host.status?.(`Asking ${session.provider.id}`);
+  host.status?.(`Asking ${providerLabel(session.provider.id)}`);
   try {
-    return await session.provider.efforts(
+    throwIfAborted(host.signal);
+    const efforts = await session.provider.efforts(
       session.model,
       host.signal,
       (status) => host.status?.(status),
     );
+    throwIfAborted(host.signal);
+    return efforts;
   } catch (error) {
+    throwIfAborted(host.signal);
     host.emit({
       kind: "notice",
       text: providerFailure(session.provider, error as Error, true),
@@ -250,12 +189,12 @@ async function motionSetting(session: Session, host: Host): Promise<void> {
   if (choose === undefined) return;
   const values = [false, true];
   const index = await choose({
-    title: heading("reduced motion", "saved default", session.palette),
+    title: [],
     options: values.map((value) => ({ label: value ? "on" : "off" })),
     index: session.config.reducedMotion ? 1 : 0,
   });
   const value = index === undefined ? undefined : values[index];
-  if (value === undefined || !(await persist(host, { reducedMotion: value }))) return;
+  if (value === undefined || !(await saveCommandSettings(host, { reducedMotion: value }))) return;
   session.config.reducedMotion = value;
   host.refreshSettings?.();
 }
@@ -281,18 +220,8 @@ async function numberSetting(
     host.emit({ kind: "notice", text: `${label} must be a positive integer`, tone: "error" });
     return;
   }
-  if (!(await persist(host, { [name]: value }))) return;
+  if (!(await saveCommandSettings(host, { [name]: value }))) return;
   session.config[name] = value;
-}
-
-async function persist(host: Host, patch: Partial<SavedSettings>): Promise<boolean> {
-  try {
-    await updateSettings(patch);
-    return true;
-  } catch (error) {
-    host.emit({ kind: "notice", text: `could not save settings · ${(error as Error).message}`, tone: "error" });
-    return false;
-  }
 }
 
 function chooser(host: Host): Host["choose"] {
@@ -300,4 +229,9 @@ function chooser(host: Host): Host["choose"] {
     host.emit({ kind: "notice", text: "that command needs the screen", tone: "warn" });
   }
   return host.choose;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error("interrupted");
 }

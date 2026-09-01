@@ -52,7 +52,7 @@ export async function runApp(
 ): Promise<void> {
   const terminal = environment.screen ?? realScreen;
   const paint = environment.paint ?? painter();
-  const keys = decoder();
+  const keys = decoder({ ctrlBackspaceIsBs: process.env["WT_SESSION"] !== undefined });
   const transcript = transcriptRenderer();
   const workspace = await workspaceLabel(session.config.root);
 

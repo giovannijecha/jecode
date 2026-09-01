@@ -1,271 +1,95 @@
-// Provider and model command flows.
+// Provider access and connection management. Runtime selection lives in /models.
 
-import type { Session } from "./session.ts";
+import { saveCommandSettings } from "./command-settings.ts";
 import type { Host } from "./commands.ts";
-import type { Option } from "./tui/picker.ts";
-import { heading } from "./tui/picker.ts";
-import { PROVIDERS } from "./providers/index.ts";
-import { readSettings } from "./settings.ts";
-import type { SavedSettings } from "./settings.ts";
+import { apiKeyCommand } from "./credential-commands.ts";
+import { credentialSource } from "./credentials.ts";
 import {
-  authenticationNeed,
-  ensureProviderAuthentication,
-} from "./credential-commands.ts";
-import { providerFailure } from "./provider-errors.ts";
+  ollamaConnectionHint,
+  ollamaConnectionSetting,
+} from "./ollama-settings-command.ts";
+import { openAIAccountHint } from "./openai-account.ts";
+import { openAIAccountCommand } from "./openai-account-command.ts";
 import { providerLabel } from "./provider-label.ts";
-import { compatibleEffort } from "./effort.ts";
+import { PROVIDERS } from "./providers/index.ts";
+import { ollamaConnection } from "./providers/ollama.ts";
+import type { Session } from "./session.ts";
+import { heading } from "./tui/picker.ts";
+import type { Provider } from "./types.ts";
 
-type SelectionBehavior = {
-  announce?: boolean;
-  save?: boolean;
-};
+const OLLAMA_KEY = "OLLAMA_API_KEY";
 
-/**
- * The provider menu.
- *
- * Every provider is offered, including the ones that cannot run: the reason
- * one is unusable — the variable it wants, by name — is worth more on screen
- * than the row would be worth hidden. A blocked choice opens the same masked
- * credential flow used by settings, and cancellation leaves the old choice.
- */
-export async function providersCommand(
-  session: Session,
-  host: Host,
-  behavior: SelectionBehavior = {},
-): Promise<boolean> {
+/** The single control plane for API keys, OAuth accounts, and Ollama endpoints. */
+export async function providersCommand(session: Session, host: Host): Promise<void> {
   const choose = chooser(host);
-  if (choose === undefined) return false;
+  if (choose === undefined) return;
 
-  const options: Option[] = PROVIDERS.map((provider) => ({
-    label: provider.id,
-    hint: provider.blocked() ?? "ready",
-  }));
-
-  const at = PROVIDERS.findIndex((provider) => provider.id === session.provider.id);
-  const index = await choose({
-    title: heading("provider", "where the next turn runs", session.palette),
-    options,
-    index: Math.max(0, at),
-  });
-  if (index === undefined) return false;
-
-  const chosen = PROVIDERS[index];
-  if (chosen === undefined) return false;
-
-  // Picking the provider already in use is not a no-op when it cannot run:
-  // it is how the user asks to fix the reason it cannot.
-  if (chosen.id === session.provider.id) {
-    if (!(await ensureProviderAuthentication(chosen, session, host))) return false;
-    return session.model === ""
-      ? modelsCommand(session, host, { announce: false, save: behavior.save })
-      : true;
-  }
-
-  // A provider that cannot run is worth one offer to fix it, here, rather
-  // than a note telling the user to leave and export something.
-  const blocked = chosen.blocked();
-  if (blocked !== undefined) {
-    await ensureProviderAuthentication(chosen, session, host);
-    const still = chosen.blocked();
-    if (still !== undefined) {
-      host.emit({
-        kind: "notice",
-        text: `${providerLabel(chosen.id)} still needs ${authenticationNeed(chosen)} · provider unchanged`,
-        tone: "warn",
-      });
-      return false;
-    }
-  }
-
-  const before = {
-    provider: session.provider,
-    model: session.model,
-    providerId: session.config.providerId,
-    configModel: session.config.model,
-    effort: session.config.effort,
-  };
-  session.provider = chosen;
-  // The model belonged to the old provider. Carrying it across would send
-  // `claude-sonnet-5` to OpenAI and call the 404 a bug in the provider.
-  session.model = readSettings().models?.[chosen.id] ?? chosen.defaultModel;
-  session.config.providerId = chosen.id;
-  session.config.model = session.model;
-
-  if (session.model === "") {
-    if (!(await modelsCommand(session, host, { announce: false, save: false }))) {
-      restoreProvider(session, before);
-      return false;
-    }
-  } else {
-    const alignment = await alignEffort(session, host);
-    if (!alignment.ok) {
-      restoreProvider(session, before);
-      return false;
-    }
-  }
-
-  if (behavior.save !== false) {
-    const saved = readSettings();
-    const models = { ...saved.models };
-    if (session.model !== "") models[chosen.id] = session.model;
-    const patch = {
-      provider: chosen.id,
-      models,
-      ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
-    };
-    if (!(await saveDefaults(host, patch))) {
-      restoreProvider(session, before);
-      return false;
-    }
-  }
-
-  if (behavior.announce !== false) {
-    host.emit({
-      kind: "notice",
-      text: session.model === "" ? `provider · ${chosen.id} · pick a model` : `provider · ${chosen.id}`,
-      tone: "info",
+  let selected = Math.max(
+    0,
+    PROVIDERS.findIndex((provider) => provider.id === session.provider.id),
+  );
+  while (true) {
+    const index = await choose({
+      title: [],
+      options: PROVIDERS.map((provider) => ({
+        label: providerLabel(provider.id),
+        value: providerAccessHint(provider),
+      })),
+      index: selected,
     });
+    if (index === undefined) return;
+    const provider = PROVIDERS[index];
+    if (provider === undefined) return;
+    selected = index;
+    await manageProvider(provider, session, host);
   }
-  return true;
 }
 
-/** The model menu, built from what the provider says it has right now. */
-export async function modelsCommand(
+export function providerAccessHint(provider: Provider): string {
+  if (provider.id === "ollama") {
+    const connection = ollamaConnection();
+    if (connection.loopback) return `${ollamaConnectionHint()} · no key needed`;
+    return `${ollamaConnectionHint()} · API key ${credentialSource(OLLAMA_KEY) ?? "missing"}`;
+  }
+  if (provider.auth.kind === "oauth") return openAIAccountHint();
+  return `API key · ${credentialSource(provider.auth.keyVar) ?? "missing"}`;
+}
+
+async function manageProvider(
+  provider: Provider,
   session: Session,
   host: Host,
-  behavior: SelectionBehavior = {},
-): Promise<boolean> {
-  // Before the network, not after: asking a provider for a list nothing can
-  // be picked from is a request spent on a menu that will never open.
-  const choose = chooser(host);
-  if (choose === undefined) return false;
-
-  const provider = session.provider;
-
-  // Offer the key rather than only naming what is missing: the user came here
-  // to pick a model, and "go and export a variable" is not an answer.
-  const blocked = provider.blocked();
-  if (blocked !== undefined) {
-    await ensureProviderAuthentication(provider, session, host);
-    const still = provider.blocked();
-    if (still !== undefined) {
-      host.emit({
-        kind: "notice",
-        text: `${providerLabel(provider.id)} still needs ${authenticationNeed(provider)}`,
-        tone: "warn",
-      });
-      return false;
-    }
+): Promise<void> {
+  if (provider.id === "ollama") {
+    await ollamaProviderCommand(session, host);
+    return;
   }
-
-  host.status?.(`Asking ${provider.id}`);
-  let ids: string[];
-  try {
-    ids = await provider.models(host.signal, (status) => host.status?.(status));
-  } catch (error) {
-    host.emit({
-      kind: "notice",
-      text: providerFailure(provider, error as Error, true),
-      tone: "error",
-    });
-    return false;
-  } finally {
-    host.status?.(undefined);
+  if (provider.auth.kind === "oauth") {
+    await openAIAccountCommand(session, host);
+    return;
   }
+  await apiKeyCommand(provider.auth.keyVar, providerLabel(provider.id), session, host);
+}
 
-  if (ids.length === 0) {
-    host.emit({ kind: "notice", text: `${provider.id} offers no models`, tone: "warn" });
-    return false;
-  }
-
-  const index = await choose({
-    title: heading("model", provider.id, session.palette),
-    options: ids.map((id) => ({ label: id })),
-    searchable: true,
-    query: "",
-    index: Math.max(0, ids.indexOf(session.model)),
+async function ollamaProviderCommand(session: Session, host: Host): Promise<void> {
+  if (host.choose === undefined) return;
+  const index = await host.choose({
+    title: heading("Ollama", "access and connection", session.palette),
+    options: [
+      { label: "connection", hint: ollamaConnectionHint() },
+      { label: "API key", hint: credentialSource(OLLAMA_KEY) ?? "missing" },
+    ],
+    index: 0,
   });
-  if (index === undefined) return false;
-
-  const chosen = ids[index];
-  if (chosen === undefined) return false;
-
-  const before = {
-    model: session.model,
-    configModel: session.config.model,
-    effort: session.config.effort,
-  };
-  session.model = chosen;
-  session.config.model = chosen;
-  const alignment = await alignEffort(session, host);
-  if (!alignment.ok) {
-    session.model = before.model;
-    session.config.model = before.configModel;
-    session.config.effort = before.effort;
-    return false;
-  }
-  if (behavior.save !== false) {
-    const saved = readSettings();
-    const models = { ...saved.models, [provider.id]: chosen };
-    const patch = {
-      models,
-      ...(session.config.effort === before.effort ? {} : { effort: session.config.effort }),
-    };
-    if (!(await saveDefaults(host, patch))) {
-      session.model = before.model;
-      session.config.model = before.configModel;
-      session.config.effort = before.effort;
-      return false;
-    }
-  }
-  if (behavior.announce !== false) {
-    host.emit({ kind: "notice", text: `model · ${chosen}`, tone: "info" });
-  }
-  return true;
-}
-
-/** The way to put a menu up, or nothing — and the reason, already said. */
-type ProviderBefore = {
-  provider: Session["provider"];
-  model: string;
-  providerId: string;
-  configModel: string;
-  effort: string;
-};
-
-function restoreProvider(session: Session, before: ProviderBefore): void {
-  session.provider = before.provider;
-  session.model = before.model;
-  session.config.providerId = before.providerId;
-  session.config.model = before.configModel;
-  session.config.effort = before.effort;
-}
-
-async function alignEffort(
-  session: Session,
-  host: Host,
-): Promise<{ ok: true; adjusted?: string } | { ok: false }> {
-  if (session.provider.efforts === undefined) return { ok: true };
-  let supported: readonly string[];
-  try {
-    supported = await session.provider.efforts(
-      session.model,
-      host.signal,
-      (status) => host.status?.(status),
+  if (index === 0) {
+    await ollamaConnectionSetting(
+      session,
+      host,
+      (patch) => saveCommandSettings(host, patch),
     );
-  } catch (error) {
-    host.emit({
-      kind: "notice",
-      text: providerFailure(session.provider, error as Error, true),
-      tone: "error",
-    });
-    return { ok: false };
+  } else if (index === 1) {
+    await apiKeyCommand(OLLAMA_KEY, "Ollama", session, host);
   }
-
-  const adjusted = compatibleEffort(session.config.effort, supported);
-  if (adjusted === undefined || adjusted === session.config.effort) return { ok: true };
-  session.config.effort = adjusted;
-  return { ok: true, adjusted };
 }
 
 function chooser(host: Host): Host["choose"] {
@@ -273,19 +97,4 @@ function chooser(host: Host): Host["choose"] {
     host.emit({ kind: "notice", text: "that command needs the screen", tone: "warn" });
   }
   return host.choose;
-}
-
-async function saveDefaults(host: Host, patch: Partial<SavedSettings>): Promise<boolean> {
-  if (host.saveSettings === undefined) return true;
-  try {
-    await host.saveSettings(patch);
-    return true;
-  } catch (error) {
-    host.emit({
-      kind: "notice",
-      text: `could not save settings · ${(error as Error).message}`,
-      tone: "error",
-    });
-    return false;
-  }
 }

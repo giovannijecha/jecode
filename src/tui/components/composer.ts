@@ -22,7 +22,7 @@ export function renderComposer(
     rows: shown.map((line, index) => row(
       width,
       [{ text: line, fg: pal.ink.bright }],
-      index === 0 && right !== "" ? [{ text: right, fg: pal.ink.muted }] : [],
+      index === 0 && right !== "" ? [{ text: right, fg: pal.ink.dim }] : [],
     )),
     cursor: { row: laid.cursor.row - first, col: laid.cursor.col },
   };

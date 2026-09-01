@@ -23,8 +23,11 @@ than decorate the interface or pretend the product has emotions.
 | Graphite | #1D2630 |
 | Steel | #669BD2 |
 | Steel soft | #8DB4DD |
+| Technical | #4EC9E8 |
+| Foreground | #DCE0E5 |
 | Bright | #EBEFF4 |
 | Muted | #9CA9B7 |
+| Dim | #707C89 |
 | Success | #86CB92 |
 | Warning | #E6BF5F |
 | Danger | #E87070 |

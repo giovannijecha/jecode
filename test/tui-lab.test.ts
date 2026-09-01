@@ -155,11 +155,25 @@ test("credential input uses the same writable prompt", () => {
 test("settings is a compact selector without key legends", () => {
   const frame = composeLab(state("menu-settings"), { rows: 24, cols: 100 });
   const shown = plain(frame.rows).join("\n");
-  assert.match(shown, /settings.*\.jecode\/settings\.json/);
-  assert.match(shown, /provider.*ollama/);
-  assert.match(shown, /ollama connection.*cloud.*ollama\.com/);
+  assert.match(shown, /model.*Ollama/);
+  assert.match(shown, /providers.*manage.*connections/);
+  assert.doesNotMatch(shown, /settings.*\.jecode|Changes apply|ollama connection|authentication/);
   assert.doesNotMatch(shown, /in use|↑↓ enter|Enter to select/);
   assert.equal(frame.cursor, undefined);
+});
+
+test("essential control-plane values remain visible at the minimum width", () => {
+  const settings = plain(
+    composeLab(state("menu-settings"), { rows: 14, cols: 38 }).rows,
+  ).join("\n");
+  const permissions = plain(
+    composeLab(state("menu-permissions"), { rows: 14, cols: 38 }).rows,
+  ).join("\n");
+
+  assert.match(settings, /model.*Ollama/);
+  assert.match(settings, /effort.*high/);
+  assert.match(settings, /max output.*64000/);
+  assert.match(permissions, /read_file.*allow/);
 });
 
 test("permissions exposes every tool and its session policy", () => {
@@ -168,12 +182,11 @@ test("permissions exposes every tool and its session policy", () => {
   const tail = plain(
     composeLab({ ...state("menu-permissions"), selected: 6 }, { rows: 24, cols: 100 }).rows,
   ).join("\n");
-  assert.match(shown, /permissions.*session only/);
-  assert.match(shown, /read_file.*allow.*read only/);
-  assert.match(shown, /search_text.*deny.*read only/);
-  assert.match(shown, /edit_file.*ask.*2 remembered/);
-  assert.match(tail, /run_command.*ask.*1 remembered/);
-  assert.doesNotMatch(shown, /close|in use|Enter to select/);
+  assert.match(shown, /read_file.*read only.*‹ allow ›/);
+  assert.match(shown, /search_text.*read only.*deny/);
+  assert.match(shown, /edit_file.*2 remembered.*ask/);
+  assert.match(tail, /run_command.*1 remembered.*‹ ask ›/);
+  assert.doesNotMatch(shown, /permissions|session only|Changes apply|close|in use|Enter to select/);
   assert.equal(frame.cursor, undefined);
 });
 
@@ -181,6 +194,8 @@ test("help is a temporary keyboard reference inside the shared dock", () => {
   const frame = composeLab(state("help"), { rows: 24, cols: 100 });
   const shown = plain(frame.rows).join("\n");
   assert.match(shown, /help\s+keyboard controls.*esc close/);
+  assert.match(shown, /ctrl\+left \/ right.*move cursor by word/);
+  assert.match(shown, /ctrl\+backspace\/del.*delete a word/);
   assert.match(shown, /alt\+enter\s+insert a new line/);
   assert.match(shown, /ctrl\+l\s+redraw the screen/);
   assert.equal(frame.cursor, undefined);

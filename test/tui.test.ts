@@ -80,7 +80,7 @@ test("activity leaves only the interrupt hint on the footer's right edge", () =>
   const blocked = compose(
     {
       ...base(),
-      readiness: { text: "Anthropic needs an API key · /settings", tone: "warn" },
+      readiness: { text: "Anthropic needs an API key · /providers", tone: "warn" },
     },
     { rows: 24, cols: 80 },
   );
@@ -257,10 +257,27 @@ test("a searchable picker filters without losing the original option index", () 
   assert.equal(picker.edge(filtered, "end").index, 2);
   const rendered = strip(picker.panel(filtered, 50, STEEL)).join("\n");
   assert.match(rendered, /→ beta.*1–2 \/ 2 · 4 total/);
-  assert.deepEqual(picker.caret(filtered, 50), { row: 1, col: 6 });
+  assert.deepEqual(picker.caret(filtered, 50), { row: 0, col: 6 });
   assert.equal(picker.clear(filtered).query, "");
   const empty = picker.type(source, "missing");
   assert.equal(picker.selected(empty), undefined);
+});
+
+test("a searchable picker includes essential row values in its query", () => {
+  const source: picker.Picker = {
+    title: [],
+    options: [
+      { label: "shared-model", value: "Anthropic" },
+      { label: "shared-model", value: "ChatGPT" },
+    ],
+    searchable: true,
+    query: "",
+    index: 0,
+  };
+
+  const filtered = picker.type(source, "chatgpt");
+  assert.equal(filtered.index, 1);
+  assert.equal(picker.selected(filtered), 1);
 });
 
 test("reduced motion replaces the live rail animation with a stable node", () => {

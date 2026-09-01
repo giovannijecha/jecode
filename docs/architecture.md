@@ -61,10 +61,13 @@ prevents a network-backed `/models` request from overlapping a turn and gives
 
 There is no startup banner, permanent preamble, or automatic menu. Every launch
 opens on an empty transcript and composer; readiness remains visible in the
-footer, and `/settings` opens only when the user invokes it. Its nested
-provider, model, and authentication flows use the same dock interaction as every
-other selector. Cancelling a new provider leaves the previous provider and
-model unchanged.
+footer, and configuration opens only when the user invokes it. `/providers`
+owns API keys, ChatGPT OAuth, and Ollama connections. `/models` asks every
+currently usable provider for its catalogue concurrently, keeps successful
+catalogues when another provider fails, and presents one searchable list.
+Choosing a row changes provider and model atomically; cancellation or a failed
+settings write restores both. `/settings` is model-first and links back to the
+same provider-access flow rather than duplicating it.
 
 ## Provider boundary
 
@@ -115,7 +118,7 @@ before unbounded work reaches the controller.
 Ollama initializes its endpoint from `--ollama-host`, `OLLAMA_HOST`, saved
 settings, then key-aware inference. A configured API key selects
 `https://ollama.com`; without one, Jecode targets the local daemon at
-`http://127.0.0.1:11434`. The Ollama connection row in `/settings` can replace
+`http://127.0.0.1:11434`. The Ollama connection flow in `/providers` can replace
 that session value live with Cloud, local, or a custom endpoint. HTTP is
 accepted only for exact loopback hosts. Remote endpoints must use HTTPS, and
 credentials embedded in the URL are rejected.
@@ -183,10 +186,12 @@ rotated by another Jecode process is covered alongside the cached value.
 The “allow this session” choice is deliberately narrow: one target file for
 file changes, or one exact shell command. `/permissions` exposes every tool in
 one session-only control plane. Read-only tools can be allowed or denied;
-dangerous tools can ask, allow, or deny. Denied tools are omitted from the next
-model request, and changing a tool policy clears its remembered grants. `/new`
-restores the defaults. A launch-time `--auto-approve` keeps dangerous tools
-locked to allow for that process.
+dangerous tools can ask, allow, or deny. Left/Right changes the selected policy
+without opening another menu, while Enter opens remembered approvals only when
+that tool has any. Denied tools are omitted from the next model request, and
+changing a tool policy clears its remembered grants. `/new` restores the
+defaults. A launch-time `--auto-approve` keeps dangerous tools locked to allow
+for that process.
 
 ## Settings, credentials, and local data
 
@@ -211,8 +216,8 @@ lock and rereads the store inside it, so concurrent Jecode sessions preserve
 unrelated settings, keys, and rotated tokens. Age alone never authorizes stale
 lock recovery: a live owner keeps the lock through a slow network refresh, and
 an abandoned lock is removed owner-first so competing waiters cannot steal a
-newly acquired lock. `/credentials` shows only API-key
-sources or a non-secret ChatGPT identity and plan hint. OAuth uses PKCE for
+newly acquired lock. `/providers` shows only API-key sources or a non-secret
+ChatGPT identity and plan hint. OAuth uses PKCE for
 browser login, supports OpenAI's device-code path for WSL/headless terminals,
 refreshes early, and retries one 401 after refresh. Logout removes the local
 account even when remote revocation cannot be confirmed.
@@ -262,7 +267,7 @@ user input       full-width neutral surface
 reasoning        unframed muted label and three-row live tail
 assistant        unframed Markdown
 tool activity    compact state rail with evidence beneath each call
-selection        quiet inset band; arrow fallback without colour
+selection        bold Steel label/value; arrow fallback without colour
 composer         editor, query fields, and contextual menu inside one pair of rules
 footer           identity left, feedback or interrupt hint right
 ```
@@ -307,18 +312,33 @@ reference provide its inner rows; none draws its own border. Autocomplete opens
 on `/`, keeps selection separate from the typed prefix, and puts window progress
 on that input row. Searchable pickers use the same `→` input and a real caret.
 Up/Down select, Tab completes, Enter runs, and Esc closes. Key legends are not
-repeated inside every picker. The footer remains outside the shell, so it never
-jumps when a menu opens.
+repeated inside every picker. Direct control surfaces omit ornamental titles
+and descriptions; row labels and values carry the state. Adjustable rows keep
+their current value on the right and use Left/Right without closing the picker.
+The footer remains outside the shell, so it never jumps when a menu opens.
+
+The input decoder normalizes terminal-specific bytes and escape sequences into
+semantic editor actions before they reach the composer. Character movement and
+deletion remain grapheme-safe; Ctrl+Left/Right moves by whitespace-delimited
+word, and Ctrl+Backspace/Delete removes the adjacent word. Windows Terminal's
+distinct BS/DEL pair is enabled only when `WT_SESSION` identifies that terminal;
+generic terminals retain both traditional plain-Backspace encodings.
 
 Writable fields and searchable pickers carry the same `→ ` active prompt. One
 shared renderer owns its terminal-cell width, horizontal window, secret mask,
 right-side progress, and cursor offset, so the interactions cannot drift apart.
-Selection itself is a quiet inset band on colour terminals; `NO_COLOR` restores
-the arrow marker so the active row remains structural rather than chromatic.
+Selection colours only the active label and value in bold Steel, leaving the
+row background untouched. `NO_COLOR` restores the arrow marker so focus remains
+structural when colour is unavailable.
 
-Assistant Markdown follows the same restraint. Inline code is accent text,
-not a background chip. Fenced code shows muted opening and closing fences with
-a two-cell body indent; it has no full-width surface or decorative left rail.
+Assistant Markdown follows the same restraint. Bright foreground carries prose;
+a dedicated technical cyan identifies paths, links, inline code, list marks,
+and syntax keywords without spending the structural Steel accent. Readable
+secondary text and deliberately dim chrome are separate roles, so explanations
+remain legible without making reasoning, fences, or footer metadata compete
+with the answer. Inline code has no background chip. Fenced code keeps dim
+opening and closing fences with a two-cell body indent; it has no full-width
+surface or decorative left rail.
 
 Tool output and diffs stay complete in state. A pending tool owns the animated
 rail node and elapsed label. `run_command` updates that same block with the
@@ -343,7 +363,9 @@ blocks. Tiny terminals receive a fixed recovery frame instead of fabricated
 dimensions or overflowing chrome.
 
 Jecode exposes one dark Steel identity through semantic colour tokens shared by
-every production component and the TUI Lab. `NO_COLOR` disables colour while
+every production component and the TUI Lab. Structural Steel, technical cyan,
+foreground, secondary, dim, and outcome roles are intentionally distinct;
+components never embed literal colours. `NO_COLOR` disables colour while
 retaining structural selection and state marks. Reduced-motion mode replaces
 the animated rail node and blinking cursor with stable marks.
 

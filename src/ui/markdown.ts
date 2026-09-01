@@ -79,7 +79,7 @@ export function markdown(text: string, max: number, pal: Palette, proseMax = max
       const depth = Math.min(2, Math.floor((bullet[1] as string).length / 2));
       const mark: Seg[] = [
         { text: "  ".repeat(depth) },
-        { text: "- ", fg: pal.accent },
+        { text: "- ", fg: pal.technical },
       ];
       const hang: Seg[] = [{ text: `${"  ".repeat(depth)}  ` }];
       rows.push(...emit(inline(bullet[2] as string, ink.fg, pal), prose - depth * 2 - 2, mark, hang));
@@ -89,7 +89,7 @@ export function markdown(text: string, max: number, pal: Palette, proseMax = max
     const ordered = ORDERED.exec(line);
     if (ordered !== null) {
       const label = `${ordered[2] as string}. `;
-      const mark: Seg[] = [{ text: label, fg: pal.accent }];
+      const mark: Seg[] = [{ text: label, fg: pal.technical }];
       const hang: Seg[] = [{ text: " ".repeat(label.length) }];
       rows.push(...emit(inline(ordered[3] as string, ink.fg, pal), prose - label.length, mark, hang));
       continue;
@@ -145,14 +145,14 @@ function code(lines: string[], start: number, max: number, pal: Palette, out: Md
     body.push(elide(line.replace(/\t/g, "  "), max - 2));
   }
 
-  out.push({ segs: [{ text: `\`\`\`${lang}`, fg: ink.muted }] });
+  out.push({ segs: [{ text: `\`\`\`${lang}`, fg: ink.dim }] });
 
   const roles: Record<Role, RGB> = {
-    plain: ink.added,
-    comment: ink.muted,
+    plain: ink.fg,
+    comment: ink.dim,
     string: ink.added,
     number: ink.attention,
-    keyword: pal.accent,
+    keyword: pal.technical,
   };
 
   for (const tokens of highlight(body, lang)) {
@@ -164,7 +164,7 @@ function code(lines: string[], start: number, max: number, pal: Palette, out: Md
     });
   }
 
-  out.push({ segs: [{ text: "```", fg: ink.muted }] });
+  out.push({ segs: [{ text: "```", fg: ink.dim }] });
   return i;
 }
 
