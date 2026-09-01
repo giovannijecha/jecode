@@ -155,7 +155,7 @@ function liveLabel(block: ToolBlock, context: ToolRenderContext): string {
 function statusInk(tone: ToolTone, pal: Palette): RGB {
   if (tone === "fail") return pal.ink.removed;
   if (tone === "pending" || tone === "deny") return pal.ink.attention;
-  return pal.ink.muted;
+  return pal.ink.added;
 }
 
 function failureLine(line: string): boolean {

@@ -7,6 +7,7 @@ import { atomicWrite } from "./atomic.ts";
 import { EFFORTS } from "./effort.ts";
 import { providerNames } from "./providers/index.ts";
 import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
+import { withStoreLock } from "./store-lock.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
 
 export { EFFORTS } from "./effort.ts";
@@ -29,14 +30,16 @@ export function readSettings(): SavedSettings {
 }
 
 export async function updateSettings(patch: Partial<SavedSettings>): Promise<string> {
-  const next = normalize({ ...readSettings(), ...patch });
   const file = settingsPath();
   const directory = path.dirname(file);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(directory, 0o700);
-  await atomicWrite(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-  saved = next;
-  return file;
+  return withStoreLock(file, async () => {
+    const next = normalize({ ...readStore(file), ...patch });
+    await atomicWrite(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+    saved = next;
+    return file;
+  });
 }
 
 export function settingsPath(): string {
@@ -52,9 +55,9 @@ export function reloadSettings(): void {
   saved = undefined;
 }
 
-function readStore(): SavedSettings {
+function readStore(file = settingsPath()): SavedSettings {
   try {
-    return normalize(JSON.parse(readFileSync(settingsPath(), "utf8")) as unknown);
+    return normalize(JSON.parse(readFileSync(file, "utf8")) as unknown);
   } catch {
     // Missing, unreadable, and malformed stores all fall back safely. A bad
     // preference must never prevent the agent from starting.

@@ -133,6 +133,7 @@ export const searchText: Tool = {
 
     const accelerated = preferRipgrep(tail, tailBytes)
       ? await trySearchWithRipgrep({
+          root: scoped.root,
           files: tail,
           query,
           caseSensitive: sensitive,

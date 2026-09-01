@@ -90,6 +90,7 @@ test("the optional ripgrep backend preserves matches and binary filtering", asyn
     bytes: (await fs.stat(file)).size,
   })));
   const result = await trySearchWithRipgrep({
+    root: ctx.root,
     files,
     query: "needle",
     caseSensitive: false,
@@ -113,6 +114,7 @@ test("search falls back to the dependency-free scanner when ripgrep is unavailab
   try {
     const file = path.join(ctx.root, "src", "a.ts");
     const accelerated = await trySearchWithRipgrep({
+      root: ctx.root,
       files: [{ path: file, bytes: (await fs.stat(file)).size }],
       query: "needle",
       caseSensitive: false,

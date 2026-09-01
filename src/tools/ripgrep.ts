@@ -1,7 +1,9 @@
 // Optional native acceleration for bounded literal search.
 
 import { spawn } from "node:child_process";
+import * as path from "node:path";
 import { shellEnvironment } from "../credential-safety.ts";
+import { resolveExecutable } from "../executable.ts";
 
 const MAX_BATCH_FILES = 256;
 const MAX_BATCH_BYTES = 16_000_000;
@@ -15,6 +17,7 @@ export type RipgrepMatch = { path: string; line: number; text: string };
 export type RipgrepSearch = { matches: RipgrepMatch[]; binaryPaths: string[] };
 
 type RipgrepOptions = {
+  root: string;
   files: readonly SearchFile[];
   query: string;
   caseSensitive: boolean;
@@ -28,6 +31,8 @@ export async function trySearchWithRipgrep(
 ): Promise<RipgrepSearch | undefined> {
   if (options.files.length === 0) return { matches: [], binaryPaths: [] };
   if (options.query.length > MAX_QUERY_CHARS || options.query.includes("\0")) return undefined;
+  const executable = resolveExecutable("rg", { rejectUnder: options.root });
+  if (executable === undefined) return undefined;
 
   const matches: RipgrepMatch[] = [];
   const binaryPaths = new Set<string>();
@@ -35,7 +40,7 @@ export async function trySearchWithRipgrep(
   try {
     for (const batch of batches(options.files, options.query.length)) {
       throwIfAborted(options.signal);
-      const searched = await searchBatch(batch, options);
+      const searched = await searchBatch(executable, batch, options);
       if (searched === undefined) return undefined;
       for (const match of searched.matches) {
         if (matches.length >= options.limit) break;
@@ -80,6 +85,7 @@ function batches(files: readonly SearchFile[], queryChars: number): SearchFile[]
 }
 
 function searchBatch(
+  executable: string,
   files: readonly SearchFile[],
   options: RipgrepOptions,
 ): Promise<RipgrepSearch | undefined> {
@@ -101,7 +107,8 @@ function searchBatch(
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn("rg", args, {
+      child = spawn(executable, args, {
+        cwd: path.dirname(executable),
         env: shellEnvironment(),
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],

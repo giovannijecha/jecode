@@ -14,6 +14,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
+import { withStoreLock } from "./store-lock.ts";
 import { legacyUserDataPath, userDataLabel, userDataPath } from "./user-data.ts";
 
 /** Keys this session was given but not asked to keep. Dies with the window. */
@@ -77,23 +78,31 @@ export function hold(name: string, value: string): void {
  */
 export async function keep(name: string, value: string): Promise<string> {
   const file = storePath();
-  const all = { ...fromDisk(), [name]: value };
-  await persist(file, all);
-  hold(name, value);
-  saved = all;
-
-  return file;
+  await prepare(file);
+  return withStoreLock(file, async () => {
+    const all = { ...readSavedStore(), [name]: value };
+    await persist(file, all);
+    hold(name, value);
+    saved = all;
+    return file;
+  });
 }
 
 /** Remove only the saved copy. An environment or session value is untouched. */
 export async function forgetSaved(name: string): Promise<boolean> {
-  const all = { ...fromDisk() };
-  if (use(all[name]) === undefined) return false;
-  delete all[name];
   const file = storePath();
-  await persist(file, all);
-  saved = all;
-  return true;
+  await prepare(file);
+  return withStoreLock(file, async () => {
+    const all = { ...readSavedStore() };
+    if (use(all[name]) === undefined) {
+      saved = all;
+      return false;
+    }
+    delete all[name];
+    await persist(file, all);
+    saved = all;
+    return true;
+  });
 }
 
 export function storePath(): string {
@@ -144,10 +153,13 @@ function readStore(file: string): Record<string, string> | undefined {
   }
 }
 
-async function persist(file: string, values: Record<string, string>): Promise<void> {
+async function prepare(file: string): Promise<void> {
   const directory = path.dirname(file);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(directory, 0o700);
+}
+
+async function persist(file: string, values: Record<string, string>): Promise<void> {
   await atomicWrite(file, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
 }
 

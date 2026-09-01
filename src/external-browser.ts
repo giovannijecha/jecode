@@ -2,6 +2,8 @@
 
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import * as path from "node:path";
+import { resolveExecutable } from "./executable.ts";
 
 export async function openExternal(url: string): Promise<boolean> {
   const target = new URL(url);
@@ -24,13 +26,26 @@ export async function openExternal(url: string): Promise<boolean> {
   });
 }
 
-function browserCommand(url: string): { file: string; args: string[] } | undefined {
+export function browserCommand(url: string): { file: string; args: string[] } | undefined {
   if (process.platform === "win32") {
-    return { file: "rundll32.exe", args: ["url.dll,FileProtocolHandler", url] };
+    const windows = process.env["SystemRoot"] ?? process.env["WINDIR"];
+    const file = windows === undefined
+      ? undefined
+      : resolveExecutable("rundll32.exe", {
+          searchPath: path.join(windows, "System32"),
+          rejectUnder: process.cwd(),
+        });
+    return file === undefined ? undefined : { file, args: ["url.dll,FileProtocolHandler", url] };
   }
-  if (process.platform === "darwin") return { file: "open", args: [url] };
-  if (isWsl()) return { file: "explorer.exe", args: [url] };
-  return { file: "xdg-open", args: [url] };
+  const name = launcherName();
+  const searchPath = process.platform === "darwin" ? "/usr/bin" : undefined;
+  const file = resolveExecutable(name, { searchPath, rejectUnder: process.cwd() });
+  return file === undefined ? undefined : { file, args: [url] };
+}
+
+function launcherName(): string {
+  if (process.platform === "darwin") return "open";
+  return isWsl() ? "explorer.exe" : "xdg-open";
 }
 
 export function headlessEnvironment(): boolean {

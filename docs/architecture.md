@@ -156,10 +156,13 @@ The built-in tools are:
 | `run_command` | Ask | Exclusive | Workspace working directory, timeout, bounded output |
 
 `search_text` enumerates and validates candidates through Jecode's own bounded
-workspace walk. For larger candidate sets, `rg` on `PATH` accelerates literal
-matching over those files with a credential-filtered environment; smaller
-searches and machines without `rg` use the dependency-free TypeScript scanner.
-`rg` is never required at install or runtime.
+workspace walk. For larger candidate sets, an optional `rg` from `PATH`
+accelerates literal matching over those files with a credential-filtered
+environment. Jecode resolves the executable to a canonical absolute path and
+rejects candidates controlled by the workspace, so a repository cannot shadow
+the helper. Smaller searches and machines without a trusted `rg` use the
+dependency-free TypeScript scanner. `rg` is never required at install or
+runtime.
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
 user account can address, which is why every exact command asks by default
@@ -201,12 +204,13 @@ read-only fallback until the canonical file is first written.
 
 Saving is explicit. Secret files use owner-only modes on POSIX; Windows relies
 on the user profile ACL. Replacement uses the same atomic writer as workspace
-files. `/credentials` shows only API-key sources or a non-secret ChatGPT
-identity and plan hint. OAuth uses PKCE for browser login, supports OpenAI's
-device-code path for WSL/headless terminals, refreshes early, retries one 401
-after refresh, and serializes rotating refresh-token writes with a bounded
-cross-process lock. Logout removes the local account even when remote
-revocation cannot be confirmed.
+files. Every persistent mutation serializes through a bounded cross-process
+lock and rereads the store inside it, so concurrent Jecode sessions preserve
+unrelated settings, keys, and rotated tokens. `/credentials` shows only API-key
+sources or a non-secret ChatGPT identity and plan hint. OAuth uses PKCE for
+browser login, supports OpenAI's device-code path for WSL/headless terminals,
+refreshes early, and retries one 401 after refresh. Logout removes the local
+account even when remote revocation cannot be confirmed.
 
 jecode writes no conversation state automatically. `/export` is an explicit,
 argument-free operation that writes an automatically named Markdown transcript

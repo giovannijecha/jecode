@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Tool } from "./types.ts";
-import { optionalBool, optionalInt, requireString } from "./args.ts";
+import { optionalBool, optionalInt, optionalString, requireString } from "./args.ts";
 import {
   assertDirectWritableInRoot,
   displayPath,
@@ -74,10 +74,9 @@ export const listDir: Tool = {
   },
   async run(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
-    const target = await resolveExistingInRoot(
-      root,
-      args.path === undefined ? "." : requireString(args, "path"),
-    );
+    const requested = optionalString(args, "path");
+    const relative = requested === undefined || requested.trim() === "" ? "." : requested;
+    const target = await resolveExistingInRoot(root, relative);
     const entries: string[] = [];
     let chars = 0;
     let truncated = false;

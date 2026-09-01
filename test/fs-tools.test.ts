@@ -195,6 +195,15 @@ test("lists a directory, marking subdirectories", async () => {
   assert.equal((await listDir.run({ path: "listed" }, ctx)).output, "one.txt\nsub/");
 });
 
+test("an omitted or empty list path means the workspace root", async () => {
+  await writeFile.run({ path: "root-entry.txt", content: "root" }, ctx);
+  const omitted = await listDir.run({}, ctx);
+  const empty = await listDir.run({ path: "" }, ctx);
+
+  assert.equal(empty.output, omitted.output);
+  assert.match(empty.output, /(?:^|\n)root-entry\.txt(?:\n|$)/);
+});
+
 test("refuses to touch anything outside the root", async () => {
   await assert.rejects(readFile.run({ path: "../escape.txt" }, ctx), /escapes the workspace root/);
   await assert.rejects(

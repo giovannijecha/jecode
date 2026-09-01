@@ -4,7 +4,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
-import { withAccountLock } from "./account-lock.ts";
+import { withStoreLock } from "./store-lock.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
 
 export type OpenAICodexAccount = {
@@ -59,7 +59,7 @@ export async function updateOpenAICodexAccount(
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(directory, 0o700);
 
-  return withAccountLock(file, async () => {
+  return withStoreLock(file, async () => {
     const current = readStore(file);
     const next = await change(current.accounts["openai-codex"]);
     const accounts = { ...current.accounts };
