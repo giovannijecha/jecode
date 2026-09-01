@@ -21,10 +21,14 @@ test("colour menu rows align with the composer while writable prompts keep their
     const picker = await import("../src/tui/picker.ts");
     const { configureColor } = await import("../src/ui/render.ts");
 
-    const commands = plain(renderCommandMenu([
+    const commandRows = renderCommandMenu([
       { name: "help", blurb: "show keyboard controls" },
       { name: "exit", blurb: "exit" },
-    ], 0, 60, STEEL).rows);
+    ], 0, 60, STEEL).rows;
+    assert.match(commandRows[0] ?? "", /\x1b\[48;2;42;52;66m/);
+    assert.doesNotMatch(commandRows[1] ?? "", /\x1b\[48;2;42;52;66m/);
+
+    const commands = plain(commandRows);
     assert.match(commands[0] ?? "", /^\/help/);
     assert.match(commands[1] ?? "", /^\/exit/);
 

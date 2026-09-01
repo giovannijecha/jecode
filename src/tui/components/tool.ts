@@ -7,7 +7,6 @@ import type { Detail, Emphasis, ToolBlock, ToolTone } from "./types.ts";
 
 const OUTPUT_ROWS = 8;
 const LIVE_OUTPUT_ROWS = 6;
-const DIFF_ROWS = 12;
 
 export type ToolRenderContext = {
   continues?: boolean;
@@ -52,52 +51,9 @@ function visibleDetails(block: ToolBlock): Detail[] {
       : `… ${hidden} earlier lines · ctrl+o expand`;
     return [{ kind: "gap", text: note }, ...all.slice(-limit)];
   }
-  return diffWindow(all);
-}
-
-/** Keep change rows and their nearest context; never turn a diff into a tail. */
-function diffWindow(all: readonly Detail[]): Detail[] {
-  if (all.length <= DIFF_ROWS) return [...all];
-
-  const important = all.flatMap((detail, index) => detail.kind === "keep" ? [] : [index]);
-  const chosen = new Set<number>();
-  const budgeted = important.length <= DIFF_ROWS
-    ? important
-    : [
-        ...important.slice(0, Math.ceil(DIFF_ROWS / 2)),
-        ...important.slice(-Math.floor(DIFF_ROWS / 2)),
-      ];
-  for (const index of budgeted) chosen.add(index);
-
-  for (let radius = 1; chosen.size < DIFF_ROWS && radius < all.length; radius++) {
-    for (const index of important) {
-      for (const candidate of [index - radius, index + radius]) {
-        if (candidate < 0 || candidate >= all.length || chosen.has(candidate)) continue;
-        chosen.add(candidate);
-        if (chosen.size >= DIFF_ROWS) break;
-      }
-      if (chosen.size >= DIFF_ROWS) break;
-    }
-  }
-
-  const indexes = [...chosen].sort((left, right) => left - right);
-  const out: Detail[] = [];
-  let previous = -1;
-  for (const index of indexes) {
-    if (index > previous + 1) {
-      out.push({ kind: "gap", text: `… ${index - previous - 1} lines hidden · ctrl+o expand` });
-    }
-    const detail = all[index];
-    if (detail !== undefined) out.push(detail);
-    previous = index;
-  }
-  if (previous < all.length - 1) {
-    out.push({
-      kind: "gap",
-      text: `… ${all.length - previous - 1} lines hidden · ctrl+o expand`,
-    });
-  }
-  return out;
+  // The compact transcript is an audit of what changed, not a code excerpt.
+  // Context and gap rows remain in semantic state for the explicit full view.
+  return all.filter((detail) => detail.kind === "add" || detail.kind === "del");
 }
 
 function renderDetail(detail: Detail, tone: ToolTone, width: number, pal: Palette): string {

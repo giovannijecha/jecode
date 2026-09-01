@@ -47,7 +47,7 @@ export const STEEL: Palette = {
   },
   surface: {
     subtle: [31, 38, 47],
-    inset: [18, 24, 31],
+    inset: [42, 52, 66],
     added: [22, 55, 34],
     removed: [62, 24, 27],
     attention: [62, 50, 19],

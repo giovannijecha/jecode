@@ -547,6 +547,33 @@ test("a write over an existing file is shown as the change, not as a new file", 
   );
 });
 
+test("a compact edit shows only changed lines while expansion restores context", () => {
+  const { blocks, events } = stage([]);
+  events.onToolCall(callOf("1", "edit_file", {
+    path: "config.ts",
+    old_text: "oldValue",
+    new_text: "newValue",
+  }), {
+    before: "one\ntwo\nthree\nfour\nfive\nsix\noldValue\nseven\neight\nnine\nten\n",
+    after: "one\ntwo\nthree\nfour\nfive\nsix\nnewValue\nseven\neight\nnine\nten\n",
+  });
+
+  const block = blocks[0];
+  assert.equal(block?.kind, "tool");
+  if (block?.kind !== "tool") return;
+
+  const compact = strip(renderAll([block], 60, STEEL)).join("\n");
+  assert.match(compact, /-\s+7 oldValue/);
+  assert.match(compact, /\+\s+7 newValue/);
+  assert.doesNotMatch(compact, /five|six|seven|eight|unchanged|lines hidden/);
+
+  block.expanded = true;
+  const expanded = strip(renderAll([block], 60, STEEL)).join("\n");
+  assert.match(expanded, /five|six/);
+  assert.match(expanded, /seven|eight/);
+  assert.match(expanded, /unchanged/);
+});
+
 test("tool output is retained in full and only collapsed while rendering", () => {
   const { blocks, events } = stage([]);
   const call = callOf("1", "run_command", { command: "many" });

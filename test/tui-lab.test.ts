@@ -82,15 +82,15 @@ test("live command output is bounded to the newest rows", () => {
   assert.match(shown, /esc to interrupt/);
 });
 
-test("long diffs keep changed hunks rather than becoming an output tail", () => {
+test("compact diffs show every changed line without context noise", () => {
   const shown = plain(
     composeLab({ ...state("tools-diff"), expanded: false }, { rows: 34, cols: 100 }).rows,
   ).join("\n");
   assert.match(shown, /edit_file\s+src\/tools\/shell\.ts/);
   assert.match(shown, /OUTPUT_CAP/);
   assert.match(shown, /return capped/);
-  assert.match(shown, /lines hidden · ctrl\+o expand/);
-  assert.doesNotMatch(shown, /earlier lines/);
+  assert.doesNotMatch(shown, /unchanged|lines hidden|earlier lines/);
+  assert.doesNotMatch(shown, /function collect|const text = chunks\.join/);
 });
 
 test("edit approval and its exact diff remain visible together", () => {
