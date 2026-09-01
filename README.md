@@ -25,7 +25,7 @@
   <a href="https://github.com/giovannijecha/jecode/releases">Releases</a>
 </p>
 
-> Jecode is an early 0.4.x release. The core loop is usable today; commands and
+> Jecode is an early 0.5.x release. The core loop is usable today; commands and
 > terminal interactions may still evolve before 1.0.
 
 ## Why Jecode
