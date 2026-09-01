@@ -171,9 +171,12 @@ test("a fenced block carries muted fences rather than the legacy rail", () => {
 });
 
 test("the renderer receives one complete dark Steel identity", () => {
-  assert.deepEqual(STEEL.accent, [138, 190, 183]);
-  assert.deepEqual(STEEL.ink.fg, [212, 212, 212]);
-  assert.deepEqual(STEEL.surface.inset, [40, 40, 50]);
+  assert.deepEqual(STEEL.accent, [102, 155, 210]);
+  assert.deepEqual(STEEL.rule, [53, 80, 110]);
+  assert.deepEqual(STEEL.ink.fg, [212, 218, 225]);
+  assert.deepEqual(STEEL.ink.added, [134, 203, 146]);
+  assert.deepEqual(STEEL.ink.removed, [232, 112, 112]);
+  assert.deepEqual(STEEL.surface.inset, [18, 24, 31]);
 });
 
 test("prose can use a readable measure while code keeps the full row", () => {

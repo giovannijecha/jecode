@@ -105,6 +105,19 @@ test("a kept key survives a reload, and keeps the others", async () => {
   });
 });
 
+test("concurrent credential updates preserve every saved key", async () => {
+  await inStore(async () => {
+    await Promise.all([
+      keep(VAR, "one"),
+      keep(`${VAR}_2`, "two"),
+    ]);
+    reload();
+
+    assert.equal(keyFor(VAR), "one");
+    assert.equal(keyFor(`${VAR}_2`), "two");
+  });
+});
+
 test("nonsense in the store is not a key", async () => {
   await inStore(async () => {
     await keep(VAR, "fine");

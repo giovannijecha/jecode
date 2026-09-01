@@ -4,7 +4,7 @@ import type { Block, Detail } from "./tui/blocks.ts";
 import { terminalText } from "./ui/terminal-text.ts";
 
 export function defaultTranscriptName(now = new Date()): string {
-  return `jecode-transcript-${now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}.md`;
+  return `jecode-transcript-${now.toISOString().replace(/[-:.]/g, "")}.md`;
 }
 
 export function transcriptMarkdown(blocks: readonly Block[]): string {

@@ -1,31 +1,31 @@
-// A tiny cross-process lock for rotating OAuth credentials.
+// A tiny cross-process lock for persistent user-store mutations.
 //
-// Refresh tokens may rotate after one use. Two Jecode processes refreshing
-// the same account concurrently would make one of them persist a dead token,
-// so account mutations serialize through an atomic lock directory.
+// Every writer rereads inside the lock. That prevents two Jecode processes
+// from replacing unrelated settings, API keys, or rotated OAuth credentials
+// with snapshots they cached before the other process wrote.
 
-import { mkdir, open, readFile, rename, rmdir, stat, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, rename, rmdir, stat, unlink } from "node:fs/promises";
 import * as path from "node:path";
 
 const WAIT_MS = 50;
 const WAIT_LIMIT_MS = 20_000;
 const STALE_MS = 60_000;
 
-export async function withAccountLock<T>(
-  accountFile: string,
+export async function withStoreLock<T>(
+  file: string,
   body: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
   throwIfAborted(signal);
-  const directory = `${accountFile}.lock`;
+  const directory = `${file}.lock`;
   const token = `${process.pid}:${randomUUID()}`;
   const started = Date.now();
 
   while (!(await acquire(directory, token))) {
     if (signal?.aborted === true) throw abortReason(signal);
     if (Date.now() - started >= WAIT_LIMIT_MS) {
-      throw new Error("timed out waiting for the account store");
+      throw new Error(`timed out waiting for ${path.basename(file)}`);
     }
     await recoverStale(directory);
     await wait(WAIT_MS, signal);

@@ -6,7 +6,14 @@ import type { Block } from "../src/tui/blocks.ts";
 test("the default transcript name is portable and sortable", () => {
   assert.equal(
     defaultTranscriptName(new Date("2026-08-29T12:34:56.789Z")),
-    "jecode-transcript-20260829T123456Z.md",
+    "jecode-transcript-20260829T123456789Z.md",
+  );
+});
+
+test("exports created in the same second receive distinct names", () => {
+  assert.notEqual(
+    defaultTranscriptName(new Date("2026-08-29T12:34:56.001Z")),
+    defaultTranscriptName(new Date("2026-08-29T12:34:56.999Z")),
   );
 });
 

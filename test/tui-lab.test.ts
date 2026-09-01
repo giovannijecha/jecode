@@ -209,10 +209,10 @@ test("operational feedback occupies the footer beside a retained prompt", () => 
 });
 
 test("the production identity carries the calibrated dark Steel tokens", () => {
-  assert.deepEqual(STEEL.surface.subtle, [52, 53, 65]);
+  assert.deepEqual(STEEL.surface.subtle, [31, 38, 47]);
   assert.equal("reasoning" in STEEL.surface, false);
-  assert.deepEqual(STEEL.surface.added, [40, 50, 40]);
-  assert.deepEqual(STEEL.surface.removed, [60, 40, 40]);
+  assert.deepEqual(STEEL.surface.added, [22, 55, 34]);
+  assert.deepEqual(STEEL.surface.removed, [62, 24, 27]);
 });
 
 test("the lab has an exact-height recovery frame for a tiny terminal", () => {

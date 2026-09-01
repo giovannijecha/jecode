@@ -29,26 +29,27 @@ export type Palette = {
   readonly surface: Surface;
 };
 
-// Jecode's fixed dark Steel baseline. Components depend on these semantic
-// roles rather than embedding presentation values of their own.
+// Jecode's fixed dark Steel baseline. Structural blues, semantic outcomes,
+// and slate surfaces keep the transcript vivid without turning it decorative.
+// Components depend on these roles rather than embedding presentation values.
 export const STEEL: Palette = {
-  accent: [138, 190, 183],
-  accentSoft: [0, 215, 255],
-  focus: [95, 135, 255],
-  rule: [80, 80, 80],
+  accent: [102, 155, 210],
+  accentSoft: [131, 213, 245],
+  focus: [102, 155, 210],
+  rule: [53, 80, 110],
   ink: {
-    fg: [212, 212, 212],
-    bright: [212, 212, 212],
-    muted: [128, 128, 128],
-    attention: [255, 255, 0],
-    added: [181, 189, 104],
-    removed: [204, 102, 102],
+    fg: [212, 218, 225],
+    bright: [235, 239, 244],
+    muted: [112, 124, 137],
+    attention: [230, 191, 95],
+    added: [134, 203, 146],
+    removed: [232, 112, 112],
   },
   surface: {
-    subtle: [52, 53, 65],
-    inset: [40, 40, 50],
-    added: [40, 50, 40],
-    removed: [60, 40, 40],
-    attention: [58, 58, 74],
+    subtle: [31, 38, 47],
+    inset: [18, 24, 31],
+    added: [22, 55, 34],
+    removed: [62, 24, 27],
+    attention: [62, 50, 19],
   },
 };

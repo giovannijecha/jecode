@@ -14,7 +14,7 @@ test("automatic export writes a timestamped Markdown file directly in the applic
       new Date("2026-08-29T12:34:56.789Z"),
     );
 
-    assert.equal(saved, "jecode-transcript-20260829T123456Z.md");
+    assert.equal(saved, "jecode-transcript-20260829T123456789Z.md");
     const contents = await readFile(path.join(root, saved), "utf8");
     assert.match(contents, /## You\n\nhello/);
   } finally {
@@ -44,7 +44,7 @@ test("automatic export stays relative when the application root is an alias", as
       new Date("2026-08-29T12:34:56.789Z"),
     );
 
-    assert.equal(saved, "jecode-transcript-20260829T123456Z.md");
+    assert.equal(saved, "jecode-transcript-20260829T123456789Z.md");
     assert.match(await readFile(path.join(root, saved), "utf8"), /## You\n\nhello/);
   } finally {
     await rm(area, { recursive: true, force: true });

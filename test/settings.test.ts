@@ -71,6 +71,18 @@ test("saved defaults and provider-specific models survive a reload", async () =>
   });
 });
 
+test("concurrent settings updates preserve unrelated fields", async () => {
+  await inSettingsHome(async () => {
+    await Promise.all([
+      updateSettings({ provider: "ollama" }),
+      updateSettings({ effort: "high" }),
+    ]);
+    reloadSettings();
+
+    assert.deepEqual(readSettings(), { provider: "ollama", effort: "high" });
+  });
+});
+
 test("invalid saved values are discarded rather than breaking startup", async () => {
   await inSettingsHome(async () => {
     await updateSettings({

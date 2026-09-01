@@ -2,9 +2,11 @@
 // much of it comes back.
 
 import { spawn } from "node:child_process";
+import * as path from "node:path";
 import type { Tool } from "./types.ts";
 import { optionalInt, requireString } from "./args.ts";
 import { credentialRedactor, redactCredentials, shellEnvironment } from "../credential-safety.ts";
+import { resolveExecutable } from "../executable.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -78,14 +80,17 @@ function execute(
 
     const timer = setTimeout(() => {
       timedOut = true;
-      stopTree(child.pid, false);
-      forceTimer = setTimeout(() => stopTree(child.pid, true), 500);
+      requestStop();
     }, timeoutMs);
+
+    const requestStop = () => {
+      stopTree(child.pid, false);
+      forceTimer ??= setTimeout(() => stopTree(child.pid, true), 500);
+    };
 
     const onAbort = () => {
       aborted = signal === undefined ? new Error("aborted") : abortReason(signal);
-      stopTree(child.pid, false);
-      forceTimer = setTimeout(() => stopTree(child.pid, true), 500);
+      requestStop();
     };
     signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -117,6 +122,10 @@ function execute(
     });
 
     child.on("exit", (code) => {
+      // The group can outlive its leader. Once a requested stop makes the
+      // shell exit, force the remaining descendants before cleanup cancels the
+      // fallback timer.
+      if (timedOut || aborted !== undefined) stopTree(child.pid, true);
       // `close` normally follows once both pipes drain. A detached descendant
       // can inherit those descriptors after the command itself has exited,
       // though, so bound that final drain instead of hanging the tool on it.
@@ -174,8 +183,27 @@ function stopTree(pid: number | undefined, force: boolean): void {
 
   if (process.platform === "win32") {
     const args = ["/pid", String(pid), "/T", ...(force ? ["/F"] : [])];
-    const killer = spawn("taskkill", args, { windowsHide: true, stdio: "ignore" });
-    killer.on("error", () => undefined);
+    const windows = process.env["SystemRoot"] ?? process.env["WINDIR"];
+    const taskkill = windows === undefined
+      ? undefined
+      : resolveExecutable("taskkill.exe", {
+          searchPath: path.join(windows, "System32"),
+          rejectUnder: process.cwd(),
+        });
+    if (taskkill !== undefined) {
+      const killer = spawn(taskkill, args, {
+        cwd: path.dirname(taskkill),
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      killer.on("error", () => undefined);
+      return;
+    }
+    try {
+      process.kill(pid, force ? "SIGKILL" : "SIGTERM");
+    } catch {
+      // The process may already be gone, or the platform helper unavailable.
+    }
     return;
   }
 

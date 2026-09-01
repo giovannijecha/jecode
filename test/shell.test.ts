@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { runCommand } from "../src/tools/shell.ts";
 import { runTool } from "../src/tools/index.ts";
 
@@ -119,6 +122,40 @@ test("does not wait indefinitely for a descendant holding output pipes", { timeo
   assert.ok(Date.now() - started < 1_000, "command waited for a detached descendant's pipe");
 });
 
+test("a timeout force-kills a descendant that ignores graceful termination", {
+  skip: process.platform === "win32",
+  timeout: 5_000,
+}, async () => {
+  const area = await mkdtemp(path.join(tmpdir(), "jecode-shell-tree-"));
+  const pidFile = path.join(area, "pid");
+  const source = [
+    "const fs = require('node:fs');",
+    `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+    "process.on('SIGTERM', () => {});",
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+  const encoded = Buffer.from(source).toString("base64");
+  let pid: number | undefined;
+
+  try {
+    const result = await runCommand.run(
+      {
+        command: `"${process.execPath}" -e "eval(Buffer.from('${encoded}','base64').toString())"`,
+        timeout_ms: 300,
+      },
+      { root },
+    );
+    pid = Number(await readFile(pidFile, "utf8"));
+
+    assert.equal(result.summary, "timed out after 300ms");
+    await waitForExit(pid);
+    assert.equal(alive(pid), false, `descendant ${pid} survived the timeout`);
+  } finally {
+    if (pid !== undefined && alive(pid)) process.kill(pid, "SIGKILL");
+    await rm(area, { recursive: true, force: true });
+  }
+});
+
 test("does not pass credential-like variables to a shell command", async (context) => {
   const name = "JECODE_REVIEW_API_KEY";
   const before = process.env[name];
@@ -223,4 +260,20 @@ test("redacts a credential before a bounded head-tail output split", async (cont
 function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForExit(pid: number): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (alive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
