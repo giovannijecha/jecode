@@ -162,7 +162,9 @@ environment. Jecode resolves the executable to a canonical absolute path and
 rejects candidates controlled by the workspace, so a repository cannot shadow
 the helper. Smaller searches and machines without a trusted `rg` use the
 dependency-free TypeScript scanner. `rg` is never required at install or
-runtime.
+runtime. Because ripgrep's own match limit applies per file, Jecode stops and
+rejects an accelerated batch as soon as its raw events exceed the requested
+global result limit; the portable scanner then produces the bounded answer.
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
 user account can address, which is why every exact command asks by default
@@ -206,7 +208,10 @@ Saving is explicit. Secret files use owner-only modes on POSIX; Windows relies
 on the user profile ACL. Replacement uses the same atomic writer as workspace
 files. Every persistent mutation serializes through a bounded cross-process
 lock and rereads the store inside it, so concurrent Jecode sessions preserve
-unrelated settings, keys, and rotated tokens. `/credentials` shows only API-key
+unrelated settings, keys, and rotated tokens. Age alone never authorizes stale
+lock recovery: a live owner keeps the lock through a slow network refresh, and
+an abandoned lock is removed owner-first so competing waiters cannot steal a
+newly acquired lock. `/credentials` shows only API-key
 sources or a non-secret ChatGPT identity and plan hint. OAuth uses PKCE for
 browser login, supports OpenAI's device-code path for WSL/headless terminals,
 refreshes early, and retries one 401 after refresh. Logout removes the local

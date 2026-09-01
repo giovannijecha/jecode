@@ -123,6 +123,7 @@ function searchBatch(
     let buffered = "";
     let stderr = "";
     let invalid = false;
+    let overLimit = false;
     let settled = false;
 
     const onAbort = () => child.kill();
@@ -138,11 +139,22 @@ function searchBatch(
     };
 
     const consume = (line: string): void => {
-      if (line === "" || invalid) return;
+      if (line === "" || invalid || overLimit) return;
       try {
         const event = JSON.parse(line) as unknown;
         const parsed = ripgrepEvent(event);
-        if (parsed?.kind === "match") matches.push(parsed.match);
+        if (parsed?.kind === "match") {
+          // `rg --max-count` is per file, not global. Once the raw stream
+          // exceeds the requested result count, stop the accelerator and let
+          // the portable scanner produce the exact bounded answer. Returning
+          // early here would lose the later binary-file end marker.
+          if (matches.length >= options.limit) {
+            overLimit = true;
+            child.kill();
+            return;
+          }
+          matches.push(parsed.match);
+        }
         if (parsed?.kind === "binary") binaryPaths.add(parsed.path);
       } catch {
         invalid = true;
@@ -181,7 +193,7 @@ function searchBatch(
         return;
       }
       consume(buffered);
-      if (invalid || (code !== 0 && code !== 1) || stderr.trim() !== "") {
+      if (invalid || overLimit || (code !== 0 && code !== 1) || stderr.trim() !== "") {
         finish(undefined);
         return;
       }
