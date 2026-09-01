@@ -7,6 +7,7 @@
 // --model.
 
 import type { Message, Provider, SendRequest } from "../types.ts";
+import { requireSupportedEffort } from "../effort.ts";
 import { postSse } from "./http.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
@@ -21,6 +22,8 @@ import type { OllamaEndpoint } from "./ollama-endpoint.ts";
 import { fromWireReply, stopNotice, toWireMessages, toWireTool } from "./ollama-wire.ts";
 
 const KEY = "OLLAMA_API_KEY";
+// Ollama also accepts `none`; Jecode's product-wide reasoning floor is `low`.
+const OLLAMA_EFFORTS = ["low", "medium", "high"] as const;
 let configuredHost: string | undefined;
 
 export type OllamaConnection = OllamaEndpoint & {
@@ -66,7 +69,7 @@ export const ollama: Provider = {
   },
 
   async efforts(): Promise<readonly string[]> {
-    return [];
+    return OLLAMA_EFFORTS;
   },
 
   location: () => {
@@ -79,9 +82,10 @@ export const ollama: Provider = {
 
   async send(req: SendRequest): Promise<Message> {
     const at = endpoint();
+    const effort = requireSupportedEffort(req.model, req.effort, OLLAMA_EFFORTS);
 
-    // `effort` has no equivalent in this shape and is dropped rather than
-    // guessed at — depth on these models is a property of the model chosen.
+    // The OpenAI-compatible endpoint accepts this vocabulary for thinking
+    // models. Invalid levels are rejected locally instead of being rewritten.
     const events = await postSse(
       `${at.baseUrl}/v1/chat/completions`,
       headers(at),
@@ -90,6 +94,7 @@ export const ollama: Provider = {
         messages: toWireMessages(req.system, req.messages),
         tools: req.tools.map(toWireTool),
         max_tokens: req.maxTokens,
+        reasoning_effort: effort,
         stream: true,
       },
       req.signal,

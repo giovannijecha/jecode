@@ -45,6 +45,11 @@ export type ControllerEvents = {
   onStep?(step: number, total: number): void;
   onToolProgress?(current: number, total: number): void;
   onStatus?(status: string): void;
+  /** A consistent history boundary, awaited before another request can open. */
+  onCheckpoint?(
+    history: readonly Message[],
+    settlement: "checkpointed" | "completed",
+  ): Promise<void>;
 };
 
 /**
@@ -92,6 +97,7 @@ export async function runTurn(
     history.push(assistant);
     if (calls.length === 0) {
       if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
+      await events.onCheckpoint?.(history, "completed");
       return; // the model is done — hand back to the user
     }
 
@@ -149,11 +155,13 @@ export async function runTurn(
           // The surface is already failing; the next turn can still proceed.
         }
       }
+      await events.onCheckpoint?.(history, "checkpointed");
       if (interrupted) throw abortReason(signal as AbortSignal);
       throw error;
     }
 
     history.push({ role: "user", content: results });
+    await events.onCheckpoint?.(history, "checkpointed");
   }
 
   throw new Error(

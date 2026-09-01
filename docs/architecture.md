@@ -48,6 +48,11 @@ workspace content the model reads or content the user supplies.
    one user message.
 6. Repeat up to `maxSteps`.
 
+The controller awaits a checkpoint after every complete tool-result batch and
+after the final assistant response. It never begins the next provider request
+until that checkpoint succeeds. Batch mode commits only to memory; the TUI
+commits the same canonical turn to its durable session owner first.
+
 A tool failure becomes an error result the model can act on. Cancellation is
 the exception: it propagates through provider HTTP, retry waits, filesystem
 searches, and process trees so the foreground operation can end promptly.
@@ -222,10 +227,51 @@ browser login, supports OpenAI's device-code path for WSL/headless terminals,
 refreshes early, and retries one 401 after refresh. Logout removes the local
 account even when remote revocation cannot be confirmed.
 
-jecode writes no conversation state automatically. `/export` is an explicit,
-argument-free operation that writes an automatically named Markdown transcript
-in the directory from which Jecode was launched. It requires no picker or approval.
-`/new` clears the in-memory history, usage, transcript, and session approvals.
+`/export` is an explicit, argument-free operation that writes an automatically
+named Markdown transcript in the directory from which Jecode was launched. It
+requires no picker or approval. `/new` closes the current durable conversation,
+then clears history, usage, transcript, and session approvals.
+
+## Conversation state and resume
+
+`ConversationTree` is the single semantic source for provider history and the
+settled TUI transcript. One node owns one user turn and its model/tool messages,
+visible transcript blocks, provider/model/effort identity, revision, and
+settlement. The selected root-to-leaf path is materialized for providers and
+the screen. This tree shape is already branch-capable; the current resume UI
+selects whole sessions, while a later timeline can expose alternate nodes
+without replacing the storage model.
+
+Interactive sessions publish lazily after the first completed response or
+consistent tool checkpoint. They live under
+`~/.jecode/sessions/<workspace-digest>/<session-id>/` with versioned metadata,
+one atomically replaced file per conversation node, and a small atomic head.
+The node lands before the head. After a crash, the loader accepts only one
+strictly adjacent node mutation and advances the head; any ambiguous state is
+rejected. Files and decoded values are size-bounded, unknown fields fail
+closed, and persisted provider messages drop opaque `raw` data before crossing
+the disk boundary.
+
+Session catalogues use the canonical real workspace path, so another project
+cannot appear in the resume picker. A process lease prevents simultaneous
+resume of the same logical session. Its directory and identifier remain stable
+across exits and resumes; each completed turn advances the head inside that
+session's tree, while `/new` or a fresh launch creates another session. Because
+provider-only opaque blocks are deliberately not persisted, a session whose
+newest turn stopped inside a tool loop resumes from its latest completed
+ancestor; a first turn with no completed ancestor is not offered. The
+interrupted node remains an internal branch, and the next completed turn adds
+another branch from that safe ancestor without creating a second catalogue
+entry. This keeps Anthropic thinking signatures and equivalent provider
+continuation state out of durable storage without constructing or replaying a
+partial tool turn. No load, resume, or branch operation executes a historical
+tool call.
+
+`jecode resume` opens a searchable selector; `jecode resume --latest` chooses
+the newest available source. `--ephemeral` omits the persistence owner entirely.
+Batch mode is always stateless. Draft editor content, transient notices,
+permission policies, approvals, credentials, and pending UI blocks are never
+part of a checkpoint.
 
 ## TUI composition
 
@@ -264,20 +310,20 @@ diagram:
 
 ```text
 user input       full-width neutral surface
-reasoning        unframed muted label and three-row live tail
+reasoning        unlabeled, unframed muted three-row tail
 assistant        unframed Markdown
 tool activity    compact state rail with evidence beneath each call
 selection        bold Steel label/value; arrow fallback without colour
 composer         editor, query fields, and contextual menu inside one pair of rules
-footer           identity left, feedback or interrupt hint right
+footer           identity left, feedback or active state with elapsed time right
 ```
 
 Operational feedback is not conversation. Slash-command confirmations,
-configuration guidance, the interrupt hint, and preflight blockers share the
-replaceable right side of the one-line footer. Live work names itself on the
-reasoning or tool row; the footer says only `esc to interrupt`. Errors and
-warnings take priority over that hint, followed by informational feedback and
-unseen output. Informational messages expire; warnings and errors remain
+configuration guidance, activity state, and preflight blockers share the
+replaceable right side of the one-line footer. Foreground work is summarized as
+`state · elapsed · esc to interrupt`, without another spinner or icon. Errors
+and warnings take priority over that summary, followed by informational feedback
+and unseen output. Informational messages expire; warnings and errors remain
 briefly or until the next key. They never become transcript blocks and
 therefore never enter Markdown exports. Turn readiness is checked before the
 editor, recall history, or model history is mutated, so a missing key or model
@@ -343,18 +389,20 @@ surface or decorative left rail.
 Tool output and diffs stay complete in state. A pending tool owns the animated
 rail node and elapsed label. `run_command` updates that same block with the
 bounded, redacted capture while the process runs. Collapsed command output
-shows the newest rows because verdicts land at the end; collapsed diffs select
-changed rows and nearby context across hunks instead of applying a tail window.
-Diffs retain old/new line numbers and intra-line emphasis. `Ctrl+O` toggles the
-latest detail, so exporting or expanding never depends on discarded rows.
+shows the newest rows because verdicts land at the end. Every collapsed file
+diff uses the same 15-changed-row budget, keeps both the beginning and end, and
+inserts one omission summary when necessary. Diffs retain old/new line numbers
+and intra-line emphasis. `Ctrl+O` toggles the latest detail even while an
+approval is open, so reviewing, exporting, or expanding never depends on
+discarded rows.
 
 Reasoning follows the same retention rule. Its semantic block stores the full
 stream, while the unframed default renderer reflows it at the current terminal
-width and shows only the newest three muted, italicized visual rows below its
-label. The label reads `thinking` while the stream is live and `thought` once
-it is sealed, without a separate live badge. The final three-row preview remains
-visible. `Ctrl+O` exposes the complete block; resize reflows the source again
-before selecting the visible tail.
+width and shows only the newest three muted, italicized visual rows. It has no
+label or inline action hint; the visual treatment already identifies it, and
+`/help` documents `Ctrl+O`. The final three-row preview remains visible.
+`Ctrl+O` exposes the complete block; resize reflows the source again before
+selecting the visible tail.
 
 The viewport is bottom-relative. At offset zero it follows output. After the
 user scrolls up, growth below the viewport increases the offset by the same
@@ -397,7 +445,9 @@ global prefix and runs its version command.
   tree is emitted by the existing development compiler before packing. Registry
   users receive that JavaScript runtime and execute no installation scripts;
   Git dependency installs are intentionally unsupported.
-- No automatic conversation persistence.
-- No client-side history summarizer or second model loop. Usage and latest
-  input context are visible; context compaction belongs at the provider seam
-  when a supported server-side mechanism is selected.
+- No client-side history summarizer or second model loop. Future compaction
+  belongs on the model-facing path while the complete durable tree and
+  transcript remain available to the user.
+- No navigable in-session timeline yet. Stable session identity and the
+  canonical branch-capable tree are present, but branch selection remains
+  future UI work.

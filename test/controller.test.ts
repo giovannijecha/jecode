@@ -137,6 +137,42 @@ test("returns every result of one step in a single message", async () => {
   );
 });
 
+test("awaits the durable tool checkpoint before asking the provider again", async () => {
+  const provider = scripted([
+    {
+      role: "assistant",
+      content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "one" } }],
+    },
+    assistantText("done"),
+  ]);
+  let release = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered = (): void => {};
+  const checkpointStarted = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const settlements: string[] = [];
+  const sink = events();
+  sink.onCheckpoint = async (_history, settlement) => {
+    settlements.push(settlement);
+    if (settlement === "checkpointed") {
+      entered();
+      await gate;
+    }
+  };
+
+  const running = runTurn([], options(provider), sink);
+  await checkpointStarted;
+  assert.equal(provider.seen.length, 1);
+  release();
+  await running;
+
+  assert.equal(provider.seen.length, 2);
+  assert.deepEqual(settlements, ["checkpointed", "completed"]);
+});
+
 test("runs shared calls concurrently while preserving result order", async () => {
   let active = 0;
   let peak = 0;
@@ -394,9 +430,14 @@ test("an interrupted tool leaves one result for every assistant call", async () 
     content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "wait" } }],
   }]);
   const history: Message[] = [];
+  const checkpoints: string[] = [];
+  const sink = events();
+  sink.onCheckpoint = async (_current, settlement) => {
+    checkpoints.push(settlement);
+  };
 
   await assert.rejects(
-    runTurn(history, options(provider, { tools: [interrupted] }), events(), control.signal),
+    runTurn(history, options(provider, { tools: [interrupted] }), sink, control.signal),
     /interrupted/,
   );
 
@@ -410,6 +451,7 @@ test("an interrupted tool leaves one result for every assistant call", async () 
       isError: true,
     }],
   });
+  assert.deepEqual(checkpoints, ["checkpointed"]);
 });
 
 test("an interrupted shared batch repairs every call in deterministic order", async () => {

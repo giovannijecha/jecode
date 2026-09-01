@@ -37,6 +37,8 @@
   diffs, approvals, reasoning, and status all share one full-screen TUI.
 - **Permission-aware.** Reads stay transparent; dangerous actions ask first.
   Session approvals can be reviewed and revoked.
+- **Durable by default.** Interactive conversations survive terminal exits and
+  can be resumed without replaying tools. Batch runs remain stateless.
 - **Provider-neutral.** Use Anthropic or OpenAI API keys, a ChatGPT account, or
   a local/remote Ollama server without changing the workflow.
 - **Lean by construction.** Jecode installs as plain JavaScript, runs on
@@ -65,6 +67,16 @@ Then open the project you want to work on and run Jecode:
 cd path/to/your/project
 jecode
 ~~~
+
+Resume a saved conversation for the current project with a searchable picker,
+or open the most recent one directly:
+
+~~~console
+jecode resume
+jecode resume --latest
+~~~
+
+Use `jecode --ephemeral` when a conversation must stay memory-only.
 
 You can point at another workspace explicitly:
 
@@ -186,7 +198,7 @@ Type **/** to open searchable command completion inside the composer.
 | /providers | Manage API keys, ChatGPT sign-in, and Ollama connections |
 | /models | Search models across every available provider and select one |
 | /permissions | Change session tool access inline and review remembered approvals |
-| /new | Start a clean conversation and reset session tool permissions |
+| /new | Close the current conversation, start clean, and reset tool permissions |
 | /export | Save a timestamped Markdown transcript in the launch directory |
 | /help | Open a temporary keyboard reference in the composer dock |
 | /exit | Restore the terminal and exit |
@@ -206,12 +218,12 @@ Useful controls:
   the place you are reading.
 - **Ctrl+O** expands or compacts the latest reasoning or tool-detail block.
 
-The one-line footer keeps model, effort, and workspace on the left. Live work
-stays visible on the reasoning and tool rail; the right edge carries the
-interrupt hint, readiness guidance, and temporary feedback without polluting
-the transcript. Slash commands never append content to the conversation or its
-Markdown export; **/help** closes with **Esc**, and token accounting remains
-internal to the active session.
+The one-line footer keeps model, effort, and workspace on the left. While work
+is active, the right edge shows its current state, elapsed time, and interrupt
+hint; readiness guidance and temporary feedback use the same replaceable space
+without polluting the transcript. Slash commands never append content to the
+conversation or its Markdown export; **/help** closes with **Esc**, and token
+accounting remains internal to the active session.
 
 ## Configuration
 
@@ -229,6 +241,7 @@ settings, built-in defaults.
 | --max-steps | JECODE_MAX_STEPS | 40 |
 | --reduced-motion | JECODE_REDUCED_MOTION=1 | Off |
 | --auto-approve | JECODE_AUTO_APPROVE=1 | Off |
+| --ephemeral | JECODE_EPHEMERAL=1 | Off |
 
 Persistent preferences live in **~/.jecode/settings.json**. Explicitly saved
 API keys live in **~/.jecode/credentials.json**; the ChatGPT OAuth account lives
@@ -237,6 +250,21 @@ permissions where the operating system supports them. Environment API keys
 always win. Model selection saves the provider and model as one change; the
 separate startup flags remain available for automation and override that saved
 choice.
+
+Interactive conversations are stored under **~/.jecode/sessions**, scoped to
+the canonical workspace path. A checkpoint contains normalized messages and
+the settled transcript needed to redraw the conversation. It excludes stored
+provider credentials, OAuth tokens, provider-only opaque response data,
+permission choices, draft composer text, transient footer notices, and pending
+tool state. Session
+files use owner-only modes on POSIX; Windows relies on the user-profile ACL.
+`jecode resume` keeps the same durable session identity and advances that
+session's conversation tree, so reopening and continuing a conversation does
+not create duplicate picker entries. `/new` or a fresh launch starts another
+logical session. Resume never executes an old tool call. If a crash left the
+newest turn inside a tool loop, the same session resumes from its latest
+completed ancestor and the next turn becomes a branch inside its tree because
+provider-only continuation data is intentionally not stored.
 
 Jecode has one interface theme: dark Steel. **NO_COLOR** is supported for
 terminals and pipelines that disable colour.
@@ -248,6 +276,8 @@ When stdin or stdout is piped, Jecode switches to a plain line-oriented mode:
 ~~~console
 printf "explain this project\n" | jecode --root .
 ~~~
+
+Batch conversations are never written to the session store.
 
 Dangerous tools stay denied in batch mode unless **--auto-approve** is supplied
 explicitly. A terminal batch failure is written to stderr and exits non-zero,
@@ -277,6 +307,9 @@ untrusted data.
   idempotent catalogue reads retry; generation requests are never replayed.
 - Model and filesystem input are bounded before they reach the screen or
   provider.
+- Durable session files are versioned, size-bounded, atomically checkpointed,
+  and treated as untrusted when loaded. A live lease prevents the same saved
+  session from being resumed by two Jecode processes at once.
 
 `run_command` is not an operating-system sandbox: an approved shell command can
 still access files and account resources available to the current user. Review

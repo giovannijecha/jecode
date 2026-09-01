@@ -14,6 +14,7 @@ export const SCENES = [
   "approve-denied",
   "menu-commands",
   "menu-search",
+  "menu-resume",
   "menu-settings",
   "menu-permissions",
   "help",

@@ -5,6 +5,9 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promise
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { runBatch } from "../src/batch.ts";
+import { ConversationTree } from "../src/conversation.ts";
+import { DurableSessionStore } from "../src/sessions/store.ts";
+import { SessionPersistence } from "../src/sessions/runtime.ts";
 import type { Session } from "../src/session.ts";
 import { start } from "../src/start.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
@@ -49,13 +52,14 @@ function session(from = provider()): Session {
       maxSteps: 8,
       root: process.cwd(),
       autoApprove: false,
+      ephemeral: false,
     },
     provider: from,
     model: from.defaultModel,
     palette: STEEL,
     tools: [],
     system: "be useful",
-    history: [],
+    conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
 }
@@ -79,7 +83,7 @@ test("batch mode carries input through the controller, renderer, commands, and e
   assert.match(shown, /Hello from fake\./);
   assert.match(shown, /interactive help needs the TUI/);
   assert.doesNotMatch(shown, /ignored/);
-  assert.equal(current.history.length, 2);
+  assert.equal(current.conversation.history.length, 2);
 });
 
 test("batch mode propagates provider failures outside the transcript", async () => {
@@ -170,6 +174,7 @@ test("the bootstrap selects the interactive surface and builds one complete sess
       "--max-tokens", "1024",
       "--max-steps", "3",
       "--root", root,
+      "--ephemeral",
     ],
     {
       applicationRoot: process.cwd(),
@@ -193,6 +198,154 @@ test("the bootstrap selects the interactive surface and builds one complete sess
   assert.equal(transcriptRoot, root);
   assert.ok((opened?.tools.length ?? 0) > 0);
   assert.match(opened?.system ?? "", /Workspace root:/);
+});
+
+test("resume --latest restores the newest durable conversation for this workspace", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-start-resume-"));
+  const workspace = path.join(root, "workspace");
+  const sessions = path.join(root, "sessions");
+  await mkdir(workspace);
+  let opened: Session | undefined;
+  try {
+    const store = await DurableSessionStore.open(workspace, sessions);
+    const conversation = ConversationTree.empty().commit({
+      parentId: 0,
+      createdAt: "2026-09-01T10:00:00.000Z",
+      identity: { providerId: "anthropic", model: "claude-resumed", effort: "medium" },
+      messages: [
+        { role: "user", content: [{ kind: "text", text: "remember me" }] },
+        {
+          role: "assistant",
+          content: [{ kind: "text", text: "remembered" }],
+          usage: {
+            inputTokens: 12,
+            outputTokens: 4,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            reasoningTokens: 1,
+          },
+        },
+      ],
+      blocks: [
+        { kind: "user", text: "remember me" },
+        { kind: "answer", text: "remembered" },
+      ],
+    }, "completed");
+    const published = await store.publish(conversation);
+
+    await start(["resume", "--latest", "--root", workspace], {
+      applicationRoot: process.cwd(),
+      sessionsRoot: sessions,
+      interactive: () => true,
+      runInteractive: async (current) => {
+        opened = current;
+      },
+    });
+
+    assert.equal(opened?.model, "claude-resumed");
+    assert.equal(opened?.config.effort, "medium");
+    assert.equal(opened?.conversation.history[0]?.content[0]?.kind, "text");
+    assert.equal(opened?.usage.requests, 1);
+    assert.equal(opened?.persistence?.sessionId, published.meta.id);
+    assert.equal((await store.list())[0]?.active, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a rejected resume identity leaves the current runtime selection intact", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-start-resume-invalid-"));
+  const workspace = path.join(root, "workspace");
+  const sessions = path.join(root, "sessions");
+  await mkdir(workspace);
+  try {
+    const store = await DurableSessionStore.open(workspace, sessions);
+    const conversation = ConversationTree.empty().commit({
+      parentId: 0,
+      createdAt: "2026-09-01T10:00:00.000Z",
+      identity: { providerId: "removed-provider", model: "old-model", effort: "low" },
+      messages: [
+        { role: "user", content: [{ kind: "text", text: "old question" }] },
+        { role: "assistant", content: [{ kind: "text", text: "old answer" }] },
+      ],
+      blocks: [
+        { kind: "user", text: "old question" },
+        { kind: "answer", text: "old answer" },
+      ],
+    }, "completed");
+    const published = await store.publish(conversation);
+
+    await start([
+      "resume",
+      "--root", workspace,
+      "--provider", "anthropic",
+      "--model", "baseline-model",
+      "--effort", "high",
+    ], {
+      applicationRoot: process.cwd(),
+      sessionsRoot: sessions,
+      interactive: () => true,
+      runInteractive: async (current) => {
+        const resume = current.resume;
+        assert.ok(resume !== undefined);
+        await assert.rejects(resume.open(published.meta.id), /unknown provider/);
+        assert.equal(current.config.providerId, "anthropic");
+        assert.equal(current.config.model, "baseline-model");
+        assert.equal(current.config.effort, "high");
+        assert.equal(current.provider.id, "anthropic");
+        assert.equal(current.model, "baseline-model");
+        assert.equal(current.resume, resume);
+      },
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("plain resume starts in the shared searchable picker", async () => {
+  const current = session();
+  const restored = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "saved question" }] },
+      { role: "assistant", content: [{ kind: "text", text: "saved answer" }] },
+    ],
+    blocks: [
+      { kind: "user", text: "saved question" },
+      { kind: "answer", text: "saved answer" },
+    ],
+  }, "completed");
+  current.resume = {
+    candidates: [{
+      id: "saved-1",
+      createdAt: "2026-09-01T10:00:00.000Z",
+      updatedAt: "2026-09-01T10:01:00.000Z",
+      turns: 1,
+      preview: "saved question",
+      active: false,
+    }],
+    open: async () => {
+      current.conversation = restored;
+      current.resume = undefined;
+    },
+  };
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("saved question"),
+    "resume picker",
+  );
+  feed("\r");
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("saved answer"),
+    "restored transcript",
+  );
+  feed("/exit\r");
+  await running;
 });
 
 test("the TUI owns and restores a screen around a real /exit interaction", async () => {
@@ -247,18 +400,56 @@ test("a TUI submit reaches the provider and returns to an editable session", asy
   const feed = await harness.input();
 
   feed("hello\r");
-  await waitFor(() => current.history.length === 2, "completed TUI turn");
+  await waitFor(() => current.conversation.history.length === 2, "completed TUI turn");
   await waitFor(
     () => harness.frames.flat().join("\n").includes("Answer from the TUI."),
     "painted TUI answer",
   );
-  assert.equal(current.history[0]?.role, "user");
-  assert.equal(current.history[1]?.role, "assistant");
+  assert.equal(current.conversation.history[0]?.role, "user");
+  assert.equal(current.conversation.history[1]?.role, "assistant");
   assert.match(harness.frames.flat().join("\n"), /Answer from the TUI\./);
 
   feed("/exit\r");
   await running;
   assert.equal(harness.left(), true);
+});
+
+test("the TUI durably checkpoints turns and /new starts a separate session", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-tui-sessions-"));
+  const workspace = path.join(root, "workspace");
+  const sessions = path.join(root, "sessions");
+  await mkdir(workspace);
+  try {
+    const store = await DurableSessionStore.open(workspace, sessions);
+    const current = session(provider("Durable answer."));
+    current.config.root = workspace;
+    current.persistence = SessionPersistence.fresh(store);
+    const harness = virtualScreen();
+    const running = runApp(current, workspace, harness.environment);
+    const feed = await harness.input();
+
+    feed("first\r");
+    await waitFor(() => current.conversation.history.length === 2, "first durable turn");
+    await waitFor(async () => (await store.list()).length === 1, "first session file");
+    const firstId = current.persistence.sessionId;
+    assert.ok(firstId !== null);
+
+    feed("/new\r");
+    await waitFor(() => current.conversation.history.length === 0, "new session reset");
+    assert.equal(current.persistence.sessionId, null);
+    assert.equal((await store.list())[0]?.active, false);
+
+    feed("second\r");
+    await waitFor(() => current.conversation.history.length === 2, "second durable turn");
+    await waitFor(async () => (await store.list()).length === 2, "second session file");
+    assert.notEqual(current.persistence.sessionId, firstId);
+
+    feed("/exit\r");
+    await running;
+    assert.ok((await store.list()).every((entry) => !entry.active));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("only the latest input chunk owns the escape grace timer", async () => {
@@ -276,8 +467,8 @@ test("only the latest input chunk owns the escape grace timer", async () => {
     await delay(35);
     feed("\r");
 
-    await waitFor(() => current.history.length === 2, "turn after split cursor sequence");
-    const prompt = current.history[0]?.content[0];
+    await waitFor(() => current.conversation.history.length === 2, "turn after split cursor sequence");
+    const prompt = current.conversation.history[0]?.content[0];
     assert.equal(prompt?.kind === "text" ? prompt.text : undefined, "draft");
   } finally {
     feed("/exit\r");

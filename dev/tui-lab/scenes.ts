@@ -8,6 +8,8 @@ import type { Picker } from "../../src/tui/picker.ts";
 import { heading } from "../../src/tui/picker.ts";
 import { settingsPicker } from "../../src/settings-command.ts";
 import { permissionsPicker } from "../../src/permission-command.ts";
+import { resumePicker } from "../../src/tui/resume.ts";
+import type { SessionCatalogEntry } from "../../src/sessions/store.ts";
 import type { View } from "../../src/tui/view.ts";
 import {
   commandApproval,
@@ -39,6 +41,7 @@ export function sceneView(state: LabState): View {
     case "approve-denied": return approveDeniedScene(state);
     case "menu-commands": return commandsScene(state);
     case "menu-search": return searchScene(state);
+    case "menu-resume": return resumeScene(state);
     case "menu-settings": return settingsScene(state);
     case "menu-permissions": return permissionsScene(state);
     case "help": return helpScene(state);
@@ -100,7 +103,7 @@ function toolsLiveScene(state: LabState): View {
     ],
     editor: edit.EMPTY,
     scroll: 0,
-    status: "Applying the bounded reader",
+    status: "Applying the bounded reader · 4s",
   };
 }
 
@@ -117,7 +120,7 @@ function toolsTraceScene(state: LabState): View {
     ],
     editor: edit.EMPTY,
     scroll: 0,
-    status: "Tracing the failed assertion",
+    status: "Tracing the failed assertion · 4s",
   };
 }
 
@@ -147,7 +150,7 @@ function toolsStreamScene(state: LabState): View {
     ],
     editor: edit.EMPTY,
     scroll: 0,
-    status: "Running run_command",
+    status: "Running run_command · 4s",
   };
 }
 
@@ -290,6 +293,43 @@ function matchingModels(): number[] {
   );
 }
 
+function resumeScene(state: LabState): View {
+  const candidates: SessionCatalogEntry[] = [
+    {
+      id: "session-durable",
+      createdAt: "2026-09-01T08:00:00.000Z",
+      updatedAt: "2026-09-01T09:35:00.000Z",
+      turns: 12,
+      preview: "Harden durable sessions across Windows, WSL, and interrupted tool turns",
+      active: false,
+    },
+    {
+      id: "session-footer",
+      createdAt: "2026-08-31T14:00:00.000Z",
+      updatedAt: "2026-08-31T16:42:00.000Z",
+      turns: 4,
+      preview: "Refine the transcript footer and active status",
+      active: false,
+    },
+    {
+      id: "session-providers",
+      createdAt: "2026-08-30T10:00:00.000Z",
+      updatedAt: "2026-08-30T11:08:00.000Z",
+      turns: 2,
+      preview: "Review provider and model controls",
+      active: false,
+    },
+  ];
+  const picker = resumePicker(candidates, state.palette);
+  return {
+    ...base(state),
+    blocks: [],
+    editor: edit.EMPTY,
+    scroll: 0,
+    modal: { kind: "pick", picker: { ...picker, index: state.selected } },
+  };
+}
+
 function settingsScene(state: LabState): View {
   return {
     ...base(state),
@@ -377,7 +417,7 @@ function reasoningScene(state: LabState): View {
     ],
     editor: edit.EMPTY,
     scroll: 0,
-    status: "Thinking",
+    status: "Thinking · 4s",
   };
 }
 

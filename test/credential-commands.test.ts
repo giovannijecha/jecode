@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { ConversationTree } from "../src/conversation.ts";
 import type { Host } from "../src/commands.ts";
 import { apiKeyCommand } from "../src/credential-commands.ts";
 import {
@@ -41,13 +42,14 @@ function session(): Session {
       maxSteps: 8,
       root: process.cwd(),
       autoApprove: false,
+      ephemeral: false,
     },
     provider,
     model: provider.defaultModel,
     palette: STEEL,
     tools: [],
     system: "",
-    history: [],
+    conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
 }

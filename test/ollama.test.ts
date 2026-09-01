@@ -5,6 +5,7 @@ import { assembleOllama } from "../src/providers/ollama-stream.ts";
 import { fromWireReply, toWireMessages } from "../src/providers/ollama-wire.ts";
 import { supportsAdaptiveThinking } from "../src/providers/anthropic.ts";
 import { MAX_TOOL_ARGUMENT_CHARS } from "../src/providers/stream-limits.ts";
+import { configureOllama, ollama } from "../src/providers/ollama.ts";
 
 async function* feed(events: unknown[]): AsyncGenerator<unknown> {
   for (const event of events) yield event;
@@ -13,6 +14,66 @@ async function* feed(events: unknown[]): AsyncGenerator<unknown> {
 function chunk(delta: unknown, finish: string | null = null): unknown {
   return { choices: [{ delta, finish_reason: finish }] };
 }
+
+test("offers and sends Ollama's supported reasoning effort levels", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+  configureOllama("http://127.0.0.1:11434");
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    configureOllama(undefined);
+  });
+
+  assert.deepEqual(
+    await ollama.efforts?.("deepseek-v4-flash:0731"),
+    ["low", "medium", "high"],
+  );
+
+  await ollama.send({
+    model: "deepseek-v4-flash:0731",
+    system: "be useful",
+    messages: [],
+    tools: [],
+    maxTokens: 100,
+    effort: "medium",
+  });
+
+  assert.equal(requestBody?.["reasoning_effort"], "medium");
+});
+
+test("rejects an Ollama effort outside the documented vocabulary", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let requests = 0;
+  configureOllama("http://127.0.0.1:11434");
+  globalThis.fetch = (async () => {
+    requests++;
+    throw new Error("request should not be made");
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    configureOllama(undefined);
+  });
+
+  await assert.rejects(
+    ollama.send({
+      model: "deepseek-v4-flash:0731",
+      system: "be useful",
+      messages: [],
+      tools: [],
+      maxTokens: 100,
+      effort: "max",
+    }),
+    /does not support effort "max"/,
+  );
+  assert.equal(requests, 0);
+});
 
 test("accumulates text deltas and streams them as they land", async () => {
   const seen: StreamEvent[] = [];

@@ -6,7 +6,7 @@
 
 import type { Session } from "../session.ts";
 import type { Activity, ActivityKind } from "./activity.ts";
-import { begin } from "./activity.ts";
+import { activityStatus, begin } from "./activity.ts";
 import * as overlay from "./overlay.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import { options as completionOptions } from "./complete.ts";
@@ -25,6 +25,7 @@ import { appState } from "./app-state.ts";
 import { appInput } from "./app-input.ts";
 import { appWorkflows } from "./app-workflows.ts";
 import { sessionPermissions } from "../permissions.ts";
+import { resumePicker } from "./resume.ts";
 
 const FRAME_MS = 16;
 const SPIN_MS = 80;
@@ -57,6 +58,7 @@ export async function runApp(
   const workspace = await workspaceLabel(session.config.root);
 
   const state = appState();
+  state.blocks.push(...session.conversation.transcript);
 
   const permissions = sessionPermissions(session.tools, session.config.autoApprove);
 
@@ -73,23 +75,28 @@ export async function runApp(
     closed = resolve;
   });
 
-  const view = () => ({
-    blocks: state.blocks,
-    editor: state.editor,
-    scroll: state.scroll,
-    unseen: state.unseen,
-    pal: session.palette,
-    footer: footerInfo(session, workspace),
-    status: state.status,
-    feedback: state.feedback,
-    readiness: turnBlocker(session),
-    spin: state.spin,
-    reducedMotion: session.config.reducedMotion,
-    now: Date.now(),
-    modal: overlay.shown(state.open),
-    menu: completionOptions(state.completing),
-    menuIndex: state.completing?.index,
-  });
+  const view = () => {
+    const now = Date.now();
+    return {
+      blocks: state.blocks,
+      editor: state.editor,
+      scroll: state.scroll,
+      unseen: state.unseen,
+      pal: session.palette,
+      footer: footerInfo(session, workspace),
+      status: state.activity === undefined
+        ? undefined
+        : activityStatus(state.activity, state.status ?? state.activity.label, now),
+      feedback: state.feedback,
+      readiness: turnBlocker(session),
+      spin: state.spin,
+      reducedMotion: session.config.reducedMotion,
+      now,
+      modal: overlay.shown(state.open),
+      menu: completionOptions(state.completing),
+      menuIndex: state.completing?.index,
+    };
+  };
 
   const draw = (): void => {
     frameTimer = undefined;
@@ -232,6 +239,43 @@ export async function runApp(
     transcriptChanged: (block) => transcript.invalidate(block),
   });
 
+  const resumeAtLaunch = session.resume === undefined
+    ? undefined
+    : openResumedSession(session.resume);
+
+  async function openResumedSession(launch: NonNullable<Session["resume"]>): Promise<void> {
+    while (live) {
+      const index = await new Promise<number | undefined>((resolve) => {
+        state.open = { picker: resumePicker(launch.candidates, session.palette), settle: resolve };
+        render();
+      });
+      if (index === undefined) {
+        quit();
+        return;
+      }
+      const candidate = launch.candidates[index];
+      if (candidate === undefined) continue;
+      const activity = startActivity("command", "Opening session");
+      if (activity === undefined) return;
+      try {
+        await launch.open(candidate.id);
+        state.blocks.splice(0, state.blocks.length, ...session.conversation.transcript);
+        state.past.length = 0;
+        state.scroll = 0;
+        state.follow = true;
+        state.unseen = 0;
+        state.lastMaxScroll = 0;
+        transcript.invalidate();
+        paint.invalidate();
+        finishActivity(activity);
+        return;
+      } catch (error) {
+        feedback.show({ text: (error as Error).message, tone: "error", timeoutMs: 6_000 });
+        finishActivity(activity);
+      }
+    }
+  }
+
   terminal.enter(session.config.reducedMotion);
   stopResize = terminal.onResize(() => {
     paint.invalidate();
@@ -254,5 +298,10 @@ export async function runApp(
   });
 
   draw();
-  await done;
+  try {
+    await resumeAtLaunch;
+    if (live) await done;
+  } finally {
+    await session.persistence?.close();
+  }
 }

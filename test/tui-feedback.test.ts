@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { ConversationTree } from "../src/conversation.ts";
 import type { Session } from "../src/session.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import { commandFeedback, feedbackController, turnBlocker } from "../src/tui/feedback.ts";
@@ -30,13 +31,14 @@ function session(from: Provider, model = from.defaultModel): Session {
       maxSteps: 8,
       root: process.cwd(),
       autoApprove: false,
+      ephemeral: false,
     },
     provider: from,
     model,
     palette: STEEL,
     tools: [],
     system: "",
-    history: [],
+    conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
 }
@@ -54,6 +56,18 @@ test("informational feedback has no decorative marker", () => {
   );
 
   assert.equal(status.map((segment) => segment.text).join(""), "new session");
+});
+
+test("active work exposes only state, elapsed time, and the interrupt hint", () => {
+  const status = renderStatus(
+    { status: "Writing · 12s", feedback: undefined, readiness: undefined, unseen: 0 },
+    STEEL,
+  );
+
+  assert.equal(
+    status.map((segment) => segment.text).join(""),
+    "Writing · 12s · esc to interrupt",
+  );
 });
 
 test("warnings and errors keep their priority markers", () => {

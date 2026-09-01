@@ -70,6 +70,9 @@ export function commandFeedback(block: NoticeBlock): Feedback {
 
 /** Explain why a model turn cannot start, without exposing configuration internals. */
 export function turnBlocker(session: Session): Feedback | undefined {
+  if (session.persistence?.failure !== undefined) {
+    return { text: "session could not be saved · /new to retry", tone: "error" };
+  }
   const blocked = session.provider.blocked();
   const auth = session.provider.auth;
   const expected = auth.kind === "api-key"

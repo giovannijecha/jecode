@@ -52,6 +52,15 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
 
     if (state.feedback !== undefined) feedback.dismiss();
 
+    // Detail expansion remains available while an approval is open. A large
+    // diff may be compacted, but the user must be able to inspect it before
+    // answering the permission prompt.
+    if (key.ctrl && key.name === "o") {
+      const changed = toggleDetails(state.blocks);
+      if (changed !== undefined) options.transcriptChanged(changed);
+      return;
+    }
+
     if (state.open !== undefined) {
       const outcome = overlay.handle(state.open, key);
       state.open = outcome.open;
@@ -123,12 +132,6 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
 
     if (key.ctrl && key.name === "l") {
       options.invalidate();
-      return;
-    }
-
-    if (key.ctrl && key.name === "o") {
-      const changed = toggleDetails(state.blocks);
-      if (changed !== undefined) options.transcriptChanged(changed);
       return;
     }
 

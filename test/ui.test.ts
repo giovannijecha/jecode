@@ -120,6 +120,12 @@ test("a trailing newline is the file ending, not a line of it", () => {
   assert.deepEqual(diff("a\n", "a\nb\n").map((r) => r.kind), ["keep", "add"]);
 });
 
+test("an empty side of a diff has no invented blank line", () => {
+  assert.deepEqual(diff("", "a\n").map((row) => `${row.kind}:${row.text}`), ["add:a"]);
+  assert.deepEqual(diff("a\n", "").map((row) => `${row.kind}:${row.text}`), ["del:a"]);
+  assert.deepEqual(diff("", ""), []);
+});
+
 test("nothing changed means nothing is marked", () => {
   assert.ok(diff("x\ny\n", "x\ny\n").every((r) => r.kind === "keep"));
 });

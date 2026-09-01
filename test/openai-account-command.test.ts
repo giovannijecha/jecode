@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { ConversationTree } from "../src/conversation.ts";
 import {
   openAICodexAccount,
   reloadAccounts,
@@ -136,6 +137,7 @@ function session(): Session {
       maxSteps: 40,
       effort: "high",
       autoApprove: false,
+      ephemeral: false,
       reducedMotion: false,
     },
     provider: {
@@ -150,7 +152,7 @@ function session(): Session {
     palette: STEEL,
     tools: [],
     system: "",
-    history: [],
+    conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
 }

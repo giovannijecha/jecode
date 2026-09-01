@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { ConversationTree } from "../src/conversation.ts";
 import type { Session } from "../src/session.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import { appInput } from "../src/tui/app-input.ts";
@@ -35,13 +36,14 @@ function session(from: Provider, model = from.defaultModel): Session {
       maxSteps: 8,
       root: process.cwd(),
       autoApprove: false,
+      ephemeral: false,
     },
     provider: from,
     model,
     palette: STEEL,
     tools: [],
     system: "",
-    history: [],
+    conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
 }
@@ -174,4 +176,30 @@ test("navigation and control keys target the active terminal operation", () => {
   const cleanExit = harness();
   cleanExit.input.handle(key("d", "", true));
   assert.equal(cleanExit.requestedQuit(), true);
+});
+
+test("ctrl+o can inspect a compacted tool diff before answering an open prompt", () => {
+  const current = harness();
+  current.state.blocks.push({
+    kind: "tool",
+    name: "write_file",
+    target: "large.txt",
+    right: "pending approval",
+    tone: "pending",
+    body: [{ kind: "add", text: "value", newLine: 1 }],
+  });
+  current.state.open = {
+    picker: {
+      title: [],
+      options: [{ label: "Yes" }, { label: "No" }],
+      index: 0,
+    },
+    settle() {},
+  };
+
+  current.input.handle(key("o", "", true));
+
+  const block = current.state.blocks[0];
+  assert.equal(block?.kind === "tool" ? block.expanded : undefined, true);
+  assert.ok(current.state.open !== undefined);
 });

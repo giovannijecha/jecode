@@ -12,6 +12,7 @@ const config: Config = {
   maxSteps: 4,
   root: "/workspace/jecode",
   autoApprove: false,
+  ephemeral: false,
 };
 
 test("the system prompt stays product-neutral while retaining runtime context", () => {

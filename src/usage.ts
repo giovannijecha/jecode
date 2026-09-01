@@ -1,6 +1,7 @@
 // Provider-neutral token accounting for one in-memory session.
 
 import type { Usage } from "./types.ts";
+import type { Message } from "./types.ts";
 
 export type UsageTotals = Usage & {
   requests: number;
@@ -28,6 +29,16 @@ export function recordUsage(total: UsageTotals, next: Usage): void {
   total.cachedInputTokens += next.cachedInputTokens;
   total.cacheWriteInputTokens += next.cacheWriteInputTokens;
   total.reasoningTokens += next.reasoningTokens;
+}
+
+export function usageFromHistory(messages: readonly Message[]): UsageTotals {
+  const total = emptyUsage();
+  for (const message of messages) {
+    if (message.role === "assistant" && message.usage !== undefined) {
+      recordUsage(total, message.usage);
+    }
+  }
+  return total;
 }
 
 export function formatTokens(value: number): string {

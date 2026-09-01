@@ -7,6 +7,7 @@ import type { Detail, Emphasis, ToolBlock, ToolTone } from "./types.ts";
 
 const OUTPUT_ROWS = 8;
 const LIVE_OUTPUT_ROWS = 6;
+const DIFF_ROWS = 15;
 
 export type ToolRenderContext = {
   continues?: boolean;
@@ -52,8 +53,23 @@ function visibleDetails(block: ToolBlock): Detail[] {
     return [{ kind: "gap", text: note }, ...all.slice(-limit)];
   }
   // The compact transcript is an audit of what changed, not a code excerpt.
-  // Context and gap rows remain in semantic state for the explicit full view.
-  return all.filter((detail) => detail.kind === "add" || detail.kind === "del");
+  // One shared budget applies to writes and edits. Keep both ends so a large
+  // replacement cannot show only deletions while hiding all new content.
+  // Context, omitted changes, and gap rows remain in semantic state for the
+  // explicit full view.
+  const changed = all.filter((detail) => detail.kind === "add" || detail.kind === "del");
+  if (changed.length <= DIFF_ROWS) return changed;
+  const leading = Math.ceil(DIFF_ROWS / 2);
+  const trailing = DIFF_ROWS - leading;
+  const hidden = changed.length - DIFF_ROWS;
+  return [
+    ...changed.slice(0, leading),
+    {
+      kind: "gap",
+      text: `… ${hidden} more changed ${hidden === 1 ? "line" : "lines"} · ctrl+o expand`,
+    },
+    ...changed.slice(-trailing),
+  ];
 }
 
 function renderDetail(detail: Detail, tone: ToolTone, width: number, pal: Palette): string {
