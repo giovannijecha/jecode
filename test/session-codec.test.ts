@@ -1,0 +1,128 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { ConversationTree } from "../src/conversation.ts";
+import {
+  decodeHead,
+  decodeMeta,
+  decodeNode,
+  encodeHead,
+  encodeMeta,
+  encodeNode,
+} from "../src/sessions/codec.ts";
+
+test("session node codec round-trips normalized history without provider raw data", () => {
+  const tree = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "openai-codex", model: "gpt-5.6-terra", effort: "medium" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "change it" }] },
+      {
+        role: "assistant",
+        content: [{ kind: "tool_call", id: "call-1", name: "edit_file", input: { path: "a.ts", old: "", new: "$&" } }],
+        raw: { encrypted: "must not survive" },
+        rawFrom: "openai-codex",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 3,
+          cachedInputTokens: 2,
+          cacheWriteInputTokens: 0,
+          reasoningTokens: 1,
+        },
+      },
+      {
+        role: "user",
+        content: [{ kind: "tool_result", id: "call-1", output: "", isError: false }],
+      },
+    ],
+    blocks: [
+      { kind: "user", text: "change it" },
+      { kind: "notice", text: "not durable", tone: "info" },
+      { kind: "reasoning", text: "inspect", live: true, expanded: true },
+      {
+        kind: "tool",
+        name: "edit_file",
+        target: "",
+        right: "",
+        tone: "ok",
+        body: [{ kind: "add", text: "", newLine: 1, emphasis: { start: 0, length: 1 } }],
+      },
+    ],
+  }, "checkpointed");
+
+  const encoded = encodeNode(
+    tree.activeNode as NonNullable<typeof tree.activeNode>,
+    7,
+    "2026-09-01T10:01:00.000Z",
+  );
+  assert.doesNotMatch(encoded, /must not survive|rawFrom|"raw"/);
+  const decoded = decodeNode(JSON.parse(encoded));
+
+  assert.equal(decoded.sequence, 7);
+  assert.equal(decoded.updatedAt, "2026-09-01T10:01:00.000Z");
+  assert.deepEqual(decoded.node.messages, tree.activeNode?.messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    ...(message.usage === undefined ? {} : { usage: message.usage }),
+  })));
+  assert.deepEqual(decoded.node.blocks, [
+    { kind: "user", text: "change it" },
+    { kind: "reasoning", text: "inspect" },
+    {
+      kind: "tool",
+      name: "edit_file",
+      target: "",
+      right: "",
+      tone: "ok",
+      body: [{ kind: "add", text: "", newLine: 1, emphasis: { start: 0, length: 1 } }],
+    },
+  ]);
+});
+
+test("session metadata and head codecs reject unknown fields", () => {
+  const meta = {
+    version: 1 as const,
+    id: "session-1",
+    workspaceRoot: "C:\\work",
+    workspaceDigest: "a".repeat(64),
+    createdAt: "2026-09-01T10:00:00.000Z",
+  };
+  const head = {
+    version: 1 as const,
+    sequence: 2,
+    nodeId: 1,
+    parentId: 0,
+    revision: 1,
+    updatedAt: "2026-09-01T10:01:00.000Z",
+  };
+  assert.deepEqual(decodeMeta(JSON.parse(encodeMeta(meta))), meta);
+  assert.deepEqual(decodeHead(JSON.parse(encodeHead(head))), head);
+  assert.throws(() => decodeMeta({ ...meta, secret: true }), /invalid or unsupported/);
+  assert.throws(() => decodeHead({ ...head, future: true }), /invalid or unsupported/);
+});
+
+test("session codec rejects unbounded and malformed tool input", () => {
+  const malformed = {
+    version: 1,
+    sequence: 1,
+    updatedAt: "2026-09-01T10:01:00.000Z",
+    node: {
+      id: 1,
+      parentId: 0,
+      revision: 1,
+      createdAt: "2026-09-01T10:00:00.000Z",
+      settlement: "checkpointed",
+      identity: { providerId: "ollama", model: "m", effort: "high" },
+      messages: [
+        { role: "user", content: [{ kind: "text", text: "x" }], usage: null },
+        {
+          role: "assistant",
+          content: [{ kind: "tool_call", id: "c", name: "run_command", input: { value: Infinity } }],
+          usage: null,
+        },
+      ],
+      blocks: [],
+    },
+  };
+  assert.throws(() => decodeNode(malformed), /invalid or unsupported/);
+});

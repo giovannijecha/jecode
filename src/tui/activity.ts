@@ -19,3 +19,11 @@ export function elapsed(activity: Activity, now = Date.now()): string {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
+
+export function activityStatus(
+  activity: Activity,
+  label = activity.label,
+  now = Date.now(),
+): string {
+  return `${label} · ${elapsed(activity, now)}`;
+}

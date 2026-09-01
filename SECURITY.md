@@ -20,5 +20,6 @@ steps, expected impact, and any proposed mitigation. Do not include API keys,
 private source code, saved credentials, or conversation transcripts.
 
 Relevant security boundaries include terminal control sequences, credential
-storage or transport, workspace path confinement, command approval, process
-cancellation, and unbounded remote or filesystem input.
+storage or transport, durable conversation storage and resume, workspace path
+confinement, command approval, process cancellation, and unbounded remote or
+filesystem input.

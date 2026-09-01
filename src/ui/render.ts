@@ -39,6 +39,8 @@ export type Seg = {
   bold?: boolean;
   italic?: boolean;
   inverse?: boolean;
+  /** Best-effort context that should disappear rather than render as a fragment. */
+  optional?: boolean;
 };
 
 export function paint(seg: Seg): string {
@@ -89,6 +91,7 @@ export function fitSegs(segs: readonly Seg[], cols: number): Seg[] {
       used += w;
       continue;
     }
+    if (safe.optional === true) continue;
     const room = cols - used;
     if (room > 0) out.push({ ...safe, text: elide(safe.text, room) });
     break;

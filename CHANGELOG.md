@@ -4,6 +4,36 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## Unreleased
+
+### Added
+
+- Added workspace-scoped durable TUI conversations with `jecode resume`, a
+  searchable session picker, `resume --latest`, and an explicit `--ephemeral`
+  mode. Repeated resumes advance one stable logical session and never replay
+  historical tools.
+- Added a canonical conversation tree shared by provider history, settled TUI
+  transcript state, crash-safe checkpoints, internal branches, and the future
+  timeline surface.
+
+### Fixed
+
+- Made foreground activity expose a compact footer state and elapsed timer
+  without another spinner, while preserving warning and error priority.
+- Published a fresh durable session with its process lease already present,
+  preventing another process from claiming it between publication and use;
+  lease reads now also reject links, replacements, and oversized files.
+- Kept failed resume identities from partially changing the current runtime
+  selection, and normalized multiline session previews into one readable row.
+- Exposed Ollama's supported positive reasoning levels (`low`, `medium`, and
+  `high`) and now pass the selected value through `reasoning_effort` instead of
+  reporting every Ollama model as model-controlled.
+- Removed the redundant `thinking` / `thought` heading and inline action hint
+  from reasoning blocks; the muted text remains expandable through `Ctrl+O`.
+- Bounded collapsed file diffs to 15 changed rows with one omission summary,
+  kept full inspection available during approvals, and removed the false blank
+  deletion previously shown for newly created files.
+
 ## [0.4.0] - 2026-09-01
 
 ### Added

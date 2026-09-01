@@ -16,7 +16,10 @@ export function renderStatus(info: StatusInfo, pal: Palette): Seg[] {
     : undefined;
   if (urgent !== undefined) return withUnseen(feedbackSegments(urgent, pal), info.unseen, pal);
   if (info.status !== undefined) {
-    return withUnseen([{ text: "esc to interrupt", fg: pal.ink.dim }], info.unseen, pal);
+    return withUnseen([
+      { text: info.status, fg: pal.ink.muted },
+      { text: " · esc to interrupt", fg: pal.ink.dim, optional: true },
+    ], info.unseen, pal);
   }
   if (info.feedback !== undefined) {
     return withUnseen(feedbackSegments(info.feedback, pal), info.unseen, pal);

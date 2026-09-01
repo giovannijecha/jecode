@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
+import { ConversationTree } from "../src/conversation.ts";
 import type { Session } from "../src/session.ts";
 import type { NoticeBlock } from "../src/tui/blocks.ts";
 import type { Picker } from "../src/tui/picker.ts";
@@ -43,13 +44,14 @@ function session(from: Provider): Session {
       maxSteps: 8,
       root: process.cwd(),
       autoApprove: false,
+      ephemeral: false,
     },
     provider: from,
     model: from.defaultModel,
     palette: STEEL,
     tools: [],
     system: "",
-    history: [],
+    conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
 }
@@ -427,7 +429,16 @@ test("cancelling catalogue loading propagates interruption instead of a provider
 
 test("new clears conversation usage and screen-local state", async () => {
   const live = session(provider("fake", ["a"]));
-  live.history.push({ role: "user", content: [{ kind: "text", text: "old" }] });
+  live.conversation = live.conversation.commit({
+    parentId: 0,
+    createdAt: new Date(0).toISOString(),
+    identity: { providerId: "fake", model: "a", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "old" }] },
+      { role: "assistant", content: [{ kind: "text", text: "answer" }] },
+    ],
+    blocks: [],
+  }, "completed");
   live.usage.requests = 2;
   live.usage.inputTokens = 123;
   let reset = false;
@@ -439,7 +450,7 @@ test("new clears conversation usage and screen-local state", async () => {
   await handleCommand("/new", live, screen);
 
   assert.equal(reset, true);
-  assert.deepEqual(live.history, []);
+  assert.deepEqual(live.conversation.history, []);
   assert.equal(live.usage.requests, 0);
   assert.equal(live.usage.inputTokens, 0);
   assert.deepEqual(texts(screen.blocks), ["new session"]);

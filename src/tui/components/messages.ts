@@ -39,29 +39,9 @@ export function renderReasoning(block: ReasoningBlock, width: number, pal: Palet
     : { text: block.text, truncated: false };
   const content = markdown(source.text, inner, pal, inner);
   const visible = expanded ? content : content.slice(-REASONING_PREVIEW_ROWS);
-  const action = expanded
-    ? "ctrl+o compact"
-    : block.live === true && block.expanded === true
-      ? "full when done"
-    : source.truncated || content.length > REASONING_PREVIEW_ROWS
-      ? "ctrl+o full"
-      : undefined;
 
   return [
     "",
-    row(
-      width,
-      [
-        {
-          text: block.live === true ? "thinking" : "thought",
-          fg: pal.ink.bright,
-          bold: true,
-        },
-      ],
-      action === undefined ? [] : [{ text: action, fg: pal.ink.dim }],
-      undefined,
-      PAD,
-    ),
     ...visible.map((line) =>
       row(
         width,

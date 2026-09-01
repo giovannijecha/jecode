@@ -6,6 +6,7 @@
 // this file keeps discovery, dispatch, and local session operations.
 
 import type { Session } from "./session.ts";
+import { ConversationTree } from "./conversation.ts";
 import type { NoticeBlock } from "./tui/blocks.ts";
 import type { Picker } from "./tui/picker.ts";
 import type { Field } from "./tui/field.ts";
@@ -39,7 +40,7 @@ export type Host = {
   status?(text?: string): void;
   signal?: AbortSignal;
   /** Clear conversation-local state, including tool policies and approvals. */
-  reset?(): void;
+  reset?(): void | Promise<void>;
   permissions?: SessionPermissions;
   exportTranscript?(): Promise<string>;
   /** Persist non-secret defaults when the host owns an interactive settings store. */
@@ -93,9 +94,9 @@ export async function handleCommand(
       return "exit";
 
     case "new":
-      session.history.length = 0;
+      await host.reset?.();
+      session.conversation = ConversationTree.empty();
       session.usage = emptyUsage();
-      host.reset?.();
       host.emit({ kind: "notice", text: "new session", tone: "info" });
       return "handled";
 

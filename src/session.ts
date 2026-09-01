@@ -2,7 +2,10 @@
 // both depend on the shape without depending on each other.
 
 import type { Config } from "./config.ts";
-import type { Message, Provider } from "./types.ts";
+import type { ConversationTree } from "./conversation.ts";
+import type { Provider } from "./types.ts";
+import type { SessionCatalogEntry } from "./sessions/store.ts";
+import type { SessionPersistence } from "./sessions/runtime.ts";
 import type { Tool } from "./tools/index.ts";
 import type { Palette } from "./ui/theme.ts";
 import type { UsageTotals } from "./usage.ts";
@@ -14,6 +17,13 @@ export type Session = {
   palette: Palette;
   tools: Tool[];
   system: string;
-  history: Message[];
+  conversation: ConversationTree;
   usage: UsageTotals;
+  /** Absent in batch mode and when --ephemeral was requested. */
+  persistence?: SessionPersistence;
+  /** Present only for an unresolved `jecode resume` selector. */
+  resume?: {
+    candidates: readonly SessionCatalogEntry[];
+    open(id: string): Promise<void>;
+  };
 };

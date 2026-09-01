@@ -11,6 +11,7 @@ const CONFIG_ENV = [
   "JECODE_MAX_STEPS",
   "JECODE_REDUCED_MOTION",
   "JECODE_AUTO_APPROVE",
+  "JECODE_EPHEMERAL",
 ] as const;
 
 const config = (argv: string[], saved = {}) => {
@@ -33,6 +34,7 @@ test("falls back to defaults", () => {
   assert.equal(defaults.maxTokens, 64000);
   assert.equal(defaults.autoApprove, false);
   assert.equal(defaults.reducedMotion, false);
+  assert.equal(defaults.ephemeral, false);
 });
 
 test("reads --key value and --key=value alike", () => {
@@ -45,6 +47,7 @@ test("treats a bare flag as true", () => {
   assert.equal(config(["--auto-approve"]).autoApprove, true);
   assert.equal(config(["--auto-approve", "--provider", "openai"]).autoApprove, true);
   assert.equal(config(["--reduced-motion"]).reducedMotion, true);
+  assert.equal(config(["--ephemeral"]).ephemeral, true);
 });
 
 test("rejects an unknown effort", () => {

@@ -111,6 +111,7 @@ function common(a: readonly string[], b: readonly string[]): Uint32Array {
 // A trailing newline is a property of the file, not a line of it: counting it
 // as one would report every append as touching two lines instead of one.
 function lines(text: string): string[] {
+  if (text === "") return [];
   const split = text.split("\n");
   if (split.length > 1 && split[split.length - 1] === "") split.pop();
   return split;

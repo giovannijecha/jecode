@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { ConversationTree } from "../src/conversation.ts";
 import { handleCommand } from "../src/commands.ts";
 import type { Host } from "../src/commands.ts";
 import { reloadAccounts } from "../src/accounts.ts";
@@ -340,6 +341,7 @@ function fakeSession(): Session {
       maxSteps: 8,
       root: process.cwd(),
       autoApprove: false,
+      ephemeral: false,
     },
     provider: {
       id: "fake",
@@ -353,7 +355,7 @@ function fakeSession(): Session {
     palette: STEEL,
     tools: [],
     system: "",
-    history: [],
+    conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
 }

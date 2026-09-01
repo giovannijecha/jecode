@@ -21,5 +21,6 @@ export function choiceCount(scene: Scene): number {
   if (scene === "menu-settings") return 10;
   if (scene === "menu-permissions") return 7;
   if (scene === "menu-search") return 3;
+  if (scene === "menu-resume") return 3;
   return 1;
 }

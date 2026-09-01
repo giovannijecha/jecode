@@ -42,10 +42,30 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       }
 
       write(`> ${terminalText(line)}\n`);
-      session.history.push({ role: "user", content: [{ kind: "text", text: line }] });
+      const parentId = session.conversation.activeNodeId;
+      const createdAt = new Date().toISOString();
+      const history = session.conversation.history;
+      const before = history.length;
+      let nodeId: number | undefined;
+      history.push({ role: "user", content: [{ kind: "text", text: line }] });
 
       const turn = events(emit, session);
-      await runTurn(session.history, options(session), turn);
+      turn.onCheckpoint = async (checkpoint, settlement) => {
+        session.conversation = session.conversation.commit({
+          ...(nodeId === undefined ? {} : { nodeId }),
+          parentId,
+          createdAt,
+          identity: {
+            providerId: session.provider.id,
+            model: session.model,
+            effort: session.config.effort,
+          },
+          messages: checkpoint.slice(before),
+          blocks: [],
+        }, settlement);
+        nodeId = session.conversation.activeNodeId;
+      };
+      await runTurn(history, options(session), turn);
       turn.flush();
     }
   } finally {

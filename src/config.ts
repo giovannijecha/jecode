@@ -15,6 +15,7 @@ export type Config = {
   maxSteps: number;
   root: string;
   autoApprove: boolean;
+  ephemeral: boolean;
 };
 
 const FLAGS = [
@@ -27,6 +28,7 @@ const FLAGS = [
   "max-steps",
   "root",
   "auto-approve",
+  "ephemeral",
 ];
 
 export function loadConfig(argv: string[], saved: SavedSettings = readSettings()): Config {
@@ -71,6 +73,7 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
     ),
     root: path.resolve(pick(flags.root, undefined, process.cwd())),
     autoApprove: flags["auto-approve"] === "true" || process.env.JECODE_AUTO_APPROVE === "1",
+    ephemeral: bool(flags.ephemeral, process.env.JECODE_EPHEMERAL, false),
   };
 }
 

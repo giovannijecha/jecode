@@ -33,9 +33,8 @@ export type Transcription = ControllerEvents & {
   finish(reason?: "interrupted" | "failed"): void;
 };
 
-// Semantic activity labels remain useful state even though the quiet footer
-// reduces them to one stable interruption hint. Reasoning and tools identify
-// the live work in the transcript itself.
+// Semantic activity labels feed the footer's compact state and timer while
+// reasoning and tools keep the detailed work visible in the transcript.
 const WAITING = "Waiting";
 const THINKING = "Thinking";
 const WRITING = "Writing";

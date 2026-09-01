@@ -38,7 +38,8 @@ test("the golden frame carries the complete production hierarchy", () => {
   const frame = composeLab(state("golden"), { rows: 32, cols: 100 });
   const shown = plain(frame.rows).join("\n");
   assert.match(shown, /Harden the OpenAI retry path/);
-  assert.match(shown, /thought/);
+  assert.match(shown, /inspect the HTTP boundary first/);
+  assert.doesNotMatch(shown, /thinking|thought/);
   assert.match(shown, /✓ read_file\s+src\/providers\/http\.ts/);
   assert.match(shown, /✓ search_text/);
   assert.match(shown, /The request path is mapped/);
@@ -79,6 +80,7 @@ test("live command output is bounded to the newest rows", () => {
   assert.match(shown, /lines so far/);
   assert.match(shown, /# duration_ms 1398/);
   assert.doesNotMatch(shown, /TAP version 13/);
+  assert.match(shown, /Running run_command · 4s/);
   assert.match(shown, /esc to interrupt/);
 });
 
@@ -139,6 +141,14 @@ test("searchable pickers expose the shared arrow prompt and a real caret", () =>
   assert.match(rows[at.row] ?? "", /^→ cla.*1–3 \/ 3 · 5 total$/);
   assert.equal(at.col, "→ cla".length);
   assert.match(rows[at.row + 1] ?? "", /→ claude-sonnet-5/);
+});
+
+test("resume is represented by its real searchable session picker", () => {
+  const shown = plain(composeLab(state("menu-resume"), { rows: 24, cols: 100 }).rows).join("\n");
+  assert.match(shown, /resume\s+saved conversations/);
+  assert.match(shown, /Harden durable sessions/);
+  assert.match(shown, /12 turns/);
+  assert.doesNotMatch(shown, /session-durable|session-footer|session-providers/);
 });
 
 test("credential input uses the same writable prompt", () => {
@@ -208,10 +218,9 @@ test("reasoning stays bounded and defers full expansion while live", () => {
   const expanded = plain(
     composeLab({ ...state("reasoning"), expanded: true }, { rows: 30, cols: 100 }).rows,
   ).join("\n");
-  assert.match(compact, /thinking/);
-  assert.match(compact, /ctrl\+o full/);
-  assert.match(expanded, /full when done/);
-  assert.doesNotMatch(compact, /─ thinking|thinking ─/);
+  assert.doesNotMatch(compact, /thinking|thought|ctrl\+o/);
+  assert.doesNotMatch(expanded, /thinking|thought|ctrl\+o/);
+  assert.match(compact, /Reasoning can keep its complete source text/);
 });
 
 test("operational feedback occupies the footer beside a retained prompt", () => {

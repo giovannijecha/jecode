@@ -7,6 +7,7 @@ const HELP = `jecode — an owned coding agent for the terminal
 
 Usage:
   jecode [options]
+  jecode resume [--latest] [options]
 
 Options:
   --root <path>          workspace root (default: current directory)
@@ -18,6 +19,8 @@ Options:
   --max-steps <number>   tool-loop ceiling
   --reduced-motion       disable animated terminal states
   --auto-approve         allow dangerous tools for this process
+  --ephemeral            do not save this conversation
+  --latest               resume the newest session without a picker
   -h, --help             show this help
   -v, --version          show the installed version
 

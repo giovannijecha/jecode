@@ -71,7 +71,7 @@ test("the footer exposes unseen output while scroll lock is active", () => {
   assert.match(strip(frame.rows).join("\n"), /3 new ↓/);
 });
 
-test("activity leaves only the interrupt hint on the footer's right edge", () => {
+test("activity keeps its state, elapsed time, and interrupt hint on the footer", () => {
   const quiet = compose(base(), { rows: 24, cols: 80 });
   const active = compose(
     { ...base(), status: "Writing · 2s" },
@@ -89,7 +89,7 @@ test("activity leaves only the interrupt hint on the footer's right edge", () =>
 
   assert.deepEqual(active.cursor, quiet.cursor);
   assert.equal(activeRows.findIndex((line) => line.includes("esc to interrupt")), 23);
-  assert.equal(activeRows.findIndex((line) => line.includes("Writing · 2s")), -1);
+  assert.equal(activeRows.findIndex((line) => line.includes("Writing · 2s")), 23);
   assert.equal(blockedRows.findIndex((line) => line.includes("needs an API key")), 23);
   assert.match(activeRows[23] ?? "", /claude-sonnet-5 · high/);
 });
@@ -108,8 +108,8 @@ test("urgent feedback outranks activity while informational feedback waits behin
 
   assert.match(urgent, /× request failed/);
   assert.doesNotMatch(urgent, /Writing/);
+  assert.match(informational, /Writing · 2s/);
   assert.match(informational, /esc to interrupt/);
-  assert.doesNotMatch(informational, /Writing/);
   assert.doesNotMatch(informational, /settings saved/);
 });
 
@@ -443,25 +443,21 @@ test("reasoning keeps an unframed three-row tail and expands without losing text
   };
   const preview = strip(renderAll([block], 50, STEEL));
   const shown = preview.join("\n");
-  assert.match(shown, /thinking/);
-  assert.doesNotMatch(shown, /· live|thought/);
+  assert.doesNotMatch(shown, /thinking|thought|· live/);
   assert.doesNotMatch(shown, /line one/);
   assert.match(shown, /line two/);
   assert.match(shown, /line three/);
   assert.match(shown, /line four/);
-  assert.match(shown, /ctrl\+o full/);
-  assert.equal(preview.length, 5, "outer gap, heading, and three content rows");
+  assert.equal(preview.length, 4, "outer gap and three content rows");
   assert.equal(preview[0], "");
-  assert.ok(preview.slice(2).every((line) => line !== " ".repeat(50)));
+  assert.ok(preview.slice(1).every((line) => line !== " ".repeat(50)));
   assert.doesNotMatch(shown, /─/);
 
   block.live = false;
   block.expanded = true;
   const full = strip(renderAll([block], 50, STEEL)).join("\n");
-  assert.match(full, /thought/);
-  assert.doesNotMatch(full, /thinking|· live/);
+  assert.doesNotMatch(full, /thinking|thought|· live/);
   assert.match(full, /line one/);
-  assert.match(full, /ctrl\+o compact/);
 });
 
 test("compact reasoning bounds the markdown source without discarding the full block", () => {
@@ -476,7 +472,6 @@ test("compact reasoning bounds the markdown source without discarding the full b
   const block: Block = { kind: "reasoning", text, live: true };
   const shown = strip(renderAll([block], 80, STEEL)).join("\n");
   assert.match(shown, /visible tail/);
-  assert.match(shown, /ctrl\+o full/);
   assert.equal(block.text, text);
 
   block.live = false;
@@ -492,12 +487,10 @@ test("a live expansion waits for the complete thought before rendering the full 
   const live = strip(renderAll([block], 80, STEEL)).join("\n");
   assert.doesNotMatch(live, /old context/);
   assert.match(live, /visible tail/);
-  assert.match(live, /full when done/);
 
   block.live = false;
   const sealed = strip(renderAll([block], 80, STEEL)).join("\n");
   assert.match(sealed, /old context/);
-  assert.match(sealed, /ctrl\+o compact/);
 });
 
 test("reasoning changes from live to retained preview at the next stream kind", () => {
@@ -589,6 +582,29 @@ test("a compact edit shows only changed lines while expansion restores context",
   assert.match(expanded, /five|six/);
   assert.match(expanded, /seven|eight/);
   assert.match(expanded, /unchanged/);
+});
+
+test("large file diffs share one bounded preview while expansion keeps every change", () => {
+  const { blocks, events } = stage([]);
+  const content = Array.from({ length: 22 }, (_, index) => `value-${index + 1}`).join("\n");
+  events.onToolCall(callOf("1", "write_file", { path: "large.txt", content }));
+
+  const block = blocks[0];
+  assert.equal(block?.kind, "tool");
+  if (block?.kind !== "tool") return;
+  assert.equal(block.body?.filter((detail) => detail.kind === "add").length, 22);
+
+  const compact = strip(renderAll([block], 60, STEEL)).join("\n");
+  assert.match(compact, /value-8/);
+  assert.doesNotMatch(compact, /value-9(?:\D|$)/);
+  assert.match(compact, /7 more changed lines · ctrl\+o expand/);
+  assert.match(compact, /value-16/);
+  assert.match(compact, /value-22/);
+
+  block.expanded = true;
+  const expanded = strip(renderAll([block], 60, STEEL)).join("\n");
+  assert.match(expanded, /value-9/);
+  assert.doesNotMatch(expanded, /more changed lines/);
 });
 
 test("tool output is retained in full and only collapsed while rendering", () => {

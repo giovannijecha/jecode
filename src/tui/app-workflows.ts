@@ -67,7 +67,8 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
           state.status = said ?? activity.label;
           options.render();
         },
-        reset: () => {
+        reset: async () => {
+          await session.persistence?.reset();
           state.blocks.splice(0);
           state.past.length = 0;
           permissions.reset();
@@ -103,8 +104,14 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
   async function turn(text: string): Promise<void> {
     const activity = options.startActivity("turn", WAITING);
     if (activity === undefined) return;
+    const parentId = session.conversation.activeNodeId;
+    const history = session.conversation.history;
+    const historyStart = history.length;
+    const blockStart = state.blocks.length;
+    const createdAt = new Date().toISOString();
+    let nodeId: number | undefined;
     options.emit({ kind: "user", text });
-    session.history.push({ role: "user", content: [{ kind: "text", text }] });
+    history.push({ role: "user", content: [{ kind: "text", text }] });
 
     const events = transcribe({
       emit: options.emit,
@@ -121,11 +128,28 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       },
       usage: (usage) => recordUsage(session.usage, usage),
     });
+    events.onCheckpoint = async (checkpoint, settlement) => {
+      const next = session.conversation.commit({
+        ...(nodeId === undefined ? {} : { nodeId }),
+        parentId,
+        createdAt,
+        identity: {
+          providerId: session.provider.id,
+          model: session.model,
+          effort: session.config.effort,
+        },
+        messages: checkpoint.slice(historyStart),
+        blocks: state.blocks.slice(blockStart),
+      }, settlement);
+      await session.persistence?.checkpoint(next);
+      session.conversation = next;
+      nodeId = next.activeNodeId;
+    };
 
     let finishReason: "interrupted" | "failed" | undefined;
     try {
       await runTurn(
-        session.history,
+        history,
         controllerOptions(session, permissions.availableTools()),
         events,
         activity.control.signal,
