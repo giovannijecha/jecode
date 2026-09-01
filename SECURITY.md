@@ -7,8 +7,8 @@ release and the `main` branch.
 
 | Version | Supported |
 |---|---|
-| 0.3.x | Yes |
-| 0.2.x and older | No |
+| 0.4.x | Yes |
+| 0.3.x and older | No |
 
 ## Report a vulnerability
 
