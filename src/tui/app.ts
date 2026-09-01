@@ -81,6 +81,7 @@ export async function runApp(
     pal: session.palette,
     footer: footerInfo(session, workspace),
     status: state.status,
+    activityKind: state.activity?.kind,
     feedback: state.feedback,
     readiness: turnBlocker(session),
     spin: state.spin,

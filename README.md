@@ -208,6 +208,11 @@ the transcript. Slash commands never append content to the conversation or its
 Markdown export; **/help** closes with **Esc**, and token accounting remains
 internal to the active session.
 
+Jeco also appears as compact terminal-native pixel art while spare transcript
+rows are available. Its idle, thinking, typing, success, warning, and error
+poses follow real controller state, yield to conversation content, and stay
+static when reduced motion is enabled.
+
 ## Configuration
 
 Startup precedence is: command-line flags, environment variables, saved

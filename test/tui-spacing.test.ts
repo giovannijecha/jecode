@@ -64,7 +64,9 @@ test("a short transcript grows upward from the composer", () => {
   const topRule = (frame.cursor?.row ?? 0) - 1;
   assert.equal(latest, 18);
   assert.deepEqual(rows.slice(latest + 1, topRule), [""]);
-  assert.ok(rows.slice(0, latest - 1).every((line) => line === ""));
+  const spare = rows.slice(0, latest - 1);
+  assert.ok(spare.some((line) => /[▀▄█]/.test(line)), "Jeco is missing from spare transcript rows");
+  assert.ok(spare.filter((line) => line !== "").length <= 8);
 });
 
 test("a writable field carries the same active arrow as a picker", () => {

@@ -4,6 +4,7 @@ import type { Command } from "../commands.ts";
 import type { Palette } from "../ui/theme.ts";
 import { row } from "../ui/render.ts";
 import { elide } from "../ui/width.ts";
+import type { ActivityKind } from "./activity.ts";
 import type { Modal } from "./modal.ts";
 import * as modal from "./modal.ts";
 import type { Block } from "./blocks.ts";
@@ -12,6 +13,7 @@ import { renderComposer } from "./components/composer.ts";
 import { renderDock } from "./components/dock.ts";
 import type { FooterInfo } from "./components/footer.ts";
 import { renderFooter } from "./components/footer.ts";
+import { MASCOT_COLS, MASCOT_ROWS, mascotState, renderMascot } from "./components/mascot.ts";
 import { renderStatus } from "./components/status.ts";
 import type { Editor } from "./editor.ts";
 import type { Feedback } from "./feedback.ts";
@@ -40,6 +42,8 @@ export type View = {
   pal: Palette;
   footer: FooterInfo;
   status?: string;
+  /** The foreground owner distinguishes model thought from command work. */
+  activityKind?: ActivityKind;
   /** Replaceable operational feedback shown in the footer, never transcribed. */
   feedback?: Feedback;
   /** Persistent idle guidance when the selected provider cannot start a turn. */
@@ -84,7 +88,37 @@ export function compose(
   const cursor = dock.cursor === undefined
     ? undefined
     : { row: transcriptHeight + dock.cursor.row, col: dock.cursor.col };
-  return { rows: [...viewport.rows, ...dock.rows], cursor, maxScroll: viewport.maxScroll };
+  return {
+    rows: [...withMascot(viewport.rows, width, view), ...dock.rows],
+    cursor,
+    maxScroll: viewport.maxScroll,
+  };
+}
+
+function withMascot(rows: readonly string[], width: number, view: View): string[] {
+  if (view.scroll !== 0 || width < MASCOT_COLS + 4) return [...rows];
+
+  let leading = 0;
+  while (leading < rows.length && rows[leading] === "") leading++;
+  // Keep a rhythm row between Jeco and real transcript content. Once the
+  // conversation needs the room, the companion yields without changing
+  // layout, scroll limits, or transcript exports.
+  if (leading < MASCOT_ROWS + 2) return [...rows];
+
+  const art = renderMascot(mascotState({
+    activityKind: view.activityKind,
+    status: view.status,
+    feedbackTone: view.feedback?.tone,
+    readinessTone: view.readiness?.tone,
+    blocks: view.blocks,
+  }), view.spin, view.reducedMotion === true);
+  const placed = [...rows];
+  const top = Math.min(2, leading - art.length - 1);
+  const left = " ".repeat(Math.max(0, Math.floor((width - MASCOT_COLS) / 2)));
+  for (let index = 0; index < art.length; index++) {
+    placed[top + index] = left + (art[index] ?? "");
+  }
+  return placed;
 }
 
 function dockRows(view: View, width: number, height: number): { rows: string[]; cursor?: Cursor } {

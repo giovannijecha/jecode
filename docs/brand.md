@@ -43,10 +43,11 @@ do not recolor the mascot.
 | docs/assets/brand/app-icon-512.png | Square application or social icon |
 | docs/assets/brand/pet-states.png | Reference sheet for functional status poses |
 | docs/assets/brand/tokens.json | Machine-readable brand tokens |
+| src/tui/components/mascot.ts | Terminal-native half-block renderer |
 
-The pixel poses are a product direction, not a promise that a terminal pet is
-already part of the current release. If introduced, each pose must correspond to
-real controller activity and reduced-motion mode must use static state changes.
+The terminal renderer uses spare transcript rows and yields them as conversation
+content grows. Each pose corresponds to real controller activity; reduced-motion
+mode keeps pose changes static, and `NO_COLOR` retains a readable silhouette.
 
 <p align="center">
   <img src="assets/brand/pet-states.png" width="720" alt="Jeco pixel status poses">
