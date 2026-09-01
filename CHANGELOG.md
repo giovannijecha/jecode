@@ -4,6 +4,31 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.6.0] - 2026-09-01
+
+### Added
+
+- Added automatic model-aware context compaction whose budget follows the
+  selected model's usable window instead of a fixed token threshold. Live
+  provider metadata, Ollama's active allocation, conservative family limits,
+  and a safe fallback keep the policy useful across small and million-token
+  contexts.
+- Added one saved compaction trigger from 50% to 95%, defaulting to 85%,
+  available through `/settings`, `--compaction-percent`, and
+  `JECODE_COMPACTION_PERCENT`; provider safety limits still take precedence.
+- Persisted branch-local compaction anchors with durable sessions so resumed
+  conversations reuse the compact provider projection while the canonical
+  conversation tree and exported transcript remain complete.
+
+### Fixed
+
+- Recovered once from definite provider context-overflow responses by
+  compacting and retrying without duplicating canonical conversation history.
+- Kept Ollama's theoretical model capacity from hiding a later, smaller active
+  runtime allocation when deciding the safe context budget.
+- Kept every settings row visible at compact terminal heights and shortened the
+  provider-management hint before it needs truncation.
+
 ## [0.5.0] - 2026-09-01
 
 ### Added
@@ -322,6 +347,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.6.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.6.0
 [0.5.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.5.0
 [0.4.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.4.0
 [0.3.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.3.2
