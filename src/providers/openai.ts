@@ -3,7 +3,7 @@
 // Responses wire contract verified against the official API reference on
 // 2026-08-29. Keep final response events authoritative over display deltas.
 
-import type { Message, Provider, SendRequest } from "../types.ts";
+import type { Message, ModelContextWindow, Provider, SendRequest } from "../types.ts";
 import { postSse } from "./http.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
@@ -43,6 +43,20 @@ export function openAIEfforts(model: string): readonly string[] {
   return STANDARD_EFFORTS;
 }
 
+/** Conservative capacities for the reasoning families accepted by this transport. */
+export function openAIContextWindow(model: string): ModelContextWindow | undefined {
+  if (/^gpt-5\.6(?:[.-]|$)/.test(model)) return usableContext(1_050_000);
+  if (/^gpt-5(?:[.-]|$)/.test(model)) return usableContext(400_000);
+  if (/^(?:o(?:1|3|4)|codex-mini)(?:[.-]|$)/.test(model)) {
+    return usableContext(200_000);
+  }
+  return undefined;
+}
+
+function usableContext(tokens: number): ModelContextWindow {
+  return Object.freeze({ tokens: Math.floor(tokens * 95 / 100) });
+}
+
 export const openai: Provider = {
   id: "openai",
   defaultModel: "gpt-5",
@@ -63,6 +77,10 @@ export const openai: Provider = {
 
   async efforts(model: string): Promise<readonly string[]> {
     return openAIEfforts(model);
+  },
+
+  async contextWindow(model: string): Promise<ModelContextWindow | undefined> {
+    return openAIContextWindow(model);
   },
 
   location: () => "cloud",

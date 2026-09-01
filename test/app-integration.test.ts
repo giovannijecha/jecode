@@ -50,6 +50,7 @@ function session(from = provider()): Session {
       effort: "high",
       maxTokens: 4096,
       maxSteps: 8,
+      compactionPercent: 85,
       root: process.cwd(),
       autoApprove: false,
       ephemeral: false,
@@ -68,6 +69,10 @@ async function* input(...lines: string[]): AsyncIterable<string> {
   for (const line of lines) yield line;
 }
 
+function messageText(message: Message | undefined): string {
+  return message?.content.find((block) => block.kind === "text")?.text ?? "";
+}
+
 test("batch mode carries input through the controller, renderer, commands, and exit", async () => {
   const output: string[] = [];
   const current = session();
@@ -84,6 +89,54 @@ test("batch mode carries input through the controller, renderer, commands, and e
   assert.match(shown, /interactive help needs the TUI/);
   assert.doesNotMatch(shown, /ignored/);
   assert.equal(current.conversation.history.length, 2);
+});
+
+test("batch mode compacts model context while retaining the complete conversation", async () => {
+  const seen: { system: string; messages: Message[] }[] = [];
+  const compacting: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 64_000 }),
+    async send(request): Promise<Message> {
+      seen.push({ system: request.system, messages: structuredClone(request.messages) });
+      const summary = request.system.includes("durable working memory");
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: summary ? "Earlier work is summarized." : "Final answer." }],
+        usage: {
+          inputTokens: summary ? 30_000 : 100,
+          outputTokens: 10,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+  };
+  const current = session(compacting);
+  const old = "old context ".repeat(10_000);
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: old }] },
+      { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
+    ],
+    blocks: [],
+  }, "completed");
+  current.usage.lastInputTokens = 65_000;
+
+  await runBatch(current, { lines: input("next request"), write: () => {} });
+
+  assert.equal(seen.length, 2);
+  assert.match(seen[0]?.system ?? "", /durable working memory/);
+  assert.match(messageText(seen[1]?.messages[0]), /Earlier conversation summary/);
+  assert.doesNotMatch(JSON.stringify(seen[1]?.messages), /old context/);
+  assert.match(JSON.stringify(current.conversation.history), /old context/);
+  assert.equal(current.conversation.activeNode?.context?.throughNodeId, 2);
+  assert.equal(current.conversation.activeNode?.context?.messageCount, 0);
+  assert.equal(current.usage.requests, 2);
+  assert.equal(current.usage.lastInputTokens, 100);
 });
 
 test("batch mode propagates provider failures outside the transcript", async () => {
@@ -230,6 +283,12 @@ test("resume --latest restores the newest durable conversation for this workspac
         { kind: "user", text: "remember me" },
         { kind: "answer", text: "remembered" },
       ],
+      context: {
+        throughNodeId: 1,
+        messageCount: 2,
+        createdAt: "2026-09-01T10:00:30.000Z",
+        summary: "The user asked to be remembered and the request was acknowledged.",
+      },
     }, "completed");
     const published = await store.publish(conversation);
 
@@ -245,6 +304,8 @@ test("resume --latest restores the newest durable conversation for this workspac
     assert.equal(opened?.model, "claude-resumed");
     assert.equal(opened?.config.effort, "medium");
     assert.equal(opened?.conversation.history[0]?.content[0]?.kind, "text");
+    assert.match(messageText(opened?.conversation.contextHistory[0]), /Earlier conversation summary/);
+    assert.equal(opened?.conversation.contextHistory.length, 1);
     assert.equal(opened?.usage.requests, 1);
     assert.equal(opened?.persistence?.sessionId, published.meta.id);
     assert.equal((await store.list())[0]?.active, false);
@@ -412,6 +473,78 @@ test("a TUI submit reaches the provider and returns to an editable session", asy
   feed("/exit\r");
   await running;
   assert.equal(harness.left(), true);
+});
+
+test("the footer reports compaction without adding it to the transcript", async () => {
+  let started = (): void => {};
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let release = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const compacting: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 64_000 }),
+    async send(request): Promise<Message> {
+      if (request.system.includes("durable working memory")) {
+        started();
+        await gate;
+        return {
+          role: "assistant",
+          content: [{ kind: "text", text: "Persisted summary." }],
+          usage: {
+            inputTokens: 30_000,
+            outputTokens: 10,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            reasoningTokens: 0,
+          },
+        };
+      }
+      request.onStream?.({ kind: "text", text: "Answer after compaction." });
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: "Answer after compaction." }],
+        usage: {
+          inputTokens: 100,
+          outputTokens: 5,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+  };
+  const current = session(compacting);
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "old context ".repeat(10_000) }] },
+      { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
+    ],
+    blocks: [],
+  }, "completed");
+  current.usage.lastInputTokens = 65_000;
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  feed("next request\r");
+  await entered;
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("Compacting"),
+    "compaction footer state",
+  );
+  release();
+  await waitFor(() => current.conversation.history.length === 4, "compacted TUI turn");
+  assert.doesNotMatch(JSON.stringify(current.conversation.transcript), /Persisted summary/);
+
+  feed("/exit\r");
+  await running;
 });
 
 test("the TUI durably checkpoints turns and /new starts a separate session", async () => {

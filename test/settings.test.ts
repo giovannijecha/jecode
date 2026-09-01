@@ -50,6 +50,7 @@ test("saved defaults and provider-specific models survive a reload", async () =>
       reducedMotion: true,
       maxTokens: 8192,
       maxSteps: 12,
+      compactionPercent: 90,
     } as unknown as Partial<SavedSettings>;
     await updateSettings(legacyVisualSettings);
     reloadSettings();
@@ -62,6 +63,7 @@ test("saved defaults and provider-specific models survive a reload", async () =>
       reducedMotion: true,
       maxTokens: 8192,
       maxSteps: 12,
+      compactionPercent: 90,
     });
     const saved = JSON.parse(await readFile(settingsPath(), "utf8"));
     assert.equal(saved.provider, "ollama");
@@ -91,6 +93,7 @@ test("invalid saved values are discarded rather than breaking startup", async ()
       ollamaHost: "http://models.example.test",
       effort: "turbo",
       maxTokens: -1,
+      compactionPercent: 100,
     } as SavedSettings);
     reloadSettings();
     assert.deepEqual(readSettings(), {});

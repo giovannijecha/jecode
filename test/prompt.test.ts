@@ -10,6 +10,7 @@ const config: Config = {
   effort: "high",
   maxTokens: 1_000,
   maxSteps: 4,
+  compactionPercent: 85,
   root: "/workspace/jecode",
   autoApprove: false,
   ephemeral: false,

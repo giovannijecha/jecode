@@ -9,6 +9,7 @@ const CONFIG_ENV = [
   "JECODE_EFFORT",
   "JECODE_MAX_TOKENS",
   "JECODE_MAX_STEPS",
+  "JECODE_COMPACTION_PERCENT",
   "JECODE_REDUCED_MOTION",
   "JECODE_AUTO_APPROVE",
   "JECODE_EPHEMERAL",
@@ -32,6 +33,7 @@ test("falls back to defaults", () => {
   assert.equal(defaults.providerId, "anthropic");
   assert.equal(defaults.effort, "high");
   assert.equal(defaults.maxTokens, 64000);
+  assert.equal(defaults.compactionPercent, 85);
   assert.equal(defaults.autoApprove, false);
   assert.equal(defaults.reducedMotion, false);
   assert.equal(defaults.ephemeral, false);
@@ -57,6 +59,12 @@ test("rejects an unknown effort", () => {
 test("rejects a non-positive integer budget", () => {
   assert.throws(() => config(["--max-tokens", "0"]), /positive integer/);
   assert.throws(() => config(["--max-steps", "n"]), /positive integer/);
+});
+
+test("accepts only a safe context compaction percentage", () => {
+  assert.equal(config(["--compaction-percent", "90"]).compactionPercent, 90);
+  assert.throws(() => config(["--compaction-percent", "49"]), /50 to 95/);
+  assert.throws(() => config(["--compaction-percent", "96"]), /50 to 95/);
 });
 
 test("a flag nobody declared is refused, not swallowed", () => {
@@ -86,6 +94,7 @@ test("saved defaults include a model for each provider", () => {
     effort: "medium",
     maxTokens: 8192,
     maxSteps: 12,
+    compactionPercent: 92,
     reducedMotion: true,
   };
   const loaded = config([], saved);
@@ -95,6 +104,7 @@ test("saved defaults include a model for each provider", () => {
   assert.equal(loaded.effort, "medium");
   assert.equal(loaded.maxTokens, 8192);
   assert.equal(loaded.maxSteps, 12);
+  assert.equal(loaded.compactionPercent, 92);
   assert.equal(loaded.reducedMotion, true);
 });
 

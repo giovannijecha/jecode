@@ -1,7 +1,7 @@
 // ChatGPT-backed Codex Responses, kept separate from the OpenAI API provider.
 
 import { randomUUID } from "node:crypto";
-import type { Message, Provider, SendRequest } from "../types.ts";
+import type { Message, ModelContextWindow, Provider, SendRequest } from "../types.ts";
 import { openAICodexAccount } from "../accounts.ts";
 import { openAIAuthorization } from "../openai-account.ts";
 import { applicationVersion } from "../version.ts";
@@ -27,6 +27,7 @@ const MAX_MODELS = 1_000;
 const MAX_MODEL_CHARS = 256;
 const XHIGH_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 let effortByModel = new Map<string, readonly string[]>();
+let contextByModel = new Map<string, ModelContextWindow | undefined>();
 
 export const openaiCodex: Provider = {
   id: ID,
@@ -41,7 +42,7 @@ export const openaiCodex: Provider = {
 
   async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
     const catalog = await loadCatalog(signal, onStatus);
-    effortByModel = catalog.efforts;
+    rememberCatalog(catalog);
     return catalog.ids;
   },
 
@@ -53,8 +54,21 @@ export const openaiCodex: Provider = {
     const cached = effortByModel.get(model);
     if (cached !== undefined) return cached;
     const catalog = await loadCatalog(signal, onStatus);
-    effortByModel = catalog.efforts;
+    rememberCatalog(catalog);
     return effortByModel.get(model) ?? fallbackEfforts(model);
+  },
+
+  async contextWindow(
+    model: string,
+    signal?: AbortSignal,
+    onStatus?: (status: string) => void,
+  ): Promise<ModelContextWindow | undefined> {
+    if (contextByModel.has(model)) return contextByModel.get(model);
+    const catalog = await loadCatalog(signal, onStatus);
+    rememberCatalog(catalog);
+    const context = contextByModel.get(model);
+    if (!contextByModel.has(model)) contextByModel.set(model, undefined);
+    return context;
   },
 
   async send(req: SendRequest): Promise<Message> {
@@ -95,7 +109,7 @@ export const openaiCodex: Provider = {
 async function loadCatalog(
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
-): Promise<{ ids: string[]; efforts: Map<string, readonly string[]> }> {
+): Promise<ModelCatalog> {
   return withAuthorization(async (authorization) => {
     const body = await getJson(
       `${BASE}/models?client_version=${CATALOG_COMPATIBILITY_VERSION}`,
@@ -105,6 +119,17 @@ async function loadCatalog(
     );
     return modelCatalog(body);
   }, signal, onStatus);
+}
+
+type ModelCatalog = {
+  ids: string[];
+  efforts: Map<string, readonly string[]>;
+  contexts: Map<string, ModelContextWindow | undefined>;
+};
+
+function rememberCatalog(catalog: ModelCatalog): void {
+  effortByModel = catalog.efforts;
+  contextByModel = catalog.contexts;
 }
 
 async function withAuthorization<T>(
@@ -137,17 +162,19 @@ function headers(
   };
 }
 
-function modelCatalog(value: unknown): {
-  ids: string[];
-  efforts: Map<string, readonly string[]>;
-} {
+function modelCatalog(value: unknown): ModelCatalog {
   const source = record(value) && Array.isArray(value["models"]) ? value["models"] : undefined;
   if (source === undefined) throw new Error("OpenAI Codex did not return a model list");
 
   const seen = new Set<string>();
   const models = source
     .slice(0, MAX_CATALOG_ITEMS)
-    .flatMap((entry): { id: string; priority: number; efforts: readonly string[] }[] => {
+    .flatMap((entry): {
+      id: string;
+      priority: number;
+      efforts: readonly string[];
+      context: ModelContextWindow | undefined;
+    }[] => {
       if (!record(entry)) return [];
       const id = entry["slug"];
       if (
@@ -162,6 +189,7 @@ function modelCatalog(value: unknown): {
         id,
         priority: typeof entry["priority"] === "number" ? entry["priority"] : 0,
         efforts: reasoningLevels(entry, id),
+        context: modelContextWindow(entry),
       }];
     })
     .sort((left, right) => left.priority - right.priority)
@@ -169,7 +197,37 @@ function modelCatalog(value: unknown): {
   return {
     ids: models.map((entry) => entry.id),
     efforts: new Map(models.map((entry) => [entry.id, entry.efforts])),
+    contexts: new Map(models.map((entry) => [entry.id, entry.context])),
   };
+}
+
+function modelContextWindow(entry: Record<string, unknown>): ModelContextWindow | undefined {
+  const resolved = tokenCount(entry["context_window"]) ?? tokenCount(entry["max_context_window"]);
+  if (resolved === undefined) return undefined;
+  const percent = percentage(entry["effective_context_window_percent"]) ?? 95;
+  const tokens = Math.floor(resolved * percent / 100);
+  if (!validTokenCount(tokens)) return undefined;
+  const automatic = Math.floor(resolved * 9 / 10);
+  const advertised = tokenCount(entry["auto_compact_token_limit"]);
+  return Object.freeze({
+    tokens,
+    compactAtTokens: Math.min(advertised ?? automatic, automatic, tokens),
+  });
+}
+
+function tokenCount(value: unknown): number | undefined {
+  return validTokenCount(value) ? value : undefined;
+}
+
+function validTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+    value >= 4_096 && value <= 10_000_000;
+}
+
+function percentage(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 100
+    ? value
+    : undefined;
 }
 
 function reasoningLevels(entry: Record<string, unknown>, model: string): readonly string[] {

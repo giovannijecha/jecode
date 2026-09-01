@@ -26,12 +26,16 @@ test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded
           slug: "later",
           visibility: "list",
           priority: 20,
+          context_window: 200_000,
           supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }],
         },
         {
           slug: "first",
           visibility: "list",
           priority: 10,
+          context_window: 1_050_000,
+          effective_context_window_percent: 95,
+          auto_compact_token_limit: 900_000,
           supported_reasoning_levels: [{ effort: "low" }, { effort: "xhigh" }],
         },
         { slug: "private", visibility: "hidden", priority: 0 },
@@ -47,6 +51,10 @@ test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded
     assert.equal(seenHeaders?.get("originator"), "jecode");
     assert.match(seenHeaders?.get("user-agent") ?? "", /^jecode\//);
     assert.deepEqual(await openaiCodex.efforts?.("first"), ["low", "xhigh"]);
+    assert.deepEqual(await openaiCodex.contextWindow?.("first"), {
+      tokens: 997_500,
+      compactAtTokens: 900_000,
+    });
   });
 });
 

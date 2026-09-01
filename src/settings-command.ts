@@ -3,6 +3,7 @@
 
 import { saveCommandSettings } from "./command-settings.ts";
 import type { Host } from "./commands.ts";
+import { MAX_COMPACTION_PERCENT, MIN_COMPACTION_PERCENT } from "./context/policy.ts";
 import { modelsCommand } from "./model-command.ts";
 import { providerFailure } from "./provider-errors.ts";
 import { providerLabel } from "./provider-label.ts";
@@ -19,6 +20,7 @@ type SettingsAction =
   | "effort"
   | "maxTokens"
   | "maxSteps"
+  | "compactionPercent"
   | "reducedMotion"
   | "providers";
 
@@ -61,6 +63,9 @@ export async function settingsCommand(session: Session, host: Host): Promise<voi
       case "maxSteps":
         await numberSetting(session, host, "maxSteps", "max tool steps");
         break;
+      case "compactionPercent":
+        await compactionSetting(session, host);
+        break;
       case "reducedMotion":
         await motionSetting(session, host);
         break;
@@ -77,6 +82,7 @@ export type SettingsValues = {
   effort: string;
   maxTokens?: number;
   maxSteps: number;
+  compactionPercent: number;
   reducedMotion: boolean;
 };
 
@@ -84,9 +90,11 @@ export function settingsPicker(
   values: SettingsValues,
   index = 0,
 ): Picker {
+  const items = settingsItems(values);
   return {
     title: [],
-    options: settingsItems(values).map((item) => item.option),
+    options: items.map((item) => item.option),
+    visible: items.length,
     index,
   };
 }
@@ -109,12 +117,16 @@ function settingsItems(values: SettingsValues): SettingsItem[] {
         }]),
     { action: "maxSteps", option: { label: "max tool steps", value: String(values.maxSteps) } },
     {
+      action: "compactionPercent",
+      option: { label: "context compaction", value: `${values.compactionPercent}%` },
+    },
+    {
       action: "reducedMotion",
       option: { label: "reduced motion", value: values.reducedMotion ? "on" : "off" },
     },
     {
       action: "providers",
-      option: { label: "providers", hint: "manage access and connections" },
+      option: { label: "providers", hint: "manage connections" },
     },
   ];
 }
@@ -126,6 +138,7 @@ function settingsValues(session: Session): SettingsValues {
     effort: session.config.effort,
     ...(session.provider.id === "openai-codex" ? {} : { maxTokens: session.config.maxTokens }),
     maxSteps: session.config.maxSteps,
+    compactionPercent: session.config.compactionPercent,
     reducedMotion: session.config.reducedMotion,
   };
 }
@@ -222,6 +235,39 @@ async function numberSetting(
   }
   if (!(await saveCommandSettings(host, { [name]: value }))) return;
   session.config[name] = value;
+}
+
+async function compactionSetting(session: Session, host: Host): Promise<void> {
+  if (host.type === undefined) return;
+  const label = "context compaction";
+  const field: Field = {
+    title: heading(
+      label,
+      `${MIN_COMPACTION_PERCENT}-${MAX_COMPACTION_PERCENT} percent`,
+      session.palette,
+    ),
+    right: "enter save Â· esc back",
+    editor: of(String(session.config.compactionPercent)),
+    secret: false,
+    note: "Compacts when model context reaches this percentage.",
+  };
+  const text = await host.type(field);
+  if (text === undefined) return;
+  const value = Number(text);
+  if (
+    !Number.isSafeInteger(value) ||
+    value < MIN_COMPACTION_PERCENT ||
+    value > MAX_COMPACTION_PERCENT
+  ) {
+    host.emit({
+      kind: "notice",
+      text: `${label} must be from ${MIN_COMPACTION_PERCENT} to ${MAX_COMPACTION_PERCENT}`,
+      tone: "error",
+    });
+    return;
+  }
+  if (!(await saveCommandSettings(host, { compactionPercent: value }))) return;
+  session.config.compactionPercent = value;
 }
 
 function chooser(host: Host): Host["choose"] {

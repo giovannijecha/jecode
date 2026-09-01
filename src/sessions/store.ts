@@ -29,6 +29,7 @@ import {
   encodeHead,
   encodeMeta,
   encodeNode,
+  SESSION_SCHEMA,
 } from "./codec.ts";
 import type { SessionHead, SessionMeta, StoredNode } from "./codec.ts";
 import {
@@ -161,7 +162,7 @@ export class DurableSessionStore {
         throw new Error("session checkpoint cannot be recovered safely");
       }
       head = {
-        version: 1,
+        version: SESSION_SCHEMA,
         sequence: candidate.sequence,
         nodeId: candidate.node.id,
         parentId: candidate.node.parentId,
@@ -190,14 +191,14 @@ export class DurableSessionStore {
     const temporary = path.join(this.#bucket, `.${id}.${randomUUID()}.tmp`);
     const target = this.#sessionDirectory(id);
     const meta: SessionMeta = {
-      version: 1,
+      version: SESSION_SCHEMA,
       id,
       workspaceRoot: this.workspaceRoot,
       workspaceDigest: this.workspaceDigest,
       createdAt: now,
     };
     const head: SessionHead = {
-      version: 1,
+      version: SESSION_SCHEMA,
       sequence: conversation.nodes.length,
       nodeId: active.id,
       parentId: active.parentId,
@@ -255,7 +256,7 @@ export class DurableSessionStore {
 
     const now = new Date().toISOString();
     const head: SessionHead = {
-      version: 1,
+      version: SESSION_SCHEMA,
       sequence: previous.head.sequence + 1,
       nodeId: active.id,
       parentId: active.parentId,

@@ -345,6 +345,7 @@ function settingsScene(state: LabState): View {
         effort: "high",
         maxTokens: 64000,
         maxSteps: 40,
+        compactionPercent: 85,
         reducedMotion: false,
       }, state.selected),
     },

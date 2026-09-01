@@ -7,9 +7,9 @@
 // purpose: the default omits the reasoning text, which on a screen reads as a
 // long silence before anything appears.
 
-import type { Message, Provider, SendRequest } from "../types.ts";
+import type { Message, ModelContextWindow, Provider, SendRequest } from "../types.ts";
 import { postSse } from "./http.ts";
-import { listModels } from "./catalog.ts";
+import { modelCatalog } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
 import { EFFORTS, requireSupportedEffort } from "../effort.ts";
 import { assembleAnthropic } from "./anthropic-stream.ts";
@@ -23,6 +23,7 @@ const KEY = "ANTHROPIC_API_KEY";
 const ADAPTIVE = /^claude-(?:fable-5|mythos-(?:5|preview)|opus-(?:5|4-[678])|sonnet-(?:5|4-6))(?:-|$)/;
 const MAX_WITHOUT_XHIGH = ["low", "medium", "high", "max"] as const;
 const ANTHROPIC_45_EFFORTS = ["low", "medium", "high"] as const;
+let contextByModel = new Map<string, ModelContextWindow | undefined>();
 
 export function supportsAdaptiveThinking(model: string): boolean {
   return ADAPTIVE.test(model);
@@ -49,12 +50,27 @@ export const anthropic: Provider = {
 
   // Newest first is how the endpoint already answers, so the order is left
   // exactly as it arrives rather than re-sorted into something less useful.
-  models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
-    return listModels(MODELS, headers(requireKey()), signal, onStatus);
+  async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
+    const catalog = await loadModels(signal, onStatus);
+    contextByModel = catalog.contexts;
+    return catalog.ids;
   },
 
   async efforts(model: string): Promise<readonly string[]> {
     return anthropicEfforts(model);
+  },
+
+  async contextWindow(
+    model: string,
+    signal?: AbortSignal,
+    onStatus?: (status: string) => void,
+  ): Promise<ModelContextWindow | undefined> {
+    if (contextByModel.has(model)) return contextByModel.get(model);
+    const catalog = await loadModels(signal, onStatus);
+    contextByModel = catalog.contexts;
+    const context = contextByModel.get(model);
+    if (!contextByModel.has(model)) contextByModel.set(model, undefined);
+    return context;
   },
 
   location: () => "cloud",
@@ -93,6 +109,32 @@ export const anthropic: Provider = {
     return fromWireResponse(data);
   },
 };
+
+async function loadModels(
+  signal?: AbortSignal,
+  onStatus?: (status: string) => void,
+): Promise<{
+  ids: string[];
+  contexts: Map<string, ModelContextWindow | undefined>;
+}> {
+  const entries = await modelCatalog(MODELS, headers(requireKey()), signal, onStatus);
+  return {
+    ids: entries.map((entry) => entry.id),
+    contexts: new Map(entries.map((entry) => [
+      entry.id,
+      contextWindow(entry.metadata["max_input_tokens"]),
+    ])),
+  };
+}
+
+function contextWindow(value: unknown): ModelContextWindow | undefined {
+  return validTokenCount(value) ? Object.freeze({ tokens: value }) : undefined;
+}
+
+function validTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+    value >= 4_096 && value <= 10_000_000;
+}
 
 // Read at the moment it is used, never captured at import: a key typed into
 // the running window has to count, and so does one exported after startup.

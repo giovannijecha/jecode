@@ -15,25 +15,39 @@ export const MAX_MODEL_CATALOG_ENTRIES = 1_000;
 export const MAX_MODEL_CATALOG_ITEMS = 4_000;
 export const MAX_MODEL_ID_CHARS = 256;
 
+export type ModelCatalogEntry = Readonly<{
+  id: string;
+  metadata: Record<string, unknown>;
+}>;
+
 export async function listModels(
   url: string,
   headers: Record<string, string>,
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
 ): Promise<string[]> {
+  return (await modelCatalog(url, headers, signal, onStatus)).map((entry) => entry.id);
+}
+
+export async function modelCatalog(
+  url: string,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+  onStatus?: (status: string) => void,
+): Promise<ModelCatalogEntry[]> {
   const body = await getJson(url, headers, signal, onStatus);
   const data = (body as { data?: unknown }).data;
   if (!Array.isArray(data)) throw new Error(`${url} did not return a model list`);
 
-  const models: string[] = [];
+  const models: ModelCatalogEntry[] = [];
   const unique = new Set<string>();
   const inspected = Math.min(data.length, MAX_MODEL_CATALOG_ITEMS);
 
   for (let index = 0; index < inspected && models.length < MAX_MODEL_CATALOG_ENTRIES; index++) {
     const entry = data[index];
-    const id = typeof entry === "object" && entry !== null
-      ? (entry as { id?: unknown }).id
-      : undefined;
+    const metadata = record(entry) ? entry : undefined;
+    if (metadata === undefined) continue;
+    const id = metadata["id"];
     if (
       typeof id !== "string" ||
       id === "" ||
@@ -41,8 +55,12 @@ export async function listModels(
       unique.has(id)
     ) continue;
     unique.add(id);
-    models.push(id);
+    models.push({ id, metadata });
   }
 
   return models;
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

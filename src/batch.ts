@@ -5,15 +5,21 @@
 
 import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import type { Message } from "./types.ts";
 import type { Session } from "./session.ts";
 import type { ControllerEvents } from "./controller.ts";
 import { runTurn } from "./controller.ts";
+import { resolveContextPolicy } from "./context/capacity.ts";
+import { compactContext } from "./context/compactor.ts";
+import type { ContextAnchor } from "./context/projection.ts";
+import type { ContextPolicy } from "./context/policy.ts";
+import { isContextOverflow, shouldResolveContextPolicy } from "./context/policy.ts";
 import { handleCommand } from "./commands.ts";
 import type { Block } from "./tui/blocks.ts";
 import { renderBatch } from "./batch-view.ts";
 import { columns } from "./ui/render.ts";
 import { terminalText } from "./ui/terminal-text.ts";
-import { recordUsage } from "./usage.ts";
+import { recordAuxiliaryUsage, recordUsage } from "./usage.ts";
 
 export type BatchEnvironment = {
   lines?: AsyncIterable<string>;
@@ -45,12 +51,18 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       const parentId = session.conversation.activeNodeId;
       const createdAt = new Date().toISOString();
       const history = session.conversation.history;
+      const modelHistory = session.conversation.contextHistory;
       const before = history.length;
+      const prospectiveNodeId = session.conversation.nodes.length + 1;
       let nodeId: number | undefined;
-      history.push({ role: "user", content: [{ kind: "text", text: line }] });
+      let context: ContextAnchor | undefined;
+      let contextPolicy: Promise<ContextPolicy> | undefined;
+      const user = { role: "user" as const, content: [{ kind: "text" as const, text: line }] };
+      history.push(user);
+      modelHistory.push(structuredClone(user));
 
       const turn = events(emit, session);
-      turn.onCheckpoint = async (checkpoint, settlement) => {
+      const commit = (checkpoint: readonly Message[], settlement: "checkpointed" | "completed") => {
         session.conversation = session.conversation.commit({
           ...(nodeId === undefined ? {} : { nodeId }),
           parentId,
@@ -62,10 +74,55 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
           },
           messages: checkpoint.slice(before),
           blocks: [],
+          ...(context === undefined ? {} : { context }),
         }, settlement);
         nodeId = session.conversation.activeNodeId;
       };
-      await runTurn(history, options(session), turn);
+
+      const compact = async (
+        checkpoint: readonly Message[],
+        projected: readonly Message[],
+        reason: "budget" | "overflow",
+        error?: Error,
+      ) => {
+        if (reason === "overflow" && (error === undefined || !isContextOverflow(error))) {
+          return undefined;
+        }
+        const force = reason === "overflow";
+        if (!shouldResolveContextPolicy(projected, session.usage.lastInputTokens, force)) {
+          return undefined;
+        }
+        contextPolicy ??= resolveContextPolicy({
+          provider: session.provider,
+          model: session.model,
+          compactionPercent: session.config.compactionPercent,
+        });
+        const result = await compactContext({
+          provider: session.provider,
+          model: session.model,
+          effort: session.config.effort,
+          context: projected,
+          turn: checkpoint.slice(before),
+          nodeId: nodeId ?? prospectiveNodeId,
+          coveredMessages: context?.messageCount ?? 0,
+          lastInputTokens: session.usage.lastInputTokens,
+          force,
+          policy: await contextPolicy,
+        });
+        if (result === undefined) return undefined;
+        context = result.anchor;
+        if (result.usage !== undefined) recordAuxiliaryUsage(session.usage, result.usage);
+        return result.messages;
+      };
+
+      turn.onContext = compact;
+      turn.onCheckpoint = async (checkpoint, settlement, projected) => {
+        commit(checkpoint, settlement);
+        const compacted = await compact(checkpoint, projected, "budget");
+        if (compacted !== undefined) commit(checkpoint, settlement);
+        return compacted;
+      };
+      await runTurn(history, options(session), turn, undefined, modelHistory);
       turn.flush();
     }
   } finally {

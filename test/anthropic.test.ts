@@ -25,6 +25,29 @@ test("Anthropic effort follows the selected model independently from adaptive th
   assert.equal(supportsAdaptiveThinking("claude-opus-4-5"), false);
 });
 
+test("Anthropic retains live input capacity from its model catalogue", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "test-key";
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    assert.equal(new Headers(init?.headers).get("x-api-key"), "test-key");
+    return new Response(JSON.stringify({
+      data: [{ id: "claude-context-fixture", max_input_tokens: 1_000_000 }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previousKey;
+  });
+
+  assert.deepEqual(await anthropic.models(), ["claude-context-fixture"]);
+  assert.deepEqual(
+    await anthropic.contextWindow?.("claude-context-fixture"),
+    { tokens: 1_000_000 },
+  );
+});
+
 test("Anthropic rejects an unsupported effort before making a request", async (context) => {
   const previousFetch = globalThis.fetch;
   const previousKey = process.env.ANTHROPIC_API_KEY;

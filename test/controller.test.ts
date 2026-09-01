@@ -173,6 +173,71 @@ test("awaits the durable tool checkpoint before asking the provider again", asyn
   assert.deepEqual(settlements, ["checkpointed", "completed"]);
 });
 
+test("keeps canonical turn history while replacing only the provider context", async () => {
+  const provider = scripted([
+    {
+      role: "assistant",
+      content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "one" } }],
+    },
+    assistantText("done"),
+  ]);
+  const history: Message[] = [
+    { role: "user", content: [{ kind: "text", text: "full request" }] },
+  ];
+  const modelHistory: Message[] = [
+    { role: "user", content: [{ kind: "text", text: "projected request" }] },
+  ];
+  const sink = events();
+  sink.onCheckpoint = async (_history, settlement) => settlement === "checkpointed"
+    ? [{ role: "user", content: [{ kind: "text", text: "compacted checkpoint" }] }]
+    : undefined;
+
+  await runTurn(history, options(provider), sink, undefined, modelHistory);
+
+  assert.equal(texts(provider.seen[1]?.messages ?? [])[0], "compacted checkpoint");
+  assert.doesNotMatch(texts(provider.seen[1]?.messages ?? []).join("\n"), /full request/);
+  assert.deepEqual(texts(history), ["full request", "done"]);
+  assert.equal(history.length, 4);
+});
+
+test("retries one definite context rejection only after the context hook replaces it", async () => {
+  const seen: Message[][] = [];
+  let calls = 0;
+  const provider: Provider = {
+    id: "fake",
+    defaultModel: "fake-1",
+    auth: { kind: "api-key", keyVar: "FAKE_API_KEY" },
+    blocked: () => undefined,
+    models: () => Promise.resolve(["fake-1"]),
+    async send(request) {
+      seen.push(structuredClone(request.messages));
+      calls++;
+      if (calls === 1) {
+        throw Object.assign(new Error("request rejected"), {
+          status: 400,
+          body: '{"error":{"code":"context_length_exceeded"}}',
+        });
+      }
+      return assistantText("recovered");
+    },
+  };
+  const history: Message[] = [{ role: "user", content: [{ kind: "text", text: "hello" }] }];
+  const reasons: string[] = [];
+  const sink = events();
+  sink.onContext = async (_history, _context, reason, error) => {
+    reasons.push(reason);
+    if (reason !== "overflow" || error === undefined) return undefined;
+    return [{ role: "user", content: [{ kind: "text", text: "safe summary" }] }];
+  };
+
+  await runTurn(history, options(provider), sink);
+
+  assert.equal(calls, 2);
+  assert.deepEqual(reasons, ["budget", "overflow"]);
+  assert.deepEqual(texts(seen[1] ?? []), ["safe summary"]);
+  assert.deepEqual(texts(history), ["hello", "recovered"]);
+});
+
 test("runs shared calls concurrently while preserving result order", async () => {
   let active = 0;
   let peak = 0;
@@ -662,6 +727,12 @@ test("a shell credential cannot reach the provider follow-up or display events",
 function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
+}
+
+function texts(messages: readonly Message[]): string[] {
+  return messages.flatMap((message) => message.content)
+    .filter((block) => block.kind === "text")
+    .map((block) => block.text);
 }
 
 function delay(ms: number): Promise<void> {

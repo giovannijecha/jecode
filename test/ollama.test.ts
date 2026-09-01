@@ -48,6 +48,80 @@ test("offers and sends Ollama's supported reasoning effort levels", async (conte
   assert.equal(requestBody?.["reasoning_effort"], "medium");
 });
 
+test("prefers Ollama's currently allocated runtime context", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const model = "runtime-context-fixture:latest";
+  configureOllama("http://127.0.0.1:11434");
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    assert.equal(String(input), "http://127.0.0.1:11434/api/ps");
+    return new Response(JSON.stringify({
+      models: [{ name: model, context_length: 32_768 }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    configureOllama(undefined);
+  });
+
+  assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 31_129 });
+});
+
+test("falls back to Ollama model capacity when the model is not loaded", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const model = "stored-context-fixture:latest";
+  const urls: string[] = [];
+  configureOllama("http://127.0.0.1:11434");
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({
+      model_info: { "fixture.context_length": 131_072 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    configureOllama(undefined);
+  });
+
+  assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 124_518 });
+  assert.deepEqual(urls, [
+    "http://127.0.0.1:11434/api/ps",
+    "http://127.0.0.1:11434/api/show",
+  ]);
+});
+
+test("does not cache Ollama's theoretical capacity over a later runtime allocation", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const model = "changing-context-fixture:latest";
+  let loaded = false;
+  configureOllama("http://127.0.0.1:11434");
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({
+        models: loaded ? [{ name: model, context_length: 32_768 }] : [],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    loaded = true;
+    return new Response(JSON.stringify({
+      model_info: { "fixture.context_length": 131_072 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    configureOllama(undefined);
+  });
+
+  assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 124_518 });
+  assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 31_129 });
+});
+
 test("rejects an Ollama effort outside the documented vocabulary", async (context) => {
   const previousFetch = globalThis.fetch;
   let requests = 0;

@@ -3,10 +3,13 @@
 // can become conversation or provider input.
 
 import type { TurnNode } from "../conversation.ts";
+import type { ContextAnchor } from "../context/projection.ts";
+import { CONTEXT_LIMITS } from "../context/projection.ts";
 import type { Detail, TranscriptBlock } from "../transcript-types.ts";
 import type { Block, Message, Usage } from "../types.ts";
 
-export const SESSION_SCHEMA = 1;
+export const SESSION_SCHEMA = 2;
+export type SessionSchema = 1 | 2;
 export const SESSION_FILE_LIMITS = Object.freeze({
   text: 1_048_576,
   jsonDepth: 24,
@@ -16,7 +19,7 @@ export const SESSION_FILE_LIMITS = Object.freeze({
 });
 
 export type SessionMeta = Readonly<{
-  version: 1;
+  version: SessionSchema;
   id: string;
   workspaceRoot: string;
   workspaceDigest: string;
@@ -24,7 +27,7 @@ export type SessionMeta = Readonly<{
 }>;
 
 export type SessionHead = Readonly<{
-  version: 1;
+  version: SessionSchema;
   sequence: number;
   nodeId: number;
   parentId: number;
@@ -47,14 +50,14 @@ export function decodeMeta(value: unknown): SessionMeta {
     throw invalid();
   }
   if (
-    value["version"] !== SESSION_SCHEMA ||
+    !schema(value["version"]) ||
     !identifier(value["id"]) ||
     !bounded(value["workspaceRoot"], 32_768) ||
     !digest(value["workspaceDigest"]) ||
     !timestamp(value["createdAt"])
   ) throw invalid();
   return Object.freeze({
-    version: 1,
+    version: value["version"],
     id: value["id"],
     workspaceRoot: value["workspaceRoot"],
     workspaceDigest: value["workspaceDigest"],
@@ -71,7 +74,7 @@ export function decodeHead(value: unknown): SessionHead {
     throw invalid();
   }
   if (
-    value["version"] !== SESSION_SCHEMA ||
+    !schema(value["version"]) ||
     !integer(value["sequence"], 0) ||
     !integer(value["nodeId"], 1) ||
     !integer(value["parentId"], 0) || value["parentId"] >= value["nodeId"] ||
@@ -79,7 +82,7 @@ export function decodeHead(value: unknown): SessionHead {
     !timestamp(value["updatedAt"])
   ) throw invalid();
   return Object.freeze({
-    version: 1,
+    version: value["version"],
     sequence: value["sequence"],
     nodeId: value["nodeId"],
     parentId: value["parentId"],
@@ -102,18 +105,23 @@ export function encodeNode(node: TurnNode, sequence: number, updatedAt: string):
       identity: node.identity,
       messages: node.messages.map(messageRecord),
       blocks: node.blocks.flatMap(blockRecord),
+      context: node.context ?? null,
     },
   });
 }
 
 export function decodeNode(value: unknown): StoredNode {
   if (!record(value) || !keys(value, "node,sequence,updatedAt,version")) throw invalid();
+  const version = value["version"];
   if (
-    value["version"] !== SESSION_SCHEMA || !integer(value["sequence"], 1) ||
+    !schema(version) || !integer(value["sequence"], 1) ||
     !timestamp(value["updatedAt"])
   ) throw invalid();
   const raw = value["node"];
-  if (!record(raw) || !keys(raw, "blocks,createdAt,id,identity,messages,parentId,revision,settlement")) {
+  const nodeKeys = version === 1
+    ? "blocks,createdAt,id,identity,messages,parentId,revision,settlement"
+    : "blocks,context,createdAt,id,identity,messages,parentId,revision,settlement";
+  if (!record(raw) || !keys(raw, nodeKeys)) {
     throw invalid();
   }
   const identity = raw["identity"];
@@ -132,6 +140,10 @@ export function decodeNode(value: unknown): StoredNode {
     !Array.isArray(blocks) || blocks.length > SESSION_FILE_LIMITS.blocks
   ) throw invalid();
 
+  const context = version === 1
+    ? undefined
+    : contextFromRecord(raw["context"], raw["id"], messages.length);
+
   const node: TurnNode = Object.freeze({
     id: raw["id"],
     parentId: raw["parentId"],
@@ -145,8 +157,33 @@ export function decodeNode(value: unknown): StoredNode {
     }),
     messages: Object.freeze(messages.map(messageFromRecord)),
     blocks: Object.freeze(blocks.map(blockFromRecord)),
+    ...(context === undefined ? {} : { context: Object.freeze(context) }),
   });
   return Object.freeze({ sequence: value["sequence"], updatedAt: value["updatedAt"], node });
+}
+
+function contextFromRecord(
+  value: unknown,
+  ownerId: number,
+  ownerMessages: number,
+): ContextAnchor | undefined {
+  if (value === null) return undefined;
+  if (!record(value) || !keys(value, "createdAt,messageCount,summary,throughNodeId")) {
+    throw invalid();
+  }
+  if (
+    !integer(value["throughNodeId"], 1) || value["throughNodeId"] > ownerId ||
+    !integer(value["messageCount"], 0) ||
+    (value["throughNodeId"] === ownerId && value["messageCount"] > ownerMessages) ||
+    !timestamp(value["createdAt"]) ||
+    !bounded(value["summary"], CONTEXT_LIMITS.summaryCodeUnits)
+  ) throw invalid();
+  return {
+    throughNodeId: value["throughNodeId"],
+    messageCount: value["messageCount"],
+    createdAt: value["createdAt"],
+    summary: value["summary"],
+  };
 }
 
 function messageRecord(message: Message): unknown {
@@ -377,6 +414,10 @@ function boundedText(value: unknown, limit: number = SESSION_FILE_LIMITS.text): 
 
 function integer(value: unknown, minimum: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum;
+}
+
+function schema(value: unknown): value is SessionSchema {
+  return value === 1 || value === SESSION_SCHEMA;
 }
 
 function nullableInteger(value: unknown, minimum: number): value is number | null {
