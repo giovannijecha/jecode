@@ -4,6 +4,20 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.7.2] - 2026-09-02
+
+### Fixed
+
+- Preserved partial transcript evidence and explicit failed or interrupted
+  outcomes consistently across export, timeline, resume, and later turns.
+- Enforced the same per-field and UTF-8 file-size boundaries before session
+  commits and writes that the loader applies after a restart, while retaining
+  compatibility with schema 1 and 2 sessions.
+- Ordered the resume catalogue by durable update time across its complete
+  bounded input set, so an older session updated most recently stays visible.
+- Aborted and awaited active provider or tool work before closing persistence
+  after a fatal TUI failure, and preserved failure outcomes through `/compact`.
+
 ## [0.7.1] - 2026-09-02
 
 ### Fixed
@@ -384,6 +398,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.7.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.2
 [0.7.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.1
 [0.7.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.0
 [0.6.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.6.0
