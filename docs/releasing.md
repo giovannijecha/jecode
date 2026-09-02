@@ -19,7 +19,7 @@ the npm artifact through trusted publishing.
 
 ```powershell
 $releaseVersion = node -p "require('./package.json').version"
-git tag "v$releaseVersion"
+git tag --annotate "v$releaseVersion" --message "Jecode $releaseVersion"
 git push origin "v$releaseVersion"
 ```
 
