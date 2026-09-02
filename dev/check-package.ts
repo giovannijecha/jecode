@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { assertReleaseDocumentation } from "./release-policy.ts";
 
 const npm = process.env.npm_execpath;
 if (npm === undefined) throw new Error("run this check through npm run check:package");
@@ -37,9 +38,13 @@ const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
   private?: boolean;
   publishConfig?: { access?: string; registry?: string };
   scripts?: Record<string, unknown>;
+  version?: string;
 };
 if (manifest.name !== "@giovannijecha/jecode") {
   throw new Error("release packages must use the canonical npm scope");
+}
+if (typeof manifest.version !== "string" || manifest.version === "") {
+  throw new Error("release packages must declare a version");
 }
 if (manifest.bin?.jecode !== "bin/jecode.js") {
   throw new Error("the jecode executable path must use npm's canonical bin form");
@@ -54,6 +59,8 @@ if (manifest.publishConfig?.access !== "public") {
 if (manifest.publishConfig?.registry !== "https://registry.npmjs.org/") {
   throw new Error("release packages must target the public npm registry");
 }
+const readme = readFileSync("README.md", "utf8");
+assertReleaseDocumentation(manifest.version, readme);
 if (manifest.scripts?.["build:release"] !== "node dev/build-release.ts") {
   throw new Error("release packages must keep one explicit clean build command");
 }

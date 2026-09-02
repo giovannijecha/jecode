@@ -117,12 +117,10 @@ Windows, Ubuntu, and macOS are covered by the project test matrix.
 
 ### Prereleases
 
-The stable npm package is the supported installation artifact. To try an
-opt-in prerelease:
-
-```console
-npm install --global @giovannijecha/jecode@next
-```
+Prereleases exist only during an announced release-candidate cycle. When one is
+active, its GitHub release provides the exact installation command. Outside an
+active cycle, the stable npm package is the only supported installation
+artifact.
 
 Git URL installs are intentionally unsupported: the source tree contains no
 generated runtime and defines no install-time build hook.
@@ -411,7 +409,8 @@ fixtures. `npm run bench:transcript` and `npm run bench:search` provide manual
 probes for long-session rendering and workspace search. Architecture and
 security boundaries are documented in
 [docs/architecture.md](docs/architecture.md); brand assets and usage rules live
-in [docs/brand.md](docs/brand.md).
+in [docs/brand.md](docs/brand.md). The maintainer release procedure lives in
+[docs/releasing.md](docs/releasing.md).
 
 ## Community
 

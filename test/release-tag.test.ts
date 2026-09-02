@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { assertReleaseDocumentation, releaseChannel } from "../dev/release-policy.ts";
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
 
@@ -33,6 +34,20 @@ test("the release guard exports the npm channel for GitHub Actions", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("release channels ignore build metadata when identifying a prerelease", () => {
+  assert.equal(releaseChannel("1.0.0"), "latest");
+  assert.equal(releaseChannel("1.0.0+build-test"), "latest");
+  assert.equal(releaseChannel("1.0.0-rc.1+build-test"), "next");
+});
+
+test("stable documentation cannot advertise an inactive next tag", () => {
+  const command = "npm install --global @giovannijecha/jecode@next";
+
+  assert.throws(() => assertReleaseDocumentation("1.0.0", command), /inactive npm next tag/);
+  assert.doesNotThrow(() => assertReleaseDocumentation("1.0.0-rc.1", command));
+  assert.doesNotThrow(() => assertReleaseDocumentation("1.0.0", "install the stable release"));
 });
 
 function runGuard(

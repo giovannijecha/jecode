@@ -4,7 +4,7 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
-## [Unreleased]
+## [0.7.4] - 2026-09-02
 
 ### Fixed
 
@@ -22,6 +22,8 @@ install artifacts and provenance are published with the [npm package].
   boundaries in Markdown and plain terminal text.
 - Kept bounded previews, provider and OAuth error details, and colored diff
   emphasis on complete grapheme boundaries, including historical emphasis.
+- Stopped stable documentation from advertising an inactive npm `next` channel
+  and added a release gate against future drift.
 
 ## [0.7.3] - 2026-09-02
 
@@ -438,6 +440,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.7.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.4
 [0.7.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.3
 [0.7.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.2
 [0.7.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.1

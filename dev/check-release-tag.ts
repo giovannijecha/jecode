@@ -1,6 +1,7 @@
 // Refuse to publish when the immutable Git tag and package version diverge.
 
 import { appendFile, readFile } from "node:fs/promises";
+import { releaseChannel } from "./release-policy.ts";
 
 type Manifest = { name?: unknown; version?: unknown };
 
@@ -22,7 +23,7 @@ if (tag !== expected) {
   throw new Error(`release tag ${JSON.stringify(tag)} does not match ${JSON.stringify(expected)}`);
 }
 
-const channel = manifest.version.split("+", 1)[0]?.includes("-") === true ? "next" : "latest";
+const channel = releaseChannel(manifest.version);
 if (process.env.GITHUB_OUTPUT !== undefined) {
   await appendFile(process.env.GITHUB_OUTPUT, `channel=${channel}\n`, "utf8");
 }
