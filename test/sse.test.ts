@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readSseJson } from "../src/providers/sse.ts";
+import { readSseJson, SseEventParser } from "../src/providers/sse.ts";
 import {
   MAX_SSE_EVENT_CHARS,
   MAX_SSE_STREAM_CHARS,
@@ -142,4 +142,20 @@ test("decodes multi-byte characters split across chunks", async () => {
     }),
   );
   assert.deepEqual(events, [{ text: "è" }]);
+});
+
+test("parses a large event from one-character fragments without rescanning its prefix", () => {
+  const source = `data: {"text":"${"x".repeat(256_000)}"}\n\n`;
+  const parser = new SseEventParser();
+  const events: unknown[] = [];
+  const started = performance.now();
+  for (const character of source) {
+    for (const parsed of parser.push(character)) events.push(parsed);
+  }
+  const final = parser.finish();
+  if (final !== undefined) events.push(final);
+  const elapsed = performance.now() - started;
+
+  assert.deepEqual(events, [{ text: "x".repeat(256_000) }]);
+  assert.ok(elapsed < 1_000, `fragmented SSE event took ${elapsed.toFixed(1)}ms`);
 });
