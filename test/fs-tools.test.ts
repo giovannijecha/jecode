@@ -5,7 +5,16 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import { editFile, listDir, readFile, writeFile } from "../src/tools/fs.ts";
+import { atomicWrite } from "../src/atomic.ts";
+import {
+  editFile,
+  listDir,
+  readFile,
+  runEditFile,
+  runWriteFile,
+  writeFile,
+  type FileMutationDependencies,
+} from "../src/tools/fs.ts";
 import {
   MAX_EDITABLE_BYTES,
   MAX_EDITABLE_LINES,
@@ -285,8 +294,18 @@ test("a write to a file that is not there yet previews as all new", async () => 
   const look = await writeFile.preview?.({ path: "fresh.txt", content: "hello" }, ctx);
   assert.equal(look?.before, "");
   assert.equal(look?.after, "hello");
+  assert.equal(look?.beforeExists, false);
   // Previewing must never be the thing that creates the file.
   await assert.rejects(fs.stat(path.join(ctx.root, "fresh.txt")));
+});
+
+test("a write distinguishes a newly created empty file from the approved missing target", async () => {
+  const args = { path: "created-after-preview.txt", content: "replacement" };
+  const preview = await writeFile.preview?.(args, ctx);
+  await fs.writeFile(path.join(ctx.root, args.path), "", "utf8");
+
+  await assert.rejects(writeFile.run(args, { ...ctx, preview }), /changed after the preview/);
+  assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "");
 });
 
 test("an edit previews against the whole file, and leaves it alone", async () => {
@@ -324,6 +343,41 @@ test("an edit refuses when the approved file changes before execution", async ()
   assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "changed elsewhere");
 });
 
+test("a write preserves a concurrent update made immediately before rename", async () => {
+  const args = { path: "commit-raced-write.txt", content: "approved replacement" };
+  await writeFile.run({ path: args.path, content: "before" }, ctx);
+  const preview = await writeFile.preview?.(args, ctx);
+
+  await assert.rejects(
+    runWriteFile(args, { ...ctx, preview }, replaceBeforeRename("concurrent update")),
+    /changed after the preview/,
+  );
+  assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "concurrent update");
+});
+
+test("a write preserves an empty file created immediately before rename", async () => {
+  const args = { path: "commit-created-write.txt", content: "approved replacement" };
+  const preview = await writeFile.preview?.(args, ctx);
+
+  await assert.rejects(
+    runWriteFile(args, { ...ctx, preview }, replaceBeforeRename("")),
+    /changed after the preview/,
+  );
+  assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "");
+});
+
+test("an edit preserves a concurrent update made immediately before rename", async () => {
+  const args = { path: "commit-raced-edit.txt", old_text: "before", new_text: "after" };
+  await writeFile.run({ path: args.path, content: "before" }, ctx);
+  const preview = await editFile.preview?.(args, ctx);
+
+  await assert.rejects(
+    runEditFile(args, { ...ctx, preview }, replaceBeforeRename("concurrent update")),
+    /changed after the preview/,
+  );
+  assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "concurrent update");
+});
+
 test("atomic replacement preserves an existing POSIX executable mode", { skip: process.platform === "win32" }, async () => {
   const file = path.join(ctx.root, "script.sh");
   await fs.writeFile(file, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -333,3 +387,15 @@ test("atomic replacement preserves an existing POSIX executable mode", { skip: p
   );
   assert.equal((await fs.stat(file)).mode & 0o777, 0o755);
 });
+
+function replaceBeforeRename(content: string): FileMutationDependencies {
+  return {
+    atomicWrite: (file, replacement, options = {}) => atomicWrite(file, replacement, {
+      ...options,
+      async validate(phase) {
+        if (phase === "before-rename") await fs.writeFile(file, content, "utf8");
+        await options.validate?.(phase);
+      },
+    }),
+  };
+}

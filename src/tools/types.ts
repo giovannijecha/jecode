@@ -31,7 +31,12 @@ export type ToolOutput = {
  * "twenty-two added lines" is a very different question from "twenty-two lines
  * replacing these nineteen".
  */
-export type ToolPreview = { before: string; after: string };
+export type ToolPreview = {
+  before: string;
+  after: string;
+  /** Distinguishes an absent target from an existing empty file. */
+  beforeExists?: boolean;
+};
 
 export type ToolConcurrency = "shared" | "exclusive";
 
