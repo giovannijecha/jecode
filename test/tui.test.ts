@@ -375,6 +375,26 @@ test("an edit is diffed from the call, so approval is about the change", () => {
   assert.match(rendered, /\+\s+1 const x = 1;/);
 });
 
+test("an emoji replacement emphasizes complete graphemes", () => {
+  const { blocks, events } = stage([]);
+  const before = String.fromCodePoint(0x1f600);
+  const after = String.fromCodePoint(0x1f601);
+  events.onToolCall(
+    callOf("emoji", "edit_file", { path: "emoji.txt", old_text: before, new_text: after }),
+  );
+
+  const [block] = blocks;
+  assert.equal(block?.kind, "tool");
+  if (block?.kind !== "tool") return;
+  const removed = block.body?.[0];
+  const added = block.body?.[1];
+  assert.equal(removed?.kind, "del");
+  assert.equal(added?.kind, "add");
+  if (removed?.kind !== "del" || added?.kind !== "add") return;
+  assert.deepEqual(removed.emphasis, { start: 0, length: before.length });
+  assert.deepEqual(added.emphasis, { start: 0, length: after.length });
+});
+
 test("a tool is a compact execution rail with evidence beneath it", () => {
   const block: Block = {
     kind: "tool",
@@ -479,7 +499,7 @@ test("compact reasoning bounds the markdown source without discarding the full b
   const source = reasoningPreviewSource(text, 80);
 
   assert.equal(source.truncated, true);
-  assert.ok(source.text.length <= 4_097);
+  assert.ok(source.text.length <= 4_096);
   assert.doesNotMatch(source.text, /old context/);
   assert.match(source.text, /visible tail$/);
 
@@ -492,6 +512,24 @@ test("compact reasoning bounds the markdown source without discarding the full b
   const settled = strip(renderAll([block], 80, STEEL)).join("\n");
   assert.doesNotMatch(settled, /old context/);
   assert.match(settled, /visible tail/);
+});
+
+test("compact reasoning starts on a complete grapheme boundary", () => {
+  const limit = 4_096;
+  const clusters = [
+    String.fromCodePoint(0x1f600),
+    `e${String.fromCodePoint(0x0301)}`,
+    `${String.fromCodePoint(0x1f469)}${String.fromCodePoint(0x200d)}` +
+      String.fromCodePoint(0x1f4bb),
+    `${String.fromCodePoint(0x1f1ee)}${String.fromCodePoint(0x1f1f9)}`,
+  ];
+
+  for (const cluster of clusters) {
+    const suffix = "a".repeat(limit + 1 - cluster.length);
+    const source = reasoningPreviewSource(`x${cluster}${suffix}`, 80);
+    assert.equal(source.text, suffix);
+    assert.equal(source.text.isWellFormed(), true);
+  }
 });
 
 test("a live expansion waits for the complete thought before rendering the full source", () => {

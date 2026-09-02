@@ -7,6 +7,7 @@
 import type { ControllerEvents } from "../controller.ts";
 import type { ToolCallBlock, Usage } from "../types.ts";
 import type { ToolPreview } from "../tools/index.ts";
+import { graphemes } from "../text-boundary.ts";
 import { condense, diff } from "../ui/diff.ts";
 import type { Answer } from "./approve.ts";
 import { promptFor } from "./approve.ts";
@@ -299,18 +300,42 @@ function emphasizePairs(rows: Detail[]): void {
     if (removed?.kind !== "del" || added?.kind !== "add") continue;
     if (rows[index - 1]?.kind === "del" || rows[index + 2]?.kind === "add") continue;
 
+    const removedClusters = graphemes(removed.text);
+    const addedClusters = graphemes(added.text);
+    let prefix = 0;
     let start = 0;
-    while (start < removed.text.length && start < added.text.length && removed.text[start] === added.text[start]) start++;
-    let suffix = 0;
     while (
-      suffix < removed.text.length - start &&
-      suffix < added.text.length - start &&
-      removed.text[removed.text.length - 1 - suffix] === added.text[added.text.length - 1 - suffix]
-    ) suffix++;
-    while (suffix > 0 && (!wordBoundary(removed.text, suffix) || !wordBoundary(added.text, suffix))) suffix--;
+      prefix < removedClusters.length &&
+      prefix < addedClusters.length &&
+      removedClusters[prefix] === addedClusters[prefix]
+    ) {
+      start += (removedClusters[prefix] as string).length;
+      prefix++;
+    }
+    let suffix = 0;
+    let removedSuffix = 0;
+    let addedSuffix = 0;
+    while (
+      suffix < removedClusters.length - prefix &&
+      suffix < addedClusters.length - prefix &&
+      removedClusters[removedClusters.length - 1 - suffix] ===
+        addedClusters[addedClusters.length - 1 - suffix]
+    ) {
+      removedSuffix += (removedClusters[removedClusters.length - 1 - suffix] as string).length;
+      addedSuffix += (addedClusters[addedClusters.length - 1 - suffix] as string).length;
+      suffix++;
+    }
+    while (
+      suffix > 0 &&
+      (!wordBoundary(removed.text, removedSuffix) || !wordBoundary(added.text, addedSuffix))
+    ) {
+      removedSuffix -= (removedClusters[removedClusters.length - suffix] as string).length;
+      addedSuffix -= (addedClusters[addedClusters.length - suffix] as string).length;
+      suffix--;
+    }
 
-    const removedLength = removed.text.length - start - suffix;
-    const addedLength = added.text.length - start - suffix;
+    const removedLength = removed.text.length - start - removedSuffix;
+    const addedLength = added.text.length - start - addedSuffix;
     if (removedLength > 0) removed.emphasis = { start, length: removedLength };
     if (addedLength > 0) added.emphasis = { start, length: addedLength };
   }

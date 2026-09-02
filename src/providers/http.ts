@@ -2,6 +2,7 @@
 // event stream. Only idempotent reads retry. Once a POST starts or response
 // bytes flow, a failure is surfaced rather than silently replayed.
 
+import { leadingText } from "../text-boundary.ts";
 import { readSseJson } from "./sse.ts";
 import { sseStreamCharacterLimit } from "./stream-limits.ts";
 
@@ -50,7 +51,7 @@ async function asJson(url: string, res: Response): Promise<unknown> {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw httpError(`${url} returned non-JSON`, res.status, text.slice(0, 500));
+    throw httpError(`${url} returned non-JSON`, res.status, leadingText(text, 500));
   }
 }
 
@@ -146,13 +147,13 @@ async function boundedText(
       if (done) {
         text += decoder.decode();
         return text.length > max
-          ? { text: text.slice(0, max), truncated: true }
+          ? { text: leadingText(text, max), truncated: true }
           : { text, truncated: false };
       }
       text += decoder.decode(value, { stream: true });
       if (text.length > max) {
         await reader.cancel().catch(() => undefined);
-        return { text: text.slice(0, max), truncated: true };
+        return { text: leadingText(text, max), truncated: true };
       }
     }
   } finally {

@@ -1,4 +1,5 @@
 import type { Palette } from "../../ui/theme.ts";
+import { trailingText } from "../../text-boundary.ts";
 import { blank, row } from "../../ui/render.ts";
 import { markdown } from "../../ui/markdown.ts";
 import type { AnswerBlock, ReasoningBlock, UserBlock } from "./types.ts";
@@ -66,8 +67,5 @@ export function reasoningPreviewSource(
 
   // A compact view only needs its visible tail. The complete text remains on
   // the block for expansion after the reasoning stream is sealed.
-  let start = text.length - limit;
-  const code = text.charCodeAt(start);
-  if (code >= 0xdc00 && code <= 0xdfff) start--;
-  return { text: text.slice(start), truncated: true };
+  return { text: trailingText(text, limit), truncated: true };
 }

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { graphemeCeiling, graphemeFloor } from "../src/text-boundary.ts";
 import { leadingText, trailingText } from "../src/tools/text-boundary.ts";
 
 const clusters = [
@@ -36,4 +37,35 @@ test("bounded text keeps complete input and honors an empty budget", () => {
   assert.equal(trailingText("complete", 20), "complete");
   assert.equal(leadingText("complete", 0), "");
   assert.equal(trailingText("complete", 0), "");
+});
+
+test("arbitrary offsets snap outward to complete grapheme boundaries", () => {
+  for (const [name, cluster] of clusters) {
+    const text = `a${cluster}b`;
+    const inside = 1 + Math.max(1, cluster.length - 1);
+    assert.equal(graphemeFloor(text, inside), 1, `${name} floor was not safe`);
+    assert.equal(graphemeCeiling(text, inside), 1 + cluster.length, `${name} ceiling was not safe`);
+    assert.equal(graphemeFloor(text, 1 + cluster.length), 1 + cluster.length);
+    assert.equal(graphemeCeiling(text, 1), 1);
+  }
+});
+
+test("a trailing projection does not walk the hidden prefix", () => {
+  const prototype = Object.getPrototypeOf(
+    new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(""),
+  ) as object;
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, Symbol.iterator);
+  assert.ok(descriptor?.value !== undefined);
+
+  Object.defineProperty(prototype, Symbol.iterator, {
+    ...descriptor,
+    value: () => {
+      throw new Error("unexpected full grapheme scan");
+    },
+  });
+  try {
+    assert.equal(trailingText(`${"hidden ".repeat(100_000)}visible`, 7), "visible");
+  } finally {
+    Object.defineProperty(prototype, Symbol.iterator, descriptor);
+  }
 });

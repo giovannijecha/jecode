@@ -3,6 +3,8 @@
 // These requests never redirect, never retry, and never retain an unbounded
 // response. Authorization codes and refresh tokens must not leak into errors.
 
+import { leadingText } from "./text-boundary.ts";
+
 const AUTH_ORIGIN = "https://auth.openai.com";
 const TIMEOUT_MS = 15_000;
 const MAX_BODY_CHARS = 64_000;
@@ -101,7 +103,7 @@ function errorDetail(value: unknown, secrets: readonly string[]): string {
   if (typeof detail !== "string" || detail.trim() === "") return "";
   let safe = detail.replace(/[\r\n]+/g, " ");
   for (const secret of secrets) safe = safe.replaceAll(secret, "[credential redacted]");
-  return ` · ${safe.slice(0, 300)}`;
+  return ` · ${leadingText(safe, 300)}`;
 }
 
 function bodySecrets(body: OAuthBody): string[] {

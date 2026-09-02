@@ -97,6 +97,27 @@ test("browser sign-in rejects a mismatched callback without cancelling the real 
   }
 });
 
+test("browser rejection details end on a complete grapheme", async () => {
+  const login = await beginBrowserLogin();
+  try {
+    const authorize = new URL(login.url);
+    const redirect = new URL(authorize.searchParams.get("redirect_uri") as string);
+    const prefix = "x".repeat(299);
+    redirect.searchParams.set("state", authorize.searchParams.get("state") as string);
+    redirect.searchParams.set("error_description", `${prefix}${String.fromCodePoint(0x1f600)}tail`);
+    const page = httpText(redirect);
+
+    await assert.rejects(login.complete(), (error: Error) => {
+      assert.equal(error.message.endsWith(prefix), true);
+      assert.equal(error.message.isWellFormed(), true);
+      return true;
+    });
+    assert.equal((await page).status, 400);
+  } finally {
+    await login.close();
+  }
+});
+
 test("device sign-in exchanges only after the user code is authorized", async (context) => {
   const previousFetch = globalThis.fetch;
   const requests: { url: string; body: string }[] = [];
@@ -172,6 +193,26 @@ test("OAuth errors reject redirects and redact submitted secrets", async (contex
     (error: Error) => {
       assert.doesNotMatch(error.message, /secret-refresh-token/);
       assert.match(error.message, /credential redacted/);
+      return true;
+    },
+  );
+});
+
+test("OAuth error details end on a complete grapheme", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const prefix = "x".repeat(299);
+  const emoji = String.fromCodePoint(0x1f600);
+  globalThis.fetch = (async () => json({ message: `${prefix}${emoji}tail` }, 400)) as typeof fetch;
+  context.after(() => { globalThis.fetch = previousFetch; });
+
+  await assert.rejects(
+    oauthRequest("https://auth.openai.com/oauth/token", {
+      contentType: "application/json",
+      value: {},
+    }),
+    (error: Error) => {
+      assert.equal(error.message.endsWith(prefix), true);
+      assert.equal(error.message.isWellFormed(), true);
       return true;
     },
   );
