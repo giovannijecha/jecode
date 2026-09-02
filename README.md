@@ -343,8 +343,9 @@ npm run check
 ```
 
 Use `npm run tui:lab` to inspect production TUI components with inert local
-fixtures, and `npm run bench:transcript` for a manual long-session rendering
-probe. Architecture and security boundaries are documented in
+fixtures. `npm run bench:transcript` and `npm run bench:search` provide manual
+probes for long-session rendering and workspace search. Architecture and
+security boundaries are documented in
 [docs/architecture.md](docs/architecture.md); brand assets and usage rules live
 in [docs/brand.md](docs/brand.md).
 
