@@ -9,6 +9,7 @@ import type { Message, ToolSpec } from "./types.ts";
 export type ControllerResponse = Readonly<{
   message: Message;
   context: Message[];
+  inputTokens: number;
 }>;
 
 export async function requestAssistant(
@@ -42,7 +43,7 @@ export async function requestAssistant(
         onStream: (event) => events.onStream(event),
         onStatus: (status) => events.onStatus?.(status),
       });
-      return { message, context };
+      return { message, context, inputTokens: budget.inputTokens };
     } catch (error) {
       if (recovered) throw error;
       if (isContextOverflow(error as Error)) policy = await options.contextPolicy();

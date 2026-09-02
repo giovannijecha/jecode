@@ -207,7 +207,6 @@ function modelContextWindow(entry: Record<string, unknown>): ModelContextWindow 
   if (resolved === undefined) return undefined;
   const percent = percentage(entry["effective_context_window_percent"]) ?? 95;
   const tokens = Math.floor(resolved * percent / 100);
-  if (!validTokenCount(tokens)) return undefined;
   const automatic = Math.floor(resolved * 9 / 10);
   const advertised = tokenCount(entry["auto_compact_token_limit"]);
   return Object.freeze({

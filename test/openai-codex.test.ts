@@ -58,6 +58,26 @@ test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded
   });
 });
 
+test("the ChatGPT catalogue retains a minimum 4K context after headroom", async (context) => {
+  await inStore(async () => {
+    await saveAccount("small-context-access", "small-context-refresh");
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async () => json({ models: [{
+      slug: "small-context-model",
+      visibility: "list",
+      priority: 1,
+      context_window: 4_096,
+      effective_context_window_percent: 95,
+    }] })) as typeof fetch;
+    context.after(() => { globalThis.fetch = previousFetch; });
+
+    assert.deepEqual(await openaiCodex.contextWindow?.("small-context-model"), {
+      tokens: 3_891,
+      compactAtTokens: 3_686,
+    });
+  });
+});
+
 test("the ChatGPT provider rejects an effort omitted by the live model catalogue", async (context) => {
   await inStore(async () => {
     await saveAccount("catalog-access", "catalog-refresh");

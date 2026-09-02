@@ -20,7 +20,7 @@ import type { Block } from "./tui/blocks.ts";
 import { renderBatch } from "./batch-view.ts";
 import { columns } from "./ui/render.ts";
 import { terminalText } from "./ui/terminal-text.ts";
-import { recordAuxiliaryUsage, recordUsage } from "./usage.ts";
+import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "./usage.ts";
 
 export type BatchEnvironment = {
   lines?: AsyncIterable<string>;
@@ -191,6 +191,9 @@ function events(
     },
     onUsage(usage) {
       recordUsage(session.usage, usage);
+    },
+    onRequestInput(inputTokens) {
+      recordRequestInput(session.usage, inputTokens);
     },
   };
 }
