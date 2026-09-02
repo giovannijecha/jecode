@@ -53,10 +53,32 @@
 
 Jecode requires **Node.js 22.18+ on the 22.x line, or Node.js 24+**, and npm.
 
+### Install or update
+
+Install the current stable release. Running the same command again updates an
+existing installation:
+
 ```console
-npm install --global @giovannijecha/jecode
+npm install --global @giovannijecha/jecode@latest
+```
+
+Confirm the installed version:
+
+```console
 jecode --version
+```
+
+### Start Jecode
+
+Open the project you want Jecode to work on:
+
+```console
 cd path/to/your/project
+```
+
+Then start Jecode:
+
+```console
 jecode
 ```
 
@@ -71,15 +93,27 @@ change to improve startup performance.
 Use `jecode --root path/to/project` to select another workspace, or
 `jecode --ephemeral` when the conversation must stay memory-only.
 
-Resume a saved conversation for the current workspace with a searchable picker:
+### Resume a conversation
+
+Open the searchable resume picker for the current workspace:
 
 ```console
 jecode resume
+```
+
+Resume the most recently updated conversation directly:
+
+```console
 jecode resume --latest
 ```
 
-Run `jecode --help` for every startup option. Windows, Ubuntu, and macOS are
-covered by the project test matrix.
+List every startup option:
+
+```console
+jecode --help
+```
+
+Windows, Ubuntu, and macOS are covered by the project test matrix.
 
 ### Prereleases
 
@@ -93,11 +127,9 @@ npm install --global @giovannijecha/jecode@next
 Git URL installs are intentionally unsupported: the source tree contains no
 generated runtime and defines no install-time build hook.
 
-### Update and uninstall
+### Uninstall
 
 ```console
-npm install --global @giovannijecha/jecode
-jecode --version
 npm uninstall --global @giovannijecha/jecode
 ```
 
@@ -105,12 +137,19 @@ Uninstalling the command preserves `~/.jecode`. Remove that directory only when
 you intentionally want to erase saved settings, credentials, accounts, and
 sessions.
 
-If an older GitHub installation still owns the `jecode` executable, remove the
-legacy unscoped package before installing the scoped package:
+### Replace a legacy installation
+
+If an older GitHub installation still owns the `jecode` executable, first
+remove the legacy unscoped package:
 
 ```console
 npm uninstall --global jecode
-npm install --global @giovannijecha/jecode
+```
+
+Then install the current scoped package:
+
+```console
+npm install --global @giovannijecha/jecode@latest
 ```
 
 Do not work around the resulting `EEXIST` error with `--force`.
@@ -119,14 +158,39 @@ Do not work around the resulting `EEXIST` error with `--force`.
 
 WSL uses its own Node.js installation and `PATH`; the Node.js version installed
 on Windows does not apply inside it. Keep user-installed npm commands in the
-Linux user path:
+Linux user path. Set the user-level npm prefix:
 
 ```console
 npm config set prefix "$HOME/.local"
+```
+
+Add it to the current shell's `PATH`:
+
+```console
 export PATH="$HOME/.local/bin:$PATH"
-npm install --global @giovannijecha/jecode
+```
+
+Install or update Jecode:
+
+```console
+npm install --global @giovannijecha/jecode@latest
+```
+
+Refresh the command cache:
+
+```console
 hash -r
+```
+
+Confirm which executable will run:
+
+```console
 command -v jecode
+```
+
+Verify the installed version:
+
+```console
 jecode --version
 ```
 
