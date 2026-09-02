@@ -22,11 +22,13 @@
 
 <p align="center">
   <a href="https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md">Changelog</a> &middot;
+  <a href="https://github.com/giovannijecha/jecode/blob/main/docs/compatibility.md">Compatibility</a> &middot;
   <a href="https://github.com/giovannijecha/jecode/releases">Releases</a>
 </p>
 
 > Jecode is currently pre-1.0. The core loop is usable today, but commands and
-> terminal interactions may still evolve before 1.0.
+> terminal interactions may still evolve before 1.0. The release-candidate
+> surface is now frozen in the [compatibility contract](https://github.com/giovannijecha/jecode/blob/main/docs/compatibility.md).
 
 ## Why Jecode
 
@@ -409,15 +411,17 @@ fixtures. `npm run bench:transcript` and `npm run bench:search` provide manual
 probes for long-session rendering and workspace search. Architecture and
 security boundaries are documented in
 [docs/architecture.md](docs/architecture.md); brand assets and usage rules live
-in [docs/brand.md](docs/brand.md). The maintainer release procedure lives in
-[docs/releasing.md](docs/releasing.md).
+in [docs/brand.md](docs/brand.md). The public 1.0 contract lives in
+[docs/compatibility.md](docs/compatibility.md), and the maintainer release
+procedure lives in [docs/releasing.md](docs/releasing.md).
 
 ## Community
 
 - Ask questions, share workflows, and explore early ideas in
   [GitHub Discussions](https://github.com/giovannijecha/jecode/discussions).
 - Report reproducible bugs and focused feature requests through
-  [GitHub Issues](https://github.com/giovannijecha/jecode/issues).
+  [GitHub Issues](https://github.com/giovannijecha/jecode/issues). New
+  capabilities are deferred until the 1.0 stabilization cycle is complete.
 - Report security concerns privately through the repository Security tab.
 
 Public pull requests are not accepted at this stage. Code changes remain a
