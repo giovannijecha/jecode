@@ -14,29 +14,40 @@ export type Gap = { kind: "gap"; skipped: number };
  * Above this many cells the table stops being worth building.
  *
  * The diff is quadratic in the two line counts, and it is drawn between two
- * keystrokes. Past the ceiling the honest answer is the coarse one — all of
- * the old, then all of the new — rather than a frame the user waits for.
+ * keystrokes. Common edges are removed before this limit is applied, so a
+ * local edit in a large file stays local. If the changed middle itself crosses
+ * the ceiling, the honest answer is the coarse one rather than a frame the
+ * user waits for.
  */
 const CEILING = 250_000;
 
 export function diff(before: string, after: string): Row[] {
   const a = lines(before);
   const b = lines(after);
+  const prefix = commonPrefix(a, b);
+  const suffix = commonSuffix(a, b, prefix);
+  const aEnd = a.length - suffix;
+  const bEnd = b.length - suffix;
+  const middleA = a.slice(prefix, aEnd);
+  const middleB = b.slice(prefix, bEnd);
+  const rows = a.slice(0, prefix).map(keep);
 
-  if (a.length * b.length > CEILING) {
-    return [...a.map(del), ...b.map(add)];
+  if (middleA.length * middleB.length > CEILING) {
+    for (const line of middleA) rows.push(del(line));
+    for (const line of middleB) rows.push(add(line));
+    appendSuffix(rows, a, aEnd);
+    return rows;
   }
 
-  const table = common(a, b);
-  const rows: Row[] = [];
+  const table = common(middleA, middleB);
 
   let i = 0;
   let j = 0;
-  const width = b.length + 1;
+  const width = middleB.length + 1;
 
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) {
-      rows.push({ kind: "keep", text: a[i] as string });
+  while (i < middleA.length && j < middleB.length) {
+    if (middleA[i] === middleB[j]) {
+      rows.push(keep(middleA[i] as string));
       i++;
       j++;
       continue;
@@ -44,18 +55,37 @@ export function diff(before: string, after: string): Row[] {
     // Deletions first on a tie, so a replaced line reads old-then-new — the
     // order the eye expects, and the order every other diff prints.
     if ((table[(i + 1) * width + j] as number) >= (table[i * width + j + 1] as number)) {
-      rows.push(del(a[i] as string));
+      rows.push(del(middleA[i] as string));
       i++;
     } else {
-      rows.push(add(b[j] as string));
+      rows.push(add(middleB[j] as string));
       j++;
     }
   }
 
-  while (i < a.length) rows.push(del(a[i++] as string));
-  while (j < b.length) rows.push(add(b[j++] as string));
+  while (i < middleA.length) rows.push(del(middleA[i++] as string));
+  while (j < middleB.length) rows.push(add(middleB[j++] as string));
+  appendSuffix(rows, a, aEnd);
 
   return rows;
+}
+
+function commonPrefix(a: readonly string[], b: readonly string[]): number {
+  const limit = Math.min(a.length, b.length);
+  let length = 0;
+  while (length < limit && a[length] === b[length]) length++;
+  return length;
+}
+
+function commonSuffix(a: readonly string[], b: readonly string[], prefix: number): number {
+  const limit = Math.min(a.length, b.length) - prefix;
+  let length = 0;
+  while (length < limit && a[a.length - length - 1] === b[b.length - length - 1]) length++;
+  return length;
+}
+
+function appendSuffix(rows: Row[], source: readonly string[], start: number): void {
+  for (let index = start; index < source.length; index++) rows.push(keep(source[index] as string));
 }
 
 /**
@@ -123,4 +153,8 @@ function add(text: string): Row {
 
 function del(text: string): Row {
   return { kind: "del", text };
+}
+
+function keep(text: string): Row {
+  return { kind: "keep", text };
 }

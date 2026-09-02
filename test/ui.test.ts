@@ -141,6 +141,35 @@ test("condensing keeps the change in sight and counts what it dropped", () => {
   );
 });
 
+test("a local edit in a large file does not become a whole-file replacement", () => {
+  const original = Array.from({ length: 1_200 }, (_, index) => `line ${index}`);
+  const changed = [...original];
+  changed[713] = "LINE 713";
+
+  const rows = diff(original.join("\n"), changed.join("\n"));
+  assert.equal(rows.filter((row) => row.kind === "del").length, 1);
+  assert.equal(rows.filter((row) => row.kind === "add").length, 1);
+  assert.equal(rows.filter((row) => row.kind === "keep").length, 1_199);
+
+  const shown = condense(rows, 2);
+  assert.ok(shown.length < 10);
+  assert.deepEqual(
+    shown.filter((row) => row.kind !== "gap").map((row) => `${row.kind}:${row.text}`),
+    ["keep:line 711", "keep:line 712", "del:line 713", "add:LINE 713", "keep:line 714", "keep:line 715"],
+  );
+});
+
+test("a genuinely large changed middle keeps its unchanged edges", () => {
+  const before = ["head", ...Array.from({ length: 600 }, (_, index) => `old ${index}`), "tail"];
+  const after = ["head", ...Array.from({ length: 600 }, (_, index) => `new ${index}`), "tail"];
+
+  const rows = diff(before.join("\n"), after.join("\n"));
+  assert.deepEqual(rows[0], { kind: "keep", text: "head" });
+  assert.deepEqual(rows.at(-1), { kind: "keep", text: "tail" });
+  assert.equal(rows.filter((row) => row.kind === "del").length, 600);
+  assert.equal(rows.filter((row) => row.kind === "add").length, 600);
+});
+
 const flat = (rows: { segs: { text: string }[] }[]): string[] =>
   rows.map((row) => row.segs.map((seg) => seg.text).join(""));
 
