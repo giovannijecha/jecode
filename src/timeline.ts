@@ -18,7 +18,7 @@ export type Timeline = Readonly<{
 
 export function timelinePicker(conversation: ConversationTree, palette: Palette): Timeline {
   const entries = timelineEntries(conversation);
-  const selectedId = conversation.latestCompleted()?.activeNodeId ?? 0;
+  const selectedId = conversation.latestResumable()?.activeNodeId ?? 0;
   const index = Math.max(0, entries.findIndex((entry) => entry.node.id === selectedId));
   return Object.freeze({
     picker: {
@@ -29,7 +29,7 @@ export function timelinePicker(conversation: ConversationTree, palette: Palette)
       options: entries.map((entry) => ({
         label: `${entry.prefix}${preview(entry.node)}`,
         hint: stamp(entry.node.createdAt),
-        ...(entry.node.id === selectedId ? { value: "active" } : {}),
+        ...timelineValue(entry.node, selectedId),
       })),
       index,
     },
@@ -55,12 +55,12 @@ export async function selectTimeline(
 type Entry = Readonly<{ node: TurnNode; prefix: string }>;
 
 function timelineEntries(conversation: ConversationTree): Entry[] {
-  const completed = conversation.nodes.filter((node) => node.settlement === "completed");
-  const completedIds = new Set(completed.map((node) => node.id));
+  const resumable = conversation.nodes.filter((node) => node.settlement !== "checkpointed");
+  const resumableIds = new Set(resumable.map((node) => node.id));
   const children = new Map<number, TurnNode[]>();
-  for (const node of completed) {
+  for (const node of resumable) {
     let parentId = node.parentId;
-    while (parentId !== 0 && !completedIds.has(parentId)) {
+    while (parentId !== 0 && !resumableIds.has(parentId)) {
       parentId = conversation.node(parentId)?.parentId ?? 0;
     }
     const siblings = children.get(parentId) ?? [];
@@ -87,6 +87,13 @@ function timelineEntries(conversation: ConversationTree): Entry[] {
   };
   visit(0, []);
   return entries;
+}
+
+function timelineValue(node: TurnNode, selectedId: number): { value?: string } {
+  const state = node.settlement === "completed" ? undefined : node.settlement;
+  const active = node.id === selectedId ? "active" : undefined;
+  const value = [state, active].filter((part) => part !== undefined).join(" · ");
+  return value === "" ? {} : { value };
 }
 
 function preview(node: TurnNode): string {

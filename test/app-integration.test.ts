@@ -553,6 +553,167 @@ test("initial and scheduled paint failures restore every TUI owner", async () =>
   }
 });
 
+test("a fatal paint failure aborts active work before persistence closes", async () => {
+  let started = (): void => {};
+  const providerStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let aborted = false;
+  let providerSettled = false;
+  let persistenceClosedAfterSettlement = false;
+  const waiting: Provider = {
+    ...provider(),
+    send: (request) => {
+      started();
+      return new Promise<Message>((_resolve, reject) => {
+        request.signal?.addEventListener("abort", () => {
+          aborted = true;
+          setTimeout(() => {
+            providerSettled = true;
+            reject(request.signal?.reason);
+          }, 20);
+        }, { once: true });
+      });
+    },
+  };
+  const current = session(waiting);
+  current.persistence = {
+    close: async () => {
+      persistenceClosedAfterSettlement = providerSettled;
+    },
+  } as SessionPersistence;
+  let paints = 0;
+  const harness = virtualScreen();
+  harness.environment.paint = {
+    paint: (rows) => {
+      paints++;
+      if (paints === 2) throw new Error("fatal fixture paint failure");
+      harness.frames.push([...rows]);
+    },
+    invalidate: () => {},
+  };
+
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+  feed("wait\r");
+  await providerStarted;
+  await assert.rejects(running, /fatal fixture paint failure/);
+
+  assert.equal(aborted, true);
+  assert.equal(providerSettled, true);
+  assert.equal(persistenceClosedAfterSettlement, true);
+  assert.equal(harness.left(), true);
+});
+
+test("teardown releases every owner even when one cleanup callback throws", async () => {
+  let feed: ((chunk: string) => void) | undefined;
+  let resizeStopped = false;
+  let left = false;
+  let persistenceClosed = false;
+  const current = session();
+  current.persistence = {
+    close: async () => {
+      persistenceClosed = true;
+    },
+  } as SessionPersistence;
+  const screen: AppScreen = {
+    size: () => ({ rows: 18, cols: 70 }),
+    enter: () => {},
+    leave: () => {
+      left = true;
+    },
+    setReducedMotion: () => {},
+    onResize: () => () => {
+      resizeStopped = true;
+    },
+    onInput: (handler) => {
+      feed = handler;
+      return () => {
+        throw new Error("fixture input cleanup failed");
+      };
+    },
+  };
+  const paint: Painter = { paint: () => {}, invalidate: () => {} };
+
+  const running = runApp(current, process.cwd(), { screen, paint });
+  await waitFor(() => feed !== undefined, "TUI input handler");
+  feed?.("/exit\r");
+  await assert.rejects(running, /fixture input cleanup failed/);
+
+  assert.equal(resizeStopped, true);
+  assert.equal(left, true);
+  assert.equal(persistenceClosed, true);
+});
+
+test("a streamed failure survives export, resume, and the next provider request", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-failed-turn-"));
+  const workspace = path.join(root, "workspace");
+  const sessions = path.join(root, "sessions");
+  await mkdir(workspace);
+  const requests: Message[][] = [];
+  let sends = 0;
+  const flaky: Provider = {
+    ...provider(),
+    async send(request): Promise<Message> {
+      sends++;
+      requests.push(structuredClone(request.messages));
+      if (sends === 1) {
+        request.onStream?.({ kind: "text", text: "partial answer" });
+        throw new Error("fixture stream failed");
+      }
+      request.onStream?.({ kind: "text", text: "recovered answer" });
+      return { role: "assistant", content: [{ kind: "text", text: "recovered answer" }] };
+    },
+  };
+
+  try {
+    const store = await DurableSessionStore.open(workspace, sessions);
+    const current = session(flaky);
+    current.config.root = workspace;
+    current.persistence = SessionPersistence.fresh(store);
+    const harness = virtualScreen();
+    const running = runApp(current, workspace, harness.environment);
+    const feed = await harness.input();
+
+    feed("first request\r");
+    await waitFor(
+      () => current.conversation.activeNode?.settlement === "failed",
+      "durable failed turn",
+    );
+    const sessionId = current.persistence.sessionId;
+    assert.ok(sessionId !== null);
+    assert.match(JSON.stringify(current.conversation.transcript), /partial answer/);
+    assert.match(JSON.stringify(current.conversation.transcript), /fixture stream failed/);
+
+    feed("/export\r");
+    await waitFor(async () => (await readdir(workspace)).some((name) => name.startsWith("jecode-transcript-")), "failed turn export");
+    const exportedName = (await readdir(workspace)).find((name) => name.startsWith("jecode-transcript-"));
+    assert.ok(exportedName !== undefined);
+    const exported = await readFile(path.join(workspace, exportedName), "utf8");
+    assert.match(exported, /partial answer/);
+    assert.match(exported, /fixture stream failed/);
+
+    feed("retry\r");
+    await waitFor(
+      () => current.conversation.activeNode?.settlement === "completed",
+      "completed retry",
+    );
+    assert.match(JSON.stringify(requests[1]), /first request/);
+    assert.match(JSON.stringify(requests[1]), /failed before completion/);
+    assert.match(JSON.stringify(requests[1]), /retry/);
+
+    feed("/exit\r");
+    await running;
+    const resumed = await SessionPersistence.resume(store, sessionId);
+    assert.equal(resumed.conversation.nodes.length, 2);
+    assert.equal(resumed.conversation.node(1)?.settlement, "failed");
+    assert.match(JSON.stringify(resumed.conversation.transcript), /fixture stream failed/);
+    await resumed.persistence.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a TUI submit reaches the provider and returns to an editable session", async () => {
   const harness = virtualScreen();
   const current = session(provider("Answer from the TUI."));

@@ -119,6 +119,23 @@ test("timeline keeps a completed descendant while collapsing an unfinished check
   assert.equal(timeline.picker.options[1]?.value, "active");
 });
 
+test("timeline preserves failed and interrupted turns as resumable evidence", () => {
+  const first = append(ConversationTree.empty(), 0, "first", "complete", "10:00");
+  const failed = first.commit({
+    parentId: 1,
+    createdAt: "2026-09-02T10:01:00.000Z",
+    identity,
+    messages: turn("retry", "The previous attempt failed before completion."),
+    blocks: [{ kind: "user", text: "retry" }, { kind: "answer", text: "partial" }],
+    failure: { text: "provider failed", tone: "error" },
+  }, "failed");
+
+  const timeline = timelinePicker(failed, STEEL);
+  assert.deepEqual(timeline.nodeIds, [1, 2]);
+  assert.equal(timeline.picker.options[1]?.value, "failed · active");
+  assert.equal(timeline.picker.index, 1);
+});
+
 function branchedTree(): ConversationTree {
   const first = append(ConversationTree.empty(), 0, "establish the goal", "goal set", "10:00");
   const pathA = append(first, 1, "take path A", "A selected", "10:01");

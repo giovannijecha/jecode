@@ -37,6 +37,25 @@ test("manual compaction revises only the active leaf context", async () => {
   assert.equal(current.usage.lastInputTokens, 0);
 });
 
+test("manual compaction preserves a failed leaf's durable evidence", async () => {
+  const current = session(summarizer([]));
+  const prompt = "durable context ".repeat(2_000);
+  const failure = { text: "provider disconnected", tone: "error" } as const;
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-02T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: messages(prompt, "The previous attempt failed before completion."),
+    blocks: [{ kind: "user", text: prompt }, { kind: "answer", text: "Partial answer." }],
+    failure,
+  }, "failed");
+
+  assert.equal(await compactSession(current), "compacted");
+  assert.equal(current.conversation.activeNode?.settlement, "failed");
+  assert.deepEqual(current.conversation.activeNode?.failure, failure);
+  assert.match(JSON.stringify(current.conversation.transcript), /provider disconnected/);
+});
+
 test("manual compaction silently ignores a context too small to summarize", async () => {
   const requests: SendRequest[] = [];
   const current = session(summarizer(requests));
