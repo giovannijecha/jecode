@@ -59,6 +59,7 @@ export async function runApp(
 
   const state = appState();
   state.blocks.push(...session.conversation.transcript);
+  state.committedNodeId = session.conversation.activeNodeId;
 
   const permissions = sessionPermissions(session.tools, session.config.autoApprove);
 
@@ -152,6 +153,17 @@ export async function runApp(
     if (state.follow) state.unseen = 0;
   };
 
+  const replaceTranscript = (): void => {
+    state.blocks.splice(0, state.blocks.length, ...session.conversation.transcript);
+    state.scroll = 0;
+    state.follow = true;
+    state.unseen = 0;
+    state.lastMaxScroll = 0;
+    transcript.invalidate();
+    paint.invalidate();
+    render();
+  };
+
   function quit(): void {
     if (!live) return;
     live = false;
@@ -216,6 +228,7 @@ export async function runApp(
     emit,
     commandNotice,
     render,
+    replaceTranscript,
     refreshSettings: () => {
       terminal.setReducedMotion(session.config.reducedMotion);
       paint.invalidate();
@@ -259,14 +272,9 @@ export async function runApp(
       if (activity === undefined) return;
       try {
         await launch.open(candidate.id);
-        state.blocks.splice(0, state.blocks.length, ...session.conversation.transcript);
+        replaceTranscript();
+        state.committedNodeId = session.conversation.activeNodeId;
         state.past.length = 0;
-        state.scroll = 0;
-        state.follow = true;
-        state.unseen = 0;
-        state.lastMaxScroll = 0;
-        transcript.invalidate();
-        paint.invalidate();
         finishActivity(activity);
         return;
       } catch (error) {

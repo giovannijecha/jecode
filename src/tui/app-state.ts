@@ -24,6 +24,8 @@ export type AppState = {
   open?: Open;
   activity?: Activity;
   closeWhenIdle: boolean;
+  /** Last node created by a real turn, before any temporary timeline selection. */
+  committedNodeId: number;
   /** The slash-command menu, held apart from the text being edited. */
   completing?: Completion;
 };
@@ -41,5 +43,6 @@ export function appState(): AppState {
     draft: "",
     spin: 0,
     closeWhenIdle: false,
+    committedNodeId: 0,
   };
 }

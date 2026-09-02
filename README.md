@@ -201,6 +201,8 @@ Type **/** to open searchable command completion inside the composer.
 | /models | Search models across every available provider and select one |
 | /permissions | Change session tool access inline and review remembered approvals |
 | /new | Close the current conversation, start clean, and reset tool permissions |
+| /timeline | Navigate completed turns and select where the next branch starts |
+| /compact | Compact the active model context immediately |
 | /export | Save a timestamped Markdown transcript in the launch directory |
 | /help | Open a temporary keyboard reference in the composer dock |
 | /exit | Restore the terminal and exit |
@@ -264,10 +266,15 @@ files use owner-only modes on POSIX; Windows relies on the user-profile ACL.
 `jecode resume` keeps the same durable session identity and advances that
 session's conversation tree, so reopening and continuing a conversation does
 not create duplicate picker entries. `/new` or a fresh launch starts another
-logical session. Resume never executes an old tool call. If a crash left the
-newest turn inside a tool loop, the same session resumes from its latest
-completed ancestor and the next turn becomes a branch inside its tree because
-provider-only continuation data is intentionally not stored.
+logical session. **/timeline** shows the completed turns in that tree. Selecting
+an earlier turn changes only the visible path; it creates and persists a branch
+only when the next real message is sent. Cancelling the picker or exiting first
+leaves the durable head untouched, and resume returns to the last branch with a
+persisted turn. Historical tools are displayed but never executed. If a crash
+left the newest turn inside a tool loop, the same session resumes from its
+latest completed ancestor and the next turn becomes a branch because
+provider-only continuation data is intentionally not stored. **/export** writes
+only the currently selected path.
 
 When the model-facing context approaches the selected model's usable capacity,
 Jecode asks the provider for one bounded summary of its older prefix and keeps
@@ -281,7 +288,11 @@ session, so resume reuses it instead of summarizing the same prefix again. A
 failed or cancelled optional summary leaves the original context intact; a
 definite provider context-limit rejection may trigger one compacted retry.
 Internal summary requests count toward provider usage but never appear in the
-transcript or Markdown export.
+transcript or Markdown export. **/compact** requests the same model-aware,
+branch-local compaction immediately, even below the automatic trigger. Very
+small contexts are left unchanged. After selecting a historical branch point,
+send its first new message before compacting so shared history is never
+rewritten.
 
 Jecode has one interface theme: dark Steel. **NO_COLOR** is supported for
 terminals and pipelines that disable colour.

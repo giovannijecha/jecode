@@ -245,9 +245,12 @@ history and the settled TUI transcript. One node owns one user turn and its
 model/tool messages, visible transcript blocks, provider/model/effort identity,
 revision, and settlement. The selected root-to-leaf path is materialized in
 full for the screen, export, and audit. A separate `contextHistory` projection
-is materialized for providers. This tree shape is already branch-capable; the
-current resume UI selects whole sessions, while a later timeline can expose
-alternate nodes without replacing the storage model.
+is materialized for providers. `/timeline` projects completed nodes into a
+searchable compact tree and can select any of them without changing durable
+state. The next real user turn appends from that selected parent and advances
+the existing session head; cancelling or exiting before then creates no node.
+The settled transcript and full history are materialized again from the newly
+selected path, while historical tool records remain inert.
 
 Context compaction is automatic and model-aware. Pressure combines the most
 recent normalized input-token count with a conservative byte estimate. The
@@ -278,7 +281,11 @@ canonical prefix remains untouched. TUI checkpoints persist the ordinary turn
 before attempting optional compaction, then atomically revise that same leaf if
 a summary succeeds. Cancellation or failure therefore cannot discard a
 completed response or a settled tool batch. Batch mode applies the same policy
-in memory.
+in memory. `/compact` forces that same policy below the automatic trigger and
+atomically revises only the active leaf with a newer anchor. It is a silent
+no-op when there is too little useful prefix. A temporary historical selection
+must receive a new user turn first, because compacting the shared branch point
+would rewrite history owned by more than one path.
 
 Interactive sessions publish lazily after the first completed response or
 consistent tool checkpoint. They live under
@@ -486,9 +493,8 @@ global prefix and runs its version command.
   tree is emitted by the existing development compiler before packing. Registry
   users receive that JavaScript runtime and execute no installation scripts;
   Git dependency installs are intentionally unsupported.
-- No manual compact command, fixed token threshold, provider-native history
-  mutation, or second agent loop. One bounded percentage controls the automatic
-  model-aware policy while the durable tree remains complete.
-- No navigable in-session timeline yet. Stable session identity and the
-  canonical branch-capable tree are present, but branch selection remains
-  future UI work.
+- No branch rename, deletion, or merge surface. Timeline navigation is append
+  only: existing nodes and alternate paths remain available for inspection.
+- No fixed token threshold, provider-native history mutation, or second agent
+  loop. One bounded percentage controls automatic compaction, while `/compact`
+  invokes the same model-aware policy and the durable tree remains complete.

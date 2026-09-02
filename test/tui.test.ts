@@ -218,8 +218,9 @@ test("closing completion hides suggestions even when the editor still holds a co
 });
 
 test("the command menu follows an arrow selection beyond its first window", () => {
+  const settings = COMMANDS.findIndex((command) => command.name === "settings");
   const frame = compose(
-    { ...base(), editor: edit.of("/"), menu: COMMANDS, menuIndex: 5 },
+    { ...base(), editor: edit.of("/"), menu: COMMANDS, menuIndex: settings },
     { rows: 24, cols: 80 },
   );
   const shown = strip(frame.rows).join("\n");

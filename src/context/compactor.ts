@@ -27,6 +27,8 @@ export type CompactContextOptions = Readonly<{
   lastInputTokens: number;
   signal?: AbortSignal;
   force?: boolean;
+  /** Manual commands surface provider failures; automatic compaction stays optional. */
+  failLoudly?: boolean;
   policy: ContextPolicy;
   onBegin?(): void;
   onEnd?(): void;
@@ -83,7 +85,8 @@ export async function compactContext(
       }),
       ...(response.usage === undefined ? {} : { usage: response.usage }),
     };
-  } catch {
+  } catch (error) {
+    if (options.failLoudly === true) throw error;
     return undefined;
   } finally {
     options.onEnd?.();

@@ -1,9 +1,8 @@
 // Slash-command registry and dispatcher.
 //
-// One of them does reach the network — a menu of models cannot be built
-// without asking the provider what it has — but none of them ever sends a
-// message. Provider access and model selection stay in their own commands;
-// this file keeps discovery, dispatch, and local session operations.
+// Model discovery and explicit context compaction can reach a provider, but
+// slash commands never become user messages. This file keeps discovery,
+// dispatch, and session operations outside the canonical transcript.
 
 import type { Session } from "./session.ts";
 import { ConversationTree } from "./conversation.ts";
@@ -17,6 +16,8 @@ import { providersCommand } from "./provider-commands.ts";
 import { permissionsCommand } from "./permission-command.ts";
 import { effortCommand, settingsCommand } from "./settings-command.ts";
 import { emptyUsage } from "./usage.ts";
+
+export type CompactCommandResult = "compacted" | "unchanged" | "branch-pending";
 
 export type CommandOutcome = "handled" | "exit";
 export type Emit = (notice: NoticeBlock) => void;
@@ -47,6 +48,10 @@ export type Host = {
   saveSettings?(patch: Partial<SavedSettings>): Promise<void>;
   /** Repaint after a live display setting changes. */
   refreshSettings?(): void;
+  /** Select an earlier completed turn without persisting an empty branch. */
+  timeline?(): Promise<"selected" | "unchanged">;
+  /** Compact the current leaf with the active provider. */
+  compact?(): Promise<CompactCommandResult>;
 };
 
 export type Command = { name: string; blurb: string };
@@ -63,6 +68,8 @@ export const COMMANDS: readonly Command[] = [
   { name: "exit", blurb: "exit and restore the terminal" },
   { name: "new", blurb: "start clean and reset tool permissions" },
   { name: "export", blurb: "save this transcript as Markdown" },
+  { name: "timeline", blurb: "navigate this conversation tree" },
+  { name: "compact", blurb: "compact the active context now" },
   { name: "permissions", blurb: "manage session tool access" },
   { name: "settings", blurb: "change and save jecode defaults" },
   { name: "effort", blurb: "set the reasoning effort" },
@@ -99,6 +106,40 @@ export async function handleCommand(
       session.usage = emptyUsage();
       host.emit({ kind: "notice", text: "new session", tone: "info" });
       return "handled";
+
+    case "timeline": {
+      if (host.timeline === undefined) {
+        host.emit({ kind: "notice", text: "timeline needs the interactive screen", tone: "warn" });
+        return "handled";
+      }
+      const result = await host.timeline();
+      if (result === "selected") {
+        host.emit({
+          kind: "notice",
+          text: "branch point selected · send a message to continue",
+          tone: "info",
+        });
+      }
+      return "handled";
+    }
+
+    case "compact": {
+      if (host.compact === undefined) {
+        host.emit({ kind: "notice", text: "compact is unavailable here", tone: "warn" });
+        return "handled";
+      }
+      const result = await host.compact();
+      if (result === "compacted") {
+        host.emit({ kind: "notice", text: "context compacted", tone: "info" });
+      } else if (result === "branch-pending") {
+        host.emit({
+          kind: "notice",
+          text: "send a message on this branch before compacting",
+          tone: "warn",
+        });
+      }
+      return "handled";
+    }
 
     case "export":
       if (host.exportTranscript === undefined) {
@@ -137,11 +178,4 @@ export async function handleCommand(
       });
       return "handled";
   }
-}
-
-function chooser(host: Host): Host["choose"] {
-  if (host.choose === undefined) {
-    host.emit({ kind: "notice", text: "that command needs the screen", tone: "warn" });
-  }
-  return host.choose;
 }
