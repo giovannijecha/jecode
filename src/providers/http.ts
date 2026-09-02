@@ -3,6 +3,7 @@
 // bytes flow, a failure is surfaced rather than silently replayed.
 
 import { readSseJson } from "./sse.ts";
+import { sseStreamCharacterLimit } from "./stream-limits.ts";
 
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
 const MAX_JSON_CHARS = 5_000_000;
@@ -57,12 +58,14 @@ export async function postSse(
   url: string,
   headers: Record<string, string>,
   body: unknown,
+  maxOutputTokens: number,
   signal?: AbortSignal,
   onStatus?: HttpStatus,
 ): Promise<AsyncGenerator<unknown>> {
+  const maximumChars = sseStreamCharacterLimit(maxOutputTokens);
   const res = await request(url, { accept: "text/event-stream", ...headers }, body, signal, onStatus);
   if (res.body === null) throw httpError(`${url} returned no body`, res.status);
-  return readSseJson(withIdleTimeout(url, res.body));
+  return readSseJson(withIdleTimeout(url, res.body), maximumChars);
 }
 
 async function request(

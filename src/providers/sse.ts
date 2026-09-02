@@ -7,10 +7,12 @@
 import {
   addBounded,
   MAX_SSE_EVENT_CHARS,
-  MAX_SSE_STREAM_CHARS,
 } from "./stream-limits.ts";
 
-export async function* readSseJson(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
+export async function* readSseJson(
+  body: ReadableStream<Uint8Array>,
+  maximumChars: number,
+): AsyncGenerator<unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -18,7 +20,7 @@ export async function* readSseJson(body: ReadableStream<Uint8Array>): AsyncGener
   let total = 0;
 
   const append = (text: string): void => {
-    total = addBounded(total, text.length, MAX_SSE_STREAM_CHARS, "SSE stream");
+    total = addBounded(total, text.length, maximumChars, "SSE stream");
     buffer += text;
   };
 

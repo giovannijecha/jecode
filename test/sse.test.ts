@@ -4,6 +4,7 @@ import { readSseJson } from "../src/providers/sse.ts";
 import {
   MAX_SSE_EVENT_CHARS,
   MAX_SSE_STREAM_CHARS,
+  sseStreamCharacterLimit,
 } from "../src/providers/stream-limits.ts";
 
 // Feeds the parser exactly the chunk boundaries given, so a test can put a
@@ -20,7 +21,7 @@ function stream(...chunks: string[]): ReadableStream<Uint8Array> {
 
 async function collect(body: ReadableStream<Uint8Array>): Promise<unknown[]> {
   const out: unknown[] = [];
-  for await (const event of readSseJson(body)) out.push(event);
+  for await (const event of readSseJson(body, MAX_SSE_STREAM_CHARS)) out.push(event);
   return out;
 }
 
@@ -81,23 +82,50 @@ test("rejects and cancels an event that exceeds the buffer limit", async () => {
   assert.equal(cancelled, true);
 });
 
-test("rejects and cancels an aggregate stream that exceeds the response budget", async () => {
+test("accepts a valid stream beyond the legacy fixed response budget", async () => {
   const encoder = new TextEncoder();
   const payload = `data: {"text":"${"x".repeat(850_000)}"}\n\n`;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let index = 0; index < 5; index++) controller.enqueue(encoder.encode(payload));
+      controller.close();
+    },
+  });
+
+  let events = 0;
+  for await (const _event of readSseJson(body, sseStreamCharacterLimit(64_000))) events++;
+  assert.equal(events, 5);
+});
+
+test("rejects and cancels an aggregate stream that exceeds its model-aware budget", async () => {
+  const encoder = new TextEncoder();
+  const payload = 'data: {"text":"small"}\n\n';
+  const limit = payload.length * 2;
   let cancelled = false;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      for (let total = 0; total <= MAX_SSE_STREAM_CHARS; total += payload.length) {
-        controller.enqueue(encoder.encode(payload));
-      }
+      controller.enqueue(encoder.encode(payload));
+      controller.enqueue(encoder.encode(payload));
+      controller.enqueue(encoder.encode(payload));
     },
     cancel() {
       cancelled = true;
     },
   });
 
-  await assert.rejects(collect(body), /SSE stream exceeded/);
+  await assert.rejects(async () => {
+    for await (const _event of readSseJson(body, limit)) {
+      // Consume events until the selected response budget is exhausted.
+    }
+  }, /SSE stream exceeded/);
   assert.equal(cancelled, true);
+});
+
+test("derives a bounded stream budget from the request output budget", () => {
+  assert.equal(sseStreamCharacterLimit(1), 4_000_000);
+  assert.equal(sseStreamCharacterLimit(64_000), 32_768_000);
+  assert.equal(sseStreamCharacterLimit(Number.MAX_SAFE_INTEGER), MAX_SSE_STREAM_CHARS);
+  assert.throws(() => sseStreamCharacterLimit(0), /positive safe integer/);
 });
 
 test("decodes multi-byte characters split across chunks", async () => {

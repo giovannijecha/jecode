@@ -114,7 +114,7 @@ test("times out an idle SSE response body", async (context) => {
     context.mock.timers.reset();
   });
 
-  const events = await postSse("https://example.test/generate", {}, {}, undefined);
+  const events = await postSse("https://example.test/generate", {}, {}, 256, undefined);
   const pending = events.next();
   await new Promise<void>((resolve) => setImmediate(resolve));
   context.mock.timers.tick(120_000);
@@ -135,7 +135,7 @@ test("keeps caller cancellation attached after response headers", async (context
     globalThis.fetch = previousFetch;
   });
 
-  const events = await postSse("https://example.test/generate", {}, {}, control.signal);
+  const events = await postSse("https://example.test/generate", {}, {}, 256, control.signal);
   const pending = events.next();
   control.abort(new Error("cancelled after headers"));
 
