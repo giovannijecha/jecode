@@ -91,6 +91,21 @@ test("bounds a large read before returning it", async () => {
   assert.ok(result.output.length < 61_000);
 });
 
+test("a bounded read never returns half an emoji", async () => {
+  const emoji = String.fromCodePoint(0x1f600);
+  await fs.writeFile(
+    path.join(ctx.root, "unicode-boundary.txt"),
+    `${"x".repeat(59_999)}${emoji}tail`,
+    "utf8",
+  );
+
+  const result = await readFile.run({ path: "unicode-boundary.txt" }, ctx);
+
+  assert.equal(result.output.isWellFormed(), true);
+  assert.equal(result.output.includes(emoji), false);
+  assert.match(result.output, /truncated at 60000 characters/);
+});
+
 test("refuses to replace an existing file above the whole-file mutation limit", async () => {
   const file = path.join(ctx.root, "too-large-to-replace.txt");
   await fs.writeFile(file, "x".repeat(MAX_EDITABLE_BYTES + 1), "utf8");

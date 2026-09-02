@@ -14,6 +14,7 @@ import {
 import {
   assertEditableText,
   assertReplacementFits,
+  leadingText,
   MAX_EDITABLE_CHARS,
   MAX_EDITABLE_LINES,
   readEditableText,
@@ -272,7 +273,7 @@ async function readRange(
     if (fragment === "") return;
     const room = MAX_READ_CHARS - text.length;
     if (fragment.length > room) {
-      if (room > 0) text += fragment.slice(0, room);
+      text += leadingText(fragment, room);
       truncated = true;
       stopped = true;
       return;
