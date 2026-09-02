@@ -16,6 +16,8 @@ install artifacts and provenance are published with the [npm package].
   replacing them with the much larger unknown-model fallback.
 - Replaced stale context pressure with the sent request estimate when a
   provider omits usage, without inventing vendor-reported token totals.
+- Prevented an interrupted `write_file` or `edit_file` from crossing its atomic
+  rename boundary, while still cleaning the temporary sibling safely.
 
 ## [0.7.3] - 2026-09-02
 

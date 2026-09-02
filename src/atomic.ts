@@ -9,6 +9,7 @@ export type AtomicWritePhase = "before-open" | "before-write" | "before-rename" 
 
 export type AtomicWriteOptions = {
   mode?: number;
+  signal?: AbortSignal;
   validate?(phase: AtomicWritePhase): Promise<void>;
 };
 
@@ -27,20 +28,29 @@ export async function atomicWrite(
   let identity: FileIdentity | undefined;
 
   try {
+    throwIfAborted(options.signal);
     await options.validate?.("before-open");
+    throwIfAborted(options.signal);
     const permissions = options.mode ?? (await existingMode(file));
+    throwIfAborted(options.signal);
     handle = await open(temporary, "wx", permissions);
     identity = fileIdentity(await handle.stat());
+    throwIfAborted(options.signal);
     await options.validate?.("before-write");
+    throwIfAborted(options.signal);
     await assertNamedFile(temporary, identity);
     await handle.writeFile(content, "utf8");
+    throwIfAborted(options.signal);
     if (permissions !== undefined && process.platform !== "win32") {
       await handle.chmod(permissions);
     }
     await handle.sync();
+    throwIfAborted(options.signal);
     identity = fileIdentity(await handle.stat());
     await options.validate?.("before-rename");
+    throwIfAborted(options.signal);
     await assertNamedFile(temporary, identity);
+    throwIfAborted(options.signal);
     await rename(temporary, file);
     const completed = handle;
     handle = undefined;
@@ -55,6 +65,11 @@ export async function atomicWrite(
     await removeTemporary(temporary, identity, options.validate);
     throw error;
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error("interrupted");
 }
 
 async function assertNamedFile(file: string, expected: FileIdentity): Promise<void> {
