@@ -6,6 +6,7 @@
 
 import type { ConversationTree, TurnNode } from "./conversation.ts";
 import type { Session } from "./session.ts";
+import { leadingText } from "./text-boundary.ts";
 import type { Palette } from "./ui/theme.ts";
 import { usageFromHistory } from "./usage.ts";
 import type { Picker } from "./tui/picker.ts";
@@ -101,7 +102,7 @@ function preview(node: TurnNode): string {
     if (message.role !== "user") continue;
     const text = message.content.find((block) => block.kind === "text")?.text
       .replace(/\s+/gu, " ").trim();
-    if (text !== undefined && text !== "") return text.slice(0, 160);
+    if (text !== undefined && text !== "") return leadingText(text, 160);
   }
   return "Untitled turn";
 }

@@ -8,6 +8,17 @@ import { encodeNode } from "../src/sessions/codec.ts";
 import { DurableSessionStore } from "../src/sessions/store.ts";
 import type { Message } from "../src/types.ts";
 
+const boundaryClusters = [
+  ["emoji", String.fromCodePoint(0x1f600)],
+  ["combining mark", `e${String.fromCodePoint(0x0301)}`],
+  [
+    "ZWJ sequence",
+    `${String.fromCodePoint(0x1f469)}${String.fromCodePoint(0x200d)}` +
+      String.fromCodePoint(0x1f4bb),
+  ],
+  ["flag", `${String.fromCodePoint(0x1f1ee)}${String.fromCodePoint(0x1f1f9)}`],
+] as const;
+
 test("publishes, updates, lists, and reloads a workspace-scoped session", async () => {
   const fixture = await sessionFixture();
   try {
@@ -36,6 +47,25 @@ test("publishes, updates, lists, and reloads a workspace-scoped session", async 
     await mkdir(otherWorkspace);
     const other = await DurableSessionStore.open(otherWorkspace, fixture.sessions);
     assert.deepEqual(await other.list(), []);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("catalogue previews end before a grapheme that crosses their boundary", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    for (const [name, cluster] of boundaryClusters) {
+      const prefix = "a".repeat(160 - cluster.length + 1);
+      const published = await store.publish(
+        turn(ConversationTree.empty(), 0, `${prefix}${cluster}tail`, "done"),
+      );
+      const preview = (await store.list()).find((entry) => entry.id === published.meta.id)?.preview;
+
+      assert.equal(preview, prefix, `${name} was split`);
+      assert.equal(preview?.isWellFormed(), true, `${name} produced malformed UTF-16`);
+    }
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

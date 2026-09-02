@@ -20,6 +20,8 @@ install artifacts and provenance are published with the [npm package].
   rename boundary, while still cleaning the temporary sibling safely.
 - Made long unbroken words wrap in linear time without losing grapheme or cell
   boundaries in Markdown and plain terminal text.
+- Kept bounded previews, provider and OAuth error details, and colored diff
+  emphasis on complete grapheme boundaries, including historical emphasis.
 
 ## [0.7.3] - 2026-09-02
 

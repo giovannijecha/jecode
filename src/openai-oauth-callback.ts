@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { leadingText } from "./text-boundary.ts";
 
 const CALLBACK_PORTS = [1455, 1457] as const;
 export const OPENAI_CALLBACK_PATH = "/auth/callback";
@@ -56,7 +57,7 @@ export async function openAICallback(state: string): Promise<OpenAICallback> {
     const authError = incoming.searchParams.get("error_description") ?? incoming.searchParams.get("error");
     const authorizationCode = incoming.searchParams.get("code");
     if (authError !== null) {
-      rejectCode(new Error(`ChatGPT sign-in was rejected · ${authError.slice(0, 300)}`));
+      rejectCode(new Error(`ChatGPT sign-in was rejected · ${leadingText(authError, 300)}`));
     } else if (authorizationCode === null || authorizationCode === "") {
       rejectCode(new Error("ChatGPT sign-in returned no authorization code"));
     } else {

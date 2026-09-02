@@ -190,8 +190,13 @@ test("rejects redirects without following or retrying them", async (context) => 
 
 test("an error response cannot accumulate an unbounded body", async (context) => {
   const previousFetch = globalThis.fetch;
+  const prefix = "x".repeat(1_999);
+  const emoji = String.fromCodePoint(0x1f600);
   globalThis.fetch = (async () =>
-    new Response("x".repeat(20_000), { status: 400, statusText: "Bad Request" })) as typeof fetch;
+    new Response(`${prefix}${emoji}${"x".repeat(20_000)}`, {
+      status: 400,
+      statusText: "Bad Request",
+    })) as typeof fetch;
   context.after(() => {
     globalThis.fetch = previousFetch;
   });
@@ -199,7 +204,25 @@ test("an error response cannot accumulate an unbounded body", async (context) =>
   await assert.rejects(
     getJson("https://example.test/models", {}),
     (error: Error & { body?: string }) => {
-      assert.equal(error.body?.length, 2_000);
+      assert.equal(error.body, prefix);
+      assert.equal(error.body?.isWellFormed(), true);
+      return true;
+    },
+  );
+});
+
+test("a non-JSON preview ends before a grapheme that crosses its boundary", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const prefix = "x".repeat(499);
+  const emoji = String.fromCodePoint(0x1f600);
+  globalThis.fetch = (async () => new Response(`${prefix}${emoji}tail`)) as typeof fetch;
+  context.after(() => { globalThis.fetch = previousFetch; });
+
+  await assert.rejects(
+    getJson("https://example.test/models", {}),
+    (error: Error & { body?: string }) => {
+      assert.equal(error.body, prefix);
+      assert.equal(error.body?.isWellFormed(), true);
       return true;
     },
   );

@@ -3,6 +3,7 @@
 import type { Palette, RGB } from "../../ui/theme.ts";
 import type { Seg } from "../../ui/render.ts";
 import { hasColor, row } from "../../ui/render.ts";
+import { graphemeCeiling, graphemeFloor } from "../../text-boundary.ts";
 import type { Detail, Emphasis, ToolBlock, ToolTone } from "./types.ts";
 
 const OUTPUT_ROWS = 8;
@@ -93,8 +94,11 @@ function renderDetail(detail: Detail, tone: ToolTone, width: number, pal: Palett
 
 function emphasized(text: string, emphasis: Emphasis | undefined, fg: RGB): Seg[] {
   if (emphasis === undefined || emphasis.length <= 0) return [{ text, fg }];
-  const start = Math.max(0, Math.min(text.length, emphasis.start));
-  const end = Math.max(start, Math.min(text.length, start + emphasis.length));
+  const requestedStart = Math.max(0, Math.min(text.length, emphasis.start));
+  const requestedEnd = Math.max(requestedStart, Math.min(text.length, requestedStart + emphasis.length));
+  const start = graphemeFloor(text, requestedStart);
+  const end = graphemeCeiling(text, requestedEnd);
+  if (start === end) return [{ text, fg }];
   return [
     ...(start === 0 ? [] : [{ text: text.slice(0, start), fg }]),
     { text: text.slice(start, end), fg, inverse: true },

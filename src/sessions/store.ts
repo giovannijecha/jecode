@@ -22,6 +22,7 @@ import * as path from "node:path";
 import { atomicWrite } from "../atomic.ts";
 import { CONVERSATION_LIMITS, ConversationTree } from "../conversation.ts";
 import type { TurnNode } from "../conversation.ts";
+import { leadingText } from "../text-boundary.ts";
 import { userDataPath } from "../user-data.ts";
 import {
   decodeHead,
@@ -467,7 +468,7 @@ function firstUserText(conversation: ConversationTree): string {
     if (message.role !== "user") continue;
     const text = message.content.find((block) => block.kind === "text")?.text
       .replace(/\s+/gu, " ").trim();
-    if (text !== undefined && text !== "") return text.slice(0, 160);
+    if (text !== undefined && text !== "") return leadingText(text, 160);
   }
   return "Untitled session";
 }

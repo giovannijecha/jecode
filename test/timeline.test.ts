@@ -9,6 +9,17 @@ import { emptyUsage } from "../src/usage.ts";
 
 const identity = { providerId: "fake", model: "fake-1", effort: "high" };
 
+const boundaryClusters = [
+  ["emoji", String.fromCodePoint(0x1f600)],
+  ["combining mark", `e${String.fromCodePoint(0x0301)}`],
+  [
+    "ZWJ sequence",
+    `${String.fromCodePoint(0x1f469)}${String.fromCodePoint(0x200d)}` +
+      String.fromCodePoint(0x1f4bb),
+  ],
+  ["flag", `${String.fromCodePoint(0x1f1ee)}${String.fromCodePoint(0x1f1f9)}`],
+] as const;
+
 test("timeline renders linear turns compactly and exposes branch structure", () => {
   const tree = branchedTree();
   const timeline = timelinePicker(tree, STEEL);
@@ -23,6 +34,17 @@ test("timeline renders linear turns compactly and exposes branch structure", () 
   assert.equal(timeline.picker.options[3]?.value, "active");
   assert.equal(timeline.picker.index, 3);
   assert.equal(timeline.picker.searchable, true);
+});
+
+test("timeline previews end before a grapheme that crosses their boundary", () => {
+  for (const [name, cluster] of boundaryClusters) {
+    const prefix = "a".repeat(160 - cluster.length + 1);
+    const tree = append(ConversationTree.empty(), 0, `${prefix}${cluster}tail`, "done", "10:00");
+    const label = timelinePicker(tree, STEEL).picker.options[0]?.label;
+
+    assert.equal(label?.slice(2), prefix, `${name} was split`);
+    assert.equal(label?.isWellFormed(), true, `${name} produced malformed UTF-16`);
+  }
 });
 
 test("timeline selection changes only the active in-memory path", async () => {

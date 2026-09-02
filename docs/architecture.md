@@ -387,9 +387,10 @@ Blocks store source text, never pre-wrapped rows. A transcript renderer caches
 rows per block, width, and palette: streaming invalidates only the changing
 block, scrolling reuses all cached rows, and resize deliberately reflows them.
 The viewport is assembled from only the cached row ranges it intersects rather
-than flattening the complete history on every frame. Cell measurement accounts
-for graphemes, combining marks, emoji, and wide CJK glyphs. Markdown prose uses
-a readable maximum measure while code and tables retain the available width.
+than flattening the complete history on every frame. Cell measurement,
+truncation, and styled spans share complete grapheme boundaries across
+combining marks, emoji, and wide CJK glyphs. Markdown prose uses a readable
+maximum measure while code and tables retain the available width.
 
 Untrusted text is neutralized before both cell measurement and paint. C0, C1,
 ESC/CSI/OSC, delete, bidirectional controls, and pasted control sequences

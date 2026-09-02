@@ -3,44 +3,16 @@
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
+export { leadingText, trailingText } from "../text-boundary.ts";
 
 export const MAX_EDITABLE_BYTES = 4_000_000;
 export const MAX_EDITABLE_CHARS = 1_000_000;
 export const MAX_EDITABLE_LINES = 20_000;
 
 const READ_CHUNK_BYTES = 64 * 1024;
-const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
 type ReadOptions = {
   label?: string;
 };
-
-/** Keep a bounded prefix without returning part of a user-perceived character. */
-export function leadingText(text: string, maxCodeUnits: number): string {
-  if (maxCodeUnits <= 0) return "";
-  if (text.length <= maxCodeUnits) return text;
-  let end = 0;
-  for (const { index, segment } of GRAPHEME_SEGMENTER.segment(text)) {
-    const next = index + segment.length;
-    if (next > maxCodeUnits) break;
-    end = next;
-  }
-  return text.slice(0, end);
-}
-
-/** Keep a bounded suffix without returning part of a user-perceived character. */
-export function trailingText(text: string, maxCodeUnits: number): string {
-  if (maxCodeUnits <= 0) return "";
-  if (text.length <= maxCodeUnits) return text;
-  let start = text.length;
-  for (const { index } of GRAPHEME_SEGMENTER.segment(text)) {
-    if (text.length - index <= maxCodeUnits) {
-      start = index;
-      break;
-    }
-  }
-  return text.slice(start);
-}
 
 /** Read a regular UTF-8 file without allowing an unbounded allocation. */
 export async function readEditableText(

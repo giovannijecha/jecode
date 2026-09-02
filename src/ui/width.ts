@@ -7,6 +7,9 @@
 // the right-hand column, a ground band, the cursor. Nothing measures with
 // `.length`.
 
+import { graphemes, segmentGraphemes } from "../text-boundary.ts";
+export { graphemes } from "../text-boundary.ts";
+
 /** Ranges the terminal draws two cells wide (East Asian Wide and Fullwidth). */
 const WIDE: readonly (readonly [number, number])[] = [
   [0x1100, 0x115f],
@@ -97,17 +100,6 @@ function inRanges(code: number, ranges: readonly (readonly [number, number])[]):
 const VS15 = String.fromCodePoint(0xfe0e);
 const VS16 = String.fromCodePoint(0xfe0f);
 
-// Grapheme segmentation is in the standard library, so a family emoji built
-// out of five code points and three joiners counts as the one thing the
-// terminal actually draws.
-const SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-export function graphemes(text: string): string[] {
-  const out: string[] = [];
-  for (const { segment } of SEGMENTER.segment(text)) out.push(segment);
-  return out;
-}
-
 /**
  * Cells taken by one grapheme cluster.
  *
@@ -127,7 +119,7 @@ export function charWidth(cluster: string): number {
 
 export function textWidth(text: string): number {
   let total = 0;
-  for (const cluster of SEGMENTER.segment(text)) total += charWidth(cluster.segment);
+  for (const cluster of segmentGraphemes(text)) total += charWidth(cluster.segment);
   return total;
 }
 
@@ -146,7 +138,7 @@ export function splitByCells(
   let used = 0;
   let room = Math.max(1, firstCols);
 
-  for (const { index, segment } of SEGMENTER.segment(text)) {
+  for (const { index, segment } of segmentGraphemes(text)) {
     const width = charWidth(segment);
     if (index > start && used + width > room) {
       chunks.push({ text: text.slice(start, index), width: used });
@@ -166,7 +158,7 @@ export function clip(text: string, cols: number): string {
   if (cols <= 0) return "";
   let out = "";
   let used = 0;
-  for (const { segment } of SEGMENTER.segment(text)) {
+  for (const { segment } of segmentGraphemes(text)) {
     const w = charWidth(segment);
     if (used + w > cols) break;
     out += segment;
