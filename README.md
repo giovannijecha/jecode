@@ -275,8 +275,8 @@ Jecode treats model output, workspace content, tool output, and terminal text as
 untrusted data.
 
 - Current filesystem tools are confined to the selected workspace. Writes
-  reject symlink and junction components, revalidate boundaries, and use atomic
-  replacement.
+  reject symlink and junction components, revalidate boundaries and the
+  approved file state immediately before atomic replacement.
 - Dangerous tools ask by default unless explicitly allowed for the session or
   the process starts with `--auto-approve`.
 - Credential fields are masked and excluded from transcripts. Recognized

@@ -12,7 +12,6 @@ const READ_CHUNK_BYTES = 64 * 1024;
 
 type ReadOptions = {
   label?: string;
-  missingAsEmpty?: boolean;
 };
 
 /** Read a regular UTF-8 file without allowing an unbounded allocation. */
@@ -21,27 +20,13 @@ export async function readEditableText(
   options: ReadOptions = {},
 ): Promise<string> {
   const label = options.label ?? "file";
-  let details: Awaited<ReturnType<typeof lstat>>;
-
-  try {
-    details = await lstat(file);
-  } catch (error) {
-    if (options.missingAsEmpty === true && isMissing(error)) return "";
-    throw error;
-  }
+  const details = await lstat(file);
   if (!details.isFile()) throw new Error(`${label} must be a regular file`);
 
-  let handle: FileHandle;
-
-  try {
-    const flags = process.platform === "win32"
-      ? "r"
-      : constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
-    handle = await open(file, flags);
-  } catch (error) {
-    if (options.missingAsEmpty === true && isMissing(error)) return "";
-    throw error;
-  }
+  const flags = process.platform === "win32"
+    ? "r"
+    : constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
+  const handle: FileHandle = await open(file, flags);
 
   try {
     const stat = await handle.stat();
@@ -121,8 +106,4 @@ function newlineCount(text: string): number {
 
 function limitError(label: string, limit: string): Error {
   return new Error(`${label} exceeds the whole-file mutation limit of ${limit}`);
-}
-
-function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException).code === "ENOENT";
 }

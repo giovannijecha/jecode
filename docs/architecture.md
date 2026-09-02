@@ -169,9 +169,13 @@ Reads may follow an alias only when its canonical target remains inside the
 workspace. Writes and edits require a direct path: every symlink or junction
 component is rejected. The boundary is revalidated after the temporary sibling
 is opened but before content is written, and again immediately before rename;
-the temporary pathname must still identify the file Jecode opened. A previewed
-write or edit also compares the current file with the approved version, so an
-intervening content change is rejected instead of overwritten.
+the temporary pathname must still identify the file Jecode opened. A write or
+edit snapshots the target at execution time, verifies any previewed state, and
+compares that snapshot again in the final before-rename validation. This also
+distinguishes an absent target from an existing empty file, so an intervening
+change is rejected instead of overwritten. Node exposes no cross-platform
+compare-and-swap replacement primitive, so another process can still write in
+the irreducible interval between that final check and the rename.
 
 File reads and whole-file mutations accept regular files only. Reads use
 bounded, cancellable handles that cannot wait on FIFOs or other special files.

@@ -3,7 +3,7 @@
 import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { Tool } from "./types.ts";
+import type { Tool, ToolContext, ToolOutput, ToolPreview } from "./types.ts";
 import { optionalBool, optionalInt, optionalString, requireString } from "./args.ts";
 import {
   assertDirectWritableInRoot,
@@ -24,6 +24,12 @@ const MAX_READ_CHARS = 60_000;
 const MAX_LIST_CHARS = 60_000;
 const MAX_LIST_ENTRIES = 2_000;
 const READ_CHUNK_BYTES = 64 * 1024;
+
+export type FileMutationDependencies = {
+  atomicWrite: typeof atomicWrite;
+};
+
+const DEFAULT_MUTATION_DEPENDENCIES: FileMutationDependencies = { atomicWrite };
 
 export const readFile: Tool = {
   name: "read_file",
@@ -134,24 +140,40 @@ export const writeFile: Tool = {
     assertEditableText(content);
     // A write against a file that is already there is a replacement, and the
     // user is owed the difference rather than a wall of green.
-    return { before: await current(target), after: content };
+    const before = await current(target);
+    return { before: before.text, after: content, beforeExists: before.exists };
   },
   async run(args, ctx) {
-    const root = await resolveExistingInRoot(ctx.root, ".");
-    const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
-    const content = requireString(args, "content", true);
-    assertEditableText(content);
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    const validate = () => assertDirectWritableInRoot(root, target);
-    await validate();
-    await unchangedSinceApproval(target, ctx.preview?.before);
-    await atomicWrite(target, content, { validate });
-    return {
-      output: `wrote ${displayPath(root, target)} (${content.length} characters)`,
-      summary: count(content, "line"),
-    };
+    return runWriteFile(args, ctx);
   },
 };
+
+export async function runWriteFile(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+  dependencies: FileMutationDependencies = DEFAULT_MUTATION_DEPENDENCIES,
+): Promise<ToolOutput> {
+  const root = await resolveExistingInRoot(ctx.root, ".");
+  const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
+  const content = requireString(args, "content", true);
+  assertEditableText(content);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await assertDirectWritableInRoot(root, target);
+  const before = await current(target);
+  assertApproved(before, ctx.preview, "write");
+  await dependencies.atomicWrite(target, content, {
+    async validate(phase) {
+      await assertDirectWritableInRoot(root, target);
+      if (phase === "before-rename") {
+        await assertUnchanged(target, before, "write", ctx.preview !== undefined);
+      }
+    },
+  });
+  return {
+    output: `wrote ${displayPath(root, target)} (${content.length} characters)`,
+    summary: count(content, "line"),
+  };
+}
 
 export const editFile: Tool = {
   name: "edit_file",
@@ -175,32 +197,48 @@ export const editFile: Tool = {
   async preview(args, ctx) {
     const root = await resolveExistingInRoot(ctx.root, ".");
     const target = await resolveDirectWritableInRoot(root, requireString(args, "path"), true);
-    const before = await current(target);
+    const before = await current(target, true);
     // An edit that will not apply gets no preview: the run is about to say so
     // properly, and a diff of a match that does not exist would be a lie.
     try {
-      return { before, after: applied(before, args).after };
+      return {
+        before: before.text,
+        after: applied(before.text, args).after,
+        beforeExists: true,
+      };
     } catch {
       return undefined;
     }
   },
   async run(args, ctx) {
-    const root = await resolveExistingInRoot(ctx.root, ".");
-    const target = await resolveDirectWritableInRoot(root, requireString(args, "path"), true);
-    const before = await readEditableText(target);
-    if (ctx.preview !== undefined && before !== ctx.preview.before) {
-      throw new Error("file changed after the preview — inspect it and retry the edit");
-    }
-    const { after, made } = applied(before, args);
-
-    const validate = () => assertDirectWritableInRoot(root, target, true);
-    await atomicWrite(target, after, { validate });
-    return {
-      output: `edited ${displayPath(root, target)} (${made} replacement${made === 1 ? "" : "s"})`,
-      summary: plural(made, "replacement", "replacements"),
-    };
+    return runEditFile(args, ctx);
   },
 };
+
+export async function runEditFile(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+  dependencies: FileMutationDependencies = DEFAULT_MUTATION_DEPENDENCIES,
+): Promise<ToolOutput> {
+  const root = await resolveExistingInRoot(ctx.root, ".");
+  const target = await resolveDirectWritableInRoot(root, requireString(args, "path"), true);
+  const before = await current(target, true);
+  assertApproved(before, ctx.preview, "edit");
+  const { after, made } = applied(before.text, args);
+
+  await dependencies.atomicWrite(target, after, {
+    async validate(phase) {
+      await assertDirectWritableInRoot(root, target, true);
+      if (phase === "before-rename") {
+        await assertUnchanged(target, before, "edit", ctx.preview !== undefined);
+      }
+    },
+  });
+  return {
+    output: `edited ${displayPath(root, target)} (${made} replacement${made === 1 ? "" : "s"})`,
+    summary: plural(made, "replacement", "replacements"),
+  };
+}
 
 async function readRange(
   target: string,
@@ -316,9 +354,18 @@ function applied(before: string, args: Record<string, unknown>): { after: string
   return { after, made };
 }
 
-/** What is on disk now, or nothing at all — a file that is not there yet. */
-async function current(target: string): Promise<string> {
-  return readEditableText(target, { missingAsEmpty: true });
+type CurrentFile = { exists: boolean; text: string };
+
+/** What is on disk now, preserving the difference between absent and empty. */
+async function current(target: string, mustExist = false): Promise<CurrentFile> {
+  try {
+    return { exists: true, text: await readEditableText(target) };
+  } catch (error) {
+    if (!mustExist && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { exists: false, text: "" };
+    }
+    throw error;
+  }
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -333,11 +380,30 @@ function countOccurrences(haystack: string, needle: string): number {
   return occurrences;
 }
 
-async function unchangedSinceApproval(target: string, approved: string | undefined): Promise<void> {
-  const onDisk = await current(target);
-  if (approved !== undefined && onDisk !== approved) {
-    throw new Error("file changed after the preview — inspect it and retry the write");
+function assertApproved(current: CurrentFile, preview: ToolPreview | undefined, operation: string): void {
+  if (preview === undefined) return;
+  const existenceChanged =
+    preview.beforeExists !== undefined && current.exists !== preview.beforeExists;
+  if (existenceChanged || current.text !== preview.before) {
+    throw changedFile(operation, true);
   }
+}
+
+async function assertUnchanged(
+  target: string,
+  expected: CurrentFile,
+  operation: string,
+  previewed: boolean,
+): Promise<void> {
+  const onDisk = await current(target);
+  if (onDisk.exists !== expected.exists || onDisk.text !== expected.text) {
+    throw changedFile(operation, previewed);
+  }
+}
+
+function changedFile(operation: string, previewed: boolean): Error {
+  const when = previewed ? "after the preview" : "while preparing the change";
+  return new Error(`file changed ${when} — inspect it and retry the ${operation}`);
 }
 
 function count(text: string, noun: string): string {
