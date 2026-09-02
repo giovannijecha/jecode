@@ -69,12 +69,21 @@ export async function runApp(
   let escapeTimer: NodeJS.Timeout | undefined;
   let stopResize = (): void => {};
   let stopInput = (): void => {};
+  let failure: { error: unknown } | undefined;
   // Timers outlive the teardown they were scheduled before. Painting after the
   // terminal has been handed back would write escapes into the user's shell.
   let live = true;
   const done = new Promise<void>((resolve) => {
     closed = resolve;
   });
+
+  const guard = (action: () => void): void => {
+    try {
+      action();
+    } catch (error) {
+      fail(error);
+    }
+  };
 
   const view = () => {
     const now = Date.now();
@@ -129,7 +138,9 @@ export async function runApp(
   // work, so repaints coalesce onto one frame.
   const render = (block?: Block): void => {
     if (block !== undefined) transcript.invalidate(block);
-    if (live && frameTimer === undefined) frameTimer = setTimeout(draw, FRAME_MS);
+    if (live && frameTimer === undefined) {
+      frameTimer = setTimeout(() => guard(draw), FRAME_MS);
+    }
   };
 
   const feedback = feedbackController((next) => {
@@ -177,6 +188,11 @@ export async function runApp(
     closed?.();
   }
 
+  function fail(error: unknown): void {
+    failure ??= { error };
+    quit();
+  }
+
   function requestQuit(): void {
     const activity = state.activity;
     if (activity === undefined) {
@@ -193,17 +209,20 @@ export async function runApp(
     const activity = begin(kind, label);
     state.activity = activity;
     state.status = label;
-    spinTimer = setInterval(() => {
-      if (!session.config.reducedMotion) state.spin++;
-      let activeTool: Block | undefined;
-      for (let index = state.blocks.length - 1; index >= 0; index--) {
-        const block = state.blocks[index];
-        if (block?.kind !== "tool" || block.tone !== "pending" || block.startedAt === undefined) continue;
-        activeTool = block;
-        break;
-      }
-      render(activeTool);
-    }, session.config.reducedMotion ? 1_000 : SPIN_MS);
+    spinTimer = setInterval(
+      () => guard(() => {
+        if (!session.config.reducedMotion) state.spin++;
+        let activeTool: Block | undefined;
+        for (let index = state.blocks.length - 1; index >= 0; index--) {
+          const block = state.blocks[index];
+          if (block?.kind !== "tool" || block.tone !== "pending" || block.startedAt === undefined) continue;
+          activeTool = block;
+          break;
+        }
+        render(activeTool);
+      }),
+      session.config.reducedMotion ? 1_000 : SPIN_MS,
+    );
     render();
     return activity;
   }
@@ -284,32 +303,37 @@ export async function runApp(
     }
   }
 
-  terminal.enter(session.config.reducedMotion);
-  stopResize = terminal.onResize(() => {
-    paint.invalidate();
-    draw();
-  });
-  stopInput = terminal.onInput((chunk) => {
-    if (escapeTimer !== undefined) clearTimeout(escapeTimer);
-    for (const key of keys.push(chunk)) {
-      if (!live) break;
-      input.handle(key);
-    }
-    if (!live) return;
-    escapeTimer = setTimeout(() => {
-      escapeTimer = undefined;
-      if (!live) return;
-      for (const key of keys.flush()) input.handle(key);
-      if (live) render();
-    }, ESCAPE_MS);
-    render();
-  });
-
-  draw();
   try {
-    await resumeAtLaunch;
+    terminal.enter(session.config.reducedMotion);
+    stopResize = terminal.onResize(() => guard(() => {
+      paint.invalidate();
+      draw();
+    }));
+    stopInput = terminal.onInput((chunk) => guard(() => {
+      if (escapeTimer !== undefined) clearTimeout(escapeTimer);
+      for (const key of keys.push(chunk)) {
+        if (!live) break;
+        input.handle(key);
+      }
+      if (!live) return;
+      escapeTimer = setTimeout(() => guard(() => {
+        escapeTimer = undefined;
+        if (!live) return;
+        for (const key of keys.flush()) input.handle(key);
+        if (live) render();
+      }), ESCAPE_MS);
+      render();
+    }));
+
+    draw();
+    if (resumeAtLaunch !== undefined) await Promise.race([resumeAtLaunch, done]);
     if (live) await done;
+    if (failure !== undefined) throw failure.error;
   } finally {
-    await session.persistence?.close();
+    try {
+      quit();
+    } finally {
+      await session.persistence?.close();
+    }
   }
 }

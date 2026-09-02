@@ -281,6 +281,18 @@ test("a searchable picker includes essential row values in its query", () => {
   assert.equal(picker.selected(filtered), 1);
 });
 
+test("a searchable picker removes one complete grapheme", () => {
+  const source: picker.Picker = {
+    title: [],
+    options: [{ label: "family" }],
+    searchable: true,
+    query: "find 👨‍👩‍👧‍👦",
+    index: 0,
+  };
+
+  assert.equal(picker.backspace(source).query, "find ");
+});
+
 test("reduced motion replaces the live rail animation with a stable node", () => {
   const frame = compose({
     ...base(),

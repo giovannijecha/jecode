@@ -3,7 +3,7 @@
 import type { Palette } from "../ui/theme.ts";
 import type { Seg } from "../ui/render.ts";
 import { row } from "../ui/render.ts";
-import { elide } from "../ui/width.ts";
+import { elide, graphemes } from "../ui/width.ts";
 import { menuWindow, renderMenuRows } from "./components/menu.ts";
 import { promptCursor, promptLine } from "./components/prompt.ts";
 import type { Cursor } from "./frame.ts";
@@ -67,7 +67,7 @@ export function type(picker: Picker, text: string): Picker {
 
 export function backspace(picker: Picker): Picker {
   if (picker.searchable !== true || (picker.query ?? "") === "") return picker;
-  return withQuery(picker, Array.from(picker.query ?? "").slice(0, -1).join(""));
+  return withQuery(picker, graphemes(picker.query ?? "").slice(0, -1).join(""));
 }
 
 export function clear(picker: Picker): Picker {

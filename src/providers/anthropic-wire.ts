@@ -2,6 +2,7 @@
 // Pure functions, no I/O — which is what makes them testable without a key.
 
 import type { Block, Message, ToolSpec, Usage } from "../types.ts";
+import { wireTokenCount } from "./wire-usage.ts";
 
 export type WireBlock = Record<string, unknown>;
 
@@ -10,10 +11,10 @@ export type AnthropicResponse = {
   stop_reason?: string;
   stop_details?: { category?: string | null; explanation?: string };
   usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_read_input_tokens?: number;
-    cache_creation_input_tokens?: number;
+    input_tokens?: unknown;
+    output_tokens?: unknown;
+    cache_read_input_tokens?: unknown;
+    cache_creation_input_tokens?: unknown;
   };
 };
 
@@ -100,10 +101,10 @@ function normalizeUsage(data: AnthropicResponse): Usage | undefined {
   const usage = data.usage;
   if (usage === undefined) return undefined;
   return {
-    inputTokens: usage.input_tokens ?? 0,
-    outputTokens: usage.output_tokens ?? 0,
-    cachedInputTokens: usage.cache_read_input_tokens ?? 0,
-    cacheWriteInputTokens: usage.cache_creation_input_tokens ?? 0,
+    inputTokens: wireTokenCount(usage.input_tokens),
+    outputTokens: wireTokenCount(usage.output_tokens),
+    cachedInputTokens: wireTokenCount(usage.cache_read_input_tokens),
+    cacheWriteInputTokens: wireTokenCount(usage.cache_creation_input_tokens),
     reasoningTokens: 0,
   };
 }

@@ -8,6 +8,7 @@
 // arguments travel as a JSON string rather than an object.
 
 import type { Block, Message, ToolSpec, Usage } from "../types.ts";
+import { wireTokenCount } from "./wire-usage.ts";
 
 export type ChatToolCall = { id: string; name: string; args: string };
 
@@ -16,7 +17,7 @@ export type ChatReply = {
   reasoning: string;
   toolCalls: ChatToolCall[];
   finishReason?: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
 };
 
 export function toWireTool(tool: ToolSpec) {
@@ -98,8 +99,8 @@ function ollamaReasoning(message: Message): string | undefined {
 function normalizeUsage(reply: ChatReply): Usage | undefined {
   if (reply.usage === undefined) return undefined;
   return {
-    inputTokens: reply.usage.prompt_tokens ?? 0,
-    outputTokens: reply.usage.completion_tokens ?? 0,
+    inputTokens: wireTokenCount(reply.usage.prompt_tokens),
+    outputTokens: wireTokenCount(reply.usage.completion_tokens),
     cachedInputTokens: 0,
     cacheWriteInputTokens: 0,
     reasoningTokens: 0,
