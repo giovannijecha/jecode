@@ -82,7 +82,8 @@ estimate replaces stale pressure without being added to vendor usage totals.
 
 A tool failure becomes an error result the model can act on. Cancellation is
 the exception: it propagates through provider HTTP, retry waits, filesystem
-searches, and process trees so the foreground operation can end promptly.
+searches, atomic file mutations until their rename commit, and process trees so
+the foreground operation can end promptly.
 
 ## Foreground activity
 

@@ -154,15 +154,18 @@ export async function runWriteFile(
   ctx: ToolContext,
   dependencies: FileMutationDependencies = DEFAULT_MUTATION_DEPENDENCIES,
 ): Promise<ToolOutput> {
+  throwIfAborted(ctx.signal);
   const root = await resolveExistingInRoot(ctx.root, ".");
   const target = await resolveDirectWritableInRoot(root, requireString(args, "path"));
   const content = requireString(args, "content", true);
   assertEditableText(content);
   await fs.mkdir(path.dirname(target), { recursive: true });
+  throwIfAborted(ctx.signal);
   await assertDirectWritableInRoot(root, target);
   const before = await current(target);
   assertApproved(before, ctx.preview, "write");
   await dependencies.atomicWrite(target, content, {
+    signal: ctx.signal,
     async validate(phase) {
       await assertDirectWritableInRoot(root, target);
       if (phase === "before-rename") {
@@ -221,6 +224,7 @@ export async function runEditFile(
   ctx: ToolContext,
   dependencies: FileMutationDependencies = DEFAULT_MUTATION_DEPENDENCIES,
 ): Promise<ToolOutput> {
+  throwIfAborted(ctx.signal);
   const root = await resolveExistingInRoot(ctx.root, ".");
   const target = await resolveDirectWritableInRoot(root, requireString(args, "path"), true);
   const before = await current(target, true);
@@ -228,6 +232,7 @@ export async function runEditFile(
   const { after, made } = applied(before.text, args);
 
   await dependencies.atomicWrite(target, after, {
+    signal: ctx.signal,
     async validate(phase) {
       await assertDirectWritableInRoot(root, target, true);
       if (phase === "before-rename") {

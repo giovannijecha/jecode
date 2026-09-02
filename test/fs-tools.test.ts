@@ -393,6 +393,50 @@ test("an edit preserves a concurrent update made immediately before rename", asy
   assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "concurrent update");
 });
 
+test("an interrupted write cannot commit after reaching the rename boundary", async () => {
+  const args = { path: "interrupted-write.txt", content: "after write" };
+  await writeFile.run({ path: args.path, content: "before write" }, ctx);
+  const preview = await writeFile.preview?.(args, ctx);
+  const control = new AbortController();
+  const gate = holdBeforeRename();
+  const operation = runWriteFile(
+    args,
+    { ...ctx, preview, signal: control.signal },
+    gate.dependencies,
+  );
+
+  await gate.reached;
+  control.abort(new Error("stop write"));
+  const rejected = assert.rejects(operation, /stop write/);
+  gate.release();
+  await rejected;
+
+  assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "before write");
+  assert.equal((await fs.readdir(ctx.root)).some((name) => name.startsWith(`.${args.path}.`)), false);
+});
+
+test("an interrupted edit cannot commit after reaching the rename boundary", async () => {
+  const args = { path: "interrupted-edit.txt", old_text: "before", new_text: "after edit" };
+  await writeFile.run({ path: args.path, content: "before" }, ctx);
+  const preview = await editFile.preview?.(args, ctx);
+  const control = new AbortController();
+  const gate = holdBeforeRename();
+  const operation = runEditFile(
+    args,
+    { ...ctx, preview, signal: control.signal },
+    gate.dependencies,
+  );
+
+  await gate.reached;
+  control.abort(new Error("stop edit"));
+  const rejected = assert.rejects(operation, /stop edit/);
+  gate.release();
+  await rejected;
+
+  assert.equal(await fs.readFile(path.join(ctx.root, args.path), "utf8"), "before");
+  assert.equal((await fs.readdir(ctx.root)).some((name) => name.startsWith(`.${args.path}.`)), false);
+});
+
 test("atomic replacement preserves an existing POSIX executable mode", { skip: process.platform === "win32" }, async () => {
   const file = path.join(ctx.root, "script.sh");
   await fs.writeFile(file, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -412,5 +456,32 @@ function replaceBeforeRename(content: string): FileMutationDependencies {
         await options.validate?.(phase);
       },
     }),
+  };
+}
+
+function holdBeforeRename(): {
+  dependencies: FileMutationDependencies;
+  reached: Promise<void>;
+  release(): void;
+} {
+  let markReached: (() => void) | undefined;
+  let resume: (() => void) | undefined;
+  const reached = new Promise<void>((resolve) => { markReached = resolve; });
+  const released = new Promise<void>((resolve) => { resume = resolve; });
+  return {
+    reached,
+    release: () => resume?.(),
+    dependencies: {
+      atomicWrite: (file, replacement, options = {}) => atomicWrite(file, replacement, {
+        ...options,
+        async validate(phase) {
+          if (phase === "before-rename") {
+            markReached?.();
+            await released;
+          }
+          await options.validate?.(phase);
+        },
+      }),
+    },
   };
 }
