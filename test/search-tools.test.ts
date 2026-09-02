@@ -76,6 +76,19 @@ test("search results stop at the requested bound", async () => {
   assert.match(result.summary ?? "", /result limit/);
 });
 
+test("a clipped search line never returns half an emoji", async () => {
+  const query = "unicode-boundary-token";
+  const emoji = String.fromCodePoint(0x1f600);
+  const line = `${query}${"x".repeat(498 - query.length)}${emoji}tail`;
+  await fs.writeFile(path.join(ctx.root, "unicode-boundary.txt"), line, "utf8");
+
+  const result = await searchText.run({ query, pattern: "*.txt" }, ctx);
+
+  assert.equal(result.output.isWellFormed(), true);
+  assert.equal(result.output.includes(emoji), false);
+  assert.match(result.output, /…$/);
+});
+
 test("search skips binary files", async () => {
   const result = await searchText.run({ query: "needle", pattern: "*.dat" }, ctx);
   assert.equal(result.output, "[no matches]");

@@ -86,6 +86,59 @@ test("keeps bounded head and tail output", async () => {
   assert.ok(result.output.length < 31_000);
 });
 
+test("bounded command output never separates an emoji around its omission marker", async () => {
+  const emoji = String.fromCodePoint(0x1f600);
+  const source =
+    "process.stdout.write('x'.repeat(14999) + " +
+    "String.fromCodePoint(0x1f600) + 'y'.repeat(20000))";
+  const snapshots: string[] = [];
+
+  const result = await runCommand.run(
+    { command: `"${process.execPath}" -e "${source}"` },
+    { root, onOutput: (output) => snapshots.push(output) },
+  );
+
+  assert.equal(result.output.isWellFormed(), true);
+  assert.equal(result.output.includes(emoji), false);
+  assert.match(result.output, /characters cut/);
+  assert.ok(snapshots.length > 0);
+  assert.ok(snapshots.every((output) => output.isWellFormed()));
+});
+
+test("a complete command output at the cap is not truncated to align graphemes", async () => {
+  const emoji = String.fromCodePoint(0x1f600);
+  const source =
+    "process.stdout.write('x'.repeat(14999) + " +
+    "String.fromCodePoint(0x1f600) + 'y'.repeat(14999))";
+
+  const result = await runCommand.run(
+    { command: `"${process.execPath}" -e "${source}"` },
+    { root },
+  );
+
+  assert.equal(result.output.isWellFormed(), true);
+  assert.equal(result.output.includes(emoji), true);
+  assert.doesNotMatch(result.output, /characters cut/);
+});
+
+test("bounded command output preserves graphemes split across stream chunks", async () => {
+  const base = String.fromCodePoint(0x4e00);
+  const combiningMark = String.fromCodePoint(0x0301);
+  const source =
+    "process.stdout.write('x'.repeat(14999) + String.fromCodePoint(0x4e00)); " +
+    "setTimeout(() => process.stdout.write(String.fromCodePoint(0x0301) + 'y'.repeat(20000)), 25)";
+
+  const result = await runCommand.run(
+    { command: `"${process.execPath}" -e "${source}"` },
+    { root },
+  );
+
+  assert.equal(result.output.isWellFormed(), true);
+  assert.equal(result.output.includes(base), false);
+  assert.equal(result.output.includes(combiningMark), false);
+  assert.match(result.output, /characters cut/);
+});
+
 test("rejects a non-positive timeout", async () => {
   await assert.rejects(
     runCommand.run({ command: "node -e \"process.exit(0)\"", timeout_ms: 0 }, { root }),

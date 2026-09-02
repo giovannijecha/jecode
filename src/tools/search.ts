@@ -8,6 +8,7 @@ import { optionalBool, optionalInt, optionalString, requireString } from "./args
 import { displayPath, resolveExistingInRoot } from "./paths.ts";
 import { trySearchWithRipgrep } from "./ripgrep.ts";
 import type { SearchFile } from "./ripgrep.ts";
+import { leadingText } from "./text-boundary.ts";
 
 const DEFAULT_RESULTS = 100;
 const MAX_RESULTS = 500;
@@ -372,7 +373,7 @@ function summary(count: number, limit: number, capped: boolean, one: string, man
 
 function clip(line: string): string {
   if (line.length <= MAX_MATCH_LINE) return line;
-  return `${line.slice(0, MAX_MATCH_LINE - 1)}…`;
+  return `${leadingText(line, MAX_MATCH_LINE - 1)}…`;
 }
 
 function checkAbort(signal: AbortSignal | undefined): void {

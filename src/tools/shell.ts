@@ -7,6 +7,7 @@ import type { Tool } from "./types.ts";
 import { optionalInt, requireString } from "./args.ts";
 import { credentialRedactor, redactCredentials, shellEnvironment } from "../credential-safety.ts";
 import { resolveExecutable } from "../executable.ts";
+import { leadingText, trailingText } from "./text-boundary.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -147,18 +148,25 @@ function capture(onOutput?: ToolContextOutput): { append(chunk: string): void; v
   let head = "";
   let tail = "";
   let total = 0;
+  let headClosed = false;
 
   const appendSafe = (chunk: string): void => {
     total += chunk.length;
-    const room = Math.max(0, half - head.length);
-    head += chunk.slice(0, room);
-    const rest = chunk.slice(room);
-    if (rest !== "") tail = `${tail}${rest}`.slice(-half);
+    let rest = chunk;
+    if (!headClosed) {
+      const candidate = `${head}${chunk}`;
+      head = leadingText(candidate, half);
+      rest = candidate.slice(head.length);
+      if (candidate.length > half) headClosed = true;
+    }
+    if (rest !== "") {
+      tail = trailingText(`${tail}${rest}`, MAX_OUTPUT_CHARS - head.length);
+    }
     if (chunk !== "") onOutput?.(formatted().trimEnd());
   };
 
   const formatted = (): string => {
-    if (total <= MAX_OUTPUT_CHARS) return `${head}${tail}`;
+    if (total === head.length + tail.length) return `${head}${tail}`;
     const cut = total - head.length - tail.length;
     return `${head}\n\n[... ${cut} characters cut ...]\n\n${tail}`;
   };
