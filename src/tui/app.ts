@@ -28,7 +28,7 @@ import { sessionPermissions } from "../permissions.ts";
 import { resumePicker } from "./resume.ts";
 
 const FRAME_MS = 16;
-const SPIN_MS = 80;
+const ACTIVITY_REFRESH_MS = 1_000;
 /** How long a lone escape waits to prove it is not the start of a sequence. */
 const ESCAPE_MS = 25;
 
@@ -65,7 +65,7 @@ export async function runApp(
 
   let closed: (() => void) | undefined;
   let frameTimer: NodeJS.Timeout | undefined;
-  let spinTimer: NodeJS.Timeout | undefined;
+  let activityTimer: NodeJS.Timeout | undefined;
   let escapeTimer: NodeJS.Timeout | undefined;
   let stopResize = (): void => {};
   let stopInput = (): void => {};
@@ -100,8 +100,6 @@ export async function runApp(
         : activityStatus(state.activity, state.status ?? state.activity.label, now),
       feedback: state.feedback,
       readiness: turnBlocker(session),
-      spin: state.spin,
-      reducedMotion: session.config.reducedMotion,
       now,
       modal: overlay.shown(state.open),
       menu: completionOptions(state.completing),
@@ -182,7 +180,7 @@ export async function runApp(
     live = false;
     safely(stopInput);
     safely(stopResize);
-    if (spinTimer !== undefined) clearInterval(spinTimer);
+    if (activityTimer !== undefined) clearInterval(activityTimer);
     if (frameTimer !== undefined) clearTimeout(frameTimer);
     if (escapeTimer !== undefined) clearTimeout(escapeTimer);
     safely(() => feedback.close());
@@ -231,9 +229,8 @@ export async function runApp(
     const activity = begin(kind, label);
     state.activity = activity;
     state.status = label;
-    spinTimer = setInterval(
+    activityTimer = setInterval(
       () => guard(() => {
-        if (!session.config.reducedMotion) state.spin++;
         let activeTool: Block | undefined;
         for (let index = state.blocks.length - 1; index >= 0; index--) {
           const block = state.blocks[index];
@@ -243,7 +240,7 @@ export async function runApp(
         }
         render(activeTool);
       }),
-      session.config.reducedMotion ? 1_000 : SPIN_MS,
+      ACTIVITY_REFRESH_MS,
     );
     render();
     return activity;
@@ -251,8 +248,8 @@ export async function runApp(
 
   function finishActivity(activity: Activity): void {
     if (state.activity !== activity) return;
-    if (spinTimer !== undefined) clearInterval(spinTimer);
-    spinTimer = undefined;
+    if (activityTimer !== undefined) clearInterval(activityTimer);
+    activityTimer = undefined;
     state.activity = undefined;
     state.status = undefined;
     state.open = overlay.cancel(state.open);

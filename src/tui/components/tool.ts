@@ -11,8 +11,6 @@ const DIFF_ROWS = 15;
 
 export type ToolRenderContext = {
   continues?: boolean;
-  spin?: number;
-  reducedMotion?: boolean;
   now?: number;
 };
 
@@ -30,7 +28,7 @@ export function renderTool(
       width,
       [
         { text: " " },
-        { text: `${stateGlyph(block, context)} `, fg: statusInk(block.tone, pal), bold: true },
+        { text: `${stateGlyph(block)} `, fg: statusInk(block.tone, pal), bold: true },
         { text: block.name, fg: pal.ink.bright, bold: true },
         ...(block.target === "" ? [] : [{ text: `  ${block.target}`, fg: pal.technical }]),
       ],
@@ -104,12 +102,8 @@ function emphasized(text: string, emphasis: Emphasis | undefined, fg: RGB): Seg[
   ];
 }
 
-function stateGlyph(block: ToolBlock, context: ToolRenderContext): string {
-  if (block.tone === "pending") {
-    if (block.startedAt === undefined || context.reducedMotion === true) return "◌";
-    const frames = ["◐", "◓", "◑", "◒"] as const;
-    return frames[Math.floor((context.spin ?? 0) / 2) % frames.length] as string;
-  }
+function stateGlyph(block: ToolBlock): string {
+  if (block.tone === "pending") return "◌";
   if (block.tone === "fail") return hasColor() ? "●" : "×";
   if (block.tone === "deny") return "○";
   return hasColor() ? "●" : "✓";

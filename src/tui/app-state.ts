@@ -20,7 +20,6 @@ export type AppState = {
   draft: string;
   status?: string;
   feedback?: Feedback;
-  spin: number;
   open?: Open;
   activity?: Activity;
   closeWhenIdle: boolean;
@@ -41,7 +40,6 @@ export function appState(): AppState {
     past: [],
     recall: -1,
     draft: "",
-    spin: 0,
     closeWhenIdle: false,
     committedNodeId: 0,
   };

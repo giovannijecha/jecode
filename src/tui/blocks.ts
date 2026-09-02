@@ -8,8 +8,6 @@ import type { Block } from "./components/types.ts";
 
 export type RenderContext = {
   previous?: Block;
-  spin?: number;
-  reducedMotion?: boolean;
   now?: number;
 };
 
@@ -37,8 +35,6 @@ export function render(block: Block, width: number, pal: Palette, context: Rende
     case "tool":
       return renderTool(block, width, pal, {
         continues: context.previous?.kind === "tool",
-        spin: context.spin,
-        reducedMotion: context.reducedMotion,
         now: context.now,
       });
     case "notice":

@@ -24,7 +24,7 @@ Options:
   --max-steps <number>   tool-loop ceiling
   --compaction-percent <${MIN_COMPACTION_PERCENT}-${MAX_COMPACTION_PERCENT}>
                           context usage that triggers compaction (default: ${DEFAULT_COMPACTION_PERCENT})
-  --reduced-motion       disable animated terminal states
+  --reduced-motion       use a steady terminal cursor
   --auto-approve         allow dangerous tools for this process
   --ephemeral            do not save this conversation
   --latest               resume the newest session without a picker

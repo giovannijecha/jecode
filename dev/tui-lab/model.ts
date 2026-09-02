@@ -27,8 +27,6 @@ export const SCENES = [
 export type Scene = (typeof SCENES)[number];
 
 export const ANIMATED: ReadonlySet<Scene> = new Set([
-  "tools-live",
-  "tools-trace",
   "tools-stream",
   "reasoning",
 ]);

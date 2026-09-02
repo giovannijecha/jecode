@@ -44,8 +44,6 @@ export type View = {
   feedback?: Feedback;
   /** Persistent idle guidance when the selected provider cannot start a turn. */
   readiness?: Feedback;
-  spin: number;
-  reducedMotion?: boolean;
   /** One frame timestamp shared by every live tool duration. */
   now?: number;
   /** A modal surface which takes the composer over while it is open. */
@@ -83,7 +81,7 @@ export function compose(
     transcriptHeight,
     view.scroll,
     view.pal,
-    { spin: view.spin, reducedMotion: view.reducedMotion, now: view.now },
+    { now: view.now },
   );
 
   const cursor = dock.cursor === undefined

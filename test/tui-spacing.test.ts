@@ -55,7 +55,6 @@ test("a short transcript grows upward from the composer", () => {
       scroll: 0,
       pal: STEEL,
       footer: { workspace: "~/work", model: "model", effort: "high" },
-      spin: 0,
     },
     { rows: 24, cols: 80 },
   );

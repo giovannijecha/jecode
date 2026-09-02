@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as edit from "../src/tui/editor.ts";
+import type { View } from "../src/tui/view.ts";
 import { compose } from "../src/tui/view.ts";
 import { COMMANDS } from "../src/commands.ts";
 import { textWidth } from "../src/ui/width.ts";
@@ -170,7 +171,6 @@ function base() {
       model: "claude-sonnet-5",
       effort: "high",
     },
-    spin: 0,
   };
 }
 
@@ -293,8 +293,8 @@ test("a searchable picker removes one complete grapheme", () => {
   assert.equal(picker.backspace(source).query, "find ");
 });
 
-test("reduced motion replaces the live rail animation with a stable node", () => {
-  const frame = compose({
+test("a pending tool keeps one stable state node and its elapsed time", () => {
+  const view: View = {
     ...base(),
     blocks: [{
       kind: "tool",
@@ -305,13 +305,14 @@ test("reduced motion replaces the live rail animation with a stable node", () =>
       startedAt: 0,
     }],
     status: "Running run_command",
-    reducedMotion: true,
-    now: 1_000,
-  }, { rows: 24, cols: 80 });
-  const shown = strip(frame.rows).join("\n");
-  assert.match(shown, /◌ run_command\s+npm test/);
-  assert.match(shown, /running · 1\.0s/);
-  assert.match(shown, /esc to interrupt/);
+  };
+  const first = strip(compose({ ...view, now: 1_000 }, { rows: 24, cols: 80 }).rows).join("\n");
+  const later = strip(compose({ ...view, now: 2_000 }, { rows: 24, cols: 80 }).rows).join("\n");
+  assert.match(first, /◌ run_command\s+npm test/);
+  assert.match(later, /◌ run_command\s+npm test/);
+  assert.match(first, /running · 1\.0s/);
+  assert.match(later, /running · 2\.0s/);
+  assert.match(later, /esc to interrupt/);
 });
 
 function stage(log: string[]) {
@@ -787,7 +788,6 @@ test("an open field takes the dock and keeps the caret on its own row", () => {
       scroll: 0,
       pal: STEEL,
       footer: base().footer,
-      spin: 0,
       modal: {
         kind: "type",
         field: { title: [{ text: "paste key" }], editor: edit.of("abc"), secret: true },
@@ -810,7 +810,6 @@ test("an open menu shows no caret at all", () => {
       scroll: 0,
       pal: STEEL,
       footer: base().footer,
-      spin: 0,
       modal: {
         kind: "pick",
         picker: approve.promptFor(callOf("1", "write_file", { path: "notes.md" }), "notes.md", STEEL),
