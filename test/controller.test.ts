@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import type { ControllerEvents, ControllerOptions } from "../src/controller.ts";
+import { resolveContextPolicy } from "../src/context/capacity.ts";
+import { estimateRequestInputTokens } from "../src/context/budget.ts";
+import { policyForContextWindow } from "../src/context/policy.ts";
 import {
   MAX_CONCURRENT_TOOL_CALLS,
   MAX_TOOL_CALLS_PER_STEP,
@@ -66,6 +69,7 @@ function options(provider: Provider, overrides: Partial<ControllerOptions> = {})
     model: "fake-1",
     system: "be useful",
     maxTokens: 100,
+    contextPolicy: () => Promise.resolve(policyForContextWindow(undefined, 85)),
     effort: "high",
     maxSteps: 10,
     toolContext: { root: process.cwd() },
@@ -104,6 +108,59 @@ test("returns as soon as the model stops asking for tools", async () => {
   assert.equal(history.length, 2);
 });
 
+test("clamps output so the complete request fits a small model window", async () => {
+  const provider = scripted([assistantText("all done")]);
+  let capacityChecks = 0;
+  let sentInputTokens = 0;
+  const send = provider.send.bind(provider);
+  provider.contextWindow = async () => {
+    capacityChecks++;
+    return { tokens: 4_096 };
+  };
+  provider.send = async (request) => {
+    sentInputTokens = estimateRequestInputTokens(request);
+    return send(request);
+  };
+  const history: Message[] = [{ role: "user", content: [{ kind: "text", text: "hi" }] }];
+  const configured = 64_000;
+  const contextPolicy = () => resolveContextPolicy({
+    provider,
+    model: "fake-1",
+    compactionPercent: 85,
+  });
+
+  await runTurn(history, options(provider, { maxTokens: configured, contextPolicy }), events());
+
+  const request = provider.seen[0] as SendRequest;
+  assert.equal(capacityChecks, 1);
+  assert.ok(request.maxTokens < configured);
+  assert.ok(sentInputTokens + request.maxTokens <= 4_096);
+});
+
+test("rejects an oversized tool envelope before opening a provider request", async () => {
+  const provider = scripted([assistantText("unreachable")]);
+  const oversized: Tool = {
+    ...echo,
+    description: "x".repeat(15_000),
+  };
+  const policy = policyForContextWindow({ tokens: 4_096 }, 85);
+
+  await assert.rejects(
+    runTurn(
+      [{ role: "user", content: [{ kind: "text", text: "hi" }] }],
+      options(provider, {
+        tools: [oversized],
+        maxTokens: 64_000,
+        contextPolicy: () => Promise.resolve(policy),
+      }),
+      events(),
+    ),
+    /request input needs approximately .* at least 256 output tokens are required/,
+  );
+
+  assert.equal(provider.seen.length, 0);
+});
+
 test("rejects an empty provider response instead of ending the turn silently", async () => {
   const provider = scripted([{ role: "assistant", content: [] }]);
 
@@ -135,6 +192,29 @@ test("returns every result of one step in a single message", async () => {
     results?.content.map((block) => (block.kind === "tool_result" ? block.output : "")),
     ["one", "two"],
   );
+});
+
+test("refreshes model capacity between provider steps in a turn", async () => {
+  const provider = scripted([
+    {
+      role: "assistant",
+      content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "one" } }],
+    },
+    assistantText("done"),
+  ]);
+  let resolutions = 0;
+
+  await runTurn([], options(provider, {
+    maxTokens: 64_000,
+    contextPolicy: async () => {
+      resolutions++;
+      return policyForContextWindow({ tokens: resolutions === 1 ? 32_000 : 4_096 }, 85);
+    },
+  }), events());
+
+  assert.equal(provider.seen.length, 2);
+  assert.equal(resolutions, 2);
+  assert.ok((provider.seen[1]?.maxTokens ?? Infinity) < 4_096);
 });
 
 test("awaits the durable tool checkpoint before asking the provider again", async () => {
@@ -202,6 +282,7 @@ test("keeps canonical turn history while replacing only the provider context", a
 
 test("retries one definite context rejection only after the context hook replaces it", async () => {
   const seen: Message[][] = [];
+  const requests: SendRequest[] = [];
   let calls = 0;
   const provider: Provider = {
     id: "fake",
@@ -210,6 +291,7 @@ test("retries one definite context rejection only after the context hook replace
     blocked: () => undefined,
     models: () => Promise.resolve(["fake-1"]),
     async send(request) {
+      requests.push(request);
       seen.push(structuredClone(request.messages));
       calls++;
       if (calls === 1) {
@@ -223,16 +305,25 @@ test("retries one definite context rejection only after the context hook replace
   };
   const history: Message[] = [{ role: "user", content: [{ kind: "text", text: "hello" }] }];
   const reasons: string[] = [];
+  let resolutions = 0;
   const sink = events();
-  sink.onContext = async (_history, _context, reason, error) => {
-    reasons.push(reason);
-    if (reason !== "overflow" || error === undefined) return undefined;
+  sink.onContext = async (_history, _context, request) => {
+    reasons.push(request.reason);
+    if (request.reason !== "overflow" || request.error === undefined) return undefined;
     return [{ role: "user", content: [{ kind: "text", text: "safe summary" }] }];
   };
 
-  await runTurn(history, options(provider), sink);
+  await runTurn(history, options(provider, {
+    maxTokens: 64_000,
+    contextPolicy: async () => {
+      resolutions++;
+      return policyForContextWindow({ tokens: resolutions === 1 ? 32_000 : 4_096 }, 85);
+    },
+  }), sink);
 
   assert.equal(calls, 2);
+  assert.equal(resolutions, 2);
+  assert.ok((requests[1]?.maxTokens ?? Infinity) < 4_096);
   assert.deepEqual(reasons, ["budget", "overflow"]);
   assert.deepEqual(texts(seen[1] ?? []), ["safe summary"]);
   assert.deepEqual(texts(history), ["hello", "recovered"]);

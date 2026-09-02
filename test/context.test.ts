@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolveContextPolicy } from "../src/context/capacity.ts";
+import { estimateRequestInputTokens } from "../src/context/budget.ts";
 import { compactContext } from "../src/context/compactor.ts";
 import type { ContextPolicy } from "../src/context/policy.ts";
 import {
@@ -8,20 +9,23 @@ import {
   isContextOverflow,
   planCompaction,
   policyForContextWindow,
-  shouldResolveContextPolicy,
 } from "../src/context/policy.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 
 const policy: ContextPolicy = {
+  windowTokens: 20_000,
+  requestLimitTokens: 20_000,
   triggerTokens: 1_000,
   targetTokens: 500,
-  recentTokens: 100,
+  recentTokens: 128,
   minimumPrefixTokens: 100,
   summaryMaxTokens: 128,
 };
 
 test("derives compaction budgets from each model window and the saved percentage", () => {
   assert.deepEqual(policyForContextWindow({ tokens: 32_000 }, 85), {
+    windowTokens: 32_000,
+    requestLimitTokens: 30_400,
     triggerTokens: 27_200,
     targetTokens: 8_000,
     recentTokens: 4_000,
@@ -32,19 +36,15 @@ test("derives compaction budgets from each model window and the saved percentage
     tokens: 997_500,
     compactAtTokens: 945_000,
   }, 95), {
-    triggerTokens: 945_000,
+    windowTokens: 997_500,
+    requestLimitTokens: 897_750,
+    triggerTokens: 897_494,
     targetTokens: 249_375,
     recentTokens: 124_687,
     minimumPrefixTokens: 49_875,
     summaryMaxTokens: 4_096,
   });
   assert.equal(policyForContextWindow(undefined, 85).triggerTokens, 170_000);
-});
-
-test("defers capacity discovery until context pressure makes it useful", () => {
-  assert.equal(shouldResolveContextPolicy([user("small")], 0), false);
-  assert.equal(shouldResolveContextPolicy([user("small")], 16_000), true);
-  assert.equal(shouldResolveContextPolicy([], 0, true), true);
 });
 
 test("context metadata failure falls back without blocking the turn", async () => {
@@ -80,6 +80,30 @@ test("plans a bounded prefix without separating a recent tool call from its resu
   assert.equal(plan?.messageCount, 1);
   assert.deepEqual(plan?.tail, turn.slice(1));
   assert.ok(estimateTokens(plan?.prefix ?? []) >= policy.minimumPrefixTokens);
+});
+
+test("literal-heavy request pressure can trigger compaction before local rejection", () => {
+  const constrained = policyForContextWindow({ tokens: 4_096 }, 85);
+  const context = [
+    user("\u{10ffff}".repeat(230)),
+    assistant("old"),
+    user("current"),
+  ];
+  const inputTokens = estimateRequestInputTokens({
+    system: "#".repeat(2_500),
+    messages: context,
+    tools: [],
+  });
+
+  assert.ok(inputTokens >= constrained.triggerTokens);
+  assert.notEqual(planCompaction(
+    context,
+    [context.at(-1) as Message],
+    0,
+    inputTokens,
+    false,
+    constrained,
+  ), undefined);
 });
 
 test("compacts normalized history and keeps the recent exact tail", async () => {
@@ -142,6 +166,29 @@ test("a failed optional summary leaves the original context available", async ()
 
   assert.equal(result, undefined);
   assert.equal(ended, 1);
+});
+
+test("clamps summary output inside the same model request budget", async () => {
+  const seen: SendRequest[] = [];
+  const provider = summarizer(seen, assistant("summary"));
+  const constrained = policyForContextWindow({ tokens: 4_096 }, 85);
+
+  const result = await compactContext({
+    provider,
+    model: "fake-1",
+    effort: "high",
+    context: [user("x".repeat(9_000)), assistant("old"), user("current")],
+    turn: [user("current")],
+    nodeId: 2,
+    coveredMessages: 0,
+    lastInputTokens: constrained.triggerTokens,
+    policy: constrained,
+  });
+
+  assert.notEqual(result, undefined);
+  const request = seen[0] as SendRequest;
+  assert.ok(request.maxTokens < constrained.summaryMaxTokens);
+  assert.ok(estimateRequestInputTokens(request) + request.maxTokens <= constrained.requestLimitTokens);
 });
 
 test("recognizes only definite provider context rejections", () => {

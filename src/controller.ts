@@ -13,6 +13,7 @@ import type {
   Usage,
 } from "./types.ts";
 import { isToolCall } from "./types.ts";
+import type { ContextPolicy } from "./context/policy.ts";
 import type { Tool, ToolContext, ToolPreview, ToolRun } from "./tools/index.ts";
 import { findTool, runTool, toolSpecs } from "./tools/index.ts";
 import { requestAssistant } from "./controller-request.ts";
@@ -23,12 +24,21 @@ export const MAX_CONCURRENT_TOOL_CALLS = 4;
 
 export type ContextReason = "budget" | "overflow";
 
+export type ContextRequest = Readonly<{
+  reason: ContextReason;
+  policy: ContextPolicy;
+  inputTokens: number;
+  error?: Error;
+}>;
+
 export type ControllerOptions = {
   provider: Provider;
   tools: Tool[];
   model: string;
   system: string;
   maxTokens: number;
+  /** Resolve for each provider attempt; adapters cache stable metadata themselves. */
+  contextPolicy(): Promise<ContextPolicy>;
   effort: string;
   maxSteps: number;
   toolContext: ToolContext;
@@ -52,8 +62,7 @@ export type ControllerEvents = {
   onContext?(
     history: readonly Message[],
     context: readonly Message[],
-    reason: ContextReason,
-    error?: Error,
+    request: ContextRequest,
   ): Promise<readonly Message[] | undefined>;
   /** A consistent history boundary, awaited before another request can open. */
   onCheckpoint?(
@@ -77,6 +86,7 @@ export async function runTurn(
 ): Promise<void> {
   const specs = toolSpecs(options.tools);
   let context = modelHistory;
+  throwIfAborted(signal);
 
   const append = (message: Message): void => {
     history.push(message);
@@ -93,7 +103,14 @@ export async function runTurn(
     events.onStep?.(step + 1, options.maxSteps);
     // The message is displayed as it streams; what comes back here is the
     // assembled version, which exists to be appended to the history.
-    const response = await requestAssistant(history, context, specs, options, events, signal);
+    const response = await requestAssistant(
+      history,
+      context,
+      specs,
+      options,
+      events,
+      signal,
+    );
     const assistant = response.message;
     context = response.context;
     throwIfAborted(signal);

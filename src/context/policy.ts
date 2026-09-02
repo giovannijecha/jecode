@@ -1,14 +1,18 @@
 // Provider-neutral context pressure and safe compaction boundaries.
 
 import type { Message, ModelContextWindow } from "../types.ts";
+import { estimateSerializedTokens } from "./estimate.ts";
 
 export const DEFAULT_COMPACTION_PERCENT = 85;
 export const MIN_COMPACTION_PERCENT = 50;
 export const MAX_COMPACTION_PERCENT = 95;
-export const CONTEXT_CAPACITY_PROBE_TOKENS = 16_000;
 export const FALLBACK_CONTEXT_WINDOW_TOKENS = 200_000;
+export const REQUEST_ESTIMATE_HEADROOM_PERCENT = 5;
+export const MIN_REQUEST_OUTPUT_TOKENS = 256;
 
 export type ContextPolicy = Readonly<{
+  windowTokens: number;
+  requestLimitTokens: number;
   triggerTokens: number;
   targetTokens: number;
   recentTokens: number;
@@ -65,14 +69,6 @@ export function planCompaction(
   };
 }
 
-export function shouldResolveContextPolicy(
-  context: readonly Message[],
-  lastInputTokens: number,
-  force = false,
-): boolean {
-  return force || Math.max(estimateTokens(context), lastInputTokens) >= CONTEXT_CAPACITY_PROBE_TOKENS;
-}
-
 export function policyForContextWindow(
   context: ModelContextWindow | undefined,
   compactionPercent: number,
@@ -86,8 +82,14 @@ export function policyForContextWindow(
   const percentageLimit = Math.floor(windowTokens * percent / 100);
   const providerLimit = validWindow(context?.compactAtTokens)
     ? context.compactAtTokens
-    : percentageLimit;
-  const triggerTokens = Math.min(percentageLimit, providerLimit, windowTokens);
+    : windowTokens;
+  const requestLimitTokens = Math.floor(
+    Math.min(providerLimit, windowTokens) * (100 - REQUEST_ESTIMATE_HEADROOM_PERCENT) / 100,
+  );
+  const triggerTokens = Math.min(
+    percentageLimit,
+    requestLimitTokens - MIN_REQUEST_OUTPUT_TOKENS,
+  );
   const targetTokens = Math.max(512, Math.min(
     Math.floor(windowTokens / 4),
     Math.floor(triggerTokens / 2),
@@ -102,6 +104,8 @@ export function policyForContextWindow(
   ));
 
   return Object.freeze({
+    windowTokens,
+    requestLimitTokens,
     triggerTokens,
     targetTokens,
     recentTokens,
@@ -111,8 +115,7 @@ export function policyForContextWindow(
 }
 
 export function estimateTokens(messages: readonly Message[]): number {
-  const bytes = Buffer.byteLength(JSON.stringify(messages), "utf8");
-  return Math.ceil(bytes / 3) + messages.length * 8;
+  return estimateSerializedTokens(messages) + messages.length * 8;
 }
 
 export function isContextOverflow(error: Error): boolean {
@@ -157,6 +160,8 @@ function safeBoundary(turn: readonly Message[], index: number): boolean {
 
 function validPolicy(policy: ContextPolicy): boolean {
   return Object.values(policy).every((value) => Number.isSafeInteger(value) && value > 0) &&
+    policy.requestLimitTokens <= policy.windowTokens &&
+    policy.triggerTokens <= policy.requestLimitTokens &&
     policy.targetTokens < policy.triggerTokens && policy.recentTokens < policy.triggerTokens;
 }
 

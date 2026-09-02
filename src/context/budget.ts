@@ -1,0 +1,62 @@
+// Conservative provider-neutral budgeting for one complete model request.
+
+import type { Message, ToolSpec } from "../types.ts";
+import { estimateSerializedTokens } from "./estimate.ts";
+import { MIN_REQUEST_OUTPUT_TOKENS, type ContextPolicy } from "./policy.ts";
+
+const ENVELOPE_OVERHEAD_TOKENS = 64;
+const MESSAGE_OVERHEAD_TOKENS = 8;
+const TOOL_OVERHEAD_TOKENS = 16;
+
+export type RequestEnvelope = Readonly<{
+  system: string;
+  messages: readonly Message[];
+  tools: readonly ToolSpec[];
+}>;
+
+export type RequestBudget = Readonly<{
+  inputTokens: number;
+  maxOutputTokens: number;
+  limitTokens: number;
+}>;
+
+/** Include system text and tool schemas instead of measuring conversation alone. */
+export function estimateRequestInputTokens(envelope: RequestEnvelope): number {
+  const contentTokens = estimateSerializedTokens({
+    system: envelope.system,
+    messages: envelope.messages,
+    tools: envelope.tools,
+  });
+  return contentTokens +
+    ENVELOPE_OVERHEAD_TOKENS +
+    envelope.messages.length * MESSAGE_OVERHEAD_TOKENS +
+    envelope.tools.length * TOOL_OVERHEAD_TOKENS;
+}
+
+/** Clamp the configured output ceiling so the complete request remains usable. */
+export function budgetRequest(
+  envelope: RequestEnvelope,
+  configuredMaxOutputTokens: number,
+  policy: ContextPolicy,
+): RequestBudget {
+  if (!Number.isSafeInteger(configuredMaxOutputTokens) || configuredMaxOutputTokens <= 0) {
+    throw new Error("max output tokens must be a positive safe integer");
+  }
+
+  const inputTokens = estimateRequestInputTokens(envelope);
+  const available = policy.requestLimitTokens - inputTokens;
+  const minimum = Math.min(configuredMaxOutputTokens, MIN_REQUEST_OUTPUT_TOKENS);
+  if (available < minimum) {
+    throw new Error(
+      `request input needs approximately ${inputTokens} tokens, leaving ` +
+      `${Math.max(0, available)} of the ${policy.requestLimitTokens}-token safe request budget; ` +
+      `at least ${minimum} output tokens are required`,
+    );
+  }
+
+  return Object.freeze({
+    inputTokens,
+    maxOutputTokens: Math.min(configuredMaxOutputTokens, available),
+    limitTokens: policy.requestLimitTokens,
+  });
+}

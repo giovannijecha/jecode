@@ -253,7 +253,7 @@ settings, then built-in defaults.
 | `--ollama-host` | `OLLAMA_HOST` | Cloud with an Ollama key, local without one |
 | `--root` | - | Current directory |
 | `--effort` | `JECODE_EFFORT` | `high` |
-| `--max-tokens` | `JECODE_MAX_TOKENS` | `64000`; not sent by `openai-codex` |
+| `--max-tokens` | `JECODE_MAX_TOKENS` | `64000` ceiling, clamped to the usable request budget; not sent by `openai-codex` |
 | `--max-steps` | `JECODE_MAX_STEPS` | `40` |
 | `--compaction-percent` | `JECODE_COMPACTION_PERCENT` | `85`; accepts `50` through `95` |
 | `--reduced-motion` | `JECODE_REDUCED_MOTION=1` | Off |

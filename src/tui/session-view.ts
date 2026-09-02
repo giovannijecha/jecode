@@ -9,6 +9,7 @@ import type { FooterInfo } from "./components/footer.ts";
 
 export function controllerOptions(
   session: Session,
+  contextPolicy: ControllerOptions["contextPolicy"],
   tools: Session["tools"] = session.tools,
 ): ControllerOptions {
   return {
@@ -17,6 +18,7 @@ export function controllerOptions(
     model: session.model,
     system: session.system,
     maxTokens: session.config.maxTokens,
+    contextPolicy,
     effort: session.config.effort,
     maxSteps: session.config.maxSteps,
     toolContext: { root: session.config.root },

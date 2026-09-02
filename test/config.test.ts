@@ -58,9 +58,13 @@ test("rejects an unknown effort", () => {
   assert.throws(() => config(["--effort", "turbo"]), /unknown effort/);
 });
 
-test("rejects a non-positive integer budget", () => {
-  assert.throws(() => config(["--max-tokens", "0"]), /positive integer/);
-  assert.throws(() => config(["--max-steps", "n"]), /positive integer/);
+test("accepts only positive safe integer budgets", () => {
+  assert.throws(() => config(["--max-tokens", "0"]), /positive safe integer/);
+  assert.throws(() => config(["--max-steps", "n"]), /positive safe integer/);
+  assert.throws(
+    () => config(["--max-tokens", String(Number.MAX_SAFE_INTEGER + 1)]),
+    /positive safe integer/,
+  );
 });
 
 test("accepts only a safe context compaction percentage", () => {

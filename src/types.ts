@@ -81,9 +81,9 @@ export type ProviderAuth =
   | { kind: "api-key"; keyVar: string }
   | { kind: "oauth"; account: "openai-codex"; label: string };
 
-/** Provider-advertised input capacity for one model. */
+/** Provider-advertised usable request capacity for one model. */
 export type ModelContextWindow = Readonly<{
-  /** Input tokens available after provider-specific headroom is reserved. */
+  /** Combined estimated input and maximum output after safety headroom. */
   tokens: number;
   /** Optional provider safety ceiling for automatic compaction. */
   compactAtTokens?: number;

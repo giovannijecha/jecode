@@ -1,6 +1,7 @@
 // One bounded provider request that condenses an older context prefix.
 
 import type { ContextAnchor } from "./projection.ts";
+import { budgetRequest } from "./budget.ts";
 import { CONTEXT_LIMITS, summaryMessage } from "./projection.ts";
 import type { ContextPolicy } from "./policy.ts";
 import { planCompaction } from "./policy.ts";
@@ -56,12 +57,18 @@ export async function compactContext(
 
   options.onBegin?.();
   try {
+    const messages = normalized(plan.prefix);
+    const budget = budgetRequest({
+      system: SUMMARY_SYSTEM,
+      messages,
+      tools: [],
+    }, policy.summaryMaxTokens, policy);
     const response = await options.provider.send({
       model: options.model,
       system: SUMMARY_SYSTEM,
-      messages: normalized(plan.prefix),
+      messages,
       tools: [],
-      maxTokens: policy.summaryMaxTokens,
+      maxTokens: budget.maxOutputTokens,
       effort: options.effort,
       signal: options.signal,
     });

@@ -2,13 +2,14 @@
 
 import { handleCommand } from "../commands.ts";
 import { runTurn } from "../controller.ts";
+import type { ContextRequest } from "../controller.ts";
 import type { TurnFailure, TurnSettlement } from "../conversation.ts";
 import { resolveContextPolicy } from "../context/capacity.ts";
 import { compactContext } from "../context/compactor.ts";
 import { compactSession } from "../context/manual.ts";
 import type { ContextAnchor } from "../context/projection.ts";
 import type { ContextPolicy } from "../context/policy.ts";
-import { isContextOverflow, shouldResolveContextPolicy } from "../context/policy.ts";
+import { isContextOverflow } from "../context/policy.ts";
 import type { Session } from "../session.ts";
 import { updateSettings } from "../settings.ts";
 import { saveTranscript } from "../transcript-export.ts";
@@ -148,7 +149,31 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     const prospectiveNodeId = session.conversation.nodes.length + 1;
     let nodeId: number | undefined;
     let context: ContextAnchor | undefined;
-    let contextPolicy: Promise<ContextPolicy> | undefined;
+    let firstPolicy = true;
+    const policy = (): Promise<ContextPolicy> => {
+      let visible = firstPolicy;
+      firstPolicy = false;
+      if (visible) {
+        state.status = "Checking context";
+        options.render();
+      }
+      return resolveContextPolicy({
+        provider: session.provider,
+        model: session.model,
+        compactionPercent: session.config.compactionPercent,
+        signal: activity.control.signal,
+        onStatus: (status) => {
+          visible = true;
+          state.status = status;
+          options.render();
+        },
+      }).finally(() => {
+        if (visible) {
+          state.status = WAITING;
+          options.render();
+        }
+      });
+    };
     options.emit({ kind: "user", text });
     const user = { role: "user" as const, content: [{ kind: "text" as const, text }] };
     history.push(user);
@@ -197,33 +222,15 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     const compact = async (
       checkpoint: readonly (typeof history)[number][],
       projected: readonly (typeof history)[number][],
-      reason: "budget" | "overflow",
-      error?: Error,
+      request: ContextRequest,
     ) => {
-      if (reason === "overflow" && (error === undefined || !isContextOverflow(error))) {
+      if (
+        request.reason === "overflow" &&
+        (request.error === undefined || !isContextOverflow(request.error))
+      ) {
         return undefined;
       }
-      const force = reason === "overflow";
-      if (!shouldResolveContextPolicy(projected, session.usage.lastInputTokens, force)) {
-        return undefined;
-      }
-      if (contextPolicy === undefined) {
-        state.status = "Checking context";
-        options.render();
-        contextPolicy = resolveContextPolicy({
-          provider: session.provider,
-          model: session.model,
-          compactionPercent: session.config.compactionPercent,
-          signal: activity.control.signal,
-          onStatus: (status) => {
-            state.status = status;
-            options.render();
-          },
-        }).finally(() => {
-          state.status = WAITING;
-          options.render();
-        });
-      }
+      const force = request.reason === "overflow";
       const result = await compactContext({
         provider: session.provider,
         model: session.model,
@@ -232,10 +239,10 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         turn: checkpoint.slice(historyStart),
         nodeId: nodeId ?? prospectiveNodeId,
         coveredMessages: context?.messageCount ?? 0,
-        lastInputTokens: session.usage.lastInputTokens,
+        lastInputTokens: Math.max(session.usage.lastInputTokens, request.inputTokens),
         signal: activity.control.signal,
         force,
-        policy: await contextPolicy,
+        policy: request.policy,
         onBegin: () => {
           state.status = "Compacting";
           options.render();
@@ -254,7 +261,11 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     events.onContext = compact;
     events.onCheckpoint = async (checkpoint, settlement, projected) => {
       await persist(checkpoint, settlement);
-      const compacted = await compact(checkpoint, projected, "budget");
+      const compacted = await compact(checkpoint, projected, {
+        reason: "budget",
+        policy: await policy(),
+        inputTokens: session.usage.lastInputTokens,
+      });
       if (compacted !== undefined) await persist(checkpoint, settlement);
       return compacted;
     };
@@ -264,7 +275,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     try {
       await runTurn(
         history,
-        controllerOptions(session, permissions.availableTools()),
+        controllerOptions(session, policy, permissions.availableTools()),
         events,
         activity.control.signal,
         modelHistory,
