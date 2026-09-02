@@ -471,7 +471,6 @@ function base(state: LabState): Omit<View, "blocks" | "editor" | "scroll"> {
   return {
     pal: state.palette,
     footer: { workspace: `${workspace} (main)`, model, effort: "high" },
-    spin: state.tick,
     now: 4_200 + state.tick * 80,
   };
 }

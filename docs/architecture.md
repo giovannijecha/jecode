@@ -472,8 +472,8 @@ with the answer. Inline code has no background chip. Fenced code keeps dim
 opening and closing fences with a two-cell body indent; it has no full-width
 surface or decorative left rail.
 
-Tool output and diffs stay complete in state. A pending tool owns the animated
-rail node and elapsed label. `run_command` updates that same block with the
+Tool output and diffs stay complete in state. A pending tool owns a stable rail
+node and elapsed label. `run_command` updates that same block with the
 bounded, redacted capture while the process runs. Collapsed command output
 shows the newest rows because verdicts land at the end. Every collapsed file
 diff uses the same 15-changed-row budget, keeps both the beginning and end, and
@@ -500,8 +500,8 @@ Jecode exposes one dark Steel identity through semantic colour tokens shared by
 every production component and the TUI Lab. Structural Steel, technical cyan,
 foreground, secondary, dim, and outcome roles are intentionally distinct;
 components never embed literal colours. `NO_COLOR` disables colour while
-retaining structural selection and state marks. Reduced-motion mode replaces
-the animated rail node and blinking cursor with stable marks.
+retaining structural selection and state marks. Activity state marks remain
+stable in every mode; reduced-motion mode also makes the input cursor steady.
 
 ## Validation boundaries
 
