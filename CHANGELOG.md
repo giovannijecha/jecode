@@ -4,6 +4,27 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.7.3] - 2026-09-02
+
+### Fixed
+
+- Clamped the complete provider request, including prompt, messages, tool
+  schemas, reasoning, and output, to the selected model's usable capacity.
+- Revalidated approved file contents immediately before atomic replacement so
+  concurrent editor or process updates are preserved instead of overwritten.
+- Made durable conversation restore and checkpoint validation scale linearly
+  across long branched sessions.
+- Preserved complete Unicode grapheme clusters when file, search, and command
+  output reaches its configured boundary.
+- Kept large-transcript resize responsive through incremental reflow and a
+  bounded two-width layout cache.
+- Scaled aggregate SSE protection with the effective model output budget while
+  retaining per-event, absolute, timeout, and cancellation limits.
+- Replaced the remaining pending-tool animation with one stable state mark and
+  a one-second elapsed-time refresh.
+- Parallelized bounded workspace text-search validation and portable reads
+  without changing canonical order, cancellation, or result limits.
+
 ## [0.7.2] - 2026-09-02
 
 ### Fixed
@@ -398,6 +419,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.7.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.3
 [0.7.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.2
 [0.7.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.1
 [0.7.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.0
