@@ -73,16 +73,16 @@ export function policyForContextWindow(
   context: ModelContextWindow | undefined,
   compactionPercent: number,
 ): ContextPolicy {
-  const windowTokens = validWindow(context?.tokens)
-    ? context.tokens
-    : FALLBACK_CONTEXT_WINDOW_TOKENS;
+  const windowTokens = context === undefined
+    ? FALLBACK_CONTEXT_WINDOW_TOKENS
+    : requireWindow(context.tokens);
   const percent = validPercent(compactionPercent)
     ? compactionPercent
     : DEFAULT_COMPACTION_PERCENT;
   const percentageLimit = Math.floor(windowTokens * percent / 100);
-  const providerLimit = validWindow(context?.compactAtTokens)
-    ? context.compactAtTokens
-    : windowTokens;
+  const providerLimit = context?.compactAtTokens === undefined
+    ? windowTokens
+    : requireWindow(context.compactAtTokens);
   const requestLimitTokens = Math.floor(
     Math.min(providerLimit, windowTokens) * (100 - REQUEST_ESTIMATE_HEADROOM_PERCENT) / 100,
   );
@@ -166,7 +166,14 @@ function validPolicy(policy: ContextPolicy): boolean {
 }
 
 function validWindow(value: number | undefined): value is number {
-  return value !== undefined && Number.isSafeInteger(value) && value >= 4_096 && value <= 10_000_000;
+  // Adapters validate raw capacities at 4K before applying their own usable
+  // headroom. The resulting safe capacity can therefore be slightly smaller.
+  return value !== undefined && Number.isSafeInteger(value) && value >= 1_024 && value <= 10_000_000;
+}
+
+function requireWindow(value: number): number {
+  if (validWindow(value)) return value;
+  throw new Error(`provider reported an invalid usable context window: ${value}`);
 }
 
 function validPercent(value: number): boolean {

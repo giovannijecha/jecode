@@ -55,6 +55,8 @@ export type ControllerEvents = {
   onToolOutput?(call: ToolCallBlock, output: string): void;
   approve(call: ToolCallBlock): Promise<boolean>;
   onUsage?(usage: Usage): void;
+  /** Best context-pressure signal: provider count when present, otherwise the sent estimate. */
+  onRequestInput?(inputTokens: number): void;
   onStep?(step: number, total: number): void;
   onToolProgress?(current: number, total: number): void;
   onStatus?(status: string): void;
@@ -125,10 +127,15 @@ export async function runTurn(
       );
     }
     assertToolCallIds(calls);
+    if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
+    events.onRequestInput?.(
+      assistant.usage !== undefined && assistant.usage.inputTokens > 0
+        ? assistant.usage.inputTokens
+        : response.inputTokens,
+    );
 
     append(assistant);
     if (calls.length === 0) {
-      if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
       await checkpoint("completed");
       return; // the model is done — hand back to the user
     }
@@ -139,7 +146,6 @@ export async function runTurn(
     const results: ToolResultBlock[] = [];
     const announced = new Set<string>();
     try {
-      if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
       while (results.length < calls.length) {
         const start = results.length;
         const batch = nextBatch(calls, start, options.tools);

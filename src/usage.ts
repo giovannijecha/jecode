@@ -23,8 +23,12 @@ export function emptyUsage(): UsageTotals {
 
 export function recordUsage(total: UsageTotals, next: Usage): void {
   total.requests += 1;
-  total.lastInputTokens = next.inputTokens;
   addUsage(total, next);
+}
+
+/** Replace context pressure without inventing provider-reported usage. */
+export function recordRequestInput(total: UsageTotals, inputTokens: number): void {
+  total.lastInputTokens = inputTokens;
 }
 
 /** Account for an internal request without replacing the main context signal. */
@@ -46,6 +50,7 @@ export function usageFromHistory(messages: readonly Message[]): UsageTotals {
   for (const message of messages) {
     if (message.role === "assistant" && message.usage !== undefined) {
       recordUsage(total, message.usage);
+      recordRequestInput(total, message.usage.inputTokens);
     }
   }
   return total;

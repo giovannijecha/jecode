@@ -47,6 +47,18 @@ test("derives compaction budgets from each model window and the saved percentage
   assert.equal(policyForContextWindow(undefined, 85).triggerTokens, 170_000);
 });
 
+test("known usable capacities below 4K never expand to the fallback window", () => {
+  for (const tokens of [3_891, 7_782, 950_000]) {
+    const resolved = policyForContextWindow({ tokens }, 85);
+    assert.equal(resolved.windowTokens, tokens);
+    assert.ok(resolved.requestLimitTokens <= tokens);
+  }
+  assert.throws(
+    () => policyForContextWindow({ tokens: 40 }, 85),
+    /invalid usable context window: 40/,
+  );
+});
+
 test("context metadata failure falls back without blocking the turn", async () => {
   const provider: Provider = {
     ...summarizer([], assistant("unused")),

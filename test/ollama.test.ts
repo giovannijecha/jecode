@@ -66,6 +66,21 @@ test("prefers Ollama's currently allocated runtime context", async (context) => 
   assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 31_129 });
 });
 
+test("keeps a minimum 4K Ollama allocation after safety headroom", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const model = "small-context-fixture:latest";
+  configureOllama("http://127.0.0.1:11434");
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    models: [{ name: model, context_length: 4_096 }],
+  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    configureOllama(undefined);
+  });
+
+  assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 3_891 });
+});
+
 test("falls back to Ollama model capacity when the model is not loaded", async (context) => {
   const previousFetch = globalThis.fetch;
   const model = "stored-context-fixture:latest";

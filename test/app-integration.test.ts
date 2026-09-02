@@ -139,6 +139,39 @@ test("batch mode compacts model context while retaining the complete conversatio
   assert.equal(current.usage.lastInputTokens, 100);
 });
 
+test("missing provider usage replaces stale context pressure with the sent estimate", async () => {
+  const requests: string[] = [];
+  const withoutUsage: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 3_891 }),
+    async send(request): Promise<Message> {
+      const summary = request.system.includes("durable working memory");
+      requests.push(summary ? "summary" : "normal");
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: summary ? "Earlier work." : "Answer." }],
+      };
+    },
+  };
+  const current = session(withoutUsage);
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-02T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "old context ".repeat(350) }] },
+      { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
+    ],
+    blocks: [],
+  }, "completed");
+  current.usage.lastInputTokens = 3_500;
+
+  await runBatch(current, { lines: input("first", "second"), write: () => {} });
+
+  assert.deepEqual(requests, ["summary", "normal", "normal"]);
+  assert.ok(current.usage.lastInputTokens < 3_500);
+});
+
 test("batch /compact updates the next provider projection without transcript noise", async () => {
   const seen: SendRequest[] = [];
   const compacting: Provider = {

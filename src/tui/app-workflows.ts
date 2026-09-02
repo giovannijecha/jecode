@@ -13,7 +13,7 @@ import { isContextOverflow } from "../context/policy.ts";
 import type { Session } from "../session.ts";
 import { updateSettings } from "../settings.ts";
 import { saveTranscript } from "../transcript-export.ts";
-import { recordAuxiliaryUsage, recordUsage } from "../usage.ts";
+import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "../usage.ts";
 import { selectTimeline } from "../timeline.ts";
 import type { SessionPermissions } from "../permissions.ts";
 import type { Message } from "../types.ts";
@@ -193,6 +193,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         state.status = text;
       },
       usage: (usage) => recordUsage(session.usage, usage),
+      requestInput: (inputTokens) => recordRequestInput(session.usage, inputTokens),
     });
     const persist = async (
       checkpoint: readonly (typeof history)[number][],

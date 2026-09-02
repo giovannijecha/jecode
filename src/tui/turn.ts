@@ -25,6 +25,7 @@ export type Stage = {
   /** Track whether a turn is active so the footer can offer interruption. */
   status(text: string): void;
   usage?(usage: Usage): void;
+  requestInput?(inputTokens: number): void;
   palette: Palette;
 };
 
@@ -88,6 +89,10 @@ export function transcribe(stage: Stage): Transcription {
 
     onUsage(usage) {
       stage.usage?.(usage);
+    },
+
+    onRequestInput(inputTokens) {
+      stage.requestInput?.(inputTokens);
     },
 
     onStatus(status) {

@@ -76,7 +76,9 @@ an output ceiling: it is reduced when necessary so estimated input plus maximum
 output stays inside the model window or a stricter provider safety limit. An
 envelope that cannot leave a small useful response budget is rejected locally
 before network generation begins. Compaction summary requests use the same
-budget boundary.
+budget boundary. After a successful request, provider-reported input usage is
+the preferred pressure signal; when it is absent, the conservative sent-input
+estimate replaces stale pressure without being added to vendor usage totals.
 
 A tool failure becomes an error result the model can act on. Cancellation is
 the exception: it propagates through provider HTTP, retry waits, filesystem

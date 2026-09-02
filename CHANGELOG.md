@@ -12,6 +12,10 @@ install artifacts and provenance are published with the [npm package].
   cannot repeatedly rescan an incomplete prefix and stall provider streaming.
 - Kept localized edits in large files as localized diffs instead of displaying
   and persisting the complete file as one coarse replacement.
+- Preserved small provider context capacities after adapter headroom instead of
+  replacing them with the much larger unknown-model fallback.
+- Replaced stale context pressure with the sent request estimate when a
+  provider omits usage, without inventing vendor-reported token totals.
 
 ## [0.7.3] - 2026-09-02
 
