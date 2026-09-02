@@ -4,6 +4,28 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.7.0] - 2026-09-02
+
+### Added
+
+- Added a searchable `/timeline` conversation tree that exposes completed
+  turns and lets users select an earlier branch point without creating or
+  persisting an empty branch.
+- Added append-only branching within one durable session. The next real user
+  turn from a selected point persists the alternate path, while historical
+  tool records remain inert and resume returns to the latest committed branch.
+- Added `/compact` to request the existing model-aware compaction policy
+  immediately in interactive and batch modes. Only the active leaf's context
+  anchor changes; canonical history, the visible transcript, and exports stay
+  complete.
+
+### Fixed
+
+- Prevented manual compaction from rewriting a temporarily selected historical
+  branch point, and kept cancelled, unchanged, or undersized operations silent.
+- Removed the legacy leading marker from informational command feedback and
+  corrected the context-compaction field's corrupted keyboard separator.
+
 ## [0.6.0] - 2026-09-01
 
 ### Added
@@ -347,6 +369,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.7.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.0
 [0.6.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.6.0
 [0.5.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.5.0
 [0.4.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.4.0
