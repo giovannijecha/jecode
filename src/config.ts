@@ -111,7 +111,9 @@ function optional(
 
 function toInt(value: string, name: string): number {
   const n = Number(value);
-  if (!Number.isInteger(n) || n <= 0) throw new Error(`--${name} must be a positive integer`);
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    throw new Error(`--${name} must be a positive safe integer`);
+  }
   return n;
 }
 

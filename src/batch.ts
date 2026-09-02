@@ -7,14 +7,14 @@ import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import type { Message } from "./types.ts";
 import type { Session } from "./session.ts";
-import type { ControllerEvents } from "./controller.ts";
+import type { ContextRequest, ControllerEvents } from "./controller.ts";
 import { runTurn } from "./controller.ts";
 import { resolveContextPolicy } from "./context/capacity.ts";
 import { compactContext } from "./context/compactor.ts";
 import { compactSession } from "./context/manual.ts";
 import type { ContextAnchor } from "./context/projection.ts";
 import type { ContextPolicy } from "./context/policy.ts";
-import { isContextOverflow, shouldResolveContextPolicy } from "./context/policy.ts";
+import { isContextOverflow } from "./context/policy.ts";
 import { handleCommand } from "./commands.ts";
 import type { Block } from "./tui/blocks.ts";
 import { renderBatch } from "./batch-view.ts";
@@ -60,7 +60,13 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       const prospectiveNodeId = session.conversation.nodes.length + 1;
       let nodeId: number | undefined;
       let context: ContextAnchor | undefined;
-      let contextPolicy: Promise<ContextPolicy> | undefined;
+      const policy = (): Promise<ContextPolicy> => {
+        return resolveContextPolicy({
+          provider: session.provider,
+          model: session.model,
+          compactionPercent: session.config.compactionPercent,
+        });
+      };
       const user = { role: "user" as const, content: [{ kind: "text" as const, text: line }] };
       history.push(user);
       modelHistory.push(structuredClone(user));
@@ -86,21 +92,15 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       const compact = async (
         checkpoint: readonly Message[],
         projected: readonly Message[],
-        reason: "budget" | "overflow",
-        error?: Error,
+        request: ContextRequest,
       ) => {
-        if (reason === "overflow" && (error === undefined || !isContextOverflow(error))) {
+        if (
+          request.reason === "overflow" &&
+          (request.error === undefined || !isContextOverflow(request.error))
+        ) {
           return undefined;
         }
-        const force = reason === "overflow";
-        if (!shouldResolveContextPolicy(projected, session.usage.lastInputTokens, force)) {
-          return undefined;
-        }
-        contextPolicy ??= resolveContextPolicy({
-          provider: session.provider,
-          model: session.model,
-          compactionPercent: session.config.compactionPercent,
-        });
+        const force = request.reason === "overflow";
         const result = await compactContext({
           provider: session.provider,
           model: session.model,
@@ -109,9 +109,9 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
           turn: checkpoint.slice(before),
           nodeId: nodeId ?? prospectiveNodeId,
           coveredMessages: context?.messageCount ?? 0,
-          lastInputTokens: session.usage.lastInputTokens,
+          lastInputTokens: Math.max(session.usage.lastInputTokens, request.inputTokens),
           force,
-          policy: await contextPolicy,
+          policy: request.policy,
         });
         if (result === undefined) return undefined;
         context = result.anchor;
@@ -122,11 +122,15 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       turn.onContext = compact;
       turn.onCheckpoint = async (checkpoint, settlement, projected) => {
         commit(checkpoint, settlement);
-        const compacted = await compact(checkpoint, projected, "budget");
+        const compacted = await compact(checkpoint, projected, {
+          reason: "budget",
+          policy: await policy(),
+          inputTokens: session.usage.lastInputTokens,
+        });
         if (compacted !== undefined) commit(checkpoint, settlement);
         return compacted;
       };
-      await runTurn(history, options(session), turn, undefined, modelHistory);
+      await runTurn(history, options(session, policy), turn, undefined, modelHistory);
       turn.flush();
     }
   } finally {
@@ -134,13 +138,14 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
   }
 }
 
-function options(session: Session) {
+function options(session: Session, contextPolicy: () => Promise<ContextPolicy>) {
   return {
     provider: session.provider,
     tools: session.tools,
     model: session.model,
     system: session.system,
     maxTokens: session.config.maxTokens,
+    contextPolicy,
     effort: session.config.effort,
     maxSteps: session.config.maxSteps,
     toolContext: { root: session.config.root },

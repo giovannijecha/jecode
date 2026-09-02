@@ -66,6 +66,18 @@ context hook may replace only the provider-facing array. One definite 400/413
 context-limit rejection can therefore be retried after compaction without
 replaying an ambiguous generation failure or rewriting durable history.
 
+Before every provider request, the controller resolves the current model
+context policy. Provider adapters cache stable metadata themselves, while this
+boundary lets Ollama observe a smaller runtime allocation after loading a
+model. Its conservative request estimate includes the system prompt, projected
+messages, tool schemas, a fixed wire-envelope allowance, entropy-sensitive
+headroom, and an additional safety reserve. The configured `maxTokens` value is
+an output ceiling: it is reduced when necessary so estimated input plus maximum
+output stays inside the model window or a stricter provider safety limit. An
+envelope that cannot leave a small useful response budget is rejected locally
+before network generation begins. Compaction summary requests use the same
+budget boundary.
+
 A tool failure becomes an error result the model can act on. Cancellation is
 the exception: it propagates through provider HTTP, retry waits, filesystem
 searches, and process trees so the foreground operation can end promptly.
@@ -267,21 +279,24 @@ historical tool records remain inert.
 
 Context compaction is automatic and model-aware. Pressure combines the most
 recent normalized input-token count with a conservative byte estimate. The
-provider boundary can advertise one model's usable input window and a stricter
+provider boundary can advertise one model's usable request window and a stricter
 automatic-compaction ceiling: ChatGPT retains those fields from its live model
 catalogue, Anthropic retains `max_input_tokens`, and Ollama prefers the context
 currently allocated by `/api/ps` before falling back to `/api/show`. The OpenAI
 API model list does not include capacities, so its accepted reasoning families
 use isolated conservative metadata. Discovery failures use a 200k fallback and
-never prevent a model request.
+therefore leave ordinary turns available; an envelope that already exceeds that
+fallback is rejected locally instead of sending an unbounded request.
 
 The saved `compactionPercent` setting accepts 50 through 95 and defaults to 85.
-It applies to the usable model window while a lower provider safety ceiling
-still wins. The post-compaction target is one quarter of that window and the
+It applies to the usable model window while a lower provider safety ceiling and
+the estimator's safety reserve still win. The post-compaction target is one
+quarter of that window and the
 recent exact tail is bounded to half that target; both therefore scale from a
-small Ollama allocation to million-token models. Capacity discovery starts
-only after meaningful pressure, is cached for the turn, and Ollama refreshes
-its runtime observation periodically. The selected provider receives one
+small Ollama allocation to million-token models. Capacity discovery runs before
+each request; provider adapters retain safe metadata where appropriate, while
+Ollama can replace theoretical capacity with its runtime allocation and refresh
+that observation periodically. The selected provider receives one
 streamed, tool-free summary request with a neutral instruction that treats all
 source content as untrusted data. Opaque provider blocks are removed from that
 request. The resulting user-level summary never enters the system prompt and is
