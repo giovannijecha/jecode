@@ -4,6 +4,21 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.7.1] - 2026-09-02
+
+### Fixed
+
+- Prevented a longer credential that shares another secret's prefix from
+  exposing its suffix when shell output crosses stream chunks.
+- Normalized malformed provider token counters before usage accounting or
+  durable session persistence can consume them.
+- Restored terminal, input, resize, timers, and persistence after initial or
+  scheduled TUI rendering failures.
+- Rejected missing launch-option values and stray positional arguments instead
+  of silently accepting a misconfigured process.
+- Neutralized every Unicode bidirectional control before terminal rendering
+  and made searchable-picker deletion operate on complete grapheme clusters.
+
 ## [0.7.0] - 2026-09-02
 
 ### Added
@@ -369,6 +384,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.7.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.1
 [0.7.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.0
 [0.6.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.6.0
 [0.5.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.5.0
