@@ -4,6 +4,13 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [Unreleased]
+
+### Fixed
+
+- Made fragmented SSE event parsing linear so large reasoning and tool payloads
+  cannot repeatedly rescan an incomplete prefix and stall provider streaming.
+
 ## [0.7.3] - 2026-09-02
 
 ### Fixed
