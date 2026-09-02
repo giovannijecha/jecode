@@ -18,6 +18,8 @@ install artifacts and provenance are published with the [npm package].
   provider omits usage, without inventing vendor-reported token totals.
 - Prevented an interrupted `write_file` or `edit_file` from crossing its atomic
   rename boundary, while still cleaning the temporary sibling safely.
+- Made long unbroken words wrap in linear time without losing grapheme or cell
+  boundaries in Markdown and plain terminal text.
 
 ## [0.7.3] - 2026-09-02
 

@@ -3,7 +3,7 @@
 
 import type { RGB } from "./theme.ts";
 import { terminalText } from "./terminal-text.ts";
-import { elide, textWidth, wrapText } from "./width.ts";
+import { elide, splitByCells, textWidth, wrapText } from "./width.ts";
 
 // Built rather than written literally: a raw escape byte in the source is
 // invisible in a diff and in a code review, which is how they survive.
@@ -203,11 +203,11 @@ export function flow(
 
   const room = (): number => Math.max(1, max - (rows.length === 0 ? 0 : lead));
 
-  const add = (tok: Tok): void => {
+  const add = (tok: Tok, width = textWidth(tok.text)): void => {
     const last = current[current.length - 1];
     if (last !== undefined && sameStyle(last, tok.seg)) last.text += tok.text;
     else current.push({ ...tok.seg, text: tok.text });
-    used += textWidth(tok.text);
+    used += width;
   };
 
   const flush = (): void => {
@@ -228,38 +228,30 @@ export function flow(
     }
 
     const space = pending === undefined ? 0 : textWidth(pending.text);
-    let word = tok.text;
+    const wordWidth = textWidth(tok.text);
 
-    if (used + space + textWidth(word) > room() && current.length > 0) flush();
+    if (used + space + wordWidth > room() && current.length > 0) flush();
     else if (pending !== undefined) {
-      add(pending);
+      add(pending, space);
       pending = undefined;
     }
 
     // A word wider than any row is spent across rows: with autowrap off, what
     // overflows is not ugly, it is gone.
-    while (textWidth(word) > room() - used) {
-      const head = clipTo(word, room() - used);
-      if (head === "") break;
-      add({ ...tok, text: head });
-      word = word.slice(head.length);
-      flush();
+    if (wordWidth > room() - used) {
+      const chunks = splitByCells(tok.text, room() - used, Math.max(1, max - lead));
+      for (const [index, chunk] of chunks.entries()) {
+        add({ ...tok, text: chunk.text }, chunk.width);
+        if (index + 1 < chunks.length) flush();
+      }
+      continue;
     }
 
-    if (word !== "") add({ ...tok, text: word });
+    if (tok.text !== "") add(tok, wordWidth);
   }
 
   if (current.length > 0 || rows.length === 0) flush();
   return rows;
-}
-
-function clipTo(text: string, cols: number): string {
-  let out = "";
-  for (const char of text) {
-    if (textWidth(out + char) > cols) break;
-    out += char;
-  }
-  return out;
 }
 
 function copy(seg: Seg): Seg {

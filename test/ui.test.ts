@@ -41,6 +41,22 @@ test("a word wider than the row is broken rather than lost", () => {
   assert.equal(rows.join(""), "a/very/long/path/that/never/fits");
 });
 
+test("a long unbroken Markdown word visits graphemes linearly", () => {
+  const text = "y".repeat(128 * 1_024);
+  const rows = withSegmentVisitLimit(text.length * 3, () => markdown(text, 80, STEEL));
+
+  assert.equal(rows.map((line) => line.segs.map((seg) => seg.text).join("")).join(""), text);
+  assert.ok(rows.every((line) => textWidth(line.segs.map((seg) => seg.text).join("")) <= 80));
+});
+
+test("plain wrapping also visits a long word linearly", () => {
+  const text = "z".repeat(128 * 1_024);
+  const rows = withSegmentVisitLimit(text.length * 3, () => wrapText(text, 80, "  "));
+
+  assert.equal(rows.map((line, index) => index === 0 ? line : line.slice(2)).join(""), text);
+  assert.ok(rows.every((line) => textWidth(line) <= 80));
+});
+
 test("wrapping measures cells, not characters", () => {
   const rows = wrapText("日本語 のテキスト です", 8);
   assert.ok(rows.every((line) => textWidth(line) <= 8));
@@ -235,3 +251,34 @@ test("prose can use a readable measure while code keeps the full row", () => {
   const codeRows = flat(markdown(`\`\`\`txt\n${"x".repeat(100)}\n\`\`\``, 150, STEEL, 40));
   assert.equal(codeRows[1]?.length, 102); // two-cell indent and all 100 code cells
 });
+
+function withSegmentVisitLimit<T>(limit: number, run: () => T): T {
+  const prototype = Intl.Segmenter.prototype;
+  const original = prototype.segment;
+  let visits = 0;
+
+  prototype.segment = function segment(input: string): Intl.Segments {
+    const segments = original.call(this, input);
+    return new Proxy(segments, {
+      get(target, property) {
+        if (property === Symbol.iterator) {
+          return function* counted(): IterableIterator<Intl.SegmentData> {
+            for (const item of target) {
+              visits++;
+              if (visits > limit) throw new Error(`grapheme visit limit exceeded: ${limit}`);
+              yield item;
+            }
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  };
+
+  try {
+    return run();
+  } finally {
+    prototype.segment = original;
+  }
+}
