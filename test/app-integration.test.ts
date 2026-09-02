@@ -501,6 +501,58 @@ test("the TUI owns and restores a screen around a real /exit interaction", async
   assert.ok(frames.every((frame) => frame.length === 18));
 });
 
+test("initial and scheduled paint failures restore every TUI owner", async () => {
+  for (const failureAt of [1, 2]) {
+    let feed: ((chunk: string) => void) | undefined;
+    let paints = 0;
+    let left = 0;
+    let inputStopped = 0;
+    let resizeStopped = 0;
+    let persistenceClosed = 0;
+    const current = session();
+    current.persistence = {
+      close: async () => {
+        persistenceClosed++;
+      },
+    } as SessionPersistence;
+    const screen: AppScreen = {
+      size: () => ({ rows: 18, cols: 70 }),
+      enter: () => {},
+      leave: () => {
+        left++;
+      },
+      setReducedMotion: () => {},
+      onResize: () => () => {
+        resizeStopped++;
+      },
+      onInput: (handler) => {
+        feed = handler;
+        return () => {
+          inputStopped++;
+        };
+      },
+    };
+    const paint: Painter = {
+      paint: () => {
+        paints++;
+        if (paints === failureAt) throw new Error("fixture paint failed");
+      },
+      invalidate: () => {},
+    };
+
+    const running = runApp(current, process.cwd(), { screen, paint });
+    const rejected = assert.rejects(running, /fixture paint failed/);
+    while (feed === undefined) await new Promise<void>((resolve) => setImmediate(resolve));
+    if (failureAt === 2) feed("x");
+    await rejected;
+
+    assert.equal(left, 1);
+    assert.equal(inputStopped, 1);
+    assert.equal(resizeStopped, 1);
+    assert.equal(persistenceClosed, 1);
+  }
+});
+
 test("a TUI submit reaches the provider and returns to an editable session", async () => {
   const harness = virtualScreen();
   const current = session(provider("Answer from the TUI."));

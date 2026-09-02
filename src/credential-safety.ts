@@ -49,16 +49,22 @@ export function credentialRedactor(source: NodeJS.ProcessEnv = process.env): {
       const ready: string[] = [];
       let at = 0;
       while (at < combined.length) {
+        const rest = combined.slice(at);
+        // A complete shorter credential can also be the prefix of a longer
+        // one. Hold that ambiguous suffix until the next chunk proves which
+        // value arrived, otherwise the longer credential leaks its tail.
+        if (
+          rest.length < longest &&
+          values.some((value) => value.length > rest.length && value.startsWith(rest))
+        ) {
+          pending = rest;
+          return ready.join("");
+        }
         const complete = values.find((value) => combined.startsWith(value, at));
         if (complete !== undefined) {
           ready.push(REDACTED);
           at += complete.length;
           continue;
-        }
-        const rest = combined.slice(at);
-        if (rest.length < longest && values.some((value) => value.startsWith(rest))) {
-          pending = rest;
-          return ready.join("");
         }
         ready.push(combined[at] as string);
         at++;

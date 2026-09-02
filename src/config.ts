@@ -24,31 +24,25 @@ export type Config = {
   ephemeral: boolean;
 };
 
-const FLAGS = [
+const VALUE_FLAGS = [
   "provider",
   "model",
   "ollama-host",
-  "reduced-motion",
   "effort",
   "max-tokens",
   "max-steps",
   "compaction-percent",
   "root",
+] as const;
+const BOOLEAN_FLAGS = [
+  "reduced-motion",
   "auto-approve",
   "ephemeral",
-];
+] as const;
+const FLAGS: readonly string[] = [...VALUE_FLAGS, ...BOOLEAN_FLAGS];
 
 export function loadConfig(argv: string[], saved: SavedSettings = readSettings()): Config {
   const flags = parseFlags(argv);
-
-  // A flag nobody declared is a typo. Swallowed in silence it becomes a
-  // setting the user believes is on, and the run that ignores it looks like
-  // the feature is broken rather than misspelled.
-  for (const name of Object.keys(flags)) {
-    if (!FLAGS.includes(name)) {
-      throw new Error(`unknown flag --${name} (known: ${FLAGS.map((f) => `--${f}`).join(", ")})`);
-    }
-  }
 
   const providerId = pick(flags.provider, process.env.JECODE_PROVIDER, saved.provider ?? "anthropic");
   const ollamaHost = optional(flags["ollama-host"], process.env.OLLAMA_HOST, saved.ollamaHost);
@@ -86,7 +80,9 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
       ),
     ),
     root: path.resolve(pick(flags.root, undefined, process.cwd())),
-    autoApprove: flags["auto-approve"] === "true" || process.env.JECODE_AUTO_APPROVE === "1",
+    autoApprove: flags["auto-approve"] === "true" ||
+      flags["auto-approve"] === "1" ||
+      process.env.JECODE_AUTO_APPROVE === "1",
     ephemeral: bool(flags.ephemeral, process.env.JECODE_EPHEMERAL, false),
   };
 }
@@ -133,28 +129,53 @@ function toPercent(value: string): number {
   return percent;
 }
 
-// Accepts --key value, --key=value, and bare --flag (which reads as "true").
+// Value flags accept --key value and --key=value. Boolean flags are bare or
+// take a real boolean value, so an accidental positional argument is never
+// swallowed as configuration.
 function parseFlags(argv: string[]): Record<string, string> {
   const flags: Record<string, string> = {};
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === undefined || !arg.startsWith("--")) continue;
+    if (arg === undefined) continue;
+    if (!arg.startsWith("--")) throw new Error(`unexpected argument "${arg}"`);
 
     const body = arg.slice(2);
     const eq = body.indexOf("=");
-    if (eq !== -1) {
-      flags[body.slice(0, eq)] = body.slice(eq + 1);
+    const name = eq === -1 ? body : body.slice(0, eq);
+    const inline = eq === -1 ? undefined : body.slice(eq + 1);
+    if (!FLAGS.includes(name)) {
+      throw new Error(`unknown flag --${name} (known: ${FLAGS.map((flag) => `--${flag}`).join(", ")})`);
+    }
+
+    if ((BOOLEAN_FLAGS as readonly string[]).includes(name)) {
+      if (inline === undefined) {
+        const next = argv[i + 1];
+        if (next !== undefined && ["true", "false", "1", "0"].includes(next)) {
+          flags[name] = next;
+          i++;
+        } else {
+          flags[name] = "true";
+        }
+      } else if (["true", "false", "1", "0"].includes(inline)) {
+        flags[name] = inline;
+      } else {
+        throw new Error(`--${name} must be true or false`);
+      }
       continue;
     }
 
-    const next = argv[i + 1];
-    if (next !== undefined && !next.startsWith("--")) {
-      flags[body] = next;
-      i++;
-    } else {
-      flags[body] = "true";
+    if (inline !== undefined) {
+      if (inline === "") throw new Error(`--${name} requires a value`);
+      flags[name] = inline;
+      continue;
     }
+    const next = argv[i + 1];
+    if (next === undefined || next.startsWith("--")) {
+      throw new Error(`--${name} requires a value`);
+    }
+    flags[name] = next;
+    i++;
   }
 
   return flags;

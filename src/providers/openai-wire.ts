@@ -3,6 +3,7 @@
 // items keyed by `call_id`, rather than blocks nested inside a message.
 
 import type { Block, Message, ToolSpec, Usage } from "../types.ts";
+import { wireTokenCount } from "./wire-usage.ts";
 
 export type OpenAIResponse = {
   output?: unknown[];
@@ -10,10 +11,10 @@ export type OpenAIResponse = {
   status?: string;
   error?: { code?: string; message?: string } | null;
   usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
-    output_tokens_details?: { reasoning_tokens?: number };
+    input_tokens?: unknown;
+    output_tokens?: unknown;
+    input_tokens_details?: { cached_tokens?: unknown; cache_write_tokens?: unknown };
+    output_tokens_details?: { reasoning_tokens?: unknown };
   } | null;
 };
 
@@ -112,11 +113,11 @@ function normalizeUsage(data: OpenAIResponse): Usage | undefined {
   const usage = data.usage;
   if (usage === undefined || usage === null) return undefined;
   return {
-    inputTokens: usage.input_tokens ?? 0,
-    outputTokens: usage.output_tokens ?? 0,
-    cachedInputTokens: usage.input_tokens_details?.cached_tokens ?? 0,
-    cacheWriteInputTokens: usage.input_tokens_details?.cache_write_tokens ?? 0,
-    reasoningTokens: usage.output_tokens_details?.reasoning_tokens ?? 0,
+    inputTokens: wireTokenCount(usage.input_tokens),
+    outputTokens: wireTokenCount(usage.output_tokens),
+    cachedInputTokens: wireTokenCount(usage.input_tokens_details?.cached_tokens),
+    cacheWriteInputTokens: wireTokenCount(usage.input_tokens_details?.cache_write_tokens),
+    reasoningTokens: wireTokenCount(usage.output_tokens_details?.reasoning_tokens),
   };
 }
 

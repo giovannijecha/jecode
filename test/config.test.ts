@@ -49,6 +49,8 @@ test("treats a bare flag as true", () => {
   assert.equal(config(["--auto-approve"]).autoApprove, true);
   assert.equal(config(["--auto-approve", "--provider", "openai"]).autoApprove, true);
   assert.equal(config(["--reduced-motion"]).reducedMotion, true);
+  assert.equal(config(["--reduced-motion=false"]).reducedMotion, false);
+  assert.equal(config(["--reduced-motion", "false"]).reducedMotion, false);
   assert.equal(config(["--ephemeral"]).ephemeral, true);
 });
 
@@ -84,6 +86,18 @@ test("the flags that do exist still parse", () => {
   assert.equal(parsed.providerId, "openai");
   assert.equal(parsed.model, "gpt-5");
   assert.equal(parsed.autoApprove, true);
+});
+
+test("rejects missing flag values and stray positional arguments", () => {
+  assert.throws(() => config(["--root"]), /--root requires a value/);
+  assert.throws(() => config(["--model"]), /--model requires a value/);
+  assert.throws(() => config(["--provider="]), /--provider requires a value/);
+  assert.throws(() => config(["--auto-approve=perhaps"]), /must be true or false/);
+  assert.throws(() => config(["positional"]), /unexpected argument "positional"/);
+  assert.throws(
+    () => config(["--auto-approve", "typo"]),
+    /unexpected argument "typo"/,
+  );
 });
 
 test("saved defaults include a model for each provider", () => {

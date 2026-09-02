@@ -27,6 +27,21 @@ test("neutralizes terminal escapes and every active control character", () => {
   assert.match(safe, /\\u009b2J/);
 });
 
+test("neutralizes every Unicode bidirectional control", () => {
+  const controls = [
+    0x061c,
+    0x200e,
+    0x200f,
+    ...range(0x202a, 0x202e),
+    ...range(0x2066, 0x2069),
+  ];
+
+  for (const code of controls) {
+    const escaped = `\\u${code.toString(16).padStart(4, "0")}`;
+    assert.equal(terminalText(String.fromCodePoint(code)), escaped);
+  }
+});
+
 test("keeps only structural newlines and expands tabs deterministically", () => {
   assert.equal(terminalText("a\tb\nc", { multiline: true }), "a  b\nc");
   assert.equal(terminalText("a\nb"), `a${LF_PICTURE}b`);
@@ -50,3 +65,7 @@ test("optional context disappears instead of rendering as a fragment", () => {
 
   assert.deepEqual(fitSegs([state, hint], plainLen([state])), [state]);
 });
+
+function range(first: number, last: number): number[] {
+  return Array.from({ length: last - first + 1 }, (_value, index) => first + index);
+}

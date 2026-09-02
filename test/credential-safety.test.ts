@@ -28,6 +28,19 @@ test("redacts one credential split across stream chunks", () => {
   assert.equal(remainder, "[credential redacted] after");
 });
 
+test("does not expose the suffix of a longer credential sharing a prefix", () => {
+  const redact = credentialRedactor({
+    OPENAI_API_KEY: "fixture-prefix",
+    ANTHROPIC_API_KEY: "fixture-prefix-secret",
+  });
+
+  assert.equal(redact.write("before fixture-prefix"), "before ");
+  assert.equal(
+    `${redact.write("-secret after")}${redact.end()}`,
+    "[credential redacted] after",
+  );
+});
+
 test("keeps the streaming buffer bounded for an overlapping credential", () => {
   const redact = credentialRedactor({ JECODE_TEST_KEY: "aaaaaaaa" });
 
