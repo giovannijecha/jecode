@@ -501,6 +501,37 @@ test("the TUI owns and restores a screen around a real /exit interaction", async
   assert.ok(frames.every((frame) => frame.length === 18));
 });
 
+test("the TUI completes a large transcript reflow across scheduled frames", async () => {
+  const current = session();
+  const blocks = Array.from(
+    { length: 300 },
+    (_, index) => ({ kind: "answer" as const, text: `answer ${index}` }),
+  );
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-02T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "large transcript" }] },
+      { role: "assistant", content: [{ kind: "text", text: "complete" }] },
+    ],
+    blocks,
+  }, "completed");
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  await waitFor(() => harness.frames.length >= 3, "incremental transcript reflow");
+  assert.match((harness.frames[0] ?? []).join("\n"), /answer 299/);
+  assert.ok(harness.frames.every((frame) => frame.length === 18));
+  const settledFrames = harness.frames.length;
+  await delay(40);
+  assert.equal(harness.frames.length, settledFrames);
+
+  feed("/exit\r");
+  await running;
+});
+
 test("initial and scheduled paint failures restore every TUI owner", async () => {
   for (const failureAt of [1, 2]) {
     let feed: ((chunk: string) => void) | undefined;

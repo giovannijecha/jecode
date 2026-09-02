@@ -56,7 +56,12 @@ export type View = {
   menuIndex?: number;
 };
 
-export type Frame = { rows: string[]; cursor?: Cursor; maxScroll: number };
+export type Frame = {
+  rows: string[];
+  cursor?: Cursor;
+  maxScroll: number;
+  transcriptPending: boolean;
+};
 
 export function compose(
   view: View,
@@ -84,7 +89,12 @@ export function compose(
   const cursor = dock.cursor === undefined
     ? undefined
     : { row: transcriptHeight + dock.cursor.row, col: dock.cursor.col };
-  return { rows: [...viewport.rows, ...dock.rows], cursor, maxScroll: viewport.maxScroll };
+  return {
+    rows: [...viewport.rows, ...dock.rows],
+    cursor,
+    maxScroll: viewport.maxScroll,
+    transcriptPending: viewport.pending,
+  };
 }
 
 function dockRows(view: View, width: number, height: number): { rows: string[]; cursor?: Cursor } {
@@ -157,5 +167,5 @@ function tooSmall(height: number, width: number, view: View): Frame {
       { text: elide(`need ${MIN_COLS}×${MIN_ROWS}`, Math.max(1, width)), fg: view.pal.ink.dim },
     ]);
   }
-  return { rows, maxScroll: 0 };
+  return { rows, maxScroll: 0, transcriptPending: false };
 }
