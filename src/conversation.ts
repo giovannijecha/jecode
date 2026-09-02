@@ -71,32 +71,26 @@ export class ConversationTree {
   }
 
   static restore(nodes: readonly TurnNode[], activeNodeId: number): ConversationTree {
-    let tree = ConversationTree.empty();
+    if (nodes.length > CONVERSATION_LIMITS.nodes) {
+      throw new Error("conversation reached its session limit — start /new");
+    }
+    const restored: TurnNode[] = [];
     for (let index = 0; index < nodes.length; index++) {
       const node = nodes[index];
       if (node === undefined || node.id !== index + 1) {
         throw new Error("session contains a non-sequential conversation node");
       }
-      tree = tree.select(node.parentId).commit({
-        parentId: node.parentId,
-        createdAt: node.createdAt,
-        identity: node.identity,
-        messages: node.messages,
-        blocks: node.blocks,
-        ...(node.context === undefined ? {} : { context: node.context }),
-        ...(node.failure === undefined ? {} : { failure: node.failure }),
-      }, node.settlement);
-      const restored = tree.activeNode;
-      if (restored === undefined || restored.id !== node.id) {
-        throw new Error("session conversation could not be restored");
-      }
-      if (node.revision > 1) {
-        const copy = [...tree.#nodes];
-        copy[node.id - 1] = ownedNode({ ...restored, revision: node.revision });
-        tree = new ConversationTree(copy, node.id);
-      }
+      const owned = ownedNode({ ...node, blocks: settledBlocks(node.blocks) });
+      assertTurn(owned);
+      assertPersistableNode(owned);
+      restored.push(owned);
     }
-    return tree.select(activeNodeId);
+    assertBounds(restored);
+    if (
+      !validNodeId(activeNodeId) ||
+      (activeNodeId !== 0 && restored[activeNodeId - 1]?.id !== activeNodeId)
+    ) throw new Error("conversation node does not exist");
+    return new ConversationTree(restored, activeNodeId);
   }
 
   /** Commit or extend the one prospective leaf turn. */
@@ -296,11 +290,12 @@ function assertBounds(nodes: readonly TurnNode[]): void {
   let messageCodeUnits = 0;
   let transcriptCodeUnits = 0;
   let contextCodeUnits = 0;
+  const contextOwners: TurnNode[] = [];
   for (const node of nodes) {
     messageCodeUnits += JSON.stringify(node.messages).length;
     transcriptCodeUnits += JSON.stringify(node.blocks).length;
     contextCodeUnits += node.context?.summary.length ?? 0;
-    if (node.context !== undefined) assertContextPath(nodes, node);
+    if (node.context !== undefined) contextOwners.push(node);
   }
   if (messageCodeUnits > CONVERSATION_LIMITS.messageCodeUnits) {
     throw new Error("conversation model history reached its session limit — start /new");
@@ -311,17 +306,46 @@ function assertBounds(nodes: readonly TurnNode[]): void {
   if (contextCodeUnits > CONVERSATION_LIMITS.contextCodeUnits) {
     throw new Error("conversation context summaries reached their session limit — start /new");
   }
+  assertContextPaths(nodes, contextOwners);
 }
 
-function assertContextPath(nodes: readonly TurnNode[], owner: TurnNode): void {
-  const context = owner.context as ContextAnchor;
-  const boundary = nodes[context.throughNodeId - 1];
-  if (boundary === undefined || !validContextAnchor(context, boundary.messages.length)) {
-    throw new Error("turn context checkpoint is invalid");
+function assertContextPaths(
+  nodes: readonly TurnNode[],
+  owners: readonly TurnNode[],
+): void {
+  if (owners.length === 0) return;
+  const children = Array.from({ length: nodes.length + 1 }, (): number[] => []);
+  for (const node of nodes) children[node.parentId]?.push(node.id);
+
+  const entered = new Uint32Array(nodes.length + 1);
+  const exited = new Uint32Array(nodes.length + 1);
+  const stack: Array<Readonly<{ id: number; exit: boolean }>> = [{ id: 0, exit: false }];
+  let clock = 0;
+  while (stack.length > 0) {
+    const current = stack.pop() as Readonly<{ id: number; exit: boolean }>;
+    if (current.exit) {
+      exited[current.id] = clock++;
+      continue;
+    }
+    entered[current.id] = clock++;
+    stack.push({ id: current.id, exit: true });
+    const descendants = children[current.id] as readonly number[];
+    for (let index = descendants.length - 1; index >= 0; index--) {
+      stack.push({ id: descendants[index] as number, exit: false });
+    }
   }
-  let id = owner.id;
-  while (id !== 0 && id !== boundary.id) id = nodes[id - 1]?.parentId ?? 0;
-  if (id !== boundary.id) throw new Error("turn context checkpoint is outside its branch");
+
+  for (const owner of owners) {
+    const context = owner.context as ContextAnchor;
+    const boundary = nodes[context.throughNodeId - 1];
+    if (boundary === undefined || !validContextAnchor(context, boundary.messages.length)) {
+      throw new Error("turn context checkpoint is invalid");
+    }
+    if (
+      entered[boundary.id] > entered[owner.id] ||
+      exited[owner.id] > exited[boundary.id]
+    ) throw new Error("turn context checkpoint is outside its branch");
+  }
 }
 
 function validNodeId(value: number): boolean {
