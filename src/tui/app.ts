@@ -133,6 +133,7 @@ export async function runApp(
     }
     state.lastMaxScroll = frame.maxScroll;
     paint.paint(frame.rows, frame.cursor);
+    if (frame.transcriptPending) render();
   };
 
   // Streaming produces a token at a time; painting at that rate is wasted
@@ -331,7 +332,7 @@ export async function runApp(
     terminal.enter(session.config.reducedMotion);
     stopResize = terminal.onResize(() => guard(() => {
       paint.invalidate();
-      draw();
+      render();
     }));
     stopInput = terminal.onInput((chunk) => guard(() => {
       if (escapeTimer !== undefined) clearTimeout(escapeTimer);

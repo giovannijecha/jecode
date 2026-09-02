@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Block } from "../src/tui/blocks.ts";
-import { render } from "../src/tui/blocks.ts";
+import { render, renderAll } from "../src/tui/blocks.ts";
 import { transcriptRenderer } from "../src/tui/transcript-view.ts";
 import { STEEL } from "../src/ui/theme.ts";
 
-test("an unchanged long transcript reuses every rendered block", () => {
+test("a cold long transcript paints its tail before bounded background reflow", () => {
   const blocks: Block[] = Array.from(
     { length: 1_000 },
     (_, index) => ({ kind: "answer", text: `answer ${index}` }),
@@ -20,10 +20,21 @@ test("an unchanged long transcript reuses every rendered block", () => {
   const second = transcript.viewport(blocks, 80, 20, 0, STEEL);
 
   assert.deepEqual(second, first);
-  assert.equal([...calls.values()].reduce((sum, count) => sum + count, 0), blocks.length);
+  const firstFrames = [...calls.values()].reduce((sum, count) => sum + count, 0);
+  assert.ok(firstFrames > 0);
+  assert.ok(firstFrames < blocks.length);
+  assert.equal(first.pending, true);
   assert.ok(first.maxScroll > 0);
   assert.match(first.rows.join("\n"), /answer 999/);
   assert.doesNotMatch(first.rows.join("\n"), /answer 0(?:\D|$)/);
+
+  let settled = second;
+  while (settled.pending) settled = transcript.viewport(blocks, 80, 20, 0, STEEL);
+  const completeCalls = [...calls.values()].reduce((sum, count) => sum + count, 0);
+  assert.equal(completeCalls, blocks.length);
+
+  transcript.viewport(blocks, 80, 20, 80, STEEL);
+  assert.equal([...calls.values()].reduce((sum, count) => sum + count, 0), completeCalls);
 });
 
 test("streaming invalidates only the block whose visible state changed", () => {
@@ -45,7 +56,7 @@ test("streaming invalidates only the block whose visible state changed", () => {
   assert.equal(calls.get(live), 2);
 });
 
-test("width changes invalidate cached rows while viewport scrolling does not", () => {
+test("two recent widths retain their cached rows while viewport scrolling does not", () => {
   const block: Block = { kind: "answer", text: "one two three four five six seven eight" };
   const blocks = [block];
   let calls = 0;
@@ -57,8 +68,119 @@ test("width changes invalidate cached rows while viewport scrolling does not", (
   transcript.viewport(blocks, 20, 2, 0, STEEL);
   transcript.viewport(blocks, 20, 2, 1, STEEL);
   transcript.viewport(blocks, 30, 2, 0, STEEL);
+  transcript.viewport(blocks, 20, 2, 0, STEEL);
 
   assert.equal(calls, 2);
+
+  transcript.viewport(blocks, 40, 2, 0, STEEL);
+  transcript.viewport(blocks, 30, 2, 0, STEEL);
+  assert.equal(calls, 4);
+});
+
+test("semantic invalidation refreshes the same block at both cached widths", () => {
+  const block: Block = { kind: "answer", text: "before" };
+  const blocks = [block];
+  let calls = 0;
+  const transcript = transcriptRenderer((current, width, palette) => {
+    calls++;
+    return render(current, width, palette);
+  });
+
+  transcript.viewport(blocks, 20, 2, 0, STEEL);
+  transcript.viewport(blocks, 30, 2, 0, STEEL);
+  block.text = "after";
+  transcript.invalidate(block);
+  const narrow = transcript.viewport(blocks, 20, 2, 0, STEEL);
+  const wide = transcript.viewport(blocks, 30, 2, 0, STEEL);
+
+  assert.equal(calls, 4);
+  assert.match(narrow.rows.join("\n"), /after/);
+  assert.match(wide.rows.join("\n"), /after/);
+});
+
+test("a resized large transcript reflows only a bounded first-frame working set", () => {
+  const blocks: Block[] = Array.from(
+    { length: 20_000 },
+    (_, index) => ({ kind: "answer", text: `answer ${index}` }),
+  );
+  let calls = 0;
+  const transcript = transcriptRenderer((block) => {
+    calls++;
+    return ["", block.kind === "answer" ? block.text : ""];
+  });
+
+  let initial = transcript.viewport(blocks, 80, 40, 0, STEEL);
+  while (initial.pending) initial = transcript.viewport(blocks, 80, 40, 0, STEEL);
+  const beforeResize = calls;
+
+  const resized = transcript.viewport(blocks, 120, 40, 0, STEEL);
+  const firstFrameCalls = calls - beforeResize;
+
+  assert.equal(resized.pending, true);
+  assert.ok(firstFrameCalls > 0);
+  assert.ok(firstFrameCalls < blocks.length / 10);
+  assert.match(resized.rows.join("\n"), /answer 19999/);
+
+  const cached = transcript.viewport(blocks, 80, 40, 0, STEEL);
+  assert.equal(cached.pending, false);
+  assert.equal(calls - beforeResize, firstFrameCalls);
+});
+
+test("a scrolled viewport stays exact while background reflow is paused", () => {
+  const blocks: Block[] = Array.from(
+    { length: 1_000 },
+    (_, index) => ({ kind: "answer", text: String(index) }),
+  );
+  const transcript = transcriptRenderer((block, width) => {
+    const index = Number(block.kind === "answer" ? block.text : -1);
+    const rows = width === 40 ? index % 7 + 1 : index % 3 + 1;
+    return Array.from({ length: rows }, (_, row) => `${index}:${row}`);
+  });
+
+  let narrow = transcript.viewport(blocks, 20, 12, 0, STEEL);
+  while (narrow.pending) narrow = transcript.viewport(blocks, 20, 12, 0, STEEL);
+  const resized = transcript.viewport(blocks, 40, 12, 900, STEEL);
+  const shown = resized.rows.map((line) => line.trim()).filter((line) => line !== "");
+
+  assert.equal(resized.pending, false);
+  assert.equal(shown.length, 12);
+  for (let index = 1; index < shown.length; index++) {
+    const [previousBlock, previousRow] = (shown[index - 1] as string).split(":").map(Number);
+    const [block, row] = (shown[index] as string).split(":").map(Number);
+    assert.ok(
+      block === previousBlock && row === previousRow + 1 ||
+        block === previousBlock + 1 && row === 0,
+      `${shown[index - 1]} must be followed by ${shown[index]}`,
+    );
+  }
+
+  assert.equal(transcript.viewport(blocks, 40, 12, 0, STEEL).pending, true);
+});
+
+test("completed incremental reflow matches the exact eager viewport", () => {
+  const blocks: Block[] = Array.from({ length: 300 }, (_, index) =>
+    index % 5 === 0
+      ? { kind: "user", text: `question ${index} ${"wide ".repeat(index % 9)}` }
+      : { kind: "answer", text: `answer ${index} ${"wrapped ".repeat(index % 13)}` }
+  );
+  const width = 24;
+  const height = 11;
+  const transcript = transcriptRenderer();
+  let viewport = transcript.viewport(blocks, width, height, 0, STEEL);
+  while (viewport.pending) viewport = transcript.viewport(blocks, width, height, 0, STEEL);
+
+  const eager = renderAll(blocks, width, STEEL);
+  const maxScroll = Math.max(0, eager.length - height);
+  for (const requested of [0, 7, Math.floor(maxScroll / 2), maxScroll, maxScroll + 100]) {
+    viewport = transcript.viewport(blocks, width, height, requested, STEEL);
+    const scroll = Math.min(requested, maxScroll);
+    const start = Math.max(0, eager.length - height - scroll);
+    const expected = eager.slice(start, start + height);
+    while (expected.length < height) expected.unshift("");
+    assert.deepEqual(viewport.rows, expected);
+    assert.equal(viewport.maxScroll, maxScroll);
+    assert.equal(viewport.pending, false);
+  }
 });
 
 test("appending renders only the new tail block", () => {
