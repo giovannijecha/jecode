@@ -103,6 +103,7 @@ export const openai: Provider = {
         include: ["reasoning.encrypted_content"],
         stream: true,
       },
+      req.maxTokens,
       req.signal,
       req.onStatus,
     );

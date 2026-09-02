@@ -118,6 +118,7 @@ export const ollama: Provider = {
         reasoning_effort: effort,
         stream: true,
       },
+      req.maxTokens,
       req.signal,
       req.onStatus,
     );

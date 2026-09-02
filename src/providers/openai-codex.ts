@@ -95,6 +95,7 @@ export const openaiCodex: Provider = {
           include: ["reasoning.encrypted_content"],
           prompt_cache_key: SESSION_ID,
         },
+        req.maxTokens,
         req.signal,
         req.onStatus,
       );

@@ -97,7 +97,14 @@ export const anthropic: Provider = {
       };
     }
 
-    const events = await postSse(ENDPOINT, headers(key), body, req.signal, req.onStatus);
+    const events = await postSse(
+      ENDPOINT,
+      headers(key),
+      body,
+      req.maxTokens,
+      req.signal,
+      req.onStatus,
+    );
 
     const data = await assembleAnthropic(events, req.onStream);
 

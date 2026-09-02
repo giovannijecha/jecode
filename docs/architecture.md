@@ -146,9 +146,9 @@ at most 120 seconds. These internal deadlines also cover batch mode, where no
 interactive cancellation signal exists. The client handles redirects manually
 and rejects every 3xx response without retrying or forwarding headers to
 another endpoint. Retry state is surfaced in the TUI. Each SSE event, the
-aggregate stream, reconstructed tool arguments, model catalogue, and per-step
-tool-call batch have explicit limits; overflow cancels or rejects the response
-before unbounded work reaches the controller.
+model-output-aware aggregate stream, reconstructed tool arguments, model
+catalogue, and per-step tool-call batch have explicit limits; overflow cancels
+or rejects the response before unbounded work reaches the controller.
 
 Ollama initializes its endpoint from `--ollama-host`, `OLLAMA_HOST`, saved
 settings, then key-aware inference. A configured API key selects
