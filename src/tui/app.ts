@@ -70,6 +70,7 @@ export async function runApp(
   let stopResize = (): void => {};
   let stopInput = (): void => {};
   let failure: { error: unknown } | undefined;
+  let activeWorkflow: Promise<void> | undefined;
   // Timers outlive the teardown they were scheduled before. Painting after the
   // terminal has been handed back would write escapes into the user's shell.
   let live = true;
@@ -178,19 +179,39 @@ export async function runApp(
   function quit(): void {
     if (!live) return;
     live = false;
-    stopInput();
-    stopResize();
+    safely(stopInput);
+    safely(stopResize);
     if (spinTimer !== undefined) clearInterval(spinTimer);
     if (frameTimer !== undefined) clearTimeout(frameTimer);
     if (escapeTimer !== undefined) clearTimeout(escapeTimer);
-    feedback.close();
-    terminal.leave();
+    safely(() => feedback.close());
+    safely(() => terminal.leave());
     closed?.();
+  }
+
+  function safely(action: () => void): void {
+    try {
+      action();
+    } catch (error) {
+      failure ??= { error };
+    }
   }
 
   function fail(error: unknown): void {
     failure ??= { error };
+    state.open = overlay.cancel(state.open);
+    state.activity?.control.abort(error);
     quit();
+  }
+
+  function track(work: Promise<void>): Promise<void> {
+    const tracked = work
+      .catch((error: unknown) => fail(error))
+      .finally(() => {
+        if (activeWorkflow === tracked) activeWorkflow = undefined;
+      });
+    activeWorkflow = tracked;
+    return tracked;
   }
 
   function requestQuit(): void {
@@ -262,7 +283,10 @@ export async function runApp(
     session,
     state,
     feedback,
-    actions,
+    actions: {
+      command: (text) => track(actions.command(text)),
+      turn: (text) => track(actions.turn(text)),
+    },
     live: () => live,
     quit,
     requestQuit,
@@ -273,7 +297,7 @@ export async function runApp(
 
   const resumeAtLaunch = session.resume === undefined
     ? undefined
-    : openResumedSession(session.resume);
+    : track(openResumedSession(session.resume));
 
   async function openResumedSession(launch: NonNullable<Session["resume"]>): Promise<void> {
     while (live) {
@@ -332,6 +356,7 @@ export async function runApp(
   } finally {
     try {
       quit();
+      await activeWorkflow;
     } finally {
       await session.persistence?.close();
     }

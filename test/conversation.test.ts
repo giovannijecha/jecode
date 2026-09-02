@@ -135,6 +135,61 @@ test("selects the latest completed ancestor instead of an unfinished tool turn",
   assert.equal(firstCheckpoint.latestCompleted(), undefined);
 });
 
+test("failed and interrupted turns remain durable resume boundaries", () => {
+  const failed = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity,
+    messages: completed("inspect", "The previous attempt failed before completion."),
+    blocks: [
+      { kind: "user", text: "inspect" },
+      { kind: "answer", text: "partial answer" },
+    ],
+    failure: { text: "provider failed", tone: "error" },
+  }, "failed");
+  const pending = failed.commit({
+    parentId: 1,
+    createdAt: "2026-09-01T10:01:00.000Z",
+    identity,
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "continue" }] },
+      {
+        role: "assistant",
+        content: [{ kind: "tool_call", id: "call-1", name: "list_dir", input: { path: "." } }],
+      },
+      {
+        role: "user",
+        content: [{ kind: "tool_result", id: "call-1", output: "a.ts", isError: false }],
+      },
+    ],
+    blocks: [{ kind: "user", text: "continue" }],
+  }, "checkpointed");
+
+  assert.equal(failed.latestResumable()?.activeNodeId, 1);
+  assert.equal(pending.latestResumable()?.activeNodeId, 1);
+  assert.deepEqual(failed.transcript.at(-1), {
+    kind: "notice",
+    text: "provider failed",
+    tone: "error",
+  });
+
+  const interrupted = pending.select(1).commit({
+    parentId: 1,
+    createdAt: "2026-09-01T10:02:00.000Z",
+    identity,
+    messages: completed("try another path", "The previous attempt was interrupted by the user."),
+    blocks: [{ kind: "user", text: "try another path" }],
+    failure: { text: "[interrupted]", tone: "warn" },
+  }, "interrupted");
+
+  assert.equal(interrupted.latestResumable()?.activeNodeId, 3);
+  assert.deepEqual(interrupted.transcript.at(-1), {
+    kind: "notice",
+    text: "[interrupted]",
+    tone: "warn",
+  });
+});
+
 test("projects the newest branch-local context anchor without changing durable history", () => {
   const firstMessages = completed("one", "first");
   const first = ConversationTree.empty().commit({

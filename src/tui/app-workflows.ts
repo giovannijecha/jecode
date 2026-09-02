@@ -2,6 +2,7 @@
 
 import { handleCommand } from "../commands.ts";
 import { runTurn } from "../controller.ts";
+import type { TurnFailure, TurnSettlement } from "../conversation.ts";
 import { resolveContextPolicy } from "../context/capacity.ts";
 import { compactContext } from "../context/compactor.ts";
 import { compactSession } from "../context/manual.ts";
@@ -14,12 +15,14 @@ import { saveTranscript } from "../transcript-export.ts";
 import { recordAuxiliaryUsage, recordUsage } from "../usage.ts";
 import { selectTimeline } from "../timeline.ts";
 import type { SessionPermissions } from "../permissions.ts";
+import type { Message } from "../types.ts";
 import type { Activity } from "./activity.ts";
 import type { AppActions } from "./app-input.ts";
 import type { AppState } from "./app-state.ts";
 import { answerAt } from "./approve.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FeedbackController } from "./feedback.ts";
+import * as edit from "./editor.ts";
 import { cancel as cancelOpen } from "./overlay.ts";
 import type { Picker } from "./picker.ts";
 import { controllerOptions, turnFailure } from "./session-view.ts";
@@ -168,7 +171,8 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     });
     const persist = async (
       checkpoint: readonly (typeof history)[number][],
-      settlement: "checkpointed" | "completed",
+      settlement: TurnSettlement,
+      failure?: TurnFailure,
     ): Promise<void> => {
       const next = session.conversation.commit({
         ...(nodeId === undefined ? {} : { nodeId }),
@@ -182,6 +186,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         messages: checkpoint.slice(historyStart),
         blocks: state.blocks.slice(blockStart),
         ...(context === undefined ? {} : { context }),
+        ...(failure === undefined ? {} : { failure }),
       }, settlement);
       await session.persistence?.checkpoint(next);
       session.conversation = next;
@@ -255,6 +260,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     };
 
     let finishReason: "interrupted" | "failed" | undefined;
+    let failed: { error: Error; interrupted: boolean } | undefined;
     try {
       await runTurn(
         history,
@@ -265,13 +271,56 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       );
     } catch (error) {
       const interrupted = activity.control.signal.aborted;
-      finishReason = interrupted ? "interrupted" : "failed";
-      options.emit(turnFailure(session, error as Error, interrupted));
+      const completed = nodeId !== undefined && session.conversation.activeNodeId === nodeId &&
+        session.conversation.activeNode?.settlement === "completed";
+      if (completed) {
+        const notice = turnFailure(session, error as Error, interrupted);
+        feedback.show({ text: notice.text, tone: notice.tone, timeoutMs: 6_000 });
+      } else {
+        finishReason = interrupted ? "interrupted" : "failed";
+        failed = { error: error as Error, interrupted };
+      }
     } finally {
-      events.finish(finishReason);
-      options.finishActivity(activity);
+      try {
+        events.finish(finishReason);
+        if (failed !== undefined) {
+          const notice = turnFailure(session, failed.error, failed.interrupted);
+          const settlement = failed.interrupted ? "interrupted" : "failed";
+          const failure: TurnFailure = {
+            text: notice.text,
+            tone: failed.interrupted ? "warn" : "error",
+          };
+          options.emit(notice);
+          try {
+            await persist(closeFailedTurn(history, settlement), settlement, failure);
+          } catch (error) {
+            // A failed persistence boundary cannot remain visible as if it had
+            // been saved. Revert to the last durable path and return the input
+            // to the composer so the user can retry without losing it.
+            options.replaceTranscript();
+            state.editor = edit.of(text);
+            feedback.show({
+              text: (error as Error).message,
+              tone: "error",
+              timeoutMs: 6_000,
+            });
+          }
+        }
+      } finally {
+        options.finishActivity(activity);
+      }
     }
   }
 
   return { command, turn };
+}
+
+function closeFailedTurn(history: readonly Message[], settlement: "failed" | "interrupted"): Message[] {
+  const closed = [...history];
+  if (closed.at(-1)?.role === "assistant") return closed;
+  const text = settlement === "interrupted"
+    ? "The previous attempt was interrupted by the user before completion."
+    : "The previous attempt failed before completion.";
+  closed.push({ role: "assistant", content: [{ kind: "text", text }] });
+  return closed;
 }

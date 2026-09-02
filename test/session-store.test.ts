@@ -216,6 +216,28 @@ test("catalogue skips malformed sessions without crossing the workspace boundary
   }
 });
 
+test("catalogue keeps the most recently updated session beyond 128 entries", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const original = turn(ConversationTree.empty(), 0, "oldest session", "one");
+    const first = await store.publish(original);
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    for (let index = 1; index < 130; index++) {
+      await store.publish(turn(ConversationTree.empty(), 0, `session ${index}`, "one"));
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    await store.checkpoint(first.meta.id, turn(original, 1, "updated last", "two"));
+
+    const catalog = await store.list(64);
+    assert.equal(catalog.length, 64);
+    assert.equal(catalog[0]?.id, first.meta.id);
+    assert.equal(catalog[0]?.turns, 2);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 function turn(
   conversation: ConversationTree,
   parentId: number,

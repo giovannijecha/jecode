@@ -53,6 +53,13 @@ after the final assistant response. It never begins the next provider request
 until that checkpoint succeeds. Batch mode commits only to memory; the TUI
 commits the same canonical turn to its durable session owner first.
 
+If an interactive provider turn fails or is interrupted, the TUI seals the
+visible partial evidence and commits an explicit `failed` or `interrupted`
+settlement. A neutral local assistant closure keeps the next provider request
+structurally valid without pretending that partial streamed text was an
+authoritative provider message. The same failure evidence is then materialized
+by the live transcript, export, timeline, and resume.
+
 Canonical history and provider context are separate arrays. The controller
 always appends authoritative assistant messages and tool results to both, but a
 context hook may replace only the provider-facing array. One definite 400/413
@@ -69,6 +76,11 @@ The interactive shell permits one foreground activity: a slash command or a
 model turn. One `AbortController` owns its cancellation. This
 prevents a network-backed `/models` request from overlapping a turn and gives
 `Esc`, `Ctrl+C`, and `Ctrl+D` one consistent target.
+
+A fatal rendering or input callback failure cancels any open overlay, aborts
+that foreground activity, and awaits its settlement before closing session
+persistence. Only then can control return to the caller, so provider or tool
+work cannot continue behind a restored terminal.
 
 There is no startup banner, permanent preamble, or automatic menu. Every launch
 opens on an empty transcript and composer; readiness remains visible in the
@@ -245,12 +257,13 @@ history and the settled TUI transcript. One node owns one user turn and its
 model/tool messages, visible transcript blocks, provider/model/effort identity,
 revision, and settlement. The selected root-to-leaf path is materialized in
 full for the screen, export, and audit. A separate `contextHistory` projection
-is materialized for providers. `/timeline` projects completed nodes into a
-searchable compact tree and can select any of them without changing durable
-state. The next real user turn appends from that selected parent and advances
-the existing session head; cancelling or exiting before then creates no node.
-The settled transcript and full history are materialized again from the newly
-selected path, while historical tool records remain inert.
+is materialized for providers. `/timeline` projects every resumable node --
+completed, failed, or interrupted -- into a searchable compact tree and can
+select any of them without changing durable state. The next real user turn
+appends from that selected parent and advances the existing session head;
+cancelling or exiting before then creates no node. The settled transcript and
+full history are materialized again from the newly selected path, while
+historical tool records remain inert.
 
 Context compaction is automatic and model-aware. Pressure combines the most
 recent normalized input-token count with a conservative byte estimate. The
@@ -287,36 +300,43 @@ no-op when there is too little useful prefix. A temporary historical selection
 must receive a new user turn first, because compacting the shared branch point
 would rewrite history owned by more than one path.
 
-Interactive sessions publish lazily after the first completed response or
-consistent tool checkpoint. They live under
+Interactive sessions publish lazily after the first consistent tool
+checkpoint or settled completed, failed, or interrupted turn. They live under
 `~/.jecode/sessions/<workspace-digest>/<session-id>/` with versioned metadata,
 one atomically replaced file per conversation node, and a small atomic head.
 The node lands before the head. After a crash, the loader accepts only one
 strictly adjacent node mutation and advances the head; any ambiguous state is
 rejected. Files and decoded values are size-bounded, unknown fields fail
 closed, and persisted provider messages drop opaque `raw` data before crossing
-the disk boundary. Schema 2 adds bounded context anchors while the strict
-decoder continues to accept schema 1 sessions and upgrades their active node on
-the next checkpoint.
+the disk boundary. The encoder applies the same per-field validation before a
+node can enter the tree or replace a file. Schema 2 added bounded context
+anchors; schema 3 adds durable failed/interrupted outcomes. The strict decoder
+continues to accept both older schemas and upgrades the active node on its next
+checkpoint.
 
 Session catalogues use the canonical real workspace path, so another project
 cannot appear in the resume picker. A process lease prevents simultaneous
 resume of the same logical session. Its directory and identifier remain stable
-across exits and resumes; each completed turn advances the head inside that
-session's tree, while `/new` or a fresh launch creates another session. Because
-provider-only opaque blocks are deliberately not persisted, a session whose
-newest turn stopped inside a tool loop resumes from its latest completed
-ancestor; a first turn with no completed ancestor is not offered. The
-interrupted node remains an internal branch, and the next completed turn adds
-another branch from that safe ancestor without creating a second catalogue
-entry. This keeps Anthropic thinking signatures and equivalent provider
-continuation state out of durable storage without constructing or replaying a
-partial tool turn. No load, resume, or branch operation executes a historical
-tool call.
+across exits and resumes; each resumable turn advances the head inside that
+session's tree, while `/new` or a fresh launch creates another session. A
+failed or user-interrupted turn resumes exactly with its partial visible
+evidence and explicit outcome. An abrupt process stop inside a tool loop leaves
+only a `checkpointed` node and therefore resumes from its latest safe ancestor;
+a first turn with no resumable ancestor is not offered. The next completed turn
+branches from that ancestor without creating a second catalogue entry. This
+keeps Anthropic thinking signatures and equivalent provider continuation state
+out of durable storage without constructing or replaying a partial tool turn.
+No load, resume, or branch operation executes a historical tool call.
+
+The resume catalogue validates every entry in its bounded 4,096-entry input
+set, reads independent sessions in small concurrent waves, and sorts the whole
+admissible set by durable `updatedAt` before applying the visible result limit.
+It fails explicitly above that bound instead of silently hiding an older
+session that was updated most recently.
 
 `jecode resume` opens a searchable selector; `jecode resume --latest` chooses
 the newest available source. `--ephemeral` omits the persistence owner entirely.
-Batch mode is always stateless. Draft editor content, transient notices,
+Batch mode is always stateless. Draft editor content, ordinary transient notices,
 permission policies, approvals, credentials, and pending UI blocks are never
 part of a checkpoint.
 

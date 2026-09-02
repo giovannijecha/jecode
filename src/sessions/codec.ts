@@ -2,16 +2,19 @@
 // the directory is owner-only: every value is bounded and re-owned before it
 // can become conversation or provider input.
 
-import type { TurnNode } from "../conversation.ts";
+import { Buffer } from "node:buffer";
+import type { TurnFailure, TurnNode, TurnSettlement } from "../conversation.ts";
 import type { ContextAnchor } from "../context/projection.ts";
 import { CONTEXT_LIMITS } from "../context/projection.ts";
 import type { Detail, TranscriptBlock } from "../transcript-types.ts";
 import type { Block, Message, Usage } from "../types.ts";
 
-export const SESSION_SCHEMA = 2;
-export type SessionSchema = 1 | 2;
+export const SESSION_SCHEMA = 3;
+export type SessionSchema = 1 | 2 | 3;
 export const SESSION_FILE_LIMITS = Object.freeze({
   text: 1_048_576,
+  metadataBytes: 64 * 1_024,
+  nodeBytes: 20 * 1_024 * 1_024,
   jsonDepth: 24,
   jsonNodes: 32_768,
   blocks: 8_192,
@@ -42,7 +45,8 @@ export type StoredNode = Readonly<{
 }>;
 
 export function encodeMeta(meta: SessionMeta): string {
-  return line(meta);
+  decodeMeta(meta);
+  return boundedLine(meta, SESSION_FILE_LIMITS.metadataBytes);
 }
 
 export function decodeMeta(value: unknown): SessionMeta {
@@ -66,7 +70,8 @@ export function decodeMeta(value: unknown): SessionMeta {
 }
 
 export function encodeHead(head: SessionHead): string {
-  return line(head);
+  decodeHead(head);
+  return boundedLine(head, SESSION_FILE_LIMITS.metadataBytes);
 }
 
 export function decodeHead(value: unknown): SessionHead {
@@ -92,7 +97,18 @@ export function decodeHead(value: unknown): SessionHead {
 }
 
 export function encodeNode(node: TurnNode, sequence: number, updatedAt: string): string {
-  return line({
+  const envelope = nodeEnvelope(node, sequence, updatedAt);
+  decodeNode(envelope);
+  return boundedLine(envelope, SESSION_FILE_LIMITS.nodeBytes);
+}
+
+/** Enforce the exact current-disk boundary before a turn enters the tree. */
+export function assertPersistableNode(node: TurnNode): void {
+  encodeNode(node, 1, node.createdAt);
+}
+
+function nodeEnvelope(node: TurnNode, sequence: number, updatedAt: string): unknown {
+  return {
     version: SESSION_SCHEMA,
     sequence,
     updatedAt,
@@ -106,8 +122,9 @@ export function encodeNode(node: TurnNode, sequence: number, updatedAt: string):
       messages: node.messages.map(messageRecord),
       blocks: node.blocks.flatMap(blockRecord),
       context: node.context ?? null,
+      failure: node.failure ?? null,
     },
-  });
+  };
 }
 
 export function decodeNode(value: unknown): StoredNode {
@@ -120,7 +137,9 @@ export function decodeNode(value: unknown): StoredNode {
   const raw = value["node"];
   const nodeKeys = version === 1
     ? "blocks,createdAt,id,identity,messages,parentId,revision,settlement"
-    : "blocks,context,createdAt,id,identity,messages,parentId,revision,settlement";
+    : version === 2
+    ? "blocks,context,createdAt,id,identity,messages,parentId,revision,settlement"
+    : "blocks,context,createdAt,failure,id,identity,messages,parentId,revision,settlement";
   if (!record(raw) || !keys(raw, nodeKeys)) {
     throw invalid();
   }
@@ -132,7 +151,7 @@ export function decodeNode(value: unknown): StoredNode {
     !integer(raw["parentId"], 0) ||
     !integer(raw["revision"], 1) ||
     !timestamp(raw["createdAt"]) ||
-    (raw["settlement"] !== "checkpointed" && raw["settlement"] !== "completed") ||
+    !settlement(raw["settlement"], version) ||
     !record(identity) || !keys(identity, "effort,model,providerId") ||
     !bounded(identity["providerId"], 128) || !bounded(identity["model"], 512) ||
     !bounded(identity["effort"], 32) ||
@@ -143,6 +162,9 @@ export function decodeNode(value: unknown): StoredNode {
   const context = version === 1
     ? undefined
     : contextFromRecord(raw["context"], raw["id"], messages.length);
+  const failure = version < 3
+    ? undefined
+    : failureFromRecord(raw["failure"], raw["settlement"]);
 
   const node: TurnNode = Object.freeze({
     id: raw["id"],
@@ -158,8 +180,27 @@ export function decodeNode(value: unknown): StoredNode {
     messages: Object.freeze(messages.map(messageFromRecord)),
     blocks: Object.freeze(blocks.map(blockFromRecord)),
     ...(context === undefined ? {} : { context: Object.freeze(context) }),
+    ...(failure === undefined ? {} : { failure: Object.freeze(failure) }),
   });
   return Object.freeze({ sequence: value["sequence"], updatedAt: value["updatedAt"], node });
+}
+
+function failureFromRecord(
+  value: unknown,
+  settlement: TurnSettlement,
+): TurnFailure | undefined {
+  const failed = settlement === "failed" || settlement === "interrupted";
+  if (value === null) {
+    if (failed) throw invalid();
+    return undefined;
+  }
+  if (!failed || !record(value) || !keys(value, "text,tone")) throw invalid();
+  if (
+    !bounded(value["text"]) ||
+    (settlement === "failed" && value["tone"] !== "error") ||
+    (settlement === "interrupted" && value["tone"] !== "warn")
+  ) throw invalid();
+  return { text: value["text"], tone: value["tone"] as "warn" | "error" };
 }
 
 function contextFromRecord(
@@ -396,6 +437,12 @@ function line(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function boundedLine(value: unknown, maxBytes: number): string {
+  const encoded = line(value);
+  if (Buffer.byteLength(encoded, "utf8") > maxBytes) throw invalid();
+  return encoded;
+}
+
 function keys(value: Record<string, unknown>, expected: string): boolean {
   return Object.keys(value).sort().join(",") === expected;
 }
@@ -417,7 +464,12 @@ function integer(value: unknown, minimum: number): value is number {
 }
 
 function schema(value: unknown): value is SessionSchema {
-  return value === 1 || value === SESSION_SCHEMA;
+  return value === 1 || value === 2 || value === SESSION_SCHEMA;
+}
+
+function settlement(value: unknown, version: SessionSchema): value is TurnSettlement {
+  return value === "checkpointed" || value === "completed" ||
+    (version >= 3 && (value === "failed" || value === "interrupted"));
 }
 
 function nullableInteger(value: unknown, minimum: number): value is number | null {

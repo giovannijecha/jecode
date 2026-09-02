@@ -37,8 +37,8 @@ export class SessionPersistence {
     const lease = await store.claim(id);
     try {
       const snapshot = await store.load(id);
-      const conversation = snapshot.conversation.latestCompleted();
-      if (conversation === undefined) throw new Error("session has no completed turn to resume");
+      const conversation = snapshot.conversation.latestResumable();
+      if (conversation === undefined) throw new Error("session has no resumable turn");
       return Object.freeze({
         conversation,
         persistence: new SessionPersistence(store, id, lease),

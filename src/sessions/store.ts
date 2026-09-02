@@ -10,6 +10,7 @@ import {
   lstat,
   mkdir,
   open,
+  opendir,
   readFile,
   readdir,
   realpath,
@@ -29,6 +30,7 @@ import {
   encodeHead,
   encodeMeta,
   encodeNode,
+  SESSION_FILE_LIMITS,
   SESSION_SCHEMA,
 } from "./codec.ts";
 import type { SessionHead, SessionMeta, StoredNode } from "./codec.ts";
@@ -45,8 +47,8 @@ export type { SessionLease } from "./lease.ts";
 
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
-const MAX_CATALOG_SCAN = 128;
-const MAX_JSON_BYTES = 20 * 1024 * 1024;
+const MAX_CATALOG_ENTRIES = 4_096;
+const CATALOG_READ_CONCURRENCY = 8;
 const SESSION_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const NODE_NAME = /^(\d{6})\.json$/;
 const ATOMIC_NODE_TEMP = /^\.\d{6}\.json\.\d+\.[a-f0-9-]+\.tmp$/;
@@ -93,32 +95,34 @@ export class DurableSessionStore {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) {
       throw new Error("session catalogue limit is invalid");
     }
-    const entries = await directoryEntries(this.#bucket);
-    const names = entries
-      .filter((entry) => entry.isDirectory() && SESSION_NAME.test(entry.name))
-      .map((entry) => entry.name)
-      .sort((left, right) => right.localeCompare(left))
-      .slice(0, MAX_CATALOG_SCAN);
+    const names = await catalogNames(this.#bucket);
     const catalog: SessionCatalogEntry[] = [];
-    for (const id of names) {
-      try {
-        const snapshot = await this.load(id);
-        const conversation = snapshot.conversation.latestCompleted();
-        if (conversation === undefined) continue;
-        catalog.push({
-          id,
-          createdAt: snapshot.meta.createdAt,
-          updatedAt: snapshot.head.updatedAt,
-          turns: selectedTurnCount(conversation),
-          preview: firstUserText(conversation),
-          active: await this.#leaseIsActive(id),
-        });
-      } catch {
-        // Corrupt or foreign data never becomes a resume candidate.
-      }
+    for (let start = 0; start < names.length; start += CATALOG_READ_CONCURRENCY) {
+      const batch = await Promise.all(names.slice(start, start + CATALOG_READ_CONCURRENCY)
+        .map(async (id): Promise<SessionCatalogEntry | undefined> => {
+          try {
+            const snapshot = await this.load(id);
+            const conversation = snapshot.conversation.latestResumable();
+            if (conversation === undefined) return undefined;
+            return {
+              id,
+              createdAt: snapshot.meta.createdAt,
+              updatedAt: snapshot.head.updatedAt,
+              turns: selectedTurnCount(conversation),
+              preview: firstUserText(conversation),
+              active: await this.#leaseIsActive(id),
+            };
+          } catch {
+            // Corrupt or foreign data never becomes a resume candidate.
+            return undefined;
+          }
+        }));
+      catalog.push(...batch.filter((entry) => entry !== undefined));
     }
     return catalog
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .sort((left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id)
+      )
       .slice(0, limit);
   }
 
@@ -126,12 +130,18 @@ export class DurableSessionStore {
     assertSessionId(id);
     const directory = this.#sessionDirectory(id);
     await assertDirectory(directory);
-    const meta = decodeMeta(await readJson(path.join(directory, "meta.json"), 64 * 1024));
+    const meta = decodeMeta(await readJson(
+      path.join(directory, "meta.json"),
+      SESSION_FILE_LIMITS.metadataBytes,
+    ));
     if (
       meta.id !== id || meta.workspaceDigest !== this.workspaceDigest ||
       workspaceKey(meta.workspaceRoot) !== workspaceKey(this.workspaceRoot)
     ) throw new Error("session belongs to a different workspace");
-    let head = decodeHead(await readJson(path.join(directory, "head.json"), 64 * 1024));
+    let head = decodeHead(await readJson(
+      path.join(directory, "head.json"),
+      SESSION_FILE_LIMITS.metadataBytes,
+    ));
     const stored = await readNodes(path.join(directory, "nodes"));
     const ahead = stored.filter((entry) => entry.sequence > head.sequence);
     if (ahead.some((entry) => entry.sequence !== head.sequence + 1) || ahead.length > 1) {
@@ -317,6 +327,27 @@ export class DurableSessionStore {
   }
 }
 
+async function catalogNames(directory: string): Promise<string[]> {
+  try {
+    await assertDirectory(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+
+  const names: string[] = [];
+  let entries = 0;
+  const handle = await opendir(directory);
+  for await (const entry of handle) {
+    entries++;
+    if (entries > MAX_CATALOG_ENTRIES) {
+      throw new Error(`session catalogue exceeds ${MAX_CATALOG_ENTRIES} entries`);
+    }
+    if (entry.isDirectory() && SESSION_NAME.test(entry.name)) names.push(entry.name);
+  }
+  return names.sort((left, right) => right.localeCompare(left));
+}
+
 function assertSharedNodes(
   previous: ConversationTree,
   next: ConversationTree,
@@ -364,7 +395,10 @@ async function readNodes(directory: string): Promise<StoredNode[]> {
     const name = names[index] as string;
     const id = Number(NODE_NAME.exec(name)?.[1]);
     if (id !== index + 1) throw new Error("session conversation nodes are not contiguous");
-    const decoded = decodeNode(await readJson(path.join(directory, name), MAX_JSON_BYTES));
+    const decoded = decodeNode(await readJson(
+      path.join(directory, name),
+      SESSION_FILE_LIMITS.nodeBytes,
+    ));
     if (decoded.node.id !== id || sequences.has(decoded.sequence)) {
       throw new Error("session conversation node identity is invalid");
     }

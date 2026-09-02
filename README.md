@@ -168,7 +168,7 @@ Type `/` to open searchable command completion inside the composer.
 | `/providers` | Manage provider connections, API keys, ChatGPT sign-in, and Ollama endpoints |
 | `/models` | Search all currently usable provider catalogues and select a model |
 | `/permissions` | Change session tool access and review remembered approvals |
-| `/timeline` | Browse completed turns and select where the next branch should begin |
+| `/timeline` | Browse resumable turns and select where the next branch should begin |
 | `/compact` | Compact the current branch context without deleting saved conversation history |
 | `/new` | Start a new conversation and reset session tool permissions |
 | `/export` | Save a timestamped Markdown transcript in the launch directory |
@@ -203,13 +203,16 @@ the resume picker until it has a settled turn. Resuming and continuing a
 conversation keeps its durable session identity and updates one picker entry
 instead of creating duplicates.
 
-`/timeline` shows completed turns in the conversation tree. Selecting an older
-turn changes only the in-memory path: it creates and saves a branch only after
-the next real user message. Cancelling the picker or exiting before that message
-leaves the durable head unchanged. Historical tools are displayed but never
-executed. If a crash interrupted a tool loop, Jecode resumes from the latest
-completed ancestor and lets the next user turn create a branch. `/export`
-writes only the currently selected path.
+`/timeline` shows completed, failed, and interrupted turns in the conversation
+tree. Selecting an older turn changes only the in-memory path: it creates and
+saves a branch only after the next real user message. Cancelling the picker or
+exiting before that message leaves the durable head unchanged. A failed turn
+keeps the same partial evidence and outcome in the live transcript, export, and
+resume, while the next model receives a neutral failure boundary instead of
+incomplete streamed text. Historical tools are displayed but never executed.
+If a process stops abruptly inside a tool loop, Jecode resumes from the latest
+safe ancestor and lets the next user turn create a branch. `/export` writes
+only the currently selected path.
 
 When model-facing context approaches the selected model's usable capacity,
 Jecode asks the provider for a bounded summary of the older prefix and keeps
@@ -289,8 +292,9 @@ untrusted data.
 - Provider handshakes and idle response bodies have finite deadlines. Only
   idempotent catalogue reads retry; generation requests are never replayed.
 - Model, terminal, and filesystem input are bounded before use.
-- Session files are versioned, size-bounded, atomically checkpointed, and
-  treated as untrusted when loaded. A live lease prevents concurrent resume.
+- Session files are versioned, symmetrically size-bounded before write and
+  after read, atomically checkpointed, and treated as untrusted when loaded. A
+  live lease prevents concurrent resume.
 
 `run_command` is not an operating-system sandbox. An approved command can still
 access files and account resources available to the current user. Review

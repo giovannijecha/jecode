@@ -82,6 +82,7 @@ export async function compactSession(
     messages: active.messages,
     blocks: active.blocks,
     context: result.anchor,
+    ...(active.failure === undefined ? {} : { failure: active.failure }),
   }, active.settlement);
   await session.persistence?.checkpoint(next);
   session.conversation = next;

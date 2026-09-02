@@ -9,6 +9,7 @@ import type { ContextAnchor } from "./context/projection.ts";
 import { projectContext, validContextAnchor } from "./context/projection.ts";
 import type { TranscriptBlock } from "./transcript-types.ts";
 import type { Message } from "./types.ts";
+import { assertPersistableNode } from "./sessions/codec.ts";
 
 export const CONVERSATION_LIMITS = Object.freeze({
   nodes: 1_024,
@@ -17,7 +18,12 @@ export const CONVERSATION_LIMITS = Object.freeze({
   contextCodeUnits: 8_388_608,
 });
 
-export type TurnSettlement = "checkpointed" | "completed";
+export type TurnSettlement = "checkpointed" | "completed" | "failed" | "interrupted";
+
+export type TurnFailure = Readonly<{
+  text: string;
+  tone: "warn" | "error";
+}>;
 
 export type TurnIdentity = Readonly<{
   providerId: string;
@@ -35,6 +41,7 @@ export type TurnNode = Readonly<{
   messages: readonly Message[];
   blocks: readonly TranscriptBlock[];
   context?: ContextAnchor;
+  failure?: TurnFailure;
 }>;
 
 export type TurnDraft = Readonly<{
@@ -45,6 +52,7 @@ export type TurnDraft = Readonly<{
   messages: readonly Message[];
   blocks: readonly TranscriptBlock[];
   context?: ContextAnchor;
+  failure?: TurnFailure;
 }>;
 
 /** Immutable tree with one selected model/transcript path. */
@@ -76,6 +84,7 @@ export class ConversationTree {
         messages: node.messages,
         blocks: node.blocks,
         ...(node.context === undefined ? {} : { context: node.context }),
+        ...(node.failure === undefined ? {} : { failure: node.failure }),
       }, node.settlement);
       const restored = tree.activeNode;
       if (restored === undefined || restored.id !== node.id) {
@@ -136,6 +145,18 @@ export class ConversationTree {
     return undefined;
   }
 
+  /** Select the newest turn that is safe to continue after a restart. */
+  latestResumable(): ConversationTree | undefined {
+    let id = this.#activeNodeId;
+    while (id !== 0) {
+      const node = this.node(id);
+      if (node === undefined) throw new Error("conversation path is incomplete");
+      if (node.settlement !== "checkpointed") return this.select(id);
+      id = node.parentId;
+    }
+    return undefined;
+  }
+
   get history(): Message[] {
     return this.#path().flatMap((node) => clone(node.messages));
   }
@@ -145,7 +166,12 @@ export class ConversationTree {
   }
 
   get transcript(): TranscriptBlock[] {
-    return this.#path().flatMap((node) => clone(node.blocks));
+    return this.#path().flatMap((node) => [
+      ...clone(node.blocks),
+      ...(node.failure === undefined
+        ? []
+        : [{ kind: "notice" as const, text: node.failure.text, tone: node.failure.tone }]),
+    ]);
   }
 
   #append(draft: TurnDraft, settlement: TurnSettlement): ConversationTree {
@@ -162,8 +188,10 @@ export class ConversationTree {
       messages: draft.messages,
       blocks: settledBlocks(draft.blocks),
       ...(draft.context === undefined ? {} : { context: draft.context }),
+      ...(draft.failure === undefined ? {} : { failure: draft.failure }),
     });
     assertTurn(node);
+    assertPersistableNode(node);
     const nodes = [...this.#nodes, node];
     assertBounds(nodes);
     return new ConversationTree(nodes, node.id);
@@ -183,8 +211,10 @@ export class ConversationTree {
       messages: draft.messages,
       blocks: settledBlocks(draft.blocks),
       context: draft.context ?? current.context,
+      failure: draft.failure,
     });
     assertTurn(node);
+    assertPersistableNode(node);
     const nodes = [...this.#nodes];
     nodes[id - 1] = node;
     assertBounds(nodes);
@@ -212,6 +242,7 @@ function ownedNode(node: TurnNode): TurnNode {
     messages: Object.freeze(clone(node.messages)),
     blocks: Object.freeze(clone(node.blocks)),
     ...(node.context === undefined ? {} : { context: Object.freeze({ ...node.context }) }),
+    ...(node.failure === undefined ? {} : { failure: Object.freeze({ ...node.failure }) }),
   });
 }
 
@@ -223,6 +254,7 @@ function settledBlocks(blocks: readonly TranscriptBlock[]): TranscriptBlock[] {
       return [settled];
     }
     if (block.kind === "tool") {
+      if (block.tone === "pending") return [];
       const { startedAt: _startedAt, expanded: _expanded, ...settled } = block;
       return [settled];
     }
@@ -236,15 +268,28 @@ function assertTurn(node: TurnNode): void {
     !validNodeId(node.parentId) || node.parentId >= node.id ||
     !Number.isSafeInteger(node.revision) || node.revision < 1 ||
     node.createdAt.length === 0 || node.createdAt.length > 64 ||
-    (node.settlement !== "checkpointed" && node.settlement !== "completed") ||
+    !validSettlement(node.settlement) ||
     node.messages.length < 2 || node.messages[0]?.role !== "user" ||
     node.identity.providerId.length === 0 || node.identity.providerId.length > 128 ||
     node.identity.model.length === 0 || node.identity.model.length > 512 ||
     node.identity.effort.length === 0 || node.identity.effort.length > 32
   ) throw new Error("turn checkpoint is invalid");
-  if (node.settlement === "completed" && node.messages.at(-1)?.role !== "assistant") {
-    throw new Error("a completed turn must end with an assistant message");
+  if (node.settlement !== "checkpointed" && node.messages.at(-1)?.role !== "assistant") {
+    throw new Error("a resumable turn must end with an assistant message");
   }
+  const failed = node.settlement === "failed" || node.settlement === "interrupted";
+  if (
+    failed !== (node.failure !== undefined) ||
+    (node.settlement === "failed" && node.failure?.tone !== "error") ||
+    (node.settlement === "interrupted" && node.failure?.tone !== "warn")
+  ) {
+    throw new Error("turn failure state is invalid");
+  }
+}
+
+function validSettlement(value: string): value is TurnSettlement {
+  return value === "checkpointed" || value === "completed" ||
+    value === "failed" || value === "interrupted";
 }
 
 function assertBounds(nodes: readonly TurnNode[]): void {

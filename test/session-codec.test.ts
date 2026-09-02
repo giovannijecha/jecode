@@ -8,6 +8,7 @@ import {
   encodeHead,
   encodeMeta,
   encodeNode,
+  SESSION_FILE_LIMITS,
 } from "../src/sessions/codec.ts";
 
 test("session node codec round-trips normalized history without provider raw data", () => {
@@ -110,6 +111,36 @@ test("schema 1 session nodes remain readable without a context anchor", () => {
   assert.equal(decoded.node.messages.length, 2);
 });
 
+test("schema 2 session nodes remain readable with their context anchor", () => {
+  const decoded = decodeNode({
+    version: 2,
+    sequence: 1,
+    updatedAt: "2026-09-01T10:01:00.000Z",
+    node: {
+      id: 1,
+      parentId: 0,
+      revision: 1,
+      createdAt: "2026-09-01T10:00:00.000Z",
+      settlement: "completed",
+      identity: { providerId: "ollama", model: "m", effort: "high" },
+      messages: [
+        { role: "user", content: [{ kind: "text", text: "hello" }], usage: null },
+        { role: "assistant", content: [{ kind: "text", text: "hi" }], usage: null },
+      ],
+      blocks: [],
+      context: {
+        throughNodeId: 1,
+        messageCount: 2,
+        createdAt: "2026-09-01T10:00:30.000Z",
+        summary: "The user greeted the assistant.",
+      },
+    },
+  });
+
+  assert.equal(decoded.node.context?.summary, "The user greeted the assistant.");
+  assert.equal(decoded.node.failure, undefined);
+});
+
 test("session metadata and head codecs reject unknown fields", () => {
   const meta = {
     version: 1 as const,
@@ -130,6 +161,10 @@ test("session metadata and head codecs reject unknown fields", () => {
   assert.deepEqual(decodeHead(JSON.parse(encodeHead(head))), head);
   assert.throws(() => decodeMeta({ ...meta, secret: true }), /invalid or unsupported/);
   assert.throws(() => decodeHead({ ...head, future: true }), /invalid or unsupported/);
+  assert.throws(
+    () => encodeMeta({ ...meta, workspaceRoot: "😀".repeat(16_384) }),
+    /invalid or unsupported/,
+  );
 });
 
 test("session codec rejects unbounded and malformed tool input", () => {
@@ -156,4 +191,60 @@ test("session codec rejects unbounded and malformed tool input", () => {
     },
   };
   assert.throws(() => decodeNode(malformed), /invalid or unsupported/);
+});
+
+test("conversation commits enforce the same per-field boundary as the session decoder", () => {
+  const atLimit = "a".repeat(SESSION_FILE_LIMITS.text);
+  const accepted = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "ollama", model: "m", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: atLimit }] },
+      { role: "assistant", content: [{ kind: "text", text: "ok" }] },
+    ],
+    blocks: [{ kind: "user", text: atLimit }, { kind: "answer", text: "ok" }],
+  }, "completed");
+
+  assert.doesNotThrow(() => encodeNode(
+    accepted.activeNode as NonNullable<typeof accepted.activeNode>,
+    1,
+    "2026-09-01T10:01:00.000Z",
+  ));
+  assert.throws(() => ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "ollama", model: "m", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: `${atLimit}a` }] },
+      { role: "assistant", content: [{ kind: "text", text: "ok" }] },
+    ],
+    blocks: [],
+  }, "completed"), /invalid or unsupported/);
+});
+
+test("conversation commits enforce the session file's UTF-8 byte boundary", () => {
+  const messageText = "😀".repeat(SESSION_FILE_LIMITS.text / 2);
+  const blockText = "😀".repeat(523_500);
+  const summary = "😀".repeat(16_384);
+
+  assert.throws(() => ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "ollama", model: "m", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: messageText }] },
+      { role: "assistant", content: [{ kind: "text", text: messageText }] },
+    ],
+    blocks: Array.from({ length: 8 }, (_, index) => ({
+      kind: index % 2 === 0 ? "user" as const : "answer" as const,
+      text: blockText,
+    })),
+    context: {
+      throughNodeId: 1,
+      messageCount: 2,
+      createdAt: "2026-09-01T10:00:30.000Z",
+      summary,
+    },
+  }, "completed"), /invalid or unsupported/);
 });
