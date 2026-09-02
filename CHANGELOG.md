@@ -10,6 +10,8 @@ install artifacts and provenance are published with the [npm package].
 
 - Made fragmented SSE event parsing linear so large reasoning and tool payloads
   cannot repeatedly rescan an incomplete prefix and stall provider streaming.
+- Kept localized edits in large files as localized diffs instead of displaying
+  and persisting the complete file as one coarse replacement.
 
 ## [0.7.3] - 2026-09-02
 

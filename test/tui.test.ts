@@ -598,6 +598,33 @@ test("a compact edit shows only changed lines while expansion restores context",
   assert.match(expanded, /unchanged/);
 });
 
+test("a local edit in a large file keeps a bounded semantic preview", () => {
+  const { blocks, events } = stage([]);
+  const original = Array.from({ length: 3_600 }, (_, index) => `value-${index + 1}`);
+  const changed = [...original];
+  changed[3_566] = "VALUE-3567";
+  events.onToolCall(callOf("1", "edit_file", {
+    path: "styles.css",
+    old_text: "value-3567",
+    new_text: "VALUE-3567",
+  }), {
+    before: original.join("\n"),
+    after: changed.join("\n"),
+  });
+
+  const block = blocks[0];
+  assert.equal(block?.kind, "tool");
+  if (block?.kind !== "tool") return;
+  assert.equal(block.body?.filter((detail) => detail.kind === "del").length, 1);
+  assert.equal(block.body?.filter((detail) => detail.kind === "add").length, 1);
+  assert.ok((block.body?.length ?? 0) < 10);
+
+  const compact = strip(renderAll([block], 60, STEEL)).join("\n");
+  assert.match(compact, /-3567 value-3567/);
+  assert.match(compact, /\+3567 VALUE-3567/);
+  assert.doesNotMatch(compact, /more changed lines/);
+});
+
 test("large file diffs share one bounded preview while expansion keeps every change", () => {
   const { blocks, events } = stage([]);
   const content = Array.from({ length: 22 }, (_, index) => `value-${index + 1}`).join("\n");
