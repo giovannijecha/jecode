@@ -16,6 +16,7 @@ const MAX_VISITED = 20_000;
 const MAX_FILE_BYTES = 1_000_000;
 const MAX_MATCH_LINE = 500;
 const MAX_GLOB_CHARS = 512;
+const PORTABLE_SEARCH_CONCURRENCY = 8;
 const RG_PREFIX_BYTES = 2_000_000;
 const RG_PREFIX_FILES = 500;
 const MIN_RG_TAIL_BYTES = 2_000_000;
@@ -91,37 +92,18 @@ export const searchText: Tool = {
     const match = pattern === undefined || pattern === "" ? () => true : glob(pattern);
     const limit = resultLimit(args);
     const found: string[] = [];
+    const candidates: string[] = [];
+    const prefix: SearchFile[] = [];
     const tail: SearchFile[] = [];
     let skipped = 0;
     let prefixBytes = 0;
     let prefixFiles = 0;
     let tailBytes = 0;
 
-    const walked = await walk(start, scoped, async (lexical) => {
-      const relative = displayPath(scoped.root, lexical);
-      if (!match(relative)) return false;
-
-      const file = await resolveExistingInRoot(scoped.root, lexical);
-      const info = await fs.stat(file);
-      if (info.size > MAX_FILE_BYTES) {
-        skipped++;
-        return false;
-      }
-
-      const candidate = { path: file, bytes: info.size };
-      if (
-        prefixFiles + 1 > RG_PREFIX_FILES ||
-        prefixBytes + info.size > RG_PREFIX_BYTES
-      ) {
-        tail.push(candidate);
-        tailBytes += info.size;
-        return false;
-      }
-
-      prefixFiles++;
-      prefixBytes += info.size;
+    const flushPrefix = async (): Promise<boolean> => {
+      if (prefix.length === 0) return false;
       const searched = await portableSearch(
-        [candidate],
+        prefix.splice(0),
         scoped,
         needle,
         sensitive,
@@ -130,9 +112,54 @@ export const searchText: Tool = {
       found.push(...searched.matches);
       skipped += searched.skipped;
       return found.length >= limit;
+    };
+
+    const flushCandidates = async (): Promise<boolean> => {
+      if (candidates.length === 0) return false;
+      const inspected = await Promise.all(
+        candidates.splice(0).map((lexical) => inspectCandidate(scoped.root, lexical)),
+      );
+      checkAbort(ctx.signal);
+      for (const result of inspected) {
+        if ("error" in result) {
+          if (!skippable(result.error)) throw result.error;
+          skipped++;
+          continue;
+        }
+        const candidate = result.file;
+        if (candidate.bytes > MAX_FILE_BYTES) {
+          skipped++;
+          continue;
+        }
+        if (
+          prefixFiles + 1 > RG_PREFIX_FILES ||
+          prefixBytes + candidate.bytes > RG_PREFIX_BYTES
+        ) {
+          tail.push(candidate);
+          tailBytes += candidate.bytes;
+          continue;
+        }
+        prefixFiles++;
+        prefixBytes += candidate.bytes;
+        prefix.push(candidate);
+        if (prefix.length >= PORTABLE_SEARCH_CONCURRENCY && await flushPrefix()) return true;
+      }
+      return false;
+    };
+
+    const walked = await walk(start, scoped, async (lexical) => {
+      const relative = displayPath(scoped.root, lexical);
+      if (!match(relative)) return false;
+      candidates.push(lexical);
+      return candidates.length >= PORTABLE_SEARCH_CONCURRENCY
+        ? await flushCandidates()
+        : false;
     });
 
-    const accelerated = preferRipgrep(tail, tailBytes)
+    if (found.length < limit) await flushCandidates();
+    if (found.length < limit) await flushPrefix();
+
+    const accelerated = found.length < limit && preferRipgrep(tail, tailBytes)
       ? await trySearchWithRipgrep({
           root: scoped.root,
           files: tail,
@@ -142,7 +169,7 @@ export const searchText: Tool = {
           signal: ctx.signal,
         })
       : undefined;
-    const portable = accelerated === undefined && tail.length > 0
+    const portable = found.length < limit && accelerated === undefined && tail.length > 0
       ? await portableSearch(tail, scoped, needle, sensitive, limit - found.length)
       : undefined;
     found.push(...(portable?.matches ?? accelerated?.matches.map((match) => (
@@ -158,43 +185,84 @@ export const searchText: Tool = {
   },
 };
 
-async function portableSearch(
+export async function portableSearch(
   files: readonly SearchFile[],
   ctx: ToolContext,
   needle: string,
   sensitive: boolean,
   limit: number,
+  read: SearchReader = readSearchFile,
 ): Promise<{ matches: string[]; skipped: number }> {
   const found: string[] = [];
   let skipped = 0;
-  for (const file of files) {
+  for (let start = 0; start < files.length; start += PORTABLE_SEARCH_CONCURRENCY) {
     checkAbort(ctx.signal);
-
-    let text: string;
-    try {
-      const data = await fs.readFile(file.path);
-      if (data.includes(0)) {
+    const remaining = limit - found.length;
+    if (remaining <= 0) break;
+    const batch = await Promise.all(
+      files.slice(start, start + PORTABLE_SEARCH_CONCURRENCY)
+        .map((file) => searchFile(file, ctx, needle, sensitive, remaining, read)),
+    );
+    for (const searched of batch) {
+      if (searched === undefined) {
         skipped++;
         continue;
       }
-      text = data.toString("utf8");
-    } catch (error) {
-      if (skippable(error)) {
-        skipped++;
-        continue;
+      for (const match of searched) {
+        found.push(match);
+        if (found.length >= limit) return { matches: found, skipped };
       }
-      throw error;
-    }
-
-    for (const [index, line] of text.replace(/\r\n?/g, "\n").split("\n").entries()) {
-      checkAbort(ctx.signal);
-      const haystack = sensitive ? line : line.toLocaleLowerCase();
-      if (!haystack.includes(needle)) continue;
-      found.push(`${displayPath(ctx.root, file.path)}:${index + 1}:${clip(line)}`);
-      if (found.length >= limit) return { matches: found, skipped };
     }
   }
   return { matches: found, skipped };
+}
+
+type CandidateInspection = { file: SearchFile } | { error: unknown };
+
+async function inspectCandidate(root: string, lexical: string): Promise<CandidateInspection> {
+  try {
+    const file = await resolveExistingInRoot(root, lexical);
+    return { file: { path: file, bytes: (await fs.stat(file)).size } };
+  } catch (error) {
+    return { error };
+  }
+}
+
+type SearchReader = (file: string, signal: AbortSignal | undefined) => Promise<Buffer>;
+
+async function searchFile(
+  file: SearchFile,
+  ctx: ToolContext,
+  needle: string,
+  sensitive: boolean,
+  limit: number,
+  read: SearchReader,
+): Promise<string[] | undefined> {
+  let data: Buffer;
+  try {
+    data = await read(file.path, ctx.signal);
+  } catch (error) {
+    checkAbort(ctx.signal);
+    if (skippable(error)) return undefined;
+    throw error;
+  }
+  checkAbort(ctx.signal);
+  if (data.byteLength > MAX_FILE_BYTES || data.includes(0)) return undefined;
+
+  const found: string[] = [];
+  const text = data.toString("utf8");
+  for (const [index, line] of text.replace(/\r\n?/g, "\n").split("\n").entries()) {
+    checkAbort(ctx.signal);
+    const haystack = sensitive ? line : line.toLocaleLowerCase();
+    if (!haystack.includes(needle)) continue;
+    found.push(`${displayPath(ctx.root, file.path)}:${index + 1}:${clip(line)}`);
+    if (found.length >= limit) break;
+  }
+  return found;
+}
+
+function readSearchFile(file: string, signal: AbortSignal | undefined): Promise<Buffer> {
+  return signal === undefined ? fs.readFile(file) : fs.readFile(file, { signal });
 }
 
 function preferRipgrep(files: readonly SearchFile[], bytes: number): boolean {

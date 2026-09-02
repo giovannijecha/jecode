@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findFiles, searchText } from "../src/tools/search.ts";
+import { findFiles, portableSearch, searchText } from "../src/tools/search.ts";
 import { trySearchWithRipgrep } from "../src/tools/ripgrep.ts";
 import { builtinTools } from "../src/tools/index.ts";
 import type { ToolContext } from "../src/tools/types.ts";
@@ -74,6 +74,54 @@ test("search results stop at the requested bound", async () => {
   const result = await searchText.run({ query: "needle", max_results: 1 }, ctx);
   assert.equal(result.output.split("\n").length, 1);
   assert.match(result.summary ?? "", /result limit/);
+});
+
+test("the portable scanner bounds concurrent reads and preserves file order", async () => {
+  const files = Array.from({ length: 20 }, (_, index) => ({
+    path: path.join(ctx.root, `ordered-${String(index).padStart(2, "0")}.txt`),
+    bytes: 16,
+  }));
+  let active = 0;
+  let peak = 0;
+  const searched = await portableSearch(files, ctx, "needle", true, 5, async (file) => {
+    active++;
+    peak = Math.max(peak, active);
+    try {
+      const index = Number.parseInt(path.basename(file).slice(8, 10), 10);
+      await new Promise((resolve) => setTimeout(resolve, 20 - index));
+      return Buffer.from(`needle ${index}\n`, "utf8");
+    } finally {
+      active--;
+    }
+  });
+
+  assert.equal(peak, 8);
+  assert.deepEqual(
+    searched.matches.map((match) => match.slice(match.lastIndexOf(":") + 1)),
+    Array.from({ length: 5 }, (_, index) => `needle ${index}`),
+  );
+});
+
+test("the portable scanner preserves the caller's cancellation reason", async () => {
+  const control = new AbortController();
+  const files = Array.from({ length: 8 }, (_, index) => ({
+    path: path.join(ctx.root, `waiting-${index}.txt`),
+    bytes: 16,
+  }));
+  const pending = portableSearch(
+    files,
+    { ...ctx, signal: control.signal },
+    "needle",
+    true,
+    100,
+    async (_file, signal) => await new Promise<Buffer>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  control.abort(new Error("cancel portable search"));
+  await assert.rejects(pending, /cancel portable search/);
 });
 
 test("a clipped search line never returns half an emoji", async () => {

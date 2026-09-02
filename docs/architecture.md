@@ -203,10 +203,12 @@ accelerates literal matching over those files with a credential-filtered
 environment. Jecode resolves the executable to a canonical absolute path and
 rejects candidates controlled by the workspace, so a repository cannot shadow
 the helper. Smaller searches and machines without a trusted `rg` use the
-dependency-free TypeScript scanner. `rg` is never required at install or
-runtime. Because ripgrep's own match limit applies per file, Jecode stops and
-rejects an accelerated batch as soon as its raw events exceed the requested
-global result limit; the portable scanner then produces the bounded answer.
+dependency-free TypeScript scanner. Candidate validation and portable reads run
+in bounded batches, while their results retain canonical file order. `rg` is
+never required at install or runtime. Because ripgrep's own match limit applies
+per file, Jecode stops and rejects an accelerated batch as soon as its raw
+events exceed the requested global result limit; the portable scanner then
+produces the bounded answer.
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
 user account can address, which is why every exact command asks by default
