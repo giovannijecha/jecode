@@ -639,6 +639,9 @@ test("/compact revises context without adding its summary to the transcript", as
     () => (harness.frames.at(-1) ?? []).join("\n").includes("context compacted"),
     "manual compaction feedback",
   );
+  const footer = plainRow(harness.frames.at(-1)?.at(-1) ?? "");
+  assert.match(footer, /context compacted$/);
+  assert.doesNotMatch(footer, /[.·]\s+context compacted/);
   assert.equal(requests.length, 1);
   assert.match(JSON.stringify(current.conversation.history), /large canonical context/);
   assert.doesNotMatch(JSON.stringify(current.conversation.transcript), /Manual durable summary/);
@@ -1060,4 +1063,8 @@ async function waitFor(
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function plainRow(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/gu, "");
 }

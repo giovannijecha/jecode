@@ -65,6 +65,7 @@ test("context compaction percentage applies live and persists", async () => {
     await handleCommand("/settings", session, host);
 
     assert.match(fields[0]?.note ?? "", /model context/);
+    assert.equal(fields[0]?.right, "enter save · esc back");
     assert.equal(session.config.compactionPercent, 90);
     assert.equal(JSON.parse(await readFile(settingsPath(), "utf8")).compactionPercent, 90);
   });

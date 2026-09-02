@@ -246,7 +246,7 @@ async function compactionSetting(session: Session, host: Host): Promise<void> {
       `${MIN_COMPACTION_PERCENT}-${MAX_COMPACTION_PERCENT} percent`,
       session.palette,
     ),
-    right: "enter save Â· esc back",
+    right: "enter save · esc back",
     editor: of(String(session.config.compactionPercent)),
     secret: false,
     note: "Compacts when model context reaches this percentage.",

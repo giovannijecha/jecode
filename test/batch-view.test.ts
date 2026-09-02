@@ -29,3 +29,14 @@ test("batch tool output keeps the content without full-screen padding", () => {
   assert.ok(rows.every((line, index) => line !== "" || rows[index - 1] !== ""));
   assert.notEqual(rows.at(-1), "");
 });
+
+test("informational notices never regain the legacy leading dot", () => {
+  const rows = renderBatch(
+    { kind: "notice", text: "context compacted", tone: "info" },
+    80,
+    STEEL,
+  );
+
+  assert.match(rows.join("\n"), /context compacted/);
+  assert.doesNotMatch(rows.join("\n"), /·/);
+});
