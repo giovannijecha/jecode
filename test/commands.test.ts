@@ -457,6 +457,46 @@ test("new clears conversation usage and screen-local state", async () => {
   assert.deepEqual(texts(screen.blocks), ["new session"]);
 });
 
+test("timeline announces only a changed branch point", async () => {
+  const screen = host();
+  screen.timeline = () => Promise.resolve("selected");
+
+  await handleCommand("/timeline", session(provider("fake", ["a"])), screen);
+
+  assert.deepEqual(texts(screen.blocks), ["branch point selected · send a message to continue"]);
+
+  screen.blocks.length = 0;
+  screen.timeline = () => Promise.resolve("unchanged");
+  await handleCommand("/timeline", session(provider("fake", ["a"])), screen);
+  assert.deepEqual(screen.blocks, []);
+});
+
+test("timeline stays outside batch surfaces", async () => {
+  const screen = host();
+  screen.timeline = undefined;
+
+  await handleCommand("/timeline", session(provider("fake", ["a"])), screen);
+
+  assert.deepEqual(texts(screen.blocks), ["timeline needs the interactive screen"]);
+});
+
+test("compact reports success, stays silent on no-op, and guards a pending branch", async () => {
+  const screen = host();
+  screen.compact = () => Promise.resolve("compacted");
+
+  await handleCommand("/compact", session(provider("fake", ["a"])), screen);
+  assert.deepEqual(texts(screen.blocks), ["context compacted"]);
+
+  screen.blocks.length = 0;
+  screen.compact = () => Promise.resolve("unchanged");
+  await handleCommand("/compact", session(provider("fake", ["a"])), screen);
+  assert.deepEqual(screen.blocks, []);
+
+  screen.compact = () => Promise.resolve("branch-pending");
+  await handleCommand("/compact", session(provider("fake", ["a"])), screen);
+  assert.deepEqual(texts(screen.blocks), ["send a message on this branch before compacting"]);
+});
+
 test("help opens a temporary surface without emitting transcript content", async () => {
   const screen = host();
 

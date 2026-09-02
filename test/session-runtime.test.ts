@@ -102,6 +102,46 @@ test("resume rewinds an unfinished tool turn to its latest completed ancestor", 
   }
 });
 
+test("timeline selection stays temporary until a real turn persists one branch", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const first = complete(ConversationTree.empty(), 0, "first", "one");
+    const second = complete(first, 1, "second", "two");
+    const published = await store.publish(second);
+
+    const inspected = await SessionPersistence.resume(store, published.meta.id);
+    const temporarySelection = inspected.conversation.select(1);
+    assert.equal(temporarySelection.activeNodeId, 1);
+    await inspected.persistence.close();
+
+    const unchanged = await SessionPersistence.resume(store, published.meta.id);
+    assert.equal(unchanged.conversation.activeNodeId, 2);
+    assert.deepEqual(unchanged.conversation.history, second.history);
+
+    const selected = unchanged.conversation.select(1);
+    const branch = complete(selected, 1, "alternate", "three");
+    await unchanged.persistence.checkpoint(branch);
+    await unchanged.persistence.close();
+
+    const resumed = await SessionPersistence.resume(store, published.meta.id);
+    assert.equal(resumed.conversation.activeNodeId, 3);
+    assert.equal(resumed.conversation.nodes.length, 3);
+    assert.equal(resumed.conversation.node(2)?.parentId, 1);
+    assert.equal(resumed.conversation.node(3)?.parentId, 1);
+    assert.deepEqual(
+      resumed.conversation.history.flatMap((message) => message.content)
+        .filter((block) => block.kind === "text")
+        .map((block) => block.text),
+      ["first", "one", "alternate", "three"],
+    );
+    await resumed.persistence.close();
+    assert.equal((await store.list()).length, 1);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 function complete(
   conversation: ConversationTree,
   parentId: number,

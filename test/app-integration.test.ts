@@ -139,6 +139,53 @@ test("batch mode compacts model context while retaining the complete conversatio
   assert.equal(current.usage.lastInputTokens, 100);
 });
 
+test("batch /compact updates the next provider projection without transcript noise", async () => {
+  const seen: SendRequest[] = [];
+  const compacting: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 64_000 }),
+    async send(request): Promise<Message> {
+      seen.push(request);
+      const summary = request.system.includes("durable working memory");
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: summary ? "Manual batch summary." : "After compact." }],
+        usage: {
+          inputTokens: summary ? 10_000 : 80,
+          outputTokens: 8,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+  };
+  const current = session(compacting);
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-02T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "old batch context ".repeat(2_000) }] },
+      { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
+    ],
+    blocks: [],
+  }, "completed");
+  const output: string[] = [];
+
+  await runBatch(current, {
+    lines: input("/compact", "next request", "/exit"),
+    write: (text) => output.push(text),
+  });
+
+  assert.equal(seen.length, 2);
+  assert.match(seen[0]?.system ?? "", /durable working memory/);
+  assert.match(messageText(seen[1]?.messages[0]), /Earlier conversation summary/);
+  assert.doesNotMatch(JSON.stringify(seen[1]?.messages), /old batch context/);
+  assert.match(output.join(""), /context compacted/);
+  assert.doesNotMatch(JSON.stringify(current.conversation.transcript), /Manual batch summary/);
+});
+
 test("batch mode propagates provider failures outside the transcript", async () => {
   const failed: Provider = {
     ...provider(),
@@ -547,6 +594,130 @@ test("the footer reports compaction without adding it to the transcript", async 
   await running;
 });
 
+test("/compact revises context without adding its summary to the transcript", async () => {
+  const requests: SendRequest[] = [];
+  const compacting: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 64_000 }),
+    async send(request): Promise<Message> {
+      requests.push(request);
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: "Manual durable summary." }],
+        usage: {
+          inputTokens: 12_000,
+          outputTokens: 12,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+  };
+  const current = session(compacting);
+  const source = "large canonical context ".repeat(2_000);
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-02T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: source }] },
+      { role: "assistant", content: [{ kind: "text", text: "Canonical answer." }] },
+    ],
+    blocks: [
+      { kind: "user", text: "large canonical context" },
+      { kind: "answer", text: "Canonical answer." },
+    ],
+  }, "completed");
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  feed("/compact\r");
+  await waitFor(() => current.conversation.activeNode?.revision === 2, "manual compaction");
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("context compacted"),
+    "manual compaction feedback",
+  );
+  const footer = plainRow(harness.frames.at(-1)?.at(-1) ?? "");
+  assert.match(footer, /context compacted$/);
+  assert.doesNotMatch(footer, /[.·]\s+context compacted/);
+  assert.equal(requests.length, 1);
+  assert.match(JSON.stringify(current.conversation.history), /large canonical context/);
+  assert.doesNotMatch(JSON.stringify(current.conversation.transcript), /Manual durable summary/);
+  assert.match(JSON.stringify(current.conversation.contextHistory), /Manual durable summary/);
+
+  feed("/exit\r");
+  await running;
+});
+
+test("/timeline creates no branch until the next user turn", async () => {
+  const current = session(provider("Alternate answer."));
+  const first = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-02T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "first request" }] },
+      { role: "assistant", content: [{ kind: "text", text: "First answer." }] },
+    ],
+    blocks: [
+      { kind: "user", text: "first request" },
+      { kind: "answer", text: "First answer." },
+    ],
+  }, "completed");
+  current.conversation = first.commit({
+    parentId: 1,
+    createdAt: "2026-09-02T10:01:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "second request" }] },
+      { role: "assistant", content: [{ kind: "text", text: "Second answer." }] },
+    ],
+    blocks: [
+      { kind: "user", text: "second request" },
+      { kind: "answer", text: "Second answer." },
+    ],
+  }, "completed");
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  feed("/timeline\r");
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("conversation tree"),
+    "timeline picker",
+  );
+  feed(`${String.fromCharCode(27)}[A\r`);
+  await waitFor(() => current.conversation.activeNodeId === 1, "timeline selection");
+  await waitFor(
+    () => !(harness.frames.at(-1) ?? []).join("\n").includes("Second answer."),
+    "selected branch transcript",
+  );
+  assert.equal(current.conversation.nodes.length, 2);
+  assert.doesNotMatch((harness.frames.at(-1) ?? []).join("\n"), /Second answer\./);
+
+  feed("/compact\r");
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("before compacting"),
+    "pending branch guard",
+  );
+  assert.equal(current.conversation.nodes.length, 2);
+
+  feed("alternate request\r");
+  await waitFor(() => current.conversation.activeNodeId === 3, "persisted alternate branch");
+  assert.equal(current.conversation.node(3)?.parentId, 1);
+  assert.deepEqual(
+    current.conversation.history.flatMap((message) => message.content)
+      .filter((block) => block.kind === "text")
+      .map((block) => block.text),
+    ["first request", "First answer.", "alternate request", "Alternate answer."],
+  );
+
+  feed("/exit\r");
+  await running;
+});
+
 test("the TUI durably checkpoints turns and /new starts a separate session", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "jecode-tui-sessions-"));
   const workspace = path.join(root, "workspace");
@@ -892,4 +1063,8 @@ async function waitFor(
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function plainRow(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/gu, "");
 }

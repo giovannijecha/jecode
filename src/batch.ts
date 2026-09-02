@@ -11,6 +11,7 @@ import type { ControllerEvents } from "./controller.ts";
 import { runTurn } from "./controller.ts";
 import { resolveContextPolicy } from "./context/capacity.ts";
 import { compactContext } from "./context/compactor.ts";
+import { compactSession } from "./context/manual.ts";
 import type { ContextAnchor } from "./context/projection.ts";
 import type { ContextPolicy } from "./context/policy.ts";
 import { isContextOverflow, shouldResolveContextPolicy } from "./context/policy.ts";
@@ -43,7 +44,10 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       if (line === "") continue;
 
       if (line.startsWith("/")) {
-        if ((await handleCommand(line, session, { emit })) === "exit") break;
+        if ((await handleCommand(line, session, {
+          emit,
+          compact: () => compactSession(session),
+        })) === "exit") break;
         continue;
       }
 

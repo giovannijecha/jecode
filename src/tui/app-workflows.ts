@@ -4,6 +4,7 @@ import { handleCommand } from "../commands.ts";
 import { runTurn } from "../controller.ts";
 import { resolveContextPolicy } from "../context/capacity.ts";
 import { compactContext } from "../context/compactor.ts";
+import { compactSession } from "../context/manual.ts";
 import type { ContextAnchor } from "../context/projection.ts";
 import type { ContextPolicy } from "../context/policy.ts";
 import { isContextOverflow, shouldResolveContextPolicy } from "../context/policy.ts";
@@ -11,6 +12,7 @@ import type { Session } from "../session.ts";
 import { updateSettings } from "../settings.ts";
 import { saveTranscript } from "../transcript-export.ts";
 import { recordAuxiliaryUsage, recordUsage } from "../usage.ts";
+import { selectTimeline } from "../timeline.ts";
 import type { SessionPermissions } from "../permissions.ts";
 import type { Activity } from "./activity.ts";
 import type { AppActions } from "./app-input.ts";
@@ -19,6 +21,7 @@ import { answerAt } from "./approve.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FeedbackController } from "./feedback.ts";
 import { cancel as cancelOpen } from "./overlay.ts";
+import type { Picker } from "./picker.ts";
 import { controllerOptions, turnFailure } from "./session-view.ts";
 import { transcribe } from "./turn.ts";
 
@@ -33,6 +36,7 @@ type WorkflowOptions = {
   emit(block: Block): void;
   commandNotice(notice: NoticeBlock): void;
   render(block?: Block): void;
+  replaceTranscript(): void;
   refreshSettings(): void;
   startActivity(kind: Activity["kind"], label: string): Activity | undefined;
   finishActivity(activity: Activity): void;
@@ -40,6 +44,12 @@ type WorkflowOptions = {
 
 export function appWorkflows(options: WorkflowOptions): AppActions {
   const { session, state, permissions, feedback } = options;
+
+  const choose = (picker: Picker) =>
+    new Promise<number | undefined>((resolve) => {
+      state.open = { picker, settle: resolve };
+      options.render();
+    });
 
   async function command(text: string): Promise<void> {
     const activity = options.startActivity("command", `Running ${text.split(/\s+/)[0]}`);
@@ -54,11 +64,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
             state.open = { help: true, settle: resolve };
             options.render();
           }),
-        choose: (picker) =>
-          new Promise<number | undefined>((resolve) => {
-            state.open = { picker, settle: resolve };
-            options.render();
-          }),
+        choose,
         dismiss: () => {
           state.open = state.open === undefined ? undefined : cancelOpen(state.open);
           options.render();
@@ -81,6 +87,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
           state.follow = true;
           state.unseen = 0;
           state.lastMaxScroll = 0;
+          state.committedNodeId = 0;
         },
         permissions,
         exportTranscript: () => saveTranscript(options.transcriptRoot, state.blocks),
@@ -88,6 +95,26 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
           await updateSettings(patch);
         },
         refreshSettings: options.refreshSettings,
+        timeline: async () => {
+          const selected = await selectTimeline(session, choose);
+          if (!selected) return "unchanged";
+          options.replaceTranscript();
+          return session.conversation.activeNodeId === state.committedNodeId
+            ? "unchanged"
+            : "selected";
+        },
+        compact: async () => {
+          if (session.conversation.activeNodeId !== state.committedNodeId) {
+            return "branch-pending";
+          }
+          return compactSession(session, {
+            signal: activity.control.signal,
+            onStatus: (status) => {
+              state.status = status ?? activity.label;
+              options.render();
+            },
+          });
+        },
       });
       if (outcome === "exit") state.closeWhenIdle = true;
     } catch (error) {
@@ -159,6 +186,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       await session.persistence?.checkpoint(next);
       session.conversation = next;
       nodeId = next.activeNodeId;
+      state.committedNodeId = next.activeNodeId;
     };
 
     const compact = async (

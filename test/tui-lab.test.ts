@@ -151,6 +151,16 @@ test("resume is represented by its real searchable session picker", () => {
   assert.doesNotMatch(shown, /session-durable|session-footer|session-providers/);
 });
 
+test("timeline exposes branches without turning a linear history into a staircase", () => {
+  const shown = plain(composeLab(state("menu-timeline"), { rows: 24, cols: 100 }).rows).join("\n");
+  assert.match(shown, /timeline\s+conversation tree/);
+  assert.match(shown, /• Design durable sessions/);
+  assert.match(shown, /├─ Add context compaction/);
+  assert.match(shown, /│\s+• Add timeline navigation/);
+  assert.match(shown, /└─ Explore a smaller storage format.*active/);
+  assert.doesNotMatch(shown, /session id|node id/);
+});
+
 test("credential input uses the same writable prompt", () => {
   const frame = composeLab(state("field"), { rows: 24, cols: 100 });
   const rows = plain(frame.rows);

@@ -9,6 +9,8 @@ import { heading } from "../../src/tui/picker.ts";
 import { settingsPicker } from "../../src/settings-command.ts";
 import { permissionsPicker } from "../../src/permission-command.ts";
 import { resumePicker } from "../../src/tui/resume.ts";
+import { ConversationTree } from "../../src/conversation.ts";
+import { timelinePicker } from "../../src/timeline.ts";
 import type { SessionCatalogEntry } from "../../src/sessions/store.ts";
 import type { View } from "../../src/tui/view.ts";
 import {
@@ -42,6 +44,7 @@ export function sceneView(state: LabState): View {
     case "menu-commands": return commandsScene(state);
     case "menu-search": return searchScene(state);
     case "menu-resume": return resumeScene(state);
+    case "menu-timeline": return timelineScene(state);
     case "menu-settings": return settingsScene(state);
     case "menu-permissions": return permissionsScene(state);
     case "help": return helpScene(state);
@@ -327,6 +330,38 @@ function resumeScene(state: LabState): View {
     editor: edit.EMPTY,
     scroll: 0,
     modal: { kind: "pick", picker: { ...picker, index: state.selected } },
+  };
+}
+
+function timelineScene(state: LabState): View {
+  const identity = { providerId: "openai-codex", model: "gpt-5.6-sol", effort: "high" };
+  const append = (
+    tree: ConversationTree,
+    parentId: number,
+    user: string,
+    answer: string,
+    minute: string,
+  ): ConversationTree => tree.commit({
+    parentId,
+    createdAt: `2026-09-02T10:${minute}:00.000Z`,
+    identity,
+    messages: [
+      { role: "user", content: [{ kind: "text", text: user }] },
+      { role: "assistant", content: [{ kind: "text", text: answer }] },
+    ],
+    blocks: [{ kind: "user", text: user }, { kind: "answer", text: answer }],
+  }, "completed");
+  const first = append(ConversationTree.empty(), 0, "Design durable sessions", "Session identity is stable.", "00");
+  const main = append(first, 1, "Add context compaction", "Compaction is model-aware.", "04");
+  const alternate = append(main.select(1), 1, "Explore a smaller storage format", "The existing format stays canonical.", "07");
+  const tree = append(alternate.select(2), 2, "Add timeline navigation", "Branching is deferred.", "12").select(3);
+  const timeline = timelinePicker(tree, state.palette).picker;
+  return {
+    ...base(state),
+    blocks: tree.transcript,
+    editor: edit.EMPTY,
+    scroll: 0,
+    modal: { kind: "pick", picker: { ...timeline, index: state.selected } },
   };
 }
 

@@ -15,6 +15,7 @@ export const SCENES = [
   "menu-commands",
   "menu-search",
   "menu-resume",
+  "menu-timeline",
   "menu-settings",
   "menu-permissions",
   "help",
