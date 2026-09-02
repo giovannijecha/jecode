@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { performance } from "node:perf_hooks";
 import { ConversationTree } from "../src/conversation.ts";
+import type { TurnNode } from "../src/conversation.ts";
 import type { Message } from "../src/types.ts";
 
 const identity = { providerId: "ollama", model: "deepseek-v4-flash:0731", effort: "high" };
@@ -269,6 +271,89 @@ test("rejects a context anchor that points outside its branch", () => {
   }, "completed"), /outside its branch/);
 });
 
+test("restore rejects a persisted context anchor from another branch", () => {
+  const nodes = chainNodes(3);
+  const branched = [
+    nodes[0] as TurnNode,
+    nodes[1] as TurnNode,
+    {
+      ...(nodes[2] as TurnNode),
+      parentId: 1,
+      context: {
+        throughNodeId: 2,
+        messageCount: 2,
+        createdAt: "2026-09-01T10:02:30.000Z",
+        summary: "Invalid cross-branch summary.",
+      },
+    },
+  ];
+
+  assert.throws(() => ConversationTree.restore(branched, 3), /outside its branch/);
+});
+
+test("restore keeps revisions while settling transient transcript state", () => {
+  const node = chainNodes(1)[0] as TurnNode;
+  const restored = ConversationTree.restore([{
+    ...node,
+    blocks: [
+      { kind: "notice", text: "temporary", tone: "info" },
+      { kind: "reasoning", text: "settled", live: true, expanded: true },
+      {
+        kind: "tool",
+        name: "list_dir",
+        target: ".",
+        right: "running",
+        tone: "pending",
+        startedAt: 123,
+      },
+      {
+        kind: "tool",
+        name: "read_file",
+        target: "README.md",
+        right: "10 lines",
+        tone: "ok",
+        startedAt: 456,
+        expanded: true,
+      },
+    ],
+  }], 1);
+
+  assert.equal(restored.activeNode?.revision, 3);
+  assert.deepEqual(restored.activeNode?.blocks, [
+    { kind: "reasoning", text: "settled" },
+    {
+      kind: "tool",
+      name: "read_file",
+      target: "README.md",
+      right: "10 lines",
+      tone: "ok",
+    },
+  ]);
+});
+
+test("restore validation scales with the snapshot instead of its square", () => {
+  const small = chainNodes(100);
+  const large = chainNodes(800);
+  ConversationTree.restore(small, small.length);
+  ConversationTree.restore(large, large.length);
+
+  const smallDuration = median(Array.from(
+    { length: 3 },
+    () => timedRestore(small, 40),
+  ));
+  const largeDuration = median(Array.from(
+    { length: 3 },
+    () => timedRestore(large, 5),
+  ));
+
+  // Both batches validate 4,000 nodes. The broad margin absorbs CI noise while
+  // still separating a linear pass from the former repeated full-tree scans.
+  assert.ok(
+    largeDuration < smallDuration * 3 + 20,
+    `restore scaling regressed: ${smallDuration.toFixed(1)}ms vs ${largeDuration.toFixed(1)}ms`,
+  );
+});
+
 function completed(user: string, answer: string): Message[] {
   return [
     { role: "user", content: [{ kind: "text", text: user }] },
@@ -280,4 +365,29 @@ function texts(messages: readonly Message[]): string[] {
   return messages.flatMap((message) => message.content)
     .filter((block) => block.kind === "text")
     .map((block) => block.text);
+}
+
+function chainNodes(count: number): TurnNode[] {
+  return Array.from({ length: count }, (_, index) => Object.freeze({
+    id: index + 1,
+    parentId: index,
+    revision: index === count - 1 ? 3 : 1,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    settlement: "completed" as const,
+    identity,
+    messages: completed(`question ${index}`, `answer ${index}`),
+    blocks: [],
+  }));
+}
+
+function timedRestore(nodes: readonly TurnNode[], iterations: number): number {
+  const startedAt = performance.now();
+  for (let index = 0; index < iterations; index++) {
+    ConversationTree.restore(nodes, nodes.length);
+  }
+  return performance.now() - startedAt;
+}
+
+function median(values: readonly number[]): number {
+  return [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)] as number;
 }
