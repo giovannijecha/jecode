@@ -131,6 +131,36 @@ export function textWidth(text: string): number {
   return total;
 }
 
+export type CellChunk = { text: string; width: number };
+
+/** Split text into grapheme-safe chunks without rescanning any suffix. */
+export function splitByCells(
+  text: string,
+  firstCols: number,
+  followingCols = firstCols,
+): CellChunk[] {
+  if (text === "") return [{ text, width: 0 }];
+
+  const chunks: CellChunk[] = [];
+  let start = 0;
+  let used = 0;
+  let room = Math.max(1, firstCols);
+
+  for (const { index, segment } of SEGMENTER.segment(text)) {
+    const width = charWidth(segment);
+    if (index > start && used + width > room) {
+      chunks.push({ text: text.slice(start, index), width: used });
+      start = index;
+      used = 0;
+      room = Math.max(1, followingCols);
+    }
+    used += width;
+  }
+
+  chunks.push({ text: text.slice(start), width: used });
+  return chunks;
+}
+
 /** The longest prefix of `text` that fits in `cols` cells. */
 export function clip(text: string, cols: number): string {
   if (cols <= 0) return "";
@@ -219,16 +249,12 @@ export function wrapText(text: string, max: number, continuation = ""): string[]
 
       if (w > room()) {
         // Too long for any row: spend whole rows on it until it fits.
-        let rest = word;
-        while (textWidth(rest) > room()) {
-          const head = clip(rest, room() - (line === "" ? 0 : width + 1));
-          if (head === "") break;
-          line = line === "" ? head : `${line} ${head}`;
-          rest = rest.slice(head.length);
-          flush();
+        const chunks = splitByCells(word, room(), Math.max(1, max - lead));
+        for (const [index, chunk] of chunks.entries()) {
+          line = chunk.text;
+          width = chunk.width;
+          if (index + 1 < chunks.length) flush();
         }
-        line = rest;
-        width = textWidth(rest);
         continue;
       }
 
