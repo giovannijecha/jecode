@@ -39,11 +39,27 @@ export function budgetRequest(
   configuredMaxOutputTokens: number,
   policy: ContextPolicy,
 ): RequestBudget {
-  if (!Number.isSafeInteger(configuredMaxOutputTokens) || configuredMaxOutputTokens <= 0) {
-    throw new Error("max output tokens must be a positive safe integer");
-  }
-
+  requirePositiveInteger(configuredMaxOutputTokens, "max output tokens");
   const inputTokens = estimateRequestInputTokens(envelope);
+  return finishBudget(inputTokens, configuredMaxOutputTokens, policy);
+}
+
+/** Reuse an exact estimate already computed for the same request envelope. */
+export function budgetRequestFromInputTokens(
+  inputTokens: number,
+  configuredMaxOutputTokens: number,
+  policy: ContextPolicy,
+): RequestBudget {
+  requirePositiveInteger(inputTokens, "request input tokens");
+  requirePositiveInteger(configuredMaxOutputTokens, "max output tokens");
+  return finishBudget(inputTokens, configuredMaxOutputTokens, policy);
+}
+
+function finishBudget(
+  inputTokens: number,
+  configuredMaxOutputTokens: number,
+  policy: ContextPolicy,
+): RequestBudget {
   const available = policy.requestLimitTokens - inputTokens;
   const minimum = Math.min(configuredMaxOutputTokens, MIN_REQUEST_OUTPUT_TOKENS);
   if (available < minimum) {
@@ -59,4 +75,10 @@ export function budgetRequest(
     maxOutputTokens: Math.min(configuredMaxOutputTokens, available),
     limitTokens: policy.requestLimitTokens,
   });
+}
+
+function requirePositiveInteger(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive safe integer`);
+  }
 }
