@@ -35,6 +35,18 @@ test("a user turn keeps one outer gap and the shared semantic gutter", () => {
   assert.match(drawn[question] ?? "", /^❯ next question$/);
 });
 
+test("assistant prose and semantic marks share the terminal left edge", () => {
+  const drawn = plain(renderAll([
+    { kind: "answer", text: "left-aligned answer" },
+    { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
+  ], 100, STEEL));
+  const answer = drawn.find((line) => line.includes("left-aligned answer")) ?? "";
+  const tool = drawn.find((line) => line.includes("read_file")) ?? "";
+
+  assert.match(answer, /^left-aligned answer/);
+  assert.match(tool, /^[✓●]\s+read_file/);
+});
+
 test("consecutive tool calls join one execution rail without repeated gaps", () => {
   const drawn = plain(renderAll([
     { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
@@ -45,6 +57,19 @@ test("consecutive tool calls join one execution rail without repeated gaps", () 
   assert.equal(first, 1);
   assert.equal(second, first + 1);
   assert.equal(drawn.filter((line) => line === "").length, 1);
+});
+
+test("reasoning and adjacent tool evidence keep a rail-only rhythm row", () => {
+  const drawn = plain(renderAll([
+    { kind: "reasoning", text: "inspect first" },
+    { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
+    { kind: "reasoning", text: "continue after the result" },
+  ], 60, STEEL));
+  const tool = drawn.findIndex((line) => line.includes("read_file"));
+  const continued = drawn.findIndex((line) => line.includes("continue after"));
+
+  assert.equal(drawn[tool - 1]?.trim(), "│");
+  assert.equal(drawn[continued - 1]?.trim(), "│");
 });
 
 test("a short transcript grows upward from the composer", () => {

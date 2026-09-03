@@ -2,7 +2,7 @@ import type { Palette } from "../../ui/theme.ts";
 import { trailingText } from "../../text-boundary.ts";
 import { row } from "../../ui/render.ts";
 import { markdown } from "../../ui/markdown.ts";
-import { transcriptLead, transcriptWidth } from "../transcript-grammar.ts";
+import { transcriptLead, transcriptMark, transcriptWidth } from "../transcript-grammar.ts";
 import type { AnswerBlock, ReasoningBlock, UserBlock } from "./types.ts";
 
 export const REASONING_PREVIEW_ROWS = 3;
@@ -24,12 +24,9 @@ export function renderUser(block: UserBlock, width: number, pal: Palette): strin
 }
 
 export function renderAnswer(block: AnswerBlock, width: number, pal: Palette): string[] {
-  const inner = transcriptWidth(width);
   return [
     "",
-    ...markdown(block.text, inner, pal, inner).map((line) =>
-      row(width, [...transcriptLead(width), ...line.segs])
-    ),
+    ...markdown(block.text, width, pal, width).map((line) => row(width, line.segs)),
   ];
 }
 
@@ -37,7 +34,7 @@ export function renderReasoning(
   block: ReasoningBlock,
   width: number,
   pal: Palette,
-  context: { continues?: boolean } = {},
+  context: { continues?: boolean; followsTool?: boolean } = {},
 ): string[] {
   const inner = transcriptWidth(width);
   // Expanding a live stream is deferred until it is sealed. Re-parsing an
@@ -50,7 +47,9 @@ export function renderReasoning(
   const visible = expanded ? content : content.slice(-REASONING_PREVIEW_ROWS);
 
   return [
-    ...(context.continues === true ? [] : [""]),
+    ...(context.followsTool === true
+      ? [row(width, transcriptMark(width, { text: "│", fg: pal.rule }))]
+      : context.continues === true ? [] : [""]),
     ...visible.map((line) =>
       row(
         width,

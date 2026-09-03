@@ -2,12 +2,10 @@
 
 import type { Seg } from "../ui/render.ts";
 
-const FULL_GUTTER = 4;
-const COMPACT_GUTTER = 2;
-const COMPACT_BELOW = 64;
+const GUTTER = 2;
 
-export function transcriptGutter(width: number): number {
-  return width < COMPACT_BELOW ? COMPACT_GUTTER : FULL_GUTTER;
+export function transcriptGutter(_width: number): number {
+  return GUTTER;
 }
 
 export function transcriptWidth(width: number): number {
@@ -19,12 +17,11 @@ export function transcriptLead(width: number, mark?: Seg): Seg[] {
   if (mark === undefined) return [{ text: " ".repeat(transcriptGutter(width)) }];
   return [
     ...transcriptMark(width, mark),
-    { text: " ".repeat(width < COMPACT_BELOW ? 1 : 2) },
+    { text: " " },
   ];
 }
 
 /** Draw only the gutter mark, without trailing content-column whitespace. */
-export function transcriptMark(width: number, mark: Seg): Seg[] {
-  if (width < COMPACT_BELOW) return [{ ...mark }];
-  return [{ text: " " }, { ...mark }];
+export function transcriptMark(_width: number, mark: Seg): Seg[] {
+  return [{ ...mark }];
 }

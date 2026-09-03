@@ -74,6 +74,18 @@ test("markdown spends the notation instead of printing it", () => {
   assert.deepEqual(code?.fg, STEEL.technical);
 });
 
+test("strong inline code keeps both hierarchy and technical colour", () => {
+  const rows = markdown("- **`index.html`** — primary document", 60, STEEL);
+  const segments = rows.flatMap((rendered) => rendered.segs);
+  const path = segments.find((segment) => segment.text === "index.html");
+  const text = segments.map((segment) => segment.text).join("");
+
+  assert.equal(text.includes("**"), false);
+  assert.equal(text.includes("`"), false);
+  assert.deepEqual(path?.fg, STEEL.technical);
+  assert.equal(path?.bold, true);
+});
+
 test("technical text is vivid while structural and secondary text stay distinct", () => {
   const [list] = markdown("- read `src/main.ts` and [docs](https://example.test)", 60, STEEL);
   const segments = list?.segs ?? [];

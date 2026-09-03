@@ -835,7 +835,7 @@ test("conversation blocks use the approved hierarchy with one tool rail", () => 
   assert.match(drawn, / ask/);
   assert.match(drawn, / think/);
   assert.match(drawn, /✓\s+read_file\s+a\.ts/);
-  assert.match(drawn, / done/);
+  assert.match(drawn, /^done$/m);
   assert.match(drawn, /│|✓\s+read_file/);
   assert.match(drawn, /│ think\n│\n✓\s+read_file/);
   assert.doesNotMatch(drawn, /[█├└]/);

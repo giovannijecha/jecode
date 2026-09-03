@@ -35,7 +35,8 @@ export function render(block: Block, width: number, pal: Palette, context: Rende
       return renderAnswer(block, width, pal);
     case "reasoning":
       return renderReasoning(block, width, pal, {
-        continues: context.previous?.kind === "tool" || context.previous?.kind === "reasoning",
+        continues: context.previous?.kind === "reasoning",
+        followsTool: context.previous?.kind === "tool",
       });
     case "tool":
       return renderTool(block, width, pal, {
