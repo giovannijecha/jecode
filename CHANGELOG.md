@@ -4,6 +4,41 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.8.0] - 2026-09-03
+
+### Added
+
+- Added cooperative mid-turn steering from the composer. Guidance enters the
+  active turn at the next safe provider or tool boundary, while interruption
+  and checkpoint failure restore anything the model did not receive.
+
+### Changed
+
+- Reworked the terminal transcript around one adaptive semantic gutter, a
+  calibrated Slate palette, continuous tool evidence, quieter reasoning, and
+  bounded renderer-local motion that preserves reduced-motion, `NO_COLOR`,
+  narrow-terminal, resume, and export behavior.
+- Removed the default model-request ceiling from ordinary turns. `--max-steps`
+  and `JECODE_MAX_STEPS` remain explicit process-only budgets for deterministic
+  automation.
+- Persisted settled tool durations through export and resume with session schema
+  4, while retaining strict read compatibility with schemas 1 through 3.
+- Defined the compatibility, release-candidate, and stabilization contract that
+  Jecode will carry into 1.0.
+
+### Fixed
+
+- Synchronized footer activity with provider preparation, local tool preview,
+  approval, execution, and response phases instead of inferring work from the
+  previous transcript block.
+- Refreshed rotated ChatGPT credentials that are already near expiry before
+  retrying a rejected request, without weakening shared refresh or persistence
+  locking.
+- Rejected incomplete or truncated tool calls from Anthropic, OpenAI, ChatGPT,
+  and Ollama before execution while preserving safe partial assistant text.
+- Discarded suppressed tool motion after settlement so reduced-motion state
+  cannot replay later or remain retained across transcript replacement.
+
 ## [0.7.4] - 2026-09-02
 
 ### Fixed
@@ -440,6 +475,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.8.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.0
 [0.7.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.4
 [0.7.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.3
 [0.7.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.2
