@@ -4,6 +4,17 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.8.1] - 2026-09-03
+
+### Fixed
+
+- Aligned assistant prose, reasoning rails, and tool state marks at the terminal
+  left edge, with continuous visual rhythm between adjacent reasoning and tool
+  evidence.
+- Kept settled tool outcomes visibly green or red and preserved technical color
+  and weight for inline code nested inside Markdown emphasis, including the
+  accessible `NO_COLOR` fallback.
+
 ## [0.8.0] - 2026-09-03
 
 ### Added
@@ -475,6 +486,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.8.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.1
 [0.8.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.0
 [0.7.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.4
 [0.7.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.3
