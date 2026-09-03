@@ -232,8 +232,17 @@ export function decoder(options: DecoderOptions = {}): Decoder {
 
       const keys: Key[] = [];
       const chunkSize = 64 * 1_024;
-      for (let from = 0; from < chunk.length; from += chunkSize) {
-        const part = chunk.slice(from, from + chunkSize);
+      for (let from = 0; from < chunk.length;) {
+        let to = Math.min(from + chunkSize, chunk.length);
+        if (
+          to < chunk.length &&
+          isHighSurrogate(chunk.charCodeAt(to - 1)) &&
+          isLowSurrogate(chunk.charCodeAt(to))
+        ) {
+          to++;
+        }
+        const part = chunk.slice(from, to);
+        from = to;
         if (part.length > MAX_PROMPT_CODE_UNITS - held.length) {
           held = "";
           pasted = "";
@@ -251,6 +260,14 @@ export function decoder(options: DecoderOptions = {}): Decoder {
       return drain(true);
     },
   };
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }
 
 function printable(text: string): boolean {

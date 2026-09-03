@@ -17,6 +17,14 @@ test("groups a printable run into one key instead of one per character", () => {
   assert.deepEqual(names(keys), ["char:ciao"]);
 });
 
+test("internal decoder chunks keep astral characters intact", () => {
+  const text = `${"x".repeat(64 * 1_024 - 1)}😀`;
+  const keys = decoder().push(`${text}\n`);
+
+  assert.deepEqual(keys.map((key) => key.name), ["char", "enter"]);
+  assert.equal(keys[0]?.text, text);
+});
+
 test("reads control bytes as ctrl+letter", () => {
   const keys = decoder().push(String.fromCharCode(3) + String.fromCharCode(21));
   assert.deepEqual(
