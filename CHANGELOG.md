@@ -4,6 +4,29 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.8.2] - 2026-09-03
+
+### Changed
+
+- Reused validated request token estimates until compaction changes the
+  provider-facing projection, avoiding duplicate work on large prompts.
+- Cached Ollama's theoretical model capacity within the existing metadata
+  window while continuing to prefer a smaller active runtime allocation.
+- Loaded durable session nodes in bounded parallel batches while preserving
+  their canonical order and complete validation.
+- Restored a brighter Slate palette and a subtle full-width surface for user
+  turns, while keeping reasoning unframed and execution rails exclusive to
+  adjacent tool calls.
+
+### Fixed
+
+- Preserved every completed result in a concurrent tool batch when another
+  call is interrupted or result rendering fails, and settled active calls
+  before checkpointing.
+- Hardened ChatGPT device authorization polling with protocol-aware backoff,
+  immediate terminal-error handling, and one bounded deadline across network
+  requests, waits, and cancellation.
+
 ## [0.8.1] - 2026-09-03
 
 ### Fixed
@@ -486,6 +509,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.8.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.2
 [0.8.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.1
 [0.8.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.0
 [0.7.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.7.4
