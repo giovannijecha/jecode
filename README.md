@@ -363,7 +363,9 @@ untrusted data.
 - Remote Ollama endpoints require HTTPS, and provider redirects are rejected.
 - Provider handshakes and idle response bodies have finite deadlines. Only
   idempotent catalogue reads retry; generation requests are never replayed.
-- Model, terminal, and filesystem input are bounded before use.
+- Interactive and batch prompts are rejected above 1,048,576 UTF-16 code
+  units before history or provider use. Model and filesystem input are also
+  bounded before use.
 - Session files are versioned, symmetrically size-bounded before write and
   after read, atomically checkpointed, and treated as untrusted when loaded. A
   live lease prevents concurrent resume.

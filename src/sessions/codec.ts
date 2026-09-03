@@ -8,11 +8,12 @@ import type { ContextAnchor } from "../context/projection.ts";
 import { CONTEXT_LIMITS } from "../context/projection.ts";
 import type { Detail, TranscriptBlock } from "../transcript-types.ts";
 import type { Block, Message, Usage } from "../types.ts";
+import { MAX_TEXT_CODE_UNITS } from "../text-boundary.ts";
 
 export const SESSION_SCHEMA = 4;
 export type SessionSchema = 1 | 2 | 3 | 4;
 export const SESSION_FILE_LIMITS = Object.freeze({
-  text: 1_048_576,
+  text: MAX_TEXT_CODE_UNITS,
   metadataBytes: 64 * 1_024,
   nodeBytes: 20 * 1_024 * 1_024,
   jsonDepth: 24,

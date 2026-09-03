@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as edit from "../src/tui/editor.ts";
 import { applyKey } from "../src/tui/input.ts";
 import { decoder } from "../src/tui/keys.ts";
+import { MAX_PROMPT_CODE_UNITS, PromptLimitError } from "../src/input-boundary.ts";
 
 const ESC = String.fromCharCode(27);
 const DEL = String.fromCharCode(127);
@@ -88,6 +89,28 @@ test("a paste split across reads does not leak its terminator", () => {
   assert.deepEqual(names(keys), ["paste:alphabeta"]);
 });
 
+test("bracketed and unbracketed paste enforce the shared prompt limit", () => {
+  const atLimit = "x".repeat(MAX_PROMPT_CODE_UNITS);
+  const bracketed = decoder();
+  assert.deepEqual(
+    bracketed.push(`${ESC}[200~${atLimit}${ESC}[201~`).map((key) => [key.name, key.text.length]),
+    [["paste", MAX_PROMPT_CODE_UNITS]],
+  );
+
+  const split = decoder();
+  assert.deepEqual(split.push(`${ESC}[200~${atLimit}`), []);
+  assert.deepEqual(names(split.push(`x${ESC}[201~`)), ["input_limit"]);
+  assert.deepEqual(names(decoder().push(`${atLimit}x`)), ["input_limit"]);
+});
+
+test("an unterminated terminal protocol sequence cannot grow the decoder buffer", () => {
+  const dec = decoder();
+  const sequence = `${ESC}[${"1".repeat(MAX_PROMPT_CODE_UNITS + 1)}`;
+
+  assert.deepEqual(names(dec.push(sequence)), ["input_limit"]);
+  assert.deepEqual(names(dec.push("ok")), ["char:ok"]);
+});
+
 test("ctrl+c escapes a bracketed paste whose terminator was lost", () => {
   const dec = decoder();
   dec.push(`${ESC}[200~incomplete paste`);
@@ -121,6 +144,13 @@ test("editor inserts at the cursor and deletes behind it", () => {
   assert.equal(state.text, "helXYlo");
   state = edit.backspace(state);
   assert.equal(state.text, "helXlo");
+});
+
+test("the editor accepts the exact prompt limit and refuses one more insertion", () => {
+  const state = edit.insert(edit.EMPTY, "x".repeat(MAX_PROMPT_CODE_UNITS));
+  assert.equal(state.text.length, MAX_PROMPT_CODE_UNITS);
+  assert.throws(() => edit.insert(state, "x"), PromptLimitError);
+  assert.equal(state.text.length, MAX_PROMPT_CODE_UNITS);
 });
 
 test("ctrl+left and ctrl+right move between word starts", () => {

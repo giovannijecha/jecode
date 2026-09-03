@@ -3,6 +3,7 @@
 // Pure functions over an immutable state — no rendering, no I/O — so the whole
 // line editor is testable without a terminal.
 
+import { assertPromptAppend } from "../input-boundary.ts";
 import { graphemes } from "../ui/width.ts";
 
 export type Editor = { readonly text: string; readonly cursor: number };
@@ -14,6 +15,7 @@ export function of(text: string): Editor {
 }
 
 export function insert(state: Editor, chunk: string): Editor {
+  assertPromptAppend(state.text.length, chunk.length);
   return {
     text: state.text.slice(0, state.cursor) + chunk + state.text.slice(state.cursor),
     cursor: state.cursor + chunk.length,

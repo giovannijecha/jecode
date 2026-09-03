@@ -3,7 +3,6 @@
 // It exists so the agent can be scripted and tested. It shares the controller,
 // the tools and the block renderer with the TUI — only the surface differs.
 
-import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import type { Message } from "./types.ts";
 import type { Session } from "./session.ts";
@@ -21,6 +20,7 @@ import { renderBatch } from "./batch-view.ts";
 import { columns } from "./ui/render.ts";
 import { terminalText } from "./ui/terminal-text.ts";
 import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "./usage.ts";
+import { assertPromptLength, boundedInputLines } from "./input-boundary.ts";
 
 export type BatchEnvironment = {
   lines?: AsyncIterable<string>;
@@ -30,13 +30,11 @@ export type BatchEnvironment = {
 };
 
 export async function runBatch(session: Session, environment: BatchEnvironment = {}): Promise<void> {
-  const rl = environment.lines === undefined ? readline.createInterface({ input: stdin }) : undefined;
-  const lines = environment.lines ?? (rl as AsyncIterable<string>);
   const write = environment.write ?? ((text: string) => stdout.write(text));
   const width = environment.width ?? columns();
   const signal = environment.signal;
-  const stopInput = (): void => rl?.close();
-  signal?.addEventListener("abort", stopInput, { once: true });
+  const source = environment.lines ?? boundedInputLines(stdin);
+  const lines = abortableLines(source, signal);
 
   const emit = (block: Block): void => {
     for (const line of renderBatch(block, width, session.palette)) write(`${line}\n`);
@@ -46,6 +44,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
     throwIfAborted(signal);
     for await (const raw of lines) {
       throwIfAborted(signal);
+      assertPromptLength(raw.length);
       const line = raw.trim();
       if (line === "") continue;
 
@@ -142,13 +141,52 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
     }
     throwIfAborted(signal);
   } finally {
-    signal?.removeEventListener("abort", stopInput);
-    rl?.close();
+    if (environment.lines === undefined) stdin.pause();
   }
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) throw signal.reason;
+}
+
+async function* abortableLines(
+  source: AsyncIterable<string>,
+  signal: AbortSignal | undefined,
+): AsyncGenerator<string> {
+  const iterator = source[Symbol.asyncIterator]();
+  let exhausted = false;
+  try {
+    while (true) {
+      throwIfAborted(signal);
+      const next = signal === undefined
+        ? await iterator.next()
+        : await new Promise<IteratorResult<string>>((resolve, reject) => {
+          const abort = (): void => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+          iterator.next().then(
+            (result) => {
+              signal.removeEventListener("abort", abort);
+              resolve(result);
+            },
+            (error: unknown) => {
+              signal.removeEventListener("abort", abort);
+              reject(error);
+            },
+          );
+        });
+      if (next.done === true) {
+        exhausted = true;
+        return;
+      }
+      yield next.value;
+    }
+  } finally {
+    if (!exhausted && iterator.return !== undefined) {
+      const closing = iterator.return();
+      if (signal?.aborted === true) void closing.catch(() => {});
+      else await closing;
+    }
+  }
 }
 
 function options(session: Session, contextPolicy: () => Promise<ContextPolicy>) {

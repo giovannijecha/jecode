@@ -7,13 +7,14 @@ import type { Field } from "./field.ts";
 import { oneLine } from "./field.ts";
 import { applyKey } from "./input.ts";
 import type { Modal } from "./modal.ts";
+import { PromptLimitError } from "../input-boundary.ts";
 
 export type Open =
   | { picker: Picker; settle(index?: number): void }
   | { field: Field; settle(text?: string): void }
   | { help: true; settle(): void };
 
-export type Outcome = { open?: Open; abort?: boolean; quit?: boolean };
+export type Outcome = { open?: Open; abort?: boolean; quit?: boolean; inputLimit?: boolean };
 
 export function shown(open: Open | undefined): Modal | undefined {
   if (open === undefined) return undefined;
@@ -42,8 +43,13 @@ export function handle(open: Open, key: Key): Outcome {
     cancel(open);
     return {};
   }
-  if ("picker" in open) return handlePicker(open, key);
-  if ("field" in open) return handleField(open, key);
+  try {
+    if ("picker" in open) return handlePicker(open, key);
+    if ("field" in open) return handleField(open, key);
+  } catch (error) {
+    if (error instanceof PromptLimitError) return { open, inputLimit: true };
+    throw error;
+  }
   return { open };
 }
 
