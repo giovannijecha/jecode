@@ -119,6 +119,7 @@ export const ollama: Provider = {
         max_tokens: req.maxTokens,
         reasoning_effort: effort,
         stream: true,
+        stream_options: { include_usage: true },
       },
       req.maxTokens,
       req.signal,
