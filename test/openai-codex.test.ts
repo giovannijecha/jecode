@@ -8,6 +8,7 @@ import {
   reloadAccounts,
   updateOpenAICodexAccount,
 } from "../src/accounts.ts";
+import type { StreamEvent } from "../src/types.ts";
 import { openaiCodex } from "../src/providers/openai-codex.ts";
 
 const CLAIMS = "https://api.openai.com/auth";
@@ -179,6 +180,7 @@ test("the ChatGPT provider retains a streamed tool call when completed output is
       },
     ])) as typeof fetch;
     context.after(() => { globalThis.fetch = previousFetch; });
+    const streamed: StreamEvent[] = [];
 
     const message = await openaiCodex.send({
       model: "gpt-codex",
@@ -191,11 +193,13 @@ test("the ChatGPT provider retains a streamed tool call when completed output is
       }],
       maxTokens: 123,
       effort: "high",
+      onStream: (event) => streamed.push(event),
     });
 
     assert.deepEqual(message.content, [
       { kind: "tool_call", id: "call-list", name: "list_dir", input: { path: "." } },
     ]);
+    assert.deepEqual(streamed, [{ kind: "tool", name: "list_dir" }]);
   });
 });
 

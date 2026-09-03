@@ -75,7 +75,7 @@ test("the footer exposes unseen output while scroll lock is active", () => {
 test("activity keeps its state, elapsed time, and interrupt hint on the footer", () => {
   const quiet = compose(base(), { rows: 24, cols: 80 });
   const active = compose(
-    { ...base(), status: "Writing · 2s" },
+    { ...base(), status: "Responding · 2s" },
     { rows: 24, cols: 80 },
   );
   const blocked = compose(
@@ -90,7 +90,7 @@ test("activity keeps its state, elapsed time, and interrupt hint on the footer",
 
   assert.deepEqual(active.cursor, quiet.cursor);
   assert.equal(activeRows.findIndex((line) => line.includes("esc to interrupt")), 23);
-  assert.equal(activeRows.findIndex((line) => line.includes("Writing · 2s")), 23);
+  assert.equal(activeRows.findIndex((line) => line.includes("Responding · 2s")), 23);
   assert.equal(blockedRows.findIndex((line) => line.includes("needs an API key")), 23);
   assert.match(activeRows[23] ?? "", /claude-sonnet-5 · high/);
 });
@@ -98,18 +98,18 @@ test("activity keeps its state, elapsed time, and interrupt hint on the footer",
 test("urgent feedback outranks activity while informational feedback waits behind it", () => {
   const urgent = strip(compose({
     ...base(),
-    status: "Writing · 2s",
+    status: "Responding · 2s",
     feedback: { text: "request failed", tone: "error" },
   }, { rows: 24, cols: 80 }).rows)[23] ?? "";
   const informational = strip(compose({
     ...base(),
-    status: "Writing · 2s",
+    status: "Responding · 2s",
     feedback: { text: "settings saved", tone: "info" },
   }, { rows: 24, cols: 80 }).rows)[23] ?? "";
 
   assert.match(urgent, /× request failed/);
-  assert.doesNotMatch(urgent, /Writing/);
-  assert.match(informational, /Writing · 2s/);
+  assert.doesNotMatch(urgent, /Responding/);
+  assert.match(informational, /Responding · 2s/);
   assert.match(informational, /esc to interrupt/);
   assert.doesNotMatch(informational, /settings saved/);
 });
@@ -339,10 +339,35 @@ test("transcription tracks the live activity phase", () => {
 
   events.onStream({ kind: "thinking", text: "hm" });
   events.onStream({ kind: "text", text: "ok" });
+  events.onStream({ kind: "tool", name: "run_command" });
+  events.onToolPreparing?.(call, 1, 1);
   events.onToolCall(call);
+  events.onToolStart?.(call, 1, 1);
   events.onToolResult(call, { kind: "tool_result", id: "1", output: "11", isError: false }, "exit 0");
 
-  assert.deepEqual(log, ["Thinking", "Writing", "Running run_command", "Waiting"]);
+  assert.deepEqual(log, [
+    "Thinking",
+    "Responding",
+    "Preparing run_command",
+    "Preparing run_command",
+    "Running run_command",
+    "Waiting",
+  ]);
+});
+
+test("a tool rail starts timing only when execution actually begins", () => {
+  const { blocks, events } = stage([]);
+  const call = callOf("1", "read_file", { path: "a.ts" });
+
+  events.onToolPreparing?.(call, 1, 1);
+  events.onToolCall(call);
+  const block = blocks[0];
+  assert.equal(block?.kind === "tool" ? block.right : undefined, "ready");
+  assert.equal(block?.kind === "tool" ? block.startedAt : undefined, undefined);
+
+  events.onToolStart?.(call, 1, 1);
+  assert.equal(block?.kind === "tool" ? block.right : undefined, "running");
+  assert.equal(typeof (block?.kind === "tool" ? block.startedAt : undefined), "number");
 });
 
 test("an edit is diffed from the call, so approval is about the change", () => {
@@ -710,6 +735,7 @@ test("live command output updates the existing pending rail", () => {
   const { blocks, events } = stage([]);
   const call = callOf("1", "run_command", { command: "many" });
   events.onToolCall(call);
+  events.onToolStart?.(call, 1, 1);
   events.onToolOutput?.(call, Array.from({ length: 12 }, (_, index) => `line ${index}`).join("\n"));
 
   const block = blocks[0];

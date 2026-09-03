@@ -62,7 +62,8 @@ export type ToolSpec = {
  */
 export type StreamEvent =
   | { kind: "text"; text: string }
-  | { kind: "thinking"; text: string };
+  | { kind: "thinking"; text: string }
+  | { kind: "tool"; name?: string };
 
 export type SendRequest = {
   model: string;

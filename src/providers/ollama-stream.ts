@@ -26,6 +26,7 @@ export async function assembleOllama(
   onStream?: (event: StreamEvent) => void,
 ): Promise<ChatReply> {
   const calls = new Map<number, ChatToolCall>();
+  const announcedTools = new Map<number, string | undefined>();
   let toolArgumentChars = 0;
   let content = "";
   let reasoning = "";
@@ -84,6 +85,14 @@ export async function assembleOllama(
         call.args += part.function.arguments;
       }
       calls.set(index, call);
+      const name = call.name === "" ? undefined : call.name;
+      if (
+        !announcedTools.has(index) ||
+        (announcedTools.get(index) === undefined && name !== undefined)
+      ) {
+        announcedTools.set(index, name);
+        onStream?.({ kind: "tool", ...(name === undefined ? {} : { name }) });
+      }
     }
   }
 

@@ -56,6 +56,7 @@ test("takes the final completed response as authoritative", async () => {
 });
 
 test("keeps completed stream items when the Codex final envelope has empty output", async () => {
+  const streamed: StreamEvent[] = [];
   const data = await assembleOpenAI(
     feed([
       {
@@ -76,6 +77,7 @@ test("keeps completed stream items when the Codex final envelope has empty outpu
         response: { status: "completed", output: [] },
       },
     ]),
+    (event) => streamed.push(event),
   );
 
   assert.deepEqual(fromWireResponse(data).content, [
@@ -89,6 +91,51 @@ test("keeps completed stream items when the Codex final envelope has empty outpu
       name: "list_dir",
       arguments: '{"path":"."}',
     },
+  ]);
+  assert.deepEqual(streamed, [{ kind: "tool", name: "list_dir" }]);
+});
+
+test("announces one tool phase while Responses arguments stream", async () => {
+  const streamed: StreamEvent[] = [];
+  await assembleOpenAI(
+    feed([
+      { type: "response.reasoning_summary_text.delta", delta: "Inspecting" },
+      {
+        type: "response.output_item.added",
+        output_index: 0,
+        item: { type: "function_call", id: "fc-1", call_id: "call-1", name: "read_file" },
+      },
+      {
+        type: "response.function_call_arguments.delta",
+        item_id: "fc-1",
+        output_index: 0,
+        delta: '{"path"',
+      },
+      {
+        type: "response.function_call_arguments.done",
+        item_id: "fc-1",
+        output_index: 0,
+        arguments: '{"path":"a.ts"}',
+      },
+      {
+        type: "response.output_item.done",
+        output_index: 0,
+        item: {
+          type: "function_call",
+          id: "fc-1",
+          call_id: "call-1",
+          name: "read_file",
+          arguments: '{"path":"a.ts"}',
+        },
+      },
+      { type: "response.completed", response: { status: "completed", output: [] } },
+    ]),
+    (event) => streamed.push(event),
+  );
+
+  assert.deepEqual(streamed, [
+    { kind: "thinking", text: "Inspecting" },
+    { kind: "tool", name: "read_file" },
   ]);
 });
 

@@ -13,6 +13,7 @@ export async function assembleOpenAI(
   onStream?: (event: StreamEvent) => void,
 ): Promise<OpenAIResponse> {
   const items: unknown[] = [];
+  const announcedTools = { identities: new Set<string>(), anonymous: false };
   let refusal = false;
 
   for await (const raw of events) {
@@ -20,6 +21,9 @@ export async function assembleOpenAI(
       type?: string;
       delta?: string;
       item?: unknown;
+      item_id?: unknown;
+      output_index?: unknown;
+      name?: unknown;
       response?: unknown;
       error?: { message?: string };
       message?: string;
@@ -41,8 +45,24 @@ export async function assembleOpenAI(
         if (typeof event.delta === "string") onStream?.({ kind: "thinking", text: event.delta });
         break;
 
+      case "response.output_item.added":
+        if (isFunctionCall(event.item)) {
+          announceTool(event, event.item, announcedTools, onStream);
+        }
+        break;
+
+      case "response.function_call_arguments.delta":
+      case "response.function_call_arguments.done":
+        announceTool(event, undefined, announcedTools, onStream);
+        break;
+
       case "response.output_item.done":
-        if (event.item !== undefined) items.push(event.item);
+        if (event.item !== undefined) {
+          if (isFunctionCall(event.item)) {
+            announceTool(event, event.item, announcedTools, onStream);
+          }
+          items.push(event.item);
+        }
         break;
 
       case "response.done":
@@ -63,6 +83,64 @@ export async function assembleOpenAI(
   }
 
   throw new Error("openai stream ended before a terminal response event");
+}
+
+type OpenAIStreamEvent = {
+  item_id?: unknown;
+  output_index?: unknown;
+  name?: unknown;
+};
+
+type FunctionCallItem = {
+  type: "function_call";
+  id?: unknown;
+  call_id?: unknown;
+  name?: unknown;
+};
+
+type ToolAnnouncements = {
+  identities: Set<string>;
+  anonymous: boolean;
+};
+
+function isFunctionCall(item: unknown): item is FunctionCallItem {
+  return typeof item === "object" && item !== null &&
+    (item as Record<string, unknown>)["type"] === "function_call";
+}
+
+function announceTool(
+  event: OpenAIStreamEvent,
+  item: FunctionCallItem | undefined,
+  announced: ToolAnnouncements,
+  onStream?: (event: StreamEvent) => void,
+): void {
+  const identities = toolIdentities(event, item);
+  if (identities.length === 0) {
+    if (announced.anonymous) return;
+    announced.anonymous = true;
+  } else {
+    const duplicate = identities.some((identity) => announced.identities.has(identity));
+    for (const identity of identities) announced.identities.add(identity);
+    if (duplicate) return;
+  }
+
+  const rawName = item?.name ?? event.name;
+  const name = typeof rawName === "string" && rawName !== "" ? rawName : undefined;
+  onStream?.({ kind: "tool", ...(name === undefined ? {} : { name }) });
+}
+
+function toolIdentities(
+  event: OpenAIStreamEvent,
+  item: FunctionCallItem | undefined,
+): string[] {
+  const identities: string[] = [];
+  const itemId = event.item_id ?? item?.id;
+  if (typeof itemId === "string" && itemId !== "") identities.push(`item:${itemId}`);
+  if (typeof event.output_index === "number") identities.push(`output:${event.output_index}`);
+  if (typeof item?.call_id === "string" && item.call_id !== "") {
+    identities.push(`call:${item.call_id}`);
+  }
+  return identities;
 }
 
 function reconcileOutput(completed: OpenAIResponse | undefined, items: unknown[]): OpenAIResponse {

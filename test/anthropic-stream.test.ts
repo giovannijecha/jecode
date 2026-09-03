@@ -37,6 +37,7 @@ test("accumulates text deltas into one block and streams them as they land", asy
 });
 
 test("rebuilds tool arguments from streamed JSON fragments", async () => {
+  const seen = sink();
   const data = await assembleAnthropic(
     feed([
       {
@@ -50,12 +51,14 @@ test("rebuilds tool arguments from streamed JSON fragments", async () => {
       { type: "message_delta", delta: { stop_reason: "tool_use" } },
       { type: "message_stop" },
     ]),
+    seen.push,
   );
 
   const message = fromWireResponse(data);
   assert.deepEqual(message.content, [
     { kind: "tool_call", id: "tu_1", name: "read_file", input: { path: "a.ts" } },
   ]);
+  assert.deepEqual(seen.events, [{ kind: "tool", name: "read_file" }]);
 });
 
 test("bounds tool arguments accumulated across Anthropic events", async () => {

@@ -16,6 +16,7 @@ export async function assembleAnthropic(
 ): Promise<AnthropicResponse> {
   const blocks = new Map<number, WireBlock>();
   const partialJson = new Map<number, string>();
+  const announcedTools = new Set<number>();
   const sizes = { toolArguments: 0 };
   let stopReason: string | undefined;
   let stopDetails: AnthropicResponse["stop_details"];
@@ -33,6 +34,15 @@ export async function assembleAnthropic(
       case "content_block_start": {
         if (typeof event.index === "number" && event.content_block !== undefined) {
           blocks.set(event.index, { ...event.content_block });
+          if (
+            event.content_block["type"] === "tool_use" &&
+            !announcedTools.has(event.index)
+          ) {
+            announcedTools.add(event.index);
+            const rawName = event.content_block["name"];
+            const name = typeof rawName === "string" && rawName !== "" ? rawName : undefined;
+            onStream?.({ kind: "tool", ...(name === undefined ? {} : { name }) });
+          }
         }
         break;
       }

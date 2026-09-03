@@ -18,7 +18,6 @@ export type AppState = {
   past: string[];
   recall: number;
   draft: string;
-  status?: string;
   feedback?: Feedback;
   open?: Open;
   activity?: Activity;

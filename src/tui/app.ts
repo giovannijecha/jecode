@@ -97,7 +97,7 @@ export async function runApp(
       footer: footerInfo(session, workspace),
       status: state.activity === undefined
         ? undefined
-        : activityStatus(state.activity, state.status ?? state.activity.label, now),
+        : activityStatus(state.activity, now),
       feedback: state.feedback,
       readiness: turnBlocker(session),
       now,
@@ -228,7 +228,6 @@ export async function runApp(
     if (state.activity !== undefined) return undefined;
     const activity = begin(kind, label);
     state.activity = activity;
-    state.status = label;
     activityTimer = setInterval(
       () => guard(() => {
         let activeTool: Block | undefined;
@@ -251,7 +250,6 @@ export async function runApp(
     if (activityTimer !== undefined) clearInterval(activityTimer);
     activityTimer = undefined;
     state.activity = undefined;
-    state.status = undefined;
     state.open = overlay.cancel(state.open);
     if (state.closeWhenIdle) quit();
     else render();
