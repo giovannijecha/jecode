@@ -90,7 +90,9 @@ export function transcriptRenderer(
     viewport(blocks, width, height, scroll, palette, state = {}) {
       const layout = layoutFor(blocks, width, palette);
       const now = state.now ?? clock();
-      if (scroll === 0 && state.reducedMotion !== true) {
+      if (state.reducedMotion === true) {
+        discardSuppressedMotion(layout);
+      } else if (scroll === 0) {
         invalidateMovingEntries(layout, now);
       }
       // Reflowing rows below a scroll-locked viewport would move the content
@@ -325,6 +327,16 @@ export function transcriptRenderer(
       if (motion !== undefined && moving(block, motion, now)) return true;
     }
     return false;
+  }
+
+  function discardSuppressedMotion(layout: Layout): void {
+    for (const block of activeMotion) {
+      if (layout.positions.get(block) !== undefined && block.kind === "tool" && block.tone === "pending") {
+        continue;
+      }
+      activeMotion.delete(block);
+      motions.delete(block);
+    }
   }
 }
 

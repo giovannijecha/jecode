@@ -128,6 +128,20 @@ test("historical and reduced-motion tools render directly at rest", () => {
   assert.equal(frame.animating, false);
   assert.match(frame.rows.join("\n"), /○\s+run_command/);
   assert.doesNotMatch(frame.rows.join("\n"), /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+
+  pending.tone = "ok";
+  pending.right = "exit 0";
+  pending.durationMs = 12;
+  pending.startedAt = undefined;
+  reduced.invalidate(pending);
+  reduced.viewport([pending], 80, 6, 0, STEEL, { now, reducedMotion: true });
+
+  now += 100;
+  assert.equal(
+    reduced.viewport([pending], 80, 6, 0, STEEL, { now }).animating,
+    false,
+    "motion suppressed at settlement must not replay when animations are re-enabled",
+  );
 });
 
 test("wide live tool motion stays inside the frame and bounds its moving trail", () => {
