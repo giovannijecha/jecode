@@ -1,25 +1,27 @@
-# Security Policy
+# Security
 
-## Supported versions
-
-Jecode is currently pre-1.0. Security fixes are applied to the latest tagged
-release and the `main` branch.
-
-| Version | Supported |
-|---|---|
-| 0.7.x | Yes |
-| 0.6.x and older | No |
+Security fixes are shipped in the latest Jecode release. Update first and
+confirm that the issue still occurs before reporting it.
 
 ## Report a vulnerability
 
-Do not open a public issue for a suspected vulnerability. Use GitHub's private
-vulnerability reporting from the repository's **Security** tab.
+Do not open a public issue. Send a
+[private vulnerability report](https://github.com/giovannijecha/jecode/security/advisories/new)
+instead.
 
-Include the affected version, operating system, Node.js version, reproduction
-steps, expected impact, and any proposed mitigation. Do not include API keys,
-private source code, saved credentials, or conversation transcripts.
+Describe what happens, why it matters, the smallest way to reproduce it, and
+the relevant environment. Include sanitized logs or screenshots only when they
+help. Never include API keys, tokens, private source code, workspace content, or
+conversation transcripts.
 
-Relevant security boundaries include terminal control sequences, credential
-storage or transport, durable conversation storage and resume, workspace path
-confinement, command approval, process cancellation, and unbounded remote or
-filesystem input.
+## Understand the boundary
+
+Jecode keeps its built-in filesystem tools inside the selected workspace, asks
+before dangerous actions by default, and redacts credentials it recognizes.
+
+Jecode is not an operating-system sandbox. A shell command you approve can
+access the same files and accounts as your user. Review commands carefully and
+use `--auto-approve` only in controlled environments.
+
+See the [safety model](docs/USAGE.md#understand-the-safety-model) for the detailed
+technical boundaries.
