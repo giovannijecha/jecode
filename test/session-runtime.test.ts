@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { ConversationTree } from "../src/conversation.ts";
@@ -52,6 +52,28 @@ test("reset closes the current lease and starts an unpublished session", async (
     assert.equal((await store.list())[0]?.active, false);
     const lease = await store.claim(id);
     await lease.close();
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("checkpointing stops when the process no longer owns the session lease", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const persistence = SessionPersistence.fresh(store);
+    const first = complete(ConversationTree.empty(), 0, "first", "one");
+    await persistence.checkpoint(first);
+    const id = persistence.sessionId as string;
+    const active = path.join(fixture.sessions, store.workspaceDigest, id, "active");
+    await writeFile(active, `${process.pid}:replacement-fixture-token`, "utf8");
+
+    await assert.rejects(
+      persistence.checkpoint(complete(first, 1, "second", "two")),
+      /lease is no longer owned/,
+    );
+    assert.equal((await store.load(id)).conversation.nodes.length, 1);
+    await persistence.close();
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

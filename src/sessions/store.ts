@@ -173,15 +173,18 @@ export class DurableSessionStore {
       if (!replacesHead && !extendsTree) {
         throw new Error("session checkpoint cannot be recovered safely");
       }
-      head = {
+      head = Object.freeze({
         version: SESSION_SCHEMA,
         sequence: candidate.sequence,
         nodeId: candidate.node.id,
         parentId: candidate.node.parentId,
         revision: candidate.node.revision,
         updatedAt: candidate.updatedAt,
-      };
-      await atomicWrite(path.join(directory, "head.json"), encodeHead(head), { mode: FILE_MODE });
+      });
+      await atomicWrite(path.join(directory, "head.json"), encodeHead(head), {
+        mode: FILE_MODE,
+        validate: async () => assertDirectory(directory),
+      });
     }
 
     const nodes = stored.map((entry) => entry.node);
@@ -202,21 +205,21 @@ export class DurableSessionStore {
     const token = claim === true ? leaseToken() : undefined;
     const temporary = path.join(this.#bucket, `.${id}.${randomUUID()}.tmp`);
     const target = this.#sessionDirectory(id);
-    const meta: SessionMeta = {
+    const meta: SessionMeta = Object.freeze({
       version: SESSION_SCHEMA,
       id,
       workspaceRoot: this.workspaceRoot,
       workspaceDigest: this.workspaceDigest,
       createdAt: now,
-    };
-    const head: SessionHead = {
+    });
+    const head: SessionHead = Object.freeze({
       version: SESSION_SCHEMA,
       sequence: conversation.nodes.length,
       nodeId: active.id,
       parentId: active.parentId,
       revision: active.revision,
       updatedAt: now,
-    };
+    });
 
     try {
       await makePrivateDirectory(temporary);
@@ -247,11 +250,34 @@ export class DurableSessionStore {
     return Object.freeze({ ...snapshot, lease });
   }
 
-  async checkpoint(id: string, conversation: ConversationTree): Promise<SessionSnapshot> {
-    const previous = await this.load(id);
+  async checkpoint(
+    previous: SessionSnapshot,
+    conversation: ConversationTree,
+  ): Promise<SessionSnapshot> {
+    assertSnapshot(previous, this.workspaceRoot, this.workspaceDigest);
+    const id = previous.meta.id;
+    const directory = this.#sessionDirectory(id);
+    await assertDirectory(directory);
+    const nodesDirectory = path.join(directory, "nodes");
+    const validateNodesDirectory = async (): Promise<void> => {
+      await assertDirectory(directory);
+      await assertDirectory(nodesDirectory);
+    };
+    await validateNodesDirectory();
+    const currentHead = decodeHead(await readJson(
+      path.join(directory, "head.json"),
+      SESSION_FILE_LIMITS.metadataBytes,
+    ));
+    if (!sameHead(currentHead, previous.head)) {
+      throw new Error("session head changed after its verified snapshot");
+    }
+
     const active = conversation.activeNode;
     if (active === undefined) throw new Error("an empty conversation cannot be checkpointed");
-    if (sameNode(active, previous.conversation.activeNode)) {
+    if (
+      active === previous.conversation.activeNode &&
+      conversation.nodes === previous.conversation.nodes
+    ) {
       return Object.freeze({ ...previous, conversation });
     }
 
@@ -265,23 +291,28 @@ export class DurableSessionStore {
       throw new Error("session checkpoint does not extend its durable tree");
     }
     assertSharedNodes(previous.conversation, conversation, replacesHead ? active.id : undefined);
+    if (extendsTree) {
+      await assertMissingNode(path.join(nodesDirectory, nodeName(active.id)));
+    }
 
     const now = new Date().toISOString();
-    const head: SessionHead = {
+    const head: SessionHead = Object.freeze({
       version: SESSION_SCHEMA,
       sequence: previous.head.sequence + 1,
       nodeId: active.id,
       parentId: active.parentId,
       revision: active.revision,
       updatedAt: now,
-    };
-    const directory = this.#sessionDirectory(id);
+    });
     await atomicWrite(
-      path.join(directory, "nodes", nodeName(active.id)),
+      path.join(nodesDirectory, nodeName(active.id)),
       encodeNode(active, head.sequence, now),
-      { mode: FILE_MODE },
+      { mode: FILE_MODE, validate: async () => validateNodesDirectory() },
     );
-    await atomicWrite(path.join(directory, "head.json"), encodeHead(head), { mode: FILE_MODE });
+    await atomicWrite(path.join(directory, "head.json"), encodeHead(head), {
+      mode: FILE_MODE,
+      validate: async () => assertDirectory(directory),
+    });
     return Object.freeze({ meta: previous.meta, head, conversation });
   }
 
@@ -358,21 +389,51 @@ function assertSharedNodes(
   for (const node of previous.nodes) {
     if (node.id === replacedId) continue;
     const candidate = next.node(node.id);
-    if (candidate === undefined || normalizedNode(candidate) !== normalizedNode(node)) {
+    if (candidate !== node) {
       throw new Error("session checkpoint rewrites prior conversation history");
     }
   }
 }
 
-function normalizedNode(node: TurnNode): string {
-  const encoded = JSON.parse(encodeNode(node, 1, "2026-01-01T00:00:00.000Z")) as {
-    node: unknown;
-  };
-  return JSON.stringify(encoded.node);
+function assertSnapshot(
+  snapshot: SessionSnapshot,
+  workspaceRoot: string,
+  workspaceDigest: string,
+): void {
+  encodeMeta(snapshot.meta);
+  encodeHead(snapshot.head);
+  assertSessionId(snapshot.meta.id);
+  if (
+    snapshot.meta.workspaceDigest !== workspaceDigest ||
+    workspaceKey(snapshot.meta.workspaceRoot) !== workspaceKey(workspaceRoot)
+  ) throw new Error("session snapshot belongs to a different workspace");
+  const active = snapshot.conversation.activeNode;
+  if (
+    active === undefined ||
+    active.id !== snapshot.head.nodeId ||
+    active.parentId !== snapshot.head.parentId ||
+    active.revision !== snapshot.head.revision ||
+    snapshot.head.sequence < snapshot.conversation.nodes.length
+  ) throw new Error("session snapshot does not match its verified head");
 }
 
-function sameNode(left: TurnNode, right: TurnNode | undefined): boolean {
-  return right !== undefined && normalizedNode(left) === normalizedNode(right);
+function sameHead(left: SessionHead, right: SessionHead): boolean {
+  return left.version === right.version &&
+    left.sequence === right.sequence &&
+    left.nodeId === right.nodeId &&
+    left.parentId === right.parentId &&
+    left.revision === right.revision &&
+    left.updatedAt === right.updatedAt;
+}
+
+async function assertMissingNode(file: string): Promise<void> {
+  try {
+    await lstat(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error("session has an incomplete node outside its verified snapshot");
 }
 
 async function readNodes(directory: string): Promise<StoredNode[]> {

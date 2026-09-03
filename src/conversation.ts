@@ -55,19 +55,34 @@ export type TurnDraft = Readonly<{
   failure?: TurnFailure;
 }>;
 
+type NodeBounds = Readonly<{
+  messageCodeUnits: number;
+  transcriptCodeUnits: number;
+  contextCodeUnits: number;
+}>;
+
 /** Immutable tree with one selected model/transcript path. */
 export class ConversationTree {
   readonly #nodes: readonly TurnNode[];
   readonly #activeNodeId: number;
+  readonly #nodeBounds: readonly NodeBounds[];
+  readonly #bounds: NodeBounds;
 
-  private constructor(nodes: readonly TurnNode[], activeNodeId: number) {
-    this.#nodes = Object.freeze([...nodes]);
+  private constructor(
+    nodes: readonly TurnNode[],
+    activeNodeId: number,
+    nodeBounds: readonly NodeBounds[],
+    bounds: NodeBounds,
+  ) {
+    this.#nodes = nodes;
     this.#activeNodeId = activeNodeId;
+    this.#nodeBounds = nodeBounds;
+    this.#bounds = bounds;
     Object.freeze(this);
   }
 
   static empty(): ConversationTree {
-    return new ConversationTree([], 0);
+    return new ConversationTree(Object.freeze([]), 0, Object.freeze([]), emptyBounds());
   }
 
   static restore(nodes: readonly TurnNode[], activeNodeId: number): ConversationTree {
@@ -85,12 +100,19 @@ export class ConversationTree {
       assertPersistableNode(owned);
       restored.push(owned);
     }
-    assertBounds(restored);
+    const measured = measureBounds(restored);
+    assertBounds(measured.total);
+    assertContextPaths(restored, restored.filter((node) => node.context !== undefined));
     if (
       !validNodeId(activeNodeId) ||
       (activeNodeId !== 0 && restored[activeNodeId - 1]?.id !== activeNodeId)
     ) throw new Error("conversation node does not exist");
-    return new ConversationTree(restored, activeNodeId);
+    return new ConversationTree(
+      Object.freeze(restored),
+      activeNodeId,
+      Object.freeze(measured.nodes),
+      measured.total,
+    );
   }
 
   /** Commit or extend the one prospective leaf turn. */
@@ -108,7 +130,7 @@ export class ConversationTree {
     if (!validNodeId(nodeId) || (nodeId !== 0 && this.#nodes[nodeId - 1]?.id !== nodeId)) {
       throw new Error("conversation node does not exist");
     }
-    return new ConversationTree(this.#nodes, nodeId);
+    return new ConversationTree(this.#nodes, nodeId, this.#nodeBounds, this.#bounds);
   }
 
   node(nodeId: number): TurnNode | undefined {
@@ -186,9 +208,16 @@ export class ConversationTree {
     });
     assertTurn(node);
     assertPersistableNode(node);
-    const nodes = [...this.#nodes, node];
-    assertBounds(nodes);
-    return new ConversationTree(nodes, node.id);
+    assertContextPath(this.#nodes, node);
+    const nodeBounds = measureNode(node);
+    const bounds = addBounds(this.#bounds, nodeBounds);
+    assertBounds(bounds);
+    return new ConversationTree(
+      Object.freeze([...this.#nodes, node]),
+      node.id,
+      Object.freeze([...this.#nodeBounds, nodeBounds]),
+      bounds,
+    );
   }
 
   #replace(draft: TurnDraft, settlement: TurnSettlement): ConversationTree {
@@ -209,10 +238,21 @@ export class ConversationTree {
     });
     assertTurn(node);
     assertPersistableNode(node);
+    assertContextPath(this.#nodes, node);
     const nodes = [...this.#nodes];
     nodes[id - 1] = node;
-    assertBounds(nodes);
-    return new ConversationTree(nodes, id);
+    const priorBounds = this.#nodeBounds[id - 1] as NodeBounds;
+    const nextNodeBounds = measureNode(node);
+    const nodeBounds = [...this.#nodeBounds];
+    nodeBounds[id - 1] = nextNodeBounds;
+    const bounds = replaceBounds(this.#bounds, priorBounds, nextNodeBounds);
+    assertBounds(bounds);
+    return new ConversationTree(
+      Object.freeze(nodes),
+      id,
+      Object.freeze(nodeBounds),
+      bounds,
+    );
   }
 
   #path(): TurnNode[] {
@@ -230,13 +270,13 @@ export class ConversationTree {
 }
 
 function ownedNode(node: TurnNode): TurnNode {
-  return Object.freeze({
+  return deepFreeze({
     ...node,
-    identity: Object.freeze({ ...node.identity }),
-    messages: Object.freeze(clone(node.messages)),
-    blocks: Object.freeze(clone(node.blocks)),
-    ...(node.context === undefined ? {} : { context: Object.freeze({ ...node.context }) }),
-    ...(node.failure === undefined ? {} : { failure: Object.freeze({ ...node.failure }) }),
+    identity: { ...node.identity },
+    messages: clone(node.messages),
+    blocks: clone(node.blocks),
+    ...(node.context === undefined ? {} : { context: { ...node.context } }),
+    ...(node.failure === undefined ? {} : { failure: { ...node.failure } }),
   });
 }
 
@@ -286,27 +326,72 @@ function validSettlement(value: string): value is TurnSettlement {
     value === "failed" || value === "interrupted";
 }
 
-function assertBounds(nodes: readonly TurnNode[]): void {
-  let messageCodeUnits = 0;
-  let transcriptCodeUnits = 0;
-  let contextCodeUnits = 0;
-  const contextOwners: TurnNode[] = [];
-  for (const node of nodes) {
-    messageCodeUnits += JSON.stringify(node.messages).length;
-    transcriptCodeUnits += JSON.stringify(node.blocks).length;
-    contextCodeUnits += node.context?.summary.length ?? 0;
-    if (node.context !== undefined) contextOwners.push(node);
-  }
-  if (messageCodeUnits > CONVERSATION_LIMITS.messageCodeUnits) {
+function assertBounds(bounds: NodeBounds): void {
+  if (bounds.messageCodeUnits > CONVERSATION_LIMITS.messageCodeUnits) {
     throw new Error("conversation model history reached its session limit — start /new");
   }
-  if (transcriptCodeUnits > CONVERSATION_LIMITS.transcriptCodeUnits) {
+  if (bounds.transcriptCodeUnits > CONVERSATION_LIMITS.transcriptCodeUnits) {
     throw new Error("conversation transcript reached its session limit — start /new");
   }
-  if (contextCodeUnits > CONVERSATION_LIMITS.contextCodeUnits) {
+  if (bounds.contextCodeUnits > CONVERSATION_LIMITS.contextCodeUnits) {
     throw new Error("conversation context summaries reached their session limit — start /new");
   }
-  assertContextPaths(nodes, contextOwners);
+}
+
+function measureBounds(nodes: readonly TurnNode[]): Readonly<{
+  nodes: NodeBounds[];
+  total: NodeBounds;
+}> {
+  const measured = nodes.map(measureNode);
+  return {
+    nodes: measured,
+    total: measured.reduce(addBounds, emptyBounds()),
+  };
+}
+
+function measureNode(node: TurnNode): NodeBounds {
+  return Object.freeze({
+    messageCodeUnits: JSON.stringify(node.messages).length,
+    transcriptCodeUnits: JSON.stringify(node.blocks).length,
+    contextCodeUnits: node.context?.summary.length ?? 0,
+  });
+}
+
+function emptyBounds(): NodeBounds {
+  return Object.freeze({ messageCodeUnits: 0, transcriptCodeUnits: 0, contextCodeUnits: 0 });
+}
+
+function addBounds(left: NodeBounds, right: NodeBounds): NodeBounds {
+  return Object.freeze({
+    messageCodeUnits: left.messageCodeUnits + right.messageCodeUnits,
+    transcriptCodeUnits: left.transcriptCodeUnits + right.transcriptCodeUnits,
+    contextCodeUnits: left.contextCodeUnits + right.contextCodeUnits,
+  });
+}
+
+function replaceBounds(total: NodeBounds, before: NodeBounds, after: NodeBounds): NodeBounds {
+  return Object.freeze({
+    messageCodeUnits: total.messageCodeUnits - before.messageCodeUnits + after.messageCodeUnits,
+    transcriptCodeUnits:
+      total.transcriptCodeUnits - before.transcriptCodeUnits + after.transcriptCodeUnits,
+    contextCodeUnits: total.contextCodeUnits - before.contextCodeUnits + after.contextCodeUnits,
+  });
+}
+
+function assertContextPath(nodes: readonly TurnNode[], owner: TurnNode): void {
+  const context = owner.context;
+  if (context === undefined) return;
+  const boundary = context.throughNodeId === owner.id
+    ? owner
+    : nodes[context.throughNodeId - 1];
+  if (boundary === undefined || !validContextAnchor(context, boundary.messages.length)) {
+    throw new Error("turn context checkpoint is invalid");
+  }
+  let current: TurnNode | undefined = owner;
+  while (current !== undefined && current.id !== boundary.id) {
+    current = nodes[current.parentId - 1];
+  }
+  if (current === undefined) throw new Error("turn context checkpoint is outside its branch");
 }
 
 function assertContextPaths(
@@ -354,4 +439,14 @@ function validNodeId(value: number): boolean {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (typeof value !== "object" || value === null || seen.has(value)) return value;
+  seen.add(value);
+  if (!ArrayBuffer.isView(value)) {
+    for (const child of Object.values(value)) deepFreeze(child, seen);
+    Object.freeze(value);
+  }
+  return value;
 }

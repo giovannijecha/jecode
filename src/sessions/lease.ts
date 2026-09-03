@@ -7,6 +7,7 @@ const MAX_LEASE_BYTES = 256;
 
 export type SessionLease = Readonly<{
   id: string;
+  assertOwned(): Promise<void>;
   close(): Promise<void>;
 }>;
 
@@ -18,6 +19,11 @@ export function sessionLease(id: string, file: string, token: string): SessionLe
   let closed = false;
   return Object.freeze({
     id,
+    assertOwned: async () => {
+      if (closed) throw new Error("session lease is closed");
+      const current = await readLease(file);
+      if (current !== token) throw new Error("session lease is no longer owned by this process");
+    },
     close: async () => {
       if (closed) return;
       closed = true;
