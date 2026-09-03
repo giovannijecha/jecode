@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { ConversationTree } from "../src/conversation.ts";
@@ -196,6 +196,38 @@ test("rejects a checkpoint after the verified head changes", async () => {
       store.checkpoint(published, turn(first, 1, "second", "two")),
       /head changed after its verified snapshot/,
     );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("checkpoint refuses a replaced node directory", async (context) => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const first = turn(ConversationTree.empty(), 0, "first", "one");
+    const published = await store.publish(first);
+    const directory = path.join(fixture.sessions, store.workspaceDigest, published.meta.id);
+    const nodes = path.join(directory, "nodes");
+    const parked = path.join(directory, "parked-nodes");
+    const outside = path.join(fixture.root, "outside");
+    await mkdir(outside);
+    await rename(nodes, parked);
+    try {
+      await symlink(outside, nodes, process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") {
+        context.skip("creating directory links is unavailable for this account");
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      store.checkpoint(published, turn(first, 1, "second", "two")),
+      /session path is not a direct directory/,
+    );
+    assert.deepEqual(await readdir(outside), []);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

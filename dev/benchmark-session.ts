@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { ConversationTree } from "../src/conversation.ts";
 import type { TurnNode } from "../src/conversation.ts";
 import { DurableSessionStore } from "../src/sessions/store.ts";
-import type { SessionSnapshot } from "../src/sessions/store.ts";
+import { SessionPersistence } from "../src/sessions/runtime.ts";
 
 const ITERATIONS = 5;
 const SMALL_NODES = 50;
@@ -47,20 +47,23 @@ async function sample(nodeCount: number): Promise<number> {
   const workspace = path.join(root, "workspace");
   const sessions = path.join(root, "sessions");
   await mkdir(workspace);
+  let persistence: SessionPersistence | undefined;
   try {
     const store = await DurableSessionStore.open(workspace, sessions);
     let conversation = ConversationTree.restore(nodes(nodeCount), nodeCount);
-    let snapshot: SessionSnapshot = await store.publish(conversation);
+    persistence = SessionPersistence.fresh(store);
+    await persistence.checkpoint(conversation);
     const timings: number[] = [];
     for (let iteration = 0; iteration <= ITERATIONS; iteration++) {
-      conversation = revise(conversation, iteration);
       const startedAt = performance.now();
-      snapshot = await store.checkpoint(snapshot, conversation);
+      conversation = revise(conversation, iteration);
+      await persistence.checkpoint(conversation);
       const elapsed = performance.now() - startedAt;
       if (iteration > 0) timings.push(elapsed);
     }
     return median(timings);
   } finally {
+    await persistence?.close();
     await rm(root, { recursive: true, force: true });
   }
 }

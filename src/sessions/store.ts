@@ -181,7 +181,10 @@ export class DurableSessionStore {
         revision: candidate.node.revision,
         updatedAt: candidate.updatedAt,
       });
-      await atomicWrite(path.join(directory, "head.json"), encodeHead(head), { mode: FILE_MODE });
+      await atomicWrite(path.join(directory, "head.json"), encodeHead(head), {
+        mode: FILE_MODE,
+        validate: async () => assertDirectory(directory),
+      });
     }
 
     const nodes = stored.map((entry) => entry.node);
@@ -255,6 +258,12 @@ export class DurableSessionStore {
     const id = previous.meta.id;
     const directory = this.#sessionDirectory(id);
     await assertDirectory(directory);
+    const nodesDirectory = path.join(directory, "nodes");
+    const validateNodesDirectory = async (): Promise<void> => {
+      await assertDirectory(directory);
+      await assertDirectory(nodesDirectory);
+    };
+    await validateNodesDirectory();
     const currentHead = decodeHead(await readJson(
       path.join(directory, "head.json"),
       SESSION_FILE_LIMITS.metadataBytes,
@@ -283,7 +292,7 @@ export class DurableSessionStore {
     }
     assertSharedNodes(previous.conversation, conversation, replacesHead ? active.id : undefined);
     if (extendsTree) {
-      await assertMissingNode(path.join(directory, "nodes", nodeName(active.id)));
+      await assertMissingNode(path.join(nodesDirectory, nodeName(active.id)));
     }
 
     const now = new Date().toISOString();
@@ -296,11 +305,14 @@ export class DurableSessionStore {
       updatedAt: now,
     });
     await atomicWrite(
-      path.join(directory, "nodes", nodeName(active.id)),
+      path.join(nodesDirectory, nodeName(active.id)),
       encodeNode(active, head.sequence, now),
-      { mode: FILE_MODE },
+      { mode: FILE_MODE, validate: async () => validateNodesDirectory() },
     );
-    await atomicWrite(path.join(directory, "head.json"), encodeHead(head), { mode: FILE_MODE });
+    await atomicWrite(path.join(directory, "head.json"), encodeHead(head), {
+      mode: FILE_MODE,
+      validate: async () => assertDirectory(directory),
+    });
     return Object.freeze({ meta: previous.meta, head, conversation });
   }
 
