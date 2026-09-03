@@ -348,9 +348,9 @@ rejected. Files and decoded values are size-bounded, unknown fields fail
 closed, and persisted provider messages drop opaque `raw` data before crossing
 the disk boundary. The encoder applies the same per-field validation before a
 node can enter the tree or replace a file. Schema 2 added bounded context
-anchors; schema 3 adds durable failed/interrupted outcomes. The strict decoder
-continues to accept both older schemas and upgrades the active node on its next
-checkpoint.
+anchors; schema 3 added durable failed/interrupted outcomes; schema 4 adds
+settled tool durations. The strict decoder continues to accept every older
+schema and upgrades the active node on its next checkpoint.
 
 Session catalogues use the canonical real workspace path, so another project
 cannot appear in the resume picker. A process lease prevents simultaneous
