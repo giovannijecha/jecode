@@ -1,8 +1,8 @@
 import type { Palette } from "../../ui/theme.ts";
 import { trailingText } from "../../text-boundary.ts";
-import { row } from "../../ui/render.ts";
+import { blank, row } from "../../ui/render.ts";
 import { markdown } from "../../ui/markdown.ts";
-import { transcriptLead, transcriptMark, transcriptWidth } from "../transcript-grammar.ts";
+import { transcriptLead, transcriptWidth } from "../transcript-grammar.ts";
 import type { AnswerBlock, ReasoningBlock, UserBlock } from "./types.ts";
 
 export const REASONING_PREVIEW_ROWS = 3;
@@ -14,12 +14,14 @@ export function renderUser(block: UserBlock, width: number, pal: Palette): strin
   const content = markdown(block.text, inner, pal, inner);
   return [
     "",
+    blank(width, pal.surface.subtle),
     ...content.map((line, index) => row(width, [
       ...transcriptLead(width, index === 0
         ? { text: "❯", fg: pal.accent, bold: true }
         : undefined),
       ...line.segs,
-    ])),
+    ], [], pal.surface.subtle)),
+    blank(width, pal.surface.subtle),
   ];
 }
 
@@ -34,29 +36,23 @@ export function renderReasoning(
   block: ReasoningBlock,
   width: number,
   pal: Palette,
-  context: { continues?: boolean; followsTool?: boolean } = {},
+  context: { continues?: boolean } = {},
 ): string[] {
-  const inner = transcriptWidth(width);
   // Expanding a live stream is deferred until it is sealed. Re-parsing an
   // ever-growing full thought on every token makes the whole TUI stall.
   const expanded = block.expanded === true && block.live !== true;
   const source = !expanded
-    ? reasoningPreviewSource(block.text, inner)
+    ? reasoningPreviewSource(block.text, width)
     : { text: block.text, truncated: false };
-  const content = markdown(source.text, inner, pal, inner);
+  const content = markdown(source.text, width, pal, width);
   const visible = expanded ? content : content.slice(-REASONING_PREVIEW_ROWS);
 
   return [
-    ...(context.followsTool === true
-      ? [row(width, transcriptMark(width, { text: "│", fg: pal.rule }))]
-      : context.continues === true ? [] : [""]),
+    ...(context.continues === true ? [] : [""]),
     ...visible.map((line) =>
       row(
         width,
-        [
-          ...transcriptLead(width, { text: "│", fg: pal.rule }),
-          ...line.segs.map((seg) => ({ ...seg, fg: pal.ink.dim, italic: true })),
-        ],
+        line.segs.map((seg) => ({ ...seg, fg: pal.ink.dim, italic: true })),
       )
     ),
   ];

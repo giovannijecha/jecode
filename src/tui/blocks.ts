@@ -36,12 +36,10 @@ export function render(block: Block, width: number, pal: Palette, context: Rende
     case "reasoning":
       return renderReasoning(block, width, pal, {
         continues: context.previous?.kind === "reasoning",
-        followsTool: context.previous?.kind === "tool",
       });
     case "tool":
       return renderTool(block, width, pal, {
-        continues: context.previous?.kind === "tool" || context.previous?.kind === "reasoning",
-        followsReasoning: context.previous?.kind === "reasoning",
+        continues: context.previous?.kind === "tool",
         now: context.now,
         motion: context.motion,
         reducedMotion: context.reducedMotion,

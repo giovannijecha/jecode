@@ -1,4 +1,4 @@
-// One semantic margin shared by every transcript block.
+// One semantic margin shared by the user cue and executable tool evidence.
 
 import type { Seg } from "../ui/render.ts";
 

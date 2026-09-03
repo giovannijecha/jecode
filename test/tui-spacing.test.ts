@@ -6,6 +6,7 @@ import * as edit from "../src/tui/editor.ts";
 import * as field from "../src/tui/field.ts";
 import { compose } from "../src/tui/view.ts";
 import { STEEL } from "../src/ui/theme.ts";
+import { textWidth } from "../src/ui/width.ts";
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(ESC + "\\[[0-9;]*m", "g");
@@ -22,7 +23,7 @@ test("every conversation block owns one leading rhythm row", () => {
   for (const block of blocks) assert.equal(render(block, 50, STEEL)[0], "", block.kind);
 });
 
-test("a user turn keeps one outer gap and the shared semantic gutter", () => {
+test("a user turn keeps one outer gap and a padded semantic surface", () => {
   const width = 50;
   const drawn = plain(renderAll([
     { kind: "answer", text: "previous answer" },
@@ -30,9 +31,24 @@ test("a user turn keeps one outer gap and the shared semantic gutter", () => {
   ], width, STEEL));
   const question = drawn.findIndex((line) => line.includes("next question"));
 
-  assert.match(drawn[question - 2] ?? "", /previous answer/);
-  assert.equal(drawn[question - 1], "");
-  assert.match(drawn[question] ?? "", /^❯ next question$/);
+  assert.match(drawn[question - 3] ?? "", /previous answer/);
+  assert.equal(drawn[question - 2], "");
+  assert.equal(drawn[question - 1], " ".repeat(width));
+  assert.match(drawn[question] ?? "", /^❯ next question\s+$/);
+  assert.equal(drawn[question + 1], " ".repeat(width));
+});
+
+test("a wrapped user surface stays inside narrow terminal bounds", () => {
+  for (const width of [38, 50]) {
+    const drawn = render({
+      kind: "user",
+      text: "A deliberately long user message that wraps across several rows without leaving its surface.",
+    }, width, STEEL);
+
+    assert.ok(drawn.every((line) => textWidth(line) <= width));
+    assert.ok(drawn.length > 4);
+    assert.match(plain(drawn).join("\n"), /❯ A deliberately long/);
+  }
 });
 
 test("assistant prose and semantic marks share the terminal left edge", () => {
@@ -59,7 +75,7 @@ test("consecutive tool calls join one execution rail without repeated gaps", () 
   assert.equal(drawn.filter((line) => line === "").length, 1);
 });
 
-test("reasoning and adjacent tool evidence keep a rail-only rhythm row", () => {
+test("reasoning breaks adjacent tool rails with an unframed rhythm row", () => {
   const drawn = plain(renderAll([
     { kind: "reasoning", text: "inspect first" },
     { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
@@ -68,8 +84,10 @@ test("reasoning and adjacent tool evidence keep a rail-only rhythm row", () => {
   const tool = drawn.findIndex((line) => line.includes("read_file"));
   const continued = drawn.findIndex((line) => line.includes("continue after"));
 
-  assert.equal(drawn[tool - 1]?.trim(), "│");
-  assert.equal(drawn[continued - 1]?.trim(), "│");
+  assert.equal(drawn[tool - 1], "");
+  assert.equal(drawn[continued - 1], "");
+  assert.match(drawn[continued] ?? "", /^continue after the result$/);
+  assert.doesNotMatch(drawn.join("\n"), /│/);
 });
 
 test("a short transcript grows upward from the composer", () => {
