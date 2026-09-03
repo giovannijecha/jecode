@@ -11,11 +11,11 @@
 // is why "not in the repo" is a rule and not a preference.
 
 import { chmod, mkdir } from "node:fs/promises";
-import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
 import { withStoreLock } from "./store-lock.ts";
 import { legacyUserDataPath, userDataLabel, userDataPath } from "./user-data.ts";
+import { assertStoreText, readBoundedJsonSync, USER_STORE_LIMITS } from "./user-store.ts";
 
 /** Keys this session was given but not asked to keep. Dies with the window. */
 const held = new Map<string, string>();
@@ -65,6 +65,10 @@ export function hasSaved(name: string): boolean {
 
 /** Take a key for this session only. Nothing is written anywhere. */
 export function hold(name: string, value: string): void {
+  assertCredential(name, value);
+  if (!held.has(name) && held.size >= USER_STORE_LIMITS.credentialEntries) {
+    throw new Error("too many session credentials");
+  }
   held.set(name, value);
 }
 
@@ -82,10 +86,14 @@ export function forgetSession(name: string): boolean {
  * Windows ignores the mode and relies on the profile directory's own ACL.
  */
 export async function keep(name: string, value: string): Promise<string> {
+  assertCredential(name, value);
   const file = storePath();
   await prepare(file);
   return withStoreLock(file, async () => {
     const all = { ...readSavedStore(), [name]: value };
+    if (Object.keys(all).length > USER_STORE_LIMITS.credentialEntries) {
+      throw new Error("too many saved credentials");
+    }
     await persist(file, all);
     saved = all;
     // A newly saved replacement must become active immediately. Otherwise an
@@ -146,13 +154,14 @@ function readSavedStore(): Record<string, string> {
 
 function readStore(file: string): Record<string, string> | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    const parsed = readBoundedJsonSync(file, USER_STORE_LIMITS.credentialsBytes);
+    if (!record(parsed)) return {};
     // Anything that is not a string is not a key, whatever the file says.
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    );
+    const entries = Object.entries(parsed);
+    if (entries.length > USER_STORE_LIMITS.credentialEntries) return {};
+    return Object.fromEntries(entries.filter(
+      (entry): entry is [string, string] => credential(entry[0], entry[1]),
+    ));
   } catch (error) {
     // Only a missing canonical file falls through to the legacy location. A
     // malformed new store must not resurrect an older credential silently.
@@ -167,7 +176,24 @@ async function prepare(file: string): Promise<void> {
 }
 
 async function persist(file: string, values: Record<string, string>): Promise<void> {
-  await atomicWrite(file, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
+  const text = `${JSON.stringify(values, null, 2)}\n`;
+  assertStoreText(text, USER_STORE_LIMITS.credentialsBytes);
+  await atomicWrite(file, text, { mode: 0o600 });
+}
+
+function assertCredential(name: string, value: string): void {
+  if (!credential(name, value)) throw new Error("invalid credential name or value");
+}
+
+function credential(name: string, value: unknown): value is string {
+  return name.length > 0 && name.length <= USER_STORE_LIMITS.credentialName &&
+    /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
+    typeof value === "string" && value.length > 0 &&
+    value.length <= USER_STORE_LIMITS.credentialValue;
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** An empty variable is an unset variable — an exported "" is not a key. */

@@ -16,9 +16,11 @@ import {
 } from "../src/credentials.ts";
 import {
   credentialRedactor,
+  MAX_REDACTION_SECRETS,
   redactCredentials,
   shellEnvironment,
 } from "../src/credential-safety.ts";
+import { USER_STORE_LIMITS } from "../src/user-store.ts";
 
 test("redacts one credential split across stream chunks", () => {
   const redact = credentialRedactor({ OPENAI_API_KEY: "fixture-split-secret" });
@@ -129,6 +131,48 @@ test("redacts credentials discovered through normalized environment names", () =
     redactCredentials("fixture-github-pat and fixture-npm-token", source),
     "[credential redacted] and [credential redacted]",
   );
+});
+
+test("redaction fails closed when the supported secret set is exceeded", () => {
+  const source = Object.fromEntries(Array.from(
+    { length: MAX_REDACTION_SECRETS + 1 },
+    (_, index) => [`TOKEN_${index}`, `fixture-secret-${index}`],
+  ));
+  const redact = credentialRedactor(source);
+
+  assert.equal(redactCredentials("ordinary output", source), "[credential redacted]");
+  assert.equal(redact.write("first chunk"), "[credential redacted]");
+  assert.equal(redact.write("second chunk"), "");
+  assert.equal(redact.end(), "");
+});
+
+test("redaction fails closed for a secret too large to match incrementally", () => {
+  const source = { OPENAI_API_KEY: "x".repeat(USER_STORE_LIMITS.accountToken + 1) };
+  assert.equal(redactCredentials("ordinary output", source), "[credential redacted]");
+});
+
+test("redaction handles 30,000 non-matching characters at the supported secret limit", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-redact-bounded-"));
+  const before = process.env["JECODE_HOME"];
+  process.env["JECODE_HOME"] = directory;
+  reloadAccounts();
+  reloadCredentials();
+  try {
+    const source = Object.fromEntries(Array.from(
+      { length: MAX_REDACTION_SECRETS },
+      (_, index) => [`TOKEN_${index}`, `fixture-secret-${index}`],
+    ));
+    const output = "x".repeat(30_000);
+    const redact = credentialRedactor(source);
+
+    assert.equal(`${redact.write(output)}${redact.end()}`, output);
+  } finally {
+    if (before === undefined) delete process.env["JECODE_HOME"];
+    else process.env["JECODE_HOME"] = before;
+    reloadAccounts();
+    reloadCredentials();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("redacts saved OAuth access and refresh tokens", async () => {

@@ -46,6 +46,7 @@
     "tui:lab": "node dev/tui-lab.ts",
     "bench:transcript": "node dev/benchmark-transcript.ts",
     "bench:search": "node dev/benchmark-search.ts",
+    "bench:redaction": "node dev/benchmark-redaction.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:release && node --test",
     "coverage": "npm run build:release && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",

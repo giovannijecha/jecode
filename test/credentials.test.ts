@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import {
   credentialSource,
+  credentialValues,
   forgetSaved,
   forgetSession,
   hasSaved,
@@ -15,6 +16,7 @@ import {
   storeLabel,
   storePath,
 } from "../src/credentials.ts";
+import { USER_STORE_LIMITS } from "../src/user-store.ts";
 
 const VAR = "JECODE_TEST_KEY";
 
@@ -160,6 +162,72 @@ test("an old config-directory store remains a read-only fallback", async () => {
 
     assert.equal(keyFor(VAR), "legacy-secret");
     await assert.rejects(() => readFile(storePath(), "utf8"));
+  });
+});
+
+test("an oversized canonical store cannot resurrect a legacy credential", async () => {
+  await inStore(async () => {
+    const legacy = path.join(process.env["APPDATA"] as string, "jecode", "credentials.json");
+    await mkdir(path.dirname(legacy), { recursive: true });
+    await writeFile(legacy, JSON.stringify({ [VAR]: "legacy-secret" }), "utf8");
+    await writeFile(storePath(), "x".repeat(USER_STORE_LIMITS.credentialsBytes + 1), "utf8");
+    reload();
+
+    assert.equal(keyFor(VAR), undefined);
+    assert.deepEqual(credentialValues(), []);
+  });
+});
+
+test("credential stores bound entry count, names, and values", async () => {
+  await inStore(async () => {
+    const tooMany = Object.fromEntries(Array.from(
+      { length: USER_STORE_LIMITS.credentialEntries + 1 },
+      (_, index) => [`KEY_${index}`, `secret-${index}`],
+    ));
+    await writeFile(storePath(), JSON.stringify(tooMany), "utf8");
+    reload();
+    assert.equal(keyFor("KEY_0"), undefined);
+
+    await writeFile(storePath(), JSON.stringify({
+      [VAR]: "x".repeat(USER_STORE_LIMITS.credentialValue + 1),
+      "invalid-name": "secret",
+    }), "utf8");
+    reload();
+    assert.deepEqual(credentialValues(), []);
+  });
+});
+
+test("new session credentials are refused before exceeding their bounds", async () => {
+  await inStore(() => {
+    for (let index = 0; index < USER_STORE_LIMITS.credentialEntries; index++) {
+      hold(`KEY_${index}`, `secret-${index}`);
+    }
+    assert.throws(() => hold("ONE_TOO_MANY", "secret"), /too many session credentials/);
+    assert.throws(
+      () => hold("TOO_LONG", "x".repeat(USER_STORE_LIMITS.credentialValue + 1)),
+      /invalid credential/,
+    );
+  });
+});
+
+test("a write beyond the credential file cap leaves the previous store intact", async () => {
+  await inStore(async () => {
+    const existing = Object.fromEntries(Array.from(
+      { length: 15 },
+      (_, index) => [
+        `KEY_${index}`,
+        String.fromCharCode(65 + index).repeat(USER_STORE_LIMITS.credentialValue),
+      ],
+    ));
+    await writeFile(storePath(), JSON.stringify(existing), "utf8");
+    reload();
+    const before = await readFile(storePath(), "utf8");
+
+    await assert.rejects(
+      keep("KEY_15", "x".repeat(USER_STORE_LIMITS.credentialValue)),
+      /user store exceeds/,
+    );
+    assert.equal(await readFile(storePath(), "utf8"), before);
   });
 });
 

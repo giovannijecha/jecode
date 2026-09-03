@@ -272,6 +272,15 @@ provider. The TUI never prints a secret, and authentication values never enter
 message history or transcript blocks. Older config-directory API keys remain a
 read-only fallback until the canonical file is first written.
 
+All three JSON stores are accepted only through regular-file handles, opened
+non-blocking where the operating system supports it. Size caps are enforced
+before content is read or parsed: 64 KiB for settings, 256 KiB for saved API
+keys, and 128 KiB for OAuth accounts. The same caps apply before writes, and
+known fields also have count and string limits. Malformed, oversized, or
+out-of-schema state falls back without becoming startup work proportional to
+attacker-controlled input. Credential redaction uses a bounded secret set and
+fails closed if that supported set is exceeded.
+
 Saving is explicit. Secret files use owner-only modes on POSIX; Windows relies
 on the user profile ACL. Replacement uses the same atomic writer as workspace
 files. Every persistent mutation serializes through a bounded cross-process

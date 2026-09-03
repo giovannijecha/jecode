@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
   updateSettings,
 } from "../src/settings.ts";
 import type { SavedSettings } from "../src/settings.ts";
+import { USER_STORE_LIMITS } from "../src/user-store.ts";
 
 async function inSettingsHome(body: () => Promise<void> | void): Promise<void> {
   const directory = await mkdtemp(path.join(tmpdir(), "jecode-settings-"));
@@ -96,6 +97,30 @@ test("invalid saved values are discarded rather than breaking startup", async ()
       compactionPercent: 100,
     } as SavedSettings);
     reloadSettings();
+    assert.deepEqual(readSettings(), {});
+  });
+});
+
+test("oversized and truncated settings stores fall back before parsing", async () => {
+  await inSettingsHome(async () => {
+    await writeFile(settingsPath(), "x".repeat(USER_STORE_LIMITS.settingsBytes + 1), "utf8");
+    reloadSettings();
+    assert.deepEqual(readSettings(), {});
+
+    await writeFile(settingsPath(), '{"provider":"ollama"', "utf8");
+    reloadSettings();
+    assert.deepEqual(readSettings(), {});
+  });
+});
+
+test("settings discard strings outside their bounded schema", async () => {
+  await inSettingsHome(async () => {
+    await writeFile(settingsPath(), JSON.stringify({
+      models: { ollama: "x".repeat(USER_STORE_LIMITS.model + 1) },
+      ollamaHost: `https://example.test/${"x".repeat(USER_STORE_LIMITS.endpoint)}`,
+    }), "utf8");
+    reloadSettings();
+
     assert.deepEqual(readSettings(), {});
   });
 });

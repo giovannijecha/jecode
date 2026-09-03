@@ -335,8 +335,9 @@ budget is neither shown nor saved by `/settings`.
 Non-secret preferences live in `~/.jecode/settings.json`. Explicitly saved API
 keys live in `~/.jecode/credentials.json`, while ChatGPT OAuth accounts live in
 `~/.jecode/accounts.json`. Environment credentials always take precedence.
-Secret stores use owner-only permissions where the operating system supports
-them.
+These JSON stores are size-bounded before parsing and writing, and invalid
+fields are discarded. Secret stores use owner-only permissions where the
+operating system supports them.
 
 Jecode has one current interface theme, Slate. `NO_COLOR` is supported for
 terminals and pipelines that disable colour.
