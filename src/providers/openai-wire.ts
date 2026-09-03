@@ -3,6 +3,7 @@
 // items keyed by `call_id`, rather than blocks nested inside a message.
 
 import type { Block, Message, ToolSpec, Usage } from "../types.ts";
+import { toolInputFromJson } from "./tool-input.ts";
 import { wireTokenCount } from "./wire-usage.ts";
 
 export type OpenAIResponse = {
@@ -103,7 +104,7 @@ export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): M
           kind: "tool_call",
           id: item.call_id,
           name: item.name,
-          input: parseArguments(item.arguments),
+          ...toolInputFromJson(item.arguments),
         });
       } else {
         suppressedFunctionCall = true;
@@ -135,18 +136,4 @@ function normalizeUsage(data: OpenAIResponse): Usage | undefined {
     cacheWriteInputTokens: wireTokenCount(usage.input_tokens_details?.cache_write_tokens),
     reasoningTokens: wireTokenCount(usage.output_tokens_details?.reasoning_tokens),
   };
-}
-
-// Arguments arrive as a JSON string and models vary in how they escape it, so
-// this always goes through a real parse — never string matching.
-function parseArguments(text: string | undefined): Record<string, unknown> {
-  if (text === undefined || text === "") return {};
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
 }

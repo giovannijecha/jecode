@@ -2,12 +2,15 @@
 // Pure functions, no I/O — which is what makes them testable without a key.
 
 import type { Block, Message, ToolSpec, Usage } from "../types.ts";
+import { toolInputFromValue } from "./tool-input.ts";
 import { wireTokenCount } from "./wire-usage.ts";
 
 export type WireBlock = Record<string, unknown>;
 
 export type AnthropicResponse = {
   content?: unknown[];
+  /** Parse failures recorded by the streaming assembler, outside the wire payload. */
+  toolInputErrors?: Record<number, string>;
   stop_reason?: string;
   stop_details?: { category?: string | null; explanation?: string };
   usage?: {
@@ -66,7 +69,8 @@ export function fromWireResponse(data: AnthropicResponse): Message {
   const content: Block[] = [];
   let suppressedToolCall = false;
 
-  for (const item of raw) {
+  for (let index = 0; index < raw.length; index++) {
+    const item = raw[index];
     const block = item as {
       type?: string;
       text?: string;
@@ -83,11 +87,14 @@ export function fromWireResponse(data: AnthropicResponse): Message {
         typeof block.id === "string" &&
         typeof block.name === "string"
       ) {
+        const parsed = toolInputFromValue(block.input ?? {});
+        const inputError = data.toolInputErrors?.[index] ?? parsed.inputError;
         content.push({
           kind: "tool_call",
           id: block.id,
           name: block.name,
-          input: (block.input ?? {}) as Record<string, unknown>,
+          input: parsed.input,
+          ...(inputError === undefined ? {} : { inputError }),
         });
       } else {
         suppressedToolCall = true;

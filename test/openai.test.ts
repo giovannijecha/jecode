@@ -361,6 +361,8 @@ test("normalizes tool calls and sparse usage from a completed response", () => {
       },
       { type: "function_call", call_id: "empty", name: "list_dir", arguments: "" },
       { type: "function_call", call_id: "broken", name: "edit_file", arguments: "{" },
+      { type: "function_call", call_id: "array", name: "list_dir", arguments: "[]" },
+      { type: "function_call", call_id: "scalar", name: "list_dir", arguments: "42" },
       { type: "future_item", value: "retained only in raw" },
     ],
     usage: { input_tokens: 4 },
@@ -369,7 +371,27 @@ test("normalizes tool calls and sparse usage from a completed response", () => {
   assert.deepEqual(message.content, [
     { kind: "tool_call", id: "valid", name: "read_file", input: { path: "a.ts" } },
     { kind: "tool_call", id: "empty", name: "list_dir", input: {} },
-    { kind: "tool_call", id: "broken", name: "edit_file", input: {} },
+    {
+      kind: "tool_call",
+      id: "broken",
+      name: "edit_file",
+      input: {},
+      inputError: "tool arguments were not valid JSON",
+    },
+    {
+      kind: "tool_call",
+      id: "array",
+      name: "list_dir",
+      input: {},
+      inputError: "tool arguments must be a JSON object",
+    },
+    {
+      kind: "tool_call",
+      id: "scalar",
+      name: "list_dir",
+      input: {},
+      inputError: "tool arguments must be a JSON object",
+    },
   ]);
   assert.deepEqual(message.usage, {
     inputTokens: 4,
@@ -380,7 +402,7 @@ test("normalizes tool calls and sparse usage from a completed response", () => {
   });
   assert.equal(message.rawFrom, "openai");
   assert.ok(Array.isArray(message.raw));
-  assert.equal(message.raw.length, 4);
+  assert.equal(message.raw.length, 6);
 });
 
 test("rejects an incomplete call item and its unsafe continuation payload", () => {

@@ -8,6 +8,7 @@
 // arguments travel as a JSON string rather than an object.
 
 import type { Block, Message, ToolSpec, Usage } from "../types.ts";
+import { toolInputFromJson } from "./tool-input.ts";
 import { wireTokenCount } from "./wire-usage.ts";
 
 export type ChatToolCall = { id: string; name: string; args: string };
@@ -75,7 +76,12 @@ export function fromWireReply(reply: ChatReply): Message {
   const acceptsToolCalls = reply.finishReason === "tool_calls";
   if (acceptsToolCalls) {
     for (const call of reply.toolCalls) {
-      content.push({ kind: "tool_call", id: call.id, name: call.name, input: parseArgs(call.args) });
+      content.push({
+        kind: "tool_call",
+        id: call.id,
+        name: call.name,
+        ...toolInputFromJson(call.args),
+      });
     }
   }
 
@@ -119,17 +125,4 @@ export function stopNotice(reply: ChatReply): string | undefined {
   return reply.finishReason === "length"
     ? "[truncated: hit the output limit — raise --max-tokens]"
     : undefined;
-}
-
-// A model that emits malformed JSON gets the empty object, which fails
-// validation in tools/args.ts with a message written for it to read. That is a
-// recoverable turn; throwing here would end the whole thing instead.
-function parseArgs(args: string): Record<string, unknown> {
-  if (args.trim() === "") return {};
-  try {
-    const parsed = JSON.parse(args) as unknown;
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
 }

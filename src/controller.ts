@@ -309,12 +309,15 @@ async function settle(
   signal: AbortSignal | undefined,
   preview: ToolPreview | undefined,
 ): Promise<ToolRun> {
+  throwIfAborted(signal);
+  if (call.inputError !== undefined) {
+    return refuse(call, call.inputError, "invalid arguments");
+  }
   const tool = findTool(options.tools, call.name);
 
   if (tool === undefined) {
     return refuse(call, `no such tool: ${call.name}`, "unknown tool");
   }
-  throwIfAborted(signal);
   const approved = !tool.dangerous || await events.approve(call);
   throwIfAborted(signal);
   if (!approved) {
@@ -350,6 +353,7 @@ async function look(
   options: ControllerOptions,
   signal: AbortSignal | undefined,
 ): Promise<ToolPreview | undefined> {
+  if (call.inputError !== undefined) return undefined;
   const tool = findTool(options.tools, call.name);
   if (tool?.preview === undefined) return undefined;
 

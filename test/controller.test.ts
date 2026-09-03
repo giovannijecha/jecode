@@ -169,6 +169,92 @@ test("never executes provider tool calls from truncated responses", async (conte
   }
 });
 
+test("never previews or executes invalid tool arguments from completed responses", async (context) => {
+  const cases: Array<{ name: string; reply: Message }> = [
+    {
+      name: "OpenAI Responses",
+      reply: fromOpenAIWire({
+        status: "completed",
+        output: [{
+          type: "function_call",
+          call_id: "invalid-openai",
+          name: "list_dir",
+          arguments: "{",
+        }],
+      }),
+    },
+    {
+      name: "Anthropic Messages",
+      reply: fromAnthropicWire({
+        stop_reason: "tool_use",
+        content: [{
+          type: "tool_use",
+          id: "invalid-anthropic",
+          name: "list_dir",
+          input: [],
+        }],
+      }),
+    },
+    {
+      name: "Ollama Chat Completions",
+      reply: fromOllamaWire({
+        content: "",
+        reasoning: "",
+        toolCalls: [{ id: "invalid-ollama", name: "list_dir", args: "42" }],
+        finishReason: "tool_calls",
+      }),
+    },
+  ];
+
+  for (const current of cases) {
+    await context.test(current.name, async () => {
+      let previews = 0;
+      let approvals = 0;
+      let runs = 0;
+      const guardedTool: Tool = {
+        name: "list_dir",
+        description: "lists a directory",
+        dangerous: true,
+        concurrency: "exclusive",
+        input: { type: "object", properties: {}, required: [] },
+        async preview() {
+          previews++;
+          return { before: "before", after: "after" };
+        },
+        async run() {
+          runs++;
+          return { output: "unexpected execution" };
+        },
+      };
+      const provider = scripted([current.reply, assistantText("recovered")]);
+      const history: Message[] = [{
+        role: "user",
+        content: [{ kind: "text", text: "inspect" }],
+      }];
+      const checkpoints: string[] = [];
+      const sink = events();
+      sink.approve = async () => {
+        approvals++;
+        return true;
+      };
+      sink.onCheckpoint = async (_messages, settlement) => {
+        checkpoints.push(settlement);
+      };
+
+      await runTurn(history, options(provider, { tools: [guardedTool] }), sink);
+
+      assert.equal(previews, 0);
+      assert.equal(approvals, 0);
+      assert.equal(runs, 0);
+      assert.equal(provider.seen.length, 2);
+      const result = history[2]?.content[0];
+      assert.equal(result?.kind === "tool_result" && result.isError, true);
+      assert.match(result?.kind === "tool_result" ? result.output : "", /tool arguments/);
+      assert.deepEqual(checkpoints, ["checkpointed", "completed"]);
+    });
+  }
+});
+
 test("steering queued during a final response continues the same turn", async () => {
   const provider = scripted([assistantText("first answer"), assistantText("revised answer")]);
   const sent: Message[][] = [];

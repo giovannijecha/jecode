@@ -11,6 +11,8 @@ export type ToolCallBlock = {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  /** Transient provider parse failure; session codecs deliberately omit it. */
+  inputError?: string;
 };
 
 export type ToolResultBlock = {

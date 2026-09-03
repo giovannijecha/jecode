@@ -9,6 +9,7 @@
 import type { StreamEvent } from "../types.ts";
 import type { AnthropicResponse, WireBlock } from "./anthropic-wire.ts";
 import { addBounded, MAX_TOOL_ARGUMENT_CHARS } from "./stream-limits.ts";
+import { toolInputFromJson } from "./tool-input.ts";
 
 export async function assembleAnthropic(
   events: AsyncIterable<unknown>,
@@ -18,6 +19,7 @@ export async function assembleAnthropic(
   const partialJson = new Map<number, string>();
   const announcedTools = new Set<number>();
   const sizes = { toolArguments: 0 };
+  const toolInputErrors: Record<number, string> = {};
   let stopReason: string | undefined;
   let stopDetails: AnthropicResponse["stop_details"];
   let usage: AnthropicResponse["usage"];
@@ -58,7 +60,9 @@ export async function assembleAnthropic(
         const pending = partialJson.get(event.index);
         const block = blocks.get(event.index);
         if (pending !== undefined && block !== undefined) {
-          block.input = parseJsonObject(pending);
+          const parsed = toolInputFromJson(pending);
+          block.input = parsed.input;
+          if (parsed.inputError !== undefined) toolInputErrors[event.index] = parsed.inputError;
           partialJson.delete(event.index);
         }
         break;
@@ -88,11 +92,24 @@ export async function assembleAnthropic(
 
   if (!complete) throw new Error("anthropic stream ended before message_stop");
 
-  const content = [...blocks.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([, block]) => block);
+  const ordered = [...blocks.entries()].sort(([a], [b]) => a - b);
+  const content = ordered.map(([, block]) => block);
+  const orderedInputErrors: Record<number, string> = {};
+  for (let index = 0; index < ordered.length; index++) {
+    const sourceIndex = ordered[index]?.[0];
+    if (sourceIndex === undefined || toolInputErrors[sourceIndex] === undefined) continue;
+    orderedInputErrors[index] = toolInputErrors[sourceIndex];
+  }
 
-  return { content, stop_reason: stopReason, stop_details: stopDetails, usage };
+  return {
+    content,
+    stop_reason: stopReason,
+    stop_details: stopDetails,
+    usage,
+    ...(Object.keys(orderedInputErrors).length === 0
+      ? {}
+      : { toolInputErrors: orderedInputErrors }),
+  };
 }
 
 type WireEvent = {
@@ -161,19 +178,5 @@ function applyDelta(
 
     default:
       return;
-  }
-}
-
-// Tool arguments arrive as a stream of JSON fragments. An empty accumulation
-// is a call with no arguments, not a malformed one.
-function parseJsonObject(text: string): Record<string, unknown> {
-  if (text.trim() === "") return {};
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
   }
 }

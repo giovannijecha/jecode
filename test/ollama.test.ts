@@ -286,17 +286,28 @@ test("streams reasoning under either field name", async () => {
   ]);
 });
 
-test("malformed arguments degrade to an empty object rather than throwing", () => {
-  const message = fromWireReply({
-    content: "",
-    reasoning: "",
-    toolCalls: [{ id: "c1", name: "read_file", args: "{not json" }],
-    finishReason: "tool_calls",
-  });
+test("preserves malformed and non-object tool arguments as invalid calls", () => {
+  const calls = [
+    ["malformed", "{not json", "tool arguments were not valid JSON"],
+    ["array", "[]", "tool arguments must be a JSON object"],
+    ["scalar", "42", "tool arguments must be a JSON object"],
+  ] as const;
 
-  assert.deepEqual(message.content, [
-    { kind: "tool_call", id: "c1", name: "read_file", input: {} },
-  ]);
+  for (const [id, args, inputError] of calls) {
+    const message = fromWireReply({
+      content: "",
+      reasoning: "",
+      toolCalls: [{ id, name: "list_dir", args }],
+      finishReason: "tool_calls",
+    });
+    assert.deepEqual(message.content, [{
+      kind: "tool_call",
+      id,
+      name: "list_dir",
+      input: {},
+      inputError,
+    }]);
+  }
 });
 
 test("keeps partial text but rejects a tool call truncated by the output limit", async () => {
