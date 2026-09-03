@@ -189,7 +189,7 @@ let mascot: string | undefined;
 
 function mascotDataUri(): string {
   if (mascot === undefined) {
-    const file = new URL("../docs/assets/brand/jeco-256.png", import.meta.url);
+    const file = new URL("../assets/jeco-256.png", import.meta.url);
     mascot = `data:image/png;base64,${readFileSync(file).toString("base64")}`;
   }
   return mascot;

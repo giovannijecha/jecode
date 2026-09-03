@@ -121,9 +121,10 @@ alternate screen, and bracketed paste support. Non-interactive streams use
 batch mode. `NO_COLOR` disables semantic colour, and `--reduced-motion` avoids
 the blinking cursor used for active work.
 
-Keyboard actions documented in the README remain supported. Exact glyphs,
-palette values, line wrapping, and component layout may change as long as the
-same information, controls, accessibility modes, and frame safety remain.
+Keyboard actions documented in the [user guide](USAGE.md#keyboard-controls)
+remain supported. Exact glyphs, palette values, line wrapping, and component
+layout may change as long as the same information, controls, accessibility
+modes, and frame safety remain.
 
 ## Internal surface
 

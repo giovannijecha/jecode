@@ -39,18 +39,18 @@ do not recolor the mascot.
 
 | Asset | Use |
 |---|---|
-| docs/assets/brand/wordmark-steel.svg | Universal wordmark for README and renderer-neutral surfaces |
-| docs/assets/brand/wordmark-dark.svg | Wordmark on light surfaces |
-| docs/assets/brand/wordmark-light.svg | Wordmark on dark surfaces |
-| docs/assets/brand/jeco-256.png | Standalone mascot |
-| docs/assets/brand/app-icon-512.png | Square application or social icon |
-| docs/assets/brand/pet-states.png | Reference sheet for functional status poses |
-| docs/assets/brand/tokens.json | Machine-readable brand tokens |
+| assets/wordmark-steel.svg | Universal wordmark for README and renderer-neutral surfaces |
+| assets/wordmark-dark.svg | Wordmark on light surfaces |
+| assets/wordmark-light.svg | Wordmark on dark surfaces |
+| assets/jeco-256.png | Standalone mascot |
+| assets/app-icon-512.png | Square application or social icon |
+| assets/pet-states.png | Reference sheet for functional status poses |
+| assets/tokens.json | Machine-readable brand tokens |
 
 The pixel poses are a product direction, not a promise that a terminal pet is
 already part of the current release. If introduced, each pose must correspond to
 real controller activity and reduced-motion mode must use static state changes.
 
 <p align="center">
-  <img src="assets/brand/pet-states.png" width="720" alt="Jeco pixel status poses">
+  <img src="pet-states.png" width="720" alt="Jeco pixel status poses">
 </p>

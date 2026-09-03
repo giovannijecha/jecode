@@ -25,7 +25,7 @@
   "files": [
     "bin/",
     "dist/",
-    "docs/assets/brand/jeco-256.png",
+    "assets/jeco-256.png",
     "LICENSE",
     "README.md"
   ],

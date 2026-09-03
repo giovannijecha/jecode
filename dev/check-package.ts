@@ -17,7 +17,7 @@ const allowedPackageFile = (file: string): boolean =>
   file === "LICENSE" ||
   file === "README.md" ||
   file === "package.json" ||
-  file === "docs/assets/brand/jeco-256.png" ||
+  file === "assets/jeco-256.png" ||
   file.startsWith("bin/") ||
   file.startsWith("dist/");
 if (!paths.every(allowedPackageFile)) {
@@ -27,7 +27,7 @@ if (!paths.every(allowedPackageFile)) {
 }
 if (!paths.includes("bin/jecode.js")) throw new Error("the jecode executable is missing from the package");
 if (!paths.includes("dist/main.js")) throw new Error("the compiled entry point is missing from the package");
-if (!paths.includes("docs/assets/brand/jeco-256.png")) throw new Error("the OAuth callback mascot is missing from the package");
+if (!paths.includes("assets/jeco-256.png")) throw new Error("the OAuth callback mascot is missing from the package");
 if (paths.some((file) => file.endsWith(".ts"))) throw new Error("release packages must not contain TypeScript runtime files");
 if (packed.size > 1_000_000) throw new Error(`package is unexpectedly large: ${packed.size} bytes`);
 
