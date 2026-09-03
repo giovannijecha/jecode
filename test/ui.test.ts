@@ -245,14 +245,14 @@ test("a fenced block carries muted fences rather than the legacy rail", () => {
 });
 
 test("the renderer receives one complete dark Slate identity", () => {
-  assert.deepEqual(STEEL.accent, [124, 164, 222]);
-  assert.deepEqual(STEEL.technical, [126, 186, 208]);
-  assert.deepEqual(STEEL.rule, [44, 60, 78]);
-  assert.deepEqual(STEEL.ink.fg, [214, 219, 226]);
-  assert.deepEqual(STEEL.ink.muted, [149, 160, 174]);
-  assert.deepEqual(STEEL.ink.dim, [99, 111, 125]);
-  assert.deepEqual(STEEL.ink.added, [138, 190, 150]);
-  assert.deepEqual(STEEL.ink.removed, [223, 120, 120]);
+  assert.deepEqual(STEEL.accent, [102, 155, 210]);
+  assert.deepEqual(STEEL.technical, [78, 201, 232]);
+  assert.deepEqual(STEEL.rule, [53, 80, 110]);
+  assert.deepEqual(STEEL.ink.fg, [220, 224, 229]);
+  assert.deepEqual(STEEL.ink.muted, [156, 169, 183]);
+  assert.deepEqual(STEEL.ink.dim, [112, 124, 137]);
+  assert.deepEqual(STEEL.ink.added, [134, 203, 146]);
+  assert.deepEqual(STEEL.ink.removed, [232, 112, 112]);
   assert.equal("inset" in STEEL.surface, false);
 });
 
