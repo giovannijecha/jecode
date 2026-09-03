@@ -72,3 +72,39 @@ test("settled tool markers retain semantic success and failure colours", async (
     configureColor(false);
   }
 });
+
+test("user turns retain a Slate surface and a monochrome marker", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const noColor = process.env["NO_COLOR"];
+  const term = process.env["TERM"];
+
+  try {
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+    delete process.env["NO_COLOR"];
+    process.env["TERM"] = "xterm-256color";
+
+    const { renderAll } = await import("../src/tui/blocks.ts");
+    const { configureColor } = await import("../src/ui/render.ts");
+    const surface = `${ESC}[48;2;${STEEL.surface.subtle.join(";")}m`;
+    try {
+      configureColor(true);
+      const coloured = renderAll([{ kind: "user", text: "distinct turn" }], 40, STEEL);
+      assert.equal(coloured.length, 4);
+      assert.ok(coloured.slice(1).every((line) => line.includes(surface)));
+
+      configureColor(false);
+      const monochrome = renderAll([{ kind: "user", text: "distinct turn" }], 40, STEEL);
+      assert.ok(monochrome.every((line) => !line.includes(ESC)));
+      assert.match(monochrome.join("\n"), /^❯ distinct turn\s*$/m);
+    } finally {
+      configureColor(false);
+    }
+  } finally {
+    if (descriptor === undefined) delete (process.stdout as { isTTY?: boolean }).isTTY;
+    else Object.defineProperty(process.stdout, "isTTY", descriptor);
+    if (noColor === undefined) delete process.env["NO_COLOR"];
+    else process.env["NO_COLOR"] = noColor;
+    if (term === undefined) delete process.env["TERM"];
+    else process.env["TERM"] = term;
+  }
+});

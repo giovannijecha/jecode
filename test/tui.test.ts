@@ -534,7 +534,7 @@ test("reasoning keeps an unframed three-row tail and expands without losing text
   assert.equal(preview.length, 4, "outer gap and three content rows");
   assert.equal(preview[0], "");
   assert.ok(preview.slice(1).every((line) => line !== " ".repeat(50)));
-  assert.doesNotMatch(shown, /─/);
+  assert.doesNotMatch(shown, /[─│]/);
 
   block.live = false;
   block.expanded = true;
@@ -824,7 +824,7 @@ test("an interrupted approval reconciles a provisional denial on its rail", asyn
   assert.equal(block?.kind === "tool" ? block.right : undefined, "interrupted");
 });
 
-test("conversation blocks use the approved hierarchy with one tool rail", () => {
+test("conversation blocks separate user surface, free reasoning, and tool rail", () => {
   const blocks: Block[] = [
     { kind: "user", text: "ask" },
     { kind: "reasoning", text: "think", expanded: true },
@@ -832,12 +832,12 @@ test("conversation blocks use the approved hierarchy with one tool rail", () => 
     { kind: "answer", text: "done" },
   ];
   const drawn = strip(renderAll(blocks, 50, STEEL)).join("\n");
-  assert.match(drawn, / ask/);
-  assert.match(drawn, / think/);
+  assert.match(drawn, /❯ ask/);
+  assert.match(drawn, /^think$/m);
   assert.match(drawn, /✓\s+read_file\s+a\.ts/);
   assert.match(drawn, /^done$/m);
-  assert.match(drawn, /│|✓\s+read_file/);
-  assert.match(drawn, /│ think\n│\n✓\s+read_file/);
+  assert.match(drawn, /think\n\n✓\s+read_file/);
+  assert.doesNotMatch(drawn, /│/);
   assert.doesNotMatch(drawn, /[█├└]/);
 });
 

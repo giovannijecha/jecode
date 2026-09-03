@@ -17,7 +17,7 @@ import {
   TOOL_ROW_ARRIVAL_MS,
   type ToolMotion,
 } from "../motion.ts";
-import { transcriptLead, transcriptMark } from "../transcript-grammar.ts";
+import { transcriptLead } from "../transcript-grammar.ts";
 import type { Detail, Emphasis, ToolBlock, ToolTone } from "./types.ts";
 
 const OUTPUT_ROWS = 8;
@@ -32,7 +32,6 @@ type ShownDetail = { detail: Detail; sourceIndex?: number };
 
 export type ToolRenderContext = {
   continues?: boolean;
-  followsReasoning?: boolean;
   now?: number;
   motion?: ToolMotion;
   reducedMotion?: boolean;
@@ -57,9 +56,7 @@ export function renderTool(
   const leader = movingLeader(width, left, right, pal, context, now);
 
   return [
-    ...(context.followsReasoning === true
-      ? [row(width, transcriptMark(width, { text: "│", fg: pal.rule }))]
-      : context.continues === true ? [] : [""]),
+    ...(context.continues === true ? [] : [""]),
     row(width, leader === undefined ? left : [...left, leader], right),
     ...shown.map(({ detail, sourceIndex }) => renderDetail(
       detail,
