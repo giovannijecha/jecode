@@ -173,18 +173,30 @@ test("keeps an incomplete final response and explains why it stopped", async () 
       {
         type: "response.incomplete",
         response: {
-          status: "incomplete",
           incomplete_details: { reason: "max_output_tokens" },
-          output: [{ type: "message", content: [{ type: "output_text", text: "partial" }] }],
+          output: [
+            { type: "message", content: [{ type: "output_text", text: "partial" }] },
+            {
+              type: "function_call",
+              status: "incomplete",
+              call_id: "partial-call",
+              name: "write_file",
+              arguments: '{"path":"partial',
+            },
+          ],
         },
       },
     ]),
   );
 
-  assert.deepEqual(fromWireResponse(data).content, [
+  const message = fromWireResponse(data);
+  assert.equal(data.status, "incomplete");
+  assert.deepEqual(message.content, [
     { kind: "text", text: "partial" },
     { kind: "text", text: "[truncated: hit max_output_tokens — raise --max-tokens]" },
   ]);
+  assert.equal(message.raw, undefined);
+  assert.equal(message.rawFrom, undefined);
 });
 
 test("streams and preserves refusal text", async () => {
@@ -338,8 +350,15 @@ test("offers only reasoning-capable Responses models and keeps their real effort
 
 test("normalizes tool calls and sparse usage from a completed response", () => {
   const message = fromWireResponse({
+    status: "completed",
     output: [
-      { type: "function_call", call_id: "valid", name: "read_file", arguments: '{"path":"a.ts"}' },
+      {
+        type: "function_call",
+        status: "completed",
+        call_id: "valid",
+        name: "read_file",
+        arguments: '{"path":"a.ts"}',
+      },
       { type: "function_call", call_id: "empty", name: "list_dir", arguments: "" },
       { type: "function_call", call_id: "broken", name: "edit_file", arguments: "{" },
       { type: "future_item", value: "retained only in raw" },
@@ -362,6 +381,43 @@ test("normalizes tool calls and sparse usage from a completed response", () => {
   assert.equal(message.rawFrom, "openai");
   assert.ok(Array.isArray(message.raw));
   assert.equal(message.raw.length, 4);
+});
+
+test("rejects an incomplete call item and its unsafe continuation payload", () => {
+  const message = fromWireResponse({
+    status: "completed",
+    output: [
+      { type: "message", content: [{ type: "output_text", text: "partial" }] },
+      {
+        type: "function_call",
+        status: "incomplete",
+        call_id: "partial",
+        name: "write_file",
+        arguments: '{"path":"partial',
+      },
+    ],
+  });
+
+  assert.deepEqual(message.content, [{ kind: "text", text: "partial" }]);
+  assert.equal(message.raw, undefined);
+  assert.equal(message.rawFrom, undefined);
+});
+
+test("explains an incomplete response even when the provider omits its reason", () => {
+  const message = fromWireResponse({
+    status: "incomplete",
+    incomplete_details: null,
+    output: [{
+      type: "function_call",
+      status: "incomplete",
+      call_id: "partial",
+      name: "write_file",
+      arguments: "{",
+    }],
+  });
+
+  assert.deepEqual(message.content, [{ kind: "text", text: "[incomplete response]" }]);
+  assert.equal(message.raw, undefined);
 });
 
 test("sends a stateless Responses request with encrypted reasoning included", async (context) => {

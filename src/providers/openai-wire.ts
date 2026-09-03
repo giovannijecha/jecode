@@ -7,7 +7,7 @@ import { wireTokenCount } from "./wire-usage.ts";
 
 export type OpenAIResponse = {
   output?: unknown[];
-  incomplete_details?: { reason?: string };
+  incomplete_details?: { reason?: string } | null;
   status?: string;
   error?: { code?: string; message?: string } | null;
   usage?: {
@@ -60,7 +60,9 @@ export function toWireItems(message: Message, providerId = "openai"): unknown[] 
 
 export function stopNotice(data: OpenAIResponse): string | undefined {
   const reason = data.incomplete_details?.reason;
-  if (reason === undefined) return undefined;
+  if (reason === undefined) {
+    return data.status === "incomplete" ? "[incomplete response]" : undefined;
+  }
   return reason === "max_output_tokens"
     ? "[truncated: hit max_output_tokens — raise --max-tokens]"
     : `[incomplete: ${reason}]`;
@@ -69,6 +71,7 @@ export function stopNotice(data: OpenAIResponse): string | undefined {
 export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): Message {
   const raw = Array.isArray(data.output) ? data.output : [];
   const content: Block[] = [];
+  let suppressedFunctionCall = false;
 
   for (const entry of raw) {
     const item = entry as {
@@ -77,6 +80,7 @@ export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): M
       call_id?: string;
       name?: string;
       arguments?: string;
+      status?: string;
     };
 
     if (item.type === "message" && Array.isArray(item.content)) {
@@ -88,17 +92,22 @@ export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): M
           content.push({ kind: "text", text: `[refused] ${piece.refusal}` });
         }
       }
-    } else if (
-      item.type === "function_call" &&
-      typeof item.call_id === "string" &&
-      typeof item.name === "string"
-    ) {
-      content.push({
-        kind: "tool_call",
-        id: item.call_id,
-        name: item.name,
-        input: parseArguments(item.arguments),
-      });
+    } else if (item.type === "function_call") {
+      if (
+        data.status === "completed" &&
+        (item.status === undefined || item.status === "completed") &&
+        typeof item.call_id === "string" &&
+        typeof item.name === "string"
+      ) {
+        content.push({
+          kind: "tool_call",
+          id: item.call_id,
+          name: item.name,
+          input: parseArguments(item.arguments),
+        });
+      } else {
+        suppressedFunctionCall = true;
+      }
     }
     // reasoning items and anything future: carried in `raw` only.
   }
@@ -106,7 +115,14 @@ export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): M
   const notice = stopNotice(data);
   if (notice !== undefined) content.push({ kind: "text", text: notice });
 
-  return { role: "assistant", content, raw, rawFrom: providerId, usage: normalizeUsage(data) };
+  return {
+    role: "assistant",
+    content,
+    ...(data.status === "completed" && !suppressedFunctionCall
+      ? { raw, rawFrom: providerId }
+      : {}),
+    usage: normalizeUsage(data),
+  };
 }
 
 function normalizeUsage(data: OpenAIResponse): Usage | undefined {

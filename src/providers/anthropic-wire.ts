@@ -64,6 +64,7 @@ export function stopNotice(data: AnthropicResponse): string | undefined {
 export function fromWireResponse(data: AnthropicResponse): Message {
   const raw = Array.isArray(data.content) ? data.content : [];
   const content: Block[] = [];
+  let suppressedToolCall = false;
 
   for (const item of raw) {
     const block = item as {
@@ -76,17 +77,21 @@ export function fromWireResponse(data: AnthropicResponse): Message {
 
     if (block.type === "text" && typeof block.text === "string") {
       content.push({ kind: "text", text: block.text });
-    } else if (
-      block.type === "tool_use" &&
-      typeof block.id === "string" &&
-      typeof block.name === "string"
-    ) {
-      content.push({
-        kind: "tool_call",
-        id: block.id,
-        name: block.name,
-        input: (block.input ?? {}) as Record<string, unknown>,
-      });
+    } else if (block.type === "tool_use") {
+      if (
+        data.stop_reason === "tool_use" &&
+        typeof block.id === "string" &&
+        typeof block.name === "string"
+      ) {
+        content.push({
+          kind: "tool_call",
+          id: block.id,
+          name: block.name,
+          input: (block.input ?? {}) as Record<string, unknown>,
+        });
+      } else {
+        suppressedToolCall = true;
+      }
     }
     // thinking / redacted_thinking and anything future: carried in `raw` only.
   }
@@ -94,7 +99,13 @@ export function fromWireResponse(data: AnthropicResponse): Message {
   const notice = stopNotice(data);
   if (notice !== undefined) content.push({ kind: "text", text: notice });
 
-  return { role: "assistant", content, raw, rawFrom: "anthropic", usage: normalizeUsage(data) };
+  const retainRaw = data.stop_reason !== "max_tokens" && !suppressedToolCall;
+  return {
+    role: "assistant",
+    content,
+    ...(retainRaw ? { raw, rawFrom: "anthropic" } : {}),
+    usage: normalizeUsage(data),
+  };
 }
 
 function normalizeUsage(data: AnthropicResponse): Usage | undefined {
