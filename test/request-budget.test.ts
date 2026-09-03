@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   budgetRequest,
+  budgetRequestFromInputTokens,
   estimateRequestInputTokens,
   type RequestEnvelope,
 } from "../src/context/budget.ts";
@@ -38,6 +39,20 @@ test("honors a provider request ceiling stricter than the usable window", () => 
 
   assert.equal(budget.limitTokens, 91_200);
   assert.equal(budget.inputTokens + budget.maxOutputTokens, budget.limitTokens);
+});
+
+test("reuses an exact request estimate without changing the budget", () => {
+  const policy = policyForContextWindow({ tokens: 128_000 }, 85);
+  const inputTokens = estimateRequestInputTokens(envelope);
+
+  assert.deepEqual(
+    budgetRequestFromInputTokens(inputTokens, 64_000, policy),
+    budgetRequest(envelope, 64_000, policy),
+  );
+  assert.throws(
+    () => budgetRequestFromInputTokens(0, 64_000, policy),
+    /request input tokens must be a positive safe integer/,
+  );
 });
 
 test("counts system text and tool schemas as request input", () => {
