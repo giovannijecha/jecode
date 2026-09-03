@@ -45,6 +45,7 @@ export type AppScreen = {
 export type AppEnvironment = {
   screen?: AppScreen;
   paint?: Painter;
+  shutdownSignal?: AbortSignal;
 };
 
 export async function runApp(
@@ -71,6 +72,7 @@ export async function runApp(
   let escapeTimer: NodeJS.Timeout | undefined;
   let stopResize = (): void => {};
   let stopInput = (): void => {};
+  let stopShutdown = (): void => {};
   let failure: { error: unknown } | undefined;
   let activeWorkflow: Promise<void> | undefined;
   // Timers outlive the teardown they were scheduled before. Painting after the
@@ -193,6 +195,7 @@ export async function runApp(
     live = false;
     safely(stopInput);
     safely(stopResize);
+    safely(stopShutdown);
     if (activityTimer !== undefined) clearInterval(activityTimer);
     if (frameTimer !== undefined) clearTimeout(frameTimer);
     if (motionTimer !== undefined) clearTimeout(motionTimer);
@@ -227,15 +230,15 @@ export async function runApp(
     return tracked;
   }
 
-  function requestQuit(): void {
+  function requestQuit(reason: unknown = new Error("interrupted")): void {
+    state.open = overlay.cancel(state.open);
     const activity = state.activity;
     if (activity === undefined) {
       quit();
       return;
     }
     state.closeWhenIdle = true;
-    state.open = overlay.cancel(state.open);
-    activity.control.abort(new Error("interrupted"));
+    activity.control.abort(reason);
   }
 
   function startActivity(kind: ActivityKind, label: string): Activity | undefined {
@@ -339,6 +342,11 @@ export async function runApp(
   }
 
   try {
+    const shutdownSignal = environment.shutdownSignal;
+    const onShutdown = (): void => requestQuit(shutdownSignal?.reason);
+    if (shutdownSignal?.aborted === true) return;
+    shutdownSignal?.addEventListener("abort", onShutdown, { once: true });
+    stopShutdown = () => shutdownSignal?.removeEventListener("abort", onShutdown);
     terminal.enter(session.config.reducedMotion);
     stopResize = terminal.onResize(() => guard(() => {
       paint.invalidate();

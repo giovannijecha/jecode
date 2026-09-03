@@ -22,9 +22,10 @@ export type StartEnvironment = {
   applicationRoot?: string;
   transcriptRoot?: string;
   sessionsRoot?: string;
+  signal?: AbortSignal;
   interactive?(): boolean;
-  runInteractive?(session: Session, applicationRoot: string): Promise<void>;
-  runNonInteractive?(session: Session): Promise<void>;
+  runInteractive?(session: Session, applicationRoot: string, signal?: AbortSignal): Promise<void>;
+  runNonInteractive?(session: Session, signal?: AbortSignal): Promise<void>;
   write?(text: string): void;
 };
 
@@ -89,12 +90,20 @@ export async function start(
       }
     }
     try {
-      await (environment.runInteractive ?? runApp)(session, transcriptRoot);
+      if (environment.runInteractive === undefined) {
+        await runApp(session, transcriptRoot, { shutdownSignal: environment.signal });
+      } else {
+        await environment.runInteractive(session, transcriptRoot, environment.signal);
+      }
     } finally {
       await session.persistence?.close();
     }
   } else {
-    await (environment.runNonInteractive ?? runBatch)(session);
+    if (environment.runNonInteractive === undefined) {
+      await runBatch(session, { signal: environment.signal });
+    } else {
+      await environment.runNonInteractive(session, environment.signal);
+    }
   }
 }
 

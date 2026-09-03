@@ -293,6 +293,34 @@ test("batch mode propagates an explicit model-request budget", async () => {
   assert.doesNotMatch(output.join(""), /stopped after/);
 });
 
+test("batch process cancellation reaches the active provider request", async () => {
+  let providerSignal: AbortSignal | undefined;
+  const waiting: Provider = {
+    ...provider(),
+    send(request): Promise<Message> {
+      providerSignal = request.signal;
+      return new Promise((_resolve, reject) => {
+        request.signal?.addEventListener("abort", () => reject(request.signal?.reason), {
+          once: true,
+        });
+      });
+    },
+  };
+  const shutdown = new AbortController();
+  const running = runBatch(session(waiting), {
+    lines: input("wait"),
+    signal: shutdown.signal,
+    write: () => {},
+  });
+
+  await waitFor(() => providerSignal !== undefined, "batch provider request");
+  const reason = new Error("received SIGTERM");
+  shutdown.abort(reason);
+
+  await assert.rejects(running, (error) => error === reason);
+  assert.equal(providerSignal?.aborted, true);
+});
+
 test("the bootstrap selects the interactive surface and builds one complete session", async () => {
   let opened: Session | undefined;
   let transcriptRoot: string | undefined;
@@ -488,6 +516,38 @@ test("plain resume starts in the shared searchable picker", async () => {
   );
   feed("/exit\r");
   await running;
+});
+
+test("process shutdown cancels the initial resume picker before leaving", async () => {
+  const current = session();
+  current.resume = {
+    candidates: [{
+      id: "saved-1",
+      createdAt: "2026-09-01T10:00:00.000Z",
+      updatedAt: "2026-09-01T10:01:00.000Z",
+      turns: 1,
+      preview: "saved question",
+      active: false,
+    }],
+    open: async () => {
+      assert.fail("shutdown must not open a session");
+    },
+  };
+  const shutdown = new AbortController();
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), {
+    ...harness.environment,
+    shutdownSignal: shutdown.signal,
+  });
+
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("saved question"),
+    "resume picker",
+  );
+  shutdown.abort(new Error("received SIGTERM"));
+  await running;
+
+  assert.equal(harness.left(), true);
 });
 
 test("the TUI owns and restores a screen around a real /exit interaction", async () => {
@@ -1150,6 +1210,44 @@ test("escape cancels the active provider request before the TUI closes", async (
 
   feed("/exit\r");
   await running;
+  assert.equal(harness.left(), true);
+});
+
+test("process shutdown aborts one active TUI turn and waits for its settlement", async () => {
+  let signal: AbortSignal | undefined;
+  let checkpoints = 0;
+  const waiting: Provider = {
+    ...provider(),
+    send: (request) => {
+      signal = request.signal;
+      return new Promise<Message>((_resolve, reject) => {
+        request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true });
+      });
+    },
+  };
+  const current = session(waiting);
+  current.persistence = {
+    checkpoint: async () => {
+      checkpoints++;
+    },
+    close: async () => {},
+  } as unknown as SessionPersistence;
+  const shutdown = new AbortController();
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), {
+    ...harness.environment,
+    shutdownSignal: shutdown.signal,
+  });
+  const feed = await harness.input();
+
+  feed("wait\r");
+  await waitFor(() => signal !== undefined, "provider request");
+  shutdown.abort(new Error("received SIGTERM"));
+  await running;
+
+  assert.equal(signal?.aborted, true);
+  assert.equal(current.conversation.activeNode?.settlement, "interrupted");
+  assert.equal(checkpoints, 1);
   assert.equal(harness.left(), true);
 });
 
