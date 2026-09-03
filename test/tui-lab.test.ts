@@ -22,8 +22,13 @@ test("every production-catalogue scene produces a bounded real terminal frame", 
     for (const size of [
       { rows: 14, cols: 38 },
       { rows: 16, cols: 40 },
+      { rows: 20, cols: 50 },
+      { rows: 24, cols: 63 },
+      { rows: 24, cols: 64 },
+      { rows: 24, cols: 65 },
       { rows: 24, cols: 80 },
       { rows: 40, cols: 120 },
+      { rows: 48, cols: 200 },
     ]) {
       const frame = composeLab(state(scene), size);
       assert.equal(frame.rows.length, size.rows, scene);
@@ -40,8 +45,8 @@ test("the golden frame carries the complete production hierarchy", () => {
   assert.match(shown, /Harden the OpenAI retry path/);
   assert.match(shown, /inspect the HTTP boundary first/);
   assert.doesNotMatch(shown, /thinking|thought/);
-  assert.match(shown, /✓ read_file\s+src\/providers\/http\.ts/);
-  assert.match(shown, /✓ search_text/);
+  assert.match(shown, /✓\s+read_file\s+src\/providers\/http\.ts/);
+  assert.match(shown, /✓\s+search_text/);
   assert.match(shown, /The request path is mapped/);
   assert.match(shown, /\/help/);
   assert.match(shown, /claude-sonnet-5 · high · ~\/Codex\/jecode \(main\)/);
@@ -97,7 +102,7 @@ test("compact diffs show every changed line without context noise", () => {
 
 test("edit approval and its exact diff remain visible together", () => {
   const shown = plain(composeLab(state("approve-edit"), { rows: 30, cols: 100 }).rows).join("\n");
-  assert.match(shown, /◌ edit_file\s+src\/providers\/http\.ts/);
+  assert.match(shown, /○\s+edit_file\s+src\/providers\/http\.ts/);
   assert.match(shown, /boundedText/);
   assert.match(shown, /Allow this edit\?/);
   assert.match(shown, /Yes, once/);
@@ -243,11 +248,11 @@ test("operational feedback occupies the footer beside a retained prompt", () => 
   assert.match(rows[prompt + 1] ?? "", /^─+$/);
 });
 
-test("the production identity carries the calibrated dark Steel tokens", () => {
-  assert.deepEqual(STEEL.surface.subtle, [31, 38, 47]);
+test("the production identity carries the calibrated Slate tokens", () => {
+  assert.deepEqual(STEEL.surface.subtle, [23, 29, 37]);
   assert.equal("reasoning" in STEEL.surface, false);
-  assert.deepEqual(STEEL.surface.added, [22, 55, 34]);
-  assert.deepEqual(STEEL.surface.removed, [62, 24, 27]);
+  assert.deepEqual(STEEL.surface.added, [21, 52, 33]);
+  assert.deepEqual(STEEL.surface.removed, [58, 24, 27]);
 });
 
 test("the lab has an exact-height recovery frame for a tiny terminal", () => {

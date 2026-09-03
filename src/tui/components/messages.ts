@@ -1,37 +1,45 @@
 import type { Palette } from "../../ui/theme.ts";
 import { trailingText } from "../../text-boundary.ts";
-import { blank, row } from "../../ui/render.ts";
+import { row } from "../../ui/render.ts";
 import { markdown } from "../../ui/markdown.ts";
+import { transcriptLead, transcriptWidth } from "../transcript-grammar.ts";
 import type { AnswerBlock, ReasoningBlock, UserBlock } from "./types.ts";
 
-const PAD = 1;
 export const REASONING_PREVIEW_ROWS = 3;
 const MIN_REASONING_PREVIEW_CHARS = 4_096;
 const REASONING_PREVIEW_OVERSCAN = 12;
 
 export function renderUser(block: UserBlock, width: number, pal: Palette): string[] {
-  const inner = Math.max(8, width - PAD * 2);
+  const inner = transcriptWidth(width);
   const content = markdown(block.text, inner, pal, inner);
   return [
     "",
-    blank(width, pal.surface.subtle),
-    ...content.map((line) => row(width, line.segs, [], pal.surface.subtle, PAD)),
-    blank(width, pal.surface.subtle),
+    ...content.map((line, index) => row(width, [
+      ...transcriptLead(width, index === 0
+        ? { text: "❯", fg: pal.accent, bold: true }
+        : undefined),
+      ...line.segs,
+    ])),
   ];
 }
 
 export function renderAnswer(block: AnswerBlock, width: number, pal: Palette): string[] {
-  const inner = Math.max(8, width - PAD * 2);
+  const inner = transcriptWidth(width);
   return [
     "",
     ...markdown(block.text, inner, pal, inner).map((line) =>
-      row(width, line.segs, [], undefined, PAD)
+      row(width, [...transcriptLead(width), ...line.segs])
     ),
   ];
 }
 
-export function renderReasoning(block: ReasoningBlock, width: number, pal: Palette): string[] {
-  const inner = Math.max(8, width - PAD * 2);
+export function renderReasoning(
+  block: ReasoningBlock,
+  width: number,
+  pal: Palette,
+  context: { continues?: boolean } = {},
+): string[] {
+  const inner = transcriptWidth(width);
   // Expanding a live stream is deferred until it is sealed. Re-parsing an
   // ever-growing full thought on every token makes the whole TUI stall.
   const expanded = block.expanded === true && block.live !== true;
@@ -42,14 +50,14 @@ export function renderReasoning(block: ReasoningBlock, width: number, pal: Palet
   const visible = expanded ? content : content.slice(-REASONING_PREVIEW_ROWS);
 
   return [
-    "",
+    ...(context.continues === true ? [] : [""]),
     ...visible.map((line) =>
       row(
         width,
-        line.segs.map((seg) => ({ ...seg, fg: pal.ink.dim, italic: true })),
-        [],
-        undefined,
-        PAD,
+        [
+          ...transcriptLead(width, { text: "│", fg: pal.rule }),
+          ...line.segs.map((seg) => ({ ...seg, fg: pal.ink.dim, italic: true })),
+        ],
       )
     ),
   ];

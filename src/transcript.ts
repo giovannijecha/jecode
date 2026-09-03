@@ -2,6 +2,7 @@
 
 import type { Block, Detail } from "./tui/blocks.ts";
 import { terminalText } from "./ui/terminal-text.ts";
+import { toolDuration } from "./duration.ts";
 
 export function defaultTranscriptName(now = new Date()): string {
   return `jecode-transcript-${now.toISOString().replace(/[-:.]/g, "")}.md`;
@@ -30,8 +31,12 @@ export function transcriptMarkdown(blocks: readonly Block[]): string {
         );
         break;
       case "tool":
+        const outcome = [
+          block.right === "" ? undefined : safeInline(block.right),
+          block.durationMs === undefined ? undefined : toolDuration(block.durationMs),
+        ].filter((part): part is string => part !== undefined).join(" · ");
         out.push(
-          `- **${safeInline(block.name)}**${block.target === "" ? "" : ` \`${inlineCode(block.target)}\``}${block.right === "" ? "" : ` — ${safeInline(block.right)}`}`,
+          `- **${safeInline(block.name)}**${block.target === "" ? "" : ` \`${inlineCode(block.target)}\``}${outcome === "" ? "" : ` — ${outcome}`}`,
         );
         if ((block.body?.length ?? 0) > 0) {
           out.push("", "````text", ...(block.body ?? []).map(detail), "````", "");

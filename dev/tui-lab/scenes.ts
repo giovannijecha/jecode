@@ -132,7 +132,7 @@ function toolsOutputScene(state: LabState): View {
     ...base(state),
     blocks: [
       { kind: "user", text: suiteRun.user },
-      commandBlock(suiteRun.output, "ok", suiteRun.result, state.expanded),
+      commandBlock(suiteRun.output, "ok", suiteRun.result, state.expanded, suiteRun.durationMs),
       { kind: "answer", text: suiteRun.answer },
     ],
     editor: edit.EMPTY,
@@ -479,6 +479,7 @@ function commandBlock(
   tone: "ok" | "pending",
   right: string,
   expanded: boolean,
+  durationMs?: number,
 ): ToolBlock {
   return {
     kind: "tool",
@@ -488,6 +489,7 @@ function commandBlock(
     tone,
     body: output.map((text) => ({ kind: "out", text })),
     expanded,
+    ...(durationMs === undefined ? {} : { durationMs }),
   };
 }
 
@@ -501,6 +503,7 @@ function toolBlock(tool: ToolFixture, expanded: boolean): ToolBlock {
     body: tool.detail?.map((text) => ({ kind: "out", text })),
     expanded,
     ...(tool.tone === "pending" ? { startedAt: 0 } : {}),
+    ...(tool.durationMs === undefined ? {} : { durationMs: tool.durationMs }),
   };
 }
 

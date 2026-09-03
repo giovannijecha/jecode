@@ -32,7 +32,7 @@ than decorate the interface or pretend the product has emotions.
 | Warning | #E6BF5F |
 | Danger | #E87070 |
 
-The product interface remains dark Steel. Semantic colors communicate state and
+The product interface remains dark Slate. Semantic colors communicate state and
 do not recolor the mascot.
 
 ## Repository assets

@@ -338,7 +338,7 @@ keys live in `~/.jecode/credentials.json`, while ChatGPT OAuth accounts live in
 Secret stores use owner-only permissions where the operating system supports
 them.
 
-Jecode has one current interface theme, Dark Steel. `NO_COLOR` is supported for
+Jecode has one current interface theme, Slate. `NO_COLOR` is supported for
 terminals and pipelines that disable colour.
 
 ## Safety model

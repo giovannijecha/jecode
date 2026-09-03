@@ -26,8 +26,8 @@ test("colour menu rows align with the composer while writable prompts keep their
       { name: "exit", blurb: "exit" },
     ], 0, 60, STEEL).rows;
     assert.ok(commandRows.every((row) => !row.includes("\x1b[48;2;")));
-    assert.match(commandRows[0] ?? "", /\x1b\[38;2;102;155;210m\/help/);
-    assert.doesNotMatch(commandRows[1] ?? "", /\x1b\[38;2;102;155;210m\/exit/);
+    assert.match(commandRows[0] ?? "", /\x1b\[38;2;124;164;222m\/help/);
+    assert.doesNotMatch(commandRows[1] ?? "", /\x1b\[38;2;124;164;222m\/exit/);
 
     const commands = plain(commandRows);
     assert.match(commands[0] ?? "", /^\/help/);
@@ -73,7 +73,7 @@ test("colour menu rows align with the composer while writable prompts keep their
     assert.match(essential[1] ?? "", /^claude-sonnet-5.*Anthropic/);
     assert.match(
       essentialRows[0] ?? "",
-      /\x1b\[1m\x1b\[38;2;102;155;210mChatGPT/,
+      /\x1b\[1m\x1b\[38;2;124;164;222mChatGPT/,
     );
 
     const input = plain([promptLine("secret", 6, 60, STEEL).row]);

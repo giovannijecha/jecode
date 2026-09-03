@@ -9,8 +9,8 @@ import { CONTEXT_LIMITS } from "../context/projection.ts";
 import type { Detail, TranscriptBlock } from "../transcript-types.ts";
 import type { Block, Message, Usage } from "../types.ts";
 
-export const SESSION_SCHEMA = 3;
-export type SessionSchema = 1 | 2 | 3;
+export const SESSION_SCHEMA = 4;
+export type SessionSchema = 1 | 2 | 3 | 4;
 export const SESSION_FILE_LIMITS = Object.freeze({
   text: 1_048_576,
   metadataBytes: 64 * 1_024,
@@ -178,7 +178,7 @@ export function decodeNode(value: unknown): StoredNode {
       effort: identity["effort"],
     }),
     messages: Object.freeze(messages.map(messageFromRecord)),
-    blocks: Object.freeze(blocks.map(blockFromRecord)),
+    blocks: Object.freeze(blocks.map((block) => blockFromRecord(block, version))),
     ...(context === undefined ? {} : { context: Object.freeze(context) }),
     ...(failure === undefined ? {} : { failure: Object.freeze(failure) }),
   });
@@ -326,20 +326,25 @@ function blockRecord(block: TranscriptBlock): unknown[] {
     right: block.right,
     tone: block.tone,
     body: block.body?.map(detailRecord) ?? null,
+    durationMs: block.durationMs ?? null,
   }];
 }
 
-function blockFromRecord(value: unknown): TranscriptBlock {
+function blockFromRecord(value: unknown, version: SessionSchema): TranscriptBlock {
   if (!record(value) || typeof value["kind"] !== "string") throw invalid();
   if (
     (value["kind"] === "user" || value["kind"] === "answer" || value["kind"] === "reasoning") &&
     keys(value, "kind,text") && boundedText(value["text"])
   ) return { kind: value["kind"], text: value["text"] };
+  const toolKeys = version >= 4
+    ? "body,durationMs,kind,name,right,target,tone"
+    : "body,kind,name,right,target,tone";
   if (
-    value["kind"] === "tool" && keys(value, "body,kind,name,right,target,tone") &&
+    value["kind"] === "tool" && keys(value, toolKeys) &&
     bounded(value["name"], 256) && boundedText(value["target"]) &&
     boundedText(value["right"], 1_024) &&
     (value["tone"] === "ok" || value["tone"] === "fail" || value["tone"] === "deny") &&
+    (version < 4 || nullableInteger(value["durationMs"], 0)) &&
     (value["body"] === null ||
       (Array.isArray(value["body"]) && value["body"].length <= SESSION_FILE_LIMITS.details))
   ) {
@@ -353,6 +358,9 @@ function blockFromRecord(value: unknown): TranscriptBlock {
       right: value["right"],
       tone: value["tone"],
       ...(body === undefined ? {} : { body }),
+      ...(version < 4 || value["durationMs"] === null
+        ? {}
+        : { durationMs: value["durationMs"] as number }),
     };
   }
   throw invalid();
@@ -464,7 +472,7 @@ function integer(value: unknown, minimum: number): value is number {
 }
 
 function schema(value: unknown): value is SessionSchema {
-  return value === 1 || value === 2 || value === SESSION_SCHEMA;
+  return value === 1 || value === 2 || value === 3 || value === SESSION_SCHEMA;
 }
 
 function settlement(value: unknown, version: SessionSchema): value is TurnSettlement {

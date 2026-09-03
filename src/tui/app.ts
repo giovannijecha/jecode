@@ -28,6 +28,7 @@ import { sessionPermissions } from "../permissions.ts";
 import { resumePicker } from "./resume.ts";
 
 const FRAME_MS = 16;
+const MOTION_FRAME_MS = 40;
 const ACTIVITY_REFRESH_MS = 1_000;
 /** How long a lone escape waits to prove it is not the start of a sequence. */
 const ESCAPE_MS = 25;
@@ -65,6 +66,7 @@ export async function runApp(
 
   let closed: (() => void) | undefined;
   let frameTimer: NodeJS.Timeout | undefined;
+  let motionTimer: NodeJS.Timeout | undefined;
   let activityTimer: NodeJS.Timeout | undefined;
   let escapeTimer: NodeJS.Timeout | undefined;
   let stopResize = (): void => {};
@@ -102,6 +104,7 @@ export async function runApp(
       feedback: state.feedback,
       readiness: turnBlocker(session),
       now,
+      reducedMotion: session.config.reducedMotion,
       modal: overlay.shown(state.open),
       menu: completionOptions(state.completing),
       menuIndex: state.completing?.index,
@@ -133,6 +136,15 @@ export async function runApp(
     state.lastMaxScroll = frame.maxScroll;
     paint.paint(frame.rows, frame.cursor);
     if (frame.transcriptPending) render();
+    if (frame.transcriptAnimating && motionTimer === undefined) {
+      motionTimer = setTimeout(() => guard(() => {
+        motionTimer = undefined;
+        render();
+      }), Math.max(0, MOTION_FRAME_MS - FRAME_MS));
+    } else if (!frame.transcriptAnimating && motionTimer !== undefined) {
+      clearTimeout(motionTimer);
+      motionTimer = undefined;
+    }
   };
 
   // Streaming produces a token at a time; painting at that rate is wasted
@@ -183,6 +195,7 @@ export async function runApp(
     safely(stopResize);
     if (activityTimer !== undefined) clearInterval(activityTimer);
     if (frameTimer !== undefined) clearTimeout(frameTimer);
+    if (motionTimer !== undefined) clearTimeout(motionTimer);
     if (escapeTimer !== undefined) clearTimeout(escapeTimer);
     safely(() => feedback.close());
     safely(() => terminal.leave());

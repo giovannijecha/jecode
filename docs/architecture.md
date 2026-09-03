@@ -400,6 +400,8 @@ state + terminal size
 Blocks store source text, never pre-wrapped rows. A transcript renderer caches
 rows per block, width, and palette: streaming invalidates only the changing
 block, scrolling reuses all cached rows, and resize deliberately reflows them.
+Ephemeral tool motion invalidates only its active block on an adaptive frame
+clock; it is neither stored in the transcript nor replayed after resume.
 The viewport is assembled from only the cached row ranges it intersects rather
 than flattening the complete history on every frame. Cell measurement,
 truncation, and styled spans share complete grapheme boundaries across
@@ -415,11 +417,11 @@ The visual grammar follows a transcript rather than a dashboard or execution
 diagram:
 
 ```text
-user input       full-width neutral surface
-reasoning        unlabeled, unframed muted three-row tail
-assistant        unframed Markdown
-tool activity    compact state rail with evidence beneath each call
-selection        bold Steel label/value; arrow fallback without colour
+user input       `❯` in the semantic gutter, then unframed Markdown
+reasoning        `│` gutter rail and muted, unlabeled three-row tail
+assistant        unframed Markdown on the shared content column
+tool activity    state mark plus continuous evidence rail beneath each call
+selection        bold Slate label/value; arrow fallback without colour
 composer         editor, mid-turn steering, query fields, and contextual menu inside one pair of rules
 footer           identity left, feedback or active state with elapsed time right
 ```
@@ -443,10 +445,11 @@ reference inside the dock and closes with Esc; command discovery remains on the
 `/` completion surface. Token accounting stays internal instead of becoming a
 persistent `/usage` report.
 
-Conversation turns use one blank terminal row as their outer separator. The
-user surface keeps its own top and bottom padding. A tool trace starts after one
-blank row, then consecutive calls join on one vertical rail without card
-padding or repeated gaps.
+Conversation turns use one blank terminal row as their outer separator. User,
+reasoning, assistant, notice, and tool rows reserve the same adaptive semantic
+gutter. A rail-only rhythm row gives reasoning space before its first tool while
+keeping the execution trace continuous. Consecutive tools join without repeated
+gaps.
 
 Short transcripts are bottom-aligned against the dock with one fixed blank row
 before the composer's upper rule. Unused terminal height stays above the
@@ -480,21 +483,26 @@ generic terminals retain both traditional plain-Backspace encodings.
 Writable fields and searchable pickers carry the same `→ ` active prompt. One
 shared renderer owns its terminal-cell width, horizontal window, secret mask,
 right-side progress, and cursor offset, so the interactions cannot drift apart.
-Selection colours only the active label and value in bold Steel, leaving the
+Selection colours only the active label and value in bold Slate, leaving the
 row background untouched. `NO_COLOR` restores the arrow marker so focus remains
 structural when colour is unavailable.
 
 Assistant Markdown follows the same restraint. Bright foreground carries prose;
 a dedicated technical cyan identifies paths, links, inline code, list marks,
-and syntax keywords without spending the structural Steel accent. Readable
+and syntax keywords without spending the structural Slate accent. Readable
 secondary text and deliberately dim chrome are separate roles, so explanations
 remain legible without making reasoning, fences, or footer metadata compete
 with the answer. Inline code has no background chip. Fenced code keeps dim
 opening and closing fences with a two-cell body indent; it has no full-width
 surface or decorative left rail.
 
-Tool output and diffs stay complete in state. A pending tool owns a stable rail
-node and elapsed label. `run_command` updates that same block with the
+Tool output and diffs stay complete in state. A running tool owns a local
+Braille activity mark and elapsed label; a call waiting to run stays on a static
+open mark. Completion lands briefly in its outcome colour before cooling into
+the transcript, and newly arrived evidence follows the same restrained motion.
+The animation registry is renderer-local, pauses away from the live tail, and
+is bypassed by reduced-motion mode. Settled execution duration is durable.
+`run_command` updates that same block with the
 bounded, redacted capture while the process runs. Collapsed command output
 shows the newest rows because verdicts land at the end. Every collapsed file
 diff uses the same 15-changed-row budget, keeps both the beginning and end, and
@@ -517,12 +525,14 @@ number of rows, preserving what is being read; the footer reports unseen
 blocks. Tiny terminals receive a fixed recovery frame instead of fabricated
 dimensions or overflowing chrome.
 
-Jecode exposes one dark Steel identity through semantic colour tokens shared by
-every production component and the TUI Lab. Structural Steel, technical cyan,
+Jecode exposes one dark Slate identity through semantic colour tokens shared by
+every production component and the TUI Lab. Structural Slate, technical cyan,
 foreground, secondary, dim, and outcome roles are intentionally distinct;
 components never embed literal colours. `NO_COLOR` disables colour while
 retaining structural selection and state marks. Activity state marks remain
-stable in every mode; reduced-motion mode also makes the input cursor steady.
+structural without colour. Reduced-motion mode renders resting tool states
+directly and also makes the input cursor steady. Assistant answers animate only
+through real provider streaming; the renderer never simulates typewriter output.
 
 ## Validation boundaries
 

@@ -1,18 +1,42 @@
-// A compact execution trace: state and identity on one rail, evidence below.
+// A compact execution trace: state and identity on one semantic rail,
+// bounded evidence below, and motion that never enters durable state.
 
 import type { Palette, RGB } from "../../ui/theme.ts";
 import type { Seg } from "../../ui/render.ts";
-import { hasColor, row } from "../../ui/render.ts";
+import { fitSegs, hasColor, plainLen, row } from "../../ui/render.ts";
 import { graphemeCeiling, graphemeFloor } from "../../text-boundary.ts";
+import { toolDuration } from "../../duration.ts";
+import {
+  breathe,
+  easeInOut,
+  easeOut,
+  interval,
+  mix,
+  TOOL_BIRTH_MS,
+  TOOL_LEADER_MAX_MS,
+  TOOL_ROW_ARRIVAL_MS,
+  TOOL_SETTLE_MS,
+  type ToolMotion,
+} from "../motion.ts";
+import { transcriptLead, transcriptMark } from "../transcript-grammar.ts";
 import type { Detail, Emphasis, ToolBlock, ToolTone } from "./types.ts";
 
 const OUTPUT_ROWS = 8;
 const LIVE_OUTPUT_ROWS = 6;
 const DIFF_ROWS = 15;
+const TOOL_NAME_COLS = 12;
+const TOOL_COLUMNS_AT = 64;
+const SPINNER_MS = 80;
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+
+type ShownDetail = { detail: Detail; sourceIndex?: number };
 
 export type ToolRenderContext = {
   continues?: boolean;
+  followsReasoning?: boolean;
   now?: number;
+  motion?: ToolMotion;
+  reducedMotion?: boolean;
 };
 
 export function renderTool(
@@ -21,42 +45,60 @@ export function renderTool(
   pal: Palette,
   context: ToolRenderContext = {},
 ): string[] {
+  const now = context.now ?? Date.now();
   const shown = visibleDetails(block);
-  const right = liveLabel(block, context);
+  const ink = statusInk(block, pal, context, now);
+  const nameInk = birthInk(pal.ink.bright, pal.ink.dim, context, now);
+  const left: Seg[] = [
+    ...transcriptLead(width, { text: stateGlyph(block, context, now), fg: ink, bold: true }),
+    { text: toolName(block, width), fg: nameInk, bold: true },
+    ...(block.target === "" ? [] : [{ text: `  ${block.target}`, fg: pal.technical }]),
+  ];
+  const right = resultSegments(block, pal, context, now);
+  const leader = movingLeader(width, left, right, pal, context, now);
+
   return [
-    ...(context.continues === true ? [] : [""]),
-    row(
+    ...(context.followsReasoning === true
+      ? [row(width, transcriptMark(width, { text: "│", fg: pal.rule }))]
+      : context.continues === true ? [] : [""]),
+    row(width, leader === undefined ? left : [...left, leader], right),
+    ...shown.map(({ detail, sourceIndex }) => renderDetail(
+      detail,
+      block.tone,
       width,
-      [
-        { text: " " },
-        { text: `${stateGlyph(block)} `, fg: statusInk(block.tone, pal), bold: true },
-        { text: block.name, fg: pal.ink.bright, bold: true },
-        ...(block.target === "" ? [] : [{ text: `  ${block.target}`, fg: pal.technical }]),
-      ],
-      right === "" ? [] : [{ text: right, fg: statusInk(block.tone, pal) }],
-    ),
-    ...shown.map((detail) => renderDetail(detail, block.tone, width, pal)),
+      pal,
+      context.reducedMotion === true ? undefined : context.motion?.rowsAt[sourceIndex ?? -1],
+      now,
+    )),
   ];
 }
 
-function visibleDetails(block: ToolBlock): Detail[] {
+function visibleDetails(block: ToolBlock): ShownDetail[] {
   const all = block.body ?? [];
-  if (block.expanded === true || all.length === 0) return all;
+  if (block.expanded === true || all.length === 0) {
+    return all.map((detail, sourceIndex) => ({ detail, sourceIndex }));
+  }
   if (all.every((detail) => detail.kind === "out")) {
     const limit = block.tone === "pending" ? LIVE_OUTPUT_ROWS : OUTPUT_ROWS;
-    if (all.length <= limit) return all;
+    if (all.length <= limit) return all.map((detail, sourceIndex) => ({ detail, sourceIndex }));
     const hidden = all.length - limit;
     const note = block.tone === "pending"
       ? `… ${all.length} lines so far`
       : `… ${hidden} earlier lines · ctrl+o expand`;
-    return [{ kind: "gap", text: note }, ...all.slice(-limit)];
+    return [
+      { detail: { kind: "gap", text: note } },
+      ...all.slice(-limit).map((detail, index) => ({
+        detail,
+        sourceIndex: all.length - limit + index,
+      })),
+    ];
   }
-  // The compact transcript is an audit of what changed, not a code excerpt.
-  // One shared budget applies to writes and edits. Keep both ends so a large
-  // replacement cannot show only deletions while hiding all new content.
-  // Context, omitted changes, and gap rows remain in semantic state for the
-  // explicit full view.
-  const changed = all.filter((detail) => detail.kind === "add" || detail.kind === "del");
+
+  // A compact transcript audits what changed rather than repeating unchanged
+  // source. One budget covers writes and edits, with both ends retained.
+  const changed = all
+    .map((detail, sourceIndex) => ({ detail, sourceIndex }))
+    .filter(({ detail }) => detail.kind === "add" || detail.kind === "del");
   if (changed.length <= DIFF_ROWS) return changed;
   const leading = Math.ceil(DIFF_ROWS / 2);
   const trailing = DIFF_ROWS - leading;
@@ -64,35 +106,65 @@ function visibleDetails(block: ToolBlock): Detail[] {
   return [
     ...changed.slice(0, leading),
     {
-      kind: "gap",
-      text: `… ${hidden} more changed ${hidden === 1 ? "line" : "lines"} · ctrl+o expand`,
+      detail: {
+        kind: "gap",
+        text: `… ${hidden} more changed ${hidden === 1 ? "line" : "lines"} · ctrl+o expand`,
+      },
     },
     ...changed.slice(-trailing),
   ];
 }
 
-function renderDetail(detail: Detail, tone: ToolTone, width: number, pal: Palette): string {
-  const lead: Seg = { text: " " };
-  const rail: Seg = { text: "│ ", fg: pal.rule };
+function renderDetail(
+  detail: Detail,
+  tone: ToolTone,
+  width: number,
+  pal: Palette,
+  arrivedAt: number | undefined,
+  now: number,
+): string {
+  const rail = transcriptLead(width, { text: "│", fg: pal.rule });
   if (detail.kind === "out") {
-    const fg = tone === "fail" || failureLine(detail.text) ? pal.ink.removed : pal.ink.muted;
-    return row(width, [lead, rail, { text: detail.text === "" ? " " : detail.text, fg }]);
+    const base = tone === "fail" || failureLine(detail.text) ? pal.ink.removed : pal.ink.muted;
+    return row(width, [
+      ...rail,
+      { text: detail.text === "" ? " " : detail.text, fg: arrivalInk(base, pal, arrivedAt, now) },
+    ]);
   }
   if (detail.kind === "gap") {
-    return row(width, [lead, rail, { text: detail.text, fg: pal.ink.dim, italic: true }]);
+    return row(width, [
+      ...rail,
+      { text: detail.text, fg: arrivalInk(pal.ink.dim, pal, arrivedAt, now), italic: true },
+    ]);
   }
 
   const number = detail.kind === "add" ? detail.newLine : detail.oldLine;
-  const prefix = `${detail.kind === "add" ? "+" : detail.kind === "del" ? "-" : " "}${String(number ?? "").padStart(3)} `;
-  const fg = detail.kind === "add"
+  const sign = detail.kind === "add" ? "+" : detail.kind === "del" ? "-" : " ";
+  const base = detail.kind === "add"
     ? pal.ink.added
     : detail.kind === "del"
       ? pal.ink.removed
       : pal.ink.dim;
-  return row(width, [lead, rail, { text: prefix, fg }, ...emphasized(detail.text, detail.emphasis, fg)]);
+  const fg = arrivalInk(base, pal, arrivedAt, now);
+  const tint = detail.kind === "add"
+    ? pal.surface.added
+    : detail.kind === "del"
+      ? pal.surface.removed
+      : undefined;
+  return row(width, [
+    ...rail,
+    { text: sign, fg, bold: detail.kind !== "keep" },
+    { text: `${String(number ?? "").padStart(4)} `, fg: pal.ink.dim },
+    ...emphasized(detail.text, detail.emphasis, fg, tint),
+  ]);
 }
 
-function emphasized(text: string, emphasis: Emphasis | undefined, fg: RGB): Seg[] {
+function emphasized(
+  text: string,
+  emphasis: Emphasis | undefined,
+  fg: RGB,
+  bg: RGB | undefined,
+): Seg[] {
   if (emphasis === undefined || emphasis.length <= 0) return [{ text, fg }];
   const requestedStart = Math.max(0, Math.min(text.length, emphasis.start));
   const requestedEnd = Math.max(requestedStart, Math.min(text.length, requestedStart + emphasis.length));
@@ -101,31 +173,103 @@ function emphasized(text: string, emphasis: Emphasis | undefined, fg: RGB): Seg[
   if (start === end) return [{ text, fg }];
   return [
     ...(start === 0 ? [] : [{ text: text.slice(0, start), fg }]),
-    { text: text.slice(start, end), fg, inverse: true },
+    { text: text.slice(start, end), fg, bg, bold: true },
     ...(end === text.length ? [] : [{ text: text.slice(end), fg }]),
   ];
 }
 
-function stateGlyph(block: ToolBlock): string {
-  if (block.tone === "pending") return "◌";
-  if (block.tone === "fail") return hasColor() ? "●" : "×";
+function toolName(block: ToolBlock, width: number): string {
+  if (width < TOOL_COLUMNS_AT || block.target === "") return block.name;
+  return block.name.padEnd(TOOL_NAME_COLS);
+}
+
+function stateGlyph(block: ToolBlock, context: ToolRenderContext, now: number): string {
+  if (block.tone === "pending") {
+    if (block.startedAt === undefined || block.right !== "running") return "○";
+    if (context.reducedMotion === true) return "○";
+    return SPINNER[Math.floor(now / SPINNER_MS) % SPINNER.length] ?? "○";
+  }
+  if (block.tone === "fail") return "×";
   if (block.tone === "deny") return "○";
   return hasColor() ? "●" : "✓";
 }
 
-function liveLabel(block: ToolBlock, context: ToolRenderContext): string {
-  if (block.tone !== "pending" || block.startedAt === undefined || block.right !== "running") {
-    return block.right;
-  }
-  const elapsed = Math.max(0, (context.now ?? Date.now()) - block.startedAt);
-  const seconds = elapsed / 1_000;
-  return `running · ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+function resultSegments(
+  block: ToolBlock,
+  pal: Palette,
+  context: ToolRenderContext,
+  now: number,
+): Seg[] {
+  const status = block.right;
+  const duration = liveDuration(block, now);
+  if (status === "" && duration === "") return [];
+  const ink = statusInk(block, pal, context, now);
+  return [
+    ...(status === "" ? [] : [{ text: status, fg: ink }]),
+    ...(duration === "" ? [] : [{ text: `${status === "" ? "" : " · "}${duration}`, fg: pal.ink.dim }]),
+  ];
 }
 
-function statusInk(tone: ToolTone, pal: Palette): RGB {
-  if (tone === "fail") return pal.ink.removed;
-  if (tone === "pending" || tone === "deny") return pal.ink.attention;
-  return pal.ink.added;
+function liveDuration(block: ToolBlock, now: number): string {
+  if (block.tone === "pending" && block.startedAt !== undefined && block.right === "running") {
+    return toolDuration(Math.max(0, now - block.startedAt), true);
+  }
+  return block.durationMs === undefined ? "" : toolDuration(block.durationMs);
+}
+
+function statusInk(
+  block: ToolBlock,
+  pal: Palette,
+  context: ToolRenderContext,
+  now: number,
+): RGB {
+  if (block.tone === "fail") return pal.ink.removed;
+  if (block.tone === "deny") return pal.ink.attention;
+  if (block.tone === "pending") {
+    if (block.startedAt === undefined || context.reducedMotion === true) return pal.ink.attention;
+    return mix(pal.ink.attention, pal.accent, breathe(now));
+  }
+  if (context.reducedMotion === true || context.motion?.settledAt === undefined) return pal.ink.muted;
+  const cooled = easeOut(interval(now, context.motion.settledAt, TOOL_SETTLE_MS));
+  return mix(pal.ink.added, pal.ink.muted, cooled);
+}
+
+function birthInk(final: RGB, initial: RGB, context: ToolRenderContext, now: number): RGB {
+  if (context.reducedMotion === true || context.motion === undefined) return final;
+  return mix(initial, final, easeOut(interval(now, context.motion.bornAt, TOOL_BIRTH_MS)));
+}
+
+function arrivalInk(base: RGB, pal: Palette, arrivedAt: number | undefined, now: number): RGB {
+  if (arrivedAt === undefined) return base;
+  return mix(pal.ink.bright, base, easeOut(interval(now, arrivedAt, TOOL_ROW_ARRIVAL_MS)));
+}
+
+function movingLeader(
+  width: number,
+  left: readonly Seg[],
+  right: readonly Seg[],
+  pal: Palette,
+  context: ToolRenderContext,
+  now: number,
+): Seg | undefined {
+  if (context.reducedMotion === true || context.motion === undefined || right.length === 0) return undefined;
+  const progress = interval(now, context.motion.bornAt, TOOL_LEADER_MAX_MS);
+  if (progress >= 1) return undefined;
+
+  const fittedRight = fitSegs(right, width);
+  const gap = width - plainLen(left) - plainLen(fittedRight) - 1;
+  if (gap < 9) return undefined;
+
+  const cells = Array.from({ length: gap }, () => " ");
+  const travelCells = gap - 2;
+  const trail = Math.min(7, travelCells);
+  const travel = travelCells + trail;
+  const head = Math.floor(easeInOut(progress) * travel) - trail;
+  for (let offset = 0; offset < trail; offset++) {
+    const at = head + offset;
+    if (at >= 0 && at < travelCells) cells[at + 1] = "·";
+  }
+  return { text: cells.join(""), fg: pal.rule };
 }
 
 function failureLine(line: string): boolean {
