@@ -1,7 +1,10 @@
 // Provider-neutral context pressure and safe compaction boundaries.
 
 import type { Message, ModelContextWindow } from "../types.ts";
-import { estimateSerializedTokens } from "./estimate.ts";
+import {
+  estimateSerializedTokens,
+  estimateSerializedTokensResponsive,
+} from "./estimate.ts";
 
 export const DEFAULT_COMPACTION_PERCENT = 85;
 export const MIN_COMPACTION_PERCENT = 50;
@@ -26,16 +29,22 @@ export type CompactionPlan = Readonly<{
   messageCount: number;
 }>;
 
-export function planCompaction(
+export async function planCompaction(
   context: readonly Message[],
   turn: readonly Message[],
   coveredMessages: number,
   lastInputTokens: number,
   force: boolean,
   policy: ContextPolicy,
-): CompactionPlan | undefined {
+  estimatedInputTokens?: number,
+  signal?: AbortSignal,
+): Promise<CompactionPlan | undefined> {
   if (!validPolicy(policy) || coveredMessages < 0 || coveredMessages > turn.length) return undefined;
-  const estimated = estimateTokens(context);
+  if (
+    estimatedInputTokens !== undefined &&
+    (!Number.isSafeInteger(estimatedInputTokens) || estimatedInputTokens <= 0)
+  ) return undefined;
+  const estimated = estimatedInputTokens ?? await estimateTokensResponsive(context, signal);
   if (
     !force &&
     (estimated < policy.targetTokens || Math.max(estimated, lastInputTokens) < policy.triggerTokens)
@@ -44,15 +53,20 @@ export function planCompaction(
   const currentSuffix = turn.length - coveredMessages;
   const contextPrefix = context.length - currentSuffix;
   if (contextPrefix < 0) return undefined;
-  if (!sameMessages(context.slice(contextPrefix), turn.slice(coveredMessages))) return undefined;
+  if (!await sameMessages(
+    context.slice(contextPrefix),
+    turn.slice(coveredMessages),
+    signal,
+  )) return undefined;
 
   const targetTokens = force
     ? Math.min(policy.targetTokens, Math.max(512, Math.floor(estimated / 4)))
     : policy.targetTokens;
   const recentTokens = Math.min(policy.recentTokens, Math.max(256, Math.floor(targetTokens / 2)));
-  let boundary = recentBoundary(turn, coveredMessages, recentTokens);
+  const recent = await recentBoundary(turn, coveredMessages, recentTokens, signal);
+  let boundary = recent.boundary;
   let tail = turn.slice(boundary);
-  if (turn.length > 1 && estimateTokens(tail) > targetTokens) {
+  if (turn.length > 1 && recent.tokens > targetTokens) {
     boundary = turn.length;
     tail = [];
   }
@@ -60,7 +74,9 @@ export function planCompaction(
   const prefixEnd = contextPrefix + boundary - coveredMessages;
   if (prefixEnd <= 0 || prefixEnd > context.length) return undefined;
   const prefix = context.slice(0, prefixEnd);
-  if (!force && estimateTokens(prefix) < policy.minimumPrefixTokens) return undefined;
+  if (!force && await estimateTokensResponsive(prefix, signal) < policy.minimumPrefixTokens) {
+    return undefined;
+  }
 
   return {
     prefix: clone(prefix),
@@ -118,6 +134,13 @@ export function estimateTokens(messages: readonly Message[]): number {
   return estimateSerializedTokens(messages) + messages.length * 8;
 }
 
+export async function estimateTokensResponsive(
+  messages: readonly Message[],
+  signal?: AbortSignal,
+): Promise<number> {
+  return await estimateSerializedTokensResponsive(messages, signal) + messages.length * 8;
+}
+
 export function isContextOverflow(error: Error): boolean {
   const candidate = error as Error & { status?: number; body?: string };
   if (candidate.status !== 400 && candidate.status !== 413) return false;
@@ -125,18 +148,50 @@ export function isContextOverflow(error: Error): boolean {
   return /context_length_exceeded|maximum context length|context window|prompt is too long|input (?:is )?too (?:long|large)|(?:input|prompt|context).{0,80}(?:exceed|maximum|max tokens)/i.test(detail);
 }
 
-function recentBoundary(
+async function recentBoundary(
   turn: readonly Message[],
   coveredMessages: number,
   recentTokens: number,
-): number {
-  let boundary = minimumRecentBoundary(turn);
-  for (let candidate = boundary - 1; candidate >= coveredMessages; candidate--) {
-    if (!safeBoundary(turn, candidate)) continue;
-    if (estimateTokens(turn.slice(candidate)) > recentTokens) break;
-    boundary = candidate;
+  signal: AbortSignal | undefined,
+): Promise<Readonly<{ boundary: number; tokens: number }>> {
+  const minimum = Math.max(coveredMessages, minimumRecentBoundary(turn));
+  const candidates: number[] = [];
+  for (let candidate = coveredMessages; candidate <= minimum; candidate++) {
+    if (candidate === minimum || safeBoundary(turn, candidate)) candidates.push(candidate);
   }
-  return Math.max(coveredMessages, boundary);
+  const cache = new Map<number, Promise<number>>();
+  const estimateAt = (candidate: number): Promise<number> => {
+    let estimate = cache.get(candidate);
+    if (estimate === undefined) {
+      estimate = estimateTokensResponsive(turn.slice(candidate), signal);
+      cache.set(candidate, estimate);
+    }
+    return estimate;
+  };
+
+  const last = candidates.length - 1;
+  const minimumTokens = await estimateAt(candidates[last] as number);
+  if (minimumTokens > recentTokens) {
+    return { boundary: candidates[last] as number, tokens: minimumTokens };
+  }
+
+  // Adding older messages raises the byte and literal floors. A lower-bound
+  // search therefore replaces the former serialization of every suffix.
+  let low = 0;
+  let high = last;
+  let selected = last;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const tokens = await estimateAt(candidates[middle] as number);
+    if (tokens <= recentTokens) {
+      selected = middle;
+      high = middle - 1;
+    } else {
+      low = middle + 1;
+    }
+  }
+  const boundary = candidates[selected] as number;
+  return { boundary, tokens: await estimateAt(boundary) };
 }
 
 function minimumRecentBoundary(turn: readonly Message[]): number {
@@ -181,8 +236,23 @@ function validPercent(value: number): boolean {
     value >= MIN_COMPACTION_PERCENT && value <= MAX_COMPACTION_PERCENT;
 }
 
-function sameMessages(left: readonly Message[], right: readonly Message[]): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+async function sameMessages(
+  left: readonly Message[],
+  right: readonly Message[],
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index++) {
+    throwIfAborted(signal);
+    if (JSON.stringify(left[index]) !== JSON.stringify(right[index])) return false;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  return true;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
 }
 
 function clone<T>(value: T): T {

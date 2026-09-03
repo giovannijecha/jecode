@@ -256,6 +256,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         nodeId: nodeId ?? prospectiveNodeId,
         coveredMessages: context?.messageCount ?? 0,
         lastInputTokens: Math.max(session.usage.lastInputTokens, request.inputTokens),
+        estimatedInputTokens: request.inputTokens,
         signal: activity.control.signal,
         force,
         policy: request.policy,

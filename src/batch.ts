@@ -116,6 +116,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
           nodeId: nodeId ?? prospectiveNodeId,
           coveredMessages: context?.messageCount ?? 0,
           lastInputTokens: Math.max(session.usage.lastInputTokens, request.inputTokens),
+          estimatedInputTokens: request.inputTokens,
           force,
           policy: request.policy,
         });

@@ -3,7 +3,7 @@
 import type { ControllerEvents, ControllerOptions } from "./controller.ts";
 import {
   budgetRequestFromInputTokens,
-  estimateRequestInputTokens,
+  estimateRequestInputTokensResponsive,
 } from "./context/budget.ts";
 import type { ContextPolicy } from "./context/policy.ts";
 import { isContextOverflow } from "./context/policy.ts";
@@ -29,7 +29,16 @@ export async function requestAssistant(
   signal?: AbortSignal,
 ): Promise<ControllerResponse> {
   let policy = await options.contextPolicy();
-  const prepared = await prepareContext(history, current, specs, options, events, policy, "budget");
+  const prepared = await prepareContext(
+    history,
+    current,
+    specs,
+    options,
+    events,
+    policy,
+    "budget",
+    signal,
+  );
   let context = prepared.projected === undefined ? [...current] : clone(prepared.projected);
   let inputTokens = prepared.inputTokens;
   let recovered = false;
@@ -60,7 +69,9 @@ export async function requestAssistant(
         events,
         policy,
         "overflow",
+        signal,
         error as Error,
+        inputTokens,
       );
       if (next.projected === undefined) throw error;
       context = clone(next.projected);
@@ -78,13 +89,18 @@ async function prepareContext(
   events: ControllerEvents,
   policy: ContextPolicy,
   reason: "budget" | "overflow",
+  signal?: AbortSignal,
   error?: Error,
+  knownInputTokens?: number,
 ): Promise<PreparedContext> {
-  const inputTokens = estimateRequestInputTokens({
-    system: options.system,
-    messages: context,
-    tools: specs,
-  });
+  const inputTokens = knownInputTokens ?? await estimateRequestInputTokensResponsive(
+    {
+      system: options.system,
+      messages: context,
+      tools: specs,
+    },
+    signal,
+  );
   const projected = await events.onContext?.(history, context, {
     reason,
     policy,
@@ -95,11 +111,11 @@ async function prepareContext(
     projected,
     inputTokens: projected === undefined
       ? inputTokens
-      : estimateRequestInputTokens({
+      : await estimateRequestInputTokensResponsive({
         system: options.system,
         messages: projected,
         tools: specs,
-      }),
+      }, signal),
   };
 }
 
