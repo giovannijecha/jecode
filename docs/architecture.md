@@ -41,17 +41,28 @@ workspace content the model reads or content the user supplies.
 2. Stream display events while the provider assembles the authoritative
    assistant message.
 3. Append that message to history and record normalized usage.
-4. Return when it contains no tool calls.
+4. When it contains no tool calls, atomically close the steering inbox if it is
+   empty. Pending guidance instead joins the same turn and opens another
+   provider request.
 5. Otherwise preview each call, request approval when required, and execute it.
    Consecutive shared reads run in bounded parallel waves; exclusive calls
    remain ordered barriers. Collect every result in original call order inside
-   one user message.
+   one user message, then append any queued guidance.
 6. Repeat up to `maxSteps`.
 
 The controller awaits a checkpoint after every complete tool-result batch and
 after the final assistant response. It never begins the next provider request
 until that checkpoint succeeds. Batch mode commits only to memory; the TUI
 commits the same canonical turn to its durable session owner first.
+
+Interactive steering is cooperative rather than preemptive. The composer feeds
+one bounded inbox owned by the active turn. Guidance is consumed after the
+provider response or complete assistant-issued tool batch already in progress,
+never by cancelling or replaying part of that batch. It becomes an ordinary
+user message in canonical and model-facing history and remains inside the same
+conversation node. An atomic empty-and-close handshake prevents guidance from
+arriving between final completion and persistence; interruption returns any
+unconsumed guidance to the composer.
 
 If an interactive provider turn fails or is interrupted, the TUI seals the
 visible partial evidence and commits an explicit `failed` or `interrupted`
@@ -88,7 +99,8 @@ the foreground operation can end promptly.
 ## Foreground activity
 
 The interactive shell permits one foreground activity: a slash command or a
-model turn. One `AbortController` owns its cancellation. This
+model turn. One `AbortController` owns its cancellation. The composer may feed
+cooperative guidance into that model turn without opening another activity. This
 prevents a network-backed `/models` request from overlapping a turn and gives
 `Esc`, `Ctrl+C`, and `Ctrl+D` one consistent target.
 
@@ -406,14 +418,15 @@ reasoning        unlabeled, unframed muted three-row tail
 assistant        unframed Markdown
 tool activity    compact state rail with evidence beneath each call
 selection        bold Steel label/value; arrow fallback without colour
-composer         editor, query fields, and contextual menu inside one pair of rules
+composer         editor, mid-turn steering, query fields, and contextual menu inside one pair of rules
 footer           identity left, feedback or active state with elapsed time right
 ```
 
 Operational feedback is not conversation. Slash-command confirmations,
 configuration guidance, activity state, and preflight blockers share the
 replaceable right side of the one-line footer. Foreground work is summarized as
-`state · elapsed · esc to interrupt`, without another spinner or icon. Errors
+`state · elapsed · enter to steer · esc to interrupt`, replacing the steering
+hint with a queue count when needed and adding no spinner or icon. Errors
 and warnings take priority over that summary, followed by informational feedback
 and unseen output. Informational messages expire; warnings and errors remain
 briefly or until the next key. They never become transcript blocks and

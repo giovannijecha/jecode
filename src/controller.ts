@@ -14,6 +14,7 @@ import type {
 } from "./types.ts";
 import { isToolCall } from "./types.ts";
 import type { ContextPolicy } from "./context/policy.ts";
+import type { SteeringSource } from "./steering.ts";
 import type { Tool, ToolContext, ToolPreview, ToolRun } from "./tools/index.ts";
 import { findTool, runTool, toolSpecs } from "./tools/index.ts";
 import { requestAssistant } from "./controller-request.ts";
@@ -42,6 +43,8 @@ export type ControllerOptions = {
   effort: string;
   maxSteps: number;
   toolContext: ToolContext;
+  /** Cooperative user guidance consumed only at safe request boundaries. */
+  steering?: SteeringSource;
 };
 
 export type ControllerEvents = {
@@ -57,6 +60,8 @@ export type ControllerEvents = {
   onUsage?(usage: Usage): void;
   /** Best context-pressure signal: provider count when present, otherwise the sent estimate. */
   onRequestInput?(inputTokens: number): void;
+  /** A queued user message has entered canonical history for this turn. */
+  onSteering?(text: string): void;
   onStep?(step: number, total: number): void;
   /** A tool call is complete on the wire and its local preview is being prepared. */
   onToolPreparing?(call: ToolCallBlock, current: number, total: number): void;
@@ -103,8 +108,19 @@ export async function runTurn(
     if (projected !== undefined) context = clone([...projected]);
   };
 
+  const appendSteering = (messages: readonly string[]): boolean => {
+    for (const text of messages) {
+      append({ role: "user", content: [{ kind: "text", text }] });
+    }
+    for (const text of messages) {
+      events.onSteering?.(text);
+    }
+    return messages.length > 0;
+  };
+
   for (let step = 0; step < options.maxSteps; step++) {
     throwIfAborted(signal);
+    appendSteering(options.steering?.drain() ?? []);
     events.onStep?.(step + 1, options.maxSteps);
     // The message is displayed as it streams; what comes back here is the
     // assembled version, which exists to be appended to the history.
@@ -139,6 +155,11 @@ export async function runTurn(
 
     append(assistant);
     if (calls.length === 0) {
+      const steering = options.steering?.drainOrClose();
+      if (steering !== undefined && appendSteering(steering.messages)) {
+        await checkpoint("checkpointed");
+        continue;
+      }
       await checkpoint("completed");
       return; // the model is done — hand back to the user
     }
@@ -209,6 +230,7 @@ export async function runTurn(
     }
 
     append({ role: "user", content: results });
+    appendSteering(options.steering?.drain() ?? []);
     await checkpoint("checkpointed");
   }
 

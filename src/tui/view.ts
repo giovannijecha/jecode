@@ -40,6 +40,8 @@ export type View = {
   pal: Palette;
   footer: FooterInfo;
   status?: string;
+  /** Pending cooperative guidance; defined only while a model turn accepts it. */
+  steering?: number;
   /** Replaceable operational feedback shown in the footer, never transcribed. */
   feedback?: Feedback;
   /** Persistent idle guidance when the selected provider cannot start a turn. */
@@ -101,6 +103,7 @@ function dockRows(view: View, width: number, height: number): { rows: string[]; 
     // use the footer while that interaction is open instead of repeating a
     // generic "Running /…" label beside it.
     status: view.modal === undefined ? view.status : undefined,
+    steering: view.modal === undefined ? view.steering : undefined,
     feedback: view.feedback,
     readiness: view.readiness,
     unseen: view.unseen ?? 0,

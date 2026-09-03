@@ -95,6 +95,25 @@ test("activity keeps its state, elapsed time, and interrupt hint on the footer",
   assert.match(activeRows[23] ?? "", /claude-sonnet-5 · high/);
 });
 
+test("queued steering remains visible and bounded on narrow monochrome frames", () => {
+  const previous = process.env["NO_COLOR"];
+  process.env["NO_COLOR"] = "1";
+  try {
+    for (const cols of [38, 50, 80]) {
+      const frame = compose(
+        { ...base(), status: "Running edit_file · 8s", steering: 2 },
+        { rows: 14, cols },
+      );
+      assert.equal(frame.rows.length, 14);
+      assert.ok(frame.rows.every((line) => textWidth(line) <= cols));
+      assert.match(strip(frame.rows).at(-1) ?? "", /2 queued/);
+    }
+  } finally {
+    if (previous === undefined) delete process.env["NO_COLOR"];
+    else process.env["NO_COLOR"] = previous;
+  }
+});
+
 test("urgent feedback outranks activity while informational feedback waits behind it", () => {
   const urgent = strip(compose({
     ...base(),

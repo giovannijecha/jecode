@@ -11,7 +11,7 @@ const CONTROLS: readonly { key: string; description: string }[] = [
   { key: "left / right", description: "move cursor or change a value" },
   { key: "ctrl+left / right", description: "move cursor by word" },
   { key: "ctrl+backspace/del", description: "delete a word" },
-  { key: "enter / tab", description: "select or send · complete" },
+  { key: "enter / tab", description: "select, send/steer · complete" },
   { key: "alt+enter", description: "insert a new line" },
   { key: "esc", description: "close UI or interrupt work" },
   { key: "ctrl+c", description: "interrupt work or exit" },

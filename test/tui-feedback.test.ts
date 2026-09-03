@@ -71,6 +71,38 @@ test("active work exposes only state, elapsed time, and the interrupt hint", () 
   );
 });
 
+test("active model work exposes steering availability and queued guidance", () => {
+  const available = renderStatus(
+    {
+      status: "Thinking · 3s",
+      steering: 0,
+      feedback: undefined,
+      readiness: undefined,
+      unseen: 0,
+    },
+    STEEL,
+  );
+  const queued = renderStatus(
+    {
+      status: "Running edit_file · 8s",
+      steering: 2,
+      feedback: undefined,
+      readiness: undefined,
+      unseen: 0,
+    },
+    STEEL,
+  );
+
+  assert.equal(
+    available.map((segment) => segment.text).join(""),
+    "Thinking · 3s · enter to steer · esc to interrupt",
+  );
+  assert.equal(
+    queued.map((segment) => segment.text).join(""),
+    "2 queued · Running edit_file · 8s · esc to interrupt",
+  );
+});
+
 test("warnings and errors keep their priority markers", () => {
   const warning = renderStatus(
     { status: undefined, feedback: { text: "check settings", tone: "warn" }, readiness: undefined, unseen: 0 },

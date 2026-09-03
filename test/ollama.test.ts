@@ -292,7 +292,7 @@ test("echoes Ollama reasoning with an assistant tool call on continuation", asyn
   }]);
 });
 
-test("lifts every tool result into its own message, in order", () => {
+test("lifts every tool result in order before following steering", () => {
   const history: Message[] = [
     { role: "user", content: [{ kind: "text", text: "leggi a.ts" }] },
     {
@@ -303,6 +303,7 @@ test("lifts every tool result into its own message, in order", () => {
       role: "user",
       content: [{ kind: "tool_result", id: "c1", output: "export {}", isError: false }],
     },
+    { role: "user", content: [{ kind: "text", text: "change direction" }] },
   ];
 
   assert.deepEqual(toWireMessages("be useful", history), [
@@ -316,6 +317,7 @@ test("lifts every tool result into its own message, in order", () => {
       ],
     },
     { role: "tool", tool_call_id: "c1", content: "export {}" },
+    { role: "user", content: "change direction" },
   ]);
 });
 

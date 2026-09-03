@@ -4,6 +4,7 @@ import type { Feedback } from "../feedback.ts";
 
 export type StatusInfo = {
   status: string | undefined;
+  steering?: number;
   feedback: Feedback | undefined;
   readiness: Feedback | undefined;
   unseen: number;
@@ -16,8 +17,19 @@ export function renderStatus(info: StatusInfo, pal: Palette): Seg[] {
     : undefined;
   if (urgent !== undefined) return withUnseen(feedbackSegments(urgent, pal), info.unseen, pal);
   if (info.status !== undefined) {
+    const active = info.steering !== undefined && info.steering > 0
+      ? [
+          { text: `${info.steering} queued`, fg: pal.accent, bold: true },
+          { text: ` · ${info.status}`, fg: pal.ink.muted, optional: true },
+        ]
+      : [
+          { text: info.status, fg: pal.ink.muted },
+          ...(info.steering === 0
+            ? [{ text: " · enter to steer", fg: pal.ink.dim, optional: true }]
+            : []),
+        ];
     return withUnseen([
-      { text: info.status, fg: pal.ink.muted },
+      ...active,
       { text: " · esc to interrupt", fg: pal.ink.dim, optional: true },
     ], info.unseen, pal);
   }

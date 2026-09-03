@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { StreamEvent } from "../src/types.ts";
 import { assembleAnthropic } from "../src/providers/anthropic-stream.ts";
-import { fromWireResponse } from "../src/providers/anthropic-wire.ts";
+import { fromWireResponse, toWireMessage } from "../src/providers/anthropic-wire.ts";
 import { MAX_TOOL_ARGUMENT_CHARS } from "../src/providers/stream-limits.ts";
 
 async function* feed(events: unknown[]): AsyncGenerator<unknown> {
@@ -13,6 +13,22 @@ function sink(): { events: StreamEvent[]; push: (event: StreamEvent) => void } {
   const events: StreamEvent[] = [];
   return { events, push: (event) => events.push(event) };
 }
+
+test("keeps steering after tool results as a separate user message", () => {
+  assert.deepEqual([
+    toWireMessage({
+      role: "user",
+      content: [{ kind: "tool_result", id: "call-1", output: "done", isError: false }],
+    }),
+    toWireMessage({ role: "user", content: [{ kind: "text", text: "change direction" }] }),
+  ], [
+    {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "call-1", content: "done", is_error: false }],
+    },
+    { role: "user", content: [{ type: "text", text: "change direction" }] },
+  ]);
+});
 
 test("accumulates text deltas into one block and streams them as they land", async () => {
   const seen = sink();

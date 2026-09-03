@@ -4,6 +4,7 @@ import type { ControllerOptions } from "../controller.ts";
 import { credentialSource } from "../credentials.ts";
 import { providerFailure } from "../provider-errors.ts";
 import type { Session } from "../session.ts";
+import type { SteeringSource } from "../steering.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FooterInfo } from "./components/footer.ts";
 
@@ -11,6 +12,7 @@ export function controllerOptions(
   session: Session,
   contextPolicy: ControllerOptions["contextPolicy"],
   tools: Session["tools"] = session.tools,
+  steering?: SteeringSource,
 ): ControllerOptions {
   return {
     provider: session.provider,
@@ -22,6 +24,7 @@ export function controllerOptions(
     effort: session.config.effort,
     maxSteps: session.config.maxSteps,
     toolContext: { root: session.config.root },
+    ...(steering === undefined ? {} : { steering }),
   };
 }
 

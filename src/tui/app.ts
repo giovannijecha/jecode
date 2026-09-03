@@ -98,6 +98,7 @@ export async function runApp(
       status: state.activity === undefined
         ? undefined
         : activityStatus(state.activity, now),
+      steering: state.steering,
       feedback: state.feedback,
       readiness: turnBlocker(session),
       now,
@@ -282,6 +283,7 @@ export async function runApp(
     actions: {
       command: (text) => track(actions.command(text)),
       turn: (text) => track(actions.turn(text)),
+      steer: (text) => actions.steer(text),
     },
     live: () => live,
     quit,
