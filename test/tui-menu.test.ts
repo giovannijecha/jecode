@@ -20,14 +20,15 @@ test("colour menu rows align with the composer while writable prompts keep their
     const { promptLine } = await import("../src/tui/components/prompt.ts");
     const picker = await import("../src/tui/picker.ts");
     const { configureColor } = await import("../src/ui/render.ts");
+    const accent = `${ESC}[38;2;${STEEL.accent.join(";")}m`;
 
     const commandRows = renderCommandMenu([
       { name: "help", blurb: "show keyboard controls" },
       { name: "exit", blurb: "exit" },
     ], 0, 60, STEEL).rows;
     assert.ok(commandRows.every((row) => !row.includes("\x1b[48;2;")));
-    assert.match(commandRows[0] ?? "", /\x1b\[38;2;124;164;222m\/help/);
-    assert.doesNotMatch(commandRows[1] ?? "", /\x1b\[38;2;124;164;222m\/exit/);
+    assert.ok((commandRows[0] ?? "").includes(`${accent}/help`));
+    assert.ok(!(commandRows[1] ?? "").includes(`${accent}/exit`));
 
     const commands = plain(commandRows);
     assert.match(commands[0] ?? "", /^\/help/);
@@ -71,10 +72,7 @@ test("colour menu rows align with the composer while writable prompts keep their
     const essential = plain(essentialRows);
     assert.match(essential[0] ?? "", /^gpt-5\.6-terra.*ChatGPT/);
     assert.match(essential[1] ?? "", /^claude-sonnet-5.*Anthropic/);
-    assert.match(
-      essentialRows[0] ?? "",
-      /\x1b\[1m\x1b\[38;2;124;164;222mChatGPT/,
-    );
+    assert.ok((essentialRows[0] ?? "").includes(`${ESC}[1m${accent}ChatGPT`));
 
     const input = plain([promptLine("secret", 6, 60, STEEL).row]);
     assert.match(input[0] ?? "", /^→ secret/);

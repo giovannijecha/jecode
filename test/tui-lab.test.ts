@@ -248,11 +248,11 @@ test("operational feedback occupies the footer beside a retained prompt", () => 
   assert.match(rows[prompt + 1] ?? "", /^─+$/);
 });
 
-test("the production identity carries the calibrated Slate tokens", () => {
-  assert.deepEqual(STEEL.surface.subtle, [23, 29, 37]);
+test("the production identity carries the readable Slate tokens", () => {
+  assert.deepEqual(STEEL.surface.subtle, [31, 38, 47]);
   assert.equal("reasoning" in STEEL.surface, false);
-  assert.deepEqual(STEEL.surface.added, [21, 52, 33]);
-  assert.deepEqual(STEEL.surface.removed, [58, 24, 27]);
+  assert.deepEqual(STEEL.surface.added, [22, 55, 34]);
+  assert.deepEqual(STEEL.surface.removed, [62, 24, 27]);
 });
 
 test("the lab has an exact-height recovery frame for a tiny terminal", () => {
