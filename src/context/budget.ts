@@ -1,7 +1,10 @@
 // Conservative provider-neutral budgeting for one complete model request.
 
 import type { Message, ToolSpec } from "../types.ts";
-import { estimateSerializedTokens } from "./estimate.ts";
+import {
+  estimateSerializedTokens,
+  estimateSerializedTokensResponsive,
+} from "./estimate.ts";
 import { MIN_REQUEST_OUTPUT_TOKENS, type ContextPolicy } from "./policy.ts";
 
 const ENVELOPE_OVERHEAD_TOKENS = 64;
@@ -27,6 +30,22 @@ export function estimateRequestInputTokens(envelope: RequestEnvelope): number {
     messages: envelope.messages,
     tools: envelope.tools,
   });
+  return contentTokens +
+    ENVELOPE_OVERHEAD_TOKENS +
+    envelope.messages.length * MESSAGE_OVERHEAD_TOKENS +
+    envelope.tools.length * TOOL_OVERHEAD_TOKENS;
+}
+
+/** Preserve the request estimate while yielding during large local inputs. */
+export async function estimateRequestInputTokensResponsive(
+  envelope: RequestEnvelope,
+  signal?: AbortSignal,
+): Promise<number> {
+  const contentTokens = await estimateSerializedTokensResponsive({
+    system: envelope.system,
+    messages: envelope.messages,
+    tools: envelope.tools,
+  }, signal);
   return contentTokens +
     ENVELOPE_OVERHEAD_TOKENS +
     envelope.messages.length * MESSAGE_OVERHEAD_TOKENS +

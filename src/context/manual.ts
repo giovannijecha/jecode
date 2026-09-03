@@ -8,7 +8,7 @@ import type { Session } from "../session.ts";
 import { recordAuxiliaryUsage } from "../usage.ts";
 import { resolveContextPolicy } from "./capacity.ts";
 import { compactContext } from "./compactor.ts";
-import { estimateTokens, planCompaction } from "./policy.ts";
+import { estimateTokensResponsive, planCompaction } from "./policy.ts";
 
 const MIN_PREFIX_TOKENS = 512;
 
@@ -26,7 +26,8 @@ export async function compactSession(
   const active = session.conversation.activeNode;
   if (active === undefined) return "unchanged";
   const context = session.conversation.contextHistory;
-  if (estimateTokens(context) < MIN_PREFIX_TOKENS) return "unchanged";
+  const estimatedInputTokens = await estimateTokensResponsive(context, options.signal);
+  if (estimatedInputTokens < MIN_PREFIX_TOKENS) return "unchanged";
   if (session.conversation.nodes.some((node) => node.parentId === active.id)) {
     throw new Error("continue this branch before compacting");
   }
@@ -42,15 +43,20 @@ export async function compactSession(
   const coveredMessages = active.context?.throughNodeId === active.id
     ? active.context.messageCount
     : 0;
-  const plan = planCompaction(
+  const plan = await planCompaction(
     context,
     active.messages,
     coveredMessages,
     session.usage.lastInputTokens,
     true,
     policy,
+    estimatedInputTokens,
+    options.signal,
   );
-  if (plan === undefined || estimateTokens(plan.prefix) < MIN_PREFIX_TOKENS) {
+  if (
+    plan === undefined ||
+    await estimateTokensResponsive(plan.prefix, options.signal) < MIN_PREFIX_TOKENS
+  ) {
     options.onStatus?.();
     return "unchanged";
   }
@@ -64,6 +70,8 @@ export async function compactSession(
     nodeId: active.id,
     coveredMessages,
     lastInputTokens: session.usage.lastInputTokens,
+    estimatedInputTokens,
+    precomputedPlan: plan,
     signal: options.signal,
     force: true,
     failLoudly: true,

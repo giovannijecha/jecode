@@ -74,7 +74,7 @@ test("context metadata failure falls back without blocking the turn", async () =
   assert.equal(resolved.triggerTokens, 170_000);
 });
 
-test("plans a bounded prefix without separating a recent tool call from its result", () => {
+test("plans a bounded prefix without separating a recent tool call from its result", async () => {
   const turn: Message[] = [
     user("inspect"),
     {
@@ -87,14 +87,14 @@ test("plans a bounded prefix without separating a recent tool call from its resu
     },
   ];
   const context = [user("x".repeat(10_000)), assistant("old"), ...turn];
-  const plan = planCompaction(context, turn, 0, 2_000, false, policy);
+  const plan = await planCompaction(context, turn, 0, 2_000, false, policy);
 
   assert.equal(plan?.messageCount, 1);
   assert.deepEqual(plan?.tail, turn.slice(1));
   assert.ok(estimateTokens(plan?.prefix ?? []) >= policy.minimumPrefixTokens);
 });
 
-test("literal-heavy request pressure can trigger compaction before local rejection", () => {
+test("literal-heavy request pressure can trigger compaction before local rejection", async () => {
   const constrained = policyForContextWindow({ tokens: 4_096 }, 85);
   const context = [
     user("\u{10ffff}".repeat(230)),
@@ -108,7 +108,7 @@ test("literal-heavy request pressure can trigger compaction before local rejecti
   });
 
   assert.ok(inputTokens >= constrained.triggerTokens);
-  assert.notEqual(planCompaction(
+  assert.notEqual(await planCompaction(
     context,
     [context.at(-1) as Message],
     0,
@@ -213,9 +213,9 @@ test("recognizes only definite provider context rejections", () => {
   assert.equal(isContextOverflow(new Error("network error calling provider")), false);
 });
 
-test("refuses a projection whose recent tail no longer matches canonical history", () => {
+test("refuses a projection whose recent tail no longer matches canonical history", async () => {
   const turn = [user("current")];
-  const plan = planCompaction(
+  const plan = await planCompaction(
     [user("x".repeat(10_000)), user("different")],
     turn,
     0,
@@ -224,6 +224,22 @@ test("refuses a projection whose recent tail no longer matches canonical history
     policy,
   );
   assert.equal(plan, undefined);
+});
+
+test("planning accepts a current turn already covered by its context anchor", async () => {
+  const turn = [user("current"), assistant("answer")];
+  const plan = await planCompaction(
+    [user("x".repeat(10_000)), assistant("old"), ...turn],
+    turn,
+    turn.length,
+    2_000,
+    true,
+    policy,
+    2_000,
+  );
+
+  assert.equal(plan?.messageCount, turn.length);
+  assert.deepEqual(plan?.tail, []);
 });
 
 function summarizer(seen: SendRequest[], outcome: Message | Error): Provider {

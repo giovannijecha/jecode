@@ -325,6 +325,14 @@ use isolated conservative metadata. Discovery failures use a 200k fallback and
 therefore leave ordinary turns available; an envelope that already exceeds that
 fallback is rejected locally instead of sending an unbounded request.
 
+Request estimation preserves the same provider-neutral byte, compression, and
+literal floors while processing serialized input in bounded chunks. Large
+estimates yield between chunks, observe cancellation, and are reused by
+automatic or overflow compaction for the exact projection already measured.
+The planner checks only a logarithmic set of safe recent-turn boundaries and
+does not re-estimate the selected tail. Projection changes always receive a
+fresh request estimate before the provider is called.
+
 The saved `compactionPercent` setting accepts 50 through 95 and defaults to 85.
 It applies to the usable model window while a lower provider safety ceiling and
 the estimator's safety reserve still win. The post-compaction target is one

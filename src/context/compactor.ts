@@ -1,9 +1,12 @@
 // One bounded provider request that condenses an older context prefix.
 
 import type { ContextAnchor } from "./projection.ts";
-import { budgetRequest } from "./budget.ts";
+import {
+  budgetRequestFromInputTokens,
+  estimateRequestInputTokensResponsive,
+} from "./budget.ts";
 import { CONTEXT_LIMITS, summaryMessage } from "./projection.ts";
-import type { ContextPolicy } from "./policy.ts";
+import type { CompactionPlan, ContextPolicy } from "./policy.ts";
 import { planCompaction } from "./policy.ts";
 import type { Message, Provider, Usage } from "../types.ts";
 
@@ -26,6 +29,10 @@ export type CompactContextOptions = Readonly<{
   nodeId: number;
   coveredMessages: number;
   lastInputTokens: number;
+  /** Reuse the estimate already calculated for this provider projection. */
+  estimatedInputTokens?: number;
+  /** A plan produced for these exact immutable inputs by planCompaction. */
+  precomputedPlan?: CompactionPlan;
   signal?: AbortSignal;
   force?: boolean;
   /** Manual commands surface provider failures; automatic compaction stays optional. */
@@ -45,24 +52,31 @@ export async function compactContext(
   options: CompactContextOptions,
 ): Promise<CompactionResult | undefined> {
   const policy = options.policy;
-  const plan = planCompaction(
+  const plan = options.precomputedPlan ?? await planCompaction(
     options.context,
     options.turn,
     options.coveredMessages,
     options.lastInputTokens,
     options.force ?? false,
     policy,
+    options.estimatedInputTokens,
+    options.signal,
   );
   if (plan === undefined) return undefined;
 
   options.onBegin?.();
   try {
     const messages = normalized(plan.prefix);
-    const budget = budgetRequest({
+    const inputTokens = await estimateRequestInputTokensResponsive({
       system: SUMMARY_SYSTEM,
       messages,
       tools: [],
-    }, policy.summaryMaxTokens, policy);
+    }, options.signal);
+    const budget = budgetRequestFromInputTokens(
+      inputTokens,
+      policy.summaryMaxTokens,
+      policy,
+    );
     const response = await options.provider.send({
       model: options.model,
       system: SUMMARY_SYSTEM,
