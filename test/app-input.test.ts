@@ -54,6 +54,7 @@ function harness(from = provider()): {
   feedback: Feedback[];
   commands: string[];
   turns: string[];
+  steering: string[];
   scrolls: number[];
   input: ReturnType<typeof appInput>;
   quit(): boolean;
@@ -64,6 +65,7 @@ function harness(from = provider()): {
   const shown: Feedback[] = [];
   const commands: string[] = [];
   const turns: string[] = [];
+  const steering: string[] = [];
   const scrolls: number[] = [];
   let quit = false;
   let requestedQuit = false;
@@ -89,6 +91,10 @@ function harness(from = provider()): {
       turn: async (text) => {
         turns.push(text);
       },
+      steer: (text) => {
+        steering.push(text);
+        return state.activity?.kind === "turn" ? "queued" : "unavailable";
+      },
     },
     live: () => true,
     quit: () => {
@@ -109,6 +115,7 @@ function harness(from = provider()): {
     feedback: shown,
     commands,
     turns,
+    steering,
     scrolls,
     input,
     quit: () => quit,
@@ -177,6 +184,36 @@ test("navigation and control keys target the active terminal operation", () => {
   const cleanExit = harness();
   cleanExit.input.handle(key("d", "", true));
   assert.equal(cleanExit.requestedQuit(), true);
+});
+
+test("enter queues ordinary guidance during a turn without opening another workflow", () => {
+  const current = harness();
+  current.state.activity = begin("turn", "Working");
+  current.state.editor = edit.of("change the test, not the implementation");
+
+  current.input.handle(key("enter"));
+
+  assert.deepEqual(current.steering, ["change the test, not the implementation"]);
+  assert.deepEqual(current.turns, []);
+  assert.equal(current.state.editor.text, "");
+  assert.deepEqual(current.state.past, ["change the test, not the implementation"]);
+});
+
+test("active work keeps slash commands and command-time prompts in the composer", () => {
+  const slash = harness();
+  slash.state.activity = begin("turn", "Working");
+  slash.state.editor = edit.of("/models");
+  slash.input.handle(key("enter"));
+  assert.equal(slash.state.editor.text, "/models");
+  assert.deepEqual(slash.commands, []);
+  assert.match(slash.feedback[0]?.text ?? "", /Slash commands.*prompt kept/);
+
+  const command = harness();
+  command.state.activity = begin("command", "Running /models");
+  command.state.editor = edit.of("keep this");
+  command.input.handle(key("enter"));
+  assert.equal(command.state.editor.text, "keep this");
+  assert.match(command.feedback[0]?.text ?? "", /active command.*prompt kept/);
 });
 
 test("ctrl+o can inspect a compacted tool diff before answering an open prompt", () => {

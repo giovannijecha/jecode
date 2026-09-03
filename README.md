@@ -34,8 +34,8 @@
 
 - **One visible loop.** One controller talks to the model, runs tools, and
   returns control to you. Independent reads may overlap inside a step; writes
-  and commands stay ordered. There are no delegated agents or hidden model
-  workers.
+  and commands stay ordered. You can steer an active turn without starting a
+  second loop. There are no delegated agents or hidden model workers.
 - **Terminal-native today.** The transcript, composer, searchable menus, tool
   output, diffs, approvals, reasoning, and status share one full-screen TUI.
 - **Permission-aware.** Tool use is visible. Dangerous actions ask first, and
@@ -247,7 +247,8 @@ Useful controls:
 - **Backspace/Delete** removes one character;
   **Ctrl+Backspace/Delete** removes one word.
 - **Home/End** moves to the beginning or end of the composer.
-- **Tab** completes a slash command without running it; **Enter** sends.
+- **Tab** completes a slash command without running it; **Enter** sends. During
+  an active model turn, **Enter** queues guidance for its next safe boundary.
 - **Alt+Enter** inserts a newline.
 - **Esc** closes the active menu or interrupts foreground work.
 - **Ctrl+C** interrupts, or exits while idle. **Ctrl+D** requests a clean exit.
@@ -255,9 +256,11 @@ Useful controls:
 - **Ctrl+O** expands or compacts the latest reasoning or tool-detail block.
 
 The footer keeps the active model, effort, and workspace visible. During work,
-it adds the current state, elapsed time, and interrupt hint. Operational
-feedback uses the same replaceable status area instead of adding noise to the
-conversation or its Markdown export.
+it adds the current state, elapsed time, steering availability or queue count,
+and interrupt hint. Queued guidance joins the same conversation turn after the
+provider response or complete tool batch already in progress; `Esc` remains an
+immediate interruption. Operational feedback uses the same replaceable status
+area instead of adding noise to the conversation or its Markdown export.
 
 ## Sessions and context
 

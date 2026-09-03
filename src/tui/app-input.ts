@@ -1,6 +1,7 @@
 // Keyboard and pointer intent for the TUI shell.
 
 import type { Session } from "../session.ts";
+import type { SteeringOffer } from "../steering.ts";
 import type { AppState } from "./app-state.ts";
 import type { Block } from "./blocks.ts";
 import {
@@ -22,6 +23,7 @@ const WHEEL_STEP = 3;
 export type AppActions = {
   command(text: string): Promise<void>;
   turn(text: string): Promise<void>;
+  steer(text: string): SteeringOffer | "unavailable";
 };
 
 type InputOptions = {
@@ -98,6 +100,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
         return;
       }
       case "tab": {
+        if (state.activity !== undefined) return;
         const completion = state.completing ?? activateCompletion(state.editor.text);
         const completed = completion === undefined ? undefined : selectedCompletion(completion);
         if (completed !== undefined) {
@@ -138,7 +141,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
     const edited = applyKey(state.editor, key);
     if (edited !== undefined) {
       state.editor = edited;
-      state.completing = activateCompletion(edited.text);
+      state.completing = state.activity === undefined ? activateCompletion(edited.text) : undefined;
     }
   }
 
@@ -165,9 +168,29 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
 
   function submit(): void {
     const text = state.editor.text.trim();
-    if (text === "" || state.activity !== undefined) return;
+    if (text === "") return;
 
     const isCommand = text.startsWith("/");
+    if (state.activity !== undefined) {
+      if (isCommand) {
+        keep("Slash commands run after the active work finishes");
+        return;
+      }
+      const result = actions.steer(text);
+      if (result !== "queued") {
+        keep(
+          result === "full"
+            ? "Steering queue is full"
+            : result === "closed"
+            ? "The turn is finishing"
+            : "Wait for the active command to finish",
+        );
+        return;
+      }
+      accept(text);
+      return;
+    }
+
     if (!isCommand) {
       const blocker = turnBlocker(session);
       if (blocker !== undefined) {
@@ -176,6 +199,13 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
       }
     }
 
+    accept(text);
+
+    if (isCommand) void actions.command(text);
+    else void actions.turn(text);
+  }
+
+  function accept(text: string): void {
     state.editor = edit.EMPTY;
     state.recall = -1;
     state.draft = "";
@@ -184,9 +214,10 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
     state.scroll = 0;
     state.follow = true;
     state.unseen = 0;
+  }
 
-    if (isCommand) void actions.command(text);
-    else void actions.turn(text);
+  function keep(text: string): void {
+    feedback.show({ text: `${text} · prompt kept`, tone: "warn", timeoutMs: 4_000 });
   }
 
   return { handle };

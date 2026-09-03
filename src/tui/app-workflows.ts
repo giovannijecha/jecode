@@ -12,6 +12,8 @@ import type { ContextPolicy } from "../context/policy.ts";
 import { isContextOverflow } from "../context/policy.ts";
 import type { Session } from "../session.ts";
 import { updateSettings } from "../settings.ts";
+import { steeringInbox } from "../steering.ts";
+import type { SteeringInbox } from "../steering.ts";
 import { saveTranscript } from "../transcript-export.ts";
 import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "../usage.ts";
 import { selectTimeline } from "../timeline.ts";
@@ -49,6 +51,7 @@ type WorkflowOptions = {
 
 export function appWorkflows(options: WorkflowOptions): AppActions {
   const { session, state, permissions, feedback } = options;
+  let activeSteering: SteeringInbox | undefined;
 
   const choose = (picker: Picker) =>
     new Promise<number | undefined>((resolve) => {
@@ -142,6 +145,13 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
   async function turn(text: string): Promise<void> {
     const activity = options.startActivity("turn", WAITING);
     if (activity === undefined) return;
+    const inbox = steeringInbox((pending, accepting) => {
+      if (activeSteering !== inbox) return;
+      state.steering = accepting ? pending : undefined;
+      options.render();
+    });
+    activeSteering = inbox;
+    state.steering = 0;
     const status = (label: string): void => transition(activity, label);
     const parentId = session.conversation.activeNodeId;
     const history = session.conversation.history;
@@ -152,6 +162,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     const prospectiveNodeId = session.conversation.nodes.length + 1;
     let nodeId: number | undefined;
     let context: ContextAnchor | undefined;
+    const unpersistedSteering: string[] = [];
     let firstPolicy = true;
     const policy = (): Promise<ContextPolicy> => {
       let visible = firstPolicy;
@@ -221,6 +232,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       session.conversation = next;
       nodeId = next.activeNodeId;
       state.committedNodeId = next.activeNodeId;
+      unpersistedSteering.length = 0;
     };
 
     const compact = async (
@@ -263,6 +275,11 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     };
 
     events.onContext = compact;
+    events.onSteering = (guidance) => {
+      unpersistedSteering.push(guidance);
+      options.emit({ kind: "user", text: guidance });
+      options.render();
+    };
     events.onCheckpoint = async (checkpoint, settlement, projected) => {
       await persist(checkpoint, settlement);
       const compacted = await compact(checkpoint, projected, {
@@ -279,7 +296,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     try {
       await runTurn(
         history,
-        controllerOptions(session, policy, permissions.availableTools()),
+        controllerOptions(session, policy, permissions.availableTools(), inbox),
         events,
         activity.control.signal,
         modelHistory,
@@ -296,6 +313,9 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         failed = { error: error as Error, interrupted };
       }
     } finally {
+      let pendingSteering = inbox.close();
+      if (activeSteering === inbox) activeSteering = undefined;
+      state.steering = undefined;
       try {
         events.finish(finishReason);
         if (failed !== undefined) {
@@ -313,7 +333,14 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
             // been saved. Revert to the last durable path and return the input
             // to the composer so the user can retry without losing it.
             options.replaceTranscript();
-            state.editor = edit.of(text);
+            state.editor = edit.of([
+              ...(nodeId === undefined ? [text] : []),
+              ...unpersistedSteering,
+              ...pendingSteering,
+              state.editor.text,
+            ].filter((part) => part !== "").join("\n\n"));
+            state.completing = undefined;
+            pendingSteering = [];
             feedback.show({
               text: (error as Error).message,
               tone: "error",
@@ -322,12 +349,24 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
           }
         }
       } finally {
+        restorePendingSteering(state, pendingSteering);
         options.finishActivity(activity);
       }
     }
   }
 
-  return { command, turn };
+  function steer(text: string) {
+    return activeSteering?.offer(text) ?? "unavailable";
+  }
+
+  return { command, turn, steer };
+}
+
+function restorePendingSteering(state: AppState, messages: readonly string[]): void {
+  if (messages.length === 0) return;
+  const pending = messages.join("\n\n");
+  state.editor = edit.of(state.editor.text === "" ? pending : `${pending}\n\n${state.editor.text}`);
+  state.completing = undefined;
 }
 
 function closeFailedTurn(history: readonly Message[], settlement: "failed" | "interrupted"): Message[] {

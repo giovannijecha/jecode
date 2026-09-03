@@ -289,6 +289,24 @@ test("translates normalized messages and tool declarations to Responses items", 
   );
 });
 
+test("orders steering after completed function outputs", () => {
+  const items = [
+    {
+      role: "user" as const,
+      content: [{ kind: "tool_result" as const, id: "call-1", output: "done", isError: false }],
+    },
+    {
+      role: "user" as const,
+      content: [{ kind: "text" as const, text: "change direction" }],
+    },
+  ].flatMap((message) => toWireItems(message));
+
+  assert.deepEqual(items, [
+    { type: "function_call_output", call_id: "call-1", output: "done" },
+    { role: "user", content: [{ type: "input_text", text: "change direction" }] },
+  ]);
+});
+
 test("offers only reasoning-capable Responses models and keeps their real effort levels", () => {
   assert.equal(supportsOpenAIModel("gpt-5.6-sol"), true);
   assert.equal(supportsOpenAIModel("o4-mini"), true);

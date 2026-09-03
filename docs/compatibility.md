@@ -71,6 +71,8 @@ surface.
 The following behavioral guarantees are stable:
 
 - one model-facing controller owns the visible loop;
+- interactive guidance enters the active turn at a safe provider/tool boundary
+  without replaying already-issued work or creating another controller;
 - historical tool calls are never replayed during resume or branching;
 - dangerous tools require the applicable permission unless launch policy
   explicitly allows them;

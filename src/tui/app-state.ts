@@ -21,6 +21,8 @@ export type AppState = {
   feedback?: Feedback;
   open?: Open;
   activity?: Activity;
+  /** Pending guidance count while the active model turn still accepts steering. */
+  steering?: number;
   closeWhenIdle: boolean;
   /** Last node created by a real turn, before any temporary timeline selection. */
   committedNodeId: number;
