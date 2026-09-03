@@ -36,7 +36,7 @@ test("offers and sends Ollama's supported reasoning effort levels", async (conte
     ["low", "medium", "high"],
   );
 
-  await ollama.send({
+  const message = await ollama.send({
     model: "deepseek-v4-flash:0731",
     system: "be useful",
     messages: [],
@@ -46,6 +46,8 @@ test("offers and sends Ollama's supported reasoning effort levels", async (conte
   });
 
   assert.equal(requestBody?.["reasoning_effort"], "medium");
+  assert.deepEqual(requestBody?.["stream_options"], { include_usage: true });
+  assert.equal(message.usage, undefined, "compatible endpoints may omit the usage trailer");
 });
 
 test("prefers Ollama's currently allocated runtime context", async (context) => {
@@ -414,6 +416,23 @@ test("normalizes usage from the final compatible chunk", async () => {
   assert.deepEqual(fromWireReply(reply).usage, {
     inputTokens: 14,
     outputTokens: 4,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    reasoningTokens: 0,
+  });
+});
+
+test("preserves zero usage from the final compatible chunk", async () => {
+  const reply = await assembleOllama(
+    feed([
+      chunk({}, "stop"),
+      { choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } },
+    ]),
+  );
+
+  assert.deepEqual(fromWireReply(reply).usage, {
+    inputTokens: 0,
+    outputTokens: 0,
     cachedInputTokens: 0,
     cacheWriteInputTokens: 0,
     reasoningTokens: 0,
