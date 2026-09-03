@@ -9,7 +9,6 @@ const config: Config = {
   reducedMotion: false,
   effort: "high",
   maxTokens: 1_000,
-  maxSteps: 4,
   compactionPercent: 85,
   root: "/workspace/jecode",
   autoApprove: false,

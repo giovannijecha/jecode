@@ -19,7 +19,6 @@ type SettingsAction =
   | "model"
   | "effort"
   | "maxTokens"
-  | "maxSteps"
   | "compactionPercent"
   | "reducedMotion"
   | "providers";
@@ -60,9 +59,6 @@ export async function settingsCommand(session: Session, host: Host): Promise<voi
       case "maxTokens":
         await numberSetting(session, host, "maxTokens", "max output tokens");
         break;
-      case "maxSteps":
-        await numberSetting(session, host, "maxSteps", "max tool steps");
-        break;
       case "compactionPercent":
         await compactionSetting(session, host);
         break;
@@ -81,7 +77,6 @@ export type SettingsValues = {
   model: string;
   effort: string;
   maxTokens?: number;
-  maxSteps: number;
   compactionPercent: number;
   reducedMotion: boolean;
 };
@@ -115,7 +110,6 @@ function settingsItems(values: SettingsValues): SettingsItem[] {
           action: "maxTokens" as const,
           option: { label: "max output tokens", value: String(values.maxTokens) },
         }]),
-    { action: "maxSteps", option: { label: "max tool steps", value: String(values.maxSteps) } },
     {
       action: "compactionPercent",
       option: { label: "context compaction", value: `${values.compactionPercent}%` },
@@ -137,7 +131,6 @@ function settingsValues(session: Session): SettingsValues {
     model: session.model,
     effort: session.config.effort,
     ...(session.provider.id === "openai-codex" ? {} : { maxTokens: session.config.maxTokens }),
-    maxSteps: session.config.maxSteps,
     compactionPercent: session.config.compactionPercent,
     reducedMotion: session.config.reducedMotion,
   };
@@ -215,7 +208,7 @@ async function motionSetting(session: Session, host: Host): Promise<void> {
 async function numberSetting(
   session: Session,
   host: Host,
-  name: "maxTokens" | "maxSteps",
+  name: "maxTokens",
   label: string,
 ): Promise<void> {
   if (host.type === undefined) return;

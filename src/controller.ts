@@ -19,7 +19,7 @@ import type { Tool, ToolContext, ToolPreview, ToolRun } from "./tools/index.ts";
 import { findTool, runTool, toolSpecs } from "./tools/index.ts";
 import { requestAssistant } from "./controller-request.ts";
 
-export const MAX_TOOL_CALLS_PER_STEP = 32;
+export const MAX_TOOL_CALLS_PER_RESPONSE = 32;
 /** Independent read calls share one bounded execution wave. */
 export const MAX_CONCURRENT_TOOL_CALLS = 4;
 
@@ -41,7 +41,8 @@ export type ControllerOptions = {
   /** Resolve for each provider attempt; adapters cache stable metadata themselves. */
   contextPolicy(): Promise<ContextPolicy>;
   effort: string;
-  maxSteps: number;
+  /** Stop after this many model requests when an explicit launch budget is set. */
+  maxModelRequests?: number;
   toolContext: ToolContext;
   /** Cooperative user guidance consumed only at safe request boundaries. */
   steering?: SteeringSource;
@@ -62,7 +63,6 @@ export type ControllerEvents = {
   onRequestInput?(inputTokens: number): void;
   /** A queued user message has entered canonical history for this turn. */
   onSteering?(text: string): void;
-  onStep?(step: number, total: number): void;
   /** A tool call is complete on the wire and its local preview is being prepared. */
   onToolPreparing?(call: ToolCallBlock, current: number, total: number): void;
   /** Approval and validation are complete; execution is about to begin. */
@@ -118,10 +118,20 @@ export async function runTurn(
     return messages.length > 0;
   };
 
-  for (let step = 0; step < options.maxSteps; step++) {
+  let requests = 0;
+  while (true) {
     throwIfAborted(signal);
+    if (
+      options.maxModelRequests !== undefined &&
+      requests >= options.maxModelRequests
+    ) {
+      const requestLabel = options.maxModelRequests === 1 ? "request" : "requests";
+      throw new Error(
+        `stopped after ${options.maxModelRequests} model ${requestLabel} (--max-steps limit reached)`,
+      );
+    }
     appendSteering(options.steering?.drain() ?? []);
-    events.onStep?.(step + 1, options.maxSteps);
+    requests++;
     // The message is displayed as it streams; what comes back here is the
     // assembled version, which exists to be appended to the history.
     const response = await requestAssistant(
@@ -140,9 +150,9 @@ export async function runTurn(
     if (assistant.content.length === 0) {
       throw new Error(`${options.provider.id} completed without an answer or tool call`);
     }
-    if (calls.length > MAX_TOOL_CALLS_PER_STEP) {
+    if (calls.length > MAX_TOOL_CALLS_PER_RESPONSE) {
       throw new Error(
-        `provider returned ${calls.length} tool calls in one step (maximum ${MAX_TOOL_CALLS_PER_STEP})`,
+        `provider returned ${calls.length} tool calls in one response (maximum ${MAX_TOOL_CALLS_PER_RESPONSE})`,
       );
     }
     assertToolCallIds(calls);
@@ -233,10 +243,6 @@ export async function runTurn(
     appendSteering(options.steering?.drain() ?? []);
     await checkpoint("checkpointed");
   }
-
-  throw new Error(
-    `gave up after ${options.maxSteps} steps without finishing (raise --max-steps)`,
-  );
 }
 
 function nextBatch(
@@ -270,7 +276,7 @@ function assertToolCallIds(calls: readonly ToolCallBlock[]): void {
   for (const call of calls) {
     if (call.id.trim() === "") throw new Error("provider returned a tool call without an id");
     if (seen.has(call.id)) {
-      throw new Error("provider returned duplicate tool call ids in one step");
+      throw new Error("provider returned duplicate tool call ids in one response");
     }
     seen.add(call.id);
   }

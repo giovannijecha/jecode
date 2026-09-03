@@ -147,7 +147,7 @@ function options(session: Session, contextPolicy: () => Promise<ContextPolicy>) 
     maxTokens: session.config.maxTokens,
     contextPolicy,
     effort: session.config.effort,
-    maxSteps: session.config.maxSteps,
+    maxModelRequests: session.config.maxModelRequests,
     toolContext: { root: session.config.root },
   };
 }

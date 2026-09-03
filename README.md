@@ -33,9 +33,10 @@
 ## Why Jecode
 
 - **One visible loop.** One controller talks to the model, runs tools, and
-  returns control to you. Independent reads may overlap inside a step; writes
-  and commands stay ordered. You can steer an active turn without starting a
-  second loop. There are no delegated agents or hidden model workers.
+  returns control to you. Independent reads may overlap within one model
+  response; writes and commands stay ordered. You can steer an active turn
+  without starting a second loop. There are no delegated agents or hidden
+  model workers.
 - **Terminal-native today.** The transcript, composer, searchable menus, tool
   output, diffs, approvals, reasoning, and status share one full-screen TUI.
 - **Permission-aware.** Tool use is visible. Dangerous actions ask first, and
@@ -321,11 +322,15 @@ settings, then built-in defaults.
 | `--root` | - | Current directory |
 | `--effort` | `JECODE_EFFORT` | `high` |
 | `--max-tokens` | `JECODE_MAX_TOKENS` | `64000` ceiling, clamped to the usable request budget; not sent by `openai-codex` |
-| `--max-steps` | `JECODE_MAX_STEPS` | `40` |
+| `--max-steps` | `JECODE_MAX_STEPS` | No limit |
 | `--compaction-percent` | `JECODE_COMPACTION_PERCENT` | `85`; accepts `50` through `95` |
 | `--reduced-motion` | `JECODE_REDUCED_MOTION=1` | Off |
 | `--auto-approve` | `JECODE_AUTO_APPROVE=1` | Off |
 | `--ephemeral` | `JECODE_EPHEMERAL=1` | Off |
+
+`--max-steps` is an opt-in, process-only budget for deterministic automation
+and diagnostics. Interactive work has no arbitrary model-loop ceiling, and the
+budget is neither shown nor saved by `/settings`.
 
 Non-secret preferences live in `~/.jecode/settings.json`. Explicitly saved API
 keys live in `~/.jecode/credentials.json`, while ChatGPT OAuth accounts live in

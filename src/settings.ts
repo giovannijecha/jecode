@@ -20,7 +20,6 @@ export type SavedSettings = {
   effort?: string;
   reducedMotion?: boolean;
   maxTokens?: number;
-  maxSteps?: number;
   compactionPercent?: number;
 };
 
@@ -76,7 +75,6 @@ function normalize(value: unknown): SavedSettings {
   const effort = member(value["effort"], EFFORTS);
   const reducedMotion = typeof value["reducedMotion"] === "boolean" ? value["reducedMotion"] : undefined;
   const maxTokens = positiveInteger(value["maxTokens"]);
-  const maxSteps = positiveInteger(value["maxSteps"]);
   const compactionPercent = percentage(value["compactionPercent"]);
 
   return {
@@ -86,7 +84,6 @@ function normalize(value: unknown): SavedSettings {
     ...(effort === undefined ? {} : { effort }),
     ...(reducedMotion === undefined ? {} : { reducedMotion }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
-    ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(compactionPercent === undefined ? {} : { compactionPercent }),
   };
 }

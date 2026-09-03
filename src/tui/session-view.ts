@@ -22,7 +22,7 @@ export function controllerOptions(
     maxTokens: session.config.maxTokens,
     contextPolicy,
     effort: session.config.effort,
-    maxSteps: session.config.maxSteps,
+    maxModelRequests: session.config.maxModelRequests,
     toolContext: { root: session.config.root },
     ...(steering === undefined ? {} : { steering }),
   };

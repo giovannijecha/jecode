@@ -21,7 +21,7 @@ Options:
   --ollama-host <url>    Ollama Cloud, local, or custom endpoint
   --effort <level>       low, medium, high, xhigh, or max
   --max-tokens <number>  output-token ceiling
-  --max-steps <number>   tool-loop ceiling
+  --max-steps <number>   optional per-turn model-request budget
   --compaction-percent <${MIN_COMPACTION_PERCENT}-${MAX_COMPACTION_PERCENT}>
                           context usage that triggers compaction (default: ${DEFAULT_COMPACTION_PERCENT})
   --reduced-motion       use a steady terminal cursor

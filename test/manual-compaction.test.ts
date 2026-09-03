@@ -172,7 +172,6 @@ function session(provider: Provider): Session {
       reducedMotion: true,
       effort: "high",
       maxTokens: 4_096,
-      maxSteps: 8,
       compactionPercent: 85,
       root: process.cwd(),
       autoApprove: false,

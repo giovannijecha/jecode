@@ -7,7 +7,7 @@ import { estimateRequestInputTokens } from "../src/context/budget.ts";
 import { policyForContextWindow } from "../src/context/policy.ts";
 import {
   MAX_CONCURRENT_TOOL_CALLS,
-  MAX_TOOL_CALLS_PER_STEP,
+  MAX_TOOL_CALLS_PER_RESPONSE,
   runTurn,
 } from "../src/controller.ts";
 import { steeringInbox } from "../src/steering.ts";
@@ -72,7 +72,6 @@ function options(provider: Provider, overrides: Partial<ControllerOptions> = {})
     maxTokens: 100,
     contextPolicy: () => Promise.resolve(policyForContextWindow(undefined, 85)),
     effort: "high",
-    maxSteps: 10,
     toolContext: { root: process.cwd() },
     ...overrides,
   };
@@ -151,6 +150,40 @@ test("steering queued during a final response continues the same turn", async ()
   assert.deepEqual(steered, ["change direction"]);
   assert.deepEqual(settlements, ["checkpointed", "completed"]);
   assert.equal(inbox.accepting, false);
+});
+
+test("an explicit request budget stops a steering continuation without losing guidance", async () => {
+  const provider = scripted([assistantText("first answer"), assistantText("not reached")]);
+  const inbox = steeringInbox();
+  const history: Message[] = [
+    { role: "user", content: [{ kind: "text", text: "initial request" }] },
+  ];
+  const settlements: string[] = [];
+  const sink = events();
+  sink.onStream = (event) => {
+    if (event.kind === "text") inbox.offer("change direction");
+  };
+  sink.onCheckpoint = async (_checkpoint, settlement) => {
+    settlements.push(settlement);
+  };
+
+  await assert.rejects(
+    runTurn(
+      history,
+      options(provider, { maxModelRequests: 1, steering: inbox }),
+      sink,
+    ),
+    /stopped after 1 model request/,
+  );
+
+  assert.equal(provider.seen.length, 1);
+  assert.deepEqual(texts(history), [
+    "initial request",
+    "first answer",
+    "change direction",
+  ]);
+  assert.deepEqual(settlements, ["checkpointed"]);
+  assert.equal(inbox.pending, 0);
 });
 
 test("steering waits for the complete issued tool batch", async () => {
@@ -242,7 +275,7 @@ test("rejects an empty provider response instead of ending the turn silently", a
   );
 });
 
-test("returns every result of one step in a single message", async () => {
+test("returns every result of one response in a single message", async () => {
   const provider = scripted([
     {
       role: "assistant",
@@ -266,7 +299,7 @@ test("returns every result of one step in a single message", async () => {
   );
 });
 
-test("refreshes model capacity between provider steps in a turn", async () => {
+test("refreshes model capacity between provider requests in a turn", async () => {
   const provider = scripted([
     {
       role: "assistant",
@@ -559,7 +592,7 @@ test("refuses an oversized batch of tool calls before executing it", async () =>
       return { output: "ran" };
     },
   };
-  const calls = Array.from({ length: MAX_TOOL_CALLS_PER_STEP + 1 }, (_, index) => ({
+  const calls = Array.from({ length: MAX_TOOL_CALLS_PER_RESPONSE + 1 }, (_, index) => ({
     kind: "tool_call" as const,
     id: String(index),
     name: "echo",
@@ -570,7 +603,7 @@ test("refuses an oversized batch of tool calls before executing it", async () =>
 
   await assert.rejects(
     runTurn(history, options(provider, { tools: [counted] }), events()),
-    /tool calls in one step/,
+    /tool calls in one response/,
   );
   assert.equal(runs, 0);
   assert.equal(history.length, 0);
@@ -845,7 +878,7 @@ test("an unknown tool is reported to the model", async () => {
   assert.match(result?.kind === "tool_result" ? result.output : "", /no such tool/);
 });
 
-test("gives up at the step limit instead of looping forever", async () => {
+test("an explicit max-steps budget stops a deterministic run", async () => {
   const looping = Array.from({ length: 5 }, (): Message => ({
     role: "assistant",
     content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "again" } }],
@@ -853,12 +886,30 @@ test("gives up at the step limit instead of looping forever", async () => {
   const provider = scripted(looping);
 
   await assert.rejects(
-    runTurn([], options(provider, { maxSteps: 3 }), events()),
-    /gave up after 3 steps/,
+    runTurn([], options(provider, { maxModelRequests: 3 }), events()),
+    /stopped after 3 model requests \(--max-steps limit reached\)/,
   );
 });
 
-test("reports provider usage and controller progress", async () => {
+test("runs beyond the former default ceiling when no budget is configured", async () => {
+  const replies: Message[] = Array.from({ length: 41 }, (_, index) => ({
+    role: "assistant",
+    content: [{
+      kind: "tool_call",
+      id: String(index),
+      name: "echo",
+      input: { text: "again" },
+    }],
+  }));
+  replies.push(assistantText("done"));
+  const provider = scripted(replies);
+
+  await runTurn([], options(provider), events());
+
+  assert.equal(provider.seen.length, 42);
+});
+
+test("reports provider usage and tool lifecycle", async () => {
   const provider = scripted([
     {
       role: "assistant",
@@ -876,7 +927,6 @@ test("reports provider usage and controller progress", async () => {
   const progress: string[] = [];
   const sink = events();
   sink.onUsage = (usage) => progress.push(`usage:${usage.inputTokens}`);
-  sink.onStep = (step) => progress.push(`step:${step}`);
   sink.onToolPreparing = (call, current, total) =>
     progress.push(`preparing:${call.id}:${current}/${total}`);
   sink.onToolStart = (call, current, total) =>
@@ -885,11 +935,9 @@ test("reports provider usage and controller progress", async () => {
   await runTurn([], options(provider), sink);
 
   assert.deepEqual(progress, [
-    "step:1",
     "usage:10",
     "preparing:a:1/1",
     "running:a:1/1",
-    "step:2",
   ]);
 });
 

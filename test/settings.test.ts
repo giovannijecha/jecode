@@ -62,7 +62,6 @@ test("saved defaults and provider-specific models survive a reload", async () =>
       effort: "medium",
       reducedMotion: true,
       maxTokens: 8192,
-      maxSteps: 12,
       compactionPercent: 90,
     });
     const saved = JSON.parse(await readFile(settingsPath(), "utf8"));
@@ -70,6 +69,7 @@ test("saved defaults and provider-specific models survive a reload", async () =>
     assert.equal(saved.ollamaHost, "https://models.example.test/team");
     assert.equal(saved.theme, undefined);
     assert.equal(saved.palette, undefined);
+    assert.equal(saved.maxSteps, undefined);
   });
 });
 
