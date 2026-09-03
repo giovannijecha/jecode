@@ -20,7 +20,13 @@ test("session node codec round-trips normalized history without provider raw dat
       { role: "user", content: [{ kind: "text", text: "change it" }] },
       {
         role: "assistant",
-        content: [{ kind: "tool_call", id: "call-1", name: "edit_file", input: { path: "a.ts", old: "", new: "$&" } }],
+        content: [{
+          kind: "tool_call",
+          id: "call-1",
+          name: "edit_file",
+          input: { path: "a.ts", old: "", new: "$&" },
+          inputError: "transient parse failure",
+        }],
         raw: { encrypted: "must not survive" },
         rawFrom: "openai-codex",
         usage: {
@@ -63,14 +69,19 @@ test("session node codec round-trips normalized history without provider raw dat
     7,
     "2026-09-01T10:01:00.000Z",
   );
-  assert.doesNotMatch(encoded, /must not survive|rawFrom|"raw"/);
+  assert.doesNotMatch(
+    encoded,
+    /must not survive|rawFrom|"raw"|inputError|transient parse failure/,
+  );
   const decoded = decodeNode(JSON.parse(encoded));
 
   assert.equal(decoded.sequence, 7);
   assert.equal(decoded.updatedAt, "2026-09-01T10:01:00.000Z");
   assert.deepEqual(decoded.node.messages, tree.activeNode?.messages.map((message) => ({
     role: message.role,
-    content: message.content,
+    content: message.content.map((block) => block.kind === "tool_call"
+      ? { kind: block.kind, id: block.id, name: block.name, input: block.input }
+      : block),
     ...(message.usage === undefined ? {} : { usage: message.usage }),
   })));
   assert.deepEqual(decoded.node.blocks, [

@@ -153,6 +153,10 @@ connected ChatGPT account and the ChatGPT Codex backend. Their opaque history
 is tagged separately so it is never replayed across those trust boundaries.
 Refusals, incomplete responses, nested failures, and usage are normalized
 rather than disappearing at the stream boundary.
+Malformed, scalar, and array tool arguments retain a transient invalid marker
+through dispatch. The controller returns a matching error result without
+previewing or executing the call; durable codecs omit the marker after that
+result makes the failure explicit.
 
 The shared HTTP client retries transient network errors, rate limits, and 5xx
 responses only for idempotent catalogue GETs. Generation POSTs are never

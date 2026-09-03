@@ -125,6 +125,47 @@ test("treats an empty argument stream as a call with no arguments", async () => 
   assert.deepEqual(call?.kind === "tool_call" ? call.input : undefined, {});
 });
 
+test("preserves malformed streamed tool arguments as an invalid call", async () => {
+  const data = await assembleAnthropic(feed([
+    {
+      type: "content_block_start",
+      index: 3,
+      content_block: { type: "tool_use", id: "tu_1", name: "list_dir", input: {} },
+    },
+    {
+      type: "content_block_delta",
+      index: 3,
+      delta: { type: "input_json_delta", partial_json: "{" },
+    },
+    { type: "content_block_stop", index: 3 },
+    { type: "message_delta", delta: { stop_reason: "tool_use" } },
+    { type: "message_stop" },
+  ]));
+
+  assert.deepEqual(fromWireResponse(data).content, [{
+    kind: "tool_call",
+    id: "tu_1",
+    name: "list_dir",
+    input: {},
+    inputError: "tool arguments were not valid JSON",
+  }]);
+});
+
+test("preserves non-object Anthropic tool input as invalid", () => {
+  const message = fromWireResponse({
+    stop_reason: "tool_use",
+    content: [{ type: "tool_use", id: "tu_1", name: "list_dir", input: [] }],
+  });
+
+  assert.deepEqual(message.content, [{
+    kind: "tool_call",
+    id: "tu_1",
+    name: "list_dir",
+    input: {},
+    inputError: "tool arguments must be a JSON object",
+  }]);
+});
+
 test("keeps thinking text and its signature in the raw block for echo-back", async () => {
   const seen = sink();
   const data = await assembleAnthropic(
