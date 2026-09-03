@@ -1,20 +1,85 @@
 import { spawn } from "node:child_process";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const SCREEN = new URL("../src/tui/screen.ts", import.meta.url).href;
+const SHUTDOWN = new URL("../src/process-shutdown.ts", import.meta.url).href;
+const SHELL = new URL("../src/tools/shell.ts", import.meta.url).href;
 const ALT_OFF = `${String.fromCharCode(27)}[?1049l`;
 
 test("a fatal signal restores the terminal and keeps its conventional exit code", async () => {
   const result = await runScreenChild([
     setup(),
     `const { enter } = await import(${JSON.stringify(SCREEN)});`,
-    "enter(true);",
-    'process.emit("SIGTERM");',
+    `const { withProcessShutdown } = await import(${JSON.stringify(SHUTDOWN)});`,
+    "await withProcessShutdown(async () => {",
+    "  enter(true);",
+    '  process.emit("SIGTERM");',
+    "});",
   ].join("\n"));
 
   assert.equal(result.code, 143, result.stderr);
   assert.ok(result.stdout.includes(ALT_OFF));
+});
+
+test("a fatal signal stops the complete command tree before exiting", { timeout: 8_000 }, async () => {
+  const area = await mkdtemp(path.join(tmpdir(), "jecode-process-shutdown-"));
+  const marker = path.join(area, "survived");
+  const descendant = [
+    "const fs = require('node:fs');",
+    `setTimeout(() => fs.writeFileSync(${JSON.stringify(marker)}, 'alive'), 1200);`,
+  ].join("");
+  const encoded = Buffer.from(descendant).toString("base64");
+  const command = `"${process.execPath}" -e "eval(Buffer.from('${encoded}','base64').toString())"`;
+
+  try {
+    const result = await runScreenChild([
+      setup(),
+      `const { enter } = await import(${JSON.stringify(SCREEN)});`,
+      `const { isProcessSignalError, withProcessShutdown } = await import(${JSON.stringify(SHUTDOWN)});`,
+      `const { runCommand } = await import(${JSON.stringify(SHELL)});`,
+      "try {",
+      "  await withProcessShutdown(async (signal) => {",
+      "    enter(true);",
+      `    const running = runCommand.run({ command: ${JSON.stringify(command)} }, { root: ${JSON.stringify(process.cwd())}, signal });`,
+      '    setTimeout(() => process.emit("SIGTERM"), 150);',
+      "    await running;",
+      "  });",
+      "} catch (error) {",
+      "  if (!isProcessSignalError(error)) throw error;",
+      "}",
+    ].join("\n"));
+
+    assert.equal(result.code, 143, result.stderr);
+    assert.ok(result.stdout.includes(ALT_OFF));
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    await assert.rejects(access(marker));
+  } finally {
+    await rm(area, { recursive: true, force: true });
+  }
+});
+
+test("a fatal signal exits after a bounded grace period when work ignores cancellation", {
+  timeout: 5_000,
+}, async () => {
+  const started = Date.now();
+  const result = await runScreenChild([
+    setup(),
+    `const { enter } = await import(${JSON.stringify(SCREEN)});`,
+    `const { withProcessShutdown } = await import(${JSON.stringify(SHUTDOWN)});`,
+    "await withProcessShutdown(async () => {",
+    "  enter(true);",
+    '  process.emit("SIGHUP");',
+    "  await new Promise(() => {});",
+    "});",
+  ].join("\n"));
+
+  assert.equal(result.code, 129, result.stderr);
+  assert.ok(result.stdout.includes(ALT_OFF));
+  assert.ok(Date.now() - started < 4_000, "shutdown exceeded its bounded grace period");
 });
 
 test("a crash restores the terminal before its stack is printed", async () => {

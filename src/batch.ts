@@ -26,6 +26,7 @@ export type BatchEnvironment = {
   lines?: AsyncIterable<string>;
   write?(text: string): void;
   width?: number;
+  signal?: AbortSignal;
 };
 
 export async function runBatch(session: Session, environment: BatchEnvironment = {}): Promise<void> {
@@ -33,20 +34,26 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
   const lines = environment.lines ?? (rl as AsyncIterable<string>);
   const write = environment.write ?? ((text: string) => stdout.write(text));
   const width = environment.width ?? columns();
+  const signal = environment.signal;
+  const stopInput = (): void => rl?.close();
+  signal?.addEventListener("abort", stopInput, { once: true });
 
   const emit = (block: Block): void => {
     for (const line of renderBatch(block, width, session.palette)) write(`${line}\n`);
   };
 
   try {
+    throwIfAborted(signal);
     for await (const raw of lines) {
+      throwIfAborted(signal);
       const line = raw.trim();
       if (line === "") continue;
 
       if (line.startsWith("/")) {
         if ((await handleCommand(line, session, {
           emit,
-          compact: () => compactSession(session),
+          signal,
+          compact: () => compactSession(session, { signal }),
         })) === "exit") break;
         continue;
       }
@@ -130,12 +137,18 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
         if (compacted !== undefined) commit(checkpoint, settlement);
         return compacted;
       };
-      await runTurn(history, options(session, policy), turn, undefined, modelHistory);
+      await runTurn(history, options(session, policy), turn, signal, modelHistory);
       turn.flush();
     }
+    throwIfAborted(signal);
   } finally {
+    signal?.removeEventListener("abort", stopInput);
     rl?.close();
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw signal.reason;
 }
 
 function options(session: Session, contextPolicy: () => Promise<ContextPolicy>) {

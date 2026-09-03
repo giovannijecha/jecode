@@ -158,8 +158,9 @@ The shared HTTP client retries transient network errors, rate limits, and 5xx
 responses only for idempotent catalogue GETs. Generation POSTs are never
 replayed after an ambiguous network or server failure. A request has 60 seconds
 to receive response headers, and an open JSON or SSE body can remain idle for
-at most 120 seconds. These internal deadlines also cover batch mode, where no
-interactive cancellation signal exists. The client handles redirects manually
+at most 120 seconds. These internal deadlines also cover batch mode. Process
+signals cancel the active provider or tool in either surface before Jecode
+exits, with a bounded hard-exit fallback. The client handles redirects manually
 and rejects every 3xx response without retrying or forwarding headers to
 another endpoint. Retry state is surfaced in the TUI. Each SSE event, the
 model-output-aware aggregate stream, reconstructed tool arguments, model
