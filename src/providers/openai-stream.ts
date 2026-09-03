@@ -67,8 +67,16 @@ export async function assembleOpenAI(
 
       case "response.done":
       case "response.completed":
+        return withDefaultStatus(
+          reconcileOutput(event.response as OpenAIResponse | undefined, items),
+          "completed",
+        );
+
       case "response.incomplete":
-        return reconcileOutput(event.response as OpenAIResponse | undefined, items);
+        return {
+          ...reconcileOutput(event.response as OpenAIResponse | undefined, items),
+          status: "incomplete",
+        };
 
       case "response.failed": {
         const response = event.response as OpenAIResponse | undefined;
@@ -147,4 +155,8 @@ function reconcileOutput(completed: OpenAIResponse | undefined, items: unknown[]
   if (completed === undefined) return { output: items };
   const finalCount = Array.isArray(completed.output) ? completed.output.length : 0;
   return items.length > finalCount ? { ...completed, output: items } : completed;
+}
+
+function withDefaultStatus(response: OpenAIResponse, status: string): OpenAIResponse {
+  return response.status === undefined ? { ...response, status } : response;
 }

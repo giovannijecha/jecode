@@ -259,11 +259,34 @@ test("malformed arguments degrade to an empty object rather than throwing", () =
     content: "",
     reasoning: "",
     toolCalls: [{ id: "c1", name: "read_file", args: "{not json" }],
+    finishReason: "tool_calls",
   });
 
   assert.deepEqual(message.content, [
     { kind: "tool_call", id: "c1", name: "read_file", input: {} },
   ]);
+});
+
+test("keeps partial text but rejects a tool call truncated by the output limit", async () => {
+  const reply = await assembleOllama(feed([
+    chunk({ content: "partial", reasoning: "unfinished" }),
+    chunk({
+      tool_calls: [{
+        index: 0,
+        id: "partial-call",
+        function: { name: "write_file", arguments: '{"path":"partial' },
+      }],
+    }),
+    chunk({}, "length"),
+  ]));
+
+  const message = fromWireReply(reply);
+  assert.deepEqual(message.content, [
+    { kind: "text", text: "partial" },
+    { kind: "text", text: "[truncated: hit the output limit — raise --max-tokens]" },
+  ]);
+  assert.equal(message.raw, undefined);
+  assert.equal(message.rawFrom, undefined);
 });
 
 test("echoes Ollama reasoning with an assistant tool call on continuation", async () => {

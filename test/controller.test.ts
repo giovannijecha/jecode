@@ -13,6 +13,9 @@ import {
 import { steeringInbox } from "../src/steering.ts";
 import type { Tool } from "../src/tools/index.ts";
 import { runCommand } from "../src/tools/shell.ts";
+import { fromWireResponse as fromOpenAIWire } from "../src/providers/openai-wire.ts";
+import { fromWireResponse as fromAnthropicWire } from "../src/providers/anthropic-wire.ts";
+import { fromWireReply as fromOllamaWire } from "../src/providers/ollama-wire.ts";
 
 type FakeProvider = Provider & { seen: SendRequest[] };
 
@@ -106,6 +109,64 @@ test("returns as soon as the model stops asking for tools", async () => {
   assert.deepEqual(sink.texts, ["all done"]);
   assert.equal(provider.seen.length, 1);
   assert.equal(history.length, 2);
+});
+
+test("never executes provider tool calls from truncated responses", async (context) => {
+  const cases: Array<{ name: string; reply: Message }> = [
+    {
+      name: "OpenAI Responses",
+      reply: fromOpenAIWire({
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        output: [{
+          type: "function_call",
+          status: "incomplete",
+          call_id: "partial-openai",
+          name: "trap",
+          arguments: "{",
+        }],
+      }),
+    },
+    {
+      name: "Anthropic Messages",
+      reply: fromAnthropicWire({
+        stop_reason: "max_tokens",
+        content: [{ type: "tool_use", id: "partial-anthropic", name: "trap", input: {} }],
+      }),
+    },
+    {
+      name: "Ollama Chat Completions",
+      reply: fromOllamaWire({
+        content: "",
+        reasoning: "",
+        finishReason: "length",
+        toolCalls: [{ id: "partial-ollama", name: "trap", args: "{" }],
+      }),
+    },
+  ];
+
+  for (const fixture of cases) {
+    await context.test(fixture.name, async () => {
+      let executions = 0;
+      const trap: Tool = {
+        name: "trap",
+        description: "must not run",
+        dangerous: false,
+        concurrency: "exclusive",
+        input: { type: "object", properties: {}, required: [] },
+        async run() {
+          executions += 1;
+          return { output: "unexpected" };
+        },
+      };
+      const provider = scripted([fixture.reply]);
+
+      await runTurn([], options(provider, { tools: [trap] }), events());
+
+      assert.equal(executions, 0);
+      assert.equal(provider.seen.length, 1);
+    });
+  }
 });
 
 test("steering queued during a final response continues the same turn", async () => {

@@ -72,11 +72,19 @@ export function fromWireReply(reply: ChatReply): Message {
   const content: Block[] = [];
   if (reply.content !== "") content.push({ kind: "text", text: reply.content });
 
-  for (const call of reply.toolCalls) {
-    content.push({ kind: "tool_call", id: call.id, name: call.name, input: parseArgs(call.args) });
+  const acceptsToolCalls = reply.finishReason === "tool_calls";
+  if (acceptsToolCalls) {
+    for (const call of reply.toolCalls) {
+      content.push({ kind: "tool_call", id: call.id, name: call.name, input: parseArgs(call.args) });
+    }
   }
 
-  const raw = reply.reasoning === "" ? undefined : { reasoning: reply.reasoning };
+  const notice = stopNotice(reply);
+  if (notice !== undefined) content.push({ kind: "text", text: notice });
+
+  const suppressedToolCall = reply.toolCalls.length > 0 && !acceptsToolCalls;
+  const retainRaw = reply.finishReason !== "length" && !suppressedToolCall;
+  const raw = !retainRaw || reply.reasoning === "" ? undefined : { reasoning: reply.reasoning };
   return {
     role: "assistant",
     content,
