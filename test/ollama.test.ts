@@ -111,6 +111,38 @@ test("falls back to Ollama model capacity when the model is not loaded", async (
   ]);
 });
 
+test("reuses Ollama model capacity while still checking for a runtime allocation", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const model = "cached-context-fixture:latest";
+  const urls: string[] = [];
+  configureOllama("http://127.0.0.1:11434");
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({
+      model_info: { "fixture.context_length": 131_072 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    configureOllama(undefined);
+  });
+
+  assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 124_518 });
+  assert.deepEqual(await ollama.contextWindow?.(model), { tokens: 124_518 });
+  assert.deepEqual(urls, [
+    "http://127.0.0.1:11434/api/ps",
+    "http://127.0.0.1:11434/api/show",
+    "http://127.0.0.1:11434/api/ps",
+  ]);
+});
+
 test("does not cache Ollama's theoretical capacity over a later runtime allocation", async (context) => {
   const previousFetch = globalThis.fetch;
   const model = "changing-context-fixture:latest";

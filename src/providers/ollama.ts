@@ -26,7 +26,9 @@ const KEY = "OLLAMA_API_KEY";
 const OLLAMA_EFFORTS = ["low", "medium", "high"] as const;
 let configuredHost: string | undefined;
 const CONTEXT_CACHE_MS = 30_000;
-const contextByEndpoint = new Map<string, { value: ModelContextWindow; expiresAt: number }>();
+type CachedContext = { value: ModelContextWindow; expiresAt: number };
+const runtimeContextByEndpoint = new Map<string, CachedContext>();
+const modelContextByEndpoint = new Map<string, CachedContext>();
 
 export type OllamaConnection = OllamaEndpoint & {
   kind: "cloud" | "local" | "custom";
@@ -81,14 +83,14 @@ export const ollama: Provider = {
   ): Promise<ModelContextWindow | undefined> {
     const at = endpoint();
     const cacheKey = `${at.baseUrl}\u0000${model}`;
-    const cached = contextByEndpoint.get(cacheKey);
-    if (cached !== undefined && cached.expiresAt > Date.now()) return cached.value;
-    const observed = await nativeContextWindow(at, model, signal, onStatus);
+    const runtime = cachedContext(runtimeContextByEndpoint, cacheKey);
+    if (runtime !== undefined) return runtime;
+    const modelCapacity = cachedContext(modelContextByEndpoint, cacheKey);
+    const observed = await nativeContextWindow(at, model, modelCapacity, signal, onStatus);
     if (observed?.runtime === true) {
-      contextByEndpoint.set(cacheKey, {
-        value: observed.value,
-        expiresAt: Date.now() + CONTEXT_CACHE_MS,
-      });
+      rememberContext(runtimeContextByEndpoint, cacheKey, observed.value);
+    } else if (observed !== undefined && modelCapacity === undefined) {
+      rememberContext(modelContextByEndpoint, cacheKey, observed.value);
     }
     return observed?.value;
   },
@@ -135,6 +137,7 @@ export const ollama: Provider = {
 async function nativeContextWindow(
   at: ReturnType<typeof endpoint>,
   model: string,
+  fallback: ModelContextWindow | undefined,
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
 ): Promise<{ value: ModelContextWindow; runtime: boolean } | undefined> {
@@ -145,6 +148,8 @@ async function nativeContextWindow(
   } catch (error) {
     throwIfAborted(signal, error);
   }
+
+  if (fallback !== undefined) return { value: fallback, runtime: false };
 
   try {
     const details = await postJson(
@@ -162,6 +167,25 @@ async function nativeContextWindow(
     throwIfAborted(signal, error);
     return undefined;
   }
+}
+
+function cachedContext(
+  cache: Map<string, CachedContext>,
+  key: string,
+): ModelContextWindow | undefined {
+  const cached = cache.get(key);
+  if (cached === undefined) return undefined;
+  if (cached.expiresAt > Date.now()) return cached.value;
+  cache.delete(key);
+  return undefined;
+}
+
+function rememberContext(
+  cache: Map<string, CachedContext>,
+  key: string,
+  value: ModelContextWindow,
+): void {
+  cache.set(key, { value, expiresAt: Date.now() + CONTEXT_CACHE_MS });
 }
 
 function runningContext(value: unknown, model: string): number | undefined {
