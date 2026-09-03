@@ -61,13 +61,13 @@ test("informational feedback has no decorative marker", () => {
 
 test("active work exposes only state, elapsed time, and the interrupt hint", () => {
   const status = renderStatus(
-    { status: "Writing · 12s", feedback: undefined, readiness: undefined, unseen: 0 },
+    { status: "Responding · 12s", feedback: undefined, readiness: undefined, unseen: 0 },
     STEEL,
   );
 
   assert.equal(
     status.map((segment) => segment.text).join(""),
-    "Writing · 12s · esc to interrupt",
+    "Responding · 12s · esc to interrupt",
   );
 });
 

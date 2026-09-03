@@ -58,7 +58,10 @@ export type ControllerEvents = {
   /** Best context-pressure signal: provider count when present, otherwise the sent estimate. */
   onRequestInput?(inputTokens: number): void;
   onStep?(step: number, total: number): void;
-  onToolProgress?(current: number, total: number): void;
+  /** A tool call is complete on the wire and its local preview is being prepared. */
+  onToolPreparing?(call: ToolCallBlock, current: number, total: number): void;
+  /** Approval and validation are complete; execution is about to begin. */
+  onToolStart?(call: ToolCallBlock, current: number, total: number): void;
   onStatus?(status: string): void;
   /** Replace only the provider-facing projection, never canonical history. */
   onContext?(
@@ -149,21 +152,28 @@ export async function runTurn(
       while (results.length < calls.length) {
         const start = results.length;
         const batch = nextBatch(calls, start, options.tools);
-        const prepared: { call: ToolCallBlock; preview?: ToolPreview }[] = [];
+        const prepared: {
+          call: ToolCallBlock;
+          current: number;
+          preview?: ToolPreview;
+        }[] = [];
 
         for (let offset = 0; offset < batch.length; offset++) {
           throwIfAborted(signal);
           const call = batch[offset] as ToolCallBlock;
-          events.onToolProgress?.(start + offset + 1, calls.length);
+          const current = start + offset + 1;
+          events.onToolPreparing?.(call, current, calls.length);
           const preview = await look(call, options, signal);
           throwIfAborted(signal);
           announced.add(call.id);
           events.onToolCall(call, preview);
-          prepared.push({ call, preview });
+          prepared.push({ call, current, preview });
         }
 
         const runs = await Promise.all(
-          prepared.map(({ call, preview }) => settle(call, options, events, signal, preview)),
+          prepared.map(({ call, current, preview }) =>
+            settle(call, current, calls.length, options, events, signal, preview)
+          ),
         );
         for (let offset = 0; offset < runs.length; offset++) {
           const call = prepared[offset]?.call as ToolCallBlock;
@@ -246,6 +256,8 @@ function assertToolCallIds(calls: readonly ToolCallBlock[]): void {
 
 async function settle(
   call: ToolCallBlock,
+  current: number,
+  total: number,
   options: ControllerOptions,
   events: ControllerEvents,
   signal: AbortSignal | undefined,
@@ -264,6 +276,7 @@ async function settle(
   }
 
   throwIfAborted(signal);
+  events.onToolStart?.(call, current, total);
   return runTool(tool, call, {
     ...options.toolContext,
     signal,

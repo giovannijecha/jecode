@@ -82,7 +82,7 @@ function events(approve = true): ControllerEvents & { texts: string[] } {
   return {
     texts,
     onStream(event) {
-      texts.push(event.text);
+      if (event.kind !== "tool") texts.push(event.text);
     },
     onToolCall() {},
     onToolResult() {},
@@ -365,6 +365,46 @@ test("runs shared calls concurrently while preserving result order", async () =>
     history[1]?.content.map((block) => block.kind === "tool_result" ? block.output : ""),
     ["one", "two"],
   );
+});
+
+test("reports preparation before preview and execution only when the tool starts", async () => {
+  const timeline: string[] = [];
+  const inspected: Tool = {
+    ...echo,
+    async preview() {
+      timeline.push("preview");
+      return { before: "old", after: "new" };
+    },
+    async run(args) {
+      timeline.push("run");
+      return { output: String(args.text) };
+    },
+  };
+  const provider = scripted([
+    {
+      role: "assistant",
+      content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "one" } }],
+    },
+    assistantText("done"),
+  ]);
+  const sink = events();
+  sink.onToolPreparing = (call, current, total) => {
+    timeline.push(`preparing:${call.id}:${current}/${total}`);
+  };
+  sink.onToolCall = (call) => timeline.push(`ready:${call.id}`);
+  sink.onToolStart = (call, current, total) => {
+    timeline.push(`running:${call.id}:${current}/${total}`);
+  };
+
+  await runTurn([], options(provider, { tools: [inspected] }), sink);
+
+  assert.deepEqual(timeline, [
+    "preparing:a:1/1",
+    "preview",
+    "ready:a",
+    "running:a:1/1",
+    "run",
+  ]);
 });
 
 test("bounds shared-call concurrency", async () => {
@@ -765,11 +805,20 @@ test("reports provider usage and controller progress", async () => {
   const sink = events();
   sink.onUsage = (usage) => progress.push(`usage:${usage.inputTokens}`);
   sink.onStep = (step) => progress.push(`step:${step}`);
-  sink.onToolProgress = (current, total) => progress.push(`tool:${current}/${total}`);
+  sink.onToolPreparing = (call, current, total) =>
+    progress.push(`preparing:${call.id}:${current}/${total}`);
+  sink.onToolStart = (call, current, total) =>
+    progress.push(`running:${call.id}:${current}/${total}`);
 
   await runTurn([], options(provider), sink);
 
-  assert.deepEqual(progress, ["step:1", "usage:10", "tool:1/1", "step:2"]);
+  assert.deepEqual(progress, [
+    "step:1",
+    "usage:10",
+    "preparing:a:1/1",
+    "running:a:1/1",
+    "step:2",
+  ]);
 });
 
 test("a shell credential cannot reach the provider follow-up or display events", async (context) => {

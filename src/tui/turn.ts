@@ -39,7 +39,7 @@ export type Transcription = ControllerEvents & {
 // reasoning and tools keep the detailed work visible in the transcript.
 const WAITING = "Waiting";
 const THINKING = "Thinking";
-const WRITING = "Writing";
+const RESPONDING = "Responding";
 const ASKING = "Waiting for you";
 
 /** Unchanged rows kept either side of a change. */
@@ -50,10 +50,9 @@ export function transcribe(stage: Stage): Transcription {
   // one, which is what keeps reasoning and answer from running together.
   let open: { kind: "answer" | "reasoning"; block: Block } | undefined;
   const tools = new Map<string, Block>();
+  const progress = new Map<string, { current: number; total: number }>();
   let step = 1;
   let steps = 1;
-  let tool = 1;
-  let toolTotal = 1;
 
   const close = (): Block | undefined => {
     const block = open?.block;
@@ -83,9 +82,23 @@ export function transcribe(stage: Stage): Transcription {
       stage.render();
     },
 
-    onToolProgress(current, total) {
-      tool = current;
-      toolTotal = total;
+    onToolPreparing(call, current, total) {
+      progress.set(call.id, { current, total });
+      const changed = close();
+      if (changed !== undefined) stage.render(changed);
+      stage.status(toolStatus("Preparing", call, progress, step, steps));
+      stage.render();
+    },
+
+    onToolStart(call, current, total) {
+      progress.set(call.id, { current, total });
+      stage.status(toolStatus("Running", call, progress, step, steps));
+      const block = tools.get(call.id);
+      if (block !== undefined && block.kind === "tool") {
+        block.right = "running";
+        block.startedAt = Date.now();
+      }
+      stage.render(block);
     },
 
     onUsage(usage) {
@@ -102,8 +115,15 @@ export function transcribe(stage: Stage): Transcription {
     },
 
     onStream(event) {
+      if (event.kind === "tool") {
+        const changed = close();
+        if (changed !== undefined) stage.render(changed);
+        stage.status(`Preparing ${event.name ?? "tool"}`);
+        stage.render();
+        return;
+      }
       const kind = event.kind === "thinking" ? "reasoning" : "answer";
-      stage.status(kind === "reasoning" ? THINKING : WRITING);
+      stage.status(kind === "reasoning" ? THINKING : RESPONDING);
 
       if (open === undefined || open.kind !== kind) {
         const changed = close();
@@ -124,17 +144,13 @@ export function transcribe(stage: Stage): Transcription {
     onToolCall(call, look) {
       const changed = close();
       if (changed !== undefined) stage.render(changed);
-      stage.status(
-        `Running ${call.name}${toolTotal > 1 ? ` · tool ${tool}/${toolTotal}` : ""}${step > 1 ? ` · step ${step}/${steps}` : ""}`,
-      );
       const block: Block = {
         kind: "tool",
         name: call.name,
         target: target(call.input),
-        right: "running",
+        right: "ready",
         tone: "pending",
         body: preview(call, look),
-        startedAt: Date.now(),
       };
       tools.set(call.id, block);
       stage.emit(block);
@@ -176,14 +192,7 @@ export function transcribe(stage: Stage): Transcription {
 
     approve(call) {
       const block = tools.get(call.id);
-      if (stage.approved(call)) {
-        if (block !== undefined && block.kind === "tool") {
-          block.right = "running";
-          block.startedAt ??= Date.now();
-          stage.render(block);
-        }
-        return Promise.resolve(true);
-      }
+      if (stage.approved(call)) return Promise.resolve(true);
       const changed = close();
       if (changed !== undefined) stage.render(changed);
       stage.status(ASKING);
@@ -202,21 +211,40 @@ export function transcribe(stage: Stage): Transcription {
           if (settled !== undefined && settled.kind === "tool") {
             if (approved) {
               settled.tone = "pending";
-              settled.right = "running";
-              settled.startedAt = Date.now();
+              settled.right = "ready";
+              settled.startedAt = undefined;
             } else {
               settled.tone = "deny";
               settled.right = "denied";
               settled.startedAt = undefined;
             }
           }
-          stage.status(approved ? `Running ${call.name}` : waiting(step, steps));
+          stage.status(
+            approved
+              ? toolStatus("Preparing", call, progress, step, steps)
+              : waiting(step, steps),
+          );
           stage.render(settled);
           resolve(approved);
         });
       });
     },
   };
+}
+
+function toolStatus(
+  phase: "Preparing" | "Running",
+  call: ToolCallBlock,
+  progress: ReadonlyMap<string, { current: number; total: number }>,
+  step: number,
+  steps: number,
+): string {
+  const position = progress.get(call.id);
+  const tool = position !== undefined && position.total > 1
+    ? ` · tool ${position.current}/${position.total}`
+    : "";
+  const turn = step > 1 ? ` · step ${step}/${steps}` : "";
+  return `${phase} ${call.name}${tool}${turn}`;
 }
 
 function pendingApproval(body: Detail[] | undefined): string {

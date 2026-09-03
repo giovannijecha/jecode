@@ -180,6 +180,7 @@ test("accumulates text deltas and streams them as they land", async () => {
 });
 
 test("rebuilds a tool call split across chunks", async () => {
+  const seen: StreamEvent[] = [];
   const reply = await assembleOllama(
     feed([
       chunk({ tool_calls: [{ index: 0, id: "c1", function: { name: "read_file", arguments: "" } }] }),
@@ -187,12 +188,14 @@ test("rebuilds a tool call split across chunks", async () => {
       chunk({ tool_calls: [{ index: 0, function: { arguments: ':"a.ts"}' } }] }),
       chunk({}, "tool_calls"),
     ]),
+    (event) => seen.push(event),
   );
 
   const message = fromWireReply(reply);
   assert.deepEqual(message.content, [
     { kind: "tool_call", id: "c1", name: "read_file", input: { path: "a.ts" } },
   ]);
+  assert.deepEqual(seen, [{ kind: "tool", name: "read_file" }]);
 });
 
 test("bounds tool arguments accumulated across Ollama calls", async () => {
@@ -210,6 +213,7 @@ test("bounds tool arguments accumulated across Ollama calls", async () => {
 });
 
 test("keeps parallel calls apart by index and invents an id when none is sent", async () => {
+  const seen: StreamEvent[] = [];
   const reply = await assembleOllama(
     feed([
       chunk({
@@ -220,6 +224,7 @@ test("keeps parallel calls apart by index and invents an id when none is sent", 
       }),
       chunk({}, "tool_calls"),
     ]),
+    (event) => seen.push(event),
   );
 
   assert.deepEqual(
@@ -229,6 +234,10 @@ test("keeps parallel calls apart by index and invents an id when none is sent", 
       ["call_1", "read_file"],
     ],
   );
+  assert.deepEqual(seen, [
+    { kind: "tool", name: "list_dir" },
+    { kind: "tool", name: "read_file" },
+  ]);
 });
 
 test("streams reasoning under either field name", async () => {

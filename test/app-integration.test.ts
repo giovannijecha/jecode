@@ -10,6 +10,7 @@ import { DurableSessionStore } from "../src/sessions/store.ts";
 import { SessionPersistence } from "../src/sessions/runtime.ts";
 import type { Session } from "../src/session.ts";
 import { start } from "../src/start.ts";
+import type { Tool } from "../src/tools/index.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import type { Painter } from "../src/tui/frame.ts";
 import { runApp } from "../src/tui/app.ts";
@@ -799,6 +800,75 @@ test("a TUI submit reaches the provider and returns to an editable session", asy
   assert.equal(harness.left(), true);
 });
 
+test("the footer follows model, tool preparation, execution, and response phases", async () => {
+  const thinking = deferred();
+  const preparing = deferred();
+  const executing = deferred();
+  const responding = deferred();
+  let requests = 0;
+  const phased: Provider = {
+    ...provider(),
+    async send(request): Promise<Message> {
+      requests++;
+      if (requests === 1) {
+        request.onStream?.({ kind: "thinking", text: "Inspecting" });
+        await thinking.wait;
+        request.onStream?.({ kind: "tool", name: "probe" });
+        await preparing.wait;
+        return {
+          role: "assistant",
+          content: [{ kind: "tool_call", id: "probe-1", name: "probe", input: {} }],
+        };
+      }
+
+      request.onStream?.({ kind: "text", text: "Finished." });
+      await responding.wait;
+      return { role: "assistant", content: [{ kind: "text", text: "Finished." }] };
+    },
+  };
+  const probe: Tool = {
+    name: "probe",
+    description: "waits while the footer is inspected",
+    dangerous: false,
+    concurrency: "shared",
+    input: { type: "object", properties: {}, required: [] },
+    async run() {
+      await executing.wait;
+      return { output: "done" };
+    },
+  };
+  const current = session(phased);
+  current.tools = [probe];
+  const harness = virtualScreen(120);
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+
+  feed("inspect\r");
+  await waitFor(() => lastFooter(harness).includes("Thinking ·"), "thinking footer phase");
+  thinking.release();
+  await waitFor(
+    () => lastFooter(harness).includes("Preparing probe ·"),
+    "tool preparation footer phase",
+  );
+  preparing.release();
+  await waitFor(
+    () => lastFooter(harness).includes("Running probe ·"),
+    "tool execution footer phase",
+  );
+  executing.release();
+  await waitFor(() => lastFooter(harness).includes("Responding ·"), "response footer phase");
+  responding.release();
+  await waitFor(() => current.conversation.history.length === 4, "completed phased turn");
+  await waitFor(
+    () => harness.frames.flat().join("\n").includes("Finished."),
+    "completed answer",
+  );
+
+  feed("/exit\r");
+  await running;
+  assert.equal(harness.left(), true);
+});
+
 test("the footer reports compaction without adding it to the transcript", async () => {
   let started = (): void => {};
   const entered = new Promise<void>((resolve) => {
@@ -1289,7 +1359,7 @@ function runNode(
   });
 }
 
-function virtualScreen(): {
+function virtualScreen(cols = 70): {
   environment: { screen: AppScreen; paint: Painter };
   frames: string[][];
   input(): Promise<(chunk: string) => void>;
@@ -1299,7 +1369,7 @@ function virtualScreen(): {
   let left = false;
   const frames: string[][] = [];
   const screen: AppScreen = {
-    size: () => ({ rows: 18, cols: 70 }),
+    size: () => ({ rows: 18, cols }),
     enter: () => {},
     leave: () => {
       left = true;
@@ -1344,4 +1414,16 @@ function delay(milliseconds: number): Promise<void> {
 
 function plainRow(value: string): string {
   return value.replace(/\u001b\[[0-9;]*m/gu, "");
+}
+
+function lastFooter(harness: { frames: string[][] }): string {
+  return plainRow(harness.frames.at(-1)?.at(-1) ?? "");
+}
+
+function deferred(): { wait: Promise<void>; release(): void } {
+  let release = (): void => {};
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { wait, release };
 }

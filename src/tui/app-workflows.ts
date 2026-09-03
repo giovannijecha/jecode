@@ -18,6 +18,7 @@ import { selectTimeline } from "../timeline.ts";
 import type { SessionPermissions } from "../permissions.ts";
 import type { Message } from "../types.ts";
 import type { Activity } from "./activity.ts";
+import { transition } from "./activity.ts";
 import type { AppActions } from "./app-input.ts";
 import type { AppState } from "./app-state.ts";
 import { answerAt } from "./approve.ts";
@@ -58,6 +59,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
   async function command(text: string): Promise<void> {
     const activity = options.startActivity("command", `Running ${text.split(/\s+/)[0]}`);
     if (activity === undefined) return;
+    const status = (label: string): void => transition(activity, label);
 
     try {
       const outcome = await handleCommand(text, session, {
@@ -79,7 +81,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
             options.render();
           }),
         status: (said) => {
-          state.status = said ?? activity.label;
+          status(said ?? activity.label);
           options.render();
         },
         reset: async () => {
@@ -113,8 +115,8 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
           }
           return compactSession(session, {
             signal: activity.control.signal,
-            onStatus: (status) => {
-              state.status = status ?? activity.label;
+            onStatus: (said) => {
+              status(said ?? activity.label);
               options.render();
             },
           });
@@ -140,6 +142,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
   async function turn(text: string): Promise<void> {
     const activity = options.startActivity("turn", WAITING);
     if (activity === undefined) return;
+    const status = (label: string): void => transition(activity, label);
     const parentId = session.conversation.activeNodeId;
     const history = session.conversation.history;
     const modelHistory = session.conversation.contextHistory;
@@ -154,7 +157,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       let visible = firstPolicy;
       firstPolicy = false;
       if (visible) {
-        state.status = "Checking context";
+        status("Checking context");
         options.render();
       }
       return resolveContextPolicy({
@@ -162,14 +165,14 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         model: session.model,
         compactionPercent: session.config.compactionPercent,
         signal: activity.control.signal,
-        onStatus: (status) => {
+        onStatus: (said) => {
           visible = true;
-          state.status = status;
+          status(said);
           options.render();
         },
       }).finally(() => {
         if (visible) {
-          state.status = WAITING;
+          status(WAITING);
           options.render();
         }
       });
@@ -190,7 +193,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         options.render();
       },
       status: (text) => {
-        state.status = text;
+        status(text);
       },
       usage: (usage) => recordUsage(session.usage, usage),
       requestInput: (inputTokens) => recordRequestInput(session.usage, inputTokens),
@@ -245,11 +248,11 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         force,
         policy: request.policy,
         onBegin: () => {
-          state.status = "Compacting";
+          status("Compacting");
           options.render();
         },
         onEnd: () => {
-          state.status = WAITING;
+          status(WAITING);
           options.render();
         },
       });

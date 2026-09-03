@@ -60,7 +60,7 @@ test("layout measures the same neutralized text that paint emits", () => {
 });
 
 test("optional context disappears instead of rendering as a fragment", () => {
-  const state = { text: "Writing · 2s" };
+  const state = { text: "Responding · 2s" };
   const hint = { text: " · esc to interrupt", optional: true };
 
   assert.deepEqual(fitSegs([state, hint], plainLen([state])), [state]);
