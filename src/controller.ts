@@ -201,17 +201,35 @@ export async function runTurn(
           prepared.push({ call, current, preview });
         }
 
-        const runs = await Promise.all(
+        const settlements = await Promise.allSettled(
           prepared.map(({ call, current, preview }) =>
             settle(call, current, calls.length, options, events, signal, preview)
           ),
         );
-        for (let offset = 0; offset < runs.length; offset++) {
+        let batchFailure: { error: unknown } | undefined;
+        for (let offset = 0; offset < settlements.length; offset++) {
           const call = prepared[offset]?.call as ToolCallBlock;
-          const run = runs[offset] as ToolRun;
+          const settlement = settlements[offset] as PromiseSettledResult<ToolRun>;
+          const run = settlement.status === "fulfilled"
+            ? settlement.value
+            : refuse(
+              call,
+              signal?.aborted === true
+                ? "interrupted before completion"
+                : "tool processing stopped before completion",
+              signal?.aborted === true ? "interrupted" : "failed",
+            );
+          if (settlement.status === "rejected" && batchFailure === undefined) {
+            batchFailure = { error: settlement.reason };
+          }
           results.push(run.result);
-          events.onToolResult(call, run.result, run.summary);
+          try {
+            events.onToolResult(call, run.result, run.summary);
+          } catch (error) {
+            batchFailure ??= { error };
+          }
         }
+        if (batchFailure !== undefined) throw batchFailure.error;
       }
     } catch (error) {
       const interrupted = signal?.aborted === true;

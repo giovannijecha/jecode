@@ -855,6 +855,44 @@ test("an interrupted shared batch repairs every call in deterministic order", as
   assert.deepEqual(shown, ["a:interrupted", "b:interrupted"]);
 });
 
+test("an interrupted shared batch preserves calls completed before cancellation", async () => {
+  const control = new AbortController();
+  const partiallyInterrupted: Tool = {
+    ...echo,
+    async run(args) {
+      if (args.text === "complete") {
+        return { output: "completed before interruption", summary: "complete" };
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+      const error = new Error("interrupted");
+      control.abort(error);
+      throw error;
+    },
+  };
+  const provider = scripted([{
+    role: "assistant",
+    content: [
+      { kind: "tool_call", id: "a", name: "echo", input: { text: "complete" } },
+      { kind: "tool_call", id: "b", name: "echo", input: { text: "stop" } },
+    ],
+  }]);
+  const history: Message[] = [];
+  const shown: string[] = [];
+  const sink = events();
+  sink.onToolResult = (call, _result, summary) => shown.push(`${call.id}:${summary}`);
+
+  await assert.rejects(
+    runTurn(history, options(provider, { tools: [partiallyInterrupted] }), sink, control.signal),
+    /interrupted/,
+  );
+
+  assert.deepEqual(history[1]?.content, [
+    { kind: "tool_result", id: "a", output: "completed before interruption", isError: false },
+    { kind: "tool_result", id: "b", output: "interrupted before completion", isError: true },
+  ]);
+  assert.deepEqual(shown, ["a:complete", "b:interrupted"]);
+});
+
 test("an unexpected approval failure leaves tool history consistent", async () => {
   const provider = scripted([{
     role: "assistant",
@@ -883,7 +921,7 @@ test("an unexpected approval failure leaves tool history consistent", async () =
   });
 });
 
-test("a result-surface failure preserves completed and pending tool results", async () => {
+test("a result-surface failure preserves every completed tool result", async () => {
   const provider = scripted([{
     role: "assistant",
     content: [
@@ -893,7 +931,9 @@ test("a result-surface failure preserves completed and pending tool results", as
   }]);
   const history: Message[] = [];
   const sink = events();
+  let surfaced = 0;
   sink.onToolResult = () => {
+    surfaced++;
     throw new Error("result surface failed");
   };
 
@@ -907,9 +947,10 @@ test("a result-surface failure preserves completed and pending tool results", as
   assert.deepEqual(blocks[1], {
     kind: "tool_result",
     id: "b",
-    output: "tool processing stopped before completion",
-    isError: true,
+    output: "pending",
+    isError: false,
   });
+  assert.equal(surfaced, 2);
 });
 
 test("a throwing tool is reported to the model rather than crashing the turn", async () => {
