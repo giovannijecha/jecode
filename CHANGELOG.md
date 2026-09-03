@@ -4,6 +4,31 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.8.3] - 2026-09-03
+
+### Changed
+
+- Kept context estimation and compaction planning responsive for multi-megabyte
+  requests, with cancellation-aware work and bounded event-loop stalls.
+- Made durable session checkpoints incremental while retaining complete
+  validation during resume and crash recovery.
+- Simplified the public README, moved detailed usage into a dedicated guide,
+  and gave documentation and brand assets canonical repository locations.
+
+### Fixed
+
+- Coordinated process shutdown across the TUI, pending resume selection,
+  provider requests, tools, and batch input before terminal restoration.
+- Rejected malformed provider tool arguments before preview or execution.
+- Bounded interactive and batch prompt input without splitting Unicode
+  characters at decoder chunk boundaries.
+- Bounded settings, API-key, and OAuth stores before parsing and writing, and
+  made credential redaction fail closed beyond its supported limits.
+- Requested streaming usage from compatible Ollama endpoints so context
+  pressure can use provider-reported input when available.
+- Revalidated session directories during incremental checkpoint writes so a
+  replaced junction or symlink cannot redirect durable data.
+
 ## [0.8.2] - 2026-09-03
 
 ### Changed
@@ -509,6 +534,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.8.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.3
 [0.8.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.2
 [0.8.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.1
 [0.8.0]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.0
