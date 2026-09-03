@@ -46,6 +46,7 @@ test("session node codec round-trips normalized history without provider raw dat
         target: "",
         right: "",
         tone: "ok",
+        durationMs: 37,
         body: [{ kind: "add", text: "", newLine: 1, emphasis: { start: 0, length: 1 } }],
       },
     ],
@@ -81,6 +82,7 @@ test("session node codec round-trips normalized history without provider raw dat
       target: "",
       right: "",
       tone: "ok",
+      durationMs: 37,
       body: [{ kind: "add", text: "", newLine: 1, emphasis: { start: 0, length: 1 } }],
     },
   ]);
@@ -139,6 +141,72 @@ test("schema 2 session nodes remain readable with their context anchor", () => {
 
   assert.equal(decoded.node.context?.summary, "The user greeted the assistant.");
   assert.equal(decoded.node.failure, undefined);
+});
+
+test("schema 3 tool records remain readable without a duration", () => {
+  const decoded = decodeNode({
+    version: 3,
+    sequence: 1,
+    updatedAt: "2026-09-01T10:01:00.000Z",
+    node: {
+      id: 1,
+      parentId: 0,
+      revision: 1,
+      createdAt: "2026-09-01T10:00:00.000Z",
+      settlement: "completed",
+      identity: { providerId: "ollama", model: "m", effort: "high" },
+      messages: [
+        { role: "user", content: [{ kind: "text", text: "inspect" }], usage: null },
+        { role: "assistant", content: [{ kind: "text", text: "done" }], usage: null },
+      ],
+      blocks: [{
+        kind: "tool",
+        name: "read_file",
+        target: "README.md",
+        right: "40 lines",
+        tone: "ok",
+        body: null,
+      }],
+      context: null,
+      failure: null,
+    },
+  });
+
+  assert.deepEqual(decoded.node.blocks, [{
+    kind: "tool",
+    name: "read_file",
+    target: "README.md",
+    right: "40 lines",
+    tone: "ok",
+  }]);
+});
+
+test("current session tool durations are bounded non-negative integers", () => {
+  const tree = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "ollama", model: "m", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "inspect" }] },
+      { role: "assistant", content: [{ kind: "text", text: "done" }] },
+    ],
+    blocks: [{
+      kind: "tool",
+      name: "read_file",
+      target: "README.md",
+      right: "40 lines",
+      tone: "ok",
+      durationMs: 7,
+    }],
+  }, "completed");
+  const encoded = JSON.parse(encodeNode(
+    tree.activeNode as NonNullable<typeof tree.activeNode>,
+    1,
+    "2026-09-01T10:01:00.000Z",
+  ));
+  encoded.node.blocks[0].durationMs = -1;
+
+  assert.throws(() => decodeNode(encoded), /invalid or unsupported/);
 });
 
 test("session metadata and head codecs reject unknown fields", () => {

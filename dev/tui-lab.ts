@@ -12,7 +12,7 @@ import { decoder } from "../src/tui/keys.ts";
 import * as screen from "../src/tui/screen.ts";
 import {
   choiceCount,
-  composeLab,
+  labComposer,
   ANIMATED,
   SCENES,
 } from "./tui-lab/view.ts";
@@ -36,6 +36,7 @@ async function run(): Promise<void> {
   configureColor(true);
 
   const paint = painter();
+  const composeLab = labComposer();
   const keys = decoder();
   let live = true;
   let escapeTimer: NodeJS.Timeout | undefined;

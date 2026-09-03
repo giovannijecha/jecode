@@ -154,9 +154,7 @@ export function blank(width: number, ground: RGB): string {
 /**
  * A full-width divider.
  *
- * Edge to edge, because the other thing that spans a whole row is the ground
- * behind a user's message: two elements that stop at different columns read as
- * two grids, and the eye finds the discrepancy before it finds the text.
+ * Edge to edge so the composer and dock keep one exact terminal boundary.
  */
 export function rule(width: number, color: RGB): string {
   return paint({ text: "─".repeat(Math.max(0, width)), fg: color });

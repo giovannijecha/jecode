@@ -27,6 +27,7 @@ test("a transcript preserves conversation, reasoning, and full tool details", ()
       target: "src/a.ts",
       right: "1 replacement",
       tone: "ok",
+      durationMs: 42,
       body: [
         { kind: "del", text: "old" },
         { kind: "add", text: "new" },
@@ -39,6 +40,7 @@ test("a transcript preserves conversation, reasoning, and full tool details", ()
   assert.match(markdown, /## You\n\nFix it/);
   assert.match(markdown, /<summary>Reasoning<\/summary>/);
   assert.match(markdown, /\*\*edit_file\*\* `src\/a\.ts`/);
+  assert.match(markdown, /1 replacement · 42ms/);
   assert.match(markdown, /- old\n\+ new/);
   assert.match(markdown, /## Assistant\n\nDone\./);
 });

@@ -43,6 +43,8 @@ export type ToolBlock = {
   expanded?: boolean;
   /** Wall-clock start for the live elapsed label; absent while approval waits. */
   startedAt?: number;
+  /** Settled execution duration. Durable evidence; never used as animation state. */
+  durationMs?: number;
 };
 export type NoticeBlock = { kind: "notice"; text: string; tone: NoticeTone };
 

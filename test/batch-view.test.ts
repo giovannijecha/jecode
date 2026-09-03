@@ -21,8 +21,8 @@ test("batch tool output keeps the content without full-screen padding", () => {
   assert.match(rows.join("\n"), /run_command\s+npm test/);
   assert.deepEqual(
     rows
-      .filter((line) => /│ (?:one|two)$/.test(line))
-      .map((line) => line.replace(/^.*│ /, "")),
+      .filter((line) => /│\s+(?:one|two)$/.test(line))
+      .map((line) => line.replace(/^.*│\s+/, "")),
     ["one", "two"],
   );
   assert.ok(rows.every((line) => !/[ \t]+$/.test(line)));
@@ -30,7 +30,7 @@ test("batch tool output keeps the content without full-screen padding", () => {
   assert.notEqual(rows.at(-1), "");
 });
 
-test("informational notices never regain the legacy leading dot", () => {
+test("informational transcript notices use the semantic gutter mark", () => {
   const rows = renderBatch(
     { kind: "notice", text: "context compacted", tone: "info" },
     80,
@@ -38,5 +38,5 @@ test("informational notices never regain the legacy leading dot", () => {
   );
 
   assert.match(rows.join("\n"), /context compacted/);
-  assert.doesNotMatch(rows.join("\n"), /·/);
+  assert.match(rows.join("\n"), /·\s+context compacted/);
 });

@@ -327,8 +327,8 @@ test("a pending tool keeps one stable state node and its elapsed time", () => {
   };
   const first = strip(compose({ ...view, now: 1_000 }, { rows: 24, cols: 80 }).rows).join("\n");
   const later = strip(compose({ ...view, now: 2_000 }, { rows: 24, cols: 80 }).rows).join("\n");
-  assert.match(first, /◌ run_command\s+npm test/);
-  assert.match(later, /◌ run_command\s+npm test/);
+  assert.match(first, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+run_command\s+npm test/);
+  assert.match(later, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+run_command\s+npm test/);
   assert.match(first, /running · 1\.0s/);
   assert.match(later, /running · 2\.0s/);
   assert.match(later, /esc to interrupt/);
@@ -388,6 +388,10 @@ test("a tool rail starts timing only when execution actually begins", () => {
   events.onToolStart?.(call, 1, 1);
   assert.equal(block?.kind === "tool" ? block.right : undefined, "running");
   assert.equal(typeof (block?.kind === "tool" ? block.startedAt : undefined), "number");
+
+  events.onToolResult(call, { kind: "tool_result", id: "1", output: "ok", isError: false }, "1 line");
+  assert.equal(block?.kind === "tool" ? block.startedAt : undefined, undefined);
+  assert.equal(typeof (block?.kind === "tool" ? block.durationMs : undefined), "number");
 });
 
 test("an edit is diffed from the call, so approval is about the change", () => {
@@ -455,9 +459,9 @@ test("a tool is a compact execution rail with evidence beneath it", () => {
 
   const ESCAPE = String.fromCharCode(27);
   const bare = renderAll([block], 60, STEEL).map((r) => r.replace(new RegExp(`${ESCAPE}\[[0-9;]*m`, "g"), ""));
-  assert.match(bare.join("\n"), /✓ run_command\s+ls/);
-  assert.match(bare.join("\n"), /│ one/);
-  assert.match(bare.join("\n"), /│ two/);
+  assert.match(bare.join("\n"), /✓\s+run_command\s+ls/);
+  assert.match(bare.join("\n"), /│\s+one/);
+  assert.match(bare.join("\n"), /│\s+two/);
   assert.equal(bare[0], "");
   assert.ok(bare.every((line) => textWidth(line) <= 60));
   assert.ok(bare.slice(1).every((line) => !/[ \t]+$/.test(line)));
@@ -830,9 +834,10 @@ test("conversation blocks use the approved hierarchy with one tool rail", () => 
   const drawn = strip(renderAll(blocks, 50, STEEL)).join("\n");
   assert.match(drawn, / ask/);
   assert.match(drawn, / think/);
-  assert.match(drawn, /✓ read_file\s+a\.ts/);
+  assert.match(drawn, /✓\s+read_file\s+a\.ts/);
   assert.match(drawn, / done/);
-  assert.match(drawn, /│|✓ read_file/);
+  assert.match(drawn, /│|✓\s+read_file/);
+  assert.match(drawn, /│ think\n│\n✓\s+read_file/);
   assert.doesNotMatch(drawn, /[█├└]/);
 });
 

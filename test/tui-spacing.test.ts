@@ -22,7 +22,7 @@ test("every conversation block owns one leading rhythm row", () => {
   for (const block of blocks) assert.equal(render(block, 50, STEEL)[0], "", block.kind);
 });
 
-test("a user turn separates its outer gap from its padded surface", () => {
+test("a user turn keeps one outer gap and the shared semantic gutter", () => {
   const width = 50;
   const drawn = plain(renderAll([
     { kind: "answer", text: "previous answer" },
@@ -30,9 +30,9 @@ test("a user turn separates its outer gap from its padded surface", () => {
   ], width, STEEL));
   const question = drawn.findIndex((line) => line.includes("next question"));
 
-  assert.match(drawn[question - 3] ?? "", /previous answer/);
-  assert.equal(drawn[question - 2], "");
-  assert.equal(drawn[question - 1], " ".repeat(width));
+  assert.match(drawn[question - 2] ?? "", /previous answer/);
+  assert.equal(drawn[question - 1], "");
+  assert.match(drawn[question] ?? "", /^❯ next question$/);
 });
 
 test("consecutive tool calls join one execution rail without repeated gaps", () => {

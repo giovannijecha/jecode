@@ -48,6 +48,8 @@ export type View = {
   readiness?: Feedback;
   /** One frame timestamp shared by every live tool duration. */
   now?: number;
+  /** Render stable states and suppress decorative repaint timers. */
+  reducedMotion?: boolean;
   /** A modal surface which takes the composer over while it is open. */
   modal?: Modal;
   /** Commands the half-typed line still matches. */
@@ -61,6 +63,7 @@ export type Frame = {
   cursor?: Cursor;
   maxScroll: number;
   transcriptPending: boolean;
+  transcriptAnimating: boolean;
 };
 
 export function compose(
@@ -83,7 +86,7 @@ export function compose(
     transcriptHeight,
     view.scroll,
     view.pal,
-    { now: view.now },
+    { now: view.now, reducedMotion: view.reducedMotion },
   );
 
   const cursor = dock.cursor === undefined
@@ -94,6 +97,7 @@ export function compose(
     cursor,
     maxScroll: viewport.maxScroll,
     transcriptPending: viewport.pending,
+    transcriptAnimating: viewport.animating,
   };
 }
 
@@ -168,5 +172,5 @@ function tooSmall(height: number, width: number, view: View): Frame {
       { text: elide(`need ${MIN_COLS}×${MIN_ROWS}`, Math.max(1, width)), fg: view.pal.ink.dim },
     ]);
   }
-  return { rows, maxScroll: 0, transcriptPending: false };
+  return { rows, maxScroll: 0, transcriptPending: false, transcriptAnimating: false };
 }

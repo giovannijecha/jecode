@@ -4,6 +4,7 @@ import type { Block } from "../src/tui/blocks.ts";
 import { render, renderAll } from "../src/tui/blocks.ts";
 import { transcriptRenderer } from "../src/tui/transcript-view.ts";
 import { STEEL } from "../src/ui/theme.ts";
+import { textWidth } from "../src/ui/width.ts";
 
 test("a cold long transcript paints its tail before bounded background reflow", () => {
   const blocks: Block[] = Array.from(
@@ -54,6 +55,103 @@ test("streaming invalidates only the block whose visible state changed", () => {
 
   assert.equal(calls.get(settled), 1);
   assert.equal(calls.get(live), 2);
+});
+
+test("live tool motion repaints locally, settles, and then leaves a stable cache", () => {
+  let now = 1_000;
+  const tool: Block = {
+    kind: "tool",
+    name: "run_command",
+    target: "npm test",
+    right: "running",
+    tone: "pending",
+    startedAt: now,
+    body: [{ kind: "out", text: "starting" }],
+  };
+  const blocks = [tool];
+  const transcript = transcriptRenderer(render, () => now);
+
+  transcript.invalidate(tool);
+  const first = transcript.viewport(blocks, 100, 8, 0, STEEL, { now });
+  now += 80;
+  const second = transcript.viewport(blocks, 100, 8, 0, STEEL, { now });
+
+  assert.equal(first.animating, true);
+  assert.equal(second.animating, true);
+  assert.notEqual(first.rows.join("\n"), second.rows.join("\n"));
+
+  if (tool.kind !== "tool") return;
+  tool.tone = "ok";
+  tool.right = "exit 0";
+  tool.durationMs = now - (tool.startedAt ?? now);
+  tool.startedAt = undefined;
+  transcript.invalidate(tool);
+  assert.equal(transcript.viewport(blocks, 100, 8, 0, STEEL, { now }).animating, true);
+
+  now = 2_600;
+  const resting = transcript.viewport(blocks, 100, 8, 0, STEEL, { now });
+  const cached = transcript.viewport(blocks, 100, 8, 0, STEEL, { now });
+  assert.equal(resting.animating, false);
+  assert.deepEqual(cached, resting);
+});
+
+test("historical and reduced-motion tools render directly at rest", () => {
+  let now = 1_000;
+  const historical: Block = {
+    kind: "tool",
+    name: "read_file",
+    target: "README.md",
+    right: "40 lines",
+    tone: "ok",
+    durationMs: 7,
+  };
+  const history = transcriptRenderer(render, () => now);
+  history.viewport([historical], 80, 6, 0, STEEL, { now });
+  historical.expanded = true;
+  history.invalidate(historical);
+  assert.equal(history.viewport([historical], 80, 6, 0, STEEL, { now }).animating, false);
+
+  const pending: Block = {
+    kind: "tool",
+    name: "run_command",
+    target: "npm test",
+    right: "running",
+    tone: "pending",
+    startedAt: now,
+  };
+  const reduced = transcriptRenderer(render, () => now);
+  reduced.invalidate(pending);
+  const frame = reduced.viewport([pending], 80, 6, 0, STEEL, {
+    now,
+    reducedMotion: true,
+  });
+  assert.equal(frame.animating, false);
+  assert.match(frame.rows.join("\n"), /○\s+run_command/);
+  assert.doesNotMatch(frame.rows.join("\n"), /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+});
+
+test("wide live tool motion stays inside the frame and bounds its moving trail", () => {
+  let now = 0;
+  const tool: Block = {
+    kind: "tool",
+    name: "run_command",
+    target: "npm test",
+    right: "running",
+    tone: "pending",
+    startedAt: 0,
+  };
+  const transcript = transcriptRenderer(render, () => now);
+  transcript.invalidate(tool);
+  now = 750;
+
+  const frame = transcript.viewport([tool], 200, 6, 0, STEEL, { now });
+  const toolRow = frame.rows.find((line) => line.includes("run_command")) ?? "";
+  const separatorsAndTrail = toolRow.match(/·/gu)?.length ?? 0;
+
+  assert.ok(frame.rows.every((line) => textWidth(line) <= 200));
+  assert.ok(separatorsAndTrail > 1, "the travelling trail is visible mid-flight");
+  assert.ok(separatorsAndTrail <= 8, "seven trail cells plus the duration separator");
+  assert.doesNotMatch(toolRow, /npm test·|·running/);
 });
 
 test("two recent widths retain their cached rows while viewport scrolling does not", () => {

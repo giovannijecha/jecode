@@ -68,7 +68,7 @@ export function transcribe(stage: Stage): Transcription {
         if (block.kind !== "tool" || block.tone !== "pending") continue;
         block.tone = "fail";
         block.right = reason ?? "failed";
-        block.startedAt = undefined;
+        settleDuration(block);
         stage.render(block);
       }
     },
@@ -88,6 +88,7 @@ export function transcribe(stage: Stage): Transcription {
       if (block !== undefined && block.kind === "tool") {
         block.right = "running";
         block.startedAt = Date.now();
+        block.durationMs = undefined;
       }
       stage.render(block);
     },
@@ -169,7 +170,7 @@ export function transcribe(stage: Stage): Transcription {
 
       block.tone = result.isError ? "fail" : "ok";
       block.right = summary ?? "";
-      block.startedAt = undefined;
+      settleDuration(block);
 
       // A failure replaces the preview: what the call was going to do stops
       // being the interesting part the moment it did not do it.
@@ -240,6 +241,13 @@ function pendingApproval(body: Detail[] | undefined): string {
   const removed = body?.filter((detail) => detail.kind === "del").length ?? 0;
   const summary = added + removed === 0 ? "" : `+${added} −${removed} · `;
   return `${summary}pending approval`;
+}
+
+function settleDuration(block: Extract<Block, { kind: "tool" }>): void {
+  if (block.startedAt !== undefined) {
+    block.durationMs = Math.max(0, Date.now() - block.startedAt);
+  }
+  block.startedAt = undefined;
 }
 
 /** The argument worth showing: the thing the call acts on. */

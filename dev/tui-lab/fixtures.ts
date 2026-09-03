@@ -9,6 +9,7 @@ export type ToolFixture = {
   readonly name: string;
   readonly target: string;
   readonly result: string;
+  readonly durationMs?: number;
   readonly tone: ToolTone;
   readonly detail?: readonly string[];
 };
@@ -58,7 +59,8 @@ export const conversation = {
     {
       name: "read_file",
       target: "src/providers/http.ts",
-      result: "146 lines · 7ms",
+      result: "146 lines",
+      durationMs: 7,
       tone: "ok",
       detail: [
         "export async function request(...) {",
@@ -69,7 +71,8 @@ export const conversation = {
     {
       name: "search_text",
       target: "\"request(\" in src/providers",
-      result: "6 matches · 11ms",
+      result: "6 matches",
+      durationMs: 11,
       tone: "ok",
       detail: [
         "src/providers/anthropic.ts:41",
@@ -81,13 +84,15 @@ export const conversation = {
       name: "edit_file",
       target: "src/providers/http.ts",
       result: "+18 −6 · approved",
+      durationMs: 42,
       tone: "ok",
       detail: ["The bounded response reader now stops at 64 KiB."],
     },
     {
       name: "run_command",
       target: "npm test",
-      result: "202 passed · 1.54s",
+      result: "202 passed",
+      durationMs: 1_540,
       tone: "ok",
       detail: ["tests 204", "pass 202", "fail 0", "skipped 2"],
     },
@@ -133,14 +138,16 @@ export const toolTrace = {
     {
       name: "find_files",
       target: "test/**/*http*.test.ts",
-      result: "2 files · 8ms",
+      result: "2 files",
+      durationMs: 8,
       tone: "ok",
       detail: ["test/http.test.ts", "test/openai-http.test.ts"],
     },
     {
       name: "run_command",
       target: "node --test test/http.test.ts",
-      result: "failed · 612ms",
+      result: "failed",
+      durationMs: 612,
       tone: "fail",
       detail: [
         "✖ abort stops a pending retry",
@@ -161,14 +168,15 @@ export const toolTrace = {
     {
       name: "read_file",
       target: "test/http.test.ts:58-80",
-      result: "23 lines · 5ms",
+      result: "23 lines",
+      durationMs: 5,
       tone: "ok",
       detail: ["The test aborts during backoff and expects no second request."],
     },
     {
       name: "search_text",
       target: '"signal.aborted" in src/providers/http.ts',
-      result: "running · 4.0s",
+      result: "running",
       tone: "pending",
     },
   ] satisfies readonly ToolFixture[],
@@ -178,7 +186,8 @@ export const toolTrace = {
 export const suiteRun = {
   user: "Run the focused HTTP suite and keep the useful end of its output visible.",
   command: "node --test test/http.test.ts",
-  result: "exit 0 · 1.4s",
+  result: "exit 0",
+  durationMs: 1_398,
   output: [
     "TAP version 13",
     "# request boundary",

@@ -34,6 +34,7 @@ test("checkpoints one turn in place and keeps only settled transcript state", ()
         right: "1 entry",
         tone: "ok",
         startedAt: 123,
+        durationMs: 12,
         expanded: true,
       },
     ],
@@ -42,7 +43,7 @@ test("checkpoints one turn in place and keeps only settled transcript state", ()
   assert.equal(tree.activeNode?.revision, 1);
   assert.deepEqual(tree.transcript, [
     { kind: "user", text: "inspect" },
-    { kind: "tool", name: "list_dir", target: ".", right: "1 entry", tone: "ok" },
+    { kind: "tool", name: "list_dir", target: ".", right: "1 entry", tone: "ok", durationMs: 12 },
   ]);
 
   tree = tree.commit({
