@@ -50,6 +50,7 @@ const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const MAX_CATALOG_ENTRIES = 4_096;
 const CATALOG_READ_CONCURRENCY = 8;
+const NODE_READ_CONCURRENCY = 4;
 const SESSION_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const NODE_NAME = /^(\d{6})\.json$/;
 const ATOMIC_NODE_TEMP = /^\.\d{6}\.json\.\d+\.[a-f0-9-]+\.tmp$/;
@@ -392,19 +393,29 @@ async function readNodes(directory: string): Promise<StoredNode[]> {
   }
   const stored: StoredNode[] = [];
   const sequences = new Set<number>();
-  for (let index = 0; index < names.length; index++) {
-    const name = names[index] as string;
-    const id = Number(NODE_NAME.exec(name)?.[1]);
-    if (id !== index + 1) throw new Error("session conversation nodes are not contiguous");
-    const decoded = decodeNode(await readJson(
-      path.join(directory, name),
-      SESSION_FILE_LIMITS.nodeBytes,
-    ));
-    if (decoded.node.id !== id || sequences.has(decoded.sequence)) {
-      throw new Error("session conversation node identity is invalid");
+  for (let start = 0; start < names.length; start += NODE_READ_CONCURRENCY) {
+    const decoded = await Promise.all(names.slice(start, start + NODE_READ_CONCURRENCY)
+      .map(async (name, offset): Promise<StoredNode> => {
+        const id = Number(NODE_NAME.exec(name)?.[1]);
+        if (id !== start + offset + 1) {
+          throw new Error("session conversation nodes are not contiguous");
+        }
+        const entry = decodeNode(await readJson(
+          path.join(directory, name),
+          SESSION_FILE_LIMITS.nodeBytes,
+        ));
+        if (entry.node.id !== id) {
+          throw new Error("session conversation node identity is invalid");
+        }
+        return entry;
+      }));
+    for (const entry of decoded) {
+      if (sequences.has(entry.sequence)) {
+        throw new Error("session conversation node identity is invalid");
+      }
+      sequences.add(entry.sequence);
+      stored.push(entry);
     }
-    sequences.add(decoded.sequence);
-    stored.push(decoded);
   }
   return stored;
 }

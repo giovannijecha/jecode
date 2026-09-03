@@ -52,6 +52,33 @@ test("publishes, updates, lists, and reloads a workspace-scoped session", async 
   }
 });
 
+test("reloads conversation nodes in order across bounded read batches", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    let conversation = ConversationTree.empty();
+    for (let index = 0; index < 10; index++) {
+      conversation = turn(
+        conversation,
+        conversation.activeNodeId,
+        `question ${index}`,
+        `answer ${index}`,
+      );
+    }
+
+    const published = await store.publish(conversation);
+    const loaded = await store.load(published.meta.id);
+
+    assert.deepEqual(
+      loaded.conversation.nodes.map((node) => node.id),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    );
+    assert.deepEqual(loaded.conversation.history, conversation.history.map(stripRaw));
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("catalogue previews end before a grapheme that crosses their boundary", async () => {
   const fixture = await sessionFixture();
   try {
