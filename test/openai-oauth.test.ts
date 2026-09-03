@@ -147,6 +147,170 @@ test("device sign-in exchanges only after the user code is authorized", async (c
   assert.equal(exchange.get("redirect_uri"), "https://auth.openai.com/deviceauth/callback");
 });
 
+test("device sign-in recognizes pending responses and backs off when asked", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const started = new Date("2026-09-03T00:00:00Z");
+  context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: started });
+  const polls: number[] = [];
+  const replies = [
+    json({ error: { code: "deviceauth_authorization_pending" } }, 403),
+    json({}, 404),
+    json({ error: "authorization_pending" }, 400),
+    json({ error: "slow_down" }, 429),
+    json({ authorization_code: "device-auth-code", code_verifier: "device-verifier" }),
+  ];
+  globalThis.fetch = deviceFlowFetch({
+    poll() {
+      polls.push(Date.now());
+      const reply = replies.shift();
+      if (reply === undefined) throw new Error("unexpected extra device poll");
+      return reply;
+    },
+    exchange: () => json(tokens("device-access", "device-refresh")),
+  });
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const login = await beginDeviceLogin();
+  const completion = login.complete();
+  void completion.catch(() => undefined);
+  await waitFor(() => polls.length === 1);
+  await flushAsync();
+
+  context.mock.timers.tick(1_000);
+  await waitFor(() => polls.length === 2);
+  await flushAsync();
+  context.mock.timers.tick(1_000);
+  await waitFor(() => polls.length === 3);
+  await flushAsync();
+  context.mock.timers.tick(1_000);
+  await waitFor(() => polls.length === 4);
+  await flushAsync();
+  context.mock.timers.tick(5_999);
+  await flushAsync();
+  assert.deepEqual(polls, [
+    started.getTime(),
+    started.getTime() + 1_000,
+    started.getTime() + 2_000,
+    started.getTime() + 3_000,
+  ]);
+
+  context.mock.timers.tick(1);
+  const account = await completion;
+  assert.equal(account.accountId, "account-1");
+  assert.deepEqual(polls, [
+    started.getTime(),
+    started.getTime() + 1_000,
+    started.getTime() + 2_000,
+    started.getTime() + 3_000,
+    started.getTime() + 9_000,
+  ]);
+});
+
+test("device sign-in stops immediately on terminal errors", async (context) => {
+  const previousFetch = globalThis.fetch;
+  context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+  const cases = [
+    {
+      response: json({ error: "access_denied", error_description: "The user declined" }, 403),
+      message: /device sign-in was denied/,
+    },
+    {
+      response: json({ error: { code: "expired_token" } }, 404),
+      message: /device sign-in code expired/,
+    },
+    {
+      response: json({ error: { code: "invalid_request" } }, 403),
+      message: /device sign-in failed \(403\)/,
+    },
+  ];
+
+  for (const sample of cases) {
+    let polls = 0;
+    globalThis.fetch = deviceFlowFetch({
+      poll() {
+        polls++;
+        if (polls > 1) throw new Error("polled after terminal error");
+        return sample.response;
+      },
+    });
+
+    const login = await beginDeviceLogin();
+    const rejection = assert.rejects(login.complete(), sample.message);
+    await waitFor(() => polls === 1);
+    await flushAsync();
+    context.mock.timers.tick(1_000);
+    await rejection;
+    assert.equal(polls, 1);
+  }
+});
+
+test("device sign-in cancellation interrupts a pending poll delay", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const control = new AbortController();
+  let polls = 0;
+  globalThis.fetch = deviceFlowFetch({
+    interval: 30,
+    poll() {
+      polls++;
+      return json({ error: { code: "deviceauth_authorization_pending" } }, 403);
+    },
+  });
+  context.after(() => { globalThis.fetch = previousFetch; });
+
+  const login = await beginDeviceLogin();
+  const rejection = assert.rejects(login.complete(control.signal), /cancelled by user/);
+  await waitFor(() => polls === 1);
+  await flushAsync();
+  control.abort(new Error("cancelled by user"));
+
+  await rejection;
+  assert.equal(polls, 1);
+});
+
+test("device sign-in does not wait beyond its overall deadline", async (context) => {
+  const previousFetch = globalThis.fetch;
+  context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+  let polls = 0;
+  globalThis.fetch = deviceFlowFetch({
+    poll() {
+      polls++;
+      return json({ error: { code: "deviceauth_authorization_pending" } }, 403);
+    },
+  });
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const login = await beginDeviceLogin();
+  const completion = login.complete();
+  void completion.catch(() => undefined);
+  let settled = false;
+  void completion.then(
+    () => { settled = true; },
+    () => { settled = true; },
+  );
+  await waitFor(() => polls === 1);
+  context.mock.timers.setTime(15 * 60_000 - 500);
+  await flushAsync();
+
+  context.mock.timers.tick(499);
+  await flushAsync();
+  assert.equal(settled, false);
+
+  context.mock.timers.tick(1);
+  await assert.rejects(completion, /timed out after 15 minutes/);
+  assert.equal(Date.now(), 15 * 60_000);
+  assert.equal(polls, 1);
+});
+
 test("refresh keeps a rotated account identity and revoke uses the refresh token", async (context) => {
   const previousFetch = globalThis.fetch;
   const requests: { url: string; body: string }[] = [];
@@ -248,6 +412,28 @@ function json(value: unknown, status = 200): Response {
   });
 }
 
+function deviceFlowFetch(options: {
+  poll(): Response;
+  interval?: number;
+  exchange?(): Response;
+}): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+      return json({
+        device_auth_id: "device-1",
+        user_code: "ABCD-EFGH",
+        interval: options.interval ?? 1,
+      });
+    }
+    if (url.endsWith("/api/accounts/deviceauth/token")) return options.poll();
+    if (url.endsWith("/oauth/token") && options.exchange !== undefined) {
+      return options.exchange();
+    }
+    throw new Error(`unexpected OAuth request: ${url}`);
+  }) as typeof fetch;
+}
+
 function httpText(
   url: URL,
   agent: Agent | false = false,
@@ -280,4 +466,16 @@ async function within<T>(promise: Promise<T>, ms: number, message: string): Prom
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (predicate()) return;
+    await flushAsync();
+  }
+  throw new Error("condition was not reached");
+}
+
+function flushAsync(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
