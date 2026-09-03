@@ -1,30 +1,21 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import {
+  accountsPath,
   openAICodexAccount,
   reloadAccounts,
   updateOpenAICodexAccount,
+  type OpenAICodexAccount,
 } from "../src/accounts.ts";
 import { openAIAuthorization } from "../src/openai-account.ts";
 
 const CLAIMS = "https://api.openai.com/auth";
 
 test("cancelling a caller does not cancel an in-flight refresh-token rotation", async (context) => {
-  const directory = await mkdtemp(path.join(tmpdir(), "jecode-refresh-account-"));
-  const beforeHome = process.env["JECODE_HOME"];
-  const previousFetch = globalThis.fetch;
-  process.env["JECODE_HOME"] = directory;
-  reloadAccounts();
-  context.after(async () => {
-    globalThis.fetch = previousFetch;
-    if (beforeHome === undefined) delete process.env["JECODE_HOME"];
-    else process.env["JECODE_HOME"] = beforeHome;
-    reloadAccounts();
-    await rm(directory, { recursive: true, force: true });
-  });
+  await accountStore(context, "jecode-refresh-account-");
 
   await updateOpenAICodexAccount(async () => ({
     accessToken: accessToken("old-access"),
@@ -58,6 +49,87 @@ test("cancelling a caller does not cancel an in-flight refresh-token rotation", 
   await waitFor(() => openAICodexAccount()?.refreshToken === "new-refresh");
   assert.equal(openAICodexAccount()?.refreshToken, "new-refresh");
 });
+
+test("401 recovery reloads fresh rotations and refreshes expired rotations", async (context) => {
+  await accountStore(context, "jecode-reloaded-account-");
+  await updateOpenAICodexAccount(async () => account("cached-access", "cached-refresh", 3_600_000));
+  await writeAccount(account("rotated-access", "rotated-refresh", 3_600_000));
+
+  let refreshes = 0;
+  const statuses: string[] = [];
+  globalThis.fetch = (async () => {
+    refreshes++;
+    return json({});
+  }) as typeof fetch;
+
+  const reloaded = await openAIAuthorization(
+    "cached-access",
+    undefined,
+    (status) => statuses.push(status),
+  );
+
+  assert.deepEqual(reloaded, {
+    accessToken: "rotated-access",
+    accountId: "account-1",
+  });
+  assert.equal(refreshes, 0);
+  assert.equal(statuses.length, 0);
+
+  await writeAccount(account("expired-access", "expired-refresh", -1));
+  globalThis.fetch = (async () => {
+    refreshes++;
+    return json({
+      access_token: accessToken("refreshed-access"),
+      refresh_token: "refreshed-refresh",
+      expires_in: 3_600,
+    });
+  }) as typeof fetch;
+
+  const refreshed = await openAIAuthorization(
+    "rotated-access",
+    undefined,
+    (status) => statuses.push(status),
+  );
+
+  assert.deepEqual(refreshed, {
+    accessToken: accessToken("refreshed-access"),
+    accountId: "account-1",
+  });
+  assert.equal(refreshes, 1);
+  assert.deepEqual(statuses, ["Refreshing ChatGPT sign-in"]);
+  assert.equal(openAICodexAccount()?.refreshToken, "refreshed-refresh");
+});
+
+async function accountStore(context: TestContext, prefix: string): Promise<void> {
+  const directory = await mkdtemp(path.join(tmpdir(), prefix));
+  const beforeHome = process.env["JECODE_HOME"];
+  const previousFetch = globalThis.fetch;
+  process.env["JECODE_HOME"] = directory;
+  reloadAccounts();
+  context.after(async () => {
+    globalThis.fetch = previousFetch;
+    if (beforeHome === undefined) delete process.env["JECODE_HOME"];
+    else process.env["JECODE_HOME"] = beforeHome;
+    reloadAccounts();
+    await rm(directory, { recursive: true, force: true });
+  });
+}
+
+function account(accessTokenValue: string, refreshToken: string, expiresIn: number): OpenAICodexAccount {
+  return {
+    accessToken: accessTokenValue,
+    refreshToken,
+    expiresAt: Date.now() + expiresIn,
+    accountId: "account-1",
+  };
+}
+
+async function writeAccount(value: OpenAICodexAccount): Promise<void> {
+  await writeFile(accountsPath(), `${JSON.stringify({
+    version: 1,
+    accounts: { "openai-codex": value },
+  }, null, 2)}\n`, "utf8");
+}
 
 async function waitFor(predicate: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt++) {

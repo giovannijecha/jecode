@@ -44,32 +44,31 @@ export async function removeOpenAIAccount(signal?: AbortSignal): Promise<{
 }
 
 export async function openAIAuthorization(
-  forceToken?: string,
+  rejectedToken?: string,
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
 ): Promise<OpenAIAuthorization> {
   const account = openAICodexAccount();
   if (account === undefined) throw new Error("ChatGPT account is not connected");
 
-  const mustRefresh = forceToken !== undefined || expiresSoon(account);
+  const mustRefresh = rejectedToken !== undefined || expiresSoon(account);
   const ready = mustRefresh
-    ? await refreshAccount(forceToken, signal, onStatus)
+    ? await refreshAccount(rejectedToken, signal, onStatus)
     : account;
   return { accessToken: ready.accessToken, accountId: ready.accountId };
 }
 
 async function refreshAccount(
-  forceToken: string | undefined,
+  rejectedToken: string | undefined,
   signal: AbortSignal | undefined,
   onStatus: ((status: string) => void) | undefined,
 ): Promise<OpenAICodexAccount> {
   if (refreshing !== undefined) return abortable(refreshing, signal);
   if (signal?.aborted === true) throw abortReason(signal);
-  onStatus?.("Refreshing ChatGPT sign-in");
   const task = updateOpenAICodexAccount(async (current) => {
     if (current === undefined) throw new Error("ChatGPT account is not connected");
-    if (forceToken !== undefined && current.accessToken !== forceToken) return current;
-    if (forceToken === undefined && !expiresSoon(current)) return current;
+    if (!requiresAuthorityRefresh(current, rejectedToken)) return current;
+    onStatus?.("Refreshing ChatGPT sign-in");
     return refreshOpenAITokens(current);
   }).then((account) => {
     if (account === undefined) throw new Error("ChatGPT account is not connected");
@@ -86,6 +85,16 @@ async function refreshAccount(
 
 function expiresSoon(account: OpenAICodexAccount): boolean {
   return account.expiresAt - Date.now() <= REFRESH_EARLY_MS;
+}
+
+function requiresAuthorityRefresh(
+  account: OpenAICodexAccount,
+  rejectedToken: string | undefined,
+): boolean {
+  // A different fresh token means another process already recovered. An
+  // expiring replacement still needs rotation, while a rejected current token
+  // must be rotated regardless of its advertised expiry.
+  return expiresSoon(account) || account.accessToken === rejectedToken;
 }
 
 function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
