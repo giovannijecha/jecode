@@ -332,6 +332,37 @@ test("restore keeps revisions while settling transient transcript state", () => 
   ]);
 });
 
+test("owned nodes deeply freeze the normalized history used as checkpoint identity", () => {
+  const tree = ConversationTree.restore(chainNodes(1), 1);
+  const node = tree.activeNode as NonNullable<typeof tree.activeNode>;
+  const text = node.messages[0]?.content[0] as { text: string };
+
+  assert.equal(Object.isFrozen(node), true);
+  assert.equal(Object.isFrozen(node.messages[0]), true);
+  assert.equal(Object.isFrozen(node.messages[0]?.content[0]), true);
+  assert.throws(() => {
+    text.text = "mutated";
+  }, TypeError);
+});
+
+test("a full 1,024-node tree replaces one leaf while retaining shared identities", () => {
+  const tree = ConversationTree.restore(chainNodes(1_024), 1_024);
+  const active = tree.activeNode as NonNullable<typeof tree.activeNode>;
+  const replaced = tree.commit({
+    nodeId: active.id,
+    parentId: active.parentId,
+    createdAt: active.createdAt,
+    identity: active.identity,
+    messages: completed("replacement", "done"),
+    blocks: [],
+  }, "completed");
+
+  assert.equal(replaced.nodes.length, 1_024);
+  assert.equal(replaced.activeNode?.revision, active.revision + 1);
+  assert.equal(replaced.node(1), tree.node(1));
+  assert.notEqual(replaced.activeNode, active);
+});
+
 test("restore validation scales with the snapshot instead of its square", () => {
   const small = chainNodes(100);
   const large = chainNodes(800);

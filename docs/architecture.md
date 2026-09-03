@@ -374,6 +374,15 @@ anchors; schema 3 added durable failed/interrupted outcomes; schema 4 adds
 settled tool durations. The strict decoder continues to accept every older
 schema and upgrades the active node on its next checkpoint.
 
+The interactive persistence owner retains the last fully verified snapshot and
+its lease. Conversation nodes are deeply immutable, so a checkpoint can verify
+shared history by identity, update aggregate size counters for only the changed
+node, reread the bounded head and lease, then write one node followed by the
+head. A changed head, replaced lease, rematerialized history, or unexpected node
+outside that snapshot fails closed. Resume and crash recovery remain the only
+paths that read and validate the complete on-disk tree; the persisted schema is
+unchanged.
+
 Session catalogues use the canonical real workspace path, so another project
 cannot appear in the resume picker. A process lease prevents simultaneous
 resume of the same logical session. Its directory and identifier remain stable

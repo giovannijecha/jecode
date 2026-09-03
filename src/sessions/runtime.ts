@@ -5,7 +5,7 @@
 // another durable session.
 
 import type { ConversationTree } from "../conversation.ts";
-import type { SessionCatalogEntry, SessionLease } from "./store.ts";
+import type { SessionCatalogEntry, SessionLease, SessionSnapshot } from "./store.ts";
 import { DurableSessionStore } from "./store.ts";
 
 export type ResumedSession = Readonly<{
@@ -17,16 +17,19 @@ export class SessionPersistence {
   readonly #store: DurableSessionStore;
   #sessionId: string | null;
   #lease: SessionLease | undefined;
+  #snapshot: SessionSnapshot | undefined;
   #failure: Error | undefined;
 
   private constructor(
     store: DurableSessionStore,
     sessionId: string | null,
     lease?: SessionLease,
+    snapshot?: SessionSnapshot,
   ) {
     this.#store = store;
     this.#sessionId = sessionId;
     this.#lease = lease;
+    this.#snapshot = snapshot;
   }
 
   static fresh(store: DurableSessionStore): SessionPersistence {
@@ -41,7 +44,7 @@ export class SessionPersistence {
       if (conversation === undefined) throw new Error("session has no resumable turn");
       return Object.freeze({
         conversation,
-        persistence: new SessionPersistence(store, id, lease),
+        persistence: new SessionPersistence(store, id, lease, snapshot),
       });
     } catch (error) {
       await lease.close();
@@ -68,9 +71,14 @@ export class SessionPersistence {
         const published = await this.#store.publish(conversation, true);
         this.#lease = published.lease;
         this.#sessionId = published.meta.id;
+        this.#snapshot = published;
         return;
       }
-      await this.#store.checkpoint(this.#sessionId, conversation);
+      if (this.#lease === undefined || this.#snapshot === undefined) {
+        throw new Error("session persistence has no verified owner snapshot");
+      }
+      await this.#lease.assertOwned();
+      this.#snapshot = await this.#store.checkpoint(this.#snapshot, conversation);
     } catch (error) {
       this.#failure = error as Error;
       throw error;
@@ -81,6 +89,7 @@ export class SessionPersistence {
     await this.#lease?.close();
     this.#lease = undefined;
     this.#sessionId = null;
+    this.#snapshot = undefined;
     this.#failure = undefined;
   }
 

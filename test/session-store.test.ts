@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { ConversationTree } from "../src/conversation.ts";
-import { encodeNode } from "../src/sessions/codec.ts";
+import { encodeHead, encodeNode } from "../src/sessions/codec.ts";
 import { DurableSessionStore } from "../src/sessions/store.ts";
 import type { Message } from "../src/types.ts";
 
@@ -27,7 +27,7 @@ test("publishes, updates, lists, and reloads a workspace-scoped session", async 
     const published = await store.publish(conversation);
 
     conversation = turn(conversation, 1, "second", "two");
-    const updated = await store.checkpoint(published.meta.id, conversation);
+    const updated = await store.checkpoint(published, conversation);
     assert.equal(updated.head.sequence, 2);
     assert.equal(updated.head.nodeId, 2);
 
@@ -79,6 +79,26 @@ test("reloads conversation nodes in order across bounded read batches", async ()
   }
 });
 
+test("replaces only the active leaf from a verified snapshot", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const first = turn(ConversationTree.empty(), 0, "first", "one");
+    const published = await store.publish(first);
+    const revised = revise(first, "revised answer");
+
+    const updated = await store.checkpoint(published, revised);
+    assert.equal(updated.head.sequence, 2);
+    assert.equal(updated.head.nodeId, 1);
+    assert.equal(updated.head.revision, 2);
+    const loaded = await store.load(published.meta.id);
+    assert.equal(loaded.conversation.activeNode?.revision, 2);
+    assert.match(JSON.stringify(loaded.conversation.history), /revised answer/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("catalogue previews end before a grapheme that crosses their boundary", async () => {
   const fixture = await sessionFixture();
   try {
@@ -118,12 +138,98 @@ test("recovers the one node mutation written before its head", async () => {
       "utf8",
     );
 
+    await assert.rejects(
+      store.checkpoint(published, second),
+      /incomplete node outside its verified snapshot/,
+    );
+
     const recovered = await store.load(published.meta.id);
     assert.equal(recovered.head.sequence, 2);
     assert.equal(recovered.head.nodeId, 2);
     assert.equal(recovered.head.updatedAt, now);
     assert.deepEqual(recovered.conversation.history, second.history.map(stripRaw));
     assert.match(await readFile(path.join(directory, "head.json"), "utf8"), /"sequence": 2/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("recovers an active-leaf revision written before its head", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const first = turn(ConversationTree.empty(), 0, "first", "one");
+    const published = await store.publish(first);
+    const revised = revise(first, "recovered revision");
+    const candidate = revised.activeNode as NonNullable<typeof revised.activeNode>;
+    const now = "2026-09-01T12:00:00.000Z";
+    const directory = path.join(fixture.sessions, store.workspaceDigest, published.meta.id);
+    await writeFile(
+      path.join(directory, "nodes", "000001.json"),
+      encodeNode(candidate, 2, now),
+      "utf8",
+    );
+
+    const recovered = await store.load(published.meta.id);
+    assert.equal(recovered.head.sequence, 2);
+    assert.equal(recovered.head.revision, 2);
+    assert.match(JSON.stringify(recovered.conversation.history), /recovered revision/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a checkpoint after the verified head changes", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const first = turn(ConversationTree.empty(), 0, "first", "one");
+    const published = await store.publish(first);
+    const directory = path.join(fixture.sessions, store.workspaceDigest, published.meta.id);
+    await writeFile(path.join(directory, "head.json"), encodeHead({
+      ...published.head,
+      sequence: published.head.sequence + 1,
+      updatedAt: "2026-09-01T12:00:00.000Z",
+    }), "utf8");
+
+    await assert.rejects(
+      store.checkpoint(published, turn(first, 1, "second", "two")),
+      /head changed after its verified snapshot/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects rematerialized shared history instead of trusting equal mutable data", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const first = turn(ConversationTree.empty(), 0, "first", "one");
+    const published = await store.publish(first);
+    const rematerialized = ConversationTree.restore(first.nodes, first.activeNodeId);
+
+    await assert.rejects(
+      store.checkpoint(published, turn(rematerialized, 1, "second", "two")),
+      /rewrites prior conversation history/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects unpublished nodes hidden behind an unchanged active head", async () => {
+  const fixture = await sessionFixture();
+  try {
+    const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
+    const first = turn(ConversationTree.empty(), 0, "first", "one");
+    const published = await store.publish(first);
+    const hidden = turn(first, 1, "hidden", "two").select(1);
+
+    await assert.rejects(
+      store.checkpoint(published, hidden),
+      /does not extend its durable tree/,
+    );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -284,7 +390,7 @@ test("catalogue keeps the most recently updated session beyond 128 entries", asy
       await store.publish(turn(ConversationTree.empty(), 0, `session ${index}`, "one"));
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    await store.checkpoint(first.meta.id, turn(original, 1, "updated last", "two"));
+    await store.checkpoint(first, turn(original, 1, "updated last", "two"));
 
     const catalog = await store.list(64);
     assert.equal(catalog.length, 64);
@@ -307,6 +413,18 @@ function turn(
     identity: { providerId: "openai-codex", model: "gpt-5.6-terra", effort: "medium" },
     messages: completed(user, answer),
     blocks: [{ kind: "user", text: user }, { kind: "answer", text: answer }],
+  }, "completed");
+}
+
+function revise(conversation: ConversationTree, answer: string): ConversationTree {
+  const active = conversation.activeNode as NonNullable<typeof conversation.activeNode>;
+  return conversation.commit({
+    nodeId: active.id,
+    parentId: active.parentId,
+    createdAt: active.createdAt,
+    identity: active.identity,
+    messages: completed("first", answer),
+    blocks: [{ kind: "user", text: "first" }, { kind: "answer", text: answer }],
   }, "completed");
 }
 
