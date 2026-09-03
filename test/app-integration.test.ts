@@ -518,6 +518,38 @@ test("plain resume starts in the shared searchable picker", async () => {
   await running;
 });
 
+test("process shutdown cancels the initial resume picker before leaving", async () => {
+  const current = session();
+  current.resume = {
+    candidates: [{
+      id: "saved-1",
+      createdAt: "2026-09-01T10:00:00.000Z",
+      updatedAt: "2026-09-01T10:01:00.000Z",
+      turns: 1,
+      preview: "saved question",
+      active: false,
+    }],
+    open: async () => {
+      assert.fail("shutdown must not open a session");
+    },
+  };
+  const shutdown = new AbortController();
+  const harness = virtualScreen();
+  const running = runApp(current, process.cwd(), {
+    ...harness.environment,
+    shutdownSignal: shutdown.signal,
+  });
+
+  await waitFor(
+    () => (harness.frames.at(-1) ?? []).join("\n").includes("saved question"),
+    "resume picker",
+  );
+  shutdown.abort(new Error("received SIGTERM"));
+  await running;
+
+  assert.equal(harness.left(), true);
+});
+
 test("the TUI owns and restores a screen around a real /exit interaction", async () => {
   let feed: ((chunk: string) => void) | undefined;
   let entered = false;

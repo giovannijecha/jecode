@@ -231,13 +231,13 @@ export async function runApp(
   }
 
   function requestQuit(reason: unknown = new Error("interrupted")): void {
+    state.open = overlay.cancel(state.open);
     const activity = state.activity;
     if (activity === undefined) {
       quit();
       return;
     }
     state.closeWhenIdle = true;
-    state.open = overlay.cancel(state.open);
     activity.control.abort(reason);
   }
 
