@@ -33,6 +33,7 @@ test("falls back to defaults", () => {
   assert.equal(defaults.providerId, "anthropic");
   assert.equal(defaults.effort, "high");
   assert.equal(defaults.maxTokens, 64000);
+  assert.equal(defaults.maxModelRequests, undefined);
   assert.equal(defaults.compactionPercent, 85);
   assert.equal(defaults.autoApprove, false);
   assert.equal(defaults.reducedMotion, false);
@@ -65,6 +66,20 @@ test("accepts only positive safe integer budgets", () => {
     () => config(["--max-tokens", String(Number.MAX_SAFE_INTEGER + 1)]),
     /positive safe integer/,
   );
+});
+
+test("max-steps is an opt-in process budget and ignores legacy saved values", () => {
+  assert.equal(config([], { maxSteps: 12 }).maxModelRequests, undefined);
+  assert.equal(config(["--max-steps", "12"]).maxModelRequests, 12);
+
+  const before = process.env["JECODE_MAX_STEPS"];
+  process.env["JECODE_MAX_STEPS"] = "7";
+  try {
+    assert.equal(loadConfig([], {}).maxModelRequests, 7);
+  } finally {
+    if (before === undefined) delete process.env["JECODE_MAX_STEPS"];
+    else process.env["JECODE_MAX_STEPS"] = before;
+  }
 });
 
 test("accepts only a safe context compaction percentage", () => {
@@ -121,7 +136,7 @@ test("saved defaults include a model for each provider", () => {
   assert.equal(loaded.ollamaHost, "https://models.example.test/team");
   assert.equal(loaded.effort, "medium");
   assert.equal(loaded.maxTokens, 8192);
-  assert.equal(loaded.maxSteps, 12);
+  assert.equal(loaded.maxModelRequests, undefined);
   assert.equal(loaded.compactionPercent, 92);
   assert.equal(loaded.reducedMotion, true);
 });

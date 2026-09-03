@@ -17,7 +17,8 @@ export type Config = {
   reducedMotion: boolean;
   effort: string;
   maxTokens: number;
-  maxSteps: number;
+  /** Optional process-only model-request budget for deterministic automation. */
+  maxModelRequests?: number;
   compactionPercent: number;
   root: string;
   autoApprove: boolean;
@@ -50,6 +51,11 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
   if (!(EFFORTS as readonly string[]).includes(effort)) {
     throw new Error(`unknown effort "${effort}" (expected one of: ${EFFORTS.join(", ")})`);
   }
+  const maxModelRequests = optional(
+    flags["max-steps"],
+    process.env.JECODE_MAX_STEPS,
+    undefined,
+  );
 
   return {
     providerId,
@@ -68,10 +74,9 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
       pick(flags["max-tokens"], process.env.JECODE_MAX_TOKENS, String(saved.maxTokens ?? 64000)),
       "max-tokens",
     ),
-    maxSteps: toInt(
-      pick(flags["max-steps"], process.env.JECODE_MAX_STEPS, String(saved.maxSteps ?? 40)),
-      "max-steps",
-    ),
+    ...(maxModelRequests === undefined
+      ? {}
+      : { maxModelRequests: toInt(maxModelRequests, "max-steps") }),
     compactionPercent: toPercent(
       pick(
         flags["compaction-percent"],

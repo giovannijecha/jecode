@@ -50,7 +50,6 @@ function session(from = provider()): Session {
       reducedMotion: true,
       effort: "high",
       maxTokens: 4096,
-      maxSteps: 8,
       compactionPercent: 85,
       root: process.cwd(),
       autoApprove: false,
@@ -265,7 +264,7 @@ test("batch mode discards an incomplete streamed answer when the provider fails"
   assert.doesNotMatch(output.join(""), /partial answer|stream failed/);
 });
 
-test("batch mode propagates controller step exhaustion", async () => {
+test("batch mode propagates an explicit model-request budget", async () => {
   let sends = 0;
   const looping: Provider = {
     ...provider(),
@@ -278,7 +277,7 @@ test("batch mode propagates controller step exhaustion", async () => {
     },
   };
   const current = session(looping);
-  current.config.maxSteps = 2;
+  current.config.maxModelRequests = 2;
   const output: string[] = [];
 
   await assert.rejects(
@@ -287,11 +286,11 @@ test("batch mode propagates controller step exhaustion", async () => {
       width: 60,
       write: (text) => output.push(text),
     }),
-    /gave up after 2 steps/,
+    /stopped after 2 model requests/,
   );
 
   assert.equal(sends, 2);
-  assert.doesNotMatch(output.join(""), /gave up after/);
+  assert.doesNotMatch(output.join(""), /stopped after/);
 });
 
 test("the bootstrap selects the interactive surface and builds one complete session", async () => {
@@ -329,6 +328,7 @@ test("the bootstrap selects the interactive surface and builds one complete sess
   assert.equal(opened?.model, "fixture-model");
   assert.equal(opened?.config.root, root);
   assert.equal(opened?.config.effort, "max");
+  assert.equal(opened?.config.maxModelRequests, 3);
   assert.equal(transcriptRoot, root);
   assert.ok((opened?.tools.length ?? 0) > 0);
   assert.match(opened?.system ?? "", /Workspace root:/);
@@ -1373,6 +1373,7 @@ test("the packaged jecode executable reaches batch help without a developer scri
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Usage:\s+jecode \[options\]/);
   assert.match(result.stdout, /--provider/);
+  assert.match(result.stdout, /optional per-turn model-request budget/);
   assert.match(result.stdout, /type \/ to discover/);
   assert.equal(result.stderr, "");
 });

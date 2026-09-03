@@ -51,8 +51,6 @@ export function transcribe(stage: Stage): Transcription {
   let open: { kind: "answer" | "reasoning"; block: Block } | undefined;
   const tools = new Map<string, Block>();
   const progress = new Map<string, { current: number; total: number }>();
-  let step = 1;
-  let steps = 1;
 
   const close = (): Block | undefined => {
     const block = open?.block;
@@ -75,24 +73,17 @@ export function transcribe(stage: Stage): Transcription {
       }
     },
 
-    onStep(current, total) {
-      step = current;
-      steps = total;
-      stage.status(waiting(step, steps));
-      stage.render();
-    },
-
     onToolPreparing(call, current, total) {
       progress.set(call.id, { current, total });
       const changed = close();
       if (changed !== undefined) stage.render(changed);
-      stage.status(toolStatus("Preparing", call, progress, step, steps));
+      stage.status(toolStatus("Preparing", call, progress));
       stage.render();
     },
 
     onToolStart(call, current, total) {
       progress.set(call.id, { current, total });
-      stage.status(toolStatus("Running", call, progress, step, steps));
+      stage.status(toolStatus("Running", call, progress));
       const block = tools.get(call.id);
       if (block !== undefined && block.kind === "tool") {
         block.right = "running";
@@ -165,7 +156,7 @@ export function transcribe(stage: Stage): Transcription {
     },
 
     onToolResult(call, result, summary) {
-      stage.status(waiting(step, steps));
+      stage.status(WAITING);
       const block = tools.get(call.id);
       if (block === undefined || block.kind !== "tool") return;
       // Explicit refusal stays a refusal. Cancellation can first settle an
@@ -221,8 +212,8 @@ export function transcribe(stage: Stage): Transcription {
           }
           stage.status(
             approved
-              ? toolStatus("Preparing", call, progress, step, steps)
-              : waiting(step, steps),
+              ? toolStatus("Preparing", call, progress)
+              : WAITING,
           );
           stage.render(settled);
           resolve(approved);
@@ -236,15 +227,12 @@ function toolStatus(
   phase: "Preparing" | "Running",
   call: ToolCallBlock,
   progress: ReadonlyMap<string, { current: number; total: number }>,
-  step: number,
-  steps: number,
 ): string {
   const position = progress.get(call.id);
   const tool = position !== undefined && position.total > 1
     ? ` · tool ${position.current}/${position.total}`
     : "";
-  const turn = step > 1 ? ` · step ${step}/${steps}` : "";
-  return `${phase} ${call.name}${tool}${turn}`;
+  return `${phase} ${call.name}${tool}`;
 }
 
 function pendingApproval(body: Detail[] | undefined): string {
@@ -252,10 +240,6 @@ function pendingApproval(body: Detail[] | undefined): string {
   const removed = body?.filter((detail) => detail.kind === "del").length ?? 0;
   const summary = added + removed === 0 ? "" : `+${added} −${removed} · `;
   return `${summary}pending approval`;
-}
-
-function waiting(step: number, total: number): string {
-  return step === 1 ? WAITING : `${WAITING} · step ${step}/${total}`;
 }
 
 /** The argument worth showing: the thing the call acts on. */

@@ -2,7 +2,7 @@
 // tool takes three arguments and this is the whole job.
 //
 // Every throw here becomes an is_error tool result the model can read and
-// correct on the next step, so the messages are written for that reader.
+// correct on the next request, so the messages are written for that reader.
 
 export function requireString(
   args: Record<string, unknown>,

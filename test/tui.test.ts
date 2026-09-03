@@ -359,19 +359,20 @@ test("transcription tracks the live activity phase", () => {
   events.onStream({ kind: "thinking", text: "hm" });
   events.onStream({ kind: "text", text: "ok" });
   events.onStream({ kind: "tool", name: "run_command" });
-  events.onToolPreparing?.(call, 1, 1);
+  events.onToolPreparing?.(call, 2, 3);
   events.onToolCall(call);
-  events.onToolStart?.(call, 1, 1);
+  events.onToolStart?.(call, 2, 3);
   events.onToolResult(call, { kind: "tool_result", id: "1", output: "11", isError: false }, "exit 0");
 
   assert.deepEqual(log, [
     "Thinking",
     "Responding",
     "Preparing run_command",
-    "Preparing run_command",
-    "Running run_command",
+    "Preparing run_command · tool 2/3",
+    "Running run_command · tool 2/3",
     "Waiting",
   ]);
+  assert.doesNotMatch(log.join("\n"), /\bstep\b/);
 });
 
 test("a tool rail starts timing only when execution actually begins", () => {

@@ -33,8 +33,10 @@ The stable options are `--root`, `--provider`, `--model`, `--ollama-host`,
 `--reduced-motion`, `--auto-approve`, and `--ephemeral`, plus `-h`/`--help`
 and `-v`/`--version`. `--latest` is valid only with `resume`.
 
-Configuration precedence remains command-line flag, environment variable,
-saved setting, then built-in default. The stable environment names are
+Persistent configuration precedence remains command-line flag, environment
+variable, saved setting, then built-in default. `--max-steps` and
+`JECODE_MAX_STEPS` are an opt-in process budget: no limit applies by default,
+and no value is stored in settings. The stable environment names are
 `JECODE_PROVIDER`, `JECODE_MODEL`, `OLLAMA_HOST`, `JECODE_EFFORT`,
 `JECODE_MAX_TOKENS`, `JECODE_MAX_STEPS`, `JECODE_COMPACTION_PERCENT`,
 `JECODE_REDUCED_MOTION`, `JECODE_AUTO_APPROVE`, and `JECODE_EPHEMERAL`.
@@ -73,6 +75,8 @@ The following behavioral guarantees are stable:
 - one model-facing controller owns the visible loop;
 - interactive guidance enters the active turn at a safe provider/tool boundary
   without replaying already-issued work or creating another controller;
+- ordinary turns have no arbitrary model-request ceiling; an explicit
+  `--max-steps` budget can constrain deterministic automation;
 - historical tool calls are never replayed during resume or branching;
 - dangerous tools require the applicable permission unless launch policy
   explicitly allows them;

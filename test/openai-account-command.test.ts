@@ -134,7 +134,6 @@ function session(): Session {
       providerId: "openai-codex",
       model: "",
       maxTokens: 64_000,
-      maxSteps: 40,
       compactionPercent: 85,
       effort: "high",
       autoApprove: false,

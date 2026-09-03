@@ -379,7 +379,6 @@ function settingsScene(state: LabState): View {
         model: "deepseek-v4-flash:0731",
         effort: "high",
         maxTokens: 64000,
-        maxSteps: 40,
         compactionPercent: 85,
         reducedMotion: false,
       }, state.selected),

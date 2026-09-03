@@ -38,7 +38,6 @@ test("settings uses nested dock pickers and persists a live change", async () =>
       "model",
       "effort",
       "max output tokens",
-      "max tool steps",
       "context compaction",
       "reduced motion",
       "providers",
@@ -50,7 +49,7 @@ test("settings uses nested dock pickers and persists a live change", async () =>
 
 test("context compaction percentage applies live and persists", async () => {
   await inSettingsHome(async () => {
-    const answers: (number | undefined)[] = [4, undefined];
+    const answers: (number | undefined)[] = [3, undefined];
     const fields: Field[] = [];
     const host: Host = {
       emit: () => {},
@@ -151,7 +150,6 @@ test("OpenAI Codex settings omit a token limit the backend does not accept", () 
     provider: "openai-codex",
     model: "gpt-codex",
     effort: "high",
-    maxSteps: 40,
     compactionPercent: 85,
     reducedMotion: false,
   });
@@ -192,7 +190,7 @@ test("settings chooses provider and model together from the model menu", async (
 test("settings changes the Ollama connection live and persists it", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_CLOUD_HOST);
-    const answers: (number | undefined)[] = [6, 3, 0, 1, undefined, undefined];
+    const answers: (number | undefined)[] = [5, 3, 0, 1, undefined, undefined];
     const pickers: Picker[] = [];
     const host: Host = {
       emit: () => {},
@@ -208,7 +206,7 @@ test("settings changes the Ollama connection live and persists it", async () => 
     try {
       await handleCommand("/settings", session, host);
 
-      assert.equal(pickers[0]?.options[6]?.label, "providers");
+      assert.equal(pickers[0]?.options[5]?.label, "providers");
       assert.equal(pickers[2]?.options[0]?.label, "connection");
       assert.equal(session.config.ollamaHost, OLLAMA_LOCAL_HOST);
       assert.equal(ollamaConnection().baseUrl, OLLAMA_LOCAL_HOST);
@@ -222,7 +220,7 @@ test("settings changes the Ollama connection live and persists it", async () => 
 test("settings configures Ollama Cloud and collects a missing key in the dock", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_LOCAL_HOST);
-    const answers: (number | undefined)[] = [6, 3, 0, 0, 0, undefined, undefined];
+    const answers: (number | undefined)[] = [5, 3, 0, 0, 0, undefined, undefined];
     const fields: Field[] = [];
     const host: Host = {
       emit: () => {},
@@ -253,7 +251,7 @@ test("settings validates and normalizes a custom Ollama endpoint", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_LOCAL_HOST);
     hold("OLLAMA_API_KEY", "fixture-key");
-    const answers: (number | undefined)[] = [6, 3, 0, 2, undefined, undefined];
+    const answers: (number | undefined)[] = [5, 3, 0, 2, undefined, undefined];
     const fields: Field[] = [];
     const host: Host = {
       emit: () => {},
@@ -363,7 +361,6 @@ function fakeSession(): Session {
       reducedMotion: false,
       effort: "high",
       maxTokens: 4096,
-      maxSteps: 8,
       compactionPercent: 85,
       root: process.cwd(),
       autoApprove: false,

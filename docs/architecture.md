@@ -23,7 +23,7 @@ npm run pack:release → clean build → dist/ inside the release tarball
 ```
 
 There are no subagents, workers, delegated tasks, or concurrent controller
-loops. One step may overlap consecutive read-only tool calls inside a bounded
+loops. One model response may overlap consecutive read-only tool calls inside a bounded
 four-call wave; writes, commands, approvals, and unknown tools remain ordered
 barriers. Complex work advances through more iterations of the same loop.
 
@@ -48,7 +48,8 @@ workspace content the model reads or content the user supplies.
    Consecutive shared reads run in bounded parallel waves; exclusive calls
    remain ordered barriers. Collect every result in original call order inside
    one user message, then append any queued guidance.
-6. Repeat up to `maxSteps`.
+6. Repeat until the model answers, the user interrupts, a fatal error occurs,
+   or an explicit process-only `--max-steps` budget is exhausted.
 
 The controller awaits a checkpoint after every complete tool-result batch and
 after the final assistant response. It never begins the next provider request
@@ -162,7 +163,7 @@ interactive cancellation signal exists. The client handles redirects manually
 and rejects every 3xx response without retrying or forwarding headers to
 another endpoint. Retry state is surfaced in the TUI. Each SSE event, the
 model-output-aware aggregate stream, reconstructed tool arguments, model
-catalogue, and per-step tool-call batch have explicit limits; overflow cancels
+catalogue, and per-response tool-call batch have explicit limits; overflow cancels
 or rejects the response before unbounded work reaches the controller.
 
 Ollama initializes its endpoint from `--ollama-host`, `OLLAMA_HOST`, saved
@@ -253,9 +254,10 @@ for that process.
 
 Persistent user data lives under `~/.jecode`, outside every workspace.
 `settings.json` contains only non-secret defaults: provider, one remembered
-model per provider, the Ollama endpoint, effort, limits, and reduced motion. Runtime
-precedence is CLI flags, environment variables, saved settings, then built-in
-defaults. Root and auto-approval stay process-only.
+model per provider, the Ollama endpoint, effort, output and compaction limits,
+and reduced motion. Runtime precedence is CLI flags, environment variables,
+saved settings, then built-in defaults. Root, auto-approval, and the optional
+model-request budget stay process-only.
 
 API keys resolve from environment, then in-memory session values, then the
 saved `~/.jecode/credentials.json` file. The environment wins. ChatGPT OAuth is
