@@ -1,11 +1,11 @@
 // OAuth accounts persisted under ~/.jecode, apart from API keys.
 
 import { chmod, mkdir } from "node:fs/promises";
-import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
 import { withStoreLock } from "./store-lock.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
+import { assertStoreText, readBoundedJsonSync, USER_STORE_LIMITS } from "./user-store.ts";
 
 export type OpenAICodexAccount = {
   accessToken: string;
@@ -62,13 +62,17 @@ export async function updateOpenAICodexAccount(
   return withStoreLock(file, async () => {
     const current = readStore(file);
     const next = await change(current.accounts["openai-codex"]);
+    const normalized = next === undefined ? undefined : normalizeOpenAI(next);
+    if (next !== undefined && normalized === undefined) throw new Error("invalid OpenAI account");
     const accounts = { ...current.accounts };
     if (next === undefined) delete accounts["openai-codex"];
-    else accounts["openai-codex"] = { ...next };
+    else accounts["openai-codex"] = normalized as OpenAICodexAccount;
     const updated: AccountStore = { version: 1, accounts };
-    await atomicWrite(file, `${JSON.stringify(updated, null, 2)}\n`, { mode: 0o600 });
+    const text = `${JSON.stringify(updated, null, 2)}\n`;
+    assertStoreText(text, USER_STORE_LIMITS.accountsBytes);
+    await atomicWrite(file, text, { mode: 0o600 });
     cached = updated;
-    return next === undefined ? undefined : { ...next };
+    return normalized === undefined ? undefined : { ...normalized };
   }, signal);
 }
 
@@ -83,8 +87,7 @@ function store(): AccountStore {
 
 function readStore(file: string): AccountStore {
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
-    return normalize(parsed);
+    return normalize(readBoundedJsonSync(file, USER_STORE_LIMITS.accountsBytes));
   } catch {
     return { version: 1, accounts: {} };
   }
@@ -103,9 +106,9 @@ function normalize(value: unknown): AccountStore {
 
 function normalizeOpenAI(value: unknown): OpenAICodexAccount | undefined {
   if (!record(value)) return undefined;
-  const accessToken = nonempty(value["accessToken"]);
-  const refreshToken = nonempty(value["refreshToken"]);
-  const accountId = nonempty(value["accountId"]);
+  const accessToken = nonempty(value["accessToken"], USER_STORE_LIMITS.accountToken);
+  const refreshToken = nonempty(value["refreshToken"], USER_STORE_LIMITS.accountToken);
+  const accountId = nonempty(value["accountId"], USER_STORE_LIMITS.accountLabel);
   const expiresAt = value["expiresAt"];
   if (
     accessToken === undefined ||
@@ -115,8 +118,8 @@ function normalizeOpenAI(value: unknown): OpenAICodexAccount | undefined {
     !Number.isSafeInteger(expiresAt) ||
     expiresAt <= 0
   ) return undefined;
-  const email = nonempty(value["email"]);
-  const plan = nonempty(value["plan"]);
+  const email = nonempty(value["email"], USER_STORE_LIMITS.accountLabel);
+  const plan = nonempty(value["plan"], USER_STORE_LIMITS.accountLabel);
   return {
     accessToken,
     refreshToken,
@@ -127,8 +130,8 @@ function normalizeOpenAI(value: unknown): OpenAICodexAccount | undefined {
   };
 }
 
-function nonempty(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+function nonempty(value: unknown, max: number): string | undefined {
+  return typeof value === "string" && value.length <= max && value.trim() !== "" ? value : undefined;
 }
 
 function record(value: unknown): value is Record<string, unknown> {

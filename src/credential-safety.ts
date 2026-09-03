@@ -2,9 +2,12 @@
 
 import { credentialValues } from "./credentials.ts";
 import { accountValues } from "./accounts.ts";
+import { USER_STORE_LIMITS } from "./user-store.ts";
 
 const REDACTED = "[credential redacted]";
 const MIN_HEURISTIC_SECRET_CHARS = 8;
+export const MAX_REDACTION_SECRETS = USER_STORE_LIMITS.credentialEntries;
+const MAX_REDACTION_SECRET_CODE_UNITS = USER_STORE_LIMITS.accountToken;
 const EXPLICIT_CREDENTIAL_ENVIRONMENT_NAMES = new Set([
   "ANTHROPIC_API_KEY",
   "OLLAMA_API_KEY",
@@ -31,7 +34,8 @@ export function shellEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJ
 
 /** Remove values Jecode recognizes as credentials before tool output leaves the shell boundary. */
 export function redactCredentials(text: string, source: NodeJS.ProcessEnv = process.env): string {
-  return redact(text, secrets(source));
+  const known = secrets(source);
+  return known.saturated ? (text === "" ? "" : REDACTED) : redact(text, known.values);
 }
 
 /** Redact before bounded capture, retaining enough raw overlap for split values. */
@@ -39,7 +43,16 @@ export function credentialRedactor(source: NodeJS.ProcessEnv = process.env): {
   write(chunk: string): string;
   end(): string;
 } {
-  const values = secrets(source);
+  const known = secrets(source);
+  if (known.saturated) return closedRedactor();
+  const values = known.values;
+  const candidates = new Map<string, string[]>();
+  for (const value of values) {
+    const first = value[0] as string;
+    const bucket = candidates.get(first);
+    if (bucket === undefined) candidates.set(first, [value]);
+    else bucket.push(value);
+  }
   const longest = Math.max(0, ...values.map((value) => value.length));
   let pending = "";
 
@@ -49,18 +62,19 @@ export function credentialRedactor(source: NodeJS.ProcessEnv = process.env): {
       const ready: string[] = [];
       let at = 0;
       while (at < combined.length) {
-        const rest = combined.slice(at);
+        const matching = candidates.get(combined[at] as string) ?? [];
+        const rest = matching.length === 0 ? "" : combined.slice(at);
         // A complete shorter credential can also be the prefix of a longer
         // one. Hold that ambiguous suffix until the next chunk proves which
         // value arrived, otherwise the longer credential leaks its tail.
         if (
           rest.length < longest &&
-          values.some((value) => value.length > rest.length && value.startsWith(rest))
+          matching.some((value) => value.length > rest.length && value.startsWith(rest))
         ) {
           pending = rest;
           return ready.join("");
         }
-        const complete = values.find((value) => combined.startsWith(value, at));
+        const complete = matching.find((value) => combined.startsWith(value, at));
         if (complete !== undefined) {
           ready.push(REDACTED);
           at += complete.length;
@@ -80,6 +94,20 @@ export function credentialRedactor(source: NodeJS.ProcessEnv = process.env): {
   };
 }
 
+function closedRedactor(): { write(chunk: string): string; end(): string } {
+  let emitted = false;
+  return {
+    write(chunk) {
+      if (chunk === "" || emitted) return "";
+      emitted = true;
+      return REDACTED;
+    },
+    end() {
+      return "";
+    },
+  };
+}
+
 function sensitiveEnvironmentName(name: string): boolean {
   const normalized = name
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -92,16 +120,33 @@ function sensitiveEnvironmentName(name: string): boolean {
   );
 }
 
-function secrets(source: NodeJS.ProcessEnv): string[] {
-  const values = new Set([...credentialValues(), ...accountValues()]);
+function secrets(source: NodeJS.ProcessEnv): { values: string[]; saturated: boolean } {
+  const values = new Set<string>();
+  let saturated = false;
+  const add = (value: string): void => {
+    if (value === "" || values.has(value) || saturated) return;
+    if (
+      value.length > MAX_REDACTION_SECRET_CODE_UNITS ||
+      values.size >= MAX_REDACTION_SECRETS
+    ) {
+      saturated = true;
+      return;
+    }
+    values.add(value);
+  };
+
+  for (const value of [...credentialValues(), ...accountValues()]) add(value);
   for (const [name, value] of Object.entries(source)) {
-    if (value === undefined || value === "") continue;
+    if (saturated || value === undefined || value === "") continue;
     const explicit = EXPLICIT_CREDENTIAL_ENVIRONMENT_NAMES.has(name.toUpperCase());
     if (explicit || (value.length >= MIN_HEURISTIC_SECRET_CHARS && sensitiveEnvironment(name, value))) {
-      values.add(value);
+      add(value);
     }
   }
-  return [...values].filter((value) => value !== "").sort((left, right) => right.length - left.length);
+  return {
+    values: [...values].sort((left, right) => right.length - left.length),
+    saturated,
+  };
 }
 
 function redact(text: string, values: readonly string[]): string {

@@ -12,6 +12,7 @@ import {
   updateOpenAICodexAccount,
   type OpenAICodexAccount,
 } from "../src/accounts.ts";
+import { USER_STORE_LIMITS } from "../src/user-store.ts";
 
 const ACCOUNT: OpenAICodexAccount = {
   accessToken: "access-token",
@@ -61,6 +62,39 @@ test("a malformed or incomplete account store is treated as disconnected", async
 
     assert.equal(openAICodexAccount(), undefined);
     assert.deepEqual(accountValues(), []);
+  });
+});
+
+test("oversized and out-of-schema account stores are treated as disconnected", async () => {
+  await inStore(async () => {
+    await writeFile(accountsPath(), "x".repeat(USER_STORE_LIMITS.accountsBytes + 1), "utf8");
+    reloadAccounts();
+    assert.equal(openAICodexAccount(), undefined);
+
+    await writeFile(accountsPath(), JSON.stringify({
+      version: 1,
+      accounts: {
+        "openai-codex": {
+          ...ACCOUNT,
+          accessToken: "x".repeat(USER_STORE_LIMITS.accountToken + 1),
+        },
+      },
+    }), "utf8");
+    reloadAccounts();
+    assert.equal(openAICodexAccount(), undefined);
+  });
+});
+
+test("an account mutation cannot persist an oversized token", async () => {
+  await inStore(async () => {
+    await assert.rejects(
+      updateOpenAICodexAccount(async () => ({
+        ...ACCOUNT,
+        refreshToken: "x".repeat(USER_STORE_LIMITS.accountToken + 1),
+      })),
+      /invalid OpenAI account/,
+    );
+    assert.equal(openAICodexAccount(), undefined);
   });
 });
 

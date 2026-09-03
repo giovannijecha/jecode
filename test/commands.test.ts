@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import { ConversationTree } from "../src/conversation.ts";
 import type { Session } from "../src/session.ts";
@@ -731,56 +734,41 @@ test("a model catalogue stops inspecting an oversized invalid list", async () =>
 });
 
 test("provider access can collect a missing API key, masked", async () => {
-  const live = session(provider("fake", ["a"]));
-  const screen = host(1, 0, 0, undefined); // OpenAI API, add, session, back
-  screen.typed = "typed-key";
+  await withIsolatedOpenAICredentials(async () => {
+    const live = session(provider("fake", ["a"]));
+    const screen = host(1, 0, 0, undefined); // OpenAI API, add, session, back
+    screen.typed = "typed-key";
 
-  const before = process.env["OPENAI_API_KEY"];
-  delete process.env["OPENAI_API_KEY"];
-  try {
     await handleCommand("/providers", live, screen);
 
     assert.equal(screen.fields.length, 1, "no key was asked for");
     assert.equal(screen.fields[0]?.secret, true, "the field would show the key");
     assert.equal(keyFor("OPENAI_API_KEY"), "typed-key");
-  } finally {
-    if (before !== undefined) process.env["OPENAI_API_KEY"] = before;
-    reload();
-  }
+  });
 });
 
 test("the key never reaches the transcript", async () => {
-  const live = session(provider("fake", ["a"]));
-  const screen = host(1, 0, 0, undefined);
-  screen.typed = "fixture-credential-value";
+  await withIsolatedOpenAICredentials(async () => {
+    const live = session(provider("fake", ["a"]));
+    const screen = host(1, 0, 0, undefined);
+    screen.typed = "fixture-credential-value";
 
-  const before = process.env["OPENAI_API_KEY"];
-  delete process.env["OPENAI_API_KEY"];
-  try {
     await handleCommand("/providers", live, screen);
     for (const said of texts(screen.blocks)) {
       assert.ok(!said.includes("fixture-credential-value"), `the key was printed: ${said}`);
     }
-  } finally {
-    if (before !== undefined) process.env["OPENAI_API_KEY"] = before;
-    reload();
-  }
+  });
 });
 
 test("discarding a typed key keeps it out of the session", async () => {
-  const live = session(provider("fake", ["a"]));
-  const screen = host(1, 0, 2, undefined); // OpenAI API, add, discard, back
-  screen.typed = "throwaway";
+  await withIsolatedOpenAICredentials(async () => {
+    const live = session(provider("fake", ["a"]));
+    const screen = host(1, 0, 2, undefined); // OpenAI API, add, discard, back
+    screen.typed = "throwaway";
 
-  const before = process.env["OPENAI_API_KEY"];
-  delete process.env["OPENAI_API_KEY"];
-  try {
     await handleCommand("/providers", live, screen);
     assert.equal(keyFor("OPENAI_API_KEY"), undefined);
-  } finally {
-    if (before !== undefined) process.env["OPENAI_API_KEY"] = before;
-    reload();
-  }
+  });
 });
 
 test("a provider that can already run is not asked for a key", async () => {
@@ -798,3 +786,24 @@ test("a provider that can already run is not asked for a key", async () => {
     reload();
   }
 });
+
+async function withIsolatedOpenAICredentials(body: () => Promise<void>): Promise<void> {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-command-credentials-"));
+  const before = {
+    home: process.env["JECODE_HOME"],
+    key: process.env["OPENAI_API_KEY"],
+  };
+  process.env["JECODE_HOME"] = directory;
+  delete process.env["OPENAI_API_KEY"];
+  reload();
+  try {
+    await body();
+  } finally {
+    if (before.home === undefined) delete process.env["JECODE_HOME"];
+    else process.env["JECODE_HOME"] = before.home;
+    if (before.key === undefined) delete process.env["OPENAI_API_KEY"];
+    else process.env["OPENAI_API_KEY"] = before.key;
+    reload();
+    await rm(directory, { recursive: true, force: true });
+  }
+}

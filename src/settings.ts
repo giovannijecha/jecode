@@ -1,6 +1,5 @@
 // Persistent, non-secret defaults for interactive and batch sessions.
 
-import { readFileSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
@@ -10,6 +9,7 @@ import { providerNames } from "./providers/index.ts";
 import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
 import { withStoreLock } from "./store-lock.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
+import { assertStoreText, readBoundedJsonSync, USER_STORE_LIMITS } from "./user-store.ts";
 
 export { EFFORTS } from "./effort.ts";
 
@@ -37,7 +37,9 @@ export async function updateSettings(patch: Partial<SavedSettings>): Promise<str
   if (process.platform !== "win32") await chmod(directory, 0o700);
   return withStoreLock(file, async () => {
     const next = normalize({ ...readStore(file), ...patch });
-    await atomicWrite(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+    const text = `${JSON.stringify(next, null, 2)}\n`;
+    assertStoreText(text, USER_STORE_LIMITS.settingsBytes);
+    await atomicWrite(file, text, { mode: 0o600 });
     saved = next;
     return file;
   });
@@ -58,7 +60,7 @@ export function reloadSettings(): void {
 
 function readStore(file = settingsPath()): SavedSettings {
   try {
-    return normalize(JSON.parse(readFileSync(file, "utf8")) as unknown);
+    return normalize(readBoundedJsonSync(file, USER_STORE_LIMITS.settingsBytes));
   } catch {
     // Missing, unreadable, and malformed stores all fall back safely. A bad
     // preference must never prevent the agent from starting.
@@ -93,7 +95,7 @@ function modelsOf(value: unknown, providers: readonly string[]): Record<string, 
   const models = Object.fromEntries(
     Object.entries(value).filter(
       (entry): entry is [string, string] =>
-        providers.includes(entry[0]) && typeof entry[1] === "string" && entry[1].trim() !== "",
+        providers.includes(entry[0]) && boundedNonempty(entry[1], USER_STORE_LIMITS.model),
     ),
   );
   return Object.keys(models).length === 0 ? undefined : models;
@@ -104,12 +106,16 @@ function member(value: unknown, values: readonly string[]): string | undefined {
 }
 
 function endpoint(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
+  if (!boundedNonempty(value, USER_STORE_LIMITS.endpoint)) return undefined;
   try {
     return parseOllamaEndpoint(value).baseUrl;
   } catch {
     return undefined;
   }
+}
+
+function boundedNonempty(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.length <= max && value.trim() !== "";
 }
 
 function positiveInteger(value: unknown): number | undefined {
