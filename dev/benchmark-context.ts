@@ -19,23 +19,28 @@ const largeRequest: Message[] = [{
   content: [{ kind: "text", text: "x".repeat(8 * 1_024 * 1_024 - 1_024) }],
 }];
 
-let inputTokens = 0;
+let requestInputTokens = 0;
 const request = await sample(async () => {
-  inputTokens = await estimateRequestInputTokensResponsive({
+  requestInputTokens = await estimateRequestInputTokensResponsive({
     system: "",
     messages: largeRequest,
     tools: [],
   });
+});
+const contextInputTokens = await estimateRequestInputTokensResponsive({
+  system: "",
+  messages: largeContext,
+  tools: [],
 });
 const planning = await sample(async () => {
   const plan = await planCompaction(
     largeContext,
     largeContext,
     0,
-    inputTokens,
+    contextInputTokens,
     true,
     policyForContextWindow({ tokens: 10_000_000 }, 85),
-    inputTokens,
+    contextInputTokens,
   );
   if (plan === undefined) throw new Error("forced benchmark plan was not produced");
 });
@@ -49,6 +54,7 @@ for (const [label, result] of [["request estimate", request], ["forced plan", pl
 
 process.stdout.write([
   `request input: ${(8).toFixed(0)} MiB`,
+  `request tokens: ${requestInputTokens}`,
   `iterations: ${ITERATIONS}`,
   `request estimate: ${request.total.toFixed(2)} ms total · ${request.maxStall.toFixed(2)} ms max stall`,
   "forced plan: 128 messages / 4 MiB",
