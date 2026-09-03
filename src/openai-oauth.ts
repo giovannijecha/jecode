@@ -24,6 +24,8 @@ const DEVICE_POLL = `${AUTHORITY}/api/accounts/deviceauth/token`;
 const DEVICE_VERIFY = `${AUTHORITY}/codex/device`;
 const DEVICE_REDIRECT = `${AUTHORITY}/deviceauth/callback`;
 const LOGIN_LIMIT_MS = 15 * 60_000;
+/** RFC 8628 increases the polling interval by five seconds after `slow_down`. */
+const SLOW_DOWN_INCREMENT_MS = 5_000;
 
 export type OpenAILogin = {
   url: string;
@@ -174,28 +176,69 @@ async function pollDevice(
   interval: number,
   signal?: AbortSignal,
 ): Promise<PendingCode> {
-  const started = Date.now();
-  while (Date.now() - started < LOGIN_LIMIT_MS) {
-    const response = await oauthRequest(
-      DEVICE_POLL,
-      {
-        contentType: "application/json",
-        value: { device_auth_id: deviceAuthId, user_code: userCode },
-      },
-      signal,
-      [200, 403, 404],
-    );
-    if (response.status === 200) {
-      const value = record(response.value) ? response.value : {};
-      return {
-        authorizationCode: required(value["authorization_code"], "authorization code"),
-        verifier: required(value["code_verifier"], "code verifier"),
-        redirectUri: DEVICE_REDIRECT,
-      };
+  const deadline = new AbortController();
+  const timer = setTimeout(() => {
+    deadline.abort(new Error("ChatGPT device sign-in timed out after 15 minutes"));
+  }, LOGIN_LIMIT_MS);
+  const combined = signal === undefined
+    ? deadline.signal
+    : AbortSignal.any([signal, deadline.signal]);
+  let intervalMs = interval * 1_000;
+  try {
+    while (true) {
+      const response = await oauthRequest(
+        DEVICE_POLL,
+        {
+          contentType: "application/json",
+          value: { device_auth_id: deviceAuthId, user_code: userCode },
+        },
+        combined,
+        [200, 400, 403, 404, 429],
+      );
+      if (combined.aborted) throw abortReason(combined);
+      if (response.status === 200) {
+        const value = record(response.value) ? response.value : {};
+        return {
+          authorizationCode: required(value["authorization_code"], "authorization code"),
+          verifier: required(value["code_verifier"], "code verifier"),
+          redirectUri: DEVICE_REDIRECT,
+        };
+      }
+
+      const errorCode = deviceErrorCode(response.value);
+      if (errorCode === "access_denied") {
+        throw new Error("ChatGPT device sign-in was denied");
+      }
+      if (errorCode === "expired_token") {
+        throw new Error("ChatGPT device sign-in code expired");
+      }
+
+      const pending = errorCode === "authorization_pending" ||
+        errorCode === "deviceauth_authorization_pending" ||
+        ((response.status === 403 || response.status === 404) && errorCode === undefined);
+      const slowDown = errorCode === "slow_down" ||
+        (response.status === 429 && errorCode === undefined);
+      if (!pending && !slowDown) {
+        throw new Error(`ChatGPT device sign-in failed (${response.status})`);
+      }
+      if (slowDown) intervalMs += SLOW_DOWN_INCREMENT_MS;
+      await sleep(intervalMs, combined);
     }
-    await sleep(interval * 1_000, signal);
+  } finally {
+    clearTimeout(timer);
   }
-  throw new Error("ChatGPT device sign-in timed out after 15 minutes");
+}
+
+function deviceErrorCode(value: unknown): string | undefined {
+  if (!record(value)) return undefined;
+  const error = value["error"];
+  const nested = typeof error === "string"
+    ? error
+    : record(error)
+      ? optional(error["code"])
+      : undefined;
+  const code = nested ?? optional(value["code"]);
+  return code?.trim().toLowerCase();
 }
 
 function intervalSeconds(value: unknown): number {
