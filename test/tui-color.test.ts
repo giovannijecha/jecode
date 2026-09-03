@@ -51,3 +51,24 @@ test("historical diff emphasis cannot split an emoji with or without color", asy
     else process.env["TERM"] = term;
   }
 });
+
+test("settled tool markers retain semantic success and failure colours", async () => {
+  const { renderAll } = await import("../src/tui/blocks.ts");
+  const { configureColor } = await import("../src/ui/render.ts");
+  const colour = (rgb: readonly number[]) => `${ESC}[38;2;${rgb.join(";")}m●`;
+
+  try {
+    configureColor(true);
+    const success = renderAll([
+      { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
+    ], 60, STEEL).join("\n");
+    const failure = renderAll([
+      { kind: "tool", name: "run_command", target: "npm test", right: "exit 1", tone: "fail" },
+    ], 60, STEEL).join("\n");
+
+    assert.ok(success.includes(colour(STEEL.ink.added)));
+    assert.ok(failure.includes(colour(STEEL.ink.removed)));
+  } finally {
+    configureColor(false);
+  }
+});

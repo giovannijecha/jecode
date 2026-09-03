@@ -20,19 +20,19 @@ export function inline(text: string, base: RGB, pal: Palette, bold = false): Seg
   const { ink } = pal;
   const segs: Seg[] = [];
   let last = 0;
+  const matcher = new RegExp(INLINE.source, INLINE.flags);
 
-  INLINE.lastIndex = 0;
-  for (let match = INLINE.exec(text); match !== null; match = INLINE.exec(text)) {
+  for (let match = matcher.exec(text); match !== null; match = matcher.exec(text)) {
     if (match.index > last) {
       segs.push({ text: text.slice(last, match.index), fg: base, bold: bold || undefined });
     }
 
     const [, mono, strong, strongAlt, emphasis, label] = match;
-    if (mono !== undefined) segs.push({ text: mono, fg: pal.technical });
-    else if (strong !== undefined) segs.push({ text: strong, fg: ink.bright, bold: true });
-    else if (strongAlt !== undefined) segs.push({ text: strongAlt, fg: ink.bright, bold: true });
-    else if (emphasis !== undefined) segs.push({ text: emphasis, fg: ink.bright });
-    else if (label !== undefined) segs.push({ text: label, fg: pal.technical });
+    if (mono !== undefined) segs.push({ text: mono, fg: pal.technical, bold: bold || undefined });
+    else if (strong !== undefined) segs.push(...inline(strong, ink.bright, pal, true));
+    else if (strongAlt !== undefined) segs.push(...inline(strongAlt, ink.bright, pal, true));
+    else if (emphasis !== undefined) segs.push(...inline(emphasis, ink.bright, pal, bold));
+    else if (label !== undefined) segs.push({ text: label, fg: pal.technical, bold: bold || undefined });
 
     last = match.index + match[0].length;
   }

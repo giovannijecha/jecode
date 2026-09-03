@@ -15,7 +15,6 @@ import {
   TOOL_BIRTH_MS,
   TOOL_LEADER_MAX_MS,
   TOOL_ROW_ARRIVAL_MS,
-  TOOL_SETTLE_MS,
   type ToolMotion,
 } from "../motion.ts";
 import { transcriptLead, transcriptMark } from "../transcript-grammar.ts";
@@ -47,7 +46,7 @@ export function renderTool(
 ): string[] {
   const now = context.now ?? Date.now();
   const shown = visibleDetails(block);
-  const ink = statusInk(block, pal, context, now);
+  const ink = stateInk(block, pal, context, now);
   const nameInk = birthInk(pal.ink.bright, pal.ink.dim, context, now);
   const left: Seg[] = [
     ...transcriptLead(width, { text: stateGlyph(block, context, now), fg: ink, bold: true }),
@@ -189,7 +188,7 @@ function stateGlyph(block: ToolBlock, context: ToolRenderContext, now: number): 
     if (context.reducedMotion === true) return "○";
     return SPINNER[Math.floor(now / SPINNER_MS) % SPINNER.length] ?? "○";
   }
-  if (block.tone === "fail") return "×";
+  if (block.tone === "fail") return hasColor() ? "●" : "×";
   if (block.tone === "deny") return "○";
   return hasColor() ? "●" : "✓";
 }
@@ -203,7 +202,7 @@ function resultSegments(
   const status = block.right;
   const duration = liveDuration(block, now);
   if (status === "" && duration === "") return [];
-  const ink = statusInk(block, pal, context, now);
+  const ink = resultInk(block, pal, context, now);
   return [
     ...(status === "" ? [] : [{ text: status, fg: ink }]),
     ...(duration === "" ? [] : [{ text: `${status === "" ? "" : " · "}${duration}`, fg: pal.ink.dim }]),
@@ -217,7 +216,7 @@ function liveDuration(block: ToolBlock, now: number): string {
   return block.durationMs === undefined ? "" : toolDuration(block.durationMs);
 }
 
-function statusInk(
+function stateInk(
   block: ToolBlock,
   pal: Palette,
   context: ToolRenderContext,
@@ -229,9 +228,16 @@ function statusInk(
     if (block.startedAt === undefined || context.reducedMotion === true) return pal.ink.attention;
     return mix(pal.ink.attention, pal.accent, breathe(now));
   }
-  if (context.reducedMotion === true || context.motion?.settledAt === undefined) return pal.ink.muted;
-  const cooled = easeOut(interval(now, context.motion.settledAt, TOOL_SETTLE_MS));
-  return mix(pal.ink.added, pal.ink.muted, cooled);
+  return pal.ink.added;
+}
+
+function resultInk(
+  block: ToolBlock,
+  pal: Palette,
+  context: ToolRenderContext,
+  now: number,
+): RGB {
+  return block.tone === "ok" ? pal.ink.muted : stateInk(block, pal, context, now);
 }
 
 function birthInk(final: RGB, initial: RGB, context: ToolRenderContext, now: number): RGB {
