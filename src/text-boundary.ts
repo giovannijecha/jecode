@@ -2,6 +2,9 @@
 
 const SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
+/** Shared persisted-text and user-prompt boundary, measured like String.length. */
+export const MAX_TEXT_CODE_UNITS = 1_048_576;
+
 export function segmentGraphemes(text: string): Intl.Segments {
   return SEGMENTER.segment(text);
 }

@@ -17,6 +17,7 @@ import { runApp } from "../src/tui/app.ts";
 import type { AppScreen } from "../src/tui/app.ts";
 import { STEEL } from "../src/ui/theme.ts";
 import { emptyUsage } from "../src/usage.ts";
+import { MAX_PROMPT_CODE_UNITS } from "../src/input-boundary.ts";
 
 function provider(reply = "Hello from fake."): Provider {
   return {
@@ -89,6 +90,31 @@ test("batch mode carries input through the controller, renderer, commands, and e
   assert.match(shown, /interactive help needs the TUI/);
   assert.doesNotMatch(shown, /ignored/);
   assert.equal(current.conversation.history.length, 2);
+});
+
+test("batch mode rejects an oversized line before echo, history, or provider use", async () => {
+  let requests = 0;
+  const counted: Provider = {
+    ...provider(),
+    async send(request): Promise<Message> {
+      requests++;
+      return provider().send(request);
+    },
+  };
+  const current = session(counted);
+  const output: string[] = [];
+
+  await assert.rejects(
+    runBatch(current, {
+      lines: input("x".repeat(MAX_PROMPT_CODE_UNITS + 1)),
+      write: (text) => output.push(text),
+    }),
+    /Prompt cannot exceed 1,048,576 UTF-16 code units/,
+  );
+
+  assert.equal(requests, 0);
+  assert.equal(output.join(""), "");
+  assert.deepEqual(current.conversation.history, []);
 });
 
 test("batch mode compacts model context while retaining the complete conversation", async () => {
@@ -319,6 +345,28 @@ test("batch process cancellation reaches the active provider request", async () 
 
   await assert.rejects(running, (error) => error === reason);
   assert.equal(providerSignal?.aborted, true);
+});
+
+test("batch process cancellation interrupts an idle input wait", async () => {
+  let waiting = false;
+  const lines: AsyncIterable<string> = {
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          waiting = true;
+          return new Promise<IteratorResult<string>>(() => {});
+        },
+      };
+    },
+  };
+  const shutdown = new AbortController();
+  const running = runBatch(session(), { lines, signal: shutdown.signal, write: () => {} });
+
+  await waitFor(() => waiting, "batch input wait");
+  const reason = new Error("received SIGTERM");
+  shutdown.abort(reason);
+
+  await assert.rejects(running, (error) => error === reason);
 });
 
 test("the bootstrap selects the interactive surface and builds one complete session", async () => {
@@ -855,6 +903,38 @@ test("a TUI submit reaches the provider and returns to an editable session", asy
   assert.equal(current.conversation.history[1]?.role, "assistant");
   assert.match(harness.frames.flat().join("\n"), /Answer from the TUI\./);
 
+  feed("/exit\r");
+  await running;
+  assert.equal(harness.left(), true);
+});
+
+test("an oversized TUI paste stays in the footer and never reaches the provider", async () => {
+  let requests = 0;
+  const counted: Provider = {
+    ...provider(),
+    async send(): Promise<Message> {
+      requests++;
+      return { role: "assistant", content: [{ kind: "text", text: "unexpected" }] };
+    },
+  };
+  const current = session(counted);
+  const harness = virtualScreen(180);
+  const running = runApp(current, process.cwd(), harness.environment);
+  const feed = await harness.input();
+  const escape = String.fromCharCode(27);
+
+  feed("keep");
+  feed(`${escape}[200~${"x".repeat(MAX_PROMPT_CODE_UNITS + 1)}${escape}[201~\r`);
+  await waitFor(
+    () => lastFooter(harness).includes("1,048,576 UTF-16 code units"),
+    "prompt limit feedback",
+  );
+
+  assert.equal(requests, 0);
+  assert.deepEqual(current.conversation.history, []);
+  assert.match(harness.frames.at(-1)?.join("\n") ?? "", /keep/);
+
+  feed(String.fromCharCode(21));
   feed("/exit\r");
   await running;
   assert.equal(harness.left(), true);
@@ -1502,6 +1582,33 @@ test("the packaged batch executable reports terminal failures on stderr", async 
     assert.match(result.stdout, /> hello/);
     assert.doesNotMatch(result.stdout, /ANTHROPIC_API_KEY is not set/);
     assert.match(result.stderr, /^jecode: ANTHROPIC_API_KEY is not set/m);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("the packaged batch executable rejects an oversized final line on stderr", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-batch-limit-home-"));
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: directory,
+    USERPROFILE: directory,
+    APPDATA: directory,
+    LOCALAPPDATA: directory,
+    JECODE_HOME: directory,
+    XDG_CONFIG_HOME: directory,
+  };
+
+  try {
+    const result = await runNode(
+      path.resolve("bin/jecode.js"),
+      ["--provider", "anthropic", "--model", "fixture-model", "--ephemeral"],
+      { input: "x".repeat(MAX_PROMPT_CODE_UNITS + 1), environment },
+    );
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^jecode: Prompt cannot exceed 1,048,576 UTF-16 code units/m);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

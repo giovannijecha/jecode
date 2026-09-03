@@ -4,6 +4,7 @@ import type { Palette } from "../ui/theme.ts";
 import type { Seg } from "../ui/render.ts";
 import { row } from "../ui/render.ts";
 import { elide, graphemes } from "../ui/width.ts";
+import { assertPromptAppend } from "../input-boundary.ts";
 import { menuWindow, renderMenuRows } from "./components/menu.ts";
 import { promptCursor, promptLine } from "./components/prompt.ts";
 import type { Cursor } from "./frame.ts";
@@ -62,6 +63,7 @@ export function adjust(picker: Picker, step: -1 | 1): Picker {
 
 export function type(picker: Picker, text: string): Picker {
   if (picker.searchable !== true || text === "") return picker;
+  assertPromptAppend((picker.query ?? "").length, text.length);
   return withQuery(picker, `${picker.query ?? ""}${text}`);
 }
 

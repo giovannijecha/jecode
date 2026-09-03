@@ -11,6 +11,7 @@ import type { Feedback, FeedbackController } from "../src/tui/feedback.ts";
 import type { Key } from "../src/tui/keys.ts";
 import { STEEL } from "../src/ui/theme.ts";
 import { emptyUsage } from "../src/usage.ts";
+import { MAX_PROMPT_CODE_UNITS } from "../src/input-boundary.ts";
 
 const key = (name: string, text = "", ctrl = false): Key => ({ name, text, ctrl });
 
@@ -133,6 +134,53 @@ test("a blocked turn keeps the unsent prompt and history untouched", () => {
   assert.deepEqual(current.state.past, []);
   assert.deepEqual(current.turns, []);
   assert.match(current.feedback[0]?.text ?? "", /needs an API key/);
+});
+
+test("an oversized prompt stays out of history and cannot be submitted", () => {
+  const current = harness();
+  current.state.editor = edit.of("keep");
+
+  current.input.handle(key("paste", "x".repeat(MAX_PROMPT_CODE_UNITS)));
+  current.input.handle(key("enter"));
+
+  assert.equal(current.state.editor.text, "keep");
+  assert.equal(current.state.promptRejected, true);
+  assert.deepEqual(current.state.past, []);
+  assert.deepEqual(current.turns, []);
+  assert.match(current.feedback.at(-1)?.text ?? "", /1,048,576 UTF-16 code units.*prompt kept/);
+
+  current.input.handle(key("left"));
+  current.input.handle(key("enter"));
+  assert.deepEqual(current.turns, []);
+
+  current.input.handle(key("end"));
+  current.input.handle(key("backspace"));
+  current.input.handle(key("enter"));
+  assert.equal(current.state.promptRejected, false);
+  assert.deepEqual(current.turns, ["kee"]);
+});
+
+test("oversized field and picker input stays inside its open interaction", () => {
+  const atLimit = "x".repeat(MAX_PROMPT_CODE_UNITS);
+  const field = harness();
+  field.state.open = {
+    field: { title: [], editor: edit.of(atLimit), secret: true },
+    settle() {},
+  };
+  field.input.handle(key("char", "x"));
+  assert.ok(field.state.open !== undefined && "field" in field.state.open);
+  assert.equal(field.state.promptRejected, false);
+  assert.match(field.feedback.at(-1)?.text ?? "", /Prompt cannot exceed/);
+
+  const picker = harness();
+  picker.state.open = {
+    picker: { title: [], options: [], searchable: true, query: atLimit, index: 0 },
+    settle() {},
+  };
+  picker.input.handle(key("char", "x"));
+  assert.ok(picker.state.open !== undefined && "picker" in picker.state.open);
+  assert.equal(picker.state.promptRejected, false);
+  assert.match(picker.feedback.at(-1)?.text ?? "", /Prompt cannot exceed/);
 });
 
 test("submission, completion, and recall preserve the editor draft", () => {

@@ -28,6 +28,8 @@ export type AppState = {
   committedNodeId: number;
   /** The slash-command menu, held apart from the text being edited. */
   completing?: Completion;
+  /** An oversized input cannot be submitted as a silently shortened prompt. */
+  promptRejected: boolean;
 };
 
 export function appState(): AppState {
@@ -43,5 +45,6 @@ export function appState(): AppState {
     draft: "",
     closeWhenIdle: false,
     committedNodeId: 0,
+    promptRejected: false,
   };
 }

@@ -2,6 +2,7 @@
 
 import type { Session } from "../session.ts";
 import type { SteeringOffer } from "../steering.ts";
+import { PROMPT_LIMIT_MESSAGE, PromptLimitError } from "../input-boundary.ts";
 import type { AppState } from "./app-state.ts";
 import type { Block } from "./blocks.ts";
 import {
@@ -54,6 +55,12 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
 
     if (state.feedback !== undefined) feedback.dismiss();
 
+    if (key.name === "input_limit") {
+      if (state.open === undefined) rejectPrompt();
+      else showInputLimit();
+      return;
+    }
+
     // Detail expansion remains available while an approval is open. A large
     // diff may be compacted, but the user must be able to inspect it before
     // answering the permission prompt.
@@ -66,6 +73,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
     if (state.open !== undefined) {
       const outcome = overlay.handle(state.open, key);
       state.open = outcome.open;
+      if (outcome.inputLimit === true) showInputLimit();
       if (outcome.abort === true) state.activity?.control.abort(new Error("interrupted"));
       if (outcome.quit === true) options.requestQuit();
       return;
@@ -93,7 +101,10 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
       case "enter": {
         if (state.completing !== undefined) {
           const completed = selectedCompletion(state.completing);
-          if (completed !== undefined) state.editor = edit.of(completed);
+          if (completed !== undefined) {
+            state.editor = edit.of(completed);
+            state.promptRejected = false;
+          }
           state.completing = undefined;
         }
         submit();
@@ -105,6 +116,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
         const completed = completion === undefined ? undefined : selectedCompletion(completion);
         if (completed !== undefined) {
           state.editor = edit.of(completed);
+          state.promptRejected = false;
           state.completing = undefined;
         }
         return;
@@ -138,16 +150,23 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
       return;
     }
 
-    const edited = applyKey(state.editor, key);
-    if (edited !== undefined) {
-      state.editor = edited;
-      state.completing = state.activity === undefined ? activateCompletion(edited.text) : undefined;
+    try {
+      const edited = applyKey(state.editor, key);
+      if (edited !== undefined) {
+        if (edited.text !== state.editor.text) state.promptRejected = false;
+        state.editor = edited;
+        state.completing = state.activity === undefined ? activateCompletion(edited.text) : undefined;
+      }
+    } catch (error) {
+      if (!(error instanceof PromptLimitError)) throw error;
+      rejectPrompt();
     }
   }
 
   function recall(step: number): void {
     if (state.past.length === 0) return;
     state.completing = undefined;
+    state.promptRejected = false;
 
     if (state.recall === -1) {
       if (step > 0) return;
@@ -167,6 +186,10 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
   }
 
   function submit(): void {
+    if (state.promptRejected) {
+      keep(PROMPT_LIMIT_MESSAGE);
+      return;
+    }
     const text = state.editor.text.trim();
     if (text === "") return;
 
@@ -210,6 +233,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
     state.recall = -1;
     state.draft = "";
     state.completing = undefined;
+    state.promptRejected = false;
     state.past.push(text);
     state.scroll = 0;
     state.follow = true;
@@ -218,6 +242,15 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
 
   function keep(text: string): void {
     feedback.show({ text: `${text} · prompt kept`, tone: "warn", timeoutMs: 4_000 });
+  }
+
+  function rejectPrompt(): void {
+    state.promptRejected = true;
+    keep(PROMPT_LIMIT_MESSAGE);
+  }
+
+  function showInputLimit(): void {
+    feedback.show({ text: PROMPT_LIMIT_MESSAGE, tone: "warn", timeoutMs: 4_000 });
   }
 
   return { handle };

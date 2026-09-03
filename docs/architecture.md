@@ -481,6 +481,14 @@ word, and Ctrl+Backspace/Delete removes the adjacent word. Windows Terminal's
 distinct BS/DEL pair is enabled only when `WT_SESSION` identifies that terminal;
 generic terminals retain both traditional plain-Backspace encodings.
 
+Prompt ingress shares the session text boundary: 1,048,576 UTF-16 code units.
+The raw-key decoder bounds bracketed-paste and protocol buffers before
+concatenation, while the editor refuses an insertion that would cross the same
+limit. An overflow stays in the footer and makes the retained prompt
+unsubmittable until the user edits it. Batch stdin is split incrementally at
+the same boundary and fails before echo, history, or provider use.
+Cooperative steering retains its smaller, separate per-turn queue boundary.
+
 Writable fields and searchable pickers carry the same `→ ` active prompt. One
 shared renderer owns its terminal-cell width, horizontal window, secret mask,
 right-side progress, and cursor offset, so the interactions cannot drift apart.

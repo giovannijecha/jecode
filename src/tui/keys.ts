@@ -5,6 +5,8 @@
 // guessed at; and a bracketed paste arrives as a delimited run that must not be
 // interpreted key by key, or a pasted newline submits half the paste.
 
+import { MAX_PROMPT_CODE_UNITS } from "../input-boundary.ts";
+
 const ESC = String.fromCharCode(27);
 const BS = String.fromCharCode(8);
 const DEL = String.fromCharCode(127);
@@ -97,6 +99,17 @@ export function decoder(options: DecoderOptions = {}): Decoder {
   let held = "";
   let pasting = false;
   let pasted = "";
+  let pasteTooLong = false;
+
+  const appendPaste = (text: string): void => {
+    if (pasteTooLong || text === "") return;
+    if (text.length > MAX_PROMPT_CODE_UNITS - pasted.length) {
+      pasted = "";
+      pasteTooLong = true;
+      return;
+    }
+    pasted += text;
+  };
 
   const drain = (final: boolean): Key[] => {
     const keys: Key[] = [];
@@ -112,22 +125,26 @@ export function decoder(options: DecoderOptions = {}): Decoder {
             // paste, then let the normal control-key path handle the byte.
             held = held.slice(interrupt);
             pasted = "";
+            pasteTooLong = false;
             pasting = false;
             continue;
           }
           // Hold back a possible partial terminator rather than pasting it.
           const safe = held.length - PASTE_END.length - 1;
           if (safe > 0) {
-            pasted += held.slice(0, safe);
+            appendPaste(held.slice(0, safe));
             held = held.slice(safe);
           }
           break;
         }
-        pasted += held.slice(0, end);
+        appendPaste(held.slice(0, end));
         held = held.slice(end + PASTE_END.length + 1);
         pasting = false;
-        keys.push({ name: "paste", text: pasted, ctrl: false });
+        keys.push(pasteTooLong
+          ? { name: "input_limit", text: "", ctrl: false }
+          : { name: "paste", text: pasted, ctrl: false });
         pasted = "";
+        pasteTooLong = false;
         continue;
       }
 
@@ -140,6 +157,7 @@ export function decoder(options: DecoderOptions = {}): Decoder {
         if (rest.startsWith(PASTE_START)) {
           held = rest.slice(PASTE_START.length);
           pasting = true;
+          pasteTooLong = false;
           continue;
         }
 
@@ -204,13 +222,60 @@ export function decoder(options: DecoderOptions = {}): Decoder {
 
   return {
     push(chunk: string): Key[] {
-      held += chunk;
-      return drain(false);
+      // The usual printable run needs no protocol buffering. This also rejects
+      // one unbracketed paste atomically before copying it into `held`.
+      if (held === "" && !pasting && printable(chunk)) {
+        return [chunk.length > MAX_PROMPT_CODE_UNITS
+          ? { name: "input_limit", text: "", ctrl: false }
+          : { name: "char", text: chunk, ctrl: false }];
+      }
+
+      const keys: Key[] = [];
+      const chunkSize = 64 * 1_024;
+      for (let from = 0; from < chunk.length;) {
+        let to = Math.min(from + chunkSize, chunk.length);
+        if (
+          to < chunk.length &&
+          isHighSurrogate(chunk.charCodeAt(to - 1)) &&
+          isLowSurrogate(chunk.charCodeAt(to))
+        ) {
+          to++;
+        }
+        const part = chunk.slice(from, to);
+        from = to;
+        if (part.length > MAX_PROMPT_CODE_UNITS - held.length) {
+          held = "";
+          pasted = "";
+          pasting = false;
+          pasteTooLong = false;
+          keys.push({ name: "input_limit", text: "", ctrl: false });
+          break;
+        }
+        held += part;
+        keys.push(...drain(false));
+      }
+      return keys;
     },
     flush(): Key[] {
       return drain(true);
     },
   };
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function printable(text: string): boolean {
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index] as string;
+    if ((char.codePointAt(0) ?? 0) < 0x20 || char === ESC || char === DEL) return false;
+  }
+  return text !== "";
 }
 
 function firstInterrupt(text: string): number {
