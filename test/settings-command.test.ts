@@ -190,7 +190,9 @@ test("settings chooses provider and model together from the model menu", async (
 test("settings changes the Ollama connection live and persists it", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_CLOUD_HOST);
-    const answers: (number | undefined)[] = [5, 3, 0, 1, undefined, undefined];
+    const answers: (number | undefined)[] = [
+      5, 1, 2, 0, 1, undefined, undefined, undefined,
+    ];
     const pickers: Picker[] = [];
     const host: Host = {
       emit: () => {},
@@ -207,7 +209,7 @@ test("settings changes the Ollama connection live and persists it", async () => 
       await handleCommand("/settings", session, host);
 
       assert.equal(pickers[0]?.options[5]?.label, "providers");
-      assert.equal(pickers[2]?.options[0]?.label, "connection");
+      assert.equal(pickers[3]?.options[0]?.label, "connection");
       assert.equal(session.config.ollamaHost, OLLAMA_LOCAL_HOST);
       assert.equal(ollamaConnection().baseUrl, OLLAMA_LOCAL_HOST);
       assert.equal(JSON.parse(await readFile(settingsPath(), "utf8")).ollamaHost, OLLAMA_LOCAL_HOST);
@@ -220,7 +222,9 @@ test("settings changes the Ollama connection live and persists it", async () => 
 test("settings configures Ollama Cloud and collects a missing key in the dock", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_LOCAL_HOST);
-    const answers: (number | undefined)[] = [5, 3, 0, 0, 0, undefined, undefined];
+    const answers: (number | undefined)[] = [
+      5, 1, 2, 0, 0, 0, undefined, undefined, undefined,
+    ];
     const fields: Field[] = [];
     const host: Host = {
       emit: () => {},
@@ -251,7 +255,9 @@ test("settings validates and normalizes a custom Ollama endpoint", async () => {
   await inSettingsHome(async () => {
     configureOllama(OLLAMA_LOCAL_HOST);
     hold("OLLAMA_API_KEY", "fixture-key");
-    const answers: (number | undefined)[] = [5, 3, 0, 2, undefined, undefined];
+    const answers: (number | undefined)[] = [
+      5, 1, 2, 0, 2, undefined, undefined, undefined,
+    ];
     const fields: Field[] = [];
     const host: Host = {
       emit: () => {},
