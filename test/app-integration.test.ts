@@ -1027,6 +1027,7 @@ test("a streamed failure survives export, resume, and the next provider request"
     assert.match(JSON.stringify(current.conversation.transcript), /fixture stream failed/);
 
     await waitForIdle(harness, "settled failed turn before export");
+    const exportStartedAt = harness.frames.length;
     feed("/export\r");
     await waitFor(async () => (await readdir(workspace)).some((name) => name.startsWith("jecode-transcript-")), "failed turn export");
     const exportedName = (await readdir(workspace)).find((name) => name.startsWith("jecode-transcript-"));
@@ -1034,13 +1035,14 @@ test("a streamed failure survives export, resume, and the next provider request"
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /partial answer/);
     assert.match(exported, /fixture stream failed/);
-    await waitForIdle(harness, "completed failed-turn export");
+    await waitForExportCompletion(harness, exportStartedAt, "failed-turn export");
 
     feed("retry\r");
     await waitFor(
       () => current.conversation.activeNode?.settlement === "completed",
       "completed retry",
     );
+    await waitForIdle(harness, "settled retry before exit");
     assert.match(JSON.stringify(requests[1]), /first request/);
     assert.match(JSON.stringify(requests[1]), /failed before completion/);
     assert.match(JSON.stringify(requests[1]), /retry/);
@@ -1106,6 +1108,7 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
     );
 
     await waitForIdle(harness, "settled interrupted turn before export");
+    const exportStartedAt = harness.frames.length;
     feed("/export\r");
     await waitFor(
       async () => (await readdir(workspace)).some((name) => name.startsWith("jecode-transcript-")),
@@ -1118,13 +1121,14 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /first request/);
     assert.match(exported, /\[interrupted\]/);
-    await waitForIdle(harness, "completed interrupted-turn export");
+    await waitForExportCompletion(harness, exportStartedAt, "interrupted-turn export");
 
     feed("continue\r");
     await waitFor(
       () => current.conversation.activeNode?.settlement === "completed",
       "completed recovery turn",
     );
+    await waitForIdle(harness, "settled recovery turn before exit");
     assert.equal(requests.length, 2);
     assert.match(JSON.stringify(requests[1]), /first request/);
     assert.match(JSON.stringify(requests[1]), /interrupted by the user before completion/);
@@ -1909,6 +1913,7 @@ test("/export writes without a picker to the directory where Jecode was launched
       "answer before export",
     );
     await waitForIdle(harness, "completed answer before export");
+    const exportStartedAt = harness.frames.length;
     feed("/export\r");
     let name: string | undefined;
     await waitFor(async () => {
@@ -1919,7 +1924,7 @@ test("/export writes without a picker to the directory where Jecode was launched
     const markdown = await readFile(path.join(directory, name), "utf8");
     assert.match(markdown, /keep this/);
     assert.match(markdown, /Exported answer\./);
-    await waitForIdle(harness, "completed export command");
+    await waitForExportCompletion(harness, exportStartedAt, "export command");
     feed("/exit\r");
     await running;
   } finally {
@@ -2182,6 +2187,18 @@ function lastFooter(harness: { frames: string[][] }): string {
 
 async function waitForIdle(harness: { frames: string[][] }, label: string): Promise<void> {
   await waitFor(() => !lastFooter(harness).includes("esc to interrupt"), label);
+}
+
+async function waitForExportCompletion(
+  harness: { frames: string[][] },
+  startedAt: number,
+  label: string,
+): Promise<void> {
+  await waitFor(
+    () => harness.frames.slice(startedAt).some((frame) => frame.join("\n").includes("saved ·")),
+    `${label} feedback`,
+  );
+  await waitForIdle(harness, `${label} idle state`);
 }
 
 function deferred(): { wait: Promise<void>; release(): void } {
