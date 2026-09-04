@@ -76,6 +76,26 @@ test("search results stop at the requested bound", async () => {
   assert.match(result.summary ?? "", /result limit/);
 });
 
+test("bounded search returns the canonical lexical prefix", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-search-order-"));
+  const ordered = { root };
+  try {
+    await fs.mkdir(path.join(root, "a-dir"));
+    await fs.mkdir(path.join(root, "z-dir"));
+    await fs.writeFile(path.join(root, "a-dir", "hit.txt"), "ordered needle a\n", "utf8");
+    await fs.writeFile(path.join(root, "b-hit.txt"), "ordered needle b\n", "utf8");
+    await fs.writeFile(path.join(root, "z-dir", "hit.txt"), "ordered needle z\n", "utf8");
+
+    const files = await findFiles.run({ pattern: "*.txt", max_results: 1 }, ordered);
+    const matches = await searchText.run({ query: "ordered needle", max_results: 1 }, ordered);
+
+    assert.equal(files.output, "a-dir/hit.txt");
+    assert.equal(matches.output, "a-dir/hit.txt:1:ordered needle a");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("the portable scanner bounds concurrent reads and preserves file order", async () => {
   const files = Array.from({ length: 20 }, (_, index) => ({
     path: path.join(ctx.root, `ordered-${String(index).padStart(2, "0")}.txt`),
