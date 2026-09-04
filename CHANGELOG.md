@@ -4,7 +4,7 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
-## Unreleased
+## [0.8.5] - 2026-09-04
 
 ### Changed
 
@@ -582,6 +582,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.8.5]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.5
 [0.8.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.4
 [0.8.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.3
 [0.8.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.2
