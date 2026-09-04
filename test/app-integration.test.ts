@@ -1022,6 +1022,12 @@ test("a max-steps failure stays actionable, durable, and recoverable", async () 
       () => current.conversation.activeNode?.settlement === "failed",
       "durable max-steps failure",
     );
+    await waitFor(
+      () => harness.frames.flat().join("\n").includes(
+        "stopped after 2 model requests (--max-steps limit reached)",
+      ),
+      "painted max-steps failure",
+    );
     const sessionId = current.persistence.sessionId;
     assert.ok(sessionId !== null);
     assert.equal(requests.length, 2);
