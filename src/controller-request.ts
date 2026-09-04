@@ -7,6 +7,11 @@ import {
 } from "./context/budget.ts";
 import type { ContextPolicy } from "./context/policy.ts";
 import { isContextOverflow } from "./context/policy.ts";
+import {
+  projectToolResults,
+  projectToolResultsNewest,
+  toolResultProjectionBudget,
+} from "./context/request-projection.ts";
 import type { Message, ToolSpec } from "./types.ts";
 
 export type ControllerResponse = Readonly<{
@@ -16,7 +21,8 @@ export type ControllerResponse = Readonly<{
 }>;
 
 type PreparedContext = Readonly<{
-  projected: readonly Message[] | undefined;
+  context: Message[];
+  requestMessages: Message[];
   inputTokens: number;
 }>;
 
@@ -39,7 +45,8 @@ export async function requestAssistant(
     "budget",
     signal,
   );
-  let context = prepared.projected === undefined ? [...current] : clone(prepared.projected);
+  let context = prepared.context;
+  let requestMessages = prepared.requestMessages;
   let inputTokens = prepared.inputTokens;
   let recovered = false;
 
@@ -49,10 +56,13 @@ export async function requestAssistant(
       const message = await options.provider.send({
         model: options.model,
         system: options.system,
-        messages: context,
+        messages: requestMessages,
         tools: specs,
         maxTokens: budget.maxOutputTokens,
         effort: options.effort,
+        ...(options.requestIdentity === undefined
+          ? {}
+          : { identity: { ...options.requestIdentity, purpose: "turn" as const } }),
         signal,
         onStream: (event) => events.onStream(event),
         onStatus: (status) => events.onStatus?.(status),
@@ -71,10 +81,10 @@ export async function requestAssistant(
         "overflow",
         signal,
         error as Error,
-        inputTokens,
       );
-      if (next.projected === undefined) throw error;
-      context = clone(next.projected);
+      if (sameContext(next.context, context)) throw error;
+      context = next.context;
+      requestMessages = next.requestMessages;
       inputTokens = next.inputTokens;
       recovered = true;
     }
@@ -91,12 +101,17 @@ async function prepareContext(
   reason: "budget" | "overflow",
   signal?: AbortSignal,
   error?: Error,
-  knownInputTokens?: number,
 ): Promise<PreparedContext> {
-  const inputTokens = knownInputTokens ?? await estimateRequestInputTokensResponsive(
+  const projectionBudget = toolResultProjectionBudget(policy);
+  const initialProjection = projectToolResults(
+    context,
+    projectionBudget,
+  );
+  const initialRequest = initialProjection.messages;
+  const inputTokens = await estimateRequestInputTokensResponsive(
     {
       system: options.system,
-      messages: context,
+      messages: initialRequest,
       tools: specs,
     },
     signal,
@@ -105,20 +120,36 @@ async function prepareContext(
     reason,
     policy,
     inputTokens,
+    projectionSaturated: initialProjection.saturated,
     ...(error === undefined ? {} : { error }),
   });
+  const semantic = projected === undefined ? clone(context) : clone(projected);
+  const stableProjection = projected === undefined
+    ? initialProjection
+    : projectToolResults(semantic, projectionBudget);
+  const requestMessages = stableProjection.saturated
+    ? projectToolResultsNewest(semantic, projectionBudget).messages
+    : stableProjection.messages;
+  const canReuseEstimate = projected === undefined && !stableProjection.saturated;
   return {
-    projected,
-    inputTokens: projected === undefined
+    context: semantic,
+    requestMessages,
+    inputTokens: canReuseEstimate
       ? inputTokens
       : await estimateRequestInputTokensResponsive({
-        system: options.system,
-        messages: projected,
-        tools: specs,
-      }, signal),
+          system: options.system,
+          messages: requestMessages,
+          tools: specs,
+        }, signal),
   };
 }
 
 function clone(messages: readonly Message[]): Message[] {
   return structuredClone([...messages]);
+}
+
+function sameContext(left: readonly Message[], right: readonly Message[]): boolean {
+  return left.length === right.length && left.every((message, index) => (
+    JSON.stringify(message) === JSON.stringify(right[index])
+  ));
 }

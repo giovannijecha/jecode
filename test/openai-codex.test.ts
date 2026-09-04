@@ -146,6 +146,11 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
       tools: [],
       maxTokens: 123,
       effort: "max",
+      identity: {
+        conversationId: "11111111-1111-4111-8111-111111111111",
+        cacheKey: "jecode-stable-cache",
+        purpose: "turn",
+      },
       onStatus: (status) => statuses.push(status),
     });
 
@@ -156,7 +161,9 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
     assert.equal(body["stream"], true);
     assert.deepEqual(body["reasoning"], { effort: "max", summary: "auto" });
     assert.deepEqual(body["include"], ["reasoning.encrypted_content"]);
+    assert.equal(body["prompt_cache_key"], "jecode-stable-cache");
     assert.equal(headers.get("authorization"), "Bearer send-access");
+    assert.equal(headers.get("session-id"), "11111111-1111-4111-8111-111111111111");
     assert.equal(headers.get("openai-beta"), "responses=experimental");
     assert.deepEqual(statuses, ["Connecting", "Waiting for model", "Working"]);
   });
@@ -214,6 +221,9 @@ test("one 401 refreshes the account once and retries with the rotated access tok
     await saveAccount("old-access", "old-refresh");
     const previousFetch = globalThis.fetch;
     const authorizations: string[] = [];
+    const sessionIds: string[] = [];
+    const requestIds: string[] = [];
+    const cacheKeys: unknown[] = [];
     let refreshes = 0;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -227,7 +237,11 @@ test("one 401 refreshes the account once and retries with the rotated access tok
         });
       }
       const authorization = new Headers(init?.headers).get("authorization") ?? "";
+      const requestHeaders = new Headers(init?.headers);
       authorizations.push(authorization);
+      sessionIds.push(requestHeaders.get("session-id") ?? "");
+      requestIds.push(requestHeaders.get("x-client-request-id") ?? "");
+      cacheKeys.push((JSON.parse(String(init?.body)) as Record<string, unknown>)["prompt_cache_key"]);
       if (authorizations.length === 1) return new Response("unauthorized", { status: 401 });
       return sse({ type: "response.completed", response: { status: "completed", output: [] } });
     }) as typeof fetch;
@@ -240,12 +254,54 @@ test("one 401 refreshes the account once and retries with the rotated access tok
       tools: [],
       maxTokens: 100,
       effort: "high",
+      identity: {
+        conversationId: "22222222-2222-4222-8222-222222222222",
+        cacheKey: "jecode-retry-cache",
+        purpose: "turn",
+      },
     });
 
     assert.equal(refreshes, 1);
     assert.equal(authorizations[0], "Bearer old-access");
     assert.equal(authorizations[1], `Bearer ${accessToken("new-access")}`);
+    assert.deepEqual(sessionIds, [
+      "22222222-2222-4222-8222-222222222222",
+      "22222222-2222-4222-8222-222222222222",
+    ]);
+    assert.deepEqual(cacheKeys, ["jecode-retry-cache", "jecode-retry-cache"]);
+    assert.match(requestIds[0] ?? "", /^[0-9a-f-]{36}$/u);
+    assert.match(requestIds[1] ?? "", /^[0-9a-f-]{36}$/u);
+    assert.notEqual(requestIds[0], requestIds[1]);
     assert.equal(openAICodexAccount()?.refreshToken, "new-refresh");
+  });
+});
+
+test("the ChatGPT provider omits prompt cache routing from compaction", async (context) => {
+  await inStore(async () => {
+    await saveAccount("send-access", "send-refresh");
+    const previousFetch = globalThis.fetch;
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return sse({ type: "response.completed", response: { status: "completed", output: [] } });
+    }) as typeof fetch;
+    context.after(() => { globalThis.fetch = previousFetch; });
+
+    await openaiCodex.send({
+      model: "gpt-codex",
+      system: "summarize",
+      messages: [],
+      tools: [],
+      maxTokens: 100,
+      effort: "high",
+      identity: {
+        conversationId: "33333333-3333-4333-8333-333333333333",
+        cacheKey: "jecode-compaction-cache",
+        purpose: "compaction",
+      },
+    });
+
+    assert.equal(body["prompt_cache_key"], undefined);
   });
 });
 

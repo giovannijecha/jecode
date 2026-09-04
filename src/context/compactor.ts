@@ -9,6 +9,9 @@ import { CONTEXT_LIMITS, summaryMessage } from "./projection.ts";
 import type { CompactionPlan, ContextPolicy } from "./policy.ts";
 import { planCompaction } from "./policy.ts";
 import type { Message, Provider, Usage } from "../types.ts";
+import type { ToolSpec } from "../types.ts";
+import type { ConversationRequestIdentity } from "../types.ts";
+import { projectToolResultsNewest, toolResultProjectionBudget } from "./request-projection.ts";
 
 const SUMMARY_SYSTEM = [
   "Condense the supplied conversation into durable working memory.",
@@ -19,6 +22,7 @@ const SUMMARY_SYSTEM = [
   "State uncertainty plainly. Do not invent details or include hidden reasoning.",
   "Return only a concise plain-text summary.",
 ].join("\n");
+const MIN_COMPACTION_SAVINGS_TOKENS = 256;
 
 export type CompactContextOptions = Readonly<{
   provider: Provider;
@@ -38,6 +42,13 @@ export type CompactContextOptions = Readonly<{
   /** Manual commands surface provider failures; automatic compaction stays optional. */
   failLoudly?: boolean;
   policy: ContextPolicy;
+  /** The real turn envelope used to prove the summary creates usable room. */
+  requestEnvelope?: Readonly<{
+    system: string;
+    tools: readonly ToolSpec[];
+    maxOutputTokens: number;
+  }>;
+  requestIdentity?: ConversationRequestIdentity;
   onBegin?(): void;
   onEnd?(): void;
 }>;
@@ -45,6 +56,7 @@ export type CompactContextOptions = Readonly<{
 export type CompactionResult = Readonly<{
   messages: Message[];
   anchor: ContextAnchor;
+  estimatedInputTokens: number;
   usage?: Usage;
 }>;
 
@@ -66,7 +78,10 @@ export async function compactContext(
 
   options.onBegin?.();
   try {
-    const messages = normalized(plan.prefix);
+    const messages = projectToolResultsNewest(
+      normalized(plan.prefix),
+      toolResultProjectionBudget(policy),
+    ).messages;
     const inputTokens = await estimateRequestInputTokensResponsive({
       system: SUMMARY_SYSTEM,
       messages,
@@ -84,6 +99,9 @@ export async function compactContext(
       tools: [],
       maxTokens: budget.maxOutputTokens,
       effort: options.effort,
+      ...(options.requestIdentity === undefined
+        ? {}
+        : { identity: { ...options.requestIdentity, purpose: "compaction" as const } }),
       signal: options.signal,
     });
     const summary = response.content
@@ -96,22 +114,67 @@ export async function compactContext(
       summary.length > CONTEXT_LIMITS.summaryCodeUnits
     ) return undefined;
 
+    const compacted = [summaryMessage(summary), ...plan.tail];
+    const estimatedInputTokens = await estimateCompactedInput(options, compacted);
+    const before = options.estimatedInputTokens ?? await estimateCompactedInput(
+      options,
+      options.context,
+    );
+    const requiredSavings = Math.min(
+      MIN_COMPACTION_SAVINGS_TOKENS,
+      Math.max(1, Math.floor(before / 20)),
+    );
+    const minimumOutput = Math.min(
+      options.requestEnvelope?.maxOutputTokens ?? policy.summaryMaxTokens,
+      256,
+    );
+    if (
+      before - estimatedInputTokens < requiredSavings ||
+      estimatedInputTokens > policy.requestLimitTokens - minimumOutput
+    ) return undefined;
+
     return {
-      messages: [summaryMessage(summary), ...plan.tail],
+      messages: compacted,
       anchor: Object.freeze({
         throughNodeId: options.nodeId,
         messageCount: plan.messageCount,
         createdAt: new Date().toISOString(),
         summary,
       }),
+      estimatedInputTokens,
       ...(response.usage === undefined ? {} : { usage: response.usage }),
     };
   } catch (error) {
+    if (options.signal?.aborted === true) throw options.signal.reason;
     if (options.failLoudly === true) throw error;
     return undefined;
   } finally {
     options.onEnd?.();
   }
+}
+
+async function estimateCompactedInput(
+  options: CompactContextOptions,
+  messages: readonly Message[],
+): Promise<number> {
+  if (options.requestEnvelope === undefined) {
+    return estimateRequestInputTokensResponsive({
+      system: "",
+      messages: projectToolResultsNewest(
+        messages,
+        toolResultProjectionBudget(options.policy),
+      ).messages,
+      tools: [],
+    }, options.signal);
+  }
+  return estimateRequestInputTokensResponsive({
+    system: options.requestEnvelope.system,
+    messages: projectToolResultsNewest(
+      messages,
+      toolResultProjectionBudget(options.policy),
+    ).messages,
+    tools: options.requestEnvelope.tools,
+  }, options.signal);
 }
 
 function normalized(messages: readonly Message[]): Message[] {

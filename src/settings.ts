@@ -1,15 +1,25 @@
 // Persistent, non-secret defaults for interactive and batch sessions.
 
-import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
+import {
+  assertDirectoryAnchor,
+  captureDirectDirectorySync,
+  preparePrivateDirectory,
+} from "./directory-anchor.ts";
+import type { DirectoryAnchor } from "./directory-anchor.ts";
 import { MAX_COMPACTION_PERCENT, MIN_COMPACTION_PERCENT } from "./context/policy.ts";
 import { EFFORTS } from "./effort.ts";
 import { providerNames } from "./providers/index.ts";
 import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
 import { withStoreLock } from "./store-lock.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
-import { assertStoreText, readBoundedJsonSync, USER_STORE_LIMITS } from "./user-store.ts";
+import {
+  assertStoreText,
+  readBoundedJsonForMutationSync,
+  readBoundedJsonSync,
+  USER_STORE_LIMITS,
+} from "./user-store.ts";
 
 export { EFFORTS } from "./effort.ts";
 
@@ -33,16 +43,19 @@ export function readSettings(): SavedSettings {
 export async function updateSettings(patch: Partial<SavedSettings>): Promise<string> {
   const file = settingsPath();
   const directory = path.dirname(file);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  if (process.platform !== "win32") await chmod(directory, 0o700);
-  return withStoreLock(file, async () => {
-    const next = normalize({ ...readStore(file), ...patch });
+  const anchor = await preparePrivateDirectory(directory, "settings store directory");
+  const anchoredFile = path.join(anchor.path, path.basename(file));
+  return withStoreLock(anchoredFile, async () => {
+    const next = normalize({ ...readStoreForMutation(anchoredFile, anchor), ...patch });
     const text = `${JSON.stringify(next, null, 2)}\n`;
     assertStoreText(text, USER_STORE_LIMITS.settingsBytes);
-    await atomicWrite(file, text, { mode: 0o600 });
+    await atomicWrite(anchoredFile, text, {
+      mode: 0o600,
+      validate: async () => assertDirectoryAnchor(anchor),
+    });
     saved = next;
     return file;
-  });
+  }, undefined, async () => assertDirectoryAnchor(anchor));
 }
 
 export function settingsPath(): string {
@@ -60,12 +73,73 @@ export function reloadSettings(): void {
 
 function readStore(file = settingsPath()): SavedSettings {
   try {
-    return normalize(readBoundedJsonSync(file, USER_STORE_LIMITS.settingsBytes));
+    const directory = captureDirectDirectorySync(path.dirname(file), "settings store directory");
+    const anchoredFile = path.join(directory.path, path.basename(file));
+    return normalize(readBoundedJsonSync(
+      anchoredFile,
+      USER_STORE_LIMITS.settingsBytes,
+      directory,
+    ));
   } catch {
     // Missing, unreadable, and malformed stores all fall back safely. A bad
     // preference must never prevent the agent from starting.
     return {};
   }
+}
+
+function readStoreForMutation(file: string, directory: DirectoryAnchor): SavedSettings {
+  const value = readBoundedJsonForMutationSync(
+    file,
+    USER_STORE_LIMITS.settingsBytes,
+    "settings store",
+    directory,
+  );
+  if (value === undefined) return {};
+  if (!record(value)) throw new Error("settings store has an unsupported structure");
+  assertMutableSettings(value);
+  return normalize(value);
+}
+
+function assertMutableSettings(value: Record<string, unknown>): void {
+  const current = new Set([
+    "provider",
+    "models",
+    "ollamaHost",
+    "effort",
+    "reducedMotion",
+    "maxTokens",
+    "compactionPercent",
+  ]);
+  const retired = new Set(["theme", "palette", "maxSteps"]);
+  if (Object.keys(value).some((key) => !current.has(key) && !retired.has(key))) {
+    throw new Error("settings store has an unsupported structure");
+  }
+  const providers = providerNames();
+  if ("provider" in value && member(value["provider"], providers) === undefined) {
+    throw new Error("settings store has an invalid provider");
+  }
+  if ("models" in value) {
+    const models = value["models"];
+    if (
+      !record(models) || Object.keys(models).some((provider) => !providers.includes(provider)) ||
+      Object.values(models).some((model) => !boundedNonempty(model, USER_STORE_LIMITS.model))
+    ) throw new Error("settings store has invalid models");
+  }
+  if ("ollamaHost" in value && endpoint(value["ollamaHost"]) === undefined) {
+    throw new Error("settings store has an invalid Ollama endpoint");
+  }
+  if ("effort" in value && member(value["effort"], EFFORTS) === undefined) {
+    throw new Error("settings store has an invalid reasoning effort");
+  }
+  if ("reducedMotion" in value && typeof value["reducedMotion"] !== "boolean") {
+    throw new Error("settings store has an invalid reduced-motion preference");
+  }
+  if ("maxTokens" in value && positiveInteger(value["maxTokens"]) === undefined) {
+    throw new Error("settings store has an invalid token limit");
+  }
+  if (
+    "compactionPercent" in value && percentage(value["compactionPercent"]) === undefined
+  ) throw new Error("settings store has an invalid compaction threshold");
 }
 
 function normalize(value: unknown): SavedSettings {

@@ -6,9 +6,13 @@
 
 import type { Session } from "../session.ts";
 import { recordAuxiliaryUsage } from "../usage.ts";
+import { toolSpecs } from "../tools/index.ts";
 import { resolveContextPolicy } from "./capacity.ts";
 import { compactContext } from "./compactor.ts";
+import { estimateRequestInputTokensResponsive } from "./budget.ts";
 import { estimateTokensResponsive, planCompaction } from "./policy.ts";
+import { projectToolResultsNewest, toolResultProjectionBudget } from "./request-projection.ts";
+import { requestIdentityForSession } from "../request-identity.ts";
 
 const MIN_PREFIX_TOKENS = 512;
 
@@ -26,8 +30,6 @@ export async function compactSession(
   const active = session.conversation.activeNode;
   if (active === undefined) return "unchanged";
   const context = session.conversation.contextHistory;
-  const estimatedInputTokens = await estimateTokensResponsive(context, options.signal);
-  if (estimatedInputTokens < MIN_PREFIX_TOKENS) return "unchanged";
   if (session.conversation.nodes.some((node) => node.parentId === active.id)) {
     throw new Error("continue this branch before compacting");
   }
@@ -40,6 +42,16 @@ export async function compactSession(
     signal: options.signal,
     onStatus: (status) => options.onStatus?.(status),
   });
+  const specs = toolSpecs(session.tools);
+  const estimatedInputTokens = await estimateRequestInputTokensResponsive({
+    system: session.system,
+    messages: projectToolResultsNewest(context, toolResultProjectionBudget(policy)).messages,
+    tools: specs,
+  }, options.signal);
+  if (estimatedInputTokens < MIN_PREFIX_TOKENS) {
+    options.onStatus?.();
+    return "unchanged";
+  }
   const coveredMessages = active.context?.throughNodeId === active.id
     ? active.context.messageCount
     : 0;
@@ -76,6 +88,12 @@ export async function compactSession(
     force: true,
     failLoudly: true,
     policy,
+    requestEnvelope: {
+      system: session.system,
+      tools: specs,
+      maxOutputTokens: session.config.maxTokens,
+    },
+    requestIdentity: requestIdentityForSession(session),
     onBegin: () => options.onStatus?.("Compacting"),
     onEnd: () => options.onStatus?.(),
   });

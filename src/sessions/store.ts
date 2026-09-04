@@ -6,21 +6,31 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmod,
   lstat,
-  mkdir,
-  open,
   opendir,
-  readFile,
-  readdir,
   realpath,
   rename,
   rm,
 } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "../atomic.ts";
+import {
+  BoundedFileError,
+  readBoundedText,
+  stableFileExpectation,
+} from "../bounded-file.ts";
+import type { StableFileExpectation } from "../bounded-file.ts";
 import { CONVERSATION_LIMITS, ConversationTree } from "../conversation.ts";
 import type { TurnNode } from "../conversation.ts";
+import {
+  assertDirectoryAnchor,
+  captureDirectDirectory,
+  createPrivateDirectory,
+  preparePrivateDirectory,
+} from "../directory-anchor.ts";
+import type { DirectoryAnchor } from "../directory-anchor.ts";
+import { sameFileIdentity } from "../file-identity.ts";
+import { readStableDirectory } from "../stable-directory.ts";
 import { userDataPath } from "../user-data.ts";
 import {
   advanceSessionCatalog,
@@ -46,11 +56,16 @@ import {
 } from "./codec.ts";
 import type { SessionHead, SessionMeta, StoredNode } from "./codec.ts";
 import {
+  claimLeaseDirectory,
+  createLeaseDirectory,
+  leaseFromGeneration,
   leaseOwner,
   leaseToken,
   pidIsAlive,
+  removeLegacyLeaseExclusive,
   removeLease,
   sessionLease,
+  sessionLeaseOwns,
 } from "./lease.ts";
 import type { SessionLease } from "./lease.ts";
 
@@ -60,10 +75,23 @@ const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const MAX_CATALOG_ENTRIES = 4_096;
 const CATALOG_READ_CONCURRENCY = 8;
-const NODE_READ_CONCURRENCY = 4;
+const MAX_NODE_READ_CONCURRENCY = 8;
+const MAX_NODE_READ_IN_FLIGHT_BYTES = 64 * 1_024 * 1_024;
+const MAX_SESSION_NODE_BYTES = 192 * 1_024 * 1_024;
+const NODE_READ_CONCURRENCY = Math.max(1, Math.min(
+  MAX_NODE_READ_CONCURRENCY,
+  Math.floor(MAX_NODE_READ_IN_FLIGHT_BYTES / SESSION_FILE_LIMITS.nodeBytes),
+));
 const SESSION_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const NODE_NAME = /^(\d{6})\.json$/;
 const ATOMIC_NODE_TEMP = /^\.\d{6}\.json\.\d+\.[a-f0-9-]+\.tmp$/;
+
+export type SessionStoreHooks = Readonly<{
+  /** Deterministic pre-lease race barrier used by the test suite. */
+  beforeCheckpointLease?(): void | Promise<void>;
+  /** Deterministic post-lease failure/race barrier used by the test suite. */
+  afterCheckpointLease?(): void | Promise<void>;
+}>;
 
 export type SessionSnapshot = Readonly<{
   meta: SessionMeta;
@@ -86,29 +114,52 @@ export type SessionCatalogEntry = Readonly<{
 export class DurableSessionStore {
   readonly workspaceRoot: string;
   readonly workspaceDigest: string;
-  readonly #sessionsRoot: string;
   readonly #bucket: string;
+  readonly #sessionsAnchor: DirectoryAnchor;
+  readonly #bucketAnchor: DirectoryAnchor;
+  readonly #hooks: SessionStoreHooks;
+  readonly #leaseScope = Object.freeze({});
 
-  private constructor(workspaceRoot: string, sessionsRoot: string) {
+  private constructor(
+    workspaceRoot: string,
+    sessionsAnchor: DirectoryAnchor,
+    bucketAnchor: DirectoryAnchor,
+    hooks: SessionStoreHooks,
+  ) {
     this.workspaceRoot = workspaceRoot;
     this.workspaceDigest = digestWorkspace(workspaceRoot);
-    this.#sessionsRoot = sessionsRoot;
-    this.#bucket = path.join(sessionsRoot, this.workspaceDigest);
+    this.#bucket = bucketAnchor.path;
+    this.#sessionsAnchor = sessionsAnchor;
+    this.#bucketAnchor = bucketAnchor;
+    this.#hooks = hooks;
   }
 
   static async open(
     workspaceRoot: string,
     sessionsRoot: string = userDataPath("sessions"),
+    hooks: SessionStoreHooks = {},
   ): Promise<DurableSessionStore> {
     const canonical = await realpath(path.resolve(workspaceRoot));
-    return new DurableSessionStore(canonical, path.resolve(sessionsRoot));
+    const digest = digestWorkspace(canonical);
+    const sessionsAnchor = await preparePrivateDirectory(
+      path.resolve(sessionsRoot),
+      "session storage root",
+      DIRECTORY_MODE,
+    );
+    const bucketAnchor = await preparePrivateDirectory(
+      path.join(sessionsAnchor.path, digest),
+      "workspace session directory",
+      DIRECTORY_MODE,
+    );
+    return new DurableSessionStore(canonical, sessionsAnchor, bucketAnchor, hooks);
   }
 
   async list(limit = 32): Promise<SessionCatalogEntry[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) {
       throw new Error("session catalogue limit is invalid");
     }
-    const names = await catalogNames(this.#bucket);
+    await this.#ensureBucket();
+    const names = await catalogNames(this.#bucketAnchor);
     const catalog: SessionCatalogEntry[] = [];
     for (let start = 0; start < names.length; start += CATALOG_READ_CONCURRENCY) {
       const batch = await Promise.all(names.slice(start, start + CATALOG_READ_CONCURRENCY)
@@ -124,20 +175,37 @@ export class DurableSessionStore {
       .slice(0, limit);
   }
 
-  async load(id: string): Promise<SessionSnapshot> {
+  async load(id: string, recoveryLease?: SessionLease): Promise<SessionSnapshot> {
     assertSessionId(id);
+    await this.#ensureBucket();
     const directory = this.#sessionDirectory(id);
-    await assertDirectory(directory);
+    const directoryAnchor = await captureDirectDirectory(directory, "session directory");
+    const nodesAnchor = await captureDirectDirectory(
+      path.join(directory, "nodes"),
+      "session node directory",
+    );
+    const validateSession = async (): Promise<void> => {
+      await Promise.all([
+        this.#ensureBucket(),
+        assertDirectoryAnchor(directoryAnchor),
+        assertDirectoryAnchor(nodesAnchor),
+      ]);
+    };
     const meta = decodeMeta(await readJson(
       path.join(directory, "meta.json"),
       SESSION_FILE_LIMITS.metadataBytes,
+      undefined,
+      validateSession,
     ));
     assertSessionWorkspace(meta, id, this.workspaceRoot, this.workspaceDigest);
-    let head = decodeHead(await readJson(
+    const persistedHead = decodeHead(await readJson(
       path.join(directory, "head.json"),
       SESSION_FILE_LIMITS.metadataBytes,
+      undefined,
+      validateSession,
     ));
-    const stored = await readNodes(path.join(directory, "nodes"));
+    let head = persistedHead;
+    const stored = await readNodes(nodesAnchor, validateSession);
     const ahead = stored.filter((entry) => entry.sequence > head.sequence);
     if (ahead.some((entry) => entry.sequence !== head.sequence + 1) || ahead.length > 1) {
       throw new Error("session has an ambiguous incomplete checkpoint");
@@ -166,6 +234,13 @@ export class DurableSessionStore {
       if (!replacesHead && !extendsTree) {
         throw new Error("session checkpoint cannot be recovered safely");
       }
+      if (
+        recoveryLease === undefined ||
+        !sessionLeaseOwns(recoveryLease, id, this.#leaseScope)
+      ) {
+        throw new Error("session recovery requires exclusive ownership");
+      }
+      await recoveryLease.assertOwned();
       head = Object.freeze({
         version: SESSION_SCHEMA,
         sequence: candidate.sequence,
@@ -176,7 +251,20 @@ export class DurableSessionStore {
       });
       await atomicWrite(path.join(directory, "head.json"), encodeHead(head), {
         mode: FILE_MODE,
-        validate: async () => assertDirectory(directory),
+        validate: async (phase) => {
+          await validateSession();
+          if (phase !== "before-rename") return;
+          await recoveryLease.assertOwned();
+          const current = decodeHead(await readJson(
+            path.join(directory, "head.json"),
+            SESSION_FILE_LIMITS.metadataBytes,
+            undefined,
+            validateSession,
+          ));
+          if (!sameSessionHead(current, persistedHead)) {
+            throw new Error("session head changed while recovering its checkpoint");
+          }
+        },
       });
     }
 
@@ -187,16 +275,23 @@ export class DurableSessionStore {
   }
 
   async publish(conversation: ConversationTree): Promise<SessionSnapshot>;
-  async publish(conversation: ConversationTree, claim: true): Promise<ClaimedSessionSnapshot>;
-  async publish(conversation: ConversationTree, claim?: true):
+  async publish(
+    conversation: ConversationTree,
+    claim: true,
+    reservedId?: string,
+  ): Promise<ClaimedSessionSnapshot>;
+  async publish(conversation: ConversationTree, claim?: true, reservedId?: string):
     Promise<SessionSnapshot | ClaimedSessionSnapshot> {
     const active = conversation.activeNode;
     if (active === undefined) throw new Error("an empty conversation cannot be persisted");
     await this.#ensureBucket();
 
     const now = new Date().toISOString();
-    const id = sessionId(now);
+    const id = reservedId ?? reserveSessionId(now);
+    assertSessionId(id);
     const token = claim === true ? leaseToken() : undefined;
+    let leaseGeneration: Awaited<ReturnType<typeof createLeaseDirectory>> | undefined;
+    let temporaryAnchor: DirectoryAnchor | undefined;
     const temporary = path.join(this.#bucket, `.${id}.${randomUUID()}.tmp`);
     const target = this.#sessionDirectory(id);
     const meta: SessionMeta = Object.freeze({
@@ -217,57 +312,103 @@ export class DurableSessionStore {
     const catalog = sessionCatalog(meta, head, conversation);
 
     try {
-      await makePrivateDirectory(temporary);
+      temporaryAnchor = await createPrivateDirectory(
+        temporary,
+        "temporary session directory",
+        DIRECTORY_MODE,
+      );
       const nodes = path.join(temporary, "nodes");
-      await makePrivateDirectory(nodes);
+      const nodesAnchor = await createPrivateDirectory(
+        nodes,
+        "temporary session node directory",
+        DIRECTORY_MODE,
+      );
+      const validateTemporary = async (): Promise<void> => {
+        await this.#ensureBucket();
+        await assertDirectoryAnchor(temporaryAnchor as DirectoryAnchor);
+        await assertDirectoryAnchor(nodesAnchor);
+      };
       for (let index = 0; index < conversation.nodes.length; index++) {
         const node = conversation.nodes[index] as TurnNode;
         await atomicWrite(
           path.join(nodes, nodeName(node.id)),
           encodeNode(node, index + 1, now),
-          { mode: FILE_MODE },
+          { mode: FILE_MODE, validate: async () => validateTemporary() },
         );
       }
-      await atomicWrite(path.join(temporary, "meta.json"), encodeMeta(meta), { mode: FILE_MODE });
-      await atomicWrite(path.join(temporary, "head.json"), encodeHead(head), { mode: FILE_MODE });
+      await atomicWrite(path.join(temporary, "meta.json"), encodeMeta(meta), {
+        mode: FILE_MODE,
+        validate: async () => validateTemporary(),
+      });
+      await atomicWrite(path.join(temporary, "head.json"), encodeHead(head), {
+        mode: FILE_MODE,
+        validate: async () => validateTemporary(),
+      });
       await atomicWrite(
         path.join(temporary, SESSION_CATALOG_FILE),
         encodeSessionCatalog(catalog),
-        { mode: FILE_MODE },
+        { mode: FILE_MODE, validate: async () => validateTemporary() },
       );
       if (token !== undefined) {
-        await atomicWrite(path.join(temporary, "active"), token, { mode: FILE_MODE });
+        leaseGeneration = await createLeaseDirectory(path.join(temporary, "active"), token);
       }
+      await validateTemporary();
       await rename(temporary, target);
+      await this.#ensureBucket();
+      const targetAnchor = await captureDirectDirectory(target, "session directory");
+      if (!sameFileIdentity(temporaryAnchor.identity, targetAnchor.identity)) {
+        throw new Error("session directory changed while publishing");
+      }
     } catch (error) {
-      await removeTemporaryDirectory(temporary, this.#bucket);
+      await removeTemporaryDirectory(temporary, this.#bucketAnchor, temporaryAnchor)
+        .catch(() => undefined);
       throw error;
     }
 
     const snapshot = Object.freeze({ meta, head, conversation, catalog });
     if (token === undefined) return snapshot;
-    const lease = sessionLease(id, path.join(target, "active"), token);
+    if (leaseGeneration === undefined) throw new Error("session lease was not initialized");
+    const lease = sessionLease(
+      id,
+      this.#leaseScope,
+      leaseFromGeneration(path.join(target, "active"), leaseGeneration),
+    );
     return Object.freeze({ ...snapshot, lease });
   }
 
   async checkpoint(
     previous: SessionSnapshot,
     conversation: ConversationTree,
+    lease: SessionLease,
   ): Promise<SessionSnapshot> {
     assertSnapshot(previous, this.workspaceRoot, this.workspaceDigest);
     const id = previous.meta.id;
+    if (!sessionLeaseOwns(lease, id, this.#leaseScope)) {
+      throw new Error("session checkpoint requires exclusive ownership");
+    }
+    await lease.assertOwned();
     const directory = this.#sessionDirectory(id);
-    await assertDirectory(directory);
+    const directoryAnchor = await this.#sessionAnchor(id);
     const nodesDirectory = path.join(directory, "nodes");
+    const nodesAnchor = await captureDirectDirectory(nodesDirectory, "session node directory");
     const validateNodesDirectory = async (): Promise<void> => {
-      await assertDirectory(directory);
-      await assertDirectory(nodesDirectory);
+      await Promise.all([
+        lease.assertOwned(),
+        this.#ensureBucket(),
+        assertDirectoryAnchor(directoryAnchor),
+        assertDirectoryAnchor(nodesAnchor),
+      ]);
     };
     await validateNodesDirectory();
+    const headFile = path.join(directory, "head.json");
+    const headExpectation = stableFileExpectation(await lstat(headFile, { bigint: true }));
+    await validateNodesDirectory();
     const currentHead = decodeHead(await readJson(
-      path.join(directory, "head.json"),
+      headFile,
       SESSION_FILE_LIMITS.metadataBytes,
+      headExpectation,
     ));
+    await validateNodesDirectory();
     if (!sameSessionHead(currentHead, previous.head)) {
       throw new Error("session head changed after its verified snapshot");
     }
@@ -306,85 +447,188 @@ export class DurableSessionStore {
     });
     const catalog = advanceSessionCatalog(previous.catalog, previous.meta, head, conversation);
     const checkpointToken = leaseToken();
-    await atomicWrite(
-      path.join(directory, SESSION_CHECKPOINT_FILE),
-      checkpointToken,
-      { mode: FILE_MODE, validate: async () => assertDirectory(directory) },
-    );
-    await atomicWrite(
-      path.join(nodesDirectory, nodeName(active.id)),
-      encodeNode(active, head.sequence, now),
-      { mode: FILE_MODE, validate: async () => validateNodesDirectory() },
-    );
-    await atomicWrite(path.join(directory, "head.json"), encodeHead(head), {
-      mode: FILE_MODE,
-      validate: async () => assertDirectory(directory),
-    });
-    await this.#writeCatalog(previous.meta.id, catalog, checkpointToken).catch(() => undefined);
-    // Once the canonical head is durable, a missing summary is detectable by
-    // its head mismatch and can be rebuilt without retaining a live marker.
-    await removeLease(path.join(directory, SESSION_CHECKPOINT_FILE), checkpointToken);
-    return Object.freeze({ meta: previous.meta, head, conversation, catalog });
+    const checkpointFile = path.join(directory, SESSION_CHECKPOINT_FILE);
+    await this.#hooks.beforeCheckpointLease?.();
+    await validateNodesDirectory();
+    const checkpointLease = await claimLeaseDirectory(checkpointFile, checkpointToken);
+    if (checkpointLease === undefined) throw new Error("session checkpoint is already active");
+    let primaryFailure: unknown;
+    try {
+      await this.#hooks.afterCheckpointLease?.();
+      const assertBaseHead = async (): Promise<void> => {
+        await Promise.all([checkpointLease.assertOwned(), validateNodesDirectory()]);
+        let verified: SessionHead;
+        try {
+          verified = decodeHead(await readJson(
+            headFile,
+            SESSION_FILE_LIMITS.metadataBytes,
+            headExpectation,
+          ));
+        } catch (error) {
+          throw new Error("session head changed after its verified snapshot", { cause: error });
+        }
+        await Promise.all([checkpointLease.assertOwned(), validateNodesDirectory()]);
+        if (!sameSessionHead(verified, previous.head)) {
+          throw new Error("session head changed after its verified snapshot");
+        }
+      };
+      await assertBaseHead();
+      if (extendsTree) {
+        await assertMissingNode(
+          path.join(nodesDirectory, nodeName(active.id)),
+          validateNodesDirectory,
+        );
+      }
+      await atomicWrite(
+        path.join(nodesDirectory, nodeName(active.id)),
+        encodeNode(active, head.sequence, now),
+        {
+          mode: FILE_MODE,
+          validate: async (phase) => {
+            await assertBaseHead();
+            if (extendsTree && phase === "before-rename") {
+              await assertMissingNode(
+                path.join(nodesDirectory, nodeName(active.id)),
+                validateNodesDirectory,
+              );
+            }
+          },
+        },
+      );
+      await atomicWrite(path.join(directory, "head.json"), encodeHead(head), {
+        mode: FILE_MODE,
+        validate: async () => assertBaseHead(),
+      });
+      await this.#writeCatalog(previous.meta.id, catalog, checkpointToken).catch(() => undefined);
+      return Object.freeze({ meta: previous.meta, head, conversation, catalog });
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      try {
+        if (!(await checkpointLease.release()) && primaryFailure === undefined) {
+          throw new Error("session checkpoint ownership was lost");
+        }
+      } catch (error) {
+        if (primaryFailure === undefined) throw error;
+      }
+    }
   }
 
   async claim(id: string): Promise<SessionLease> {
     assertSessionId(id);
-    await assertDirectory(this.#sessionDirectory(id));
-    const file = path.join(this.#sessionDirectory(id), "active");
-    const token = leaseToken();
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const handle = await open(file, "wx", FILE_MODE);
-        try {
-          await handle.writeFile(token, "utf8");
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        return sessionLease(id, file, token);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        const owner = await leaseOwner(file);
-        if (owner !== undefined && pidIsAlive(owner.pid)) {
-          throw new Error("session is already open in another Jecode process");
-        }
-        if (owner !== undefined) {
-          await removeLease(file, owner.token);
-        }
+    const directory = this.#sessionDirectory(id);
+    const directoryAnchor = await this.#sessionAnchor(id);
+    const validateDirectory = async (): Promise<void> => {
+      await this.#assertSessionAnchor(directoryAnchor);
+    };
+    await validateDirectory();
+    const file = path.join(directory, "active");
+    const previous = await leaseOwner(file);
+    await validateDirectory();
+    if (previous?.legacy === true) {
+      if (pidIsAlive(previous.pid)) {
+        throw new Error("session is already open in an older Jecode process");
       }
+      throw new Error(
+        "session has a stale legacy active marker; close older Jecode processes and remove it before retrying",
+      );
     }
-    throw new Error("session could not be claimed");
+    const token = leaseToken();
+    const lease = await claimLeaseDirectory(file, token);
+    if (lease === undefined) {
+      throw new Error("session is already open in another Jecode process");
+    }
+    const owned = sessionLease(id, this.#leaseScope, lease);
+    const checkpointFile = path.join(directory, SESSION_CHECKPOINT_FILE);
+    try {
+      await owned.assertOwned();
+      await validateDirectory();
+      const checkpoint = await leaseOwner(checkpointFile);
+      if (checkpoint !== undefined && pidIsAlive(checkpoint.pid)) {
+        throw new Error("session has a live checkpoint from another Jecode process");
+      }
+      if (checkpoint?.legacy === true) {
+        if (!await removeLegacyLeaseExclusive(checkpointFile, checkpoint.token, owned)) {
+          throw new Error("session legacy checkpoint changed during migration");
+        }
+      } else if (
+        checkpoint !== undefined &&
+        !await removeLease(checkpointFile, checkpoint.token)
+      ) {
+        throw new Error("session checkpoint changed during recovery");
+      }
+      await owned.assertOwned();
+      await validateDirectory();
+    } catch (error) {
+      await owned.close().catch(() => undefined);
+      throw error;
+    }
+    return owned;
   }
 
   #sessionDirectory(id: string): string {
     return path.join(this.#bucket, id);
   }
 
-  async #ensureBucket(): Promise<void> {
-    await makePrivateDirectory(this.#sessionsRoot);
-    await makePrivateDirectory(this.#bucket);
+  async #sessionAnchor(id: string): Promise<DirectoryAnchor> {
+    await this.#ensureBucket();
+    return captureDirectDirectory(this.#sessionDirectory(id), "session directory");
   }
 
-  async #leaseIsActive(id: string): Promise<boolean> {
+  async #assertSessionAnchor(anchor: DirectoryAnchor): Promise<void> {
+    await Promise.all([this.#ensureBucket(), assertDirectoryAnchor(anchor)]);
+  }
+
+  async #ensureBucket(): Promise<void> {
+    await Promise.all([
+      assertDirectoryAnchor(this.#sessionsAnchor),
+      assertDirectoryAnchor(this.#bucketAnchor),
+    ]);
+  }
+
+  async #leaseIsActive(id: string, directory?: DirectoryAnchor): Promise<boolean> {
+    if (directory !== undefined) await this.#assertSessionAnchor(directory);
+    else await this.#ensureBucket();
     const owner = await leaseOwner(path.join(this.#sessionDirectory(id), "active"));
+    if (directory !== undefined) await this.#assertSessionAnchor(directory);
     return owner !== undefined && pidIsAlive(owner.pid);
   }
 
   async #catalogEntry(id: string): Promise<SessionCatalogEntry | undefined> {
     try {
       const directory = this.#sessionDirectory(id);
-      await assertDirectory(directory);
+      const directoryAnchor = await this.#sessionAnchor(id);
+      const validateDirectory = async (): Promise<void> => {
+        await this.#assertSessionAnchor(directoryAnchor);
+      };
       const checkpointFile = path.join(directory, SESSION_CHECKPOINT_FILE);
 
       // A second head read closes the only useful race: a checkpoint landing
       // between the small record reads. A changing marker gets one retry.
       for (let attempt = 0; attempt < 2; attempt++) {
+        await validateDirectory();
         const checkpointBefore = await leaseOwner(checkpointFile);
         try {
           const [metaValue, headValue, catalogValue] = await Promise.all([
-            readJson(path.join(directory, "meta.json"), SESSION_FILE_LIMITS.metadataBytes),
-            readJson(path.join(directory, "head.json"), SESSION_FILE_LIMITS.metadataBytes),
-            readJson(path.join(directory, SESSION_CATALOG_FILE), SESSION_CATALOG_BYTES),
+            readJson(
+              path.join(directory, "meta.json"),
+              SESSION_FILE_LIMITS.metadataBytes,
+              undefined,
+              validateDirectory,
+            ),
+            readJson(
+              path.join(directory, "head.json"),
+              SESSION_FILE_LIMITS.metadataBytes,
+              undefined,
+              validateDirectory,
+            ),
+            readJson(
+              path.join(directory, SESSION_CATALOG_FILE),
+              SESSION_CATALOG_BYTES,
+              undefined,
+              validateDirectory,
+            ),
           ]);
           const meta = decodeMeta(metaValue);
           const head = decodeHead(headValue);
@@ -393,7 +637,10 @@ export class DurableSessionStore {
           const confirmedHead = decodeHead(await readJson(
             path.join(directory, "head.json"),
             SESSION_FILE_LIMITS.metadataBytes,
+            undefined,
+            validateDirectory,
           ));
+          await validateDirectory();
           const checkpointAfter = await leaseOwner(checkpointFile);
           if (!sameLease(checkpointBefore, checkpointAfter)) continue;
           if (
@@ -401,7 +648,8 @@ export class DurableSessionStore {
             !catalogMatches(storedCatalog, meta, head)
           ) break;
           if (checkpointAfter !== undefined && !pidIsAlive(checkpointAfter.pid)) break;
-          const active = await this.#leaseIsActive(id) || checkpointAfter !== undefined;
+          const active = await this.#leaseIsActive(id, directoryAnchor) ||
+            checkpointAfter !== undefined;
           return catalogEntry(storedCatalog, active);
         } catch {
           break;
@@ -412,13 +660,23 @@ export class DurableSessionStore {
       // session is idle. Selecting a session still performs this strict load.
       const checkpoint = await leaseOwner(checkpointFile);
       if (
-        await this.#leaseIsActive(id) ||
+        await this.#leaseIsActive(id, directoryAnchor) ||
         (checkpoint !== undefined && pidIsAlive(checkpoint.pid))
       ) return undefined;
-      const snapshot = await this.load(id);
-      await this.#writeCatalog(id, snapshot.catalog, checkpoint?.token).catch(() => undefined);
+      const repairLease = await this.claim(id);
+      let snapshot: SessionSnapshot;
+      try {
+        snapshot = await this.load(id, repairLease);
+        await this.#writeCatalog(
+          id,
+          snapshot.catalog,
+          checkpoint?.legacy === true ? undefined : checkpoint?.token,
+        ).catch(() => undefined);
+      } finally {
+        await repairLease.close();
+      }
       const currentCheckpoint = await leaseOwner(checkpointFile);
-      const active = await this.#leaseIsActive(id) ||
+      const active = await this.#leaseIsActive(id, directoryAnchor) ||
         (currentCheckpoint !== undefined && pidIsAlive(currentCheckpoint.pid));
       return catalogEntry(snapshot.catalog, active);
     } catch {
@@ -434,11 +692,17 @@ export class DurableSessionStore {
     checkpointToken?: string,
   ): Promise<void> {
     const directory = this.#sessionDirectory(id);
+    const directoryAnchor = await this.#sessionAnchor(id);
+    const validateDirectory = async (): Promise<void> => {
+      await this.#assertSessionAnchor(directoryAnchor);
+    };
     const validate = async (): Promise<void> => {
-      await assertDirectory(directory);
+      await validateDirectory();
       const currentHead = decodeHead(await readJson(
         path.join(directory, "head.json"),
         SESSION_FILE_LIMITS.metadataBytes,
+        undefined,
+        validateDirectory,
       ));
       if (!sameSessionHead(currentHead, catalog.head)) {
         throw new Error("session head changed while updating its catalogue");
@@ -450,30 +714,25 @@ export class DurableSessionStore {
       { mode: FILE_MODE, validate },
     );
     if (checkpointToken !== undefined) {
+      await validateDirectory();
       await removeLease(path.join(directory, SESSION_CHECKPOINT_FILE), checkpointToken);
+      await validateDirectory();
     }
   }
 }
 
-async function catalogNames(directory: string): Promise<string[]> {
-  try {
-    await assertDirectory(directory);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
+async function catalogNames(directory: DirectoryAnchor): Promise<string[]> {
+  await assertDirectoryAnchor(directory);
+  const inspected = await readStableDirectory(directory.path, directory.path, {
+    maxEntries: MAX_CATALOG_ENTRIES + 1,
+  });
+  if (inspected.capped || inspected.entries.length > MAX_CATALOG_ENTRIES) {
+    throw new Error(`session catalogue exceeds ${MAX_CATALOG_ENTRIES} entries`);
   }
-
-  const names: string[] = [];
-  let entries = 0;
-  const handle = await opendir(directory);
-  for await (const entry of handle) {
-    entries++;
-    if (entries > MAX_CATALOG_ENTRIES) {
-      throw new Error(`session catalogue exceeds ${MAX_CATALOG_ENTRIES} entries`);
-    }
-    if (entry.isDirectory() && SESSION_NAME.test(entry.name)) names.push(entry.name);
-  }
-  return names.sort((left, right) => right.localeCompare(left));
+  return inspected.entries
+    .filter((entry) => entry.kind === "directory" && SESSION_NAME.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
 }
 
 function catalogEntry(
@@ -495,7 +754,7 @@ function sameLease(
   left: Awaited<ReturnType<typeof leaseOwner>>,
   right: Awaited<ReturnType<typeof leaseOwner>>,
 ): boolean {
-  return left?.token === right?.token;
+  return left?.token === right?.token && left?.legacy === right?.legacy;
 }
 
 function assertSessionWorkspace(
@@ -550,44 +809,87 @@ function assertSnapshot(
   }
 }
 
-async function assertMissingNode(file: string): Promise<void> {
+async function assertMissingNode(
+  file: string,
+  validate?: () => Promise<void>,
+): Promise<void> {
+  await validate?.();
   try {
     await lstat(file);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await validate?.();
+      return;
+    }
     throw error;
   }
+  await validate?.();
   throw new Error("session has an incomplete node outside its verified snapshot");
 }
 
-async function readNodes(directory: string): Promise<StoredNode[]> {
-  await assertDirectory(directory);
-  const entries = await readdir(directory, { withFileTypes: true });
-  const names = entries.filter((entry) => entry.isFile() && NODE_NAME.test(entry.name))
-    .map((entry) => entry.name).sort();
+async function readNodes(
+  directory: DirectoryAnchor,
+  validate: () => Promise<void>,
+): Promise<StoredNode[]> {
+  await validate();
+  await assertDirectoryAnchor(directory);
+  const names: string[] = [];
+  let entries = 0;
+  const handle = await opendir(directory.path);
+  for await (const entry of handle) {
+    entries++;
+    if (entries > CONVERSATION_LIMITS.nodes + 64) {
+      throw new Error("session node directory contains unsupported data");
+    }
+    if (
+      !entry.isFile() || (!NODE_NAME.test(entry.name) && !ATOMIC_NODE_TEMP.test(entry.name))
+    ) {
+      throw new Error("session node directory contains unsupported data");
+    }
+    if (NODE_NAME.test(entry.name)) names.push(entry.name);
+  }
+  await validate();
+  await assertDirectoryAnchor(directory);
+  names.sort();
   if (names.length === 0 || names.length > CONVERSATION_LIMITS.nodes) {
     throw new Error("session has an invalid conversation size");
   }
-  if (
-    entries.length > CONVERSATION_LIMITS.nodes + 64 ||
-    entries.some((entry) =>
-      !entry.isFile() || (!NODE_NAME.test(entry.name) && !ATOMIC_NODE_TEMP.test(entry.name))
-    )
-  ) {
-    throw new Error("session node directory contains unsupported data");
+  const files: Array<Readonly<{
+    name: string;
+    id: number;
+    expected: StableFileExpectation;
+  }>> = [];
+  let storedBytes = 0;
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index] as string;
+    const id = Number(NODE_NAME.exec(name)?.[1]);
+    if (id !== index + 1) {
+      throw new Error("session conversation nodes are not contiguous");
+    }
+    const details = await lstat(path.join(directory.path, name), { bigint: true });
+    if (
+      details.isSymbolicLink() || !details.isFile() || details.size < 0n ||
+      details.size > BigInt(SESSION_FILE_LIMITS.nodeBytes)
+    ) throw new Error("session node file is unsafe or too large");
+    storedBytes += Number(details.size);
+    if (storedBytes > MAX_SESSION_NODE_BYTES) {
+      throw new Error("session node files exceed their aggregate storage limit");
+    }
+    files.push({ name, id, expected: stableFileExpectation(details) });
   }
+  await validate();
   const stored: StoredNode[] = [];
   const sequences = new Set<number>();
-  for (let start = 0; start < names.length; start += NODE_READ_CONCURRENCY) {
-    const decoded = await Promise.all(names.slice(start, start + NODE_READ_CONCURRENCY)
-      .map(async (name, offset): Promise<StoredNode> => {
-        const id = Number(NODE_NAME.exec(name)?.[1]);
-        if (id !== start + offset + 1) {
-          throw new Error("session conversation nodes are not contiguous");
-        }
+  let messageCodeUnits = 0;
+  let transcriptCodeUnits = 0;
+  let contextCodeUnits = 0;
+  for (let start = 0; start < files.length; start += NODE_READ_CONCURRENCY) {
+    const decoded = await Promise.all(files.slice(start, start + NODE_READ_CONCURRENCY)
+      .map(async ({ name, id, expected }): Promise<StoredNode> => {
         const entry = decodeNode(await readJson(
-          path.join(directory, name),
+          path.join(directory.path, name),
           SESSION_FILE_LIMITS.nodeBytes,
+          expected,
         ));
         if (entry.node.id !== id) {
           throw new Error("session conversation node identity is invalid");
@@ -598,52 +900,90 @@ async function readNodes(directory: string): Promise<StoredNode[]> {
       if (sequences.has(entry.sequence)) {
         throw new Error("session conversation node identity is invalid");
       }
+      messageCodeUnits += JSON.stringify(entry.node.messages).length;
+      transcriptCodeUnits += JSON.stringify(entry.node.blocks).length;
+      contextCodeUnits += entry.node.context?.summary.length ?? 0;
+      if (
+        messageCodeUnits > CONVERSATION_LIMITS.messageCodeUnits ||
+        transcriptCodeUnits > CONVERSATION_LIMITS.transcriptCodeUnits ||
+        contextCodeUnits > CONVERSATION_LIMITS.contextCodeUnits
+      ) {
+        throw new Error("session conversation exceeds its aggregate limit");
+      }
       sequences.add(entry.sequence);
       stored.push(entry);
     }
   }
+  await validate();
   return stored;
 }
 
-async function readJson(file: string, limit: number): Promise<unknown> {
-  const details = await lstat(file);
-  if (details.isSymbolicLink() || !details.isFile() || details.size > limit) {
-    throw new Error("session file is unsafe or too large");
-  }
+async function readJson(
+  file: string,
+  limit: number,
+  expected?: StableFileExpectation,
+  validate?: () => Promise<void>,
+): Promise<unknown> {
   try {
-    return JSON.parse(await readFile(file, "utf8"));
-  } catch {
-    throw new Error("session file is not valid JSON");
+    return JSON.parse(await readBoundedText(file, limit, {
+      label: "session file",
+      expected,
+      validate,
+    }));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error("session file is not valid JSON");
+    }
+    if (error instanceof BoundedFileError) {
+      throw new Error("session file is unsafe or too large, or changed while opening");
+    }
+    throw error;
   }
 }
 
-async function assertDirectory(directory: string): Promise<void> {
-  const details = await lstat(directory);
-  if (details.isSymbolicLink() || !details.isDirectory()) {
-    throw new Error("session path is not a direct directory");
-  }
-}
-
-async function makePrivateDirectory(directory: string): Promise<void> {
-  await mkdir(directory, { recursive: true, mode: DIRECTORY_MODE });
-  await assertDirectory(directory);
-  if (process.platform !== "win32") await chmod(directory, DIRECTORY_MODE);
-}
-
-async function removeTemporaryDirectory(directory: string, bucket: string): Promise<void> {
-  const relative = path.relative(bucket, directory);
+async function removeTemporaryDirectory(
+  directory: string,
+  bucket: DirectoryAnchor,
+  expected?: DirectoryAnchor,
+): Promise<void> {
+  const relative = path.relative(bucket.path, directory);
   if (
     relative === "" || relative.startsWith("..") || path.isAbsolute(relative) ||
     !path.basename(directory).startsWith(".") || !path.basename(directory).endsWith(".tmp")
   ) throw new Error("refusing to remove an unverified session directory");
-  await rm(directory, { recursive: true, force: true });
+  await assertDirectoryAnchor(bucket);
+  let observed: DirectoryAnchor;
+  try {
+    observed = await captureDirectDirectory(directory, "temporary session directory");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (
+    expected !== undefined &&
+    !sameFileIdentity(expected.identity, observed.identity)
+  ) throw new Error("refusing to remove a replaced session directory");
+
+  const quarantine = path.join(
+    bucket.path,
+    `.discard-${process.pid}-${randomUUID()}.tmp`,
+  );
+  await assertDirectoryAnchor(bucket);
+  await rename(directory, quarantine);
+  const moved = await captureDirectDirectory(quarantine, "discarded session directory");
+  if (!sameFileIdentity(observed.identity, moved.identity)) {
+    throw new Error("session cleanup target changed during quarantine");
+  }
+  await assertDirectoryAnchor(bucket);
+  await assertDirectoryAnchor(moved);
+  await rm(quarantine, { recursive: true });
 }
 
 function nodeName(id: number): string {
   return `${String(id).padStart(6, "0")}.json`;
 }
 
-function sessionId(now: string): string {
+export function reserveSessionId(now: string = new Date().toISOString()): string {
   return `${now.replace(/[-:.]/g, "").replace("Z", "Z")}-${randomUUID()}`;
 }
 

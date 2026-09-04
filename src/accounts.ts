@@ -1,11 +1,21 @@
 // OAuth accounts persisted under ~/.jecode, apart from API keys.
 
-import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
+import {
+  assertDirectoryAnchor,
+  captureDirectDirectorySync,
+  preparePrivateDirectory,
+} from "./directory-anchor.ts";
+import type { DirectoryAnchor } from "./directory-anchor.ts";
 import { withStoreLock } from "./store-lock.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
-import { assertStoreText, readBoundedJsonSync, USER_STORE_LIMITS } from "./user-store.ts";
+import {
+  assertStoreText,
+  readBoundedJsonForMutationSync,
+  readBoundedJsonSync,
+  USER_STORE_LIMITS,
+} from "./user-store.ts";
 
 export type OpenAICodexAccount = {
   accessToken: string;
@@ -56,11 +66,11 @@ export async function updateOpenAICodexAccount(
 ): Promise<OpenAICodexAccount | undefined> {
   const file = accountsPath();
   const directory = path.dirname(file);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  if (process.platform !== "win32") await chmod(directory, 0o700);
+  const anchor = await preparePrivateDirectory(directory, "account store directory");
+  const anchoredFile = path.join(anchor.path, path.basename(file));
 
-  return withStoreLock(file, async () => {
-    const current = readStore(file);
+  return withStoreLock(anchoredFile, async () => {
+    const current = readStoreForMutation(anchoredFile, anchor);
     const next = await change(current.accounts["openai-codex"]);
     const normalized = next === undefined ? undefined : normalizeOpenAI(next);
     if (next !== undefined && normalized === undefined) throw new Error("invalid OpenAI account");
@@ -70,10 +80,13 @@ export async function updateOpenAICodexAccount(
     const updated: AccountStore = { version: 1, accounts };
     const text = `${JSON.stringify(updated, null, 2)}\n`;
     assertStoreText(text, USER_STORE_LIMITS.accountsBytes);
-    await atomicWrite(file, text, { mode: 0o600 });
+    await atomicWrite(anchoredFile, text, {
+      mode: 0o600,
+      validate: async () => assertDirectoryAnchor(anchor),
+    });
     cached = updated;
     return normalized === undefined ? undefined : { ...normalized };
-  }, signal);
+  }, signal, async () => assertDirectoryAnchor(anchor));
 }
 
 export function reloadAccounts(): void {
@@ -87,10 +100,51 @@ function store(): AccountStore {
 
 function readStore(file: string): AccountStore {
   try {
-    return normalize(readBoundedJsonSync(file, USER_STORE_LIMITS.accountsBytes));
+    const directory = captureDirectDirectorySync(path.dirname(file), "account store directory");
+    const anchoredFile = path.join(directory.path, path.basename(file));
+    return normalize(readBoundedJsonSync(
+      anchoredFile,
+      USER_STORE_LIMITS.accountsBytes,
+      directory,
+    ));
   } catch {
     return { version: 1, accounts: {} };
   }
+}
+
+function readStoreForMutation(file: string, directory: DirectoryAnchor): AccountStore {
+  const value = readBoundedJsonForMutationSync(
+    file,
+    USER_STORE_LIMITS.accountsBytes,
+    "account store",
+    directory,
+  );
+  if (value === undefined) return { version: 1, accounts: {} };
+  if (
+    !record(value) || value["version"] !== 1 || !record(value["accounts"]) ||
+    hasUnknownKeys(value, ["version", "accounts"])
+  ) {
+    throw new Error("account store has an unsupported structure");
+  }
+  const accounts = value["accounts"];
+  if (Object.keys(accounts).some((name) => name !== "openai-codex")) {
+    throw new Error("account store has an unsupported structure");
+  }
+  const raw = accounts["openai-codex"];
+  if (raw === undefined) return { version: 1, accounts: {} };
+  if (
+    !record(raw) || hasUnknownKeys(raw, [
+      "accessToken",
+      "refreshToken",
+      "expiresAt",
+      "accountId",
+      "email",
+      "plan",
+    ])
+  ) throw new Error("account store has an unsupported structure");
+  const account = normalizeOpenAI(raw);
+  if (account === undefined) throw new Error("account store has an invalid OpenAI account");
+  return { version: 1, accounts: { "openai-codex": account } };
 }
 
 function normalize(value: unknown): AccountStore {
@@ -136,4 +190,9 @@ function nonempty(value: unknown, max: number): string | undefined {
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasUnknownKeys(value: Record<string, unknown>, known: readonly string[]): boolean {
+  const allowed = new Set(known);
+  return Object.keys(value).some((key) => !allowed.has(key));
 }

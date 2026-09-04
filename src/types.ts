@@ -67,6 +67,15 @@ export type StreamEvent =
   | { kind: "thinking"; text: string }
   | { kind: "tool"; name?: string };
 
+export type ConversationRequestIdentity = Readonly<{
+  conversationId: string;
+  cacheKey: string;
+}>;
+
+export type ProviderRequestIdentity = ConversationRequestIdentity & Readonly<{
+  purpose: "turn" | "compaction";
+}>;
+
 export type SendRequest = {
   model: string;
   system: string;
@@ -74,6 +83,7 @@ export type SendRequest = {
   tools: ToolSpec[];
   maxTokens: number;
   effort: string;
+  identity?: ProviderRequestIdentity;
   signal?: AbortSignal;
   onStream?: (event: StreamEvent) => void;
   /** Provider and HTTP lifecycle updates that are useful on a live screen. */

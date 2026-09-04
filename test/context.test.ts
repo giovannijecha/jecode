@@ -5,6 +5,11 @@ import { estimateRequestInputTokens } from "../src/context/budget.ts";
 import { compactContext } from "../src/context/compactor.ts";
 import type { ContextPolicy } from "../src/context/policy.ts";
 import {
+  projectToolResults,
+  projectToolResultsNewest,
+  TOOL_RESULT_CLIP_MARKER,
+} from "../src/context/request-projection.ts";
+import {
   estimateTokens,
   isContextOverflow,
   planCompaction,
@@ -180,6 +185,36 @@ test("a failed optional summary leaves the original context available", async ()
   assert.equal(ended, 1);
 });
 
+test("an optional summary never swallows cancellation", async () => {
+  const control = new AbortController();
+  const reason = new Error("stop compaction");
+  let ended = 0;
+  const provider = summarizer([], reason);
+  const send = provider.send;
+  provider.send = async (request) => {
+    control.abort(reason);
+    return send(request);
+  };
+
+  await assert.rejects(
+    compactContext({
+      provider,
+      model: "fake-1",
+      effort: "high",
+      context: [user("x".repeat(10_000)), assistant("old"), user("new")],
+      turn: [user("new")],
+      nodeId: 2,
+      coveredMessages: 0,
+      lastInputTokens: 2_000,
+      policy,
+      signal: control.signal,
+      onEnd: () => ended++,
+    }),
+    (error: unknown) => error === reason,
+  );
+  assert.equal(ended, 1);
+});
+
 test("clamps summary output inside the same model request budget", async () => {
   const seen: SendRequest[] = [];
   const provider = summarizer(seen, assistant("summary"));
@@ -240,6 +275,85 @@ test("planning accepts a current turn already covered by its context anchor", as
 
   assert.equal(plan?.messageCount, turn.length);
   assert.deepEqual(plan?.tail, []);
+});
+
+test("the exhausted fallback bounds tool evidence while preserving ids and recent priority", () => {
+  const source: Message[] = [
+    {
+      role: "user",
+      content: [
+        { kind: "tool_result", id: "old", output: "a".repeat(1_000), isError: false },
+        { kind: "tool_result", id: "middle", output: "b".repeat(1_000), isError: true },
+        { kind: "tool_result", id: "new", output: "c".repeat(1_000), isError: false },
+      ],
+    },
+  ];
+
+  const projected = projectToolResultsNewest(source, 900);
+  const results = projected.messages[0]?.content.filter((block) => block.kind === "tool_result") ?? [];
+
+  assert.equal(projected.clippedResults, 3);
+  assert.equal(results.length, 3);
+  assert.deepEqual(results.map((block) => block.id), ["old", "middle", "new"]);
+  assert.deepEqual(results.map((block) => block.isError), [false, true, false]);
+  assert.ok(results.every((block) => block.output.includes(TOOL_RESULT_CLIP_MARKER)));
+  assert.ok((results[2]?.output.length ?? 0) > (results[0]?.output.length ?? Infinity));
+  assert.ok(projected.outputCodeUnits <= 900);
+  assert.equal(source[0]?.content[0]?.kind === "tool_result"
+    ? source[0].content[0].output.length
+    : 0, 1_000);
+});
+
+test("the normal tool projection keeps its existing prefix stable as results append", () => {
+  const result = (id: string, value: string) => ({
+    kind: "tool_result" as const,
+    id,
+    output: value.repeat(100_000),
+    isError: false,
+  });
+  const firstThree: Message[] = [{
+    role: "user",
+    content: [result("one", "a"), result("two", "b"), result("three", "c")],
+  }];
+  const appended: Message[] = [{
+    role: "user",
+    content: [...firstThree[0]!.content, result("four", "d")],
+  }];
+
+  const before = projectToolResults(firstThree, 50_000);
+  const after = projectToolResults(appended, 50_000);
+  const beforeOutputs = before.messages[0]!.content
+    .filter((block) => block.kind === "tool_result")
+    .map((block) => block.output);
+  const afterOutputs = after.messages[0]!.content
+    .filter((block) => block.kind === "tool_result")
+    .map((block) => block.output);
+
+  assert.equal(before.saturated, false);
+  assert.equal(after.saturated, true);
+  assert.deepEqual(afterOutputs.slice(0, 3), beforeOutputs);
+  assert.ok(after.outputCodeUnits <= 50_000);
+  assert.equal(firstThree[0]?.content[0]?.kind === "tool_result"
+    ? firstThree[0].content[0].output.length
+    : 0, 100_000);
+});
+
+test("clips tool evidence only at complete grapheme boundaries", () => {
+  const family = "👨‍👩‍👧‍👦";
+  const source: Message[] = [{
+    role: "user",
+    content: [{ kind: "tool_result", id: "unicode", output: family.repeat(100), isError: false }],
+  }];
+
+  const projected = projectToolResults(source, 80);
+  const output = projected.messages[0]?.content[0]?.kind === "tool_result"
+    ? projected.messages[0].content[0].output
+    : "";
+
+  assert.match(output, /^\ud83d\udc68‍\ud83d\udc69‍\ud83d\udc67‍\ud83d\udc66/u);
+  assert.match(output, /\ud83d\udc68‍\ud83d\udc69‍\ud83d\udc67‍\ud83d\udc66$/u);
+  assert.ok(output.includes(TOOL_RESULT_CLIP_MARKER));
+  assert.doesNotMatch(output, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
 });
 
 function summarizer(seen: SendRequest[], outcome: Message | Error): Provider {

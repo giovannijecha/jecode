@@ -1,8 +1,16 @@
 // Compact workspace identity for the persistent footer.
 
-import { readFile, stat } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { readBoundedText, stableFileExpectation } from "../bounded-file.ts";
+import {
+  assertDirectoryAnchor,
+  captureDirectDirectory,
+} from "../directory-anchor.ts";
+import type { DirectoryAnchor } from "../directory-anchor.ts";
+
+const MAX_GIT_POINTER_BYTES = 4_096;
 
 export async function workspaceLabel(root: string): Promise<string> {
   const shown = displayRoot(root);
@@ -34,21 +42,39 @@ async function findBranch(root: string): Promise<string | undefined> {
 async function branchAt(directory: string): Promise<string | undefined> {
   const marker = path.join(directory, ".git");
   try {
-    const info = await stat(marker);
-    if (info.isDirectory()) return readHead(marker);
+    const info = await lstat(marker, { bigint: true });
+    if (info.isSymbolicLink()) return undefined;
+    if (info.isDirectory()) {
+      const gitDirectory = await captureDirectDirectory(marker, "Git directory");
+      return readHead(gitDirectory);
+    }
     if (!info.isFile()) return undefined;
-    const pointer = await readFile(marker, "utf8");
+    const pointer = await readBoundedText(marker, MAX_GIT_POINTER_BYTES, {
+      label: "Git directory pointer",
+      expected: stableFileExpectation(info),
+    });
     const match = /^gitdir:\s*(.+)\s*$/im.exec(pointer);
     if (match === null) return undefined;
-    return readHead(path.resolve(directory, match[1] as string));
+    const gitDirectory = await captureDirectDirectory(
+      path.resolve(directory, match[1] as string),
+      "Git directory",
+    );
+    return readHead(gitDirectory);
   } catch {
     return undefined;
   }
 }
 
-async function readHead(gitDirectory: string): Promise<string | undefined> {
+async function readHead(gitDirectory: DirectoryAnchor): Promise<string | undefined> {
   try {
-    const head = (await readFile(path.join(gitDirectory, "HEAD"), "utf8")).trim();
+    const head = (await readBoundedText(
+      path.join(gitDirectory.path, "HEAD"),
+      MAX_GIT_POINTER_BYTES,
+      {
+        label: "Git HEAD",
+        validate: async () => assertDirectoryAnchor(gitDirectory),
+      },
+    )).trim();
     const prefix = "ref: refs/heads/";
     if (head.startsWith(prefix)) return head.slice(prefix.length);
     return /^[0-9a-f]{7,}$/i.test(head) ? head.slice(0, 7) : undefined;

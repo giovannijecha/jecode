@@ -9,6 +9,7 @@ import type { Session } from "../session.ts";
 import type { SteeringSource } from "../steering.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
 import type { FooterInfo } from "./components/footer.ts";
+import { requestIdentityForSession } from "../request-identity.ts";
 
 export function controllerOptions(
   session: Session,
@@ -24,6 +25,7 @@ export function controllerOptions(
     maxTokens: session.config.maxTokens,
     contextPolicy,
     effort: session.config.effort,
+    requestIdentity: requestIdentityForSession(session),
     maxModelRequests: session.config.maxModelRequests,
     toolContext: { root: session.config.root },
     ...(steering === undefined ? {} : { steering }),

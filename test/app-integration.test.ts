@@ -165,6 +165,59 @@ test("batch mode compacts model context while retaining the complete conversatio
   assert.equal(current.usage.lastInputTokens, 100);
 });
 
+test("a provider overflow can compact again after budget compaction", async () => {
+  const requests: string[] = [];
+  let summaries = 0;
+  let turns = 0;
+  const compacting: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 64_000 }),
+    async send(request): Promise<Message> {
+      if (request.system.includes("durable working memory")) {
+        summaries++;
+        requests.push(`summary-${summaries}`);
+        return {
+          role: "assistant",
+          content: [{
+            kind: "text",
+            text: summaries === 1 ? "budget memory ".repeat(500) : "overflow memory",
+          }],
+        };
+      }
+      turns++;
+      requests.push(`turn-${turns}`);
+      if (turns === 1) {
+        throw Object.assign(new Error("request rejected"), {
+          status: 400,
+          body: '{"error":{"code":"context_length_exceeded"}}',
+        });
+      }
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: "Recovered after the second compaction." }],
+      };
+    },
+  };
+  const current = session(compacting);
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-04T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "old context ".repeat(10_000) }] },
+      { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
+    ],
+    blocks: [],
+  }, "completed");
+  current.usage.lastInputTokens = 65_000;
+
+  await runBatch(current, { lines: input("next request"), write: () => {} });
+
+  assert.deepEqual(requests, ["summary-1", "turn-1", "summary-2", "turn-2"]);
+  assert.match(JSON.stringify(current.conversation.contextHistory), /overflow memory/);
+  assert.match(JSON.stringify(current.conversation.history), /old context/);
+});
+
 test("missing provider usage replaces stale context pressure with the sent estimate", async () => {
   const requests: string[] = [];
   const withoutUsage: Provider = {
@@ -196,6 +249,119 @@ test("missing provider usage replaces stale context pressure with the sent estim
 
   assert.deepEqual(requests, ["summary", "normal", "normal"]);
   assert.ok(current.usage.lastInputTokens < 3_500);
+});
+
+test("a failed automatic summary is not retried before the unchanged tool follow-up", async () => {
+  const requests: string[] = [];
+  let normalRequests = 0;
+  const compacting: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 64_000 }),
+    async send(request): Promise<Message> {
+      const summary = request.system.includes("durable working memory");
+      requests.push(summary ? "summary" : "normal");
+      if (summary) throw new Error("summary unavailable");
+      normalRequests++;
+      if (normalRequests === 1) {
+        return {
+          role: "assistant",
+          content: [{ kind: "tool_call", id: "inspect", name: "fixture", input: {} }],
+          usage: {
+            inputTokens: 60_000,
+            outputTokens: 10,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            reasoningTokens: 0,
+          },
+        };
+      }
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: "Recovered without duplicate compaction." }],
+        usage: {
+          inputTokens: 6_000,
+          outputTokens: 10,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+  };
+  const fixture: Tool = {
+    name: "fixture",
+    description: "Return bounded fixture evidence",
+    dangerous: false,
+    concurrency: "shared",
+    input: { type: "object", properties: {} },
+    run: () => Promise.resolve({ output: "fixture evidence" }),
+  };
+  const current = session(compacting);
+  current.tools = [fixture];
+  current.conversation = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-04T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "old context ".repeat(2_000) }] },
+      { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
+    ],
+    blocks: [],
+  }, "completed");
+
+  await runBatch(current, { lines: input("inspect once"), write: () => {} });
+
+  assert.deepEqual(requests, ["normal", "summary", "normal"]);
+  assert.equal(current.conversation.activeNode?.settlement, "completed");
+});
+
+test("batch /new resets the automatic-compaction breaker", async () => {
+  const requests: string[] = [];
+  const compacting: Provider = {
+    ...provider(),
+    contextWindow: () => Promise.resolve({ tokens: 64_000 }),
+    async send(request): Promise<Message> {
+      const summary = request.system.includes("durable working memory");
+      requests.push(summary ? "summary" : "normal");
+      if (summary) throw new Error("summary unavailable");
+      return {
+        role: "assistant",
+        content: [{ kind: "text", text: "Continue." }],
+        usage: {
+          inputTokens: 100,
+          outputTokens: 5,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          reasoningTokens: 0,
+        },
+      };
+    },
+  };
+  const current = session(compacting);
+  const pressure = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-04T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "old context ".repeat(10_000) }] },
+      { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
+    ],
+    blocks: [],
+  }, "completed");
+  current.conversation = pressure;
+  current.usage.lastInputTokens = 65_000;
+
+  async function* lines(): AsyncIterable<string> {
+    yield "first";
+    yield "/new";
+    current.conversation = pressure;
+    current.usage.lastInputTokens = 65_000;
+    yield "second";
+  }
+
+  await runBatch(current, { lines: lines(), write: () => {} });
+
+  assert.deepEqual(requests, ["summary", "normal", "summary", "normal"]);
 });
 
 test("batch /compact updates the next provider projection without transcript noise", async () => {
@@ -860,6 +1026,8 @@ test("a streamed failure survives export, resume, and the next provider request"
     assert.match(JSON.stringify(current.conversation.transcript), /partial answer/);
     assert.match(JSON.stringify(current.conversation.transcript), /fixture stream failed/);
 
+    await waitForIdle(harness, "settled failed turn before export");
+    const exportStartedAt = harness.frames.length;
     feed("/export\r");
     await waitFor(async () => (await readdir(workspace)).some((name) => name.startsWith("jecode-transcript-")), "failed turn export");
     const exportedName = (await readdir(workspace)).find((name) => name.startsWith("jecode-transcript-"));
@@ -867,12 +1035,14 @@ test("a streamed failure survives export, resume, and the next provider request"
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /partial answer/);
     assert.match(exported, /fixture stream failed/);
+    await waitForExportCompletion(harness, exportStartedAt, "failed-turn export");
 
     feed("retry\r");
     await waitFor(
       () => current.conversation.activeNode?.settlement === "completed",
       "completed retry",
     );
+    await waitForIdle(harness, "settled retry before exit");
     assert.match(JSON.stringify(requests[1]), /first request/);
     assert.match(JSON.stringify(requests[1]), /failed before completion/);
     assert.match(JSON.stringify(requests[1]), /retry/);
@@ -937,6 +1107,8 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
       "painted interrupted turn",
     );
 
+    await waitForIdle(harness, "settled interrupted turn before export");
+    const exportStartedAt = harness.frames.length;
     feed("/export\r");
     await waitFor(
       async () => (await readdir(workspace)).some((name) => name.startsWith("jecode-transcript-")),
@@ -949,12 +1121,14 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /first request/);
     assert.match(exported, /\[interrupted\]/);
+    await waitForExportCompletion(harness, exportStartedAt, "interrupted-turn export");
 
     feed("continue\r");
     await waitFor(
       () => current.conversation.activeNode?.settlement === "completed",
       "completed recovery turn",
     );
+    await waitForIdle(harness, "settled recovery turn before exit");
     assert.equal(requests.length, 2);
     assert.match(JSON.stringify(requests[1]), /first request/);
     assert.match(JSON.stringify(requests[1]), /interrupted by the user before completion/);
@@ -1738,6 +1912,8 @@ test("/export writes without a picker to the directory where Jecode was launched
       () => harness.frames.flat().join("\n").includes("Exported answer."),
       "answer before export",
     );
+    await waitForIdle(harness, "completed answer before export");
+    const exportStartedAt = harness.frames.length;
     feed("/export\r");
     let name: string | undefined;
     await waitFor(async () => {
@@ -1748,6 +1924,7 @@ test("/export writes without a picker to the directory where Jecode was launched
     const markdown = await readFile(path.join(directory, name), "utf8");
     assert.match(markdown, /keep this/);
     assert.match(markdown, /Exported answer\./);
+    await waitForExportCompletion(harness, exportStartedAt, "export command");
     feed("/exit\r");
     await running;
   } finally {
@@ -2006,6 +2183,22 @@ function plainRow(value: string): string {
 
 function lastFooter(harness: { frames: string[][] }): string {
   return plainRow(harness.frames.at(-1)?.at(-1) ?? "");
+}
+
+async function waitForIdle(harness: { frames: string[][] }, label: string): Promise<void> {
+  await waitFor(() => !lastFooter(harness).includes("esc to interrupt"), label);
+}
+
+async function waitForExportCompletion(
+  harness: { frames: string[][] },
+  startedAt: number,
+  label: string,
+): Promise<void> {
+  await waitFor(
+    () => harness.frames.slice(startedAt).some((frame) => frame.join("\n").includes("saved ·")),
+    `${label} feedback`,
+  );
+  await waitForIdle(harness, `${label} idle state`);
 }
 
 function deferred(): { wait: Promise<void>; release(): void } {

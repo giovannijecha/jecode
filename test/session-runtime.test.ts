@@ -1,11 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { ConversationTree } from "../src/conversation.ts";
 import { SessionPersistence } from "../src/sessions/runtime.ts";
 import { DurableSessionStore } from "../src/sessions/store.ts";
+import {
+  createProcessLeaseDirectory,
+  inspectProcessLease,
+  processLease,
+  processLeaseToken,
+  removeObservedProcessLease,
+} from "../src/process-lease.ts";
 
 test("repeated resumes update one stable logical session", async () => {
   const fixture = await sessionFixture();
@@ -39,6 +46,26 @@ test("repeated resumes update one stable logical session", async () => {
   }
 });
 
+test("resume preserves a load failure when lease cleanup also fails", async () => {
+  const store = {
+    claim: async () => ({
+      id: "fixture",
+      assertOwned: async () => undefined,
+      close: async () => {
+        throw new Error("lease cleanup failure");
+      },
+    }),
+    load: async () => {
+      throw new Error("primary load failure");
+    },
+  } as unknown as DurableSessionStore;
+
+  await assert.rejects(
+    SessionPersistence.resume(store, "fixture"),
+    /primary load failure/,
+  );
+});
+
 test("reset closes the current lease and starts an unpublished session", async () => {
   const fixture = await sessionFixture();
   try {
@@ -66,14 +93,19 @@ test("checkpointing stops when the process no longer owns the session lease", as
     await persistence.checkpoint(first);
     const id = persistence.sessionId as string;
     const active = path.join(fixture.sessions, store.workspaceDigest, id, "active");
-    await writeFile(active, `${process.pid}:replacement-fixture-token`, "utf8");
+    const owner = await inspectProcessLease(active);
+    assert.ok(owner !== undefined);
+    assert.equal(await removeObservedProcessLease(active, owner), true);
+    const replacementGeneration = await createProcessLeaseDirectory(active, processLeaseToken());
+    const replacement = processLease(active, replacementGeneration);
 
     await assert.rejects(
       persistence.checkpoint(complete(first, 1, "second", "two")),
       /lease is no longer owned/,
     );
     assert.equal((await store.load(id)).conversation.nodes.length, 1);
-    await persistence.close();
+    await assert.rejects(persistence.close(), /lease is no longer owned/);
+    assert.equal(await replacement.release(), true);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

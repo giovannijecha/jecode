@@ -6,7 +6,7 @@
 
 import type { ConversationTree } from "../conversation.ts";
 import type { SessionCatalogEntry, SessionLease, SessionSnapshot } from "./store.ts";
-import { DurableSessionStore } from "./store.ts";
+import { DurableSessionStore, reserveSessionId } from "./store.ts";
 
 export type ResumedSession = Readonly<{
   conversation: ConversationTree;
@@ -16,6 +16,7 @@ export type ResumedSession = Readonly<{
 export class SessionPersistence {
   readonly #store: DurableSessionStore;
   #sessionId: string | null;
+  #conversationId: string;
   #lease: SessionLease | undefined;
   #snapshot: SessionSnapshot | undefined;
   #failure: Error | undefined;
@@ -25,29 +26,31 @@ export class SessionPersistence {
     sessionId: string | null,
     lease?: SessionLease,
     snapshot?: SessionSnapshot,
+    conversationId: string = sessionId ?? reserveSessionId(),
   ) {
     this.#store = store;
     this.#sessionId = sessionId;
+    this.#conversationId = conversationId;
     this.#lease = lease;
     this.#snapshot = snapshot;
   }
 
   static fresh(store: DurableSessionStore): SessionPersistence {
-    return new SessionPersistence(store, null);
+    return new SessionPersistence(store, null, undefined, undefined, reserveSessionId());
   }
 
   static async resume(store: DurableSessionStore, id: string): Promise<ResumedSession> {
     const lease = await store.claim(id);
     try {
-      const snapshot = await store.load(id);
+      const snapshot = await store.load(id, lease);
       const conversation = snapshot.conversation.latestResumable();
       if (conversation === undefined) throw new Error("session has no resumable turn");
       return Object.freeze({
         conversation,
-        persistence: new SessionPersistence(store, id, lease, snapshot),
+        persistence: new SessionPersistence(store, id, lease, snapshot, id),
       });
     } catch (error) {
-      await lease.close();
+      await lease.close().catch(() => undefined);
       throw error;
     }
   }
@@ -64,11 +67,16 @@ export class SessionPersistence {
     return this.#sessionId;
   }
 
+  /** Reserved before publication so provider cache identity survives resume. */
+  get conversationId(): string {
+    return this.#conversationId;
+  }
+
   async checkpoint(conversation: ConversationTree): Promise<void> {
     if (this.#failure !== undefined) throw this.#failure;
     try {
       if (this.#sessionId === null) {
-        const published = await this.#store.publish(conversation, true);
+        const published = await this.#store.publish(conversation, true, this.#conversationId);
         this.#lease = published.lease;
         this.#sessionId = published.meta.id;
         this.#snapshot = published;
@@ -78,7 +86,7 @@ export class SessionPersistence {
         throw new Error("session persistence has no verified owner snapshot");
       }
       await this.#lease.assertOwned();
-      this.#snapshot = await this.#store.checkpoint(this.#snapshot, conversation);
+      this.#snapshot = await this.#store.checkpoint(this.#snapshot, conversation, this.#lease);
     } catch (error) {
       this.#failure = error as Error;
       throw error;
@@ -89,6 +97,7 @@ export class SessionPersistence {
     await this.#lease?.close();
     this.#lease = undefined;
     this.#sessionId = null;
+    this.#conversationId = reserveSessionId();
     this.#snapshot = undefined;
     this.#failure = undefined;
   }

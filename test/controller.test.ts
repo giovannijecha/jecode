@@ -532,6 +532,55 @@ test("keeps canonical turn history while replacing only the provider context", a
   assert.equal(history.length, 4);
 });
 
+test("clips aggregate tool output only on the provider request", async () => {
+  const provider = scripted([assistantText("done")]);
+  const output = "evidence ".repeat(1_000);
+  const history: Message[] = [{
+    role: "user",
+    content: [{ kind: "tool_result", id: "large", output, isError: false }],
+  }];
+  const constrained = policyForContextWindow({ tokens: 4_096 }, 85);
+
+  await runTurn(history, options(provider, {
+    contextPolicy: () => Promise.resolve(constrained),
+  }), events());
+
+  const sent = provider.seen[0]?.messages[0]?.content[0];
+  assert.equal(sent?.kind, "tool_result");
+  assert.ok(sent?.kind === "tool_result" && sent.output.length < output.length);
+  assert.match(sent?.kind === "tool_result" ? sent.output : "", /\[tool output clipped\]/);
+  assert.equal(history[0]?.content[0]?.kind === "tool_result"
+    ? history[0].content[0].output
+    : "", output);
+});
+
+test("rebudgets the newest-first fallback from the exact request projection", async () => {
+  const provider = scripted([assistantText("done")]);
+  const constrained = policyForContextWindow({ tokens: 4_096 }, 85);
+  const history: Message[] = [{
+    role: "user",
+    content: [
+      { kind: "tool_result", id: "old", output: "a".repeat(10_000), isError: false },
+      {
+        kind: "tool_result",
+        id: "new",
+        output: String.fromCodePoint(0x10ffff).repeat(10_000),
+        isError: false,
+      },
+    ],
+  }];
+
+  await runTurn(history, options(provider, {
+    maxTokens: 3_600,
+    contextPolicy: () => Promise.resolve(constrained),
+  }), events());
+
+  const request = provider.seen[0] as SendRequest;
+  assert.ok(
+    estimateRequestInputTokens(request) + request.maxTokens <= constrained.requestLimitTokens,
+  );
+});
+
 test("retries one definite context rejection only after the context hook replaces it", async () => {
   const seen: Message[][] = [];
   const requests: SendRequest[] = [];

@@ -11,6 +11,8 @@ import {
   listDir,
   readFile,
   runEditFile,
+  runListDir,
+  runReadFile,
   runWriteFile,
   writeFile,
   type FileMutationDependencies,
@@ -147,6 +149,28 @@ test("scans past an unselected large line without returning it", async () => {
   assert.equal(
     (await readFile.run({ path: "offset.txt", offset: 2, limit: 1 }, ctx)).output,
     "wanted",
+  );
+});
+
+test("bounds work while seeking a line beyond a very large prefix", async () => {
+  const file = path.join(ctx.root, "scan-capped.txt");
+  const handle = await fs.open(file, "w");
+  try {
+    await handle.truncate(16 * 1024 * 1024 + 1);
+  } finally {
+    await handle.close();
+  }
+
+  const result = await readFile.run({ path: "scan-capped.txt", offset: 2, limit: 1 }, ctx);
+
+  assert.match(result.output, /stopped after scanning 16777216 bytes/);
+  assert.equal(result.summary, "scan capped at 16777216 bytes");
+});
+
+test("rejects integer arguments outside JavaScript's exact range", async () => {
+  await assert.rejects(
+    readFile.run({ path: "lines.txt", offset: Number.MAX_SAFE_INTEGER + 1 }, ctx),
+    /"offset" must be a safe integer/,
   );
 });
 
@@ -290,6 +314,81 @@ test("allows an internal directory alias for reads but not writes", async (t) =>
   } finally {
     await fs.rm(alias, { force: true }).catch(() => undefined);
     await fs.rm(direct, { recursive: true, force: true });
+  }
+});
+
+test("read_file rejects a final-component swap to an outside file", async (t) => {
+  const area = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-read-race-"));
+  const workspace = path.join(area, "workspace");
+  const outside = path.join(area, "outside.txt");
+  const target = path.join(workspace, "target.txt");
+  const probe = path.join(workspace, "probe.txt");
+  try {
+    await fs.mkdir(workspace);
+    await fs.writeFile(target, "inside", "utf8");
+    await fs.writeFile(outside, "outside secret", "utf8");
+    try {
+      await fs.symlink(outside, probe, "file");
+      await fs.unlink(probe);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") {
+        t.skip("creating file symlinks is unavailable for this account");
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      runReadFile({ path: "target.txt" }, { root: workspace }, {
+        async beforeOpen() {
+          await fs.rename(target, path.join(workspace, "original.txt"));
+          await fs.symlink(outside, target, "file");
+        },
+      }),
+      /changed while it was being read/,
+    );
+  } finally {
+    await fs.rm(area, { recursive: true, force: true });
+  }
+});
+
+test("list_dir rejects a directory swapped to an outside junction", async (t) => {
+  const area = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-list-race-"));
+  const workspace = path.join(area, "workspace");
+  const target = path.join(workspace, "listed");
+  const outside = path.join(area, "outside");
+  const probe = path.join(workspace, "probe");
+  try {
+    await fs.mkdir(target, { recursive: true });
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(target, "inside.txt"), "inside", "utf8");
+    await fs.writeFile(path.join(outside, "secret.txt"), "outside", "utf8");
+    try {
+      await fs.symlink(outside, probe, process.platform === "win32" ? "junction" : "dir");
+      await fs.rm(probe, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") {
+        t.skip("creating directory links is unavailable for this account");
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      runListDir({ path: "listed" }, { root: workspace }, {
+        async beforeOpen() {
+          await fs.rename(target, path.join(workspace, "original"));
+          await fs.symlink(
+            outside,
+            target,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      }),
+      /directory changed while it was being listed/,
+    );
+  } finally {
+    await fs.rm(area, { recursive: true, force: true });
   }
 });
 

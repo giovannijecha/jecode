@@ -11,7 +11,6 @@ const FILE_BYTES = 4_096;
 const ITERATIONS = 5;
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-search-bench-"));
-const originalPath = process.env["PATH"];
 
 try {
   const body = "ordinary source text\n".repeat(Math.ceil(FILE_BYTES / 21)).slice(0, FILE_BYTES);
@@ -19,19 +18,14 @@ try {
     fs.writeFile(path.join(root, `source-${String(index).padStart(4, "0")}.txt`), body, "utf8")
   )));
 
-  const accelerated = await sample();
-  process.env["PATH"] = "";
-  const portable = await sample();
+  const bounded = await sample();
 
   process.stdout.write([
     `files: ${FILES.toLocaleString()} (${formatBytes(FILES * FILE_BYTES)})`,
     `iterations: ${ITERATIONS}`,
-    `default search: ${formatMilliseconds(accelerated)} median`,
-    `portable fallback: ${formatMilliseconds(portable)} median`,
+    `bounded search: ${formatMilliseconds(bounded)} median`,
   ].join("\n") + "\n");
 } finally {
-  if (originalPath === undefined) delete process.env["PATH"];
-  else process.env["PATH"] = originalPath;
   await fs.rm(root, { recursive: true, force: true });
 }
 

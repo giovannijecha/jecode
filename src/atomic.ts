@@ -1,9 +1,11 @@
-// Crash-safe replacement of one file, using a verified temporary sibling and
-// rename.
+// Process-crash-safe replacement of one file, using a verified temporary
+// sibling and rename. POSIX also receives a best-effort parent-directory sync.
 
 import { lstat, open, rename, rm, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import * as path from "node:path";
+import { fileIdentity, sameFileIdentity } from "./file-identity.ts";
+import type { FileIdentity } from "./file-identity.ts";
 
 export type AtomicWritePhase = "before-open" | "before-write" | "before-rename" | "before-cleanup";
 
@@ -12,8 +14,6 @@ export type AtomicWriteOptions = {
   signal?: AbortSignal;
   validate?(phase: AtomicWritePhase): Promise<void>;
 };
-
-type FileIdentity = { dev: number; ino: number; birthtimeMs: number };
 
 export async function atomicWrite(
   file: string,
@@ -34,7 +34,7 @@ export async function atomicWrite(
     const permissions = options.mode ?? (await existingMode(file));
     throwIfAborted(options.signal);
     handle = await open(temporary, "wx", permissions);
-    identity = fileIdentity(await handle.stat());
+    identity = fileIdentity(await handle.stat({ bigint: true }));
     throwIfAborted(options.signal);
     await options.validate?.("before-write");
     throwIfAborted(options.signal);
@@ -46,7 +46,7 @@ export async function atomicWrite(
     }
     await handle.sync();
     throwIfAborted(options.signal);
-    identity = fileIdentity(await handle.stat());
+    identity = fileIdentity(await handle.stat({ bigint: true }));
     await options.validate?.("before-rename");
     throwIfAborted(options.signal);
     await assertNamedFile(temporary, identity);
@@ -55,6 +55,7 @@ export async function atomicWrite(
     const completed = handle;
     handle = undefined;
     await completed.close().catch(() => undefined);
+    await syncParentDirectory(file);
   } catch (error) {
     if (handle !== undefined) {
       await handle.truncate(0).catch(() => undefined);
@@ -67,14 +68,28 @@ export async function atomicWrite(
   }
 }
 
+async function syncParentDirectory(file: string): Promise<void> {
+  if (process.platform === "win32") return;
+  let directory: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    directory = await open(path.dirname(file), "r");
+    await directory.sync();
+  } catch {
+    // The rename is already committed and some filesystems do not support
+    // directory fsync. Do not report a successful replacement as failed.
+  } finally {
+    await directory?.close().catch(() => undefined);
+  }
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted !== true) return;
   throw signal.reason instanceof Error ? signal.reason : new Error("interrupted");
 }
 
 async function assertNamedFile(file: string, expected: FileIdentity): Promise<void> {
-  const details = await lstat(file);
-  if (details.isSymbolicLink() || !sameFile(expected, fileIdentity(details))) {
+  const details = await lstat(file, { bigint: true });
+  if (details.isSymbolicLink() || !sameFileIdentity(expected, fileIdentity(details))) {
     throw new Error("atomic write target changed during replacement");
   }
 }
@@ -92,15 +107,6 @@ async function removeTemporary(
   } catch {
     // A changed path is no longer ours to remove.
   }
-}
-
-function fileIdentity(details: { dev: number; ino: number; birthtimeMs: number }): FileIdentity {
-  return { dev: details.dev, ino: details.ino, birthtimeMs: details.birthtimeMs };
-}
-
-function sameFile(left: FileIdentity, right: FileIdentity): boolean {
-  if (left.dev !== right.dev || left.ino !== right.ino) return false;
-  return left.ino !== 0 || left.birthtimeMs === right.birthtimeMs;
 }
 
 async function existingMode(file: string): Promise<number | undefined> {

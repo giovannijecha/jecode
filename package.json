@@ -59,9 +59,8 @@
     "check:install": "npm run build:release -- --quiet && node dev/check-installed-cli.ts",
     "check": "npm run check:source-tree && npm run typecheck && npm run coverage && npm run check:package && npm run check:install"
   },
-  "dependencies": {},
   "devDependencies": {
-    "@types/node": "^26.4.0",
-    "typescript": "^5.9.3"
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2"
   }
 }

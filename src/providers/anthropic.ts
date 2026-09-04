@@ -99,6 +99,9 @@ export const anthropic: Provider = {
       messages: req.messages.map(toWireMessage),
       tools: req.tools.map(toWireTool),
       stream: true,
+      ...(req.identity?.purpose === "compaction"
+        ? {}
+        : { cache_control: { type: "ephemeral" } }),
     };
 
     if (supportsAdaptiveThinking(req.model)) {
