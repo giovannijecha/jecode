@@ -19,6 +19,9 @@ export async function* readSseJson(
   const parser = new SseEventParser();
   let finished = false;
   let total = 0;
+  const progressDeadline = idle?.progress === undefined
+    ? undefined
+    : eventDeadline(idle.progress);
 
   try {
     let ended = false;
@@ -30,7 +33,11 @@ export async function* readSseJson(
       const payloads: unknown[] = [];
       try {
         while (payloads.length === 0 && !ended) {
-          const { done, value } = await deadline.wait(reader.read());
+          const read = reader.read();
+          const pending = progressDeadline === undefined
+            ? read
+            : progressDeadline.wait(read);
+          const { done, value } = await deadline.wait(pending);
           if (done) {
             ended = true;
             const text = decoder.decode();
@@ -49,34 +56,82 @@ export async function* readSseJson(
         deadline.clear();
       }
 
-      for (const payload of payloads) yield payload;
+      for (const payload of payloads) {
+        if (idle?.progress?.observed(payload) === true) progressDeadline?.reset();
+        yield payload;
+      }
     }
     finished = true;
   } finally {
+    progressDeadline?.clear();
     if (!finished) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }
 
-export type SseIdlePolicy = {
+export type SseProgressPolicy = {
   milliseconds: number;
+  observed(event: unknown): boolean;
   error(): Error;
 };
 
-function eventDeadline(idle: SseIdlePolicy | undefined): {
+export type SseIdlePolicy = {
+  milliseconds: number;
+  error(): Error;
+  progress?: SseProgressPolicy;
+};
+
+type DeadlinePolicy = Pick<SseIdlePolicy, "milliseconds" | "error">;
+
+function eventDeadline(idle: DeadlinePolicy | undefined): {
   wait<T>(pending: Promise<T>): Promise<T>;
+  reset(): void;
   clear(): void;
 } {
-  if (idle === undefined) return { wait: (pending) => pending, clear: () => undefined };
+  if (idle === undefined) {
+    return {
+      wait: (pending) => pending,
+      reset: () => undefined,
+      clear: () => undefined,
+    };
+  }
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(idle.error()), idle.milliseconds);
-  });
+  let expired: Error | undefined;
+  let rejectWait: ((reason?: unknown) => void) | undefined;
+  const arm = (): void => {
+    if (timer !== undefined) clearTimeout(timer);
+    expired = undefined;
+    timer = setTimeout(() => {
+      expired = idle.error();
+      const reject = rejectWait;
+      rejectWait = undefined;
+      reject?.(expired);
+    }, idle.milliseconds);
+  };
+  arm();
+
   return {
-    wait: (pending) => Promise.race([pending, expired]),
+    wait: <T>(pending: Promise<T>): Promise<T> => {
+      if (expired !== undefined) return Promise.reject(expired);
+      return new Promise<T>((resolve, reject) => {
+        rejectWait = reject;
+        pending.then(
+          (value) => {
+            if (rejectWait === reject) rejectWait = undefined;
+            resolve(value);
+          },
+          (error: unknown) => {
+            if (rejectWait === reject) rejectWait = undefined;
+            reject(error);
+          },
+        );
+      });
+    },
+    reset: arm,
     clear: () => {
       if (timer !== undefined) clearTimeout(timer);
+      rejectWait = undefined;
     },
   };
 }

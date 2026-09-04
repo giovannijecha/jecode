@@ -8,7 +8,7 @@ import { postSse } from "./http.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
 import { EFFORTS, requireSupportedEffort } from "../effort.ts";
-import { assembleOpenAI } from "./openai-stream.ts";
+import { assembleOpenAI, openAIStreamProgress } from "./openai-stream.ts";
 import {
   fromWireResponse,
   stopNotice,
@@ -106,6 +106,7 @@ export const openai: Provider = {
       req.maxTokens,
       req.signal,
       req.onStatus,
+      openAIStreamProgress,
     );
 
     const data = await assembleOpenAI(events, req.onStream, req.onStatus);

@@ -92,6 +92,8 @@ export async function assembleOpenAI(
         if (event.item !== undefined) {
           if (isFunctionCall(event.item)) {
             announceTool(event, event.item, announcedTools, onStream, status);
+          } else if (itemType(event.item) === "reasoning") {
+            status("Working");
           }
           items.push(event.item);
         }
@@ -123,6 +125,22 @@ export async function assembleOpenAI(
   }
 
   throw new Error("openai stream ended before a terminal response event");
+}
+
+/** State-only keepalives prove transport liveness, not forward model progress. */
+export function openAIStreamProgress(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null) return false;
+  const type = (raw as Record<string, unknown>)["type"];
+  if (typeof type !== "string") return false;
+  if (type === "response.created") return true;
+  if (
+    type === "response.done" ||
+    type === "response.completed" ||
+    type === "response.incomplete" ||
+    type === "response.failed" ||
+    type === "error"
+  ) return true;
+  return /\.(?:added|delta|done)$/u.test(type);
 }
 
 type OpenAIStreamEvent = {

@@ -1150,6 +1150,8 @@ test("a full conversation keeps the next prompt and never reaches the provider",
 });
 
 test("the footer follows model, tool preparation, execution, and response phases", async () => {
+  const connecting = deferred();
+  const waiting = deferred();
   const working = deferred();
   const thinking = deferred();
   const preparing = deferred();
@@ -1161,6 +1163,10 @@ test("the footer follows model, tool preparation, execution, and response phases
     async send(request): Promise<Message> {
       requests++;
       if (requests === 1) {
+        request.onStatus?.("Connecting");
+        await connecting.wait;
+        request.onStatus?.("Waiting for model");
+        await waiting.wait;
         request.onStatus?.("Working");
         await working.wait;
         request.onStream?.({ kind: "thinking", text: "Inspecting" });
@@ -1196,6 +1202,13 @@ test("the footer follows model, tool preparation, execution, and response phases
   const feed = await harness.input();
 
   feed("inspect\r");
+  await waitFor(() => lastFooter(harness).includes("Connecting"), "connecting footer phase");
+  connecting.release();
+  await waitFor(
+    () => lastFooter(harness).includes("Waiting for model"),
+    "model wait footer phase",
+  );
+  waiting.release();
   await waitFor(() => lastFooter(harness).includes("Working ·"), "working footer phase");
   working.release();
   await waitFor(() => lastFooter(harness).includes("Thinking ·"), "thinking footer phase");

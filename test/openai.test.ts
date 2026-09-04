@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { StreamEvent } from "../src/types.ts";
-import { assembleOpenAI } from "../src/providers/openai-stream.ts";
+import {
+  assembleOpenAI,
+  openAIStreamProgress,
+} from "../src/providers/openai-stream.ts";
 import {
   fromWireResponse,
   toWireItems,
@@ -149,6 +152,36 @@ test("announces one tool phase while Responses arguments stream", async () => {
     "Working",
     "Preparing read_file",
   ]);
+});
+
+test("leaves the thinking phase when a reasoning item finishes", async () => {
+  const statuses: string[] = [];
+
+  await assembleOpenAI(
+    feed([
+      {
+        type: "response.output_item.added",
+        item: { type: "reasoning", id: "reasoning-1" },
+      },
+      {
+        type: "response.output_item.done",
+        item: { type: "reasoning", id: "reasoning-1", encrypted_content: "opaque" },
+      },
+      { type: "response.completed", response: { status: "completed", output: [] } },
+    ]),
+    undefined,
+    (status) => statuses.push(status),
+  );
+
+  assert.deepEqual(statuses, ["Thinking", "Working"]);
+});
+
+test("recognizes only substantive Responses events as stream progress", () => {
+  assert.equal(openAIStreamProgress({ type: "response.in_progress" }), false);
+  assert.equal(openAIStreamProgress({ type: "ping" }), false);
+  assert.equal(openAIStreamProgress({ type: "response.reasoning_summary_text.delta", delta: "x" }), true);
+  assert.equal(openAIStreamProgress({ type: "response.function_call_arguments.delta", delta: "{" }), true);
+  assert.equal(openAIStreamProgress({ type: "response.completed", response: {} }), true);
 });
 
 test("accepts the Codex response.done alias and stops reading after the terminal event", async () => {
