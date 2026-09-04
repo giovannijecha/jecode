@@ -276,32 +276,41 @@ async function walk(
   ctx: ToolContext,
   visit: (file: string) => Promise<boolean>,
 ): Promise<WalkResult> {
-  const pending = [start];
+  const pending: Array<{ directory: string; entries: Dirent<string>[]; next: number }> = [];
   let seen = 0;
 
-  while (pending.length > 0) {
+  const enter = async (lexical: string): Promise<void> => {
     checkAbort(ctx.signal);
-    const lexical = pending.pop() as string;
     const directory = await resolveExistingInRoot(ctx.root, lexical);
     let entries: Dirent<string>[];
     try {
       entries = await fs.readdir(directory, { withFileTypes: true, encoding: "utf8" });
     } catch (error) {
-      if (skippable(error)) continue;
+      if (skippable(error)) return;
       throw error;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
+    pending.push({ directory, entries, next: 0 });
+  };
 
-    for (const entry of entries) {
-      checkAbort(ctx.signal);
-      if (++seen > MAX_VISITED) return { capped: true };
-      if (entry.isSymbolicLink()) continue;
-      const target = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (!SKIP.has(entry.name)) pending.push(target);
-      } else if (entry.isFile() && (await visit(target))) {
-        return { capped: false };
-      }
+  await enter(start);
+  while (pending.length > 0) {
+    checkAbort(ctx.signal);
+    const frame = pending[pending.length - 1];
+    if (frame === undefined) break;
+    const entry = frame.entries[frame.next++];
+    if (entry === undefined) {
+      pending.pop();
+      continue;
+    }
+
+    if (++seen > MAX_VISITED) return { capped: true };
+    if (entry.isSymbolicLink()) continue;
+    const target = path.join(frame.directory, entry.name);
+    if (entry.isDirectory()) {
+      if (!SKIP.has(entry.name)) await enter(target);
+    } else if (entry.isFile() && (await visit(target))) {
+      return { capped: false };
     }
   }
   return { capped: false };
