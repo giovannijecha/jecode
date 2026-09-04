@@ -85,9 +85,7 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
       ),
     ),
     root: path.resolve(pick(flags.root, undefined, process.cwd())),
-    autoApprove: flags["auto-approve"] === "true" ||
-      flags["auto-approve"] === "1" ||
-      process.env.JECODE_AUTO_APPROVE === "1",
+    autoApprove: autoApproval(flags["auto-approve"], process.env.JECODE_AUTO_APPROVE),
     ephemeral: bool(flags.ephemeral, process.env.JECODE_EPHEMERAL, false),
   };
 }
@@ -96,6 +94,11 @@ function bool(flag: string | undefined, env: string | undefined, fallback: boole
   if (flag !== undefined) return flag === "true" || flag === "1";
   if (env !== undefined && env !== "") return env === "true" || env === "1";
   return fallback;
+}
+
+function autoApproval(flag: string | undefined, env: string | undefined): boolean {
+  if (flag !== undefined) return flag === "true" || flag === "1";
+  return env === "1";
 }
 
 function pick(flag: string | undefined, env: string | undefined, fallback: string): string {

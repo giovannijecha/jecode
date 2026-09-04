@@ -55,6 +55,27 @@ test("treats a bare flag as true", () => {
   assert.equal(config(["--ephemeral"]).ephemeral, true);
 });
 
+test("explicit auto-approve flags override the environment", () => {
+  const before = process.env["JECODE_AUTO_APPROVE"];
+  try {
+    process.env["JECODE_AUTO_APPROVE"] = "1";
+    assert.equal(loadConfig([], {}).autoApprove, true);
+    assert.equal(loadConfig(["--auto-approve=false"], {}).autoApprove, false);
+    assert.equal(loadConfig(["--auto-approve=0"], {}).autoApprove, false);
+
+    process.env["JECODE_AUTO_APPROVE"] = "0";
+    assert.equal(loadConfig([], {}).autoApprove, false);
+    assert.equal(loadConfig(["--auto-approve=true"], {}).autoApprove, true);
+    assert.equal(loadConfig(["--auto-approve=1"], {}).autoApprove, true);
+
+    process.env["JECODE_AUTO_APPROVE"] = "true";
+    assert.equal(loadConfig([], {}).autoApprove, false);
+  } finally {
+    if (before === undefined) delete process.env["JECODE_AUTO_APPROVE"];
+    else process.env["JECODE_AUTO_APPROVE"] = before;
+  }
+});
+
 test("rejects an unknown effort", () => {
   assert.throws(() => config(["--effort", "turbo"]), /unknown effort/);
 });
