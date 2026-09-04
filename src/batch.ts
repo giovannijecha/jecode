@@ -21,6 +21,7 @@ import { columns } from "./ui/render.ts";
 import { terminalText } from "./ui/terminal-text.ts";
 import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "./usage.ts";
 import { assertPromptLength, boundedInputLines } from "./input-boundary.ts";
+import { providerFailure } from "./provider-errors.ts";
 
 export type BatchEnvironment = {
   lines?: AsyncIterable<string>;
@@ -137,7 +138,15 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
         if (compacted !== undefined) commit(checkpoint, settlement);
         return compacted;
       };
-      await runTurn(history, options(session, policy), turn, signal, modelHistory);
+      try {
+        await runTurn(history, options(session, policy), turn, signal, modelHistory);
+      } catch (error) {
+        throwIfAborted(signal);
+        if (!(error instanceof Error)) throw error;
+        const message = providerFailure(session.provider, error);
+        if (message === error.message) throw error;
+        throw new Error(message, { cause: error });
+      }
       turn.flush();
     }
     throwIfAborted(signal);

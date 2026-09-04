@@ -167,10 +167,14 @@ test("the ChatGPT provider asks for sign-in instead of an API key", () => {
 });
 
 test("a real authentication failure remains one actionable transcript notice", () => {
-  const failure = turnFailure(session(provider()), new Error("401 unauthorized"), false);
+  const error = Object.assign(new Error("401 unauthorized"), {
+    body: '{"error":{"message":"invalid account"}}',
+  });
+  const failure = turnFailure(session(provider()), error, false);
   assert.equal(failure.kind, "notice");
   assert.equal(failure.tone, "error");
   assert.match(failure.text, /^401 unauthorized · /);
+  assert.match(failure.text, /invalid account/);
   assert.match(failure.text, /access|environment/);
 });
 

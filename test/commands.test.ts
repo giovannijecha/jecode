@@ -360,13 +360,15 @@ test("credentials is absent because providers owns access", async () => {
 test("a failure fetching models is reported, not thrown", async () => {
   const live = session({
     ...provider("fake", []),
-    models: () => Promise.reject(new Error("network error")),
+    models: () => Promise.reject(Object.assign(new Error("network error"), {
+      body: '{"error":{"message":"catalog unavailable"}}',
+    })),
   });
   const screen = host();
 
   await modelsCommand(live, screen, { save: false }, [live.provider]);
 
-  assert.deepEqual(texts(screen.blocks), ["Fake: network error"]);
+  assert.deepEqual(texts(screen.blocks), ["Fake: network error · catalog unavailable"]);
 });
 
 test("an unreachable local Ollama catalogue points back to providers", async () => {
