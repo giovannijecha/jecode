@@ -158,7 +158,7 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
     assert.deepEqual(body["include"], ["reasoning.encrypted_content"]);
     assert.equal(headers.get("authorization"), "Bearer send-access");
     assert.equal(headers.get("openai-beta"), "responses=experimental");
-    assert.deepEqual(statuses, ["Working"]);
+    assert.deepEqual(statuses, ["Connecting", "Waiting for model", "Working"]);
   });
 });
 

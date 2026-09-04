@@ -11,10 +11,12 @@ const MAX_JSON_CHARS = 5_000_000;
 const MAX_ERROR_CHARS = 2_000;
 const HANDSHAKE_TIMEOUT_MS = 60_000;
 const BODY_IDLE_TIMEOUT_MS = 120_000;
+const MODEL_PROGRESS_TIMEOUT_MS = 300_000;
 const GET_RETRIES = 3;
 
 export type HttpError = Error & { status?: number; body?: string };
 export type HttpStatus = (text: string) => void;
+export type StreamProgress = (event: unknown) => boolean;
 
 function httpError(message: string, status?: number, body?: string): HttpError {
   const error = new Error(message) as HttpError;
@@ -62,16 +64,31 @@ export async function postSse(
   maxOutputTokens: number,
   signal?: AbortSignal,
   onStatus?: HttpStatus,
+  progress?: StreamProgress,
 ): Promise<AsyncGenerator<unknown>> {
   const maximumChars = sseStreamCharacterLimit(maxOutputTokens);
+  onStatus?.("Connecting");
   const res = await request(url, { accept: "text/event-stream", ...headers }, body, signal, onStatus);
   if (res.body === null) throw httpError(`${url} returned no body`, res.status);
+  onStatus?.("Waiting for model");
   return readSseJson(res.body, maximumChars, {
     milliseconds: BODY_IDLE_TIMEOUT_MS,
     error: () => httpError(
       `${url} SSE stream was idle for ${BODY_IDLE_TIMEOUT_MS}ms without an event`,
       res.status,
     ),
+    ...(progress === undefined
+      ? {}
+      : {
+        progress: {
+          milliseconds: MODEL_PROGRESS_TIMEOUT_MS,
+          observed: progress,
+          error: () => httpError(
+            `${url} SSE stream made no model progress for ${MODEL_PROGRESS_TIMEOUT_MS}ms`,
+            res.status,
+          ),
+        },
+      }),
   });
 }
 

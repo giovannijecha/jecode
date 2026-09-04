@@ -155,6 +155,102 @@ test("SSE comments cannot keep a response alive without model events", async (co
   assert.equal(cancelled, true);
 });
 
+test("complete non-progress events cannot keep a model stream alive", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let cancelled = false;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      stream = controller;
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }), { status: 200 })) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const events = await postSse(
+    "https://example.test/generate",
+    {},
+    {},
+    256,
+    undefined,
+    undefined,
+    () => false,
+  );
+  const pending = (async () => {
+    for await (const _event of events) {
+      // Keep consuming protocol events while none count as model progress.
+    }
+  })();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  for (let heartbeat = 0; heartbeat < 5; heartbeat++) {
+    context.mock.timers.tick(50_000);
+    stream?.enqueue(encoder.encode('data: {"type":"response.in_progress"}\n\n'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  context.mock.timers.tick(50_000);
+
+  await assert.rejects(pending, /made no model progress for 300000ms/);
+  assert.equal(cancelled, true);
+});
+
+test("substantive progress resets the model stream deadline", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      stream = controller;
+    },
+  }), { status: 200 })) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const events = await postSse(
+    "https://example.test/generate",
+    {},
+    {},
+    256,
+    undefined,
+    undefined,
+    (event) => (event as { type?: string }).type === "response.output_text.delta",
+  );
+  let seen = 0;
+  const pending = (async () => {
+    for await (const _event of events) seen++;
+  })();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  for (let heartbeat = 0; heartbeat < 4; heartbeat++) {
+    context.mock.timers.tick(50_000);
+    stream?.enqueue(encoder.encode('data: {"type":"response.in_progress"}\n\n'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  context.mock.timers.tick(50_000);
+  stream?.enqueue(encoder.encode('data: {"type":"response.output_text.delta"}\n\n'));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  for (let heartbeat = 0; heartbeat < 5; heartbeat++) {
+    context.mock.timers.tick(50_000);
+    stream?.enqueue(encoder.encode('data: {"type":"response.in_progress"}\n\n'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  stream?.close();
+
+  await pending;
+  assert.equal(seen, 10);
+});
+
 test("keeps caller cancellation attached after response headers", async (context) => {
   const previousFetch = globalThis.fetch;
   const control = new AbortController();

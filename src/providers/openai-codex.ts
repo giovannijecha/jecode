@@ -7,7 +7,7 @@ import { openAIAuthorization } from "../openai-account.ts";
 import { applicationVersion } from "../version.ts";
 import { EFFORTS, isEffort, requireSupportedEffort } from "../effort.ts";
 import { getJson, postSse } from "./http.ts";
-import { assembleOpenAI } from "./openai-stream.ts";
+import { assembleOpenAI, openAIStreamProgress } from "./openai-stream.ts";
 import {
   fromWireResponse,
   stopNotice,
@@ -98,6 +98,7 @@ export const openaiCodex: Provider = {
         req.maxTokens,
         req.signal,
         req.onStatus,
+        openAIStreamProgress,
       );
       const data = await assembleOpenAI(events, req.onStream, req.onStatus);
       const notice = stopNotice(data);
