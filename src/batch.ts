@@ -143,7 +143,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       } catch (error) {
         throwIfAborted(signal);
         if (!(error instanceof Error)) throw error;
-        const message = providerFailure(session.provider, error);
+        const message = providerFailure(session.provider, error, true);
         if (message === error.message) throw error;
         throw new Error(message, { cause: error });
       }

@@ -34,10 +34,11 @@ test("headless sign-in defaults to device code and dismisses its wait panel on s
   await inStore(async () => {
     const pickers: Parameters<NonNullable<Host["choose"]>>[0][] = [];
     const opened: string[] = [];
+    const notices: string[] = [];
     let waiting: ((index?: number) => void) | undefined;
     let closed = false;
     const host: Host = {
-      emit: () => {},
+      emit: (block) => notices.push(block.text),
       choose: (picker) => {
         pickers.push(picker);
         if (pickers.length === 1) return Promise.resolve(picker.index);
@@ -63,6 +64,7 @@ test("headless sign-in defaults to device code and dismisses its wait panel on s
     assert.equal(pickers[1]?.options[1]?.label, "cancel sign-in");
     assert.deepEqual(opened, [login.url]);
     assert.deepEqual(openAICodexAccount(), ACCOUNT);
+    assert.deepEqual(notices, ["ChatGPT connected · current provider route"]);
     assert.equal(closed, true);
   });
 });
@@ -110,7 +112,7 @@ test("sign out revokes remotely and removes the saved ChatGPT account", async (c
     assert.equal(await openAIAccountCommand(session(), host), true);
     assert.equal(openAICodexAccount(), undefined);
     assert.match(body, /"token":"refresh-token"/);
-    assert.deepEqual(notices, ["ChatGPT disconnected"]);
+    assert.deepEqual(notices, ["ChatGPT disconnected · choose another provider in /models"]);
   });
 });
 

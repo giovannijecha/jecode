@@ -4,7 +4,7 @@ import type { Host } from "./commands.ts";
 import { saveCommandSettings } from "./command-settings.ts";
 import { compatibleEffort } from "./effort.ts";
 import { providerFailure } from "./provider-errors.ts";
-import { providerLabel } from "./provider-label.ts";
+import { providerLabel, providerRouteLabel } from "./provider-label.ts";
 import { PROVIDERS } from "./providers/index.ts";
 import type { Session } from "./session.ts";
 import { readSettings } from "./settings.ts";
@@ -107,7 +107,7 @@ export async function modelsCommand(
       label: choice.model,
       // Provider identity is part of the choice, not optional help: keep it
       // visible even when the terminal is only at the supported minimum.
-      value: providerLabel(choice.provider.id),
+      value: providerRouteLabel(choice.provider),
     })),
     searchable: true,
     query: "",
@@ -150,7 +150,7 @@ export async function modelsCommand(
   if (behavior.announce !== false) {
     host.emit({
       kind: "notice",
-      text: `model · ${providerLabel(chosen.provider.id)} · ${chosen.model}`,
+      text: `model · ${providerRouteLabel(chosen.provider)} · ${chosen.model}`,
       tone: "info",
     });
   }
@@ -191,8 +191,9 @@ async function alignEffort(
 function catalogDescription(
   disconnected: readonly Provider[],
   failed: readonly FailedCatalog[],
-): string | undefined {
+): string {
   const parts = [
+    "The connection on the right will run this model; API and account usage stay separate",
     disconnected.length === 0
       ? undefined
       : `Not connected: ${disconnected.map((provider) => providerLabel(provider.id)).join(", ")}`,
@@ -200,7 +201,7 @@ function catalogDescription(
       ? undefined
       : `Unavailable: ${failed.map((entry) => providerLabel(entry.provider.id)).join(", ")}`,
   ].filter((part): part is string => part !== undefined);
-  return parts.length === 0 ? undefined : `${parts.join(" · ")} · manage in /providers`;
+  return `${parts.join(" · ")} · manage access in /providers`;
 }
 
 function emptyCatalogMessage(

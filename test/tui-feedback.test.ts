@@ -126,9 +126,10 @@ test("the feedback channel replaces its message instead of accumulating copies",
   channel.close();
 });
 
-test("the footer projection omits provider, usage, location, and ready noise", () => {
+test("the footer projection exposes the exact provider route without secondary noise", () => {
   assert.deepEqual(footerInfo(session(provider()), "~/Codex/jecode"), {
     workspace: "~/Codex/jecode",
+    provider: "Anthropic API",
     model: "claude-sonnet-5",
     effort: "high",
   });
@@ -173,8 +174,7 @@ test("a real authentication failure remains one actionable transcript notice", (
   const failure = turnFailure(session(provider()), error, false);
   assert.equal(failure.kind, "notice");
   assert.equal(failure.tone, "error");
-  assert.match(failure.text, /^401 unauthorized · /);
-  assert.match(failure.text, /invalid account/);
+  assert.match(failure.text, /^Anthropic: authentication failed · /);
   assert.match(failure.text, /access|environment/);
 });
 

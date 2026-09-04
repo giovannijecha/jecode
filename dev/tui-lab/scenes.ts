@@ -368,7 +368,12 @@ function timelineScene(state: LabState): View {
 function settingsScene(state: LabState): View {
   return {
     ...base(state),
-    footer: { workspace: `${workspace} (main)`, model: "deepseek-v4-flash:0731", effort: "high" },
+    footer: {
+      workspace: `${workspace} (main)`,
+      provider: "Ollama · local",
+      model: "deepseek-v4-flash:0731",
+      effort: "high",
+    },
     blocks: [],
     editor: edit.EMPTY,
     scroll: 0,
@@ -469,7 +474,7 @@ function feedbackScene(state: LabState): View {
 function base(state: LabState): Omit<View, "blocks" | "editor" | "scroll"> {
   return {
     pal: state.palette,
-    footer: { workspace: `${workspace} (main)`, model, effort: "high" },
+    footer: { workspace: `${workspace} (main)`, provider: "Anthropic API", model, effort: "high" },
     now: 4_200 + state.tick * 80,
   };
 }

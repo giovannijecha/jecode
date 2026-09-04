@@ -3,6 +3,8 @@
 import type { ControllerOptions } from "../controller.ts";
 import { credentialSource } from "../credentials.ts";
 import { providerFailure } from "../provider-errors.ts";
+import { providerRouteLabel } from "../provider-label.ts";
+import { providerFailureDetails } from "../providers/failure.ts";
 import type { Session } from "../session.ts";
 import type { SteeringSource } from "../steering.ts";
 import type { Block, NoticeBlock } from "./blocks.ts";
@@ -31,6 +33,7 @@ export function controllerOptions(
 export function footerInfo(session: Session, workspace = session.config.root): FooterInfo {
   return {
     workspace,
+    provider: providerRouteLabel(session.provider),
     model: session.model || "no model",
     effort: session.config.effort,
   };
@@ -40,8 +43,8 @@ export function footerInfo(session: Session, workspace = session.config.root): F
 export function turnFailure(session: Session, error: Error, aborted: boolean): NoticeBlock {
   if (aborted) return { kind: "notice", text: "[interrupted]", tone: "warn" };
 
-  let text = providerFailure(session.provider, error);
-  if (/\b401\b/.test(text)) {
+  let text = providerFailure(session.provider, error, true);
+  if (providerFailureDetails(session.provider.id, error).kind === "authentication") {
     const auth = session.provider.auth;
     if (auth.kind === "oauth") {
       text += ` · reconnect ${auth.label} in /providers`;

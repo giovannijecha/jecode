@@ -8,10 +8,15 @@ configuration, and the safety boundaries that apply while Jecode works.
 
 | Provider ID | Authentication | Notes |
 | --- | --- | --- |
-| `anthropic` | `ANTHROPIC_API_KEY` | Anthropic API |
-| `openai` | `OPENAI_API_KEY` | OpenAI API |
-| `openai-codex` | ChatGPT OAuth | Experimental; uses eligible ChatGPT Codex access |
+| `anthropic` | `ANTHROPIC_API_KEY` | Anthropic API usage |
+| `openai` | `OPENAI_API_KEY` | Separately billed OpenAI API usage |
+| `openai-codex` | ChatGPT OAuth | Experimental; uses eligible ChatGPT account access, not API credits |
 | `ollama` | `OLLAMA_API_KEY` for cloud or remote use | Cloud with a key, local without one |
+
+`/providers` manages access only; connecting an account or adding a key never
+silently changes the runtime route. Use `/models` to choose a model. Each row
+identifies whether it will use an API or the ChatGPT account, and the footer
+keeps that exact route visible before and during every turn.
 
 Choose **ChatGPT** in `/providers` to sign in on OpenAI's website without
 pasting a key. Jecode supports a local browser callback and a device-code flow;
@@ -62,12 +67,13 @@ Type `/` to open searchable command completion inside the composer.
 - **PageUp/PageDown** and the mouse wheel scroll the transcript.
 - **Ctrl+O** expands or compacts the latest reasoning or tool-detail block.
 
-The footer keeps the active model, effort, and workspace visible. During work,
-it adds the current state, elapsed time, steering availability or queue count,
-and interrupt hint. Queued guidance joins the same conversation turn after the
-provider response or complete tool batch already in progress; `Esc` remains an
-immediate interruption. Operational feedback uses the same replaceable status
-area instead of adding noise to the conversation or its Markdown export.
+The footer keeps the selected provider route, model, effort, and workspace
+visible. During work, it adds the current state, elapsed time, steering
+availability or queue count, and interrupt hint. Queued guidance joins the same
+conversation turn after the provider response or complete tool batch already
+in progress; `Esc` remains an immediate interruption. Operational feedback uses
+the same replaceable status area instead of adding noise to the conversation or
+its Markdown export.
 
 ## Resume, branch, and compact conversations
 
@@ -169,10 +175,11 @@ untrusted data.
 - Terminal control characters are neutralized before rendering.
 - Remote Ollama endpoints require HTTPS, and provider redirects are rejected.
 - Provider handshakes and idle response bodies have finite deadlines.
-  Idempotent catalogue reads retry bounded transient failures. A streaming
-  generation retries once only after an explicit pre-stream `429` with a
-  provider delay; Jecode caps the wait at 60 seconds and keeps it interruptible.
-  Ambiguous failures and started streams are never replayed.
+  Idempotent catalogue reads retry only bounded transient failures. A streaming
+  generation may retry once only when its adapter identifies a transient
+  pre-stream rate limit with an explicit provider delay. Billing and quota
+  failures stop immediately; ambiguous failures and started streams are never
+  replayed. Jecode caps the wait at 60 seconds and keeps it interruptible.
 - Interactive and batch prompts are rejected above 1,048,576 UTF-16 code units
   before history or provider use. Model and filesystem input are also bounded
   before use.

@@ -4,6 +4,23 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## Unreleased
+
+### Changed
+
+- Kept the selected provider route visible in the footer and distinguished
+  separately billed OpenAI API models from ChatGPT account models in provider
+  and model menus.
+- Normalized provider failures across adapters and attached per-request client
+  identifiers to OpenAI API traffic for support correlation.
+
+### Fixed
+
+- Retried only explicit transient generation rate limits, while treating
+  billing and quota exhaustion as immediate actionable failures.
+- Replaced a runner-sensitive context-estimation wall-clock assertion with its
+  deterministic responsiveness and test-deadline guarantees.
+
 ## [0.8.4] - 2026-09-04
 
 ### Changed

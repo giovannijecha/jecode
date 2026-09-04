@@ -37,11 +37,12 @@ follow tool calls and diffs, steer the model while it runs, and resume the same
 conversation later. One controller carries each turn from prompt to result—no
 delegated agents or hidden model workers.
 
-Choose Anthropic, OpenAI, an eligible ChatGPT account, or Ollama without
-changing the workflow. Jecode is written in TypeScript and released as plain
-JavaScript for Node.js, with no installation scripts and zero third-party
-runtime dependencies. The runtime stays small enough to inspect, understand,
-and change.
+Choose Anthropic API, OpenAI API, an eligible ChatGPT account, or Ollama without
+changing the workflow. API connections and account access stay separate, and
+the footer always names the route selected for the next request. Jecode is
+written in TypeScript and released as plain JavaScript for Node.js, with no
+installation scripts and zero third-party runtime dependencies. The runtime
+stays small enough to inspect, understand, and change.
 
 ## Quick start
 
@@ -71,7 +72,8 @@ jecode
 ```
 
 Jecode opens directly on an empty composer. Use `/providers` to connect a
-service, `/models` to choose a model, then describe the work you want done.
+service and `/models` to select both the model and the connection that will run
+it, then describe the work you want done.
 
 ```text
 Review this project, explain its architecture, and propose the smallest safe

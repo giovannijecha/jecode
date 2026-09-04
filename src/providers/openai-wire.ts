@@ -10,7 +10,7 @@ export type OpenAIResponse = {
   output?: unknown[];
   incomplete_details?: { reason?: string } | null;
   status?: string;
-  error?: { code?: string; message?: string } | null;
+  error?: { code?: string; message?: string; type?: string } | null;
   usage?: {
     input_tokens?: unknown;
     output_tokens?: unknown;

@@ -8,6 +8,7 @@
 
 import type { StreamEvent } from "../types.ts";
 import type { AnthropicResponse, WireBlock } from "./anthropic-wire.ts";
+import { providerWireError } from "./failure.ts";
 import { addBounded, MAX_TOOL_ARGUMENT_CHARS } from "./stream-limits.ts";
 import { toolInputFromJson } from "./tool-input.ts";
 
@@ -76,9 +77,9 @@ export async function assembleAnthropic(
       }
 
       case "error": {
-        throw new Error(
-          `anthropic stream error: ${event.error?.message ?? "unspecified"}`,
-        );
+        throw providerWireError("anthropic stream error", event.error?.message, {
+          type: event.error?.type,
+        });
       }
 
       case "message_stop":
@@ -125,7 +126,7 @@ type WireEvent = {
     stop_reason?: string;
     stop_details?: AnthropicResponse["stop_details"];
   };
-  error?: { message?: string };
+  error?: { message?: string; type?: string };
   message?: { usage?: AnthropicResponse["usage"] };
   usage?: AnthropicResponse["usage"];
 };

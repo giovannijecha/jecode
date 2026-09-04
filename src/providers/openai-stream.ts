@@ -6,6 +6,7 @@
 // those streamed items remain the fallback when the final envelope is empty.
 
 import type { StreamEvent } from "../types.ts";
+import { providerWireError } from "./failure.ts";
 import type { OpenAIResponse } from "./openai-wire.ts";
 
 export async function assembleOpenAI(
@@ -32,7 +33,7 @@ export async function assembleOpenAI(
       output_index?: unknown;
       name?: unknown;
       response?: unknown;
-      error?: { message?: string };
+      error?: { code?: string; message?: string; type?: string };
       message?: string;
     };
 
@@ -114,10 +115,17 @@ export async function assembleOpenAI(
 
       case "response.failed": {
         const response = event.response as OpenAIResponse | undefined;
-        throw new Error(`openai stream error: ${response?.error?.message ?? "unspecified"}`);
+        throw providerWireError("openai stream error", response?.error?.message, {
+          code: response?.error?.code,
+          type: response?.error?.type,
+        });
       }
       case "error":
-        throw new Error(`openai stream error: ${event.error?.message ?? event.message ?? "unspecified"}`);
+        throw providerWireError(
+          "openai stream error",
+          event.error?.message ?? event.message,
+          { code: event.error?.code, type: event.error?.type },
+        );
 
       default:
         break;

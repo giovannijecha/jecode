@@ -6,6 +6,11 @@ import { openAICodexAccount } from "../accounts.ts";
 import { openAIAuthorization } from "../openai-account.ts";
 import { applicationVersion } from "../version.ts";
 import { EFFORTS, isEffort, requireSupportedEffort } from "../effort.ts";
+import {
+  isRetryableGenerationFailure,
+  isRetryableReadFailure,
+  throwProviderError,
+} from "./failure.ts";
 import { getJson, postSse } from "./http.ts";
 import { assembleOpenAI, openAIStreamProgress } from "./openai-stream.ts";
 import {
@@ -41,9 +46,13 @@ export const openaiCodex: Provider = {
   location: () => "cloud",
 
   async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
-    const catalog = await loadCatalog(signal, onStatus);
-    rememberCatalog(catalog);
-    return catalog.ids;
+    try {
+      const catalog = await loadCatalog(signal, onStatus);
+      rememberCatalog(catalog);
+      return catalog.ids;
+    } catch (error) {
+      throwProviderError(ID, signal, error);
+    }
   },
 
   async efforts(
@@ -53,9 +62,13 @@ export const openaiCodex: Provider = {
   ): Promise<readonly string[]> {
     const cached = effortByModel.get(model);
     if (cached !== undefined) return cached;
-    const catalog = await loadCatalog(signal, onStatus);
-    rememberCatalog(catalog);
-    return effortByModel.get(model) ?? fallbackEfforts(model);
+    try {
+      const catalog = await loadCatalog(signal, onStatus);
+      rememberCatalog(catalog);
+      return effortByModel.get(model) ?? fallbackEfforts(model);
+    } catch (error) {
+      throwProviderError(ID, signal, error);
+    }
   },
 
   async contextWindow(
@@ -64,47 +77,56 @@ export const openaiCodex: Provider = {
     onStatus?: (status: string) => void,
   ): Promise<ModelContextWindow | undefined> {
     if (contextByModel.has(model)) return contextByModel.get(model);
-    const catalog = await loadCatalog(signal, onStatus);
-    rememberCatalog(catalog);
-    const context = contextByModel.get(model);
-    if (!contextByModel.has(model)) contextByModel.set(model, undefined);
-    return context;
+    try {
+      const catalog = await loadCatalog(signal, onStatus);
+      rememberCatalog(catalog);
+      const context = contextByModel.get(model);
+      if (!contextByModel.has(model)) contextByModel.set(model, undefined);
+      return context;
+    } catch (error) {
+      throwProviderError(ID, signal, error);
+    }
   },
 
   async send(req: SendRequest): Promise<Message> {
     const efforts = effortByModel.get(req.model) ?? fallbackEfforts(req.model);
     const effort = requireSupportedEffort(req.model, req.effort, efforts);
-    return withAuthorization(async (authorization) => {
-      const events = await postSse(
-        `${BASE}/responses`,
-        {
-          ...headers(authorization, randomUUID()),
-          "openai-beta": "responses=experimental",
-        },
-        {
-          model: req.model,
-          store: false,
-          stream: true,
-          instructions: req.system,
-          input: req.messages.flatMap((message) => toWireItems(message, ID)),
-          tools: req.tools.map(toWireTool),
-          tool_choice: "auto",
-          parallel_tool_calls: true,
-          reasoning: { effort, summary: "auto" },
-          text: { verbosity: "low" },
-          include: ["reasoning.encrypted_content"],
-          prompt_cache_key: SESSION_ID,
-        },
-        req.maxTokens,
-        req.signal,
-        req.onStatus,
-        openAIStreamProgress,
-      );
-      const data = await assembleOpenAI(events, req.onStream, req.onStatus);
-      const notice = stopNotice(data);
-      if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
-      return fromWireResponse(data, ID);
-    }, req.signal, req.onStatus);
+    try {
+      return await withAuthorization(async (authorization) => {
+        const events = await postSse(
+          `${BASE}/responses`,
+          {
+            ...headers(authorization, randomUUID()),
+            "openai-beta": "responses=experimental",
+          },
+          {
+            model: req.model,
+            store: false,
+            stream: true,
+            instructions: req.system,
+            input: req.messages.flatMap((message) => toWireItems(message, ID)),
+            tools: req.tools.map(toWireTool),
+            tool_choice: "auto",
+            parallel_tool_calls: true,
+            reasoning: { effort, summary: "auto" },
+            text: { verbosity: "low" },
+            include: ["reasoning.encrypted_content"],
+            prompt_cache_key: SESSION_ID,
+          },
+          req.maxTokens,
+          req.signal,
+          req.onStatus,
+          openAIStreamProgress,
+          (error) => isRetryableGenerationFailure(ID, error),
+        );
+        const data = await assembleOpenAI(events, req.onStream, req.onStatus);
+        const notice = stopNotice(data);
+        if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
+        return fromWireResponse(data, ID);
+      }, req.signal, req.onStatus);
+    } catch (error) {
+      throwProviderError(ID, req.signal, error);
+    }
   },
 };
 
@@ -118,6 +140,7 @@ async function loadCatalog(
       headers(authorization, randomUUID()),
       signal,
       onStatus,
+      (error) => isRetryableReadFailure(ID, error),
     );
     return modelCatalog(body);
   }, signal, onStatus);

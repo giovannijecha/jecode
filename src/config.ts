@@ -69,7 +69,8 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
       saved.reducedMotion ?? false,
     ),
     effort,
-    // Every request streams, so a large ceiling costs nothing in timeout risk.
+    // This is a ceiling, not a target. Request budgeting may lower it to fit
+    // the selected model, while provider rate and billing limits still apply.
     maxTokens: toInt(
       pick(flags["max-tokens"], process.env.JECODE_MAX_TOKENS, String(saved.maxTokens ?? 64000)),
       "max-tokens",

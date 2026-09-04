@@ -10,6 +10,7 @@
 // only its URL and its headers.
 
 import { getJson } from "./http.ts";
+import type { HttpRetryPolicy } from "./http.ts";
 
 export const MAX_MODEL_CATALOG_ENTRIES = 1_000;
 export const MAX_MODEL_CATALOG_ITEMS = 4_000;
@@ -25,8 +26,9 @@ export async function listModels(
   headers: Record<string, string>,
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
+  retry?: HttpRetryPolicy,
 ): Promise<string[]> {
-  return (await modelCatalog(url, headers, signal, onStatus)).map((entry) => entry.id);
+  return (await modelCatalog(url, headers, signal, onStatus, retry)).map((entry) => entry.id);
 }
 
 export async function modelCatalog(
@@ -34,8 +36,9 @@ export async function modelCatalog(
   headers: Record<string, string>,
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
+  retry?: HttpRetryPolicy,
 ): Promise<ModelCatalogEntry[]> {
-  const body = await getJson(url, headers, signal, onStatus);
+  const body = await getJson(url, headers, signal, onStatus, retry);
   const data = (body as { data?: unknown }).data;
   if (!Array.isArray(data)) throw new Error(`${url} did not return a model list`);
 
