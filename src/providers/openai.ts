@@ -28,6 +28,7 @@ const MODELS = "https://api.openai.com/v1/models";
 const KEY = "OPENAI_API_KEY";
 const ID = "openai";
 
+const ASTRA_MODEL = /^gpt-6-astra(?:-|$)/;
 const RESPONSES_REASONING_MODEL = /^(?:gpt-5(?:[.-]|$)|o(?:1|3|4)(?:[.-]|$)|codex-mini(?:[.-]|$))/;
 // Jecode's transport always streams and always declares local tools. Hide
 // catalog entries that cannot satisfy either half of that contract.
@@ -38,11 +39,13 @@ const PRO_EFFORTS = ["medium", "high", "xhigh"] as const;
 const HIGH_ONLY_EFFORT = ["high"] as const;
 
 export function supportsOpenAIModel(model: string): boolean {
-  return RESPONSES_REASONING_MODEL.test(model) && !INCOMPATIBLE_MODEL.test(model);
+  return ASTRA_MODEL.test(model) ||
+    (RESPONSES_REASONING_MODEL.test(model) && !INCOMPATIBLE_MODEL.test(model));
 }
 
 export function openAIEfforts(model: string): readonly string[] {
   if (!supportsOpenAIModel(model)) return [];
+  if (ASTRA_MODEL.test(model)) return EFFORTS;
   if (/^gpt-5-pro(?:-|$)/.test(model)) return HIGH_ONLY_EFFORT;
   if (/^gpt-5\.[2-5]-pro(?:-|$)/.test(model)) return PRO_EFFORTS;
   if (/^gpt-5\.6(?:[.-]|$)/.test(model)) return EFFORTS;
@@ -53,6 +56,7 @@ export function openAIEfforts(model: string): readonly string[] {
 
 /** Conservative capacities for the reasoning families accepted by this transport. */
 export function openAIContextWindow(model: string): ModelContextWindow | undefined {
+  if (ASTRA_MODEL.test(model)) return usableContext(1_050_000);
   if (/^gpt-5\.6(?:[.-]|$)/.test(model)) return usableContext(1_050_000);
   if (/^gpt-5(?:[.-]|$)/.test(model)) return usableContext(400_000);
   if (/^(?:o(?:1|3|4)|codex-mini)(?:[.-]|$)/.test(model)) {
@@ -121,6 +125,9 @@ export const openai: Provider = {
           store: false,
           include: ["reasoning.encrypted_content"],
           stream: true,
+          ...(req.identity?.purpose === "turn"
+            ? { prompt_cache_key: req.identity.cacheKey }
+            : {}),
         },
         req.maxTokens,
         req.signal,

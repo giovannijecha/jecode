@@ -269,7 +269,13 @@ test("combines input and output usage from separate stream events", async () => 
     feed([
       {
         type: "message_start",
-        message: { usage: { input_tokens: 20, cache_read_input_tokens: 8 } },
+        message: {
+          usage: {
+            input_tokens: 20,
+            cache_read_input_tokens: 8,
+            cache_creation_input_tokens: 3,
+          },
+        },
       },
       { type: "message_delta", delta: {}, usage: { output_tokens: 6 } },
       { type: "message_stop" },
@@ -277,10 +283,10 @@ test("combines input and output usage from separate stream events", async () => 
   );
 
   assert.deepEqual(fromWireResponse(data).usage, {
-    inputTokens: 20,
+    inputTokens: 31,
     outputTokens: 6,
     cachedInputTokens: 8,
-    cacheWriteInputTokens: 0,
+    cacheWriteInputTokens: 3,
     reasoningTokens: 0,
   });
 });

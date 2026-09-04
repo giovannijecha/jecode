@@ -19,6 +19,10 @@ const CATALOG_SMALL_NODES = 1;
 const CATALOG_LARGE_NODES = 200;
 const MAX_CATALOG_MEDIAN_MS = 20;
 const MAX_CATALOG_DEPTH_DELTA_MS = 10;
+const LOAD_ITERATIONS = 3;
+const LOAD_NODE_COUNTS = [1, 200, 750, 1_024] as const;
+const MAX_LOAD_MEDIAN_MS = 350;
+const MAX_LOAD_SCALE = 7;
 const identity = {
   providerId: "ollama",
   model: "deepseek-v4-flash:0731",
@@ -34,7 +38,15 @@ const deepCatalog = await sampleCatalog(CATALOG_LARGE_NODES);
 const catalogDepthDelta = deepCatalog - shallowCatalog;
 const catalogPassed = deepCatalog <= MAX_CATALOG_MEDIAN_MS &&
   catalogDepthDelta <= MAX_CATALOG_DEPTH_DELTA_MS;
-const passed = checkpointPassed && catalogPassed;
+const loadResults: Array<{ nodes: number; medianMilliseconds: number }> = [];
+for (const nodeCount of LOAD_NODE_COUNTS) {
+  loadResults.push({ nodes: nodeCount, medianMilliseconds: await sampleLoad(nodeCount) });
+}
+const loadScale = (loadResults.at(-1)?.medianMilliseconds ?? Infinity) /
+  (loadResults[1]?.medianMilliseconds ?? 1);
+const loadPassed = (loadResults.at(-1)?.medianMilliseconds ?? Infinity) <=
+    MAX_LOAD_MEDIAN_MS && loadScale <= MAX_LOAD_SCALE;
+const passed = checkpointPassed && catalogPassed && loadPassed;
 
 process.stdout.write(`${JSON.stringify({
   benchmark: "durable-session-store",
@@ -64,6 +76,19 @@ process.stdout.write(`${JSON.stringify({
     },
     observedDepthDeltaMilliseconds: round(catalogDepthDelta),
     passed: catalogPassed,
+  },
+  load: {
+    iterations: LOAD_ITERATIONS,
+    results: loadResults.map((result) => ({
+      nodes: result.nodes,
+      medianMilliseconds: round(result.medianMilliseconds),
+    })),
+    thresholds: {
+      largestMedianMilliseconds: MAX_LOAD_MEDIAN_MS,
+      maximumScaleFrom200To1024: MAX_LOAD_SCALE,
+    },
+    observedScaleFrom200To1024: round(loadScale),
+    passed: loadPassed,
   },
   passed,
 })}\n`);
@@ -112,6 +137,27 @@ async function sampleCatalog(nodeCount: number): Promise<number> {
     for (let iteration = 0; iteration < ITERATIONS; iteration++) {
       const startedAt = performance.now();
       await store.list();
+      timings.push(performance.now() - startedAt);
+    }
+    return median(timings);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function sampleLoad(nodeCount: number): Promise<number> {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-session-load-bench-"));
+  const workspace = path.join(root, "workspace");
+  const sessions = path.join(root, "sessions");
+  await mkdir(workspace);
+  try {
+    const store = await DurableSessionStore.open(workspace, sessions);
+    const published = await store.publish(ConversationTree.restore(nodes(nodeCount), nodeCount));
+    await store.load(published.meta.id);
+    const timings: number[] = [];
+    for (let iteration = 0; iteration < LOAD_ITERATIONS; iteration++) {
+      const startedAt = performance.now();
+      await store.load(published.meta.id);
       timings.push(performance.now() - startedAt);
     }
     return median(timings);

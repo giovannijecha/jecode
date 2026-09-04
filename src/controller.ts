@@ -29,6 +29,8 @@ export type ContextRequest = Readonly<{
   reason: ContextReason;
   policy: ContextPolicy;
   inputTokens: number;
+  /** Stable tool excerpts exhausted their aggregate request budget. */
+  projectionSaturated: boolean;
   error?: Error;
 }>;
 
@@ -41,6 +43,8 @@ export type ControllerOptions = {
   /** Resolve for each provider attempt; adapters cache stable metadata themselves. */
   contextPolicy(): Promise<ContextPolicy>;
   effort: string;
+  /** Stable for this logical conversation; providers may use it for cache routing. */
+  requestIdentity?: import("./types.ts").ConversationRequestIdentity;
   /** Stop after this many model requests when an explicit launch budget is set. */
   maxModelRequests?: number;
   toolContext: ToolContext;

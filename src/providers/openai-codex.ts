@@ -26,7 +26,6 @@ const BASE = "https://chatgpt.com/backend-api/codex";
 // own catalogue updater uses this sentinel to request the complete current
 // manifest; Jecode then keeps only entries explicitly visible in that manifest.
 const CATALOG_COMPATIBILITY_VERSION = "99.99.99";
-const SESSION_ID = randomUUID();
 const MAX_CATALOG_ITEMS = 4_000;
 const MAX_MODELS = 1_000;
 const MAX_MODEL_CHARS = 256;
@@ -91,12 +90,14 @@ export const openaiCodex: Provider = {
   async send(req: SendRequest): Promise<Message> {
     const efforts = effortByModel.get(req.model) ?? fallbackEfforts(req.model);
     const effort = requireSupportedEffort(req.model, req.effort, efforts);
+    const sessionId = req.identity?.conversationId ?? randomUUID();
+    const cacheKey = req.identity?.cacheKey ?? sessionId;
     try {
       return await withAuthorization(async (authorization) => {
         const events = await postSse(
           `${BASE}/responses`,
           {
-            ...headers(authorization, randomUUID()),
+            ...headers(authorization, sessionId, randomUUID()),
             "openai-beta": "responses=experimental",
           },
           {
@@ -111,7 +112,9 @@ export const openaiCodex: Provider = {
             reasoning: { effort, summary: "auto" },
             text: { verbosity: "low" },
             include: ["reasoning.encrypted_content"],
-            prompt_cache_key: SESSION_ID,
+            ...(req.identity?.purpose === "compaction"
+              ? {}
+              : { prompt_cache_key: cacheKey }),
           },
           req.maxTokens,
           req.signal,
@@ -137,7 +140,7 @@ async function loadCatalog(
   return withAuthorization(async (authorization) => {
     const body = await getJson(
       `${BASE}/models?client_version=${CATALOG_COMPATIBILITY_VERSION}`,
-      headers(authorization, randomUUID()),
+      headers(authorization, randomUUID(), randomUUID()),
       signal,
       onStatus,
       (error) => isRetryableReadFailure(ID, error),
@@ -174,6 +177,7 @@ async function withAuthorization<T>(
 
 function headers(
   authorization: Awaited<ReturnType<typeof openAIAuthorization>>,
+  sessionId: string,
   requestId: string,
 ): Record<string, string> {
   const version = applicationVersion();
@@ -182,7 +186,7 @@ function headers(
     "chatgpt-account-id": authorization.accountId,
     originator: "jecode",
     "user-agent": `jecode/${version} (${process.platform}; ${process.arch})`,
-    "session-id": SESSION_ID,
+    "session-id": sessionId,
     "x-client-request-id": requestId,
   };
 }
@@ -267,6 +271,7 @@ function reasoningLevels(entry: Record<string, unknown>, model: string): readonl
 }
 
 function fallbackEfforts(model: string): readonly string[] {
+  if (/^gpt-6-astra(?:-|$)/.test(model)) return EFFORTS;
   if (/^gpt-5\.6-(?:sol|terra|luna)(?:-|$)/.test(model)) return EFFORTS;
   return XHIGH_EFFORTS;
 }

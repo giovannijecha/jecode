@@ -10,12 +10,22 @@
 // secret in the working tree is one `git add -A` from being published, which
 // is why "not in the repo" is a rule and not a preference.
 
-import { chmod, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";
+import {
+  assertDirectoryAnchor,
+  captureDirectDirectorySync,
+  preparePrivateDirectory,
+} from "./directory-anchor.ts";
+import type { DirectoryAnchor } from "./directory-anchor.ts";
 import { withStoreLock } from "./store-lock.ts";
 import { legacyUserDataPath, userDataLabel, userDataPath } from "./user-data.ts";
-import { assertStoreText, readBoundedJsonSync, USER_STORE_LIMITS } from "./user-store.ts";
+import {
+  assertStoreText,
+  readBoundedJsonForMutationSync,
+  readBoundedJsonSync,
+  USER_STORE_LIMITS,
+} from "./user-store.ts";
 
 /** Keys this session was given but not asked to keep. Dies with the window. */
 const held = new Map<string, string>();
@@ -88,36 +98,38 @@ export function forgetSession(name: string): boolean {
 export async function keep(name: string, value: string): Promise<string> {
   assertCredential(name, value);
   const file = storePath();
-  await prepare(file);
-  return withStoreLock(file, async () => {
-    const all = { ...readSavedStore(), [name]: value };
+  const directory = await prepare(file);
+  const anchoredFile = path.join(directory.path, path.basename(file));
+  return withStoreLock(anchoredFile, async () => {
+    const all = { ...readSavedStoreForMutation(anchoredFile, directory), [name]: value };
     if (Object.keys(all).length > USER_STORE_LIMITS.credentialEntries) {
       throw new Error("too many saved credentials");
     }
-    await persist(file, all);
+    await persist(anchoredFile, all, directory);
     saved = all;
     // A newly saved replacement must become active immediately. Otherwise an
     // older session-only value would keep shadowing the value just written.
     held.delete(name);
     return file;
-  });
+  }, undefined, async () => assertDirectoryAnchor(directory));
 }
 
 /** Remove only the saved copy. An environment or session value is untouched. */
 export async function forgetSaved(name: string): Promise<boolean> {
   const file = storePath();
-  await prepare(file);
-  return withStoreLock(file, async () => {
-    const all = { ...readSavedStore() };
+  const directory = await prepare(file);
+  const anchoredFile = path.join(directory.path, path.basename(file));
+  return withStoreLock(anchoredFile, async () => {
+    const all = { ...readSavedStoreForMutation(anchoredFile, directory) };
     if (use(all[name]) === undefined) {
       saved = all;
       return false;
     }
     delete all[name];
-    await persist(file, all);
+    await persist(anchoredFile, all, directory);
     saved = all;
     return true;
-  });
+  }, undefined, async () => assertDirectoryAnchor(directory));
 }
 
 export function storePath(): string {
@@ -152,9 +164,59 @@ function readSavedStore(): Record<string, string> {
   return current ?? (legacy === undefined ? undefined : readStore(legacy)) ?? {};
 }
 
+function readSavedStoreForMutation(
+  file: string,
+  directory: DirectoryAnchor,
+): Record<string, string> {
+  const current = readCredentialStoreForMutation(file, directory);
+  if (current !== undefined) return current;
+  const legacy = legacyUserDataPath("credentials.json");
+  if (legacy === undefined) return {};
+  return readCredentialStoreForMutation(legacy) ?? {};
+}
+
+function readCredentialStoreForMutation(
+  file: string,
+  directory?: DirectoryAnchor,
+): Record<string, string> | undefined {
+  let anchor = directory;
+  if (anchor === undefined) {
+    try {
+      anchor = captureDirectDirectorySync(path.dirname(file), "credential store directory");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw new Error("credential store is invalid, unsafe, or too large", { cause: error });
+    }
+  }
+  const anchoredFile = path.join(anchor.path, path.basename(file));
+  const value = readBoundedJsonForMutationSync(
+    anchoredFile,
+    USER_STORE_LIMITS.credentialsBytes,
+    "credential store",
+    anchor,
+  );
+  if (value === undefined) return undefined;
+  if (!record(value)) throw new Error("credential store has an unsupported structure");
+  const entries = Object.entries(value);
+  if (
+    entries.length > USER_STORE_LIMITS.credentialEntries ||
+    entries.some(([name, candidate]) => !credential(name, candidate))
+  ) throw new Error("credential store has invalid entries");
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
 function readStore(file: string): Record<string, string> | undefined {
   try {
-    const parsed = readBoundedJsonSync(file, USER_STORE_LIMITS.credentialsBytes);
+    const directory = captureDirectDirectorySync(
+      path.dirname(file),
+      "credential store directory",
+    );
+    const anchoredFile = path.join(directory.path, path.basename(file));
+    const parsed = readBoundedJsonSync(
+      anchoredFile,
+      USER_STORE_LIMITS.credentialsBytes,
+      directory,
+    );
     if (!record(parsed)) return {};
     // Anything that is not a string is not a key, whatever the file says.
     const entries = Object.entries(parsed);
@@ -169,16 +231,22 @@ function readStore(file: string): Record<string, string> | undefined {
   }
 }
 
-async function prepare(file: string): Promise<void> {
+async function prepare(file: string): Promise<DirectoryAnchor> {
   const directory = path.dirname(file);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  if (process.platform !== "win32") await chmod(directory, 0o700);
+  return preparePrivateDirectory(directory, "credential store directory");
 }
 
-async function persist(file: string, values: Record<string, string>): Promise<void> {
+async function persist(
+  file: string,
+  values: Record<string, string>,
+  directory: DirectoryAnchor,
+): Promise<void> {
   const text = `${JSON.stringify(values, null, 2)}\n`;
   assertStoreText(text, USER_STORE_LIMITS.credentialsBytes);
-  await atomicWrite(file, text, { mode: 0o600 });
+  await atomicWrite(file, text, {
+    mode: 0o600,
+    validate: async () => assertDirectoryAnchor(directory),
+  });
 }
 
 function assertCredential(name: string, value: string): void {

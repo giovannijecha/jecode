@@ -34,8 +34,8 @@ export function optionalInt(
   const value = args[name];
   if (value === undefined || value === null) return undefined;
   const n = typeof value === "string" ? Number(value) : value;
-  if (typeof n !== "number" || !Number.isInteger(n)) {
-    throw new Error(`"${name}" must be an integer`);
+  if (typeof n !== "number" || !Number.isSafeInteger(n)) {
+    throw new Error(`"${name}" must be a safe integer`);
   }
   return n;
 }

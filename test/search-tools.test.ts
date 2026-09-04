@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { stableFileExpectation } from "../src/bounded-file.ts";
 import { findFiles, portableSearch, searchText } from "../src/tools/search.ts";
-import { trySearchWithRipgrep } from "../src/tools/ripgrep.ts";
 import { builtinTools } from "../src/tools/index.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 
@@ -163,121 +163,27 @@ test("search skips binary files", async () => {
   assert.match(result.summary ?? "", /skipped 1/);
 });
 
-test("the optional ripgrep backend preserves matches and binary filtering", async (t) => {
-  const paths = ["src/a.ts", "src/nested/b.ts", "binary.dat"]
-    .map((relative) => path.join(ctx.root, relative));
-  const files = await Promise.all(paths.map(async (file) => ({
-    path: file,
-    bytes: (await fs.stat(file)).size,
-  })));
-  const result = await trySearchWithRipgrep({
-    root: ctx.root,
-    files,
-    query: "needle",
-    caseSensitive: false,
-    limit: 100,
-  });
-  if (result === undefined) {
-    t.skip("ripgrep is not installed");
-    return;
-  }
-
-  assert.deepEqual(
-    result.matches.map((match) => `${path.basename(match.path)}:${match.line}:${match.text}`),
-    ["a.ts:1:const Needle = 1;", "b.ts:1:needle here"],
-  );
-  assert.deepEqual(result.binaryPaths.map((file) => path.basename(file)), ["binary.dat"]);
-});
-
-test("the ripgrep accelerator rejects output beyond the requested result bound", {
-  skip: process.platform === "win32",
-}, async () => {
-  const area = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-ripgrep-bound-"));
-  const workspace = path.join(area, "workspace");
-  const bin = path.join(area, "bin");
-  const executable = path.join(bin, "rg");
-  const marker = path.join(area, "finished");
-  const before = process.env["PATH"];
-
+test("portable search rejects a candidate replaced after discovery", async () => {
+  const area = await fs.mkdtemp(path.join(os.tmpdir(), "jecode-search-replaced-"));
+  const file = path.join(area, "candidate.txt");
+  const parked = path.join(area, "candidate.old.txt");
   try {
-    await fs.mkdir(workspace);
-    await fs.mkdir(bin);
-    const paths = await Promise.all(Array.from({ length: 4 }, async (_, index) => {
-      const file = path.join(workspace, `file-${index}.txt`);
-      await fs.writeFile(file, "needle\nneedle\nneedle\n", "utf8");
-      return file;
-    }));
-    const source = [
-      "#!/usr/bin/env node",
-      'const fs = require("node:fs");',
-      `const paths = ${JSON.stringify(paths)};`,
-      `const marker = ${JSON.stringify(marker)};`,
-      "let index = 0;",
-      "const timer = setInterval(() => {",
-      "  if (index < 12) {",
-      "    const file = paths[Math.floor(index / 3) % paths.length];",
-      "    const event = { type: 'match', data: {",
-      "      path: { text: file },",
-      "      lines: { text: `needle ${index}\\n` },",
-      "      line_number: index % 3 + 1,",
-      "    } };",
-      "    process.stdout.write(`${JSON.stringify(event)}\\n`);",
-      "    index++;",
-      "    return;",
-      "  }",
-      "  clearInterval(timer);",
-      "  fs.writeFileSync(marker, 'finished');",
-      "}, 10);",
-    ].join("\n");
-    await fs.writeFile(executable, source, "utf8");
-    await fs.chmod(executable, 0o755);
-    process.env["PATH"] = [bin, path.dirname(process.execPath), before ?? ""]
-      .filter((entry) => entry !== "")
-      .join(path.delimiter);
+    await fs.writeFile(file, "ordinary text\n", "utf8");
+    const details = await fs.lstat(file, { bigint: true });
+    await fs.rename(file, parked);
+    await fs.writeFile(file, "outside needle\n", "utf8");
 
-    const files = await Promise.all(paths.map(async (file) => ({
-      path: file,
-      bytes: (await fs.stat(file)).size,
-    })));
-    const result = await trySearchWithRipgrep({
-      root: workspace,
-      files,
-      query: "needle",
-      caseSensitive: true,
-      limit: 3,
-    });
+    const result = await portableSearch(
+      [{ path: file, bytes: Number(details.size), expected: stableFileExpectation(details) }],
+      { root: area },
+      "needle",
+      true,
+      10,
+    );
 
-    assert.equal(result, undefined);
-    await assert.rejects(fs.access(marker), { code: "ENOENT" });
+    assert.deepEqual(result, { matches: [], skipped: 1 });
   } finally {
-    if (before === undefined) delete process.env["PATH"];
-    else process.env["PATH"] = before;
     await fs.rm(area, { recursive: true, force: true });
-  }
-});
-
-test("search falls back to the dependency-free scanner when ripgrep is unavailable", async () => {
-  const before = process.env["PATH"];
-  process.env["PATH"] = "";
-  try {
-    const file = path.join(ctx.root, "src", "a.ts");
-    const accelerated = await trySearchWithRipgrep({
-      root: ctx.root,
-      files: [{ path: file, bytes: (await fs.stat(file)).size }],
-      query: "needle",
-      caseSensitive: false,
-      limit: 100,
-    });
-    assert.equal(accelerated, undefined);
-
-    const result = await searchText.run({ query: "needle", pattern: "**/*.ts" }, ctx);
-    assert.deepEqual(result.output.split("\n"), [
-      "src/a.ts:1:const Needle = 1;",
-      "src/nested/b.ts:1:needle here",
-    ]);
-  } finally {
-    if (before === undefined) delete process.env["PATH"];
-    else process.env["PATH"] = before;
   }
 });
 

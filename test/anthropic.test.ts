@@ -102,10 +102,51 @@ test("Anthropic can send effort without enabling adaptive thinking", async (cont
     tools: [],
     maxTokens: 100,
     effort: "high",
+    identity: {
+      conversationId: "11111111-1111-4111-8111-111111111111",
+      cacheKey: "jecode-stable-cache",
+      purpose: "turn",
+    },
   });
 
   assert.equal(body["thinking"], undefined);
   assert.deepEqual(body["output_config"], { effort: "high" });
+  assert.deepEqual(body["cache_control"], { type: "ephemeral" });
+});
+
+test("Anthropic omits automatic cache creation from compaction requests", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.ANTHROPIC_API_KEY;
+  let body: Record<string, unknown> = {};
+  process.env.ANTHROPIC_API_KEY = "test-key";
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response("data: {\"type\":\"message_stop\"}\n\n", {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previousKey;
+  });
+
+  await anthropic.send({
+    model: "claude-opus-4-5",
+    system: "summarize",
+    messages: [],
+    tools: [],
+    maxTokens: 100,
+    effort: "high",
+    identity: {
+      conversationId: "11111111-1111-4111-8111-111111111111",
+      cacheKey: "jecode-stable-cache",
+      purpose: "compaction",
+    },
+  });
+
+  assert.equal(body["cache_control"], undefined);
 });
 
 test("Anthropic enables adaptive thinking and max effort for Mythos Preview", async (context) => {

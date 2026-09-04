@@ -77,6 +77,12 @@ always appends authoritative assistant messages and tool results to both, but a
 context hook may replace only the provider-facing array. One definite 400/413
 context-limit rejection can therefore be retried after compaction without
 replaying an ambiguous generation failure or rewriting durable history.
+Provider-facing tool evidence is bounded independently from canonical history.
+Each ordinary result keeps an append-stable excerpt, so adding later evidence
+does not rewrite the request prefix and defeat prompt caching. Semantic
+compaction establishes the only normal boundary that may replace that prefix;
+if compaction cannot recover a saturated request, a bounded newest-first
+projection remains as the final safety fallback.
 
 Before every provider request, the controller resolves the current model
 context policy. Provider adapters cache stable metadata themselves, while this
@@ -155,6 +161,10 @@ Model selection stores the provider and model together, while the footer keeps
 that route visible. Connecting an account or adding a key never changes it.
 OpenAI API requests carry a random client request identifier and bounded server
 request metadata for support correlation without logging prompts or secrets.
+Every controller session also derives one stable, non-secret request identity
+for each provider from its durable conversation or process-local session state.
+Retries and subsequent requests on that route reuse it for provider cache
+affinity without coupling API-key traffic to ChatGPT account traffic.
 Refusals, incomplete responses, nested failures, and usage are normalized
 rather than disappearing at the stream boundary.
 Malformed, scalar, and array tool arguments retain a transient invalid marker
@@ -214,6 +224,9 @@ the irreducible interval between that final check and the rename.
 
 File reads and whole-file mutations accept regular files only. Reads use
 bounded, cancellable handles that cannot wait on FIFOs or other special files.
+Identity-sensitive metadata remains bigint, and discovery hands the exact file
+generation to the descriptor reader. A replacement between discovery and open
+is rejected rather than searched.
 Mutations enforce independent byte, character, and line budgets; existing
 content is read through a bounded file handle, and `replace_all` checks its
 projected size before allocating the result. Files above that budget remain
@@ -227,23 +240,17 @@ The built-in tools are:
 | `read_file` | Allow | Shared | Progressive UTF-8 read, bounded output, canonical path |
 | `list_dir` | Allow | Shared | Bounded entries and output from one canonical directory |
 | `find_files` | Allow | Shared | Bounded recursive glob; skips VCS, dependencies, symlinks |
-| `search_text` | Allow | Shared | Bounded literal search; optional `rg`, built-in fallback |
+| `search_text` | Allow | Shared | Bounded literal search over verified file generations |
 | `edit_file` | Ask | Exclusive | Bounded exact replacement, atomic write, preview check |
 | `write_file` | Ask | Exclusive | Bounded whole-file replacement, atomic write, preview check |
 | `run_command` | Ask | Exclusive | Workspace working directory, timeout, bounded output |
 
-`search_text` enumerates and validates candidates through Jecode's own bounded
-workspace walk. For larger candidate sets, an optional `rg` from `PATH`
-accelerates literal matching over those files with a credential-filtered
-environment. Jecode resolves the executable to a canonical absolute path and
-rejects candidates controlled by the workspace, so a repository cannot shadow
-the helper. Smaller searches and machines without a trusted `rg` use the
-dependency-free TypeScript scanner. Candidate validation and portable reads run
-in bounded batches, while their results retain canonical file order. `rg` is
-never required at install or runtime. Because ripgrep's own match limit applies
-per file, Jecode stops and rejects an accelerated batch as soon as its raw
-events exceed the requested global result limit; the portable scanner then
-produces the bounded answer.
+`search_text` enumerates candidates through Jecode's bounded workspace walk and
+captures each regular file's identity while its parent directory is stable.
+The owned scanner opens those candidates in bounded parallel batches, checks
+the captured identity and workspace boundary throughout the read, and retains
+canonical file order. It never delegates workspace reads to an executable from
+`PATH`.
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
 user account can address, which is why every exact command asks by default
@@ -292,14 +299,19 @@ before content is read or parsed: 64 KiB for settings, 256 KiB for saved API
 keys, and 128 KiB for OAuth accounts. The same caps apply before writes, and
 known fields also have count and string limits. Malformed, oversized, or
 out-of-schema state falls back without becoming startup work proportional to
-attacker-controlled input. Credential redaction uses a bounded secret set and
-fails closed if that supported set is exceeded.
+attacker-controlled input. Startup remains tolerant and treats damaged state as
+unconfigured; a mutation instead rejects unknown, malformed, or oversized state
+without rewriting it. Credential redaction uses a bounded secret set and fails
+closed if that supported set is exceeded.
 
 Saving is explicit. Secret files use owner-only modes on POSIX; Windows relies
-on the user profile ACL. Replacement uses the same atomic writer as workspace
-files. Every persistent mutation serializes through a bounded cross-process
-lock and rereads the store inside it, so concurrent Jecode sessions preserve
-unrelated settings, keys, and rotated tokens. Age alone never authorizes stale
+on the user profile ACL. Store directories are captured as canonical direct
+anchors, so an alias retarget cannot redirect a later lock or write. Replacement
+uses the same atomic writer as workspace files; POSIX attempts a
+parent-directory sync after rename. Every persistent mutation serializes
+through a bounded cross-process lock and rereads the store inside it, so
+concurrent Jecode sessions preserve unrelated settings, keys, and rotated
+tokens. Age alone never authorizes stale
 lock recovery: a live owner keeps the lock through a slow network refresh, and
 an abandoned lock is removed owner-first so competing waiters cannot steal a
 newly acquired lock. `/providers` shows only API-key sources or a non-secret
@@ -391,20 +403,22 @@ settled tool durations. The strict decoder continues to accept every older
 schema and upgrades the active node on its next checkpoint.
 
 The interactive persistence owner retains the last fully verified snapshot and
-its lease. Conversation nodes are deeply immutable, so a checkpoint can verify
+its exact store-scoped lease. Conversation nodes are deeply immutable, so a
+checkpoint can verify
 shared history by identity, update aggregate size counters for only the changed
 node, reread the bounded head and lease, then write one node followed by the
 head and catalogue summary. A bounded checkpoint marker precedes the node
 mutation, so a crash cannot leave an old summary looking current while an
 adjacent node awaits recovery. A changed head, replaced lease, rematerialized
-history, or unexpected node outside that snapshot fails closed. Resume always
-reads and validates the complete on-disk tree; the persisted conversation
-schema is unchanged.
+history, or unexpected node outside that snapshot fails closed. Node reads use
+bounded parallel batches with per-file, in-flight, and aggregate byte caps.
+Resume always reads and validates the complete on-disk tree; the persisted
+conversation schema is unchanged.
 
 Session catalogues use the canonical real workspace path, so another project
-cannot appear in the resume picker. A process lease prevents simultaneous
-resume of the same logical session. Its directory and identifier remain stable
-across exits and resumes; each resumable turn advances the head inside that
+cannot appear in the resume picker. Generation-specific process leases prevent
+simultaneous resume of the same logical session. Its directory and identifier
+remain stable across exits and resumes; each resumable turn advances the head inside that
 session's tree, while `/new` or a fresh launch creates another session. A
 failed or user-interrupted turn resumes exactly with its partial visible
 evidence and explicit outcome. An abrupt process stop inside a tool loop leaves
@@ -603,7 +617,8 @@ logic is unit tested. Integration tests cover the packaged command, bootstrap
 routing, batch conversations, durable session recovery, context projection and
 compaction, TUI screen ownership and restoration, stream assembly, HTTP retry
 and cancellation, provider request bodies, tool-loop semantics,
-symlink/junction confinement, atomic preview checks, shell process-tree
+symlink/junction confinement, stable file generations, generation-safe leases,
+atomic preview checks, shell process-tree
 termination, credential precedence, and bounded search.
 
 Canonical checks:

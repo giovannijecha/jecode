@@ -85,6 +85,68 @@ test("oversized and out-of-schema account stores are treated as disconnected", a
   });
 });
 
+test("an account mutation preserves an unreadable existing store", async () => {
+  await inStore(async () => {
+    const before = '{"version":1,"accounts":';
+    await writeFile(accountsPath(), before, "utf8");
+    reloadAccounts();
+
+    await assert.rejects(
+      updateOpenAICodexAccount(async () => ACCOUNT),
+      /account store is invalid, unsafe, or too large/,
+    );
+    assert.equal(await readFile(accountsPath(), "utf8"), before);
+  });
+});
+
+test("an account mutation preserves an invalid existing account", async () => {
+  await inStore(async () => {
+    const before = JSON.stringify({
+      version: 1,
+      accounts: { "openai-codex": { accessToken: "partial" } },
+    });
+    await writeFile(accountsPath(), before, "utf8");
+    reloadAccounts();
+
+    await assert.rejects(
+      updateOpenAICodexAccount(async () => ACCOUNT),
+      /invalid OpenAI account/,
+    );
+    assert.equal(await readFile(accountsPath(), "utf8"), before);
+  });
+});
+
+test("an account mutation preserves unknown store fields", async () => {
+  await inStore(async () => {
+    const before = JSON.stringify({ version: 1, accounts: {}, future: true });
+    await writeFile(accountsPath(), before, "utf8");
+    reloadAccounts();
+
+    await assert.rejects(
+      updateOpenAICodexAccount(async () => ACCOUNT),
+      /unsupported structure/,
+    );
+    assert.equal(await readFile(accountsPath(), "utf8"), before);
+  });
+});
+
+test("an account mutation preserves unknown account fields", async () => {
+  await inStore(async () => {
+    const before = JSON.stringify({
+      version: 1,
+      accounts: { "openai-codex": { ...ACCOUNT, future: true } },
+    });
+    await writeFile(accountsPath(), before, "utf8");
+    reloadAccounts();
+
+    await assert.rejects(
+      updateOpenAICodexAccount(async () => ACCOUNT),
+      /unsupported structure/,
+    );
+    assert.equal(await readFile(accountsPath(), "utf8"), before);
+  });
+});
+
 test("an account mutation cannot persist an oversized token", async () => {
   await inStore(async () => {
     await assert.rejects(

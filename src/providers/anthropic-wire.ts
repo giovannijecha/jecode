@@ -118,11 +118,16 @@ export function fromWireResponse(data: AnthropicResponse): Message {
 function normalizeUsage(data: AnthropicResponse): Usage | undefined {
   const usage = data.usage;
   if (usage === undefined) return undefined;
+  const uncached = wireTokenCount(usage.input_tokens);
+  const cached = wireTokenCount(usage.cache_read_input_tokens);
+  const cacheWrite = wireTokenCount(usage.cache_creation_input_tokens);
   return {
-    inputTokens: wireTokenCount(usage.input_tokens),
+    // Anthropic reports these as disjoint buckets. Jecode's provider-neutral
+    // input count represents the complete request context, as OpenAI's does.
+    inputTokens: uncached + cached + cacheWrite,
     outputTokens: wireTokenCount(usage.output_tokens),
-    cachedInputTokens: wireTokenCount(usage.cache_read_input_tokens),
-    cacheWriteInputTokens: wireTokenCount(usage.cache_creation_input_tokens),
+    cachedInputTokens: cached,
+    cacheWriteInputTokens: cacheWrite,
     reasoningTokens: 0,
   };
 }

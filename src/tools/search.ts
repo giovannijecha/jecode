@@ -1,13 +1,17 @@
 // Bounded, read-only workspace discovery without borrowing a shell.
 
 import * as fs from "node:fs/promises";
-import type { Dirent } from "node:fs";
 import * as path from "node:path";
+import { BoundedFileError, readBoundedFile } from "../bounded-file.ts";
+import type { StableFileExpectation } from "../bounded-file.ts";
+import {
+  readStableDirectory,
+  StableDirectoryError,
+} from "../stable-directory.ts";
+import type { StableDirectoryEntry } from "../stable-directory.ts";
 import type { Tool, ToolContext } from "./types.ts";
 import { optionalBool, optionalInt, optionalString, requireString } from "./args.ts";
 import { displayPath, resolveExistingInRoot } from "./paths.ts";
-import { trySearchWithRipgrep } from "./ripgrep.ts";
-import type { SearchFile } from "./ripgrep.ts";
 import { leadingText } from "./text-boundary.ts";
 
 const DEFAULT_RESULTS = 100;
@@ -17,11 +21,13 @@ const MAX_FILE_BYTES = 1_000_000;
 const MAX_MATCH_LINE = 500;
 const MAX_GLOB_CHARS = 512;
 const PORTABLE_SEARCH_CONCURRENCY = 8;
-const RG_PREFIX_BYTES = 2_000_000;
-const RG_PREFIX_FILES = 500;
-const MIN_RG_TAIL_BYTES = 2_000_000;
-const MIN_RG_TAIL_FILES = 500;
 const SKIP = new Set([".git", ".hg", ".svn", "node_modules"]);
+
+export type SearchFile = Readonly<{
+  path: string;
+  bytes: number;
+  expected?: StableFileExpectation;
+}>;
 
 export const findFiles: Tool = {
   name: "find_files",
@@ -92,18 +98,13 @@ export const searchText: Tool = {
     const match = pattern === undefined || pattern === "" ? () => true : glob(pattern);
     const limit = resultLimit(args);
     const found: string[] = [];
-    const candidates: string[] = [];
-    const prefix: SearchFile[] = [];
-    const tail: SearchFile[] = [];
+    const pending: SearchFile[] = [];
     let skipped = 0;
-    let prefixBytes = 0;
-    let prefixFiles = 0;
-    let tailBytes = 0;
 
-    const flushPrefix = async (): Promise<boolean> => {
-      if (prefix.length === 0) return false;
+    const flushPending = async (): Promise<boolean> => {
+      if (pending.length === 0) return false;
       const searched = await portableSearch(
-        prefix.splice(0),
+        pending.splice(0),
         scoped,
         needle,
         sensitive,
@@ -114,68 +115,19 @@ export const searchText: Tool = {
       return found.length >= limit;
     };
 
-    const flushCandidates = async (): Promise<boolean> => {
-      if (candidates.length === 0) return false;
-      const inspected = await Promise.all(
-        candidates.splice(0).map((lexical) => inspectCandidate(scoped.root, lexical)),
-      );
-      checkAbort(ctx.signal);
-      for (const result of inspected) {
-        if ("error" in result) {
-          if (!skippable(result.error)) throw result.error;
-          skipped++;
-          continue;
-        }
-        const candidate = result.file;
-        if (candidate.bytes > MAX_FILE_BYTES) {
-          skipped++;
-          continue;
-        }
-        if (
-          prefixFiles + 1 > RG_PREFIX_FILES ||
-          prefixBytes + candidate.bytes > RG_PREFIX_BYTES
-        ) {
-          tail.push(candidate);
-          tailBytes += candidate.bytes;
-          continue;
-        }
-        prefixFiles++;
-        prefixBytes += candidate.bytes;
-        prefix.push(candidate);
-        if (prefix.length >= PORTABLE_SEARCH_CONCURRENCY && await flushPrefix()) return true;
-      }
-      return false;
-    };
-
-    const walked = await walk(start, scoped, async (lexical) => {
+    const walked = await walk(start, scoped, async (lexical, expected) => {
       const relative = displayPath(scoped.root, lexical);
       if (!match(relative)) return false;
-      candidates.push(lexical);
-      return candidates.length >= PORTABLE_SEARCH_CONCURRENCY
-        ? await flushCandidates()
-        : false;
+      const bytes = Number(expected.size);
+      if (bytes > MAX_FILE_BYTES) {
+        skipped++;
+        return false;
+      }
+      pending.push({ path: lexical, bytes, expected });
+      return pending.length >= PORTABLE_SEARCH_CONCURRENCY && await flushPending();
     });
 
-    if (found.length < limit) await flushCandidates();
-    if (found.length < limit) await flushPrefix();
-
-    const accelerated = found.length < limit && preferRipgrep(tail, tailBytes)
-      ? await trySearchWithRipgrep({
-          root: scoped.root,
-          files: tail,
-          query,
-          caseSensitive: sensitive,
-          limit: limit - found.length,
-          signal: ctx.signal,
-        })
-      : undefined;
-    const portable = found.length < limit && accelerated === undefined && tail.length > 0
-      ? await portableSearch(tail, scoped, needle, sensitive, limit - found.length)
-      : undefined;
-    found.push(...(portable?.matches ?? accelerated?.matches.map((match) => (
-      `${displayPath(scoped.root, match.path)}:${match.line}:${clip(match.text)}`
-    )) ?? []));
-    skipped += portable?.skipped ?? accelerated?.binaryPaths.length ?? 0;
+    if (found.length < limit) await flushPending();
 
     const extra = skipped === 0 ? "" : ` · skipped ${skipped} binary/large/unreadable`;
     return {
@@ -191,7 +143,7 @@ export async function portableSearch(
   needle: string,
   sensitive: boolean,
   limit: number,
-  read: SearchReader = readSearchFile,
+  read?: SearchReader,
 ): Promise<{ matches: string[]; skipped: number }> {
   const found: string[] = [];
   let skipped = 0;
@@ -217,17 +169,6 @@ export async function portableSearch(
   return { matches: found, skipped };
 }
 
-type CandidateInspection = { file: SearchFile } | { error: unknown };
-
-async function inspectCandidate(root: string, lexical: string): Promise<CandidateInspection> {
-  try {
-    const file = await resolveExistingInRoot(root, lexical);
-    return { file: { path: file, bytes: (await fs.stat(file)).size } };
-  } catch (error) {
-    return { error };
-  }
-}
-
 type SearchReader = (file: string, signal: AbortSignal | undefined) => Promise<Buffer>;
 
 async function searchFile(
@@ -236,11 +177,13 @@ async function searchFile(
   needle: string,
   sensitive: boolean,
   limit: number,
-  read: SearchReader,
+  read?: SearchReader,
 ): Promise<string[] | undefined> {
   let data: Buffer;
   try {
-    data = await read(file.path, ctx.signal);
+    data = read === undefined
+      ? await readVerifiedSearchFile(file, ctx)
+      : await read(file.path, ctx.signal);
   } catch (error) {
     checkAbort(ctx.signal);
     if (skippable(error)) return undefined;
@@ -261,12 +204,21 @@ async function searchFile(
   return found;
 }
 
-function readSearchFile(file: string, signal: AbortSignal | undefined): Promise<Buffer> {
-  return signal === undefined ? fs.readFile(file) : fs.readFile(file, { signal });
-}
-
-function preferRipgrep(files: readonly SearchFile[], bytes: number): boolean {
-  return files.length >= MIN_RG_TAIL_FILES || bytes >= MIN_RG_TAIL_BYTES;
+async function readVerifiedSearchFile(file: SearchFile, ctx: ToolContext): Promise<Buffer> {
+  if (file.expected === undefined) {
+    throw new BoundedFileError("changed", "search file has no verified identity");
+  }
+  return readBoundedFile(file.path, MAX_FILE_BYTES, {
+    label: "search file",
+    signal: ctx.signal,
+    expected: file.expected,
+    validate: async () => {
+      const confirmed = await resolveExistingInRoot(ctx.root, file.path);
+      if (confirmed !== file.path) {
+        throw new BoundedFileError("changed", "search file left the workspace");
+      }
+    },
+  });
 }
 
 type WalkResult = { capped: boolean };
@@ -274,46 +226,64 @@ type WalkResult = { capped: boolean };
 async function walk(
   start: string,
   ctx: ToolContext,
-  visit: (file: string) => Promise<boolean>,
+  visit: (file: string, expected: StableFileExpectation) => Promise<boolean>,
 ): Promise<WalkResult> {
-  const pending: Array<{ directory: string; entries: Dirent<string>[]; next: number }> = [];
+  const pending: Array<{
+    directory: string;
+    entries: Array<StableDirectoryEntry | undefined>;
+    next: number;
+  }> = [];
   let seen = 0;
+  let buffered = 0;
+  let capped = false;
 
-  const enter = async (lexical: string): Promise<void> => {
+  const enter = async (lexical: string): Promise<boolean> => {
     checkAbort(ctx.signal);
     const directory = await resolveExistingInRoot(ctx.root, lexical);
-    let entries: Dirent<string>[];
+    const room = MAX_VISITED - seen - buffered;
+    if (room <= 0) {
+      capped = true;
+      return false;
+    }
     try {
-      entries = await fs.readdir(directory, { withFileTypes: true, encoding: "utf8" });
+      const inspected = await readStableDirectory(ctx.root, directory, {
+        maxEntries: room,
+        signal: ctx.signal,
+      });
+      if (inspected.capped) capped = true;
+      const entries = [...inspected.entries];
+      buffered += entries.length;
+      pending.push({ directory, entries, next: 0 });
     } catch (error) {
-      if (skippable(error)) return;
+      if (skippable(error)) return true;
       throw error;
     }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    pending.push({ directory, entries, next: 0 });
+    return true;
   };
 
-  await enter(start);
+  if (!await enter(start)) return { capped: true };
   while (pending.length > 0) {
     checkAbort(ctx.signal);
     const frame = pending[pending.length - 1];
     if (frame === undefined) break;
-    const entry = frame.entries[frame.next++];
+    const index = frame.next++;
+    const entry = frame.entries[index];
     if (entry === undefined) {
       pending.pop();
       continue;
     }
+    frame.entries[index] = undefined;
+    buffered--;
 
-    if (++seen > MAX_VISITED) return { capped: true };
-    if (entry.isSymbolicLink()) continue;
+    seen++;
     const target = path.join(frame.directory, entry.name);
-    if (entry.isDirectory()) {
+    if (entry.kind === "directory") {
       if (!SKIP.has(entry.name)) await enter(target);
-    } else if (entry.isFile() && (await visit(target))) {
-      return { capped: false };
+    } else if (await visit(target, entry.expected)) {
+      return { capped };
     }
   }
-  return { capped: false };
+  return { capped };
 }
 
 async function startAt(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
@@ -459,5 +429,6 @@ function checkAbort(signal: AbortSignal | undefined): void {
 }
 
 function skippable(error: unknown): boolean {
-  return ["EACCES", "EPERM", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "");
+  return error instanceof BoundedFileError || error instanceof StableDirectoryError ||
+    ["EACCES", "EPERM", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "");
 }

@@ -8,6 +8,14 @@ install artifacts and provenance are published with the [npm package].
 
 ### Changed
 
+- Kept provider request identity and tool-result excerpts stable across growing
+  turns so retries and ordinary continuation preserve cacheable prefixes.
+- Made context estimation and compaction planning incremental, kept session
+  checkpoints constant-time, and bounded catalogue reads and resume loads.
+- Replaced external search acceleration with Jecode's owned bounded scanner,
+  carrying verified file generations from discovery through descriptor reads.
+- Updated development type checking to TypeScript 7 and current Node.js types;
+  the shipped runtime still has zero third-party dependencies.
 - Kept the selected provider route visible in the footer and distinguished
   separately billed OpenAI API models from ChatGPT account models in provider
   and model menus.
@@ -16,6 +24,15 @@ install artifacts and provenance are published with the [npm package].
 
 ### Fixed
 
+- Hardened automatic and overflow compaction as distinct recovery paths,
+  including cancellation, circuit-breaker reset, and successful retry coverage.
+- Made session and cross-process locks generation-safe, required exact
+  store-issued ownership for checkpoints, and bounded every durable read.
+- Anchored session, settings, credential, and OAuth storage to canonical direct
+  directories; mutations now preserve malformed or unknown state instead of
+  silently rewriting it.
+- Rejected workspace files replaced between discovery and search, normalized
+  legacy lease races, and preserved the primary failure during cleanup.
 - Retried only explicit transient generation rate limits, while treating
   billing and quota exhaustion as immediate actionable failures.
 - Replaced a runner-sensitive context-estimation wall-clock assertion with its

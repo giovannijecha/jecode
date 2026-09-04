@@ -6,6 +6,7 @@
 
 import type { Session } from "./session.ts";
 import { ConversationTree } from "./conversation.ts";
+import { resetRequestIdentity } from "./request-identity.ts";
 import type { NoticeBlock } from "./tui/blocks.ts";
 import type { Picker } from "./tui/picker.ts";
 import type { Field } from "./tui/field.ts";
@@ -102,6 +103,7 @@ export async function handleCommand(
 
     case "new":
       await host.reset?.();
+      resetRequestIdentity(session);
       session.conversation = ConversationTree.empty();
       session.usage = emptyUsage();
       host.emit({ kind: "notice", text: "new session", tone: "info" });

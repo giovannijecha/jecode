@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import {
@@ -17,6 +26,11 @@ import {
   storePath,
 } from "../src/credentials.ts";
 import { USER_STORE_LIMITS } from "../src/user-store.ts";
+import {
+  createProcessLeaseDirectory,
+  processLease,
+  processLeaseToken,
+} from "../src/process-lease.ts";
 
 const VAR = "JECODE_TEST_KEY";
 
@@ -195,6 +209,112 @@ test("credential stores bound entry count, names, and values", async () => {
     reload();
     assert.deepEqual(credentialValues(), []);
   });
+});
+
+test("a credential mutation preserves a malformed existing store", async () => {
+  await inStore(async () => {
+    const before = `{"${VAR}":`;
+    await writeFile(storePath(), before, "utf8");
+    reload();
+
+    await assert.rejects(
+      keep(`${VAR}_2`, "new-secret"),
+      /credential store is invalid, unsafe, or too large/,
+    );
+    assert.equal(await readFile(storePath(), "utf8"), before);
+  });
+});
+
+test("credential reads and writes refuse a linked store directory", async (context) => {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-linked-store-"));
+  const outside = await mkdtemp(path.join(tmpdir(), "jecode-linked-target-"));
+  const linked = path.join(root, "home");
+  const original = JSON.stringify({ [VAR]: "outside-secret" });
+  await writeFile(path.join(outside, "credentials.json"), original, "utf8");
+  try {
+    await symlink(outside, linked, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      context.skip("creating directory links is unavailable for this account");
+      return;
+    }
+    throw error;
+  }
+
+  const before = process.env["JECODE_HOME"];
+  process.env["JECODE_HOME"] = linked;
+  reload();
+  try {
+    assert.equal(keyFor(VAR), undefined);
+    await assert.rejects(keep(VAR, "new-secret"), /not a direct directory/);
+    assert.equal(await readFile(path.join(outside, "credentials.json"), "utf8"), original);
+  } finally {
+    restore("JECODE_HOME", before);
+    reload();
+    await unlink(linked).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("retargeting an ancestor alias cannot redirect a credential write", async (context) => {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-store-alias-"));
+  const first = await mkdtemp(path.join(tmpdir(), "jecode-store-first-"));
+  const second = await mkdtemp(path.join(tmpdir(), "jecode-store-second-"));
+  const firstHome = path.join(first, "home");
+  const secondHome = path.join(second, "home");
+  const alias = path.join(root, "alias");
+  await mkdir(firstHome);
+  await mkdir(secondHome);
+  try {
+    await symlink(first, alias, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    await rm(first, { recursive: true, force: true });
+    await rm(second, { recursive: true, force: true });
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      context.skip("creating directory links is unavailable for this account");
+      return;
+    }
+    throw error;
+  }
+
+  const before = process.env["JECODE_HOME"];
+  process.env["JECODE_HOME"] = path.join(alias, "home");
+  reload();
+  const canonicalFile = path.join(firstHome, "credentials.json");
+  const generation = await createProcessLeaseDirectory(
+    `${canonicalFile}.lock`,
+    processLeaseToken(),
+  );
+  const blocker = processLease(`${canonicalFile}.lock`, generation);
+  try {
+    const pending = keep(VAR, "anchored-secret");
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    await unlink(alias);
+    await symlink(second, alias, process.platform === "win32" ? "junction" : "dir");
+    assert.equal(await blocker.release(), true);
+    await pending;
+
+    assert.deepEqual(
+      JSON.parse(await readFile(canonicalFile, "utf8")),
+      { [VAR]: "anchored-secret" },
+    );
+    await assert.rejects(
+      readFile(path.join(secondHome, "credentials.json"), "utf8"),
+      (error: NodeJS.ErrnoException) => error.code === "ENOENT",
+    );
+  } finally {
+    await blocker.release().catch(() => undefined);
+    restore("JECODE_HOME", before);
+    reload();
+    await unlink(alias).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+    await rm(first, { recursive: true, force: true });
+    await rm(second, { recursive: true, force: true });
+  }
 });
 
 test("new session credentials are refused before exceeding their bounds", async () => {

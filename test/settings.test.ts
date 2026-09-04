@@ -113,6 +113,37 @@ test("oversized and truncated settings stores fall back before parsing", async (
   });
 });
 
+test("a settings mutation preserves a truncated existing store", async () => {
+  await inSettingsHome(async () => {
+    const before = '{"provider":"ollama"';
+    await writeFile(settingsPath(), before, "utf8");
+    reloadSettings();
+
+    await assert.rejects(
+      updateSettings({ effort: "high" }),
+      /settings store is invalid, unsafe, or too large/,
+    );
+    assert.equal(await readFile(settingsPath(), "utf8"), before);
+  });
+});
+
+test("a settings mutation preserves unsupported or invalid stored fields", async () => {
+  await inSettingsHome(async () => {
+    for (const invalid of [
+      { futureSetting: true },
+      { provider: "unknown" },
+      { models: { ollama: "x".repeat(USER_STORE_LIMITS.model + 1) } },
+    ]) {
+      const before = JSON.stringify(invalid);
+      await writeFile(settingsPath(), before, "utf8");
+      reloadSettings();
+
+      await assert.rejects(updateSettings({ effort: "high" }), /settings store has/);
+      assert.equal(await readFile(settingsPath(), "utf8"), before);
+    }
+  });
+});
+
 test("settings discard strings outside their bounded schema", async () => {
   await inSettingsHome(async () => {
     await writeFile(settingsPath(), JSON.stringify({

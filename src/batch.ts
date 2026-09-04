@@ -9,6 +9,10 @@ import type { Session } from "./session.ts";
 import type { ContextRequest, ControllerEvents } from "./controller.ts";
 import { runTurn } from "./controller.ts";
 import { resolveContextPolicy } from "./context/capacity.ts";
+import {
+  automaticCompactionGate,
+  automaticCompactionKey,
+} from "./context/automatic.ts";
 import { compactContext } from "./context/compactor.ts";
 import { compactSession } from "./context/manual.ts";
 import type { ContextAnchor } from "./context/projection.ts";
@@ -22,6 +26,8 @@ import { terminalText } from "./ui/terminal-text.ts";
 import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "./usage.ts";
 import { assertPromptLength, boundedInputLines } from "./input-boundary.ts";
 import { providerFailure } from "./provider-errors.ts";
+import { toolSpecs } from "./tools/index.ts";
+import { requestIdentityForSession } from "./request-identity.ts";
 
 export type BatchEnvironment = {
   lines?: AsyncIterable<string>;
@@ -36,6 +42,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
   const signal = environment.signal;
   const source = environment.lines ?? boundedInputLines(stdin);
   const lines = abortableLines(source, signal);
+  const automaticCompaction = automaticCompactionGate();
 
   const emit = (block: Block): void => {
     for (const line of renderBatch(block, width, session.palette)) write(`${line}\n`);
@@ -53,7 +60,14 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
         if ((await handleCommand(line, session, {
           emit,
           signal,
-          compact: () => compactSession(session, { signal }),
+          reset: () => {
+            automaticCompaction.reset();
+          },
+          compact: async () => {
+            const result = await compactSession(session, { signal });
+            if (result === "compacted") automaticCompaction.reset();
+            return result;
+          },
         })) === "exit") break;
         continue;
       }
@@ -79,6 +93,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
       modelHistory.push(structuredClone(user));
 
       const turn = events(emit, session);
+      const specs = toolSpecs(session.tools);
       const commit = (checkpoint: readonly Message[], settlement: "checkpointed" | "completed") => {
         session.conversation = session.conversation.commit({
           ...(nodeId === undefined ? {} : { nodeId }),
@@ -107,7 +122,16 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
         ) {
           return undefined;
         }
-        const force = request.reason === "overflow";
+        const force = request.reason === "overflow" || request.projectionSaturated;
+        const key = automaticCompactionKey(
+          session.provider.id,
+          session.model,
+          nodeId ?? prospectiveNodeId,
+          checkpoint.length,
+        );
+        const attempt = { key, reason: request.reason } as const;
+        if (!automaticCompaction.allows(attempt)) return undefined;
+        let attempted = false;
         const result = await compactContext({
           provider: session.provider,
           model: session.model,
@@ -120,8 +144,21 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
           estimatedInputTokens: request.inputTokens,
           force,
           policy: request.policy,
+          requestEnvelope: {
+            system: session.system,
+            tools: specs,
+            maxOutputTokens: session.config.maxTokens,
+          },
+          requestIdentity: requestIdentityForSession(session),
+          onBegin: () => {
+            attempted = true;
+          },
         });
-        if (result === undefined) return undefined;
+        if (result === undefined) {
+          if (attempted && signal?.aborted !== true) automaticCompaction.failed(attempt);
+          return undefined;
+        }
+        automaticCompaction.succeeded(attempt);
         context = result.anchor;
         if (result.usage !== undefined) recordAuxiliaryUsage(session.usage, result.usage);
         return result.messages;
@@ -134,6 +171,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
           reason: "budget",
           policy: await policy(),
           inputTokens: session.usage.lastInputTokens,
+          projectionSaturated: false,
         });
         if (compacted !== undefined) commit(checkpoint, settlement);
         return compacted;
@@ -208,6 +246,7 @@ function options(session: Session, contextPolicy: () => Promise<ContextPolicy>) 
     maxTokens: session.config.maxTokens,
     contextPolicy,
     effort: session.config.effort,
+    requestIdentity: requestIdentityForSession(session),
     maxModelRequests: session.config.maxModelRequests,
     toolContext: { root: session.config.root },
   };

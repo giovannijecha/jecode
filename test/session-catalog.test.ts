@@ -108,7 +108,17 @@ test("catalogue repairs a summary that no longer matches the durable head", asyn
     const store = await DurableSessionStore.open(fixture.workspace, fixture.sessions);
     const first = turn(ConversationTree.empty(), 0, "first", "one");
     const published = await store.publish(first);
-    const updated = await store.checkpoint(published, turn(first, 1, "second", "two"));
+    const lease = await store.claim(published.meta.id);
+    let updated;
+    try {
+      updated = await store.checkpoint(
+        published,
+        turn(first, 1, "second", "two"),
+        lease,
+      );
+    } finally {
+      await lease.close();
+    }
     const directory = sessionDirectory(fixture.sessions, store, published.meta.id);
     await writeFile(
       path.join(directory, SESSION_CATALOG_FILE),

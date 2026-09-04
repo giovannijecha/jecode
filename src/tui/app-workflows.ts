@@ -5,6 +5,10 @@ import { runTurn } from "../controller.ts";
 import type { ContextRequest } from "../controller.ts";
 import type { TurnFailure, TurnSettlement } from "../conversation.ts";
 import { resolveContextPolicy } from "../context/capacity.ts";
+import {
+  automaticCompactionGate,
+  automaticCompactionKey,
+} from "../context/automatic.ts";
 import { compactContext } from "../context/compactor.ts";
 import { compactSession } from "../context/manual.ts";
 import type { ContextAnchor } from "../context/projection.ts";
@@ -19,6 +23,8 @@ import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "../usage.
 import { selectTimeline } from "../timeline.ts";
 import type { SessionPermissions } from "../permissions.ts";
 import type { Message } from "../types.ts";
+import { toolSpecs } from "../tools/index.ts";
+import { resetRequestIdentity, requestIdentityForSession } from "../request-identity.ts";
 import type { Activity } from "./activity.ts";
 import { transition } from "./activity.ts";
 import type { AppActions } from "./app-input.ts";
@@ -52,6 +58,7 @@ type WorkflowOptions = {
 export function appWorkflows(options: WorkflowOptions): AppActions {
   const { session, state, permissions, feedback } = options;
   let activeSteering: SteeringInbox | undefined;
+  const automaticCompaction = automaticCompactionGate();
 
   const choose = (picker: Picker) =>
     new Promise<number | undefined>((resolve) => {
@@ -89,6 +96,8 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         },
         reset: async () => {
           await session.persistence?.reset();
+          resetRequestIdentity(session);
+          automaticCompaction.reset();
           state.blocks.splice(0);
           state.past.length = 0;
           permissions.reset();
@@ -116,13 +125,15 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
           if (session.conversation.activeNodeId !== state.committedNodeId) {
             return "branch-pending";
           }
-          return compactSession(session, {
+          const result = await compactSession(session, {
             signal: activity.control.signal,
             onStatus: (said) => {
               status(said ?? activity.label);
               options.render();
             },
           });
+          if (result === "compacted") automaticCompaction.reset();
+          return result;
         },
       });
       if (outcome === "exit") state.closeWhenIdle = true;
@@ -163,6 +174,8 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     let nodeId: number | undefined;
     let context: ContextAnchor | undefined;
     const unpersistedSteering: string[] = [];
+    const turnTools = permissions.availableTools();
+    const specs = toolSpecs(turnTools);
     let firstPolicy = true;
     const policy = (): Promise<ContextPolicy> => {
       let visible = firstPolicy;
@@ -246,7 +259,16 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
       ) {
         return undefined;
       }
-      const force = request.reason === "overflow";
+      const force = request.reason === "overflow" || request.projectionSaturated;
+      const key = automaticCompactionKey(
+        session.provider.id,
+        session.model,
+        nodeId ?? prospectiveNodeId,
+        checkpoint.length,
+      );
+      const attempt = { key, reason: request.reason } as const;
+      if (!automaticCompaction.allows(attempt)) return undefined;
+      let attempted = false;
       const result = await compactContext({
         provider: session.provider,
         model: session.model,
@@ -260,7 +282,14 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         signal: activity.control.signal,
         force,
         policy: request.policy,
+        requestEnvelope: {
+          system: session.system,
+          tools: specs,
+          maxOutputTokens: session.config.maxTokens,
+        },
+        requestIdentity: requestIdentityForSession(session),
         onBegin: () => {
+          attempted = true;
           status("Compacting");
           options.render();
         },
@@ -269,7 +298,11 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
           options.render();
         },
       });
-      if (result === undefined) return undefined;
+      if (result === undefined) {
+        if (attempted && !activity.control.signal.aborted) automaticCompaction.failed(attempt);
+        return undefined;
+      }
+      automaticCompaction.succeeded(attempt);
       context = result.anchor;
       if (result.usage !== undefined) recordAuxiliaryUsage(session.usage, result.usage);
       return result.messages;
@@ -287,6 +320,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
         reason: "budget",
         policy: await policy(),
         inputTokens: session.usage.lastInputTokens,
+        projectionSaturated: false,
       });
       if (compacted !== undefined) await persist(checkpoint, settlement);
       return compacted;
@@ -297,7 +331,7 @@ export function appWorkflows(options: WorkflowOptions): AppActions {
     try {
       await runTurn(
         history,
-        controllerOptions(session, policy, permissions.availableTools(), inbox),
+        controllerOptions(session, policy, turnTools, inbox),
         events,
         activity.control.signal,
         modelHistory,
