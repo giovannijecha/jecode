@@ -943,6 +943,7 @@ test("an oversized TUI paste stays in the footer and never reaches the provider"
 });
 
 test("the footer follows model, tool preparation, execution, and response phases", async () => {
+  const working = deferred();
   const thinking = deferred();
   const preparing = deferred();
   const executing = deferred();
@@ -953,6 +954,8 @@ test("the footer follows model, tool preparation, execution, and response phases
     async send(request): Promise<Message> {
       requests++;
       if (requests === 1) {
+        request.onStatus?.("Working");
+        await working.wait;
         request.onStream?.({ kind: "thinking", text: "Inspecting" });
         await thinking.wait;
         request.onStream?.({ kind: "tool", name: "probe" });
@@ -986,6 +989,8 @@ test("the footer follows model, tool preparation, execution, and response phases
   const feed = await harness.input();
 
   feed("inspect\r");
+  await waitFor(() => lastFooter(harness).includes("Working ·"), "working footer phase");
+  working.release();
   await waitFor(() => lastFooter(harness).includes("Thinking ·"), "thinking footer phase");
   thinking.release();
   await waitFor(

@@ -12,6 +12,7 @@ import {
 export async function* readSseJson(
   body: ReadableStream<Uint8Array>,
   maximumChars: number,
+  idle?: SseIdlePolicy,
 ): AsyncGenerator<unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -20,26 +21,64 @@ export async function* readSseJson(
   let total = 0;
 
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const text = decoder.decode(value, { stream: true });
-      total = addBounded(total, text.length, maximumChars, "SSE stream");
-      for (const payload of parser.push(text)) yield payload;
-    }
+    let ended = false;
+    while (!ended) {
+      // One deadline spans every raw read until a complete JSON event lands.
+      // SSE comments and partial framing prove only that the socket is alive;
+      // they must not keep a model request pending forever.
+      const deadline = eventDeadline(idle);
+      const payloads: unknown[] = [];
+      try {
+        while (payloads.length === 0 && !ended) {
+          const { done, value } = await deadline.wait(reader.read());
+          if (done) {
+            ended = true;
+            const text = decoder.decode();
+            total = addBounded(total, text.length, maximumChars, "SSE stream");
+            payloads.push(...parser.push(text));
+            const payload = parser.finish();
+            if (payload !== undefined) payloads.push(payload);
+            continue;
+          }
 
-    // A stream that ends without a trailing blank line still owes us its last
-    // event.
-    const text = decoder.decode();
-    total = addBounded(total, text.length, maximumChars, "SSE stream");
-    for (const payload of parser.push(text)) yield payload;
-    const payload = parser.finish();
-    if (payload !== undefined) yield payload;
+          const text = decoder.decode(value, { stream: true });
+          total = addBounded(total, text.length, maximumChars, "SSE stream");
+          payloads.push(...parser.push(text));
+        }
+      } finally {
+        deadline.clear();
+      }
+
+      for (const payload of payloads) yield payload;
+    }
     finished = true;
   } finally {
     if (!finished) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
+}
+
+export type SseIdlePolicy = {
+  milliseconds: number;
+  error(): Error;
+};
+
+function eventDeadline(idle: SseIdlePolicy | undefined): {
+  wait<T>(pending: Promise<T>): Promise<T>;
+  clear(): void;
+} {
+  if (idle === undefined) return { wait: (pending) => pending, clear: () => undefined };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(idle.error()), idle.milliseconds);
+  });
+  return {
+    wait: (pending) => Promise.race([pending, expired]),
+    clear: () => {
+      if (timer !== undefined) clearTimeout(timer);
+    },
+  };
 }
 
 // Keep fragments in bounded groups. A provider may split one SSE line into

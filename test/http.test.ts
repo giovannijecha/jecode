@@ -103,7 +103,7 @@ test("times out a response handshake even without a caller signal", async (conte
   await assert.rejects(pending, /timed out waiting for response headers after 60000ms/);
 });
 
-test("times out an idle SSE response body", async (context) => {
+test("times out an idle SSE event stream", async (context) => {
   const previousFetch = globalThis.fetch;
   context.mock.timers.enable({ apis: ["setTimeout"] });
   globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>(), {
@@ -119,7 +119,40 @@ test("times out an idle SSE response body", async (context) => {
   await new Promise<void>((resolve) => setImmediate(resolve));
   context.mock.timers.tick(120_000);
 
-  await assert.rejects(pending, /response body was idle for 120000ms/);
+  await assert.rejects(pending, /SSE stream was idle for 120000ms without an event/);
+});
+
+test("SSE comments cannot keep a response alive without model events", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let cancelled = false;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      stream = controller;
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }), { status: 200 })) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const events = await postSse("https://example.test/generate", {}, {}, 256);
+  const pending = events.next();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  for (let heartbeat = 0; heartbeat < 4; heartbeat++) {
+    context.mock.timers.tick(25_000);
+    stream?.enqueue(encoder.encode(": keep-alive\n\n"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  context.mock.timers.tick(20_000);
+
+  await assert.rejects(pending, /SSE stream was idle for 120000ms without an event/);
+  assert.equal(cancelled, true);
 });
 
 test("keeps caller cancellation attached after response headers", async (context) => {
