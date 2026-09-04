@@ -4,6 +4,20 @@ This file records notable changes in stable Jecode releases. Prereleases are
 omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [0.8.4] - 2026-09-04
+
+### Changed
+
+- Organized `/providers` into Account and API access, with ChatGPT under
+  Account and Anthropic, OpenAI API, and Ollama under API.
+- Synchronized OpenAI and ChatGPT activity with response, reasoning, text, and
+  tool-call lifecycle events so the footer reflects the current work phase.
+
+### Fixed
+
+- Bounded OpenAI and ChatGPT stream inactivity by complete SSE events so
+  heartbeat traffic and incomplete framing cannot hide a stalled response.
+
 ## [0.8.3] - 2026-09-03
 
 ### Changed
@@ -534,6 +548,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.8.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.4
 [0.8.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.3
 [0.8.2]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.2
 [0.8.1]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.1
