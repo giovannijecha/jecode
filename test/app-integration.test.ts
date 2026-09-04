@@ -1033,6 +1033,10 @@ test("a streamed failure survives export, resume, and the next provider request"
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /partial answer/);
     assert.match(exported, /fixture stream failed/);
+    await waitFor(
+      () => !(harness.frames.at(-1) ?? []).join("\n").includes("esc to interrupt"),
+      "completed export command",
+    );
 
     feed("retry\r");
     await waitFor(

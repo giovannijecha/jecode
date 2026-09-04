@@ -1,7 +1,7 @@
 // Stable ownership boundary for private data directories.
 
-import { constants, lstatSync, realpathSync } from "node:fs";
-import { lstat, mkdir, open, realpath } from "node:fs/promises";
+import { constants, lstatSync, realpath as realpathCallback, realpathSync } from "node:fs";
+import { lstat, mkdir, open } from "node:fs/promises";
 import * as path from "node:path";
 import { fileIdentity, sameFileIdentity } from "./file-identity.ts";
 import type { FileIdentity } from "./file-identity.ts";
@@ -42,7 +42,7 @@ export async function captureDirectDirectory(
 ): Promise<DirectoryAnchor> {
   const resolved = path.resolve(directory);
   const [canonical, named] = await Promise.all([
-    realpath(resolved),
+    nativeRealpath(resolved),
     lstat(resolved, { bigint: true }),
   ]);
   if (named.isSymbolicLink() || !named.isDirectory()) {
@@ -61,7 +61,7 @@ export function captureDirectDirectorySync(
   label: string,
 ): DirectoryAnchor {
   const resolved = path.resolve(directory);
-  const canonical = realpathSync(resolved);
+  const canonical = realpathSync.native(resolved);
   const named = lstatSync(resolved, { bigint: true });
   if (named.isSymbolicLink() || !named.isDirectory()) {
     throw new Error(`${label} is not a direct directory`);
@@ -92,6 +92,15 @@ export function assertDirectoryAnchorSync(anchor: DirectoryAnchor): void {
   ) {
     throw new Error(`${anchor.label} changed during use`);
   }
+}
+
+function nativeRealpath(target: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    realpathCallback.native(target, (error, canonical) => {
+      if (error !== null) reject(error);
+      else resolve(canonical);
+    });
+  });
 }
 
 async function secureDirectoryMode(anchor: DirectoryAnchor, mode: number): Promise<void> {
