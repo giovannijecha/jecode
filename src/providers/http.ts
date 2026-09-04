@@ -1,6 +1,8 @@
 // The entire HTTP layer: one bounded request, then either a JSON body or an
-// event stream. Only idempotent reads retry. Once a POST starts or response
-// bytes flow, a failure is surfaced rather than silently replayed.
+// event stream. Idempotent reads retry transient failures. A generation POST
+// gets one retry only after an explicit 429 rejection with a bounded provider
+// delay, before a stream exists. Ambiguous POST failures and failures after
+// response bytes flow are surfaced.
 
 import { leadingText } from "../text-boundary.ts";
 import { readSseJson } from "./sse.ts";
@@ -13,6 +15,8 @@ const HANDSHAKE_TIMEOUT_MS = 60_000;
 const BODY_IDLE_TIMEOUT_MS = 120_000;
 const MODEL_PROGRESS_TIMEOUT_MS = 300_000;
 const GET_RETRIES = 3;
+const GENERATION_RATE_LIMIT_RETRIES = 1;
+const MAX_RETRY_DELAY_MS = 60_000;
 
 export type HttpError = Error & { status?: number; body?: string };
 export type HttpStatus = (text: string) => void;
@@ -68,7 +72,14 @@ export async function postSse(
 ): Promise<AsyncGenerator<unknown>> {
   const maximumChars = sseStreamCharacterLimit(maxOutputTokens);
   onStatus?.("Connecting");
-  const res = await request(url, { accept: "text/event-stream", ...headers }, body, signal, onStatus);
+  const res = await request(
+    url,
+    { accept: "text/event-stream", ...headers },
+    body,
+    signal,
+    onStatus,
+    GENERATION_RATE_LIMIT_RETRIES,
+  );
   if (res.body === null) throw httpError(`${url} returned no body`, res.status);
   onStatus?.("Waiting for model");
   return readSseJson(res.body, maximumChars, {
@@ -98,13 +109,18 @@ async function request(
   body: unknown,
   signal: AbortSignal | undefined,
   onStatus: HttpStatus | undefined,
+  rateLimitRetries = 0,
 ): Promise<Response> {
-  const maxRetries = body === undefined ? GET_RETRIES : 0;
+  const read = body === undefined;
+  const maxRetries = read ? GET_RETRIES : rateLimitRetries;
   let lastError: HttpError | undefined;
   let waitMs = 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (waitMs > 0) await sleep(waitMs, signal);
+    if (attempt > 0) {
+      if (waitMs > 0) await sleep(waitMs, signal);
+      if (!read) onStatus?.("Connecting");
+    }
 
     let res: Response;
     const handshake = handshakeSignal(url, signal);
@@ -124,8 +140,9 @@ async function request(
       if (signal?.aborted === true) throw cause;
       const detail = cause instanceof Error ? cause.message : String(cause);
       lastError = httpError(`network error calling ${url}: ${detail}`);
+      if (!read || attempt >= maxRetries) throw lastError;
       waitMs = backoff(attempt);
-      if (attempt < maxRetries) onStatus?.(`Network error · retrying in ${waitLabel(waitMs)}`);
+      onStatus?.(`Network error · retrying in ${waitLabel(waitMs)}`);
       continue;
     } finally {
       handshake.clear();
@@ -143,12 +160,15 @@ async function request(
       res.status,
       text,
     );
-    if (!RETRYABLE.has(res.status)) throw lastError;
-    waitMs = retryAfter(res) ?? backoff(attempt);
-    if (attempt < maxRetries) {
-      const reason = res.status === 429 ? "Rate limited" : `HTTP ${res.status}`;
-      onStatus?.(`${reason} · retrying in ${waitLabel(waitMs)}`);
-    }
+    const providerDelay = retryAfter(res) ?? retryAfterMessage(text);
+    const retryable = read
+      ? RETRYABLE.has(res.status)
+      : rateLimitRetries > 0 && res.status === 429 && providerDelay !== undefined;
+    if (!retryable || attempt >= maxRetries) throw lastError;
+
+    waitMs = providerDelay ?? backoff(attempt);
+    const reason = res.status === 429 ? "Rate limited" : `HTTP ${res.status}`;
+    onStatus?.(`${reason} · retrying in ${waitLabel(waitMs)}`);
   }
 
   throw lastError ?? httpError(`${url} failed`);
@@ -239,10 +259,28 @@ function retryAfter(res: Response): number | undefined {
   if (header === null) return undefined;
 
   const seconds = Number(header);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60_000, seconds * 1_000);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(MAX_RETRY_DELAY_MS, seconds * 1_000);
+  }
 
   const at = Date.parse(header);
-  return Number.isNaN(at) ? undefined : Math.max(0, Math.min(60_000, at - Date.now()));
+  return Number.isNaN(at)
+    ? undefined
+    : Math.max(0, Math.min(MAX_RETRY_DELAY_MS, at - Date.now()));
+}
+
+function retryAfterMessage(body: string): number | undefined {
+  const match = /\btry again in\s+(\d+(?:\.\d+)?)\s*(milliseconds?|ms|seconds?|secs?|s)\b/iu
+    .exec(body);
+  if (match === null) return undefined;
+
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount < 0) return undefined;
+  const unit = match[2]?.toLowerCase();
+  const milliseconds = unit === "ms" || unit?.startsWith("millisecond") === true
+    ? amount
+    : amount * 1_000;
+  return Math.min(MAX_RETRY_DELAY_MS, Math.ceil(milliseconds));
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

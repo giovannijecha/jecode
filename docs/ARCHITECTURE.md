@@ -159,12 +159,16 @@ previewing or executing the call; durable codecs omit the marker after that
 result makes the failure explicit.
 
 The shared HTTP client retries transient network errors, rate limits, and 5xx
-responses only for idempotent catalogue GETs. Generation POSTs are never
-replayed after an ambiguous network or server failure. A generation reports
-whether it is connecting or waiting for the model. A request has 60 seconds to
-receive response headers, and an open JSON or SSE body can remain idle for at
-most 120 seconds. OpenAI Responses streams also have five minutes to produce
-substantive model progress; protocol keepalives do not extend that deadline.
+responses for idempotent catalogue GETs. A streaming generation gets one retry
+only when the provider explicitly rejects it with `429` and supplies a retry
+delay before a stream begins. Jecode caps that wait at 60 seconds and keeps it
+visible and interruptible.
+Generation POSTs are never replayed after an ambiguous network error, a server
+failure, or any stream progress. A generation reports whether it is connecting
+or waiting for the model. A request has 60 seconds to receive response headers,
+and an open JSON or SSE body can remain idle for at most 120 seconds. OpenAI
+Responses streams also have five minutes to produce substantive model progress;
+protocol keepalives do not extend that deadline.
 These internal deadlines also cover batch mode. Process
 signals cancel the active provider or tool in either surface before Jecode
 exits, with a bounded hard-exit fallback. The client handles redirects manually
