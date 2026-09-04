@@ -1918,6 +1918,10 @@ test("/export writes without a picker to the directory where Jecode was launched
     const markdown = await readFile(path.join(directory, name), "utf8");
     assert.match(markdown, /keep this/);
     assert.match(markdown, /Exported answer\./);
+    await waitFor(
+      () => !(harness.frames.at(-1) ?? []).join("\n").includes("esc to interrupt"),
+      "completed export command",
+    );
     feed("/exit\r");
     await running;
   } finally {
