@@ -168,8 +168,11 @@ untrusted data.
   flow. Refresh-token rotation is serialized across Jecode processes.
 - Terminal control characters are neutralized before rendering.
 - Remote Ollama endpoints require HTTPS, and provider redirects are rejected.
-- Provider handshakes and idle response bodies have finite deadlines. Only
-  idempotent catalogue reads retry; generation requests are never replayed.
+- Provider handshakes and idle response bodies have finite deadlines.
+  Idempotent catalogue reads retry bounded transient failures. A streaming
+  generation retries once only after an explicit pre-stream `429` with a
+  provider delay; Jecode caps the wait at 60 seconds and keeps it interruptible.
+  Ambiguous failures and started streams are never replayed.
 - Interactive and batch prompts are rejected above 1,048,576 UTF-16 code units
   before history or provider use. Model and filesystem input are also bounded
   before use.

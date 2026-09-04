@@ -26,6 +26,186 @@ test("retries a rate limit and reports the wait", async (context) => {
   assert.deepEqual(statuses, ["Rate limited · retrying in 0ms"]);
 });
 
+test("retries one rejected SSE generation after the provider delay", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const statuses: string[] = [];
+  let calls = 0;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return calls === 1
+      ? new Response(
+        JSON.stringify({
+          error: { message: "Rate limit reached. Please try again in 6.386s." },
+        }),
+        { status: 429, statusText: "Too Many Requests" },
+      )
+      : new Response('data: {"type":"done"}\n\n', { status: 200 });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    context.mock.timers.reset();
+  });
+
+  const pending = postSse(
+    "https://example.test/generate",
+    {},
+    { prompt: "hello" },
+    256,
+    undefined,
+    (status) => statuses.push(status),
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(statuses, ["Connecting", "Rate limited · retrying in 7s"]);
+  context.mock.timers.tick(6_386);
+  const events = await pending;
+  const received: unknown[] = [];
+  for await (const event of events) received.push(event);
+
+  assert.equal(calls, 2);
+  assert.deepEqual(received, [{ type: "done" }]);
+  assert.deepEqual(statuses, [
+    "Connecting",
+    "Rate limited · retrying in 7s",
+    "Connecting",
+    "Waiting for model",
+  ]);
+});
+
+test("bounds an SSE generation to one rate-limit retry", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const statuses: string[] = [];
+  let calls = 0;
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response("Please try again in 0s.", {
+      status: 429,
+      statusText: "Too Many Requests",
+    });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  await assert.rejects(
+    postSse(
+      "https://example.test/generate",
+      {},
+      { prompt: "hello" },
+      256,
+      undefined,
+      (status) => statuses.push(status),
+    ),
+    (error: Error & { status?: number }) => {
+      assert.equal(error.status, 429);
+      return true;
+    },
+  );
+  assert.equal(calls, 2);
+  assert.deepEqual(statuses, [
+    "Connecting",
+    "Rate limited · retrying in 0ms",
+    "Connecting",
+  ]);
+});
+
+test("does not retry an SSE rate limit without a provider delay", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response("usage quota exhausted", { status: 429 });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  await assert.rejects(
+    postSse("https://example.test/generate", {}, { prompt: "hello" }, 256),
+    (error: Error & { status?: number }) => {
+      assert.equal(error.status, 429);
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
+});
+
+test("an abort stops a pending SSE rate-limit retry", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const control = new AbortController();
+  const statuses: string[] = [];
+  let calls = 0;
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response("busy", { status: 429, headers: { "retry-after": "999999" } });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  const pending = postSse(
+    "https://example.test/generate",
+    {},
+    { prompt: "hello" },
+    256,
+    control.signal,
+    (status) => {
+      statuses.push(status);
+      if (status.startsWith("Rate limited")) control.abort(new Error("cancelled"));
+    },
+  );
+
+  await assert.rejects(pending, /cancelled/);
+  assert.equal(calls, 1);
+  assert.deepEqual(statuses, ["Connecting", "Rate limited · retrying in 60s"]);
+});
+
+test("does not replay an SSE generation after a server failure", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response("busy", { status: 503, statusText: "Unavailable" });
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  await assert.rejects(
+    postSse("https://example.test/generate", {}, { prompt: "hello" }, 256),
+    (error: Error & { status?: number }) => {
+      assert.equal(error.status, 503);
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
+});
+
+test("does not replay an SSE generation after an ambiguous network error", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("socket reset");
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+  });
+
+  await assert.rejects(
+    postSse("https://example.test/generate", {}, { prompt: "hello" }, 256),
+    /network error calling .*socket reset/,
+  );
+  assert.equal(calls, 1);
+});
+
 test("an abort stops a pending retry", async (context) => {
   const previousFetch = globalThis.fetch;
   const control = new AbortController();
@@ -42,28 +222,32 @@ test("an abort stops a pending retry", async (context) => {
   await assert.rejects(pending, /cancelled/);
 });
 
-test("does not replay a POST after a retryable response", async (context) => {
+test("does not replay a JSON POST after a retryable response", async (context) => {
   const previousFetch = globalThis.fetch;
   let calls = 0;
   const statuses: string[] = [];
+  let responseStatus = 429;
   globalThis.fetch = (async () => {
     calls += 1;
-    return new Response("busy", { status: 503, statusText: "Unavailable" });
+    return new Response("busy", { status: responseStatus });
   }) as typeof fetch;
   context.after(() => {
     globalThis.fetch = previousFetch;
   });
 
-  await assert.rejects(
-    postJson("https://example.test/generate", {}, { prompt: "hello" }, undefined, (status) => {
-      statuses.push(status);
-    }),
-    (error: Error & { status?: number }) => {
-      assert.equal(error.status, 503);
-      return true;
-    },
-  );
-  assert.equal(calls, 1);
+  for (const status of [429, 503]) {
+    responseStatus = status;
+    await assert.rejects(
+      postJson("https://example.test/generate", {}, { prompt: "hello" }, undefined, (text) => {
+        statuses.push(text);
+      }),
+      (error: Error & { status?: number }) => {
+        assert.equal(error.status, status);
+        return true;
+      },
+    );
+  }
+  assert.equal(calls, 2);
   assert.deepEqual(statuses, []);
 });
 
