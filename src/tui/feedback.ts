@@ -1,8 +1,9 @@
 // Operational feedback belongs in the footer, not in the conversation.
 
+import { CONVERSATION_LIMITS } from "../conversation.ts";
+import { providerLabel } from "../provider-label.ts";
 import type { Session } from "../session.ts";
 import type { NoticeBlock, NoticeTone } from "./blocks.ts";
-import { providerLabel } from "../provider-label.ts";
 
 export type Feedback = {
   text: string;
@@ -72,6 +73,9 @@ export function commandFeedback(block: NoticeBlock): Feedback {
 export function turnBlocker(session: Session): Feedback | undefined {
   if (session.persistence?.failure !== undefined) {
     return { text: "session could not be saved · /new to retry", tone: "error" };
+  }
+  if (session.conversation.nodes.length >= CONVERSATION_LIMITS.nodes) {
+    return { text: "conversation reached its session limit · /new to continue", tone: "warn" };
   }
   const blocked = session.provider.blocked();
   const auth = session.provider.auth;

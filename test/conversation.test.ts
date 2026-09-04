@@ -363,6 +363,25 @@ test("a full 1,024-node tree replaces one leaf while retaining shared identities
   assert.notEqual(replaced.activeNode, active);
 });
 
+test("a full 1,024-node tree rejects another turn without changing its state", () => {
+  const tree = ConversationTree.restore(chainNodes(1_024), 1_024);
+  const active = tree.activeNode;
+  const history = tree.history;
+
+  assert.throws(() =>
+    tree.commit({
+      parentId: tree.activeNodeId,
+      createdAt: "2026-09-04T10:01:00.000Z",
+      identity,
+      messages: completed("one more", "not persisted"),
+      blocks: [],
+    }, "completed"), /conversation reached its session limit/);
+
+  assert.equal(tree.nodes.length, 1_024);
+  assert.equal(tree.activeNode, active);
+  assert.deepEqual(tree.history, history);
+});
+
 test("restore validation scales with the snapshot instead of its square", () => {
   const small = chainNodes(100);
   const large = chainNodes(800);
