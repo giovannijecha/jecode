@@ -3,11 +3,18 @@
 // Responses wire contract verified against the official API reference on
 // 2026-08-29. Keep final response events authoritative over display deltas.
 
+import { randomUUID } from "node:crypto";
 import type { Message, ModelContextWindow, Provider, SendRequest } from "../types.ts";
+import { applicationVersion } from "../version.ts";
 import { postSse } from "./http.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
 import { EFFORTS, requireSupportedEffort } from "../effort.ts";
+import {
+  isRetryableGenerationFailure,
+  isRetryableReadFailure,
+  throwProviderError,
+} from "./failure.ts";
 import { assembleOpenAI, openAIStreamProgress } from "./openai-stream.ts";
 import {
   fromWireResponse,
@@ -19,6 +26,7 @@ import {
 const ENDPOINT = "https://api.openai.com/v1/responses";
 const MODELS = "https://api.openai.com/v1/models";
 const KEY = "OPENAI_API_KEY";
+const ID = "openai";
 
 const RESPONSES_REASONING_MODEL = /^(?:gpt-5(?:[.-]|$)|o(?:1|3|4)(?:[.-]|$)|codex-mini(?:[.-]|$))/;
 // Jecode's transport always streams and always declares local tools. Hide
@@ -58,7 +66,7 @@ function usableContext(tokens: number): ModelContextWindow {
 }
 
 export const openai: Provider = {
-  id: "openai",
+  id: ID,
   defaultModel: "gpt-5",
   auth: { kind: "api-key", keyVar: KEY },
 
@@ -69,10 +77,20 @@ export const openai: Provider = {
   // The endpoint answers in no order worth keeping, so descending puts the
   // highest-numbered family — usually the newest — at the top of the menu.
   async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
-    const ids = await listModels(MODELS, headers(requireKey()), signal, onStatus);
-    return ids
-      .filter(supportsOpenAIModel)
-      .sort((a, b) => b.localeCompare(a));
+    try {
+      const ids = await listModels(
+        MODELS,
+        headers(requireKey()),
+        signal,
+        onStatus,
+        (error) => isRetryableReadFailure(ID, error),
+      );
+      return ids
+        .filter(supportsOpenAIModel)
+        .sort((a, b) => b.localeCompare(a));
+    } catch (error) {
+      throwProviderError(ID, signal, error);
+    }
   },
 
   async efforts(model: string): Promise<readonly string[]> {
@@ -89,32 +107,37 @@ export const openai: Provider = {
     const key = requireKey();
     const effort = requireSupportedEffort(req.model, req.effort, openAIEfforts(req.model));
 
-    const events = await postSse(
-      ENDPOINT,
-      headers(key),
-      {
-        model: req.model,
-        instructions: req.system,
-        input: req.messages.flatMap((message) => toWireItems(message)),
-        tools: req.tools.map(toWireTool),
-        max_output_tokens: req.maxTokens,
-        reasoning: { effort, summary: "auto" },
-        store: false,
-        include: ["reasoning.encrypted_content"],
-        stream: true,
-      },
-      req.maxTokens,
-      req.signal,
-      req.onStatus,
-      openAIStreamProgress,
-    );
+    try {
+      const events = await postSse(
+        ENDPOINT,
+        headers(key),
+        {
+          model: req.model,
+          instructions: req.system,
+          input: req.messages.flatMap((message) => toWireItems(message)),
+          tools: req.tools.map(toWireTool),
+          max_output_tokens: req.maxTokens,
+          reasoning: { effort, summary: "auto" },
+          store: false,
+          include: ["reasoning.encrypted_content"],
+          stream: true,
+        },
+        req.maxTokens,
+        req.signal,
+        req.onStatus,
+        openAIStreamProgress,
+        (error) => isRetryableGenerationFailure(ID, error),
+      );
 
-    const data = await assembleOpenAI(events, req.onStream, req.onStatus);
+      const data = await assembleOpenAI(events, req.onStream, req.onStatus);
 
-    const notice = stopNotice(data);
-    if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
+      const notice = stopNotice(data);
+      if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
 
-    return fromWireResponse(data);
+      return fromWireResponse(data);
+    } catch (error) {
+      throwProviderError(ID, req.signal, error);
+    }
   },
 };
 
@@ -129,5 +152,9 @@ function requireKey(): string {
 }
 
 function headers(key: string): Record<string, string> {
-  return { authorization: `Bearer ${key}` };
+  return {
+    authorization: `Bearer ${key}`,
+    "user-agent": `jecode/${applicationVersion()} (${process.platform}; ${process.arch})`,
+    "x-client-request-id": randomUUID(),
+  };
 }

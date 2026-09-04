@@ -5,6 +5,10 @@ import { redactCredentials } from "./credential-safety.ts";
 import { providerLabel } from "./provider-label.ts";
 import { leadingText } from "./text-boundary.ts";
 import { terminalText } from "./ui/terminal-text.ts";
+import {
+  providerFailureDetails,
+  type ProviderFailureKind,
+} from "./providers/failure.ts";
 import type { HttpError } from "./providers/http.ts";
 
 const CONNECTION_FAILURE =
@@ -18,18 +22,52 @@ export function providerFailure(
   error: Error,
   labelProvider = false,
 ): string {
-  if (provider.id === "ollama" && CONNECTION_FAILURE.test(error.message)) {
-    return provider.location?.() === "local"
+  const details = providerFailureDetails(provider.id, error);
+  let failure: string;
+  if (provider.id === "ollama" && details.kind === "network" && CONNECTION_FAILURE.test(error.message)) {
+    failure = provider.location?.() === "local"
       ? "Ollama is not reachable on this computer · start Ollama or choose cloud in /providers"
       : "Ollama is not reachable · check its connection in /providers";
+  } else {
+    failure = actionableFailure(provider.id, details.kind) ?? rawFailure(error);
   }
+
+  if (details.requestId !== undefined) failure += ` · request ${details.requestId}`;
+
+  const label = providerLabel(provider.id);
+  return labelProvider && !failure.startsWith(`${label} `) ? `${label}: ${failure}` : failure;
+}
+
+function actionableFailure(providerId: string, kind: ProviderFailureKind): string | undefined {
+  switch (kind) {
+    case "authentication":
+      return "authentication failed";
+    case "billing":
+      return providerId === "openai"
+        ? "credits exhausted · add credits or choose another provider in /models"
+        : "billing limit reached · check provider billing or choose another provider in /models";
+    case "quota":
+      return "usage quota exhausted · check provider limits or choose another provider in /models";
+    case "rate-limit":
+      return "rate limit reached · retry later";
+    case "overload":
+      return "temporarily unavailable · retry later";
+    case "context":
+      return "context limit reached · compact the conversation or choose a larger-context model";
+    case "network":
+      return "network request failed · check the connection and retry";
+    case "unknown":
+      return undefined;
+  }
+}
+
+function rawFailure(error: Error): string {
   const message = safeText(error.message, MAX_MESSAGE_CHARS) || "provider request failed";
   const reason = providerReason(error);
   const detail = reason !== undefined && !message.toLocaleLowerCase().includes(reason.toLocaleLowerCase())
     ? ` · ${reason}`
     : "";
-  const failure = `${message}${detail}`;
-  return labelProvider ? `${providerLabel(provider.id)}: ${failure}` : failure;
+  return `${message}${detail}`;
 }
 
 function providerReason(error: Error): string | undefined {

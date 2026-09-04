@@ -52,9 +52,14 @@ export async function openAIAccountCommand(
 
   if (connected && actions[action]?.key === "s") {
     const result = await removeOpenAIAccount(host.signal);
+    const route = session.provider.id === "openai-codex"
+      ? " · choose another provider in /models"
+      : "";
     host.emit({
       kind: "notice",
-      text: result.revokeFailed ? "ChatGPT disconnected · remote sign-out could not be confirmed" : "ChatGPT disconnected",
+      text: result.revokeFailed
+        ? `ChatGPT disconnected · remote sign-out could not be confirmed${route}`
+        : `ChatGPT disconnected${route}`,
       tone: result.revokeFailed ? "warn" : "info",
     });
     return result.removed;
@@ -128,7 +133,13 @@ async function waitForLogin(
       if (outcome.kind === "account") {
         host.dismiss?.();
         await saveOpenAIAccount(outcome.account, host.signal);
-        host.emit({ kind: "notice", text: "ChatGPT connected", tone: "info" });
+        host.emit({
+          kind: "notice",
+          text: session.provider.id === "openai-codex"
+            ? "ChatGPT connected · current provider route"
+            : "ChatGPT connected · choose a ChatGPT model in /models to use this account",
+          tone: "info",
+        });
         return true;
       }
       if (outcome.kind === "error") {

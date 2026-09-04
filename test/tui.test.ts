@@ -60,11 +60,11 @@ test("scroll is bounded by how much there is to scroll", () => {
   assert.match(frame.rows.slice(0, 2).join("\n"), /line 0/);
 });
 
-test("the one-line footer carries model, effort, and workspace without provider noise", () => {
+test("the one-line footer keeps the active provider route visible", () => {
   const frame = compose(base(), { rows: 24, cols: 80 });
   const footer = strip(frame.rows)[23] as string;
-  assert.match(footer, /claude-sonnet-5 · high · ~\/Codex\/jecode/);
-  assert.doesNotMatch(footer, /anthropic|cloud|ready|tokens/);
+  assert.match(footer, /Anthropic API · claude-sonnet-5 · high · ~\/Codex\/jecode/);
+  assert.doesNotMatch(footer, /cloud|ready|tokens/);
 });
 
 test("the footer exposes unseen output while scroll lock is active", () => {
@@ -187,6 +187,7 @@ function base() {
     pal: STEEL,
     footer: {
       workspace: "~/Codex/jecode",
+      provider: "Anthropic API",
       model: "claude-sonnet-5",
       effort: "high",
     },

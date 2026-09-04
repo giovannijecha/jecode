@@ -491,10 +491,12 @@ test("sends a stateless Responses request with encrypted reasoning included", as
   const previousFetch = globalThis.fetch;
   const previousKey = process.env.OPENAI_API_KEY;
   let requestBody: Record<string, unknown> | undefined;
+  let requestHeaders = new Headers();
   process.env.OPENAI_API_KEY = "test-key";
 
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
     requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    requestHeaders = new Headers(init?.headers);
     return new Response(
       'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n',
       { status: 200, headers: { "content-type": "text/event-stream" } },
@@ -519,6 +521,11 @@ test("sends a stateless Responses request with encrypted reasoning included", as
   assert.equal(requestBody?.store, false);
   assert.deepEqual(requestBody?.include, ["reasoning.encrypted_content"]);
   assert.equal(requestBody?.stream, true);
+  assert.match(requestHeaders.get("user-agent") ?? "", /^jecode\//);
+  assert.match(
+    requestHeaders.get("x-client-request-id") ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+  );
 });
 
 test("passes max effort through to a model that supports it", async (context) => {
@@ -549,4 +556,49 @@ test("passes max effort through to a model that supports it", async (context) =>
   });
 
   assert.deepEqual(requestBody?.reasoning, { effort: "max", summary: "auto" });
+});
+
+test("normalizes an in-stream credit exhaustion as a hard billing failure", async (context) => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.OPENAI_API_KEY;
+  let calls = 0;
+  process.env.OPENAI_API_KEY = "test-key";
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(
+      `data: ${JSON.stringify({
+        type: "response.failed",
+        response: {
+          status: "failed",
+          error: {
+            code: "billing_hard_limit_reached",
+            message: "You have no credits remaining.",
+          },
+        },
+      })}\n\n`,
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  }) as typeof fetch;
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  });
+
+  await assert.rejects(
+    openai.send({
+      model: "gpt-5",
+      system: "be useful",
+      messages: [],
+      tools: [],
+      maxTokens: 100,
+      effort: "high",
+    }),
+    (error: Error & { kind?: string; providerId?: string }) => {
+      assert.equal(error.kind, "billing");
+      assert.equal(error.providerId, "openai");
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
 });

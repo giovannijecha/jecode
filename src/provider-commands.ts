@@ -10,7 +10,7 @@ import {
 } from "./ollama-settings-command.ts";
 import { openAIAccountHint } from "./openai-account.ts";
 import { openAIAccountCommand } from "./openai-account-command.ts";
-import { providerLabel } from "./provider-label.ts";
+import { providerLabel, providerRouteLabel } from "./provider-label.ts";
 import { PROVIDERS } from "./providers/index.ts";
 import { ollamaConnection } from "./providers/ollama.ts";
 import type { Session } from "./session.ts";
@@ -32,9 +32,10 @@ export async function providersCommand(session: Session, host: Host): Promise<vo
   while (true) {
     const index = await choose({
       title: [],
+      description: `Current route: ${providerRouteLabel(session.provider)} · access changes do not switch it; use /models`,
       options: groups.map((group) => ({
         label: group.label,
-        value: providerCount(group.providers.length),
+        value: providerGroupHint(group, session.provider.id),
       })),
       index: selected,
     });
@@ -78,7 +79,7 @@ async function providerGroupCommand(
       title: heading(group.label, "provider access", session.palette),
       options: group.providers.map((provider) => ({
         label: providerLabel(provider.id),
-        value: providerAccessHint(provider),
+        value: `${provider.id === session.provider.id ? "current · " : ""}${providerAccessHint(provider)}`,
       })),
       index: selected,
     });
@@ -98,6 +99,12 @@ async function providerGroupCommand(
 
 function providerCount(count: number): string {
   return `${count} ${count === 1 ? "provider" : "providers"}`;
+}
+
+function providerGroupHint(group: ProviderGroup, activeId: string): string {
+  const active = group.providers.find((provider) => provider.id === activeId);
+  const count = providerCount(group.providers.length);
+  return active === undefined ? count : `${count} · current ${providerRouteLabel(active)}`;
 }
 
 export function providerAccessHint(provider: Provider): string {
@@ -123,7 +130,7 @@ async function manageProvider(
     await openAIAccountCommand(session, host);
     return;
   }
-  await apiKeyCommand(provider.auth.keyVar, providerLabel(provider.id), session, host);
+  await apiKeyCommand(provider.auth.keyVar, providerLabel(provider.id), session, host, provider.id);
 }
 
 async function ollamaProviderCommand(session: Session, host: Host): Promise<void> {
@@ -143,7 +150,7 @@ async function ollamaProviderCommand(session: Session, host: Host): Promise<void
       (patch) => saveCommandSettings(host, patch),
     );
   } else if (index === 1) {
-    await apiKeyCommand(OLLAMA_KEY, "Ollama", session, host);
+    await apiKeyCommand(OLLAMA_KEY, "Ollama", session, host, "ollama");
   }
 }
 

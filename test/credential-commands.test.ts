@@ -115,6 +115,29 @@ test("an API key can be kept for this session", async () => {
   });
 });
 
+test("adding an API key says explicitly whether that provider is active", async () => {
+  await inStore(async () => {
+    const inactive = host([0, 0], "session-secret");
+    await apiKeyCommand(KEY, "OpenAI API", session(), inactive, "openai");
+    assert.match(
+      inactive.blocks.map((block) => "text" in block ? block.text : "").join("\n"),
+      /choose OpenAI API in \/models to use it/,
+    );
+
+    const live = session();
+    const selected = PROVIDERS.find((candidate) => candidate.id === "openai");
+    if (selected === undefined) throw new Error("openai provider fixture is missing");
+    live.provider = selected;
+    live.config.providerId = selected.id;
+    const active = host([0, 0], "replacement-secret");
+    await apiKeyCommand(KEY, "OpenAI API", live, active, "openai");
+    assert.match(
+      active.blocks.map((block) => "text" in block ? block.text : "").join("\n"),
+      /current provider route/,
+    );
+  });
+});
+
 test("API key actions rely on escape instead of a redundant close row", async () => {
   await inStore(async () => {
     const screen = host([undefined]);

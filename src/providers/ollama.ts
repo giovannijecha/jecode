@@ -13,6 +13,11 @@ import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
 import { assembleOllama } from "./ollama-stream.ts";
 import {
+  isRetryableGenerationFailure,
+  isRetryableReadFailure,
+  throwProviderError,
+} from "./failure.ts";
+import {
   OLLAMA_CLOUD_HOST,
   OLLAMA_LOCAL_HOST,
   ollamaConnectionKind,
@@ -22,6 +27,7 @@ import type { OllamaEndpoint } from "./ollama-endpoint.ts";
 import { fromWireReply, stopNotice, toWireMessages, toWireTool } from "./ollama-wire.ts";
 
 const KEY = "OLLAMA_API_KEY";
+const ID = "ollama";
 // Ollama also accepts `none`; Jecode's product-wide reasoning floor is `low`.
 const OLLAMA_EFFORTS = ["low", "medium", "high"] as const;
 let configuredHost: string | undefined;
@@ -49,7 +55,7 @@ export function ollamaConnection(): OllamaConnection {
 }
 
 export const ollama: Provider = {
-  id: "ollama",
+  id: ID,
   defaultModel: "",
   auth: { kind: "api-key", keyVar: KEY },
 
@@ -67,9 +73,19 @@ export const ollama: Provider = {
   },
 
   // Whatever the daemon has pulled, or whatever the subscription grants.
-  models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
-    const at = endpoint();
-    return listModels(`${at.baseUrl}/v1/models`, headers(at), signal, onStatus);
+  async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
+    try {
+      const at = endpoint();
+      return await listModels(
+        `${at.baseUrl}/v1/models`,
+        headers(at),
+        signal,
+        onStatus,
+        (error) => isRetryableReadFailure(ID, error),
+      );
+    } catch (error) {
+      throwProviderError(ID, signal, error);
+    }
   },
 
   async efforts(): Promise<readonly string[]> {
@@ -109,29 +125,35 @@ export const ollama: Provider = {
 
     // The OpenAI-compatible endpoint accepts this vocabulary for thinking
     // models. Invalid levels are rejected locally instead of being rewritten.
-    const events = await postSse(
-      `${at.baseUrl}/v1/chat/completions`,
-      headers(at),
-      {
-        model: req.model,
-        messages: toWireMessages(req.system, req.messages),
-        tools: req.tools.map(toWireTool),
-        max_tokens: req.maxTokens,
-        reasoning_effort: effort,
-        stream: true,
-        stream_options: { include_usage: true },
-      },
-      req.maxTokens,
-      req.signal,
-      req.onStatus,
-    );
+    try {
+      const events = await postSse(
+        `${at.baseUrl}/v1/chat/completions`,
+        headers(at),
+        {
+          model: req.model,
+          messages: toWireMessages(req.system, req.messages),
+          tools: req.tools.map(toWireTool),
+          max_tokens: req.maxTokens,
+          reasoning_effort: effort,
+          stream: true,
+          stream_options: { include_usage: true },
+        },
+        req.maxTokens,
+        req.signal,
+        req.onStatus,
+        undefined,
+        (error) => isRetryableGenerationFailure(ID, error),
+      );
 
-    const reply = await assembleOllama(events, req.onStream);
+      const reply = await assembleOllama(events, req.onStream);
 
-    const notice = stopNotice(reply);
-    if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
+      const notice = stopNotice(reply);
+      if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
 
-    return fromWireReply(reply);
+      return fromWireReply(reply);
+    } catch (error) {
+      throwProviderError(ID, req.signal, error);
+    }
   },
 };
 
@@ -143,7 +165,13 @@ async function nativeContextWindow(
   onStatus?: (status: string) => void,
 ): Promise<{ value: ModelContextWindow; runtime: boolean } | undefined> {
   try {
-    const running = await getJson(`${at.baseUrl}/api/ps`, headers(at), signal, onStatus);
+    const running = await getJson(
+      `${at.baseUrl}/api/ps`,
+      headers(at),
+      signal,
+      onStatus,
+      (error) => isRetryableReadFailure(ID, error),
+    );
     const allocated = runningContext(running, model);
     if (allocated !== undefined) return { value: usableContext(allocated), runtime: true };
   } catch (error) {

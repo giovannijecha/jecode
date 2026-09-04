@@ -97,7 +97,7 @@ test("a short transcript grows upward from the composer", () => {
       editor: edit.EMPTY,
       scroll: 0,
       pal: STEEL,
-      footer: { workspace: "~/work", model: "model", effort: "high" },
+      footer: { workspace: "~/work", provider: "Anthropic", model: "model", effort: "high" },
     },
     { rows: 24, cols: 80 },
   );

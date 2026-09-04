@@ -5,6 +5,7 @@
 // arguments as JSON fragments after it.
 
 import type { StreamEvent } from "../types.ts";
+import { providerWireError } from "./failure.ts";
 import type { ChatReply, ChatToolCall } from "./ollama-wire.ts";
 import { addBounded, MAX_TOOL_ARGUMENT_CHARS } from "./stream-limits.ts";
 
@@ -36,13 +37,16 @@ export async function assembleOllama(
   for await (const raw of events) {
     const event = raw as {
       choices?: { delta?: Delta; finish_reason?: string | null }[];
-      error?: { message?: string } | string;
+      error?: { code?: string; message?: string; type?: string } | string;
       usage?: ChatReply["usage"];
     };
 
     if (event.error !== undefined) {
       const message = typeof event.error === "string" ? event.error : event.error.message;
-      throw new Error(`ollama stream error: ${message ?? "unspecified"}`);
+      throw providerWireError("ollama stream error", message, {
+        code: typeof event.error === "string" ? undefined : event.error.code,
+        type: typeof event.error === "string" ? undefined : event.error.type,
+      });
     }
     if (event.usage !== undefined) usage = event.usage;
 

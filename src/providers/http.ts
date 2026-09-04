@@ -1,8 +1,8 @@
 // The entire HTTP layer: one bounded request, then either a JSON body or an
 // event stream. Idempotent reads retry transient failures. A generation POST
-// gets one retry only after an explicit 429 rejection with a bounded provider
-// delay, before a stream exists. Ambiguous POST failures and failures after
-// response bytes flow are surfaced.
+// gets one retry only when its provider adapter classifies an explicit,
+// delayed rejection as transient, before a stream exists. Ambiguous POST
+// failures and failures after response bytes flow are surfaced.
 
 import { leadingText } from "../text-boundary.ts";
 import { readSseJson } from "./sse.ts";
@@ -18,14 +18,27 @@ const GET_RETRIES = 3;
 const GENERATION_RATE_LIMIT_RETRIES = 1;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-export type HttpError = Error & { status?: number; body?: string };
+export type HttpError = Error & {
+  status?: number;
+  body?: string;
+  retryAfterMs?: number;
+  requestId?: string;
+};
 export type HttpStatus = (text: string) => void;
 export type StreamProgress = (event: unknown) => boolean;
+export type HttpRetryPolicy = (error: HttpError) => boolean;
 
-function httpError(message: string, status?: number, body?: string): HttpError {
+function httpError(
+  message: string,
+  status?: number,
+  body?: string,
+  metadata: Pick<HttpError, "retryAfterMs" | "requestId"> = {},
+): HttpError {
   const error = new Error(message) as HttpError;
   error.status = status;
   error.body = body;
+  if (metadata.retryAfterMs !== undefined) error.retryAfterMs = metadata.retryAfterMs;
+  if (metadata.requestId !== undefined) error.requestId = metadata.requestId;
   return error;
 }
 
@@ -45,8 +58,12 @@ export async function getJson(
   headers: Record<string, string>,
   signal?: AbortSignal,
   onStatus?: HttpStatus,
+  retry?: HttpRetryPolicy,
 ): Promise<unknown> {
-  return asJson(url, await request(url, headers, undefined, signal, onStatus));
+  return asJson(
+    url,
+    await request(url, headers, undefined, signal, onStatus, 0, undefined, retry),
+  );
 }
 
 async function asJson(url: string, res: Response): Promise<unknown> {
@@ -69,6 +86,7 @@ export async function postSse(
   signal?: AbortSignal,
   onStatus?: HttpStatus,
   progress?: StreamProgress,
+  retry?: HttpRetryPolicy,
 ): Promise<AsyncGenerator<unknown>> {
   const maximumChars = sseStreamCharacterLimit(maxOutputTokens);
   onStatus?.("Connecting");
@@ -79,6 +97,7 @@ export async function postSse(
     signal,
     onStatus,
     GENERATION_RATE_LIMIT_RETRIES,
+    retry,
   );
   if (res.body === null) throw httpError(`${url} returned no body`, res.status);
   onStatus?.("Waiting for model");
@@ -109,10 +128,12 @@ async function request(
   body: unknown,
   signal: AbortSignal | undefined,
   onStatus: HttpStatus | undefined,
-  rateLimitRetries = 0,
+  generationRetries = 0,
+  generationRetry?: HttpRetryPolicy,
+  readRetry?: HttpRetryPolicy,
 ): Promise<Response> {
   const read = body === undefined;
-  const maxRetries = read ? GET_RETRIES : rateLimitRetries;
+  const maxRetries = read ? GET_RETRIES : generationRetries;
   let lastError: HttpError | undefined;
   let waitMs = 0;
 
@@ -155,15 +176,22 @@ async function request(
     if (res.ok) return res;
 
     const { text } = await boundedText(url, res, MAX_ERROR_CHARS);
+    const providerDelay = retryAfter(res) ?? retryAfterMessage(text);
+    const requestId = responseRequestId(res);
     lastError = httpError(
       `${url} -> ${res.status} ${res.statusText}`,
       res.status,
       text,
+      {
+        ...(providerDelay === undefined ? {} : { retryAfterMs: providerDelay }),
+        ...(requestId === undefined ? {} : { requestId }),
+      },
     );
-    const providerDelay = retryAfter(res) ?? retryAfterMessage(text);
     const retryable = read
-      ? RETRYABLE.has(res.status)
-      : rateLimitRetries > 0 && res.status === 429 && providerDelay !== undefined;
+      ? RETRYABLE.has(res.status) && (readRetry?.(lastError) ?? true)
+      : generationRetries > 0 &&
+        providerDelay !== undefined &&
+        generationRetry?.(lastError) === true;
     if (!retryable || attempt >= maxRetries) throw lastError;
 
     waitMs = providerDelay ?? backoff(attempt);
@@ -281,6 +309,14 @@ function retryAfterMessage(body: string): number | undefined {
     ? amount
     : amount * 1_000;
   return Math.min(MAX_RETRY_DELAY_MS, Math.ceil(milliseconds));
+}
+
+function responseRequestId(res: Response): string | undefined {
+  for (const name of ["x-request-id", "request-id"]) {
+    const value = res.headers.get(name)?.trim();
+    if (value !== undefined && /^[A-Za-z0-9._:-]{1,256}$/u.test(value)) return value;
+  }
+  return undefined;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

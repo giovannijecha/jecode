@@ -151,6 +151,10 @@ content for stateless continuation. The `openai` provider authenticates with
 `OPENAI_API_KEY`; the separate `openai-codex` provider uses an explicitly
 connected ChatGPT account and the ChatGPT Codex backend. Their opaque history
 is tagged separately so it is never replayed across those trust boundaries.
+Model selection stores the provider and model together, while the footer keeps
+that route visible. Connecting an account or adding a key never changes it.
+OpenAI API requests carry a random client request identifier and bounded server
+request metadata for support correlation without logging prompts or secrets.
 Refusals, incomplete responses, nested failures, and usage are normalized
 rather than disappearing at the stream boundary.
 Malformed, scalar, and array tool arguments retain a transient invalid marker
@@ -158,11 +162,14 @@ through dispatch. The controller returns a matching error result without
 previewing or executing the call; durable codecs omit the marker after that
 result makes the failure explicit.
 
-The shared HTTP client retries transient network errors, rate limits, and 5xx
-responses for idempotent catalogue GETs. A streaming generation gets one retry
-only when the provider explicitly rejects it with `429` and supplies a retry
-delay before a stream begins. Jecode caps that wait at 60 seconds and keeps it
-visible and interruptible.
+The shared HTTP client owns bounded transport but not provider semantics.
+Adapters normalize authentication, billing, quota, rate-limit, overload,
+context, network, and unknown failures. Idempotent catalogue GETs may retry
+transient network, rate-limit, and 5xx failures. A streaming generation gets one
+retry only when its adapter classifies a pre-stream rejection as a transient
+rate limit and the provider supplies an explicit delay. Billing and quota stops
+are never retried. Jecode caps a retry wait at 60 seconds and keeps it visible
+and interruptible.
 Generation POSTs are never replayed after an ambiguous network error, a server
 failure, or any stream progress. A generation reports whether it is connecting
 or waiting for the model. A request has 60 seconds to receive response headers,

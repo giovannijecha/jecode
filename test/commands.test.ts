@@ -226,6 +226,23 @@ test("the model menu aggregates providers and switches provider and model atomic
   assert.equal(saved[0]?.models?.second, "second-only");
 });
 
+test("the model menu distinguishes API billing from ChatGPT account access", async () => {
+  const api = provider("openai", ["shared-model"]);
+  const account: Provider = {
+    ...provider("openai-codex", ["shared-model"]),
+    auth: { kind: "oauth", account: "openai-codex", label: "ChatGPT" },
+  };
+  const screen = host(undefined);
+
+  await modelsCommand(session(api), screen, { save: false }, [api, account]);
+
+  assert.deepEqual(
+    screen.pickers[0]?.options.map((option) => `${option.label}:${option.value}`),
+    ["shared-model:OpenAI API · billed usage", "shared-model:ChatGPT account"],
+  );
+  assert.match(screen.pickers[0]?.description ?? "", /API and account usage stay separate/);
+});
+
 test("one failed catalogue does not hide models from another provider", async () => {
   const good = provider("good", ["usable"]);
   const failed = {
@@ -303,8 +320,24 @@ test("the provider menu separates account and API access", async () => {
   assert.deepEqual(options.map((option) => option.label), ["Account", "API"]);
   assert.deepEqual(options.map((option) => option.value), ["1 provider", "3 providers"]);
   assert.deepEqual(screen.pickers[0]?.title, []);
-  assert.equal(screen.pickers[0]?.description, undefined);
+  assert.equal(
+    screen.pickers[0]?.description,
+    "Current route: Fake · access changes do not switch it; use /models",
+  );
   assert.equal(live.provider.id, "fake");
+});
+
+test("the provider menu marks the active API route before opening a connection", async () => {
+  const live = session(provider("openai", ["gpt-fixture"]));
+  const screen = host();
+
+  await handleCommand("/providers", live, screen);
+
+  assert.deepEqual(
+    screen.pickers[0]?.options.map((option) => option.value),
+    ["1 provider", "3 providers · current OpenAI API · billed usage"],
+  );
+  assert.match(screen.pickers[0]?.description ?? "", /^Current route: OpenAI API · billed usage/);
 });
 
 test("the account provider menu contains account-backed authentication", async () => {

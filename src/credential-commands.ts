@@ -17,8 +17,18 @@ import { heading } from "./tui/picker.ts";
 import type { Option } from "./tui/picker.ts";
 import type { Palette } from "./ui/theme.ts";
 
+type CredentialRoute = {
+  label: string;
+  active: boolean;
+};
+
 /** Ask for a key, then ask separately whether it may be written to disk. */
-export async function askForKey(name: string, host: Host, pal: Palette): Promise<boolean> {
+export async function askForKey(
+  name: string,
+  host: Host,
+  pal: Palette,
+  route?: CredentialRoute,
+): Promise<boolean> {
   if (host.type === undefined || host.choose === undefined) return false;
 
   const field: Field = {
@@ -47,14 +57,18 @@ export async function askForKey(name: string, host: Host, pal: Palette): Promise
 
   if (index === 0) {
     hold(name, value);
-    host.emit({ kind: "notice", text: "API key ready · this session", tone: "info" });
+    host.emit({
+      kind: "notice",
+      text: readyMessage(route, "ready for this session"),
+      tone: "info",
+    });
     return true;
   }
 
   if (index === 1) {
     try {
       await keep(name, value);
-      host.emit({ kind: "notice", text: "API key saved", tone: "info" });
+      host.emit({ kind: "notice", text: readyMessage(route, "saved"), tone: "info" });
       return true;
     } catch (error) {
       host.emit({
@@ -75,6 +89,7 @@ export async function apiKeyCommand(
   label: string,
   session: Session,
   host: Host,
+  providerId?: string,
 ): Promise<void> {
   const choose = chooser(host);
   if (choose === undefined) return;
@@ -118,9 +133,22 @@ export async function apiKeyCommand(
     index: 0,
   });
   const action = index === undefined ? undefined : actions[index]?.key;
-  if (action === "r") await askForKey(name, host, session.palette);
+  if (action === "r") {
+    await askForKey(name, host, session.palette, {
+      label,
+      active: providerId !== undefined && providerId === session.provider.id,
+    });
+  }
   else if (action === "c") clearSessionKey(name, host);
   else if (action === "f") await forgetSavedKey(name, host);
+}
+
+function readyMessage(route: CredentialRoute | undefined, state: string): string {
+  if (route === undefined) return `API key ${state}`;
+  const next = route.active
+    ? "current provider route"
+    : `choose ${route.label} in /models to use it`;
+  return `${route.label} key ${state} · ${next}`;
 }
 
 function clearSessionKey(name: string, host: Host): void {

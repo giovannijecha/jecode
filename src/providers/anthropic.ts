@@ -13,12 +13,18 @@ import { modelCatalog } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
 import { EFFORTS, requireSupportedEffort } from "../effort.ts";
 import { assembleAnthropic } from "./anthropic-stream.ts";
+import {
+  isRetryableGenerationFailure,
+  isRetryableReadFailure,
+  throwProviderError,
+} from "./failure.ts";
 import { fromWireResponse, stopNotice, toWireMessage, toWireTool } from "./anthropic-wire.ts";
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const MODELS = "https://api.anthropic.com/v1/models?limit=100";
 const API_VERSION = "2023-06-01";
 const KEY = "ANTHROPIC_API_KEY";
+const ID = "anthropic";
 
 const ADAPTIVE = /^claude-(?:fable-5|mythos-(?:5|preview)|opus-(?:5|4-[678])|sonnet-(?:5|4-6))(?:-|$)/;
 const MAX_WITHOUT_XHIGH = ["low", "medium", "high", "max"] as const;
@@ -38,7 +44,7 @@ export function anthropicEfforts(model: string): readonly string[] {
 }
 
 export const anthropic: Provider = {
-  id: "anthropic",
+  id: ID,
   // Sonnet is the default because it is the one that can be left running.
   // Opus via `--model claude-opus-5`, Haiku via `--model claude-haiku-4-5`.
   defaultModel: "claude-sonnet-5",
@@ -51,9 +57,13 @@ export const anthropic: Provider = {
   // Newest first is how the endpoint already answers, so the order is left
   // exactly as it arrives rather than re-sorted into something less useful.
   async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
-    const catalog = await loadModels(signal, onStatus);
-    contextByModel = catalog.contexts;
-    return catalog.ids;
+    try {
+      const catalog = await loadModels(signal, onStatus);
+      contextByModel = catalog.contexts;
+      return catalog.ids;
+    } catch (error) {
+      throwProviderError(ID, signal, error);
+    }
   },
 
   async efforts(model: string): Promise<readonly string[]> {
@@ -66,11 +76,15 @@ export const anthropic: Provider = {
     onStatus?: (status: string) => void,
   ): Promise<ModelContextWindow | undefined> {
     if (contextByModel.has(model)) return contextByModel.get(model);
-    const catalog = await loadModels(signal, onStatus);
-    contextByModel = catalog.contexts;
-    const context = contextByModel.get(model);
-    if (!contextByModel.has(model)) contextByModel.set(model, undefined);
-    return context;
+    try {
+      const catalog = await loadModels(signal, onStatus);
+      contextByModel = catalog.contexts;
+      const context = contextByModel.get(model);
+      if (!contextByModel.has(model)) contextByModel.set(model, undefined);
+      return context;
+    } catch (error) {
+      throwProviderError(ID, signal, error);
+    }
   },
 
   location: () => "cloud",
@@ -97,23 +111,29 @@ export const anthropic: Provider = {
       };
     }
 
-    const events = await postSse(
-      ENDPOINT,
-      headers(key),
-      body,
-      req.maxTokens,
-      req.signal,
-      req.onStatus,
-    );
+    try {
+      const events = await postSse(
+        ENDPOINT,
+        headers(key),
+        body,
+        req.maxTokens,
+        req.signal,
+        req.onStatus,
+        undefined,
+        (error) => isRetryableGenerationFailure(ID, error),
+      );
 
-    const data = await assembleAnthropic(events, req.onStream);
+      const data = await assembleAnthropic(events, req.onStream);
 
-    // A refusal or a truncation never arrives as streamed text, so it has to
-    // be announced separately or the user watches the turn end in silence.
-    const notice = stopNotice(data);
-    if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
+      // A refusal or a truncation never arrives as streamed text, so it has to
+      // be announced separately or the user watches the turn end in silence.
+      const notice = stopNotice(data);
+      if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
 
-    return fromWireResponse(data);
+      return fromWireResponse(data);
+    } catch (error) {
+      throwProviderError(ID, req.signal, error);
+    }
   },
 };
 
@@ -124,7 +144,13 @@ async function loadModels(
   ids: string[];
   contexts: Map<string, ModelContextWindow | undefined>;
 }> {
-  const entries = await modelCatalog(MODELS, headers(requireKey()), signal, onStatus);
+  const entries = await modelCatalog(
+    MODELS,
+    headers(requireKey()),
+    signal,
+    onStatus,
+    (error) => isRetryableReadFailure(ID, error),
+  );
   return {
     ids: entries.map((entry) => entry.id),
     contexts: new Map(entries.map((entry) => [

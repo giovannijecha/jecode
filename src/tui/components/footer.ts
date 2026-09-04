@@ -5,6 +5,7 @@ import { elide, textWidth } from "../../ui/width.ts";
 
 export type FooterInfo = {
   workspace: string;
+  provider: string;
   model: string;
   effort: string;
 };
@@ -25,7 +26,7 @@ export function renderFooter(
 
 function identity(info: FooterInfo, cols: number): string {
   if (cols <= 0) return "";
-  const core = `${info.model || "no model"} · ${info.effort}`;
+  const core = `${info.provider || "Provider"} · ${info.model || "no model"} · ${info.effort}`;
   if (textWidth(core) >= cols || info.workspace === "") return elide(core, cols);
 
   const divider = " · ";

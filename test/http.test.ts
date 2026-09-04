@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getJson, postJson, postSse } from "../src/providers/http.ts";
+import {
+  isRetryableGenerationFailure,
+  isRetryableReadFailure,
+} from "../src/providers/failure.ts";
 
 test("retries a rate limit and reports the wait", async (context) => {
   const previousFetch = globalThis.fetch;
@@ -55,6 +59,8 @@ test("retries one rejected SSE generation after the provider delay", async (cont
     256,
     undefined,
     (status) => statuses.push(status),
+    undefined,
+    (error) => isRetryableGenerationFailure("openai", error),
   );
   await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -98,6 +104,8 @@ test("bounds an SSE generation to one rate-limit retry", async (context) => {
       256,
       undefined,
       (status) => statuses.push(status),
+      undefined,
+      (error) => isRetryableGenerationFailure("openai", error),
     ),
     (error: Error & { status?: number }) => {
       assert.equal(error.status, 429);
@@ -134,6 +142,83 @@ test("does not retry an SSE rate limit without a provider delay", async (context
   assert.equal(calls, 1);
 });
 
+test("does not retry a delayed hard-quota rejection", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: "insufficient_quota",
+          message: "You exceeded your current quota. Check billing.",
+        },
+      }),
+      {
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: { "retry-after": "0", "x-request-id": "req_hard-quota" },
+      },
+    );
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = previousFetch; });
+
+  await assert.rejects(
+    postSse(
+      "https://example.test/generate",
+      {},
+      { prompt: "hello" },
+      256,
+      undefined,
+      undefined,
+      undefined,
+      (error) => isRetryableGenerationFailure("openai", error),
+    ),
+    (error: Error & { requestId?: string }) => {
+      assert.equal(error.requestId, "req_hard-quota");
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
+});
+
+test("does not retry a hard-quota catalogue read", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: "insufficient_quota",
+          message: "You exceeded your current quota. Check billing.",
+        },
+      }),
+      {
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: { "retry-after": "0" },
+      },
+    );
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = previousFetch; });
+
+  await assert.rejects(
+    getJson(
+      "https://example.test/models",
+      {},
+      undefined,
+      undefined,
+      (error) => isRetryableReadFailure("openai", error),
+    ),
+    (error: Error & { status?: number }) => {
+      assert.equal(error.status, 429);
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
+});
+
 test("an abort stops a pending SSE rate-limit retry", async (context) => {
   const previousFetch = globalThis.fetch;
   const control = new AbortController();
@@ -158,6 +243,8 @@ test("an abort stops a pending SSE rate-limit retry", async (context) => {
       statuses.push(status);
       if (status.startsWith("Rate limited")) control.abort(new Error("cancelled"));
     },
+    undefined,
+    (error) => isRetryableGenerationFailure("openai", error),
   );
 
   await assert.rejects(pending, /cancelled/);

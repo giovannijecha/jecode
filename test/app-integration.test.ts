@@ -1814,7 +1814,7 @@ test("the packaged batch executable reports terminal failures on stderr", async 
     assert.equal(result.code, 1);
     assert.match(result.stdout, /> hello/);
     assert.doesNotMatch(result.stdout, /ANTHROPIC_API_KEY is not set/);
-    assert.match(result.stderr, /^jecode: ANTHROPIC_API_KEY is not set/m);
+    assert.match(result.stderr, /^jecode: Anthropic: ANTHROPIC_API_KEY is not set/m);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
