@@ -11,10 +11,17 @@ import type { OpenAIResponse } from "./openai-wire.ts";
 export async function assembleOpenAI(
   events: AsyncIterable<unknown>,
   onStream?: (event: StreamEvent) => void,
+  onStatus?: (status: string) => void,
 ): Promise<OpenAIResponse> {
   const items: unknown[] = [];
   const announcedTools = { identities: new Set<string>(), anonymous: false };
   let refusal = false;
+  let activity: string | undefined;
+  const status = (next: string): void => {
+    if (activity === next) return;
+    activity = next;
+    onStatus?.(next);
+  };
 
   for await (const raw of events) {
     const event = raw as {
@@ -30,36 +37,61 @@ export async function assembleOpenAI(
     };
 
     switch (event.type) {
+      case "response.created":
+      case "response.in_progress":
+        if (activity === undefined) status("Working");
+        break;
+
       case "response.output_text.delta":
-        if (typeof event.delta === "string") onStream?.({ kind: "text", text: event.delta });
+        if (typeof event.delta === "string") {
+          status("Responding");
+          onStream?.({ kind: "text", text: event.delta });
+        }
         break;
 
       case "response.refusal.delta":
         if (typeof event.delta === "string") {
+          status("Responding");
           onStream?.({ kind: "text", text: `${refusal ? "" : "[refused] "}${event.delta}` });
           refusal = true;
         }
         break;
 
       case "response.reasoning_summary_text.delta":
-        if (typeof event.delta === "string") onStream?.({ kind: "thinking", text: event.delta });
+        if (typeof event.delta === "string") {
+          status("Thinking");
+          onStream?.({ kind: "thinking", text: event.delta });
+        }
+        break;
+
+      case "response.reasoning_summary_part.added":
+        status("Thinking");
+        break;
+
+      case "response.reasoning_summary_text.done":
+      case "response.reasoning_summary_part.done":
+        status("Working");
         break;
 
       case "response.output_item.added":
         if (isFunctionCall(event.item)) {
-          announceTool(event, event.item, announcedTools, onStream);
+          announceTool(event, event.item, announcedTools, onStream, status);
+        } else if (itemType(event.item) === "reasoning") {
+          status("Thinking");
+        } else if (itemType(event.item) === "message") {
+          status("Responding");
         }
         break;
 
       case "response.function_call_arguments.delta":
       case "response.function_call_arguments.done":
-        announceTool(event, undefined, announcedTools, onStream);
+        announceTool(event, undefined, announcedTools, onStream, status);
         break;
 
       case "response.output_item.done":
         if (event.item !== undefined) {
           if (isFunctionCall(event.item)) {
-            announceTool(event, event.item, announcedTools, onStream);
+            announceTool(event, event.item, announcedTools, onStream, status);
           }
           items.push(event.item);
         }
@@ -116,11 +148,18 @@ function isFunctionCall(item: unknown): item is FunctionCallItem {
     (item as Record<string, unknown>)["type"] === "function_call";
 }
 
+function itemType(item: unknown): unknown {
+  return typeof item === "object" && item !== null
+    ? (item as Record<string, unknown>)["type"]
+    : undefined;
+}
+
 function announceTool(
   event: OpenAIStreamEvent,
   item: FunctionCallItem | undefined,
   announced: ToolAnnouncements,
   onStream?: (event: StreamEvent) => void,
+  onStatus?: (status: string) => void,
 ): void {
   const identities = toolIdentities(event, item);
   if (identities.length === 0) {
@@ -134,6 +173,7 @@ function announceTool(
 
   const rawName = item?.name ?? event.name;
   const name = typeof rawName === "string" && rawName !== "" ? rawName : undefined;
+  onStatus?.(`Preparing ${name ?? "tool"}`);
   onStream?.({ kind: "tool", ...(name === undefined ? {} : { name }) });
 }
 

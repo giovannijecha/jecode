@@ -122,16 +122,20 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
     const previousFetch = globalThis.fetch;
     let body: Record<string, unknown> = {};
     let headers = new Headers();
+    const statuses: string[] = [];
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       headers = new Headers(init?.headers);
-      return sse({
-        type: "response.completed",
-        response: {
-          status: "completed",
-          output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+      return sseEvents([
+        { type: "response.created", response: {} },
+        {
+          type: "response.completed",
+          response: {
+            status: "completed",
+            output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+          },
         },
-      });
+      ]);
     }) as typeof fetch;
     context.after(() => { globalThis.fetch = previousFetch; });
 
@@ -142,6 +146,7 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
       tools: [],
       maxTokens: 123,
       effort: "max",
+      onStatus: (status) => statuses.push(status),
     });
 
     assert.deepEqual(message.content, [{ kind: "text", text: "done" }]);
@@ -153,6 +158,7 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
     assert.deepEqual(body["include"], ["reasoning.encrypted_content"]);
     assert.equal(headers.get("authorization"), "Bearer send-access");
     assert.equal(headers.get("openai-beta"), "responses=experimental");
+    assert.deepEqual(statuses, ["Working"]);
   });
 });
 

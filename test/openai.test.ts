@@ -97,9 +97,14 @@ test("keeps completed stream items when the Codex final envelope has empty outpu
 
 test("announces one tool phase while Responses arguments stream", async () => {
   const streamed: StreamEvent[] = [];
+  const statuses: string[] = [];
   await assembleOpenAI(
     feed([
+      { type: "response.created", response: {} },
+      { type: "response.in_progress", response: {} },
+      { type: "response.reasoning_summary_part.added", summary_index: 0 },
       { type: "response.reasoning_summary_text.delta", delta: "Inspecting" },
+      { type: "response.reasoning_summary_text.done", text: "Inspecting" },
       {
         type: "response.output_item.added",
         output_index: 0,
@@ -131,11 +136,18 @@ test("announces one tool phase while Responses arguments stream", async () => {
       { type: "response.completed", response: { status: "completed", output: [] } },
     ]),
     (event) => streamed.push(event),
+    (status) => statuses.push(status),
   );
 
   assert.deepEqual(streamed, [
     { kind: "thinking", text: "Inspecting" },
     { kind: "tool", name: "read_file" },
+  ]);
+  assert.deepEqual(statuses, [
+    "Working",
+    "Thinking",
+    "Working",
+    "Preparing read_file",
   ]);
 });
 

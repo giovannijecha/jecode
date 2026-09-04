@@ -99,7 +99,7 @@ export const openaiCodex: Provider = {
         req.signal,
         req.onStatus,
       );
-      const data = await assembleOpenAI(events, req.onStream);
+      const data = await assembleOpenAI(events, req.onStream, req.onStatus);
       const notice = stopNotice(data);
       if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
       return fromWireResponse(data, ID);

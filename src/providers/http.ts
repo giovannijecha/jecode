@@ -66,7 +66,13 @@ export async function postSse(
   const maximumChars = sseStreamCharacterLimit(maxOutputTokens);
   const res = await request(url, { accept: "text/event-stream", ...headers }, body, signal, onStatus);
   if (res.body === null) throw httpError(`${url} returned no body`, res.status);
-  return readSseJson(withIdleTimeout(url, res.body), maximumChars);
+  return readSseJson(res.body, maximumChars, {
+    milliseconds: BODY_IDLE_TIMEOUT_MS,
+    error: () => httpError(
+      `${url} SSE stream was idle for ${BODY_IDLE_TIMEOUT_MS}ms without an event`,
+      res.status,
+    ),
+  });
 }
 
 async function request(
@@ -201,38 +207,6 @@ async function timedRead(
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
-}
-
-function withIdleTimeout(url: string, body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
-  const reader = body.getReader();
-  let released = false;
-  const release = (): void => {
-    if (released) return;
-    released = true;
-    reader.releaseLock();
-  };
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { done, value } = await timedRead(url, reader);
-        if (done) {
-          release();
-          controller.close();
-        } else {
-          controller.enqueue(value);
-        }
-      } catch (error) {
-        await reader.cancel(error).catch(() => undefined);
-        release();
-        controller.error(error);
-      }
-    },
-    async cancel(reason) {
-      await reader.cancel(reason).catch(() => undefined);
-      release();
-    },
-  });
 }
 
 function waitLabel(ms: number): string {
