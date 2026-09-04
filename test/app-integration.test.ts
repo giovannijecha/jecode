@@ -1119,6 +1119,10 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /first request/);
     assert.match(exported, /\[interrupted\]/);
+    await waitFor(
+      () => !(harness.frames.at(-1) ?? []).join("\n").includes("esc to interrupt"),
+      "completed export command",
+    );
 
     feed("continue\r");
     await waitFor(
