@@ -1026,6 +1026,7 @@ test("a streamed failure survives export, resume, and the next provider request"
     assert.match(JSON.stringify(current.conversation.transcript), /partial answer/);
     assert.match(JSON.stringify(current.conversation.transcript), /fixture stream failed/);
 
+    await waitForIdle(harness, "settled failed turn before export");
     feed("/export\r");
     await waitFor(async () => (await readdir(workspace)).some((name) => name.startsWith("jecode-transcript-")), "failed turn export");
     const exportedName = (await readdir(workspace)).find((name) => name.startsWith("jecode-transcript-"));
@@ -1033,10 +1034,7 @@ test("a streamed failure survives export, resume, and the next provider request"
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /partial answer/);
     assert.match(exported, /fixture stream failed/);
-    await waitFor(
-      () => !(harness.frames.at(-1) ?? []).join("\n").includes("esc to interrupt"),
-      "completed export command",
-    );
+    await waitForIdle(harness, "completed failed-turn export");
 
     feed("retry\r");
     await waitFor(
@@ -1107,6 +1105,7 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
       "painted interrupted turn",
     );
 
+    await waitForIdle(harness, "settled interrupted turn before export");
     feed("/export\r");
     await waitFor(
       async () => (await readdir(workspace)).some((name) => name.startsWith("jecode-transcript-")),
@@ -1119,10 +1118,7 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
     const exported = await readFile(path.join(workspace, exportedName), "utf8");
     assert.match(exported, /first request/);
     assert.match(exported, /\[interrupted\]/);
-    await waitFor(
-      () => !(harness.frames.at(-1) ?? []).join("\n").includes("esc to interrupt"),
-      "completed export command",
-    );
+    await waitForIdle(harness, "completed interrupted-turn export");
 
     feed("continue\r");
     await waitFor(
@@ -1912,6 +1908,7 @@ test("/export writes without a picker to the directory where Jecode was launched
       () => harness.frames.flat().join("\n").includes("Exported answer."),
       "answer before export",
     );
+    await waitForIdle(harness, "completed answer before export");
     feed("/export\r");
     let name: string | undefined;
     await waitFor(async () => {
@@ -1922,10 +1919,7 @@ test("/export writes without a picker to the directory where Jecode was launched
     const markdown = await readFile(path.join(directory, name), "utf8");
     assert.match(markdown, /keep this/);
     assert.match(markdown, /Exported answer\./);
-    await waitFor(
-      () => !(harness.frames.at(-1) ?? []).join("\n").includes("esc to interrupt"),
-      "completed export command",
-    );
+    await waitForIdle(harness, "completed export command");
     feed("/exit\r");
     await running;
   } finally {
@@ -2184,6 +2178,10 @@ function plainRow(value: string): string {
 
 function lastFooter(harness: { frames: string[][] }): string {
   return plainRow(harness.frames.at(-1)?.at(-1) ?? "");
+}
+
+async function waitForIdle(harness: { frames: string[][] }, label: string): Promise<void> {
+  await waitFor(() => !lastFooter(harness).includes("esc to interrupt"), label);
 }
 
 function deferred(): { wait: Promise<void>; release(): void } {
