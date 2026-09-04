@@ -103,7 +103,9 @@ User data remains under `~/.jecode`:
 These files are implementation-owned and should not be edited manually. Their
 exact JSON layout is not a public API. Jecode 1.x will continue to read session
 schemas 1, 2, 3, and 4. A future schema change must migrate safely or fail
-without destroying the existing session.
+without destroying the existing session. Bounded catalogue summaries are
+rebuildable indexes, not canonical conversation data; missing or suspect
+summaries fall back to strict session loading.
 
 `JECODE_HOME` is reserved for development and test isolation. It is not a
 supported user-facing configuration surface and is not covered by the 1.x

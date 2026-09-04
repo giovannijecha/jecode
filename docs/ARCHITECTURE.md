@@ -363,7 +363,9 @@ would rewrite history owned by more than one path.
 Interactive sessions publish lazily after the first consistent tool
 checkpoint or settled completed, failed, or interrupted turn. They live under
 `~/.jecode/sessions/<workspace-digest>/<session-id>/` with versioned metadata,
-one atomically replaced file per conversation node, and a small atomic head.
+one atomically replaced file per conversation node, a small atomic head, and a
+rebuildable 4 KiB catalogue summary tied exactly to that metadata and head. The
+summary has its own version; it does not change the canonical session schema.
 The node lands before the head. After a crash, the loader accepts only one
 strictly adjacent node mutation and advances the head; any ambiguous state is
 rejected. Files and decoded values are size-bounded, unknown fields fail
@@ -378,10 +380,12 @@ The interactive persistence owner retains the last fully verified snapshot and
 its lease. Conversation nodes are deeply immutable, so a checkpoint can verify
 shared history by identity, update aggregate size counters for only the changed
 node, reread the bounded head and lease, then write one node followed by the
-head. A changed head, replaced lease, rematerialized history, or unexpected node
-outside that snapshot fails closed. Resume and crash recovery remain the only
-paths that read and validate the complete on-disk tree; the persisted schema is
-unchanged.
+head and catalogue summary. A bounded checkpoint marker precedes the node
+mutation, so a crash cannot leave an old summary looking current while an
+adjacent node awaits recovery. A changed head, replaced lease, rematerialized
+history, or unexpected node outside that snapshot fails closed. Resume always
+reads and validates the complete on-disk tree; the persisted conversation
+schema is unchanged.
 
 Session catalogues use the canonical real workspace path, so another project
 cannot appear in the resume picker. A process lease prevents simultaneous
@@ -397,10 +401,15 @@ keeps Anthropic thinking signatures and equivalent provider continuation state
 out of durable storage without constructing or replaying a partial tool turn.
 No load, resume, or branch operation executes a historical tool call.
 
-The resume catalogue validates every entry in its bounded 4,096-entry input
-set, reads independent sessions in small concurrent waves, and sorts the whole
-admissible set by durable `updatedAt` before applying the visible result limit.
-It fails explicitly above that bound instead of silently hiding an older
+The resume catalogue validates bounded metadata, head, summary, marker, and
+lease files for every entry in its 4,096-entry input set. It rereads each head
+to reject a mixed checkpoint view, processes independent sessions in small
+concurrent waves, and sorts the whole admissible set by durable `updatedAt`
+before applying the visible result limit. A missing, malformed, head-stale, or
+abandoned-checkpoint summary triggers the strict full loader while the session
+is idle, then is rebuilt atomically. Selecting a row always performs the strict
+load again, so the summary never authorizes conversation data. The catalogue
+fails explicitly above its entry bound instead of silently hiding an older
 session that was updated most recently.
 
 `jecode resume` opens a searchable selector; `jecode resume --latest` chooses
