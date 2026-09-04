@@ -24,28 +24,80 @@ export async function providersCommand(session: Session, host: Host): Promise<vo
   const choose = chooser(host);
   if (choose === undefined) return;
 
+  const groups = providerGroups();
   let selected = Math.max(
     0,
-    PROVIDERS.findIndex((provider) => provider.id === session.provider.id),
+    groups.findIndex((group) => group.providers.some((provider) => provider.id === session.provider.id)),
   );
   while (true) {
     const index = await choose({
       title: [],
-      options: PROVIDERS.map((provider) => ({
+      options: groups.map((group) => ({
+        label: group.label,
+        value: providerCount(group.providers.length),
+      })),
+      index: selected,
+    });
+    if (index === undefined) {
+      throwIfAborted(host.signal);
+      return;
+    }
+    const group = groups[index];
+    if (group === undefined) return;
+    selected = index;
+    await providerGroupCommand(group, session, host);
+    throwIfAborted(host.signal);
+  }
+}
+
+type ProviderGroup = {
+  label: "Account" | "API";
+  providers: readonly Provider[];
+};
+
+function providerGroups(): readonly ProviderGroup[] {
+  return [
+    { label: "Account", providers: PROVIDERS.filter((provider) => provider.auth.kind === "oauth") },
+    { label: "API", providers: PROVIDERS.filter((provider) => provider.auth.kind !== "oauth") },
+  ];
+}
+
+async function providerGroupCommand(
+  group: ProviderGroup,
+  session: Session,
+  host: Host,
+): Promise<void> {
+  if (host.choose === undefined) return;
+  let selected = Math.max(
+    0,
+    group.providers.findIndex((provider) => provider.id === session.provider.id),
+  );
+
+  while (true) {
+    const index = await host.choose({
+      title: heading(group.label, "provider access", session.palette),
+      options: group.providers.map((provider) => ({
         label: providerLabel(provider.id),
         value: providerAccessHint(provider),
       })),
       index: selected,
     });
-    if (index === undefined) return;
-    const provider = PROVIDERS[index];
+    if (index === undefined) {
+      throwIfAborted(host.signal);
+      return;
+    }
+    const provider = group.providers[index];
     if (provider === undefined) return;
     selected = index;
     await manageProvider(provider, session, host);
-    // Esc closes only the nested provider flow. Ctrl+C also settles that
-    // picker, but aborts the command signal and must not reopen the parent.
+    // Esc closes only the provider-specific flow. Ctrl+C also settles that
+    // interaction, but aborts the command signal and must not reopen a menu.
     throwIfAborted(host.signal);
   }
+}
+
+function providerCount(count: number): string {
+  return `${count} ${count === 1 ? "provider" : "providers"}`;
 }
 
 export function providerAccessHint(provider: Provider): string {

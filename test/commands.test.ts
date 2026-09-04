@@ -293,28 +293,49 @@ test("a menu command without a screen says so, and asks nothing", async () => {
   assert.equal(blocks.length, 1);
 });
 
-test("the provider menu names every provider and its access state", async () => {
+test("the provider menu separates account and API access", async () => {
   const live = session(provider("fake", ["a"]));
   const screen = host();
 
   await handleCommand("/providers", live, screen);
 
   const options = screen.pickers[0]?.options ?? [];
-  assert.deepEqual(
-    options.map((option) => option.label),
-    ["Anthropic", "OpenAI API", "ChatGPT", "Ollama"],
-  );
-  // Either a reason or "ready" — never an empty hint, which would read as a
-  // provider that has nothing to say about itself.
-  for (const option of options) assert.notEqual(option.value, undefined);
+  assert.deepEqual(options.map((option) => option.label), ["Account", "API"]);
+  assert.deepEqual(options.map((option) => option.value), ["1 provider", "3 providers"]);
   assert.deepEqual(screen.pickers[0]?.title, []);
   assert.equal(screen.pickers[0]?.description, undefined);
   assert.equal(live.provider.id, "fake");
 });
 
+test("the account provider menu contains account-backed authentication", async () => {
+  const screen = host(0, undefined, undefined);
+
+  await handleCommand("/providers", session(provider("fake", ["a"])), screen);
+
+  assert.deepEqual(
+    screen.pickers[1]?.options.map((option) => option.label),
+    ["ChatGPT"],
+  );
+  assert.notEqual(screen.pickers[1]?.options[0]?.value, undefined);
+  assert.deepEqual(screen.pickers[2]?.options.map((option) => option.label), ["Account", "API"]);
+});
+
+test("the API provider menu contains keys and Ollama connections", async () => {
+  const screen = host(1, undefined, undefined);
+
+  await handleCommand("/providers", session(provider("fake", ["a"])), screen);
+
+  assert.deepEqual(
+    screen.pickers[1]?.options.map((option) => option.label),
+    ["Anthropic", "OpenAI API", "Ollama"],
+  );
+  for (const option of screen.pickers[1]?.options ?? []) assert.notEqual(option.value, undefined);
+  assert.deepEqual(screen.pickers[2]?.options.map((option) => option.label), ["Account", "API"]);
+});
+
 test("provider access management never changes the runtime selection", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(undefined);
+  const screen = host(0, 0, undefined, undefined, undefined);
   const saved: Partial<SavedSettings>[] = [];
   screen.saveSettings = (patch) => {
     saved.push(patch);
@@ -337,8 +358,28 @@ test("ctrl+c inside provider management does not reopen the parent menu", async 
   screen.choose = (picker) => {
     screen.pickers.push(picker);
     calls++;
-    if (calls === 1) return Promise.resolve(3); // Ollama
-    if (calls === 2) control.abort(new Error("interrupted"));
+    if (calls === 1) return Promise.resolve(1); // API
+    if (calls === 2) return Promise.resolve(2); // Ollama
+    if (calls === 3) control.abort(new Error("interrupted"));
+    return Promise.resolve(undefined);
+  };
+
+  await assert.rejects(handleCommand("/providers", live, screen), /interrupted/);
+
+  assert.equal(calls, 3);
+});
+
+test("ctrl+c inside a provider category does not reopen the root menu", async () => {
+  const live = session(provider("fake", ["a"]));
+  const screen = host();
+  const control = new AbortController();
+  let calls = 0;
+  screen.signal = control.signal;
+  screen.choose = (picker) => {
+    screen.pickers.push(picker);
+    calls++;
+    if (calls === 1) return Promise.resolve(1); // API
+    control.abort(new Error("interrupted"));
     return Promise.resolve(undefined);
   };
 
@@ -738,7 +779,7 @@ test("a model catalogue stops inspecting an oversized invalid list", async () =>
 test("provider access can collect a missing API key, masked", async () => {
   await withIsolatedOpenAICredentials(async () => {
     const live = session(provider("fake", ["a"]));
-    const screen = host(1, 0, 0, undefined); // OpenAI API, add, session, back
+    const screen = host(1, 1, 0, 0, undefined, undefined); // API, OpenAI, add, session, back
     screen.typed = "typed-key";
 
     await handleCommand("/providers", live, screen);
@@ -752,7 +793,7 @@ test("provider access can collect a missing API key, masked", async () => {
 test("the key never reaches the transcript", async () => {
   await withIsolatedOpenAICredentials(async () => {
     const live = session(provider("fake", ["a"]));
-    const screen = host(1, 0, 0, undefined);
+    const screen = host(1, 1, 0, 0, undefined, undefined);
     screen.typed = "fixture-credential-value";
 
     await handleCommand("/providers", live, screen);
@@ -765,7 +806,7 @@ test("the key never reaches the transcript", async () => {
 test("discarding a typed key keeps it out of the session", async () => {
   await withIsolatedOpenAICredentials(async () => {
     const live = session(provider("fake", ["a"]));
-    const screen = host(1, 0, 2, undefined); // OpenAI API, add, discard, back
+    const screen = host(1, 1, 0, 2, undefined, undefined); // API, OpenAI, add, discard, back
     screen.typed = "throwaway";
 
     await handleCommand("/providers", live, screen);
@@ -775,7 +816,7 @@ test("discarding a typed key keeps it out of the session", async () => {
 
 test("a provider that can already run is not asked for a key", async () => {
   const live = session(provider("fake", ["a"]));
-  const screen = host(0, undefined);
+  const screen = host(1, 0, undefined, undefined);
 
   const before = process.env["ANTHROPIC_API_KEY"];
   process.env["ANTHROPIC_API_KEY"] = "already-there";
