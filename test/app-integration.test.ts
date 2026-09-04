@@ -249,7 +249,9 @@ test("batch mode propagates provider failures outside the transcript", async () 
   const failed: Provider = {
     ...provider(),
     async send(): Promise<Message> {
-      throw new Error("fixture provider failed");
+      throw Object.assign(new Error("fixture provider failed"), {
+        body: '{"error":{"message":"requested model is unavailable"}}',
+      });
     },
   };
   const output: string[] = [];
@@ -260,12 +262,12 @@ test("batch mode propagates provider failures outside the transcript", async () 
       width: 60,
       write: (text) => output.push(text),
     }),
-    /fixture provider failed/,
+    /fixture provider failed · requested model is unavailable/,
   );
 
   const shown = output.join("");
   assert.match(shown, /> hello/);
-  assert.doesNotMatch(shown, /fixture provider failed/);
+  assert.doesNotMatch(shown, /fixture provider failed|requested model is unavailable/);
 });
 
 test("batch mode discards an incomplete streamed answer when the provider fails", async () => {
