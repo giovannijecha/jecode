@@ -457,8 +457,8 @@ The visual grammar follows a transcript rather than a dashboard or execution
 diagram:
 
 ```text
-user input       `❯` in the semantic gutter, then unframed Markdown
-reasoning        `│` gutter rail and muted, unlabeled three-row tail
+user input       full-width subtle surface with `❯` in the semantic gutter
+reasoning        unframed, muted, unlabeled three-row tail
 assistant        unframed Markdown on the shared content column
 tool activity    state mark plus continuous evidence rail beneath each call
 selection        bold Slate label/value; arrow fallback without colour
@@ -485,11 +485,11 @@ reference inside the dock and closes with Esc; command discovery remains on the
 `/` completion surface. Token accounting stays internal instead of becoming a
 persistent `/usage` report.
 
-Conversation turns use one blank terminal row as their outer separator. User,
-reasoning, assistant, notice, and tool rows reserve the same adaptive semantic
-gutter. A rail-only rhythm row gives reasoning space before its first tool while
-keeping the execution trace continuous. Consecutive tools join without repeated
-gaps.
+Conversation turns use one blank terminal row as their outer separator. A user
+turn owns a full-width subtle surface whose cue aligns with the shared content
+column. Assistant and reasoning rows remain unframed. Only tool rows form an
+evidence rail: consecutive tools join without repeated gaps, while reasoning
+breaks that rail and keeps its own unframed rhythm.
 
 Short transcripts are bottom-aligned against the dock with one fixed blank row
 before the composer's upper rule. Unused terminal height stays above the
