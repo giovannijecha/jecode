@@ -16,14 +16,24 @@ import {
   realpath,
   rename,
   rm,
-  stat,
 } from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWrite } from "../atomic.ts";
 import { CONVERSATION_LIMITS, ConversationTree } from "../conversation.ts";
 import type { TurnNode } from "../conversation.ts";
-import { leadingText } from "../text-boundary.ts";
 import { userDataPath } from "../user-data.ts";
+import {
+  advanceSessionCatalog,
+  catalogMatches,
+  decodeSessionCatalog,
+  encodeSessionCatalog,
+  sameSessionHead,
+  sessionCatalog,
+  SESSION_CATALOG_BYTES,
+  SESSION_CATALOG_FILE,
+  SESSION_CHECKPOINT_FILE,
+} from "./catalog.ts";
+import type { StoredSessionCatalog } from "./catalog.ts";
 import {
   decodeHead,
   decodeMeta,
@@ -59,6 +69,7 @@ export type SessionSnapshot = Readonly<{
   meta: SessionMeta;
   head: SessionHead;
   conversation: ConversationTree;
+  catalog: StoredSessionCatalog;
 }>;
 
 export type ClaimedSessionSnapshot = SessionSnapshot & Readonly<{ lease: SessionLease }>;
@@ -102,22 +113,7 @@ export class DurableSessionStore {
     for (let start = 0; start < names.length; start += CATALOG_READ_CONCURRENCY) {
       const batch = await Promise.all(names.slice(start, start + CATALOG_READ_CONCURRENCY)
         .map(async (id): Promise<SessionCatalogEntry | undefined> => {
-          try {
-            const snapshot = await this.load(id);
-            const conversation = snapshot.conversation.latestResumable();
-            if (conversation === undefined) return undefined;
-            return {
-              id,
-              createdAt: snapshot.meta.createdAt,
-              updatedAt: snapshot.head.updatedAt,
-              turns: selectedTurnCount(conversation),
-              preview: firstUserText(conversation),
-              active: await this.#leaseIsActive(id),
-            };
-          } catch {
-            // Corrupt or foreign data never becomes a resume candidate.
-            return undefined;
-          }
+          return await this.#catalogEntry(id);
         }));
       catalog.push(...batch.filter((entry) => entry !== undefined));
     }
@@ -136,10 +132,7 @@ export class DurableSessionStore {
       path.join(directory, "meta.json"),
       SESSION_FILE_LIMITS.metadataBytes,
     ));
-    if (
-      meta.id !== id || meta.workspaceDigest !== this.workspaceDigest ||
-      workspaceKey(meta.workspaceRoot) !== workspaceKey(this.workspaceRoot)
-    ) throw new Error("session belongs to a different workspace");
+    assertSessionWorkspace(meta, id, this.workspaceRoot, this.workspaceDigest);
     let head = decodeHead(await readJson(
       path.join(directory, "head.json"),
       SESSION_FILE_LIMITS.metadataBytes,
@@ -189,7 +182,8 @@ export class DurableSessionStore {
 
     const nodes = stored.map((entry) => entry.node);
     const conversation = ConversationTree.restore(nodes, head.nodeId);
-    return Object.freeze({ meta, head, conversation });
+    const catalog = sessionCatalog(meta, head, conversation);
+    return Object.freeze({ meta, head, conversation, catalog });
   }
 
   async publish(conversation: ConversationTree): Promise<SessionSnapshot>;
@@ -220,6 +214,7 @@ export class DurableSessionStore {
       revision: active.revision,
       updatedAt: now,
     });
+    const catalog = sessionCatalog(meta, head, conversation);
 
     try {
       await makePrivateDirectory(temporary);
@@ -235,6 +230,11 @@ export class DurableSessionStore {
       }
       await atomicWrite(path.join(temporary, "meta.json"), encodeMeta(meta), { mode: FILE_MODE });
       await atomicWrite(path.join(temporary, "head.json"), encodeHead(head), { mode: FILE_MODE });
+      await atomicWrite(
+        path.join(temporary, SESSION_CATALOG_FILE),
+        encodeSessionCatalog(catalog),
+        { mode: FILE_MODE },
+      );
       if (token !== undefined) {
         await atomicWrite(path.join(temporary, "active"), token, { mode: FILE_MODE });
       }
@@ -244,7 +244,7 @@ export class DurableSessionStore {
       throw error;
     }
 
-    const snapshot = Object.freeze({ meta, head, conversation });
+    const snapshot = Object.freeze({ meta, head, conversation, catalog });
     if (token === undefined) return snapshot;
     const lease = sessionLease(id, path.join(target, "active"), token);
     return Object.freeze({ ...snapshot, lease });
@@ -268,7 +268,7 @@ export class DurableSessionStore {
       path.join(directory, "head.json"),
       SESSION_FILE_LIMITS.metadataBytes,
     ));
-    if (!sameHead(currentHead, previous.head)) {
+    if (!sameSessionHead(currentHead, previous.head)) {
       throw new Error("session head changed after its verified snapshot");
     }
 
@@ -304,6 +304,13 @@ export class DurableSessionStore {
       revision: active.revision,
       updatedAt: now,
     });
+    const catalog = advanceSessionCatalog(previous.catalog, previous.meta, head, conversation);
+    const checkpointToken = leaseToken();
+    await atomicWrite(
+      path.join(directory, SESSION_CHECKPOINT_FILE),
+      checkpointToken,
+      { mode: FILE_MODE, validate: async () => assertDirectory(directory) },
+    );
     await atomicWrite(
       path.join(nodesDirectory, nodeName(active.id)),
       encodeNode(active, head.sequence, now),
@@ -313,7 +320,11 @@ export class DurableSessionStore {
       mode: FILE_MODE,
       validate: async () => assertDirectory(directory),
     });
-    return Object.freeze({ meta: previous.meta, head, conversation });
+    await this.#writeCatalog(previous.meta.id, catalog, checkpointToken).catch(() => undefined);
+    // Once the canonical head is durable, a missing summary is detectable by
+    // its head mismatch and can be rebuilt without retaining a live marker.
+    await removeLease(path.join(directory, SESSION_CHECKPOINT_FILE), checkpointToken);
+    return Object.freeze({ meta: previous.meta, head, conversation, catalog });
   }
 
   async claim(id: string): Promise<SessionLease> {
@@ -358,6 +369,90 @@ export class DurableSessionStore {
     const owner = await leaseOwner(path.join(this.#sessionDirectory(id), "active"));
     return owner !== undefined && pidIsAlive(owner.pid);
   }
+
+  async #catalogEntry(id: string): Promise<SessionCatalogEntry | undefined> {
+    try {
+      const directory = this.#sessionDirectory(id);
+      await assertDirectory(directory);
+      const checkpointFile = path.join(directory, SESSION_CHECKPOINT_FILE);
+
+      // A second head read closes the only useful race: a checkpoint landing
+      // between the small record reads. A changing marker gets one retry.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const checkpointBefore = await leaseOwner(checkpointFile);
+        try {
+          const [metaValue, headValue, catalogValue] = await Promise.all([
+            readJson(path.join(directory, "meta.json"), SESSION_FILE_LIMITS.metadataBytes),
+            readJson(path.join(directory, "head.json"), SESSION_FILE_LIMITS.metadataBytes),
+            readJson(path.join(directory, SESSION_CATALOG_FILE), SESSION_CATALOG_BYTES),
+          ]);
+          const meta = decodeMeta(metaValue);
+          const head = decodeHead(headValue);
+          const storedCatalog = decodeSessionCatalog(catalogValue);
+          assertSessionWorkspace(meta, id, this.workspaceRoot, this.workspaceDigest);
+          const confirmedHead = decodeHead(await readJson(
+            path.join(directory, "head.json"),
+            SESSION_FILE_LIMITS.metadataBytes,
+          ));
+          const checkpointAfter = await leaseOwner(checkpointFile);
+          if (!sameLease(checkpointBefore, checkpointAfter)) continue;
+          if (
+            !sameSessionHead(head, confirmedHead) ||
+            !catalogMatches(storedCatalog, meta, head)
+          ) break;
+          if (checkpointAfter !== undefined && !pidIsAlive(checkpointAfter.pid)) break;
+          const active = await this.#leaseIsActive(id) || checkpointAfter !== undefined;
+          return catalogEntry(storedCatalog, active);
+        } catch {
+          break;
+        }
+      }
+
+      // Missing, stale, or malformed summaries are rebuilt only while the
+      // session is idle. Selecting a session still performs this strict load.
+      const checkpoint = await leaseOwner(checkpointFile);
+      if (
+        await this.#leaseIsActive(id) ||
+        (checkpoint !== undefined && pidIsAlive(checkpoint.pid))
+      ) return undefined;
+      const snapshot = await this.load(id);
+      await this.#writeCatalog(id, snapshot.catalog, checkpoint?.token).catch(() => undefined);
+      const currentCheckpoint = await leaseOwner(checkpointFile);
+      const active = await this.#leaseIsActive(id) ||
+        (currentCheckpoint !== undefined && pidIsAlive(currentCheckpoint.pid));
+      return catalogEntry(snapshot.catalog, active);
+    } catch {
+      // Corrupt, unsafe, active-without-a-summary, or foreign data never
+      // becomes a resume candidate.
+      return undefined;
+    }
+  }
+
+  async #writeCatalog(
+    id: string,
+    catalog: StoredSessionCatalog,
+    checkpointToken?: string,
+  ): Promise<void> {
+    const directory = this.#sessionDirectory(id);
+    const validate = async (): Promise<void> => {
+      await assertDirectory(directory);
+      const currentHead = decodeHead(await readJson(
+        path.join(directory, "head.json"),
+        SESSION_FILE_LIMITS.metadataBytes,
+      ));
+      if (!sameSessionHead(currentHead, catalog.head)) {
+        throw new Error("session head changed while updating its catalogue");
+      }
+    };
+    await atomicWrite(
+      path.join(directory, SESSION_CATALOG_FILE),
+      encodeSessionCatalog(catalog),
+      { mode: FILE_MODE, validate },
+    );
+    if (checkpointToken !== undefined) {
+      await removeLease(path.join(directory, SESSION_CHECKPOINT_FILE), checkpointToken);
+    }
+  }
 }
 
 async function catalogNames(directory: string): Promise<string[]> {
@@ -381,6 +476,40 @@ async function catalogNames(directory: string): Promise<string[]> {
   return names.sort((left, right) => right.localeCompare(left));
 }
 
+function catalogEntry(
+  catalog: StoredSessionCatalog,
+  active: boolean,
+): SessionCatalogEntry | undefined {
+  if (catalog.resumeNodeId === 0) return undefined;
+  return Object.freeze({
+    id: catalog.id,
+    createdAt: catalog.createdAt,
+    updatedAt: catalog.head.updatedAt,
+    turns: catalog.turns,
+    preview: catalog.preview,
+    active,
+  });
+}
+
+function sameLease(
+  left: Awaited<ReturnType<typeof leaseOwner>>,
+  right: Awaited<ReturnType<typeof leaseOwner>>,
+): boolean {
+  return left?.token === right?.token;
+}
+
+function assertSessionWorkspace(
+  meta: SessionMeta,
+  id: string,
+  workspaceRoot: string,
+  workspaceDigest: string,
+): void {
+  if (
+    meta.id !== id || meta.workspaceDigest !== workspaceDigest ||
+    workspaceKey(meta.workspaceRoot) !== workspaceKey(workspaceRoot)
+  ) throw new Error("session belongs to a different workspace");
+}
+
 function assertSharedNodes(
   previous: ConversationTree,
   next: ConversationTree,
@@ -402,6 +531,7 @@ function assertSnapshot(
 ): void {
   encodeMeta(snapshot.meta);
   encodeHead(snapshot.head);
+  encodeSessionCatalog(snapshot.catalog);
   assertSessionId(snapshot.meta.id);
   if (
     snapshot.meta.workspaceDigest !== workspaceDigest ||
@@ -415,15 +545,9 @@ function assertSnapshot(
     active.revision !== snapshot.head.revision ||
     snapshot.head.sequence < snapshot.conversation.nodes.length
   ) throw new Error("session snapshot does not match its verified head");
-}
-
-function sameHead(left: SessionHead, right: SessionHead): boolean {
-  return left.version === right.version &&
-    left.sequence === right.sequence &&
-    left.nodeId === right.nodeId &&
-    left.parentId === right.parentId &&
-    left.revision === right.revision &&
-    left.updatedAt === right.updatedAt;
+  if (!catalogMatches(snapshot.catalog, snapshot.meta, snapshot.head)) {
+    throw new Error("session snapshot does not match its verified catalogue");
+  }
 }
 
 async function assertMissingNode(file: string): Promise<void> {
@@ -506,16 +630,6 @@ async function makePrivateDirectory(directory: string): Promise<void> {
   if (process.platform !== "win32") await chmod(directory, DIRECTORY_MODE);
 }
 
-async function directoryEntries(directory: string) {
-  try {
-    await assertDirectory(directory);
-    return await readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-}
-
 async function removeTemporaryDirectory(directory: string, bucket: string): Promise<void> {
   const relative = path.relative(bucket, directory);
   if (
@@ -523,26 +637,6 @@ async function removeTemporaryDirectory(directory: string, bucket: string): Prom
     !path.basename(directory).startsWith(".") || !path.basename(directory).endsWith(".tmp")
   ) throw new Error("refusing to remove an unverified session directory");
   await rm(directory, { recursive: true, force: true });
-}
-
-function selectedTurnCount(conversation: ConversationTree): number {
-  let count = 0;
-  let id = conversation.activeNodeId;
-  while (id !== 0) {
-    count++;
-    id = conversation.node(id)?.parentId ?? 0;
-  }
-  return count;
-}
-
-function firstUserText(conversation: ConversationTree): string {
-  for (const message of conversation.history) {
-    if (message.role !== "user") continue;
-    const text = message.content.find((block) => block.kind === "text")?.text
-      .replace(/\s+/gu, " ").trim();
-    if (text !== undefined && text !== "") return leadingText(text, 160);
-  }
-  return "Untitled session";
 }
 
 function nodeName(id: number): string {

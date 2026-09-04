@@ -158,7 +158,10 @@ test("timeline selection stays temporary until a real turn persists one branch",
       ["first", "one", "alternate", "three"],
     );
     await resumed.persistence.close();
-    assert.equal((await store.list()).length, 1);
+    const catalog = await store.list();
+    assert.equal(catalog.length, 1);
+    assert.equal(catalog[0]?.turns, 2);
+    assert.equal(catalog[0]?.preview, "first");
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

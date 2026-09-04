@@ -14,35 +14,63 @@ const SMALL_NODES = 50;
 const LARGE_NODES = 750;
 const MAX_LARGE_MEDIAN_MS = 25;
 const MAX_SCALE = 2;
+const CATALOG_SESSIONS = 12;
+const CATALOG_SMALL_NODES = 1;
+const CATALOG_LARGE_NODES = 200;
+const MAX_CATALOG_MEDIAN_MS = 20;
+const MAX_CATALOG_DEPTH_DELTA_MS = 10;
 const identity = {
   providerId: "ollama",
   model: "deepseek-v4-flash:0731",
   effort: "high",
 };
 
-const small = await sample(SMALL_NODES);
-const large = await sample(LARGE_NODES);
+const small = await sampleCheckpoint(SMALL_NODES);
+const large = await sampleCheckpoint(LARGE_NODES);
 const scale = large / small;
-const passed = large <= MAX_LARGE_MEDIAN_MS && scale <= MAX_SCALE;
+const checkpointPassed = large <= MAX_LARGE_MEDIAN_MS && scale <= MAX_SCALE;
+const shallowCatalog = await sampleCatalog(CATALOG_SMALL_NODES);
+const deepCatalog = await sampleCatalog(CATALOG_LARGE_NODES);
+const catalogDepthDelta = deepCatalog - shallowCatalog;
+const catalogPassed = deepCatalog <= MAX_CATALOG_MEDIAN_MS &&
+  catalogDepthDelta <= MAX_CATALOG_DEPTH_DELTA_MS;
+const passed = checkpointPassed && catalogPassed;
 
 process.stdout.write(`${JSON.stringify({
-  benchmark: "incremental-session-checkpoint",
-  iterations: ITERATIONS,
-  results: [
-    { nodes: SMALL_NODES, medianMilliseconds: round(small) },
-    { nodes: LARGE_NODES, medianMilliseconds: round(large) },
-  ],
-  thresholds: {
-    largeMedianMilliseconds: MAX_LARGE_MEDIAN_MS,
-    maximumScale: MAX_SCALE,
+  benchmark: "durable-session-store",
+  checkpoint: {
+    iterations: ITERATIONS,
+    results: [
+      { nodes: SMALL_NODES, medianMilliseconds: round(small) },
+      { nodes: LARGE_NODES, medianMilliseconds: round(large) },
+    ],
+    thresholds: {
+      largeMedianMilliseconds: MAX_LARGE_MEDIAN_MS,
+      maximumScale: MAX_SCALE,
+    },
+    observedScale: round(scale),
+    passed: checkpointPassed,
   },
-  observedScale: round(scale),
+  catalog: {
+    iterations: ITERATIONS,
+    sessions: CATALOG_SESSIONS,
+    results: [
+      { nodesPerSession: CATALOG_SMALL_NODES, medianMilliseconds: round(shallowCatalog) },
+      { nodesPerSession: CATALOG_LARGE_NODES, medianMilliseconds: round(deepCatalog) },
+    ],
+    thresholds: {
+      deepMedianMilliseconds: MAX_CATALOG_MEDIAN_MS,
+      maximumDepthDeltaMilliseconds: MAX_CATALOG_DEPTH_DELTA_MS,
+    },
+    observedDepthDeltaMilliseconds: round(catalogDepthDelta),
+    passed: catalogPassed,
+  },
   passed,
 })}\n`);
 
 if (!passed) process.exitCode = 1;
 
-async function sample(nodeCount: number): Promise<number> {
+async function sampleCheckpoint(nodeCount: number): Promise<number> {
   const root = await mkdtemp(path.join(tmpdir(), "jecode-session-bench-"));
   const workspace = path.join(root, "workspace");
   const sessions = path.join(root, "sessions");
@@ -64,6 +92,30 @@ async function sample(nodeCount: number): Promise<number> {
     return median(timings);
   } finally {
     await persistence?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function sampleCatalog(nodeCount: number): Promise<number> {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-session-catalog-bench-"));
+  const workspace = path.join(root, "workspace");
+  const sessions = path.join(root, "sessions");
+  await mkdir(workspace);
+  try {
+    const store = await DurableSessionStore.open(workspace, sessions);
+    const conversation = ConversationTree.restore(nodes(nodeCount), nodeCount);
+    for (let index = 0; index < CATALOG_SESSIONS; index++) {
+      await store.publish(conversation);
+    }
+    await store.list();
+    const timings: number[] = [];
+    for (let iteration = 0; iteration < ITERATIONS; iteration++) {
+      const startedAt = performance.now();
+      await store.list();
+      timings.push(performance.now() - startedAt);
+    }
+    return median(timings);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
