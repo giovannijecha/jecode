@@ -175,8 +175,9 @@ configuration, and safety boundaries.
 
 Public pull requests are not accepted at this stage. Code changes remain a
 maintainer and invited-collaborator workflow. See
-[CONTRIBUTING.md](CONTRIBUTING.md) and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+[CONTRIBUTING.md](https://github.com/giovannijecha/jecode/blob/main/CONTRIBUTING.md)
+and
+[CODE_OF_CONDUCT.md](https://github.com/giovannijecha/jecode/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 

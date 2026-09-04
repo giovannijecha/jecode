@@ -13,7 +13,7 @@ body:
     attributes:
       label: Jecode version
       description: Run jecode --version.
-      placeholder: 0.8.2
+      placeholder: 0.x.y
     validations:
       required: true
   - type: textarea
