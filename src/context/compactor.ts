@@ -3,7 +3,6 @@
 import type { ContextAnchor } from "./projection.ts";
 import {
   budgetRequestFromInputTokens,
-  estimateRequestInputTokensResponsive,
 } from "./budget.ts";
 import { CONTEXT_LIMITS, summaryMessage } from "./projection.ts";
 import type { CompactionPlan, ContextPolicy } from "./policy.ts";
@@ -11,7 +10,10 @@ import { planCompaction } from "./policy.ts";
 import type { Message, Provider, Usage } from "../types.ts";
 import type { ToolSpec } from "../types.ts";
 import type { ConversationRequestIdentity } from "../types.ts";
-import { projectToolResultsNewest, toolResultProjectionBudget } from "./request-projection.ts";
+import { inputMeter, measureInput, messageCounter } from "./measurement.ts";
+import { fitRequestInput } from "./request.ts";
+import { observedCompaction } from "./diagnostics.ts";
+import type { CompactionDiagnostic } from "./diagnostics.ts";
 
 const SUMMARY_SYSTEM = [
   "Condense the supplied conversation into durable working memory.",
@@ -23,8 +25,14 @@ const SUMMARY_SYSTEM = [
   "Return only a concise plain-text summary.",
 ].join("\n");
 const MIN_COMPACTION_SAVINGS_TOKENS = 256;
+const SUMMARY_TIMEOUT_MS = 60_000;
+
+export type CompactionOutcome =
+  | "accepted" | "empty" | "oversized" | "insufficient-savings" | "failed" | "timeout";
 
 export type CompactContextOptions = Readonly<{
+  reason?: CompactionDiagnostic["reason"];
+  onDiagnostic?(event: CompactionDiagnostic): void;
   provider: Provider;
   model: string;
   effort: string;
@@ -51,6 +59,10 @@ export type CompactContextOptions = Readonly<{
   requestIdentity?: ConversationRequestIdentity;
   onBegin?(): void;
   onEnd?(): void;
+  onUsage?(usage: Usage): void;
+  onOutcome?(outcome: CompactionOutcome): void;
+  /** Deterministic deadline override for inert development fixtures. */
+  timeoutMs?: number;
 }>;
 
 export type CompactionResult = Readonly<{
@@ -63,7 +75,14 @@ export type CompactionResult = Readonly<{
 export async function compactContext(
   options: CompactContextOptions,
 ): Promise<CompactionResult | undefined> {
+  return observedCompaction(options, performCompaction);
+}
+
+async function performCompaction(options: CompactContextOptions): Promise<CompactionResult | undefined> {
   const policy = options.policy;
+  const countMessages = options.precomputedPlan === undefined
+    ? await messageCounter(options.provider, options.model, options.effort, options.signal)
+    : undefined;
   const plan = options.precomputedPlan ?? await planCompaction(
     options.context,
     options.turn,
@@ -73,46 +92,58 @@ export async function compactContext(
     policy,
     options.estimatedInputTokens,
     options.signal,
+    countMessages,
   );
   if (plan === undefined) return undefined;
 
+  const deadline = AbortSignal.timeout(options.timeoutMs ?? SUMMARY_TIMEOUT_MS);
+  const signal = options.signal === undefined ? deadline : AbortSignal.any([options.signal, deadline]);
   options.onBegin?.();
   try {
-    const messages = projectToolResultsNewest(
-      normalized(plan.prefix),
-      toolResultProjectionBudget(policy),
-    ).messages;
-    const inputTokens = await estimateRequestInputTokensResponsive({
+    const input = {
+      model: options.model,
+      effort: options.effort,
       system: SUMMARY_SYSTEM,
-      messages,
+      messages: normalized(plan.prefix),
       tools: [],
-    }, options.signal);
+    };
+    const meter = inputMeter(options.provider);
+    const estimated = await meter.measure(input, signal);
+    const fitted = await fitRequestInput(input, meter, policy, estimated, signal);
     const budget = budgetRequestFromInputTokens(
-      inputTokens,
+      fitted.measurement.inputTokens,
       policy.summaryMaxTokens,
       policy,
     );
+    const efforts = await options.provider.efforts?.(options.model, signal);
+    signal.throwIfAborted();
     const response = await options.provider.send({
       model: options.model,
       system: SUMMARY_SYSTEM,
-      messages,
+      messages: fitted.messages,
       tools: [],
       maxTokens: budget.maxOutputTokens,
-      effort: options.effort,
+      effort: efforts?.includes("low") === true ? "low" : options.effort,
       ...(options.requestIdentity === undefined
         ? {}
         : { identity: { ...options.requestIdentity, purpose: "compaction" as const } }),
-      signal: options.signal,
+      signal,
     });
+    signal.throwIfAborted();
+    if (response.usage !== undefined) options.onUsage?.(response.usage);
     const summary = response.content
       .filter((block) => block.kind === "text")
       .map((block) => block.text)
       .join("\n")
       .trim();
-    if (
-      summary.length === 0 ||
-      summary.length > CONTEXT_LIMITS.summaryCodeUnits
-    ) return undefined;
+    if (summary.length === 0) {
+      options.onOutcome?.("empty");
+      return undefined;
+    }
+    if (summary.length > CONTEXT_LIMITS.summaryCodeUnits) {
+      options.onOutcome?.("oversized");
+      return undefined;
+    }
 
     const compacted = [summaryMessage(summary), ...plan.tail];
     const estimatedInputTokens = await estimateCompactedInput(options, compacted);
@@ -120,9 +151,9 @@ export async function compactContext(
       options,
       options.context,
     );
-    const requiredSavings = Math.min(
+    const requiredSavings = Math.max(
       MIN_COMPACTION_SAVINGS_TOKENS,
-      Math.max(1, Math.floor(before / 20)),
+      Math.floor(before / 5),
     );
     const minimumOutput = Math.min(
       options.requestEnvelope?.maxOutputTokens ?? policy.summaryMaxTokens,
@@ -130,9 +161,14 @@ export async function compactContext(
     );
     if (
       before - estimatedInputTokens < requiredSavings ||
-      estimatedInputTokens > policy.requestLimitTokens - minimumOutput
-    ) return undefined;
+      estimatedInputTokens > policy.requestLimitTokens - minimumOutput ||
+      estimatedInputTokens >= policy.triggerTokens
+    ) {
+      options.onOutcome?.("insufficient-savings");
+      return undefined;
+    }
 
+    options.onOutcome?.("accepted");
     return {
       messages: compacted,
       anchor: Object.freeze({
@@ -146,6 +182,7 @@ export async function compactContext(
     };
   } catch (error) {
     if (options.signal?.aborted === true) throw options.signal.reason;
+    options.onOutcome?.(deadline.aborted ? "timeout" : "failed");
     if (options.failLoudly === true) throw error;
     return undefined;
   } finally {
@@ -157,23 +194,12 @@ async function estimateCompactedInput(
   options: CompactContextOptions,
   messages: readonly Message[],
 ): Promise<number> {
-  if (options.requestEnvelope === undefined) {
-    return estimateRequestInputTokensResponsive({
-      system: "",
-      messages: projectToolResultsNewest(
-        messages,
-        toolResultProjectionBudget(options.policy),
-      ).messages,
-      tools: [],
-    }, options.signal);
-  }
-  return estimateRequestInputTokensResponsive({
-    system: options.requestEnvelope.system,
-    messages: projectToolResultsNewest(
-      messages,
-      toolResultProjectionBudget(options.policy),
-    ).messages,
-    tools: options.requestEnvelope.tools,
+  return measureInput(options.provider, {
+    model: options.model,
+    effort: options.effort,
+    system: options.requestEnvelope?.system ?? "",
+    messages: [...messages],
+    tools: [...(options.requestEnvelope?.tools ?? [])],
   }, options.signal);
 }
 

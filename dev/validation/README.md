@@ -99,6 +99,12 @@ Automated injection is appropriate for races, invalid data, and transport errors
 that cannot be triggered safely and reliably by hand. Link the passing test and
 state that it was automated; it does not replace the interactive recovery checks.
 
+For context investigations, the [development recorder](../context/README.md)
+captures request estimates, provider counts, and accepted/failed/cancelled summary
+attempts without conversation content. Record its source commit and any dropped
+events. Keep development-launch observations separate from acceptance checks of
+the installed candidate; the recorder does not establish that artifact's behavior.
+
 ## Performance
 
 Run all six probes before and after relevant changes on the same idle machine,

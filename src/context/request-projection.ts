@@ -7,49 +7,18 @@ import type { ContextPolicy } from "./policy.ts";
 
 export const TOOL_RESULT_CLIP_MARKER = "[tool output clipped]";
 const FAIR_CONTENT_CODE_UNITS = 256;
-const APPEND_STABLE_RESULT_CODE_UNITS = 16_384;
-const MAX_TOOL_RESULT_PROJECTION_CODE_UNITS = 256_000;
+const MAX_TOOL_RESULT_PROJECTION_CODE_UNITS = 1_000_000;
 
 export type ToolResultProjection = Readonly<{
   messages: Message[];
   clippedResults: number;
   outputCodeUnits: number;
-  saturated: boolean;
 }>;
 
 export function toolResultProjectionBudget(policy: ContextPolicy): number {
-  return Math.min(MAX_TOOL_RESULT_PROJECTION_CODE_UNITS, policy.targetTokens);
-}
-
-/**
- * Keep historical result excerpts byte-for-byte stable as new results append.
- * Semantic compaction is allowed to establish a new prefix before the safety
- * fallback below redistributes an exhausted aggregate budget.
- */
-export function projectToolResults(
-  source: readonly Message[],
-  requestedCodeUnits: number,
-): ToolResultProjection {
-  const results = toolResults(source, requestedCodeUnits);
-  if (results.length === 0) {
-    return { messages: [...source], clippedResults: 0, outputCodeUnits: 0, saturated: false };
-  }
-  const allocations: number[] = [];
-  let remaining = requestedCodeUnits;
-  let saturated = false;
-  for (const result of results) {
-    const desired = Math.min(result.output.length, APPEND_STABLE_RESULT_CODE_UNITS);
-    if (desired <= remaining) {
-      allocations.push(desired);
-      remaining -= desired;
-      continue;
-    }
-    saturated = true;
-    const excerpt = remaining >= TOOL_RESULT_CLIP_MARKER.length ? remaining : 0;
-    allocations.push(Math.min(result.output.length, excerpt));
-    remaining -= excerpt;
-  }
-  return projectAllocations(source, allocations, saturated);
+  // Character allocation is only a starting point. The actual provider input
+  // is measured again before it can be sent, including Unicode and framing.
+  return Math.min(MAX_TOOL_RESULT_PROJECTION_CODE_UNITS, policy.targetTokens * 3);
 }
 
 /** Prefer recent evidence when compaction cannot restore a stable prefix. */
@@ -59,7 +28,7 @@ export function projectToolResultsNewest(
 ): ToolResultProjection {
   const results = toolResults(source, requestedCodeUnits);
   if (results.length === 0) {
-    return { messages: [...source], clippedResults: 0, outputCodeUnits: 0, saturated: false };
+    return { messages: [...source], clippedResults: 0, outputCodeUnits: 0 };
   }
 
   const allocations = results.map(() => 0);
@@ -79,7 +48,7 @@ export function projectToolResultsNewest(
     allocations[index] = (allocations[index] as number) + extra;
     remaining -= extra;
   }
-  return projectAllocations(source, allocations, true);
+  return projectAllocations(source, allocations);
 }
 
 function toolResults(
@@ -97,7 +66,6 @@ function toolResults(
 function projectAllocations(
   source: readonly Message[],
   allocations: readonly number[],
-  saturated: boolean,
 ): ToolResultProjection {
   let resultIndex = 0;
   let clippedResults = 0;
@@ -117,7 +85,7 @@ function projectAllocations(
     });
     return changed ? { ...message, content } : message;
   });
-  return { messages, clippedResults, outputCodeUnits, saturated };
+  return { messages, clippedResults, outputCodeUnits };
 }
 
 function allocateFairExcerpt(

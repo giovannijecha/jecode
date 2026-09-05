@@ -14,6 +14,7 @@ import {
 } from "./failure.ts";
 import { OLLAMA_CLOUD_HOST } from "./ollama-endpoint.ts";
 import { fromWireReply, stopNotice, toWireMessages, toWireTool } from "./ollama-wire.ts";
+import { measureOllamaInput } from "./input-measurement.ts";
 
 const KEY = "OLLAMA_API_KEY";
 const ID = "ollama";
@@ -50,6 +51,8 @@ export const ollama: Provider = {
   async contextWindow(model, signal, onStatus) {
     return ollamaContextWindow(model, headers(), signal, onStatus);
   },
+
+  measureInput: measureOllamaInput,
 
   async send(req: SendRequest): Promise<Message> {
     const effort = requireSupportedEffort(req.model, req.effort, OLLAMA_EFFORTS);

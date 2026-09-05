@@ -20,6 +20,7 @@ import {
   toWireItems,
   toWireTool,
 } from "./openai-wire.ts";
+import { measureResponsesInput } from "./input-measurement.ts";
 
 const ID = "openai-codex";
 const BASE = "https://chatgpt.com/backend-api/codex";
@@ -85,6 +86,8 @@ export const openaiCodex: Provider = {
       throwProviderError(ID, signal, error);
     }
   },
+
+  measureInput: (request, signal) => measureResponsesInput(request, ID, signal),
 
   async send(req: SendRequest): Promise<Message> {
     const efforts = effortByModel.get(req.model) ?? fallbackEfforts(req.model);

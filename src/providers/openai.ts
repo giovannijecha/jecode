@@ -22,6 +22,7 @@ import {
   toWireItems,
   toWireTool,
 } from "./openai-wire.ts";
+import { measureResponsesInput } from "./input-measurement.ts";
 
 const ENDPOINT = "https://api.openai.com/v1/responses";
 const MODELS = "https://api.openai.com/v1/models";
@@ -104,6 +105,8 @@ export const openai: Provider = {
   async contextWindow(model: string): Promise<ModelContextWindow | undefined> {
     return openAIContextWindow(model);
   },
+
+  measureInput: (request, signal) => measureResponsesInput(request, ID, signal),
 
 
   async send(req: SendRequest): Promise<Message> {

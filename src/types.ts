@@ -90,6 +90,9 @@ export type SendRequest = {
   onStatus?: (status: string) => void;
 };
 
+/** Input identity and content needed to estimate one outgoing provider request. */
+export type RequestInput = Pick<SendRequest, "model" | "system" | "messages" | "tools" | "effort">;
+
 export type ProviderAuth =
   | { kind: "api-key"; keyVar: string }
   | { kind: "oauth"; account: "openai-codex"; label: string };
@@ -126,6 +129,8 @@ export type Provider = {
     signal?: AbortSignal,
     onStatus?: (status: string) => void,
   ): Promise<ModelContextWindow | undefined>;
+  /** Local estimate of the actual outgoing input; no authentication or network I/O. */
+  measureInput?(request: RequestInput, signal?: AbortSignal): Promise<number>;
   send(req: SendRequest): Promise<Message>;
 };
 
