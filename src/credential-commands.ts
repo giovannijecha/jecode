@@ -99,13 +99,13 @@ export async function apiKeyCommand(
     if (!hasSaved(name)) {
       host.emit({
         kind: "notice",
-        text: `${label} API key comes from the environment · restart after changing it`,
+        text: `${label} key comes from the environment · restart after changing it`,
         tone: "info",
       });
       return;
     }
     const action = await choose({
-      title: heading(`${label} API key`, `${name} · environment`, session.palette),
+      title: heading(`${label} key`, `${name} · environment`, session.palette),
       description: "The environment value is read-only. A saved copy is currently shadowed.",
       options: [{ label: "forget saved copy", hint: storeLabel(), key: "f" }],
       index: 0,
@@ -128,7 +128,7 @@ export async function apiKeyCommand(
       : []),
   ];
   const index = await choose({
-    title: heading(`${label} API key`, `${name} · ${source ?? "missing"}`, session.palette),
+    title: heading(`${label} key`, `${name} · ${source ?? "missing"}`, session.palette),
     options: actions,
     index: 0,
   });

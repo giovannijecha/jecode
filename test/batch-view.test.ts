@@ -40,3 +40,19 @@ test("informational transcript notices use the semantic gutter mark", () => {
   assert.match(rows.join("\n"), /context compacted/);
   assert.match(rows.join("\n"), /·\s+context compacted/);
 });
+
+test("batch prose uses the supplied width without the interactive reading column", () => {
+  const text = "word ".repeat(20).trimEnd();
+  const rows = renderBatch({ kind: "answer", text }, 120, STEEL);
+  assert.deepEqual(rows, ["", text]);
+});
+
+test("batch evidence is complete without interactive expansion hints", () => {
+  const body = Array.from({ length: 20 }, (_, index) => ({ kind: "out" as const, text: `LINE_${index}` }));
+  const block: Block = { kind: "tool", name: "run_command", target: "", right: "exit 1", tone: "fail", body };
+  const rows = renderBatch(block, 80, STEEL);
+  assert.deepEqual(rows.filter((line) => line.startsWith("│ ")).map((line) => line.slice(2)),
+    body.map((detail) => detail.text));
+  assert.equal(rows.filter((line) => line.includes("run_command")).length, 1);
+  assert.doesNotMatch(rows.join("\n"), /ctrl\+o|earlier lines|other lines/);
+});

@@ -1,7 +1,9 @@
 import type { Palette } from "../../ui/theme.ts";
 import { trailingText } from "../../text-boundary.ts";
-import { blank, row } from "../../ui/render.ts";
+import { blank, hasColor, row } from "../../ui/render.ts";
 import { markdown } from "../../ui/markdown.ts";
+import { terminalText } from "../../ui/terminal-text.ts";
+import { splitByCells } from "../../ui/width.ts";
 import { transcriptLead, transcriptWidth } from "../transcript-grammar.ts";
 import type { AnswerBlock, ReasoningBlock, UserBlock } from "./types.ts";
 
@@ -11,18 +13,23 @@ const REASONING_PREVIEW_OVERSCAN = 12;
 
 export function renderUser(block: UserBlock, width: number, pal: Palette): string[] {
   const inner = transcriptWidth(width);
-  const content = markdown(block.text, inner, pal, inner);
+  const content = terminalText(block.text, { multiline: true }).split("\n")
+    .flatMap((line) => splitByCells(line, inner));
   return [
     "",
-    blank(width, pal.surface.subtle),
-    ...content.map((line, index) => row(width, [
-      ...transcriptLead(width, index === 0
-        ? { text: "❯", fg: pal.accent, bold: true }
-        : undefined),
-      ...line.segs,
+    userEdge(width, pal, "▄"),
+    ...content.map((line) => row(width, [
+      ...transcriptLead(width),
+      { text: line.text, fg: pal.ink.fg },
     ], [], pal.surface.subtle)),
-    blank(width, pal.surface.subtle),
+    userEdge(width, pal, "▀"),
   ];
+}
+
+/** Half-cell colour keeps the surface light without moving surrounding text. */
+function userEdge(width: number, pal: Palette, half: "▄" | "▀"): string {
+  if (!hasColor()) return blank(width, pal.surface.subtle);
+  return row(width, [{ text: half.repeat(width), fg: pal.surface.subtle }]);
 }
 
 export function renderAnswer(block: AnswerBlock, width: number, pal: Palette): string[] {

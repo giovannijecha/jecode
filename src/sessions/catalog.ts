@@ -16,11 +16,13 @@ export const SESSION_CATALOG_FILE = "catalog.json";
 export const SESSION_CHECKPOINT_FILE = ".checkpoint";
 export const SESSION_CATALOG_BYTES = 4 * 1_024;
 
-const CATALOG_SCHEMA = 1;
+// Older indexes can hide a node committed before a failed head write. Rebuild
+// them through strict loading instead of trusting their apparently current head.
+const CATALOG_SCHEMA = 2;
 const PREVIEW_CODE_UNITS = 160;
 
 export type StoredSessionCatalog = Readonly<{
-  version: 1;
+  version: 2;
   id: string;
   workspaceDigest: string;
   createdAt: string;

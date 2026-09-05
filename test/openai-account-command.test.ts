@@ -35,10 +35,12 @@ test("headless sign-in defaults to device code and dismisses its wait panel on s
     const pickers: Parameters<NonNullable<Host["choose"]>>[0][] = [];
     const opened: string[] = [];
     const notices: string[] = [];
+    const statuses: (string | undefined)[] = [];
     let waiting: ((index?: number) => void) | undefined;
     let closed = false;
     const host: Host = {
       emit: (block) => notices.push(block.text),
+      status: (status) => statuses.push(status),
       choose: (picker) => {
         pickers.push(picker);
         if (pickers.length === 1) return Promise.resolve(picker.index);
@@ -55,6 +57,7 @@ test("headless sign-in defaults to device code and dismisses its wait panel on s
     const dependencies = deps(login, opened, true);
 
     assert.equal(await ensureOpenAIAccount(session(), host, dependencies), true);
+    assert.match(pickers[0]?.title.map((part) => part.text).join("") ?? "", /^connect OpenAI Account/);
     assert.equal(pickers[0]?.index, 1);
     assert.equal(pickers[0]?.options[0]?.hint, "desktop terminal");
     assert.equal(pickers[0]?.options[1]?.hint, "WSL, SSH, or headless");
@@ -62,9 +65,11 @@ test("headless sign-in defaults to device code and dismisses its wait panel on s
     assert.match(pickers[1]?.description ?? "", /ABCD-EFGH/);
     assert.doesNotMatch(pickers[1]?.description ?? "", /https?:\/\//);
     assert.equal(pickers[1]?.options[1]?.label, "cancel sign-in");
+    assert.match(pickers[1]?.title.map((part) => part.text).join("") ?? "", /^OpenAI Account sign-in/);
     assert.deepEqual(opened, [login.url]);
     assert.deepEqual(openAICodexAccount(), ACCOUNT);
-    assert.deepEqual(notices, ["ChatGPT connected · current provider route"]);
+    assert.deepEqual(notices, ["OpenAI Account connected · current provider route"]);
+    assert.deepEqual(statuses, ["Starting OpenAI Account sign-in", undefined]);
     assert.equal(closed, true);
   });
 });
@@ -93,7 +98,7 @@ test("cancelling the wait panel aborts and leaves the account disconnected", asy
   });
 });
 
-test("sign out revokes remotely and removes the saved ChatGPT account", async (context) => {
+test("sign out revokes remotely and removes the saved OpenAI Account", async (context) => {
   await inStore(async () => {
     await updateOpenAICodexAccount(async () => ACCOUNT);
     const previousFetch = globalThis.fetch;
@@ -106,13 +111,17 @@ test("sign out revokes remotely and removes the saved ChatGPT account", async (c
     const notices: string[] = [];
     const host: Host = {
       emit: (block) => notices.push(block.text),
-      choose: () => Promise.resolve(1),
+      choose: (picker) => {
+        assert.match(picker.title.map((part) => part.text).join(""), /^OpenAI Account/);
+        assert.equal(picker.options[0]?.label, "reconnect OpenAI Account");
+        return Promise.resolve(1);
+      },
     };
 
     assert.equal(await openAIAccountCommand(session(), host), true);
     assert.equal(openAICodexAccount(), undefined);
     assert.match(body, /"token":"refresh-token"/);
-    assert.deepEqual(notices, ["ChatGPT disconnected · choose another provider in /models"]);
+    assert.deepEqual(notices, ["OpenAI Account disconnected · choose another provider in /models"]);
   });
 });
 
@@ -145,8 +154,8 @@ function session(): Session {
     provider: {
       id: "openai-codex",
       defaultModel: "",
-      auth: { kind: "oauth", account: "openai-codex", label: "ChatGPT" },
-      blocked: () => openAICodexAccount() === undefined ? "ChatGPT account is not connected" : undefined,
+      auth: { kind: "oauth", account: "openai-codex", label: "OpenAI Account" },
+      blocked: () => openAICodexAccount() === undefined ? "OpenAI Account is not connected" : undefined,
       models: () => Promise.resolve([]),
       send: (_request: SendRequest): Promise<Message> => Promise.reject(new Error("not called")),
     },

@@ -4,6 +4,10 @@ This is the maintainer runbook for publishing Jecode. Releases originate from a
 reviewed commit on `main`; the tag-triggered GitHub workflow builds and publishes
 the npm artifact through trusted publishing.
 
+For the 1.0 cycle, follow the
+[release-candidate requirements](COMPATIBILITY.md#release-candidate-gate),
+including the soak before stable promotion.
+
 ## Prepare a stable release
 
 1. Create a release branch from current `main`.
@@ -12,8 +16,8 @@ the npm artifact through trusted publishing.
 3. Promote the accumulated changelog entries to the dated release and update
    version examples that users will submit in bug reports.
 4. Remove prerelease installation instructions when no active candidate exists.
-5. Run `npm run check`, open a pull request, and merge only after every CI job
-   passes.
+5. Run `npm run check`, open a pull request, and merge only after review and
+   every CI job pass.
 6. Tag the exact merge commit and push the immutable tag. In PowerShell, derive
    it from the reviewed manifest rather than typing the version twice:
 

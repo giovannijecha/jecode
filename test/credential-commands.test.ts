@@ -108,6 +108,7 @@ test("an API key can be kept for this session", async () => {
 
     await apiKeyCommand(KEY, "OpenAI API", session(), screen);
 
+    assert.match(screen.pickers[0]?.title.map((part) => part.text).join("") ?? "", /^OpenAI API key  /);
     assert.equal(screen.fields[0]?.secret, true);
     assert.equal(credentialSource(KEY), "session");
     assert.equal(hasSaved(KEY), false);
@@ -185,11 +186,30 @@ test("an environment key can forget a shadowed saved copy without exposing eithe
 
     await apiKeyCommand(KEY, "OpenAI API", session(), screen);
 
+    assert.match(screen.pickers[0]?.title.map((part) => part.text).join("") ?? "", /^OpenAI API key  /);
     assert.equal(credentialSource(KEY), "environment");
     assert.equal(hasSaved(KEY), false);
     const output = screen.blocks.map((block) => "text" in block ? block.text : "").join("\n");
     assert.match(output, /saved API key removed/);
     assert.doesNotMatch(output, /saved-secret|environment-secret/);
+  });
+});
+
+test("an environment key names its API route without exposing the value", async () => {
+  await inStore(async () => {
+    process.env[KEY] = "environment-secret";
+    const screen = host([]);
+
+    await apiKeyCommand(KEY, "OpenAI API", session(), screen);
+
+    assert.equal(credentialSource(KEY), "environment");
+    assert.equal(screen.pickers.length, 0);
+    assert.equal(screen.fields.length, 0);
+    assert.deepEqual(screen.blocks, [{
+      kind: "notice",
+      text: "OpenAI API key comes from the environment · restart after changing it",
+      tone: "info",
+    }]);
   });
 });
 

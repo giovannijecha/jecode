@@ -32,13 +32,13 @@ test("provider failures keep one concise JSON reason across provider labels", ()
 
   assert.equal(
     providerFailure(provider("anthropic"), error, true),
-    "Anthropic: https://provider.example.test/v1/models -> 400 Bad Request · requested model is unavailable",
+    "Anthropic API: https://provider.example.test/v1/models -> 400 Bad Request · requested model is unavailable",
   );
   assert.equal(
-    providerFailure(provider("openai-codex"), error, true).startsWith("ChatGPT: "),
+    providerFailure(provider("openai-codex"), error, true).startsWith("OpenAI Account: "),
     true,
   );
-  assert.equal(providerFailure(provider("ollama"), error, true).startsWith("Ollama: "), true);
+  assert.equal(providerFailure(provider("ollama"), error, true).startsWith("Ollama API: "), true);
 });
 
 test("provider failures distinguish transient rate limits from hard quota and billing stops", () => {
@@ -75,7 +75,7 @@ test("provider failures distinguish transient rate limits from hard quota and bi
   assert.equal(providerFailure(provider(), billing, true),
     "OpenAI API: credits exhausted · add credits or choose another provider in /models");
   assert.equal(providerFailure(provider("anthropic"), spendLimit, true),
-    "Anthropic: billing limit reached · check provider billing or choose another provider in /models");
+    "Anthropic API: billing limit reached · check provider billing or choose another provider in /models");
 });
 
 test("provider failures expose only a validated support request identifier", () => {

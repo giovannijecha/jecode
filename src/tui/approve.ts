@@ -26,14 +26,16 @@ export type Answer = "once" | "always" | "no";
 export function promptFor(call: ToolCallBlock, target: string, pal: Palette): Picker {
   const scope = scopeFor(call);
   const options: Option[] = [
-    { label: "Yes, once", hint: "enter", key: "y" },
-    { label: `Yes, ${scopeNoun(scope)} for the session`, hint: "a", key: "a" },
-    { label: "No, and say why", hint: "esc", key: "n" },
+    { label: "Yes, once", hint: "y", key: "y", description: "Approve only this call. Ask again next time." },
+    { label: `Yes, ${scopeNoun(scope)} for the session`, hint: "a", key: "a",
+      description: `Reuse approval for ${scopeNoun(scope)} in this session.` },
+    { label: "No, and say why", hint: "n", key: "n", description: "Do not run this call. Return feedback to the model." },
   ];
 
   return {
     title: [{ text: question(call.name), fg: pal.ink.attention, bold: true }],
     right: `${call.name}${target === "" ? "" : ` · ${target}`}`,
+    controls: "↑↓ choose · enter confirm · esc deny",
     options,
     index: 0,
   };

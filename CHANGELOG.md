@@ -1,8 +1,45 @@
 # Changelog
 
-This file records notable changes in stable Jecode releases. Prereleases are
-omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
+This file records notable changes, with unreleased work listed separately.
+Prereleases are omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
+
+## Unreleased
+
+### Changed
+
+- Aligned model responses and target-first tool records in one reading column,
+  with consistent spacing and the original full-width composer.
+- Bounded compact diffs to six changed lines and command previews to four
+  output rows, retaining diagnostic failures and complete expandable evidence.
+- Replaced tool spinners and evidence flashes with a travelling connector
+  light; waiting, completed, and expanded records remain static.
+- Unified menus around a dot-marked selection band and a stable detail area
+  sized to its content, with separate approval targets and explicit choice
+  scopes and shortcuts.
+- Standardized provider names as Anthropic API, OpenAI API, Ollama API, and
+  OpenAI Account across menus, status, and account management.
+
+### Fixed
+
+- Kept partially written checkpoints discoverable for resume and validated
+  recovered conversation trees before advancing their durable head. Older
+  catalogue indexes are rebuilt to recover previously hidden checkpoints.
+- Preserved all own JSON keys in saved tool input, including nested
+  `__proto__` properties, through session loading.
+- Propagated batch cancellation through model metadata lookup and automatic
+  context compaction.
+- Rejected malformed OAuth callback URLs without terminating Jecode or
+  cancelling the pending sign-in.
+- Kept common exception diagnostics visible in compact command output,
+  including Node error codes alongside the retained output tail.
+
+### Removed
+
+- Local model support and custom Ollama endpoints, including `--ollama-host`
+  and connection-mode menus. Ollama now uses its official cloud API with a
+  required key. Legacy non-cloud settings stop with an actionable message
+  instead of silently redirecting requests or overwriting saved data.
 
 ## [0.8.5] - 2026-09-04
 

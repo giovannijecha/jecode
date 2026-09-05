@@ -14,6 +14,11 @@ import { openAIAuthorization } from "../src/openai-account.ts";
 
 const CLAIMS = "https://api.openai.com/auth";
 
+test("a disconnected account names the required sign-in route", async (context) => {
+  await accountStore(context, "jecode-missing-account-");
+  await assert.rejects(openAIAuthorization(), { message: "OpenAI Account is not connected" });
+});
+
 test("cancelling a caller does not cancel an in-flight refresh-token rotation", async (context) => {
   await accountStore(context, "jecode-refresh-account-");
 
@@ -96,7 +101,7 @@ test("401 recovery reloads fresh rotations and refreshes expired rotations", asy
     accountId: "account-1",
   });
   assert.equal(refreshes, 1);
-  assert.deepEqual(statuses, ["Refreshing ChatGPT sign-in"]);
+  assert.deepEqual(statuses, ["Refreshing OpenAI Account sign-in"]);
   assert.equal(openAICodexAccount()?.refreshToken, "refreshed-refresh");
 });
 

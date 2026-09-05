@@ -14,7 +14,7 @@ import type { Message, Provider, SendRequest } from "../src/types.ts";
 import { STEEL } from "../src/ui/theme.ts";
 import { emptyUsage } from "../src/usage.ts";
 
-test("selecting a ChatGPT model switches provider and saves both", async (context) => {
+test("selecting an OpenAI Account model switches provider and saves both", async (context) => {
   const directory = await mkdtemp(path.join(tmpdir(), "jecode-openai-provider-command-"));
   const beforeHome = process.env["JECODE_HOME"];
   const previousFetch = globalThis.fetch;
@@ -41,7 +41,10 @@ test("selecting a ChatGPT model switches provider and saves both", async (contex
   const answers = [0];
   const host: Host = {
     emit: () => {},
-    choose: () => Promise.resolve(answers.shift()),
+    choose: (picker) => {
+      assert.equal(picker.options[0]?.value, "OpenAI Account");
+      return Promise.resolve(answers.shift());
+    },
     saveSettings: async (patch) => { await updateSettings(patch); },
   };
   const live = session();

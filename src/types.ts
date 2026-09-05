@@ -110,8 +110,6 @@ export type Provider = {
    * it; commands use the metadata to open the right authentication flow.
    */
   readonly auth: ProviderAuth;
-  /** Where prompts leave the machine for the current provider configuration. */
-  location?(): "cloud" | "local";
   /** What stands between this provider and a request, if anything does. */
   blocked(): string | undefined;
   /** What it will answer to, asked of it rather than remembered here. */

@@ -7,6 +7,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { OpenAICodexAccount } from "./accounts.ts";
 import { oauthRequest } from "./oauth-http.ts";
+import { providerLabel } from "./provider-label.ts";
 import { OPENAI_CALLBACK_PATH, openAICallback } from "./openai-oauth-callback.ts";
 import {
   openAIAccountFromTokens,
@@ -14,6 +15,7 @@ import {
   type OpenAITokenReply,
 } from "./openai-oauth-tokens.ts";
 
+const ACCOUNT_LABEL = providerLabel("openai-codex");
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTHORITY = "https://auth.openai.com";
 const AUTHORIZE = `${AUTHORITY}/oauth/authorize`;
@@ -125,7 +127,7 @@ export async function refreshOpenAITokens(
   const token = openAITokenReply(response.value, account.refreshToken);
   const refreshed = openAIAccountFromTokens(token);
   if (refreshed.accountId !== account.accountId) {
-    throw new Error("OpenAI refreshed a different ChatGPT account · sign in again");
+    throw new Error(`${ACCOUNT_LABEL} refresh returned a different account · sign in again`);
   }
   return {
     ...refreshed,
@@ -178,7 +180,7 @@ async function pollDevice(
 ): Promise<PendingCode> {
   const deadline = new AbortController();
   const timer = setTimeout(() => {
-    deadline.abort(new Error("ChatGPT device sign-in timed out after 15 minutes"));
+    deadline.abort(new Error(`${ACCOUNT_LABEL} device sign-in timed out after 15 minutes`));
   }, LOGIN_LIMIT_MS);
   const combined = signal === undefined
     ? deadline.signal
@@ -207,10 +209,10 @@ async function pollDevice(
 
       const errorCode = deviceErrorCode(response.value);
       if (errorCode === "access_denied") {
-        throw new Error("ChatGPT device sign-in was denied");
+        throw new Error(`${ACCOUNT_LABEL} device sign-in was denied`);
       }
       if (errorCode === "expired_token") {
-        throw new Error("ChatGPT device sign-in code expired");
+        throw new Error(`${ACCOUNT_LABEL} device sign-in code expired`);
       }
 
       const pending = errorCode === "authorization_pending" ||
@@ -219,7 +221,7 @@ async function pollDevice(
       const slowDown = errorCode === "slow_down" ||
         (response.status === 429 && errorCode === undefined);
       if (!pending && !slowDown) {
-        throw new Error(`ChatGPT device sign-in failed (${response.status})`);
+        throw new Error(`${ACCOUNT_LABEL} device sign-in failed (${response.status})`);
       }
       if (slowDown) intervalMs += SLOW_DOWN_INCREMENT_MS;
       await sleep(intervalMs, combined);
@@ -250,7 +252,7 @@ function intervalSeconds(value: unknown): number {
 
 function required(value: unknown, label: string): string {
   const found = optional(value);
-  if (found === undefined) throw new Error(`OpenAI sign-in returned no ${label}`);
+  if (found === undefined) throw new Error(`${ACCOUNT_LABEL} sign-in returned no ${label}`);
   return found;
 }
 

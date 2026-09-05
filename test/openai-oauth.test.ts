@@ -97,6 +97,40 @@ test("browser sign-in rejects a mismatched callback without cancelling the real 
   }
 });
 
+test("browser sign-in rejects malformed callback URLs and accepts the next valid callback", async (context) => {
+  const previousFetch = globalThis.fetch;
+  let exchanges = 0;
+  globalThis.fetch = (async () => {
+    exchanges++;
+    return json(tokens("recovered-access", "recovered-refresh"));
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = previousFetch; });
+
+  const login = await beginBrowserLogin();
+  try {
+    const authorize = new URL(login.url);
+    const redirect = new URL(authorize.searchParams.get("redirect_uri") as string);
+    const malformed = new URL(redirect);
+    malformed.pathname = "//[";
+    const rejected = await httpText(malformed);
+
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body, "Invalid sign-in callback.");
+    assert.equal(exchanges, 0);
+
+    redirect.searchParams.set("state", authorize.searchParams.get("state") as string);
+    redirect.searchParams.set("code", "authorization-code");
+    const page = httpText(redirect);
+    const account = await within(login.complete(), 1_000, "browser login did not recover");
+
+    assert.equal((await page).status, 200);
+    assert.equal(account.accountId, "account-1");
+    assert.equal(exchanges, 1);
+  } finally {
+    await login.close();
+  }
+});
+
 test("browser rejection details end on a complete grapheme", async () => {
   const login = await beginBrowserLogin();
   try {
@@ -108,6 +142,7 @@ test("browser rejection details end on a complete grapheme", async () => {
     const page = httpText(redirect);
 
     await assert.rejects(login.complete(), (error: Error) => {
+      assert.match(error.message, /^OpenAI Account sign-in was rejected/);
       assert.equal(error.message.endsWith(prefix), true);
       assert.equal(error.message.isWellFormed(), true);
       return true;
@@ -219,15 +254,15 @@ test("device sign-in stops immediately on terminal errors", async (context) => {
   const cases = [
     {
       response: json({ error: "access_denied", error_description: "The user declined" }, 403),
-      message: /device sign-in was denied/,
+      message: "OpenAI Account device sign-in was denied",
     },
     {
       response: json({ error: { code: "expired_token" } }, 404),
-      message: /device sign-in code expired/,
+      message: "OpenAI Account device sign-in code expired",
     },
     {
       response: json({ error: { code: "invalid_request" } }, 403),
-      message: /device sign-in failed \(403\)/,
+      message: "OpenAI Account device sign-in failed (403)",
     },
   ];
 
@@ -242,7 +277,7 @@ test("device sign-in stops immediately on terminal errors", async (context) => {
     });
 
     const login = await beginDeviceLogin();
-    const rejection = assert.rejects(login.complete(), sample.message);
+    const rejection = assert.rejects(login.complete(), { message: sample.message });
     await waitFor(() => polls === 1);
     await flushAsync();
     context.mock.timers.tick(1_000);
@@ -306,7 +341,7 @@ test("device sign-in does not wait beyond its overall deadline", async (context)
   assert.equal(settled, false);
 
   context.mock.timers.tick(1);
-  await assert.rejects(completion, /timed out after 15 minutes/);
+  await assert.rejects(completion, { message: "OpenAI Account device sign-in timed out after 15 minutes" });
   assert.equal(Date.now(), 15 * 60_000);
   assert.equal(polls, 1);
 });

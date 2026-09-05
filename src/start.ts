@@ -7,7 +7,7 @@ import { loadConfig } from "./config.ts";
 import { ConversationTree } from "./conversation.ts";
 import { parseLaunch } from "./launch.ts";
 import { systemPrompt } from "./prompt.ts";
-import { configureProviders, selectProvider } from "./providers/index.ts";
+import { selectProvider } from "./providers/index.ts";
 import type { Session } from "./session.ts";
 import { SessionPersistence } from "./sessions/runtime.ts";
 import { DurableSessionStore } from "./sessions/store.ts";
@@ -39,7 +39,6 @@ export async function start(
   if (await showCliInfo(args, applicationRoot, write)) return;
   const launch = parseLaunch(args);
   const config = loadConfig(launch.configArgs);
-  configureProviders(config);
   const provider = selectProvider(config.providerId);
   const hasScreen = environment.interactive?.() ?? interactive();
   if (launch.kind === "resume" && !hasScreen) {

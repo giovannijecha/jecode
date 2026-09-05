@@ -18,7 +18,6 @@ Options:
   --root <path>          workspace root (default: current directory)
   --provider <id>        anthropic, openai, openai-codex, or ollama
   --model <id>           model for the selected provider
-  --ollama-host <url>    Ollama Cloud, local, or custom endpoint
   --effort <level>       low, medium, high, xhigh, or max
   --max-tokens <number>  output-token ceiling
   --max-steps <number>   optional per-turn model-request budget

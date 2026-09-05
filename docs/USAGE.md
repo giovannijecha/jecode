@@ -10,15 +10,15 @@ configuration, and the safety boundaries that apply while Jecode works.
 | --- | --- | --- |
 | `anthropic` | `ANTHROPIC_API_KEY` | Anthropic API usage |
 | `openai` | `OPENAI_API_KEY` | Separately billed OpenAI API usage |
-| `openai-codex` | ChatGPT OAuth | Experimental; uses eligible ChatGPT account access, not API credits |
-| `ollama` | `OLLAMA_API_KEY` for cloud or remote use | Cloud with a key, local without one |
+| `openai-codex` | OpenAI Account via OAuth | Experimental; uses eligible ChatGPT account access, not API credits |
+| `ollama` | `OLLAMA_API_KEY` | Ollama API at `https://ollama.com`; cloud only |
 
 `/providers` manages access only; connecting an account or adding a key never
 silently changes the runtime route. Use `/models` to choose a model. Each row
-identifies whether it will use an API or the ChatGPT account, and the footer
+identifies whether it will use an API or the OpenAI Account, and the footer
 keeps that exact route visible before and during every turn.
 
-Choose **ChatGPT** in `/providers` to sign in on OpenAI's website without
+Choose **Account → OpenAI Account** in `/providers` to sign in on OpenAI's website without
 pasting a key. Jecode supports a local browser callback and a device-code flow;
 WSL and remote terminals default to the device code. Availability and usage
 limits depend on the ChatGPT account and plan, not on OpenAI API credits. This
@@ -27,13 +27,19 @@ integration is experimental and is not an endorsement of Jecode by OpenAI.
 Anthropic remains API-key only. Jecode does not reuse a Claude consumer
 subscription or copy credentials from another client.
 
-For Ollama, `/providers` can select cloud, local, or a custom endpoint. With an
-Ollama API key Jecode defaults to `https://ollama.com`; without one it defaults
-to `http://127.0.0.1:11434`. Remote custom endpoints must use HTTPS.
+The **API** group lists **Anthropic API**, **OpenAI API**, and **Ollama API**.
+Each uses the same key-management flow. Ollama connects directly to the
+[official cloud API](https://docs.ollama.com/cloud#cloud-api-access) and always
+requires an API key. Local models and custom endpoints are not supported.
 
 ## Work in the TUI
 
 Type `/` to open searchable command completion inside the composer.
+
+Sent messages have a padded background without a leading symbol. With
+`NO_COLOR`, their inset and surrounding space still separate them from replies.
+Your text keeps Markdown punctuation, indentation, and explicit line breaks;
+long lines wrap to the terminal width without changing the saved message.
 
 ### Slash commands
 
@@ -41,7 +47,7 @@ Type `/` to open searchable command completion inside the composer.
 | --- | --- |
 | `/settings` | Manage the selected model and saved non-secret defaults |
 | `/effort` | Change and save reasoning effort directly |
-| `/providers` | Manage provider connections, API keys, ChatGPT sign-in, and Ollama endpoints |
+| `/providers` | Manage API keys and OpenAI Account sign-in |
 | `/models` | Search all currently usable provider catalogues and select a model |
 | `/permissions` | Change session tool access and review remembered approvals |
 | `/timeline` | Browse resumable turns and select where the next branch should begin |
@@ -66,6 +72,22 @@ Type `/` to open searchable command completion inside the composer.
 - **Ctrl+C** interrupts, or exits while idle. **Ctrl+D** requests a clean exit.
 - **PageUp/PageDown** and the mouse wheel scroll the transcript.
 - **Ctrl+O** expands or compacts the latest reasoning or tool-detail block.
+
+Menus mark the selected row with `●` and a subtle background. Descriptions sit
+in a stable area below the choices, using only the one or two rows needed by
+the menu's content. Long selected labels and values take priority there.
+Search and writable fields retain the `→` input prompt.
+Approvals show the question and target separately. **Enter** confirms the
+highlighted choice; **Y** approves once, **A** remembers the displayed scope
+for this session, and **N** or **Esc** refuses with feedback.
+
+Assistant text and tool records share a reading column; the composer keeps the
+full terminal width. Each tool names its target and execution state, with
+connected evidence below. Compact diffs show six changed lines shared between
+the beginning and end, with a count of omitted changes. Command previews show
+up to four output rows; failures retain a diagnostic line alongside the tail
+when one is recognized. Ctrl+O reveals the complete retained source, including
+unchanged diff context. These previews never shorten saved history or export.
 
 The footer keeps the selected provider route, model, effort, and workspace
 visible. During work, it adds the current state, elapsed time, steering
@@ -97,7 +119,7 @@ only the currently selected path.
 When model-facing context approaches the selected model's usable capacity,
 Jecode asks the provider for a bounded summary of the older prefix and keeps
 recent turns exact. The default trigger is 85% and can be changed from 50% to
-95%. Live provider metadata or Ollama's allocated context determines the budget
+95%. Live provider model metadata determines the budget
 when available; provider safety limits always win.
 
 Compaction changes only the projection sent to the model. Complete messages,
@@ -130,7 +152,6 @@ settings, then built-in defaults.
 | --- | --- | --- |
 | `--provider` | `JECODE_PROVIDER` | `anthropic` |
 | `--model` | `JECODE_MODEL` | Provider default or interactive selection |
-| `--ollama-host` | `OLLAMA_HOST` | Cloud with an Ollama key, local without one |
 | `--root` | - | Current directory |
 | `--effort` | `JECODE_EFFORT` | `high` |
 | `--max-tokens` | `JECODE_MAX_TOKENS` | `64000` ceiling, clamped to the usable request budget; not sent by `openai-codex` |
@@ -140,6 +161,16 @@ settings, then built-in defaults.
 | `--auto-approve` | `JECODE_AUTO_APPROVE=1` | Off |
 | `--ephemeral` | `JECODE_EPHEMERAL=1` | Off |
 
+Reasoning levels are `low`, `medium`, `high`, `xhigh`, and `max`. Each provider
+exposes the subset supported by the selected model.
+
+`--ollama-host` has been removed. Old `OLLAMA_HOST` and saved `ollamaHost`
+values are accepted only when they name the official cloud URL; they no longer
+configure an endpoint. Any other value stops startup with a removal message,
+so a former local or custom connection is never silently redirected to cloud.
+Remove the retired value explicitly to continue. Existing files remain intact;
+an old cloud setting disappears on the next successful settings save.
+
 `--max-steps` is an opt-in, process-only budget for deterministic automation
 and diagnostics. Interactive work has no arbitrary model-loop ceiling, and the
 budget is neither shown nor saved by `/settings`.
@@ -147,12 +178,16 @@ budget is neither shown nor saved by `/settings`.
 Non-secret preferences live in `~/.jecode/settings.json`. Explicitly saved API
 keys live in `~/.jecode/credentials.json`, while ChatGPT OAuth accounts live in
 `~/.jecode/accounts.json`. Environment credentials always take precedence.
-These JSON stores are size-bounded before parsing and writing, and invalid
-fields are discarded. Secret stores use owner-only permissions where the
+These JSON stores are size-bounded before parsing and writing. Startup tolerates
+damaged state; saving rejects unknown, malformed, or oversized stored data
+without rewriting it. Secret stores use owner-only permissions where the
 operating system supports them.
 
 Jecode has one current interface theme, Slate. `NO_COLOR` is supported for
-terminals and pipelines that disable colour.
+terminals and pipelines that disable colour. `--reduced-motion` disables
+the travelling light on active tool connectors and keeps the input cursor
+steady; provider text continues to stream. Output text, expanded evidence,
+waiting calls, and completed calls stay still.
 
 ## Understand the safety model
 
@@ -173,7 +208,7 @@ untrusted data.
 - ChatGPT OAuth uses PKCE and an exact loopback callback or the OpenAI device
   flow. Refresh-token rotation is serialized across Jecode processes.
 - Terminal control characters are neutralized before rendering.
-- Remote Ollama endpoints require HTTPS, and provider redirects are rejected.
+- Model requests use fixed HTTPS provider endpoints, and redirects are rejected.
 - Provider handshakes and idle response bodies have finite deadlines.
   Idempotent catalogue reads retry only bounded transient failures. A streaming
   generation may retry once only when its adapter identifies a transient

@@ -34,7 +34,7 @@ test("a user turn keeps one outer gap and a padded semantic surface", () => {
   assert.match(drawn[question - 3] ?? "", /previous answer/);
   assert.equal(drawn[question - 2], "");
   assert.equal(drawn[question - 1], " ".repeat(width));
-  assert.match(drawn[question] ?? "", /^❯ next question\s+$/);
+  assert.match(drawn[question] ?? "", /^  next question\s+$/);
   assert.equal(drawn[question + 1], " ".repeat(width));
 });
 
@@ -47,47 +47,62 @@ test("a wrapped user surface stays inside narrow terminal bounds", () => {
 
     assert.ok(drawn.every((line) => textWidth(line) <= width));
     assert.ok(drawn.length > 4);
-    assert.match(plain(drawn).join("\n"), /❯ A deliberately long/);
+    assert.match(plain(drawn).join("\n"), /^  A deliberately long/m);
   }
 });
 
-test("assistant prose and semantic marks share the terminal left edge", () => {
-  const drawn = plain(renderAll([
-    { kind: "answer", text: "left-aligned answer" },
-    { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
-  ], 100, STEEL));
-  const answer = drawn.find((line) => line.includes("left-aligned answer")) ?? "";
-  const tool = drawn.find((line) => line.includes("read_file")) ?? "";
-
-  assert.match(answer, /^left-aligned answer/);
-  assert.match(tool, /^[✓●]\s+read_file/);
+test("assistant prose and tool records share a two-cell inset and an 86-cell measure", () => {
+  const blocks: Block[] = [
+    { kind: "answer", text: "bounded answer ".repeat(30) },
+    { kind: "reasoning", text: "bounded reasoning ".repeat(30), expanded: true },
+    { kind: "tool", name: "read_file", target: "folder/".repeat(30), right: "1 line", tone: "ok" },
+  ];
+  for (const width of [38, 100, 200]) {
+    const drawn = plain(renderAll(blocks, width, STEEL)).filter((line) => line !== "");
+    assert.ok(drawn.every((line) => line.startsWith("  ")));
+    assert.ok(drawn.every((line) => textWidth(line) <= Math.min(width - 2, 88)));
+    assert.ok(drawn.some((line) => textWidth(line) > Math.min(width - 10, 75)));
+  }
 });
 
-test("consecutive tool calls join one execution rail without repeated gaps", () => {
+test("consecutive tool calls keep one gap between their independent records", () => {
   const drawn = plain(renderAll([
     { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
     { kind: "tool", name: "search_text", target: "needle", right: "2 matches", tone: "ok" },
   ], 60, STEEL));
-  const first = drawn.findIndex((line) => line.includes("read_file"));
-  const second = drawn.findIndex((line) => line.includes("search_text"));
+  const first = drawn.findIndex((line) => line === "  ┌ a.ts");
+  const second = drawn.findIndex((line) => line === "  ┌ needle");
   assert.equal(first, 1);
-  assert.equal(second, first + 1);
-  assert.equal(drawn.filter((line) => line === "").length, 1);
+  assert.equal(second, first + 3);
+  assert.equal(drawn[second - 1], "");
+  assert.equal(drawn.filter((line) => line === "").length, 2);
 });
 
-test("reasoning breaks adjacent tool rails with an unframed rhythm row", () => {
+test("reasoning leads directly into a tool while the following thought keeps one gap", () => {
   const drawn = plain(renderAll([
     { kind: "reasoning", text: "inspect first" },
     { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
     { kind: "reasoning", text: "continue after the result" },
   ], 60, STEEL));
-  const tool = drawn.findIndex((line) => line.includes("read_file"));
+  const tool = drawn.findIndex((line) => line === "  ┌ a.ts");
   const continued = drawn.findIndex((line) => line.includes("continue after"));
 
-  assert.equal(drawn[tool - 1], "");
+  assert.equal(drawn[tool - 1], "  inspect first");
   assert.equal(drawn[continued - 1], "");
-  assert.match(drawn[continued] ?? "", /^continue after the result$/);
-  assert.doesNotMatch(drawn.join("\n"), /│/);
+  assert.equal(drawn[continued], "  continue after the result");
+});
+
+test("response groups keep one leading gap except after a continuing thought", () => {
+  const tool: Block = { kind: "tool", name: "read_file", target: "a.ts", right: "4 lines", tone: "ok" };
+  const thought: Block = { kind: "reasoning", text: "Inspect the boundary.", live: false };
+  const answer: Block = { kind: "answer", text: "The boundary is intact." };
+  const cases: readonly (readonly [Block, Block, number])[] = [
+    [tool, tool, 1], [tool, thought, 1], [tool, answer, 1], [thought, tool, 0], [thought, thought, 0],
+  ];
+  for (const [previous, next, gap] of cases) {
+    const rows = plain(render(next, 100, STEEL, { previous, reducedMotion: true }));
+    assert.equal(rows.findIndex((line) => line.trim() !== ""), gap, `${previous.kind} → ${next.kind}`);
+  }
 });
 
 test("a short transcript grows upward from the composer", () => {
@@ -109,7 +124,7 @@ test("a short transcript grows upward from the composer", () => {
   assert.ok(rows.slice(0, latest - 1).every((line) => line === ""));
 });
 
-test("a writable field carries the same active arrow as a picker", () => {
+test("a writable field keeps its active input prompt", () => {
   const shown = plain(field.panel({ title: [], editor: edit.of("64000"), secret: false }, 60, STEEL));
   assert.equal(shown[1], "→ 64000");
 });
