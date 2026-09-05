@@ -11,8 +11,6 @@ import {
 } from "./providers/failure.ts";
 import type { HttpError } from "./providers/http.ts";
 
-const CONNECTION_FAILURE =
-  /network error calling|timed out waiting for response headers|response body was idle/i;
 const MAX_MESSAGE_CHARS = 1_000;
 const MAX_REASON_CHARS = 500;
 const HTML = /<!doctype\s|<\/?[a-z][^>]*>/i;
@@ -23,14 +21,7 @@ export function providerFailure(
   labelProvider = false,
 ): string {
   const details = providerFailureDetails(provider.id, error);
-  let failure: string;
-  if (provider.id === "ollama" && details.kind === "network" && CONNECTION_FAILURE.test(error.message)) {
-    failure = provider.location?.() === "local"
-      ? "Ollama is not reachable on this computer · start Ollama or choose cloud in /providers"
-      : "Ollama is not reachable · check its connection in /providers";
-  } else {
-    failure = actionableFailure(provider.id, details.kind) ?? rawFailure(error);
-  }
+  let failure = actionableFailure(provider.id, details.kind) ?? rawFailure(error);
 
   if (details.requestId !== undefined) failure += ` · request ${details.requestId}`;
 

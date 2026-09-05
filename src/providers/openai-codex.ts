@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Message, ModelContextWindow, Provider, SendRequest } from "../types.ts";
 import { openAICodexAccount } from "../accounts.ts";
 import { openAIAuthorization } from "../openai-account.ts";
+import { providerLabel } from "../provider-label.ts";
 import { applicationVersion } from "../version.ts";
 import { EFFORTS, isEffort, requireSupportedEffort } from "../effort.ts";
 import {
@@ -36,13 +37,11 @@ let contextByModel = new Map<string, ModelContextWindow | undefined>();
 export const openaiCodex: Provider = {
   id: ID,
   defaultModel: "",
-  auth: { kind: "oauth", account: ID, label: "ChatGPT" },
+  auth: { kind: "oauth", account: ID, label: providerLabel(ID) },
 
   blocked(): string | undefined {
-    return openAICodexAccount() === undefined ? "ChatGPT account is not connected" : undefined;
+    return openAICodexAccount() === undefined ? `${providerLabel(ID)} is not connected` : undefined;
   },
-
-  location: () => "cloud",
 
   async models(signal?: AbortSignal, onStatus?: (status: string) => void): Promise<string[]> {
     try {
@@ -193,7 +192,7 @@ function headers(
 
 function modelCatalog(value: unknown): ModelCatalog {
   const source = record(value) && Array.isArray(value["models"]) ? value["models"] : undefined;
-  if (source === undefined) throw new Error("OpenAI Codex did not return a model list");
+  if (source === undefined) throw new Error(`${providerLabel(ID)} did not return a model list`);
 
   const seen = new Set<string>();
   const models = source

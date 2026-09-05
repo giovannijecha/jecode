@@ -59,9 +59,9 @@ export function permissionsPicker(
   };
 }
 
-function permissionControlPicker(
-  control: SessionPermissions,
-  host: Host,
+export function permissionControlPicker(
+  control: Pick<SessionPermissions, "listTools" | "set">,
+  host: Pick<Host, "emit">,
   selected: number,
 ): Picker {
   return permissionsPicker(control.listTools(), selected, (index, step) => {
@@ -124,7 +124,7 @@ function toolDescription(tool: PermissionTool): string | undefined {
   return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
-function lockedNotice(tool: string, host: Host): void {
+function lockedNotice(tool: string, host: Pick<Host, "emit">): void {
   host.emit({
     kind: "notice",
     text: `restart without --auto-approve to change ${tool}`,

@@ -204,7 +204,7 @@ const flat = (rows: { segs: { text: string }[] }[]): string[] =>
 test("a table is drawn as columns, not printed as pipes", () => {
   const rows = flat(
     markdown(
-      ["| Provider | Model |", "| --- | --- |", "| anthropic | sonnet |", "| ollama | local |"].join("\n"),
+      ["| Provider | Model |", "| --- | --- |", "| anthropic | sonnet |", "| ollama | cloud |"].join("\n"),
       60,
       STEEL,
     ),
@@ -214,7 +214,7 @@ test("a table is drawn as columns, not printed as pipes", () => {
     "Provider   Model ",
     "─────────  ──────",
     "anthropic  sonnet",
-    "ollama     local ",
+    "ollama     cloud ",
   ]);
 });
 

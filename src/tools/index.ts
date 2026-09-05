@@ -2,7 +2,8 @@
 
 import type { ToolCallBlock, ToolResultBlock, ToolSpec } from "../types.ts";
 import type { Tool, ToolContext } from "./types.ts";
-import { editFile, listDir, readFile, writeFile } from "./fs.ts";
+import { listDir, readFile } from "./file-read.ts";
+import { editFile, writeFile } from "./file-write.ts";
 import { runCommand } from "./shell.ts";
 import { findFiles, searchText } from "./search.ts";
 

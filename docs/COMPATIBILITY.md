@@ -28,7 +28,7 @@ jecode [options]
 jecode resume [--latest] [options]
 ```
 
-The stable options are `--root`, `--provider`, `--model`, `--ollama-host`,
+The stable options are `--root`, `--provider`, `--model`,
 `--effort`, `--max-tokens`, `--max-steps`, `--compaction-percent`,
 `--reduced-motion`, `--auto-approve`, and `--ephemeral`, plus `-h`/`--help`
 and `-v`/`--version`. `--latest` is valid only with `resume`.
@@ -37,7 +37,7 @@ Persistent configuration precedence remains command-line flag, environment
 variable, saved setting, then built-in default. `--max-steps` and
 `JECODE_MAX_STEPS` are an opt-in process budget: no limit applies by default,
 and no value is stored in settings. The stable environment names are
-`JECODE_PROVIDER`, `JECODE_MODEL`, `OLLAMA_HOST`, `JECODE_EFFORT`,
+`JECODE_PROVIDER`, `JECODE_MODEL`, `JECODE_EFFORT`,
 `JECODE_MAX_TOKENS`, `JECODE_MAX_STEPS`, `JECODE_COMPACTION_PERCENT`,
 `JECODE_REDUCED_MOTION`, `JECODE_AUTO_APPROVE`, and `JECODE_EPHEMERAL`.
 Provider credentials retain their documented environment names.
@@ -58,7 +58,14 @@ The stable provider IDs are:
 
 - `anthropic` for the Anthropic API;
 - `openai` for the OpenAI API;
-- `ollama` for local, cloud, or explicitly configured compatible endpoints.
+- `ollama` for the official Ollama cloud API, with an API key.
+
+Local models and custom Ollama endpoints were retired before 1.0.
+`--ollama-host` is rejected. Legacy `OLLAMA_HOST` and saved `ollamaHost` values
+are recognized only for compatibility: official-cloud values do not change
+routing and are omitted on the next settings save; other values stop startup
+and block settings writes until explicitly removed. No migration silently
+redirects a saved local or custom connection to cloud.
 
 Provider-owned model IDs, catalogues, limits, and availability are not frozen
 by Jecode. Provider-specific wire formats remain internal.
@@ -100,12 +107,16 @@ User data remains under `~/.jecode`:
 - `accounts.json` stores ChatGPT OAuth accounts;
 - `sessions/` stores workspace-scoped durable conversations.
 
-These files are implementation-owned and should not be edited manually. Their
-exact JSON layout is not a public API. Jecode 1.x will continue to read session
+These files are implementation-owned. Use Jecode's controls for ordinary changes;
+manual edits are reserved for explicit migration or recovery instructions, such
+as removing the retired `ollamaHost` field described above. Their exact JSON
+layout is not a public API. Jecode 1.x will continue to read session
 schemas 1, 2, 3, and 4. A future schema change must migrate safely or fail
 without destroying the existing session. Bounded catalogue summaries are
 rebuildable indexes, not canonical conversation data; missing or suspect
-summaries fall back to strict session loading.
+summaries fall back to strict session loading. Version 1 catalogue indexes are
+rebuilt on the next idle listing to recover checkpoints that older writers
+could leave hidden; canonical conversation schemas and node files do not change.
 
 `JECODE_HOME` is reserved for development and test isolation. It is not a
 supported user-facing configuration surface and is not covered by the 1.x
@@ -121,7 +132,8 @@ The resume catalogue refuses to scan a workspace store containing more than
 The interactive UI requires a TTY with UTF-8 text, ANSI cursor control, an
 alternate screen, and bracketed paste support. Non-interactive streams use
 batch mode. `NO_COLOR` disables semantic colour, and `--reduced-motion` avoids
-the blinking cursor used for active work.
+tool-state and evidence animations and keeps the input cursor steady. Provider
+text continues to stream in either mode.
 
 Keyboard actions documented in the [user guide](USAGE.md#keyboard-controls)
 remain supported. Exact glyphs, palette values, line wrapping, and component
@@ -141,3 +153,8 @@ correctness, safety, or performance.
 stable providers and experimental ChatGPT integration have been exercised with
 authorized live accounts, physical terminal checks cover the supported
 platforms, and no confirmed critical, high, or medium finding remains open.
+
+Before promoting a candidate to stable `1.0.0`, complete an explicit
+release-candidate soak across supported providers and platforms. Exercise long
+sessions, interruption and crash recovery, resume and branching, compaction,
+and provider failures, and resolve confirmed regressions before promotion.

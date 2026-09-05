@@ -5,7 +5,9 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { leadingText } from "./text-boundary.ts";
+import { providerLabel } from "./provider-label.ts";
 
+const ACCOUNT_LABEL = providerLabel("openai-codex");
 const CALLBACK_PORTS = [1455, 1457] as const;
 export const OPENAI_CALLBACK_PATH = "/auth/callback";
 
@@ -38,7 +40,13 @@ export async function openAICallback(state: string): Promise<OpenAICallback> {
       outgoing.writeHead(400).end("Invalid sign-in callback.");
       return;
     }
-    const incoming = new URL(request.url, "http://localhost");
+    let incoming: URL;
+    try {
+      incoming = new URL(request.url, "http://localhost");
+    } catch {
+      outgoing.writeHead(400).end("Invalid sign-in callback.");
+      return;
+    }
     if (incoming.pathname !== OPENAI_CALLBACK_PATH) {
       outgoing.writeHead(404).end("Not found.");
       return;
@@ -57,9 +65,9 @@ export async function openAICallback(state: string): Promise<OpenAICallback> {
     const authError = incoming.searchParams.get("error_description") ?? incoming.searchParams.get("error");
     const authorizationCode = incoming.searchParams.get("code");
     if (authError !== null) {
-      rejectCode(new Error(`ChatGPT sign-in was rejected · ${leadingText(authError, 300)}`));
+      rejectCode(new Error(`${ACCOUNT_LABEL} sign-in was rejected · ${leadingText(authError, 300)}`));
     } else if (authorizationCode === null || authorizationCode === "") {
-      rejectCode(new Error("ChatGPT sign-in returned no authorization code"));
+      rejectCode(new Error(`${ACCOUNT_LABEL} sign-in returned no authorization code`));
     } else {
       resolveCode(authorizationCode);
     }
@@ -107,7 +115,7 @@ async function firstAvailableServer(
       if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
     }
   }
-  throw new Error("ChatGPT sign-in could not open callback ports 1455 or 1457");
+  throw new Error(`${ACCOUNT_LABEL} sign-in could not open callback ports 1455 or 1457`);
 }
 
 function listen(server: Server, port: number): Promise<void> {

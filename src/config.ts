@@ -8,12 +8,11 @@ import {
 } from "./context/policy.ts";
 import { EFFORTS, readSettings } from "./settings.ts";
 import type { SavedSettings } from "./settings.ts";
-import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
+import { isLegacyOllamaCloudHost } from "./providers/ollama-endpoint.ts";
 
 export type Config = {
   providerId: string;
   model: string;
-  ollamaHost?: string;
   reducedMotion: boolean;
   effort: string;
   maxTokens: number;
@@ -28,7 +27,6 @@ export type Config = {
 const VALUE_FLAGS = [
   "provider",
   "model",
-  "ollama-host",
   "effort",
   "max-tokens",
   "max-steps",
@@ -44,9 +42,9 @@ const FLAGS: readonly string[] = [...VALUE_FLAGS, ...BOOLEAN_FLAGS];
 
 export function loadConfig(argv: string[], saved: SavedSettings = readSettings()): Config {
   const flags = parseFlags(argv);
+  assertRetiredOllamaSettings(saved);
 
   const providerId = pick(flags.provider, process.env.JECODE_PROVIDER, saved.provider ?? "anthropic");
-  const ollamaHost = optional(flags["ollama-host"], process.env.OLLAMA_HOST, saved.ollamaHost);
   const effort = pick(flags.effort, process.env.JECODE_EFFORT, saved.effort ?? "high");
   if (!(EFFORTS as readonly string[]).includes(effort)) {
     throw new Error(`unknown effort "${effort}" (expected one of: ${EFFORTS.join(", ")})`);
@@ -60,9 +58,6 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
   return {
     providerId,
     model: pick(flags.model, process.env.JECODE_MODEL, saved.models?.[providerId] ?? ""),
-    ...(ollamaHost === undefined
-      ? {}
-      : { ollamaHost: parseOllamaEndpoint(ollamaHost).baseUrl }),
     reducedMotion: bool(
       flags["reduced-motion"],
       process.env.JECODE_REDUCED_MOTION,
@@ -89,6 +84,16 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
     autoApprove: autoApproval(flags["auto-approve"], process.env.JECODE_AUTO_APPROVE),
     ephemeral: bool(flags.ephemeral, process.env.JECODE_EPHEMERAL, false),
   };
+}
+
+function assertRetiredOllamaSettings(saved: SavedSettings): void {
+  const host = process.env.OLLAMA_HOST;
+  if (host !== undefined && host !== "" && !isLegacyOllamaCloudHost(host)) {
+    throw new Error("OLLAMA_HOST no longer selects an endpoint; remove it to use Ollama API at https://ollama.com");
+  }
+  if (saved.ollamaHost !== undefined && !isLegacyOllamaCloudHost(saved.ollamaHost)) {
+    throw new Error("settings.json has a retired Ollama endpoint; remove ollamaHost to use Ollama API at https://ollama.com");
+  }
 }
 
 function bool(flag: string | undefined, env: string | undefined, fallback: boolean): boolean {
@@ -155,6 +160,9 @@ function parseFlags(argv: string[]): Record<string, string> {
     const eq = body.indexOf("=");
     const name = eq === -1 ? body : body.slice(0, eq);
     const inline = eq === -1 ? undefined : body.slice(eq + 1);
+    if (name === "ollama-host") {
+      throw new Error("--ollama-host is no longer supported; remove it to use Ollama API at https://ollama.com");
+    }
     if (!FLAGS.includes(name)) {
       throw new Error(`unknown flag --${name} (known: ${FLAGS.map((flag) => `--${flag}`).join(", ")})`);
     }

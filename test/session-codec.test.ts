@@ -100,6 +100,35 @@ test("session node codec round-trips normalized history without provider raw dat
   assert.deepEqual(decoded.node.context, tree.activeNode?.context);
 });
 
+test("tool input retains own JSON keys through decoding and conversation restore", () => {
+  const input = JSON.parse(`{
+    "__proto__": {"path": "retained.txt"},
+    "constructor": {"prototype": {"label": "ordinary JSON"}},
+    "nested": [{"__proto__": "text"}, {"__proto__": null}]
+  }`) as Record<string, unknown>;
+  const tree = ConversationTree.empty().commit({
+    parentId: 0,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    identity: { providerId: "ollama", model: "m", effort: "high" },
+    messages: [
+      { role: "user", content: [{ kind: "text", text: "inspect" }] },
+      { role: "assistant", content: [{ kind: "tool_call", id: "t1", name: "read_file", input }] },
+    ],
+    blocks: [],
+  }, "checkpointed");
+  const encoded = encodeNode(tree.activeNode!, 1, "2026-09-01T10:01:00.000Z");
+  const decoded = decodeNode(JSON.parse(encoded));
+  const call = decoded.node.messages[1]?.content[0];
+  assert.equal(call?.kind, "tool_call");
+  if (call?.kind !== "tool_call") throw new Error("missing tool input");
+  assert.equal(Object.hasOwn(call.input, "__proto__"), true);
+  assert.equal(call.input["path"], undefined);
+  assert.deepEqual(call.input, input);
+  assert.equal(encodeNode(decoded.node, decoded.sequence, decoded.updatedAt), encoded);
+  const restored = ConversationTree.restore([decoded.node], 1);
+  assert.deepEqual(restored.history, tree.history);
+});
+
 test("schema 1 session nodes remain readable without a context anchor", () => {
   const decoded = decodeNode({
     version: 1,

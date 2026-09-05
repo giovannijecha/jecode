@@ -2,26 +2,28 @@
 // the directory is owner-only: every value is bounded and re-owned before it
 // can become conversation or provider input.
 
-import { Buffer } from "node:buffer";
 import type { TurnFailure, TurnNode, TurnSettlement } from "../conversation.ts";
 import type { ContextAnchor } from "../context/projection.ts";
 import { CONTEXT_LIMITS } from "../context/projection.ts";
-import type { Detail, TranscriptBlock } from "../transcript-types.ts";
-import type { Block, Message, Usage } from "../types.ts";
-import { MAX_TEXT_CODE_UNITS } from "../text-boundary.ts";
+import { messageFromRecord, messageRecord } from "./codec-messages.ts";
+import { blockFromRecord, blockRecord } from "./codec-transcript.ts";
+import {
+  bounded,
+  boundedLine,
+  digest,
+  identifier,
+  integer,
+  invalid,
+  keys,
+  record,
+  SESSION_FILE_LIMITS,
+  timestamp,
+} from "./codec-values.ts";
+
+export { SESSION_FILE_LIMITS } from "./codec-values.ts";
 
 export const SESSION_SCHEMA = 4;
 export type SessionSchema = 1 | 2 | 3 | 4;
-export const SESSION_FILE_LIMITS = Object.freeze({
-  text: MAX_TEXT_CODE_UNITS,
-  metadataBytes: 64 * 1_024,
-  nodeBytes: 20 * 1_024 * 1_024,
-  jsonDepth: 24,
-  jsonNodes: 32_768,
-  blocks: 8_192,
-  details: 8_192,
-});
-
 export type SessionMeta = Readonly<{
   version: SessionSchema;
   id: string;
@@ -228,250 +230,6 @@ function contextFromRecord(
   };
 }
 
-function messageRecord(message: Message): unknown {
-  return {
-    role: message.role,
-    content: message.content.map(contentRecord),
-    usage: message.usage ?? null,
-  };
-}
-
-function messageFromRecord(value: unknown): Message {
-  if (!record(value) || !keys(value, "content,role,usage")) throw invalid();
-  if (
-    (value["role"] !== "user" && value["role"] !== "assistant") ||
-    !Array.isArray(value["content"]) || value["content"].length > SESSION_FILE_LIMITS.blocks
-  ) throw invalid();
-  const usage = value["usage"] === null ? undefined : usageFromRecord(value["usage"]);
-  return {
-    role: value["role"],
-    content: value["content"].map(contentFromRecord),
-    ...(usage === undefined ? {} : { usage }),
-  };
-}
-
-function contentRecord(block: Block): unknown {
-  if (block.kind === "text") return { kind: block.kind, text: block.text };
-  if (block.kind === "tool_call") {
-    return { kind: block.kind, id: block.id, name: block.name, input: block.input };
-  }
-  return {
-    kind: block.kind,
-    id: block.id,
-    output: block.output,
-    isError: block.isError,
-  };
-}
-
-function contentFromRecord(value: unknown): Block {
-  if (!record(value) || typeof value["kind"] !== "string") throw invalid();
-  if (value["kind"] === "text" && keys(value, "kind,text") && boundedText(value["text"])) {
-    return { kind: "text", text: value["text"] };
-  }
-  if (
-    value["kind"] === "tool_call" && keys(value, "id,input,kind,name") &&
-    bounded(value["id"], 512) && bounded(value["name"], 256)
-  ) {
-    const input = jsonObject(value["input"]);
-    return { kind: "tool_call", id: value["id"], name: value["name"], input };
-  }
-  if (
-    value["kind"] === "tool_result" && keys(value, "id,isError,kind,output") &&
-    bounded(value["id"], 512) && boundedText(value["output"]) &&
-    typeof value["isError"] === "boolean"
-  ) {
-    return {
-      kind: "tool_result",
-      id: value["id"],
-      output: value["output"],
-      isError: value["isError"],
-    };
-  }
-  throw invalid();
-}
-
-function usageFromRecord(value: unknown): Usage {
-  if (!record(value) || !keys(
-    value,
-    "cacheWriteInputTokens,cachedInputTokens,inputTokens,outputTokens,reasoningTokens",
-  )) throw invalid();
-  const inputTokens = value["inputTokens"];
-  const outputTokens = value["outputTokens"];
-  const cachedInputTokens = value["cachedInputTokens"];
-  const cacheWriteInputTokens = value["cacheWriteInputTokens"];
-  const reasoningTokens = value["reasoningTokens"];
-  if (
-    !integer(inputTokens, 0) || !integer(outputTokens, 0) ||
-    !integer(cachedInputTokens, 0) || !integer(cacheWriteInputTokens, 0) ||
-    !integer(reasoningTokens, 0)
-  ) throw invalid();
-  return {
-    inputTokens,
-    outputTokens,
-    cachedInputTokens,
-    cacheWriteInputTokens,
-    reasoningTokens,
-  };
-}
-
-function blockRecord(block: TranscriptBlock): unknown[] {
-  if (block.kind === "notice") return [];
-  if (block.kind === "user" || block.kind === "answer" || block.kind === "reasoning") {
-    return [{ kind: block.kind, text: block.text }];
-  }
-  if (block.tone === "pending") return [];
-  return [{
-    kind: block.kind,
-    name: block.name,
-    target: block.target,
-    right: block.right,
-    tone: block.tone,
-    body: block.body?.map(detailRecord) ?? null,
-    durationMs: block.durationMs ?? null,
-  }];
-}
-
-function blockFromRecord(value: unknown, version: SessionSchema): TranscriptBlock {
-  if (!record(value) || typeof value["kind"] !== "string") throw invalid();
-  if (
-    (value["kind"] === "user" || value["kind"] === "answer" || value["kind"] === "reasoning") &&
-    keys(value, "kind,text") && boundedText(value["text"])
-  ) return { kind: value["kind"], text: value["text"] };
-  const toolKeys = version >= 4
-    ? "body,durationMs,kind,name,right,target,tone"
-    : "body,kind,name,right,target,tone";
-  if (
-    value["kind"] === "tool" && keys(value, toolKeys) &&
-    bounded(value["name"], 256) && boundedText(value["target"]) &&
-    boundedText(value["right"], 1_024) &&
-    (value["tone"] === "ok" || value["tone"] === "fail" || value["tone"] === "deny") &&
-    (version < 4 || nullableInteger(value["durationMs"], 0)) &&
-    (value["body"] === null ||
-      (Array.isArray(value["body"]) && value["body"].length <= SESSION_FILE_LIMITS.details))
-  ) {
-    const body = value["body"] === null
-      ? undefined
-      : value["body"].map(detailFromRecord);
-    return {
-      kind: "tool",
-      name: value["name"],
-      target: value["target"],
-      right: value["right"],
-      tone: value["tone"],
-      ...(body === undefined ? {} : { body }),
-      ...(version < 4 || value["durationMs"] === null
-        ? {}
-        : { durationMs: value["durationMs"] as number }),
-    };
-  }
-  throw invalid();
-}
-
-function detailRecord(detail: Detail): unknown {
-  if (detail.kind === "out" || detail.kind === "gap") return { kind: detail.kind, text: detail.text };
-  return {
-    kind: detail.kind,
-    text: detail.text,
-    oldLine: detail.oldLine ?? null,
-    newLine: detail.newLine ?? null,
-    emphasis: detail.emphasis ?? null,
-  };
-}
-
-function detailFromRecord(value: unknown): Detail {
-  if (!record(value) || typeof value["kind"] !== "string") throw invalid();
-  if (
-    (value["kind"] === "out" || value["kind"] === "gap") &&
-    keys(value, "kind,text") && boundedText(value["text"])
-  ) return { kind: value["kind"], text: value["text"] };
-  if (
-    (value["kind"] === "keep" || value["kind"] === "add" || value["kind"] === "del") &&
-    keys(value, "emphasis,kind,newLine,oldLine,text") && boundedText(value["text"]) &&
-    nullableInteger(value["oldLine"], 1) && nullableInteger(value["newLine"], 1)
-  ) {
-    const emphasis = emphasisFromRecord(value["emphasis"]);
-    return {
-      kind: value["kind"],
-      text: value["text"],
-      ...(value["oldLine"] === null ? {} : { oldLine: value["oldLine"] }),
-      ...(value["newLine"] === null ? {} : { newLine: value["newLine"] }),
-      ...(emphasis === undefined ? {} : { emphasis }),
-    };
-  }
-  throw invalid();
-}
-
-function emphasisFromRecord(value: unknown): { start: number; length: number } | undefined {
-  if (value === null) return undefined;
-  if (!record(value) || !keys(value, "length,start")) throw invalid();
-  if (!integer(value["start"], 0) || !integer(value["length"], 1)) throw invalid();
-  return { start: value["start"], length: value["length"] };
-}
-
-function jsonObject(value: unknown): Record<string, unknown> {
-  const budget = { nodes: 0 };
-  const safe = jsonValue(value, budget, 0);
-  if (!record(safe)) throw invalid();
-  return safe;
-}
-
-function jsonValue(value: unknown, budget: { nodes: number }, depth: number): unknown {
-  budget.nodes++;
-  if (budget.nodes > SESSION_FILE_LIMITS.jsonNodes || depth > SESSION_FILE_LIMITS.jsonDepth) {
-    throw invalid();
-  }
-  if (value === null || typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    if (!boundedText(value)) throw invalid();
-    return value;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw invalid();
-    return value;
-  }
-  if (Array.isArray(value)) {
-    if (value.length > SESSION_FILE_LIMITS.blocks) throw invalid();
-    return value.map((item) => jsonValue(item, budget, depth + 1));
-  }
-  if (!record(value) || Object.keys(value).length > SESSION_FILE_LIMITS.blocks) throw invalid();
-  const safe: Record<string, unknown> = {};
-  for (const [name, child] of Object.entries(value)) {
-    if (!boundedText(name, 1_024)) throw invalid();
-    safe[name] = jsonValue(child, budget, depth + 1);
-  }
-  return safe;
-}
-
-function line(value: unknown): string {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
-function boundedLine(value: unknown, maxBytes: number): string {
-  const encoded = line(value);
-  if (Buffer.byteLength(encoded, "utf8") > maxBytes) throw invalid();
-  return encoded;
-}
-
-function keys(value: Record<string, unknown>, expected: string): boolean {
-  return Object.keys(value).sort().join(",") === expected;
-}
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function bounded(value: unknown, limit: number = SESSION_FILE_LIMITS.text): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= limit;
-}
-
-function boundedText(value: unknown, limit: number = SESSION_FILE_LIMITS.text): value is string {
-  return typeof value === "string" && value.length <= limit;
-}
-
-function integer(value: unknown, minimum: number): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum;
-}
-
 function schema(value: unknown): value is SessionSchema {
   return value === 1 || value === 2 || value === 3 || value === SESSION_SCHEMA;
 }
@@ -479,25 +237,4 @@ function schema(value: unknown): value is SessionSchema {
 function settlement(value: unknown, version: SessionSchema): value is TurnSettlement {
   return value === "checkpointed" || value === "completed" ||
     (version >= 3 && (value === "failed" || value === "interrupted"));
-}
-
-function nullableInteger(value: unknown, minimum: number): value is number | null {
-  return value === null || integer(value, minimum);
-}
-
-function identifier(value: unknown): value is string {
-  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value);
-}
-
-function digest(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-}
-
-function timestamp(value: unknown): value is string {
-  return typeof value === "string" && value.length >= 20 && value.length <= 64 &&
-    Number.isFinite(Date.parse(value));
-}
-
-function invalid(): Error {
-  return new Error("session data is invalid or unsupported");
 }

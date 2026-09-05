@@ -1,9 +1,11 @@
-// The live ChatGPT account: persistence, proactive refresh, and logout.
+// The live OpenAI account: persistence, proactive refresh, and logout.
 
 import type { OpenAICodexAccount } from "./accounts.ts";
 import { openAICodexAccount, updateOpenAICodexAccount } from "./accounts.ts";
 import { refreshOpenAITokens, revokeOpenAITokens } from "./openai-oauth.ts";
+import { providerLabel } from "./provider-label.ts";
 
+const ACCOUNT_LABEL = providerLabel("openai-codex");
 const REFRESH_EARLY_MS = 5 * 60_000;
 let refreshing: Promise<OpenAICodexAccount> | undefined;
 
@@ -49,7 +51,7 @@ export async function openAIAuthorization(
   onStatus?: (status: string) => void,
 ): Promise<OpenAIAuthorization> {
   const account = openAICodexAccount();
-  if (account === undefined) throw new Error("ChatGPT account is not connected");
+  if (account === undefined) throw new Error(`${ACCOUNT_LABEL} is not connected`);
 
   const mustRefresh = rejectedToken !== undefined || expiresSoon(account);
   const ready = mustRefresh
@@ -66,12 +68,12 @@ async function refreshAccount(
   if (refreshing !== undefined) return abortable(refreshing, signal);
   if (signal?.aborted === true) throw abortReason(signal);
   const task = updateOpenAICodexAccount(async (current) => {
-    if (current === undefined) throw new Error("ChatGPT account is not connected");
+    if (current === undefined) throw new Error(`${ACCOUNT_LABEL} is not connected`);
     if (!requiresAuthorityRefresh(current, rejectedToken)) return current;
-    onStatus?.("Refreshing ChatGPT sign-in");
+    onStatus?.(`Refreshing ${ACCOUNT_LABEL} sign-in`);
     return refreshOpenAITokens(current);
   }).then((account) => {
-    if (account === undefined) throw new Error("ChatGPT account is not connected");
+    if (account === undefined) throw new Error(`${ACCOUNT_LABEL} is not connected`);
     return account;
   });
   refreshing = task;

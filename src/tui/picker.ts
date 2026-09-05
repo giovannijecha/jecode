@@ -2,11 +2,9 @@
 
 import type { Palette } from "../ui/theme.ts";
 import type { Seg } from "../ui/render.ts";
-import { row } from "../ui/render.ts";
-import { elide, graphemes } from "../ui/width.ts";
+import { graphemes } from "../ui/width.ts";
 import { assertPromptAppend } from "../input-boundary.ts";
-import { menuWindow, renderMenuRows } from "./components/menu.ts";
-import { promptCursor, promptLine } from "./components/prompt.ts";
+import { layoutPicker } from "./picker-layout.ts";
 import type { Cursor } from "./frame.ts";
 
 export type Option = {
@@ -25,6 +23,8 @@ export type Picker = {
   description?: string;
   right?: string;
   footer?: string;
+  /** Explicit controls for interactions whose Esc action differs from closing. */
+  controls?: string;
   options: readonly Option[];
   searchable?: boolean;
   query?: string;
@@ -93,96 +93,18 @@ export function panel(
   picker: Picker,
   width: number,
   pal: Palette,
-  maxRows = (picker.visible ?? WINDOW) + 3,
+  maxRows = (picker.visible ?? WINDOW) + 6,
 ): string[] {
-  return layout(picker, width, pal, maxRows).rows;
+  return layoutPicker(picker, matches(picker), width, pal, maxRows).rows;
 }
 
 /** Caret for the shared query row, relative to the unframed picker body. */
 export function caret(
   picker: Picker,
   width: number,
-  maxRows = (picker.visible ?? WINDOW) + 3,
+  maxRows = (picker.visible ?? WINDOW) + 6,
 ): Cursor | undefined {
-  return layout(picker, width, undefined, maxRows).cursor;
-}
-
-function layout(
-  picker: Picker,
-  width: number,
-  pal: Palette | undefined,
-  maxRows: number,
-): { rows: string[]; cursor?: Cursor } {
-  const found = matches(picker);
-  const note = picker.description ?? picker.footer;
-  const hasTitle = picker.title.length > 0;
-  const fixed = (hasTitle ? 1 : 0) +
-    (note === undefined ? 0 : 1) +
-    (picker.searchable === true ? 1 : 0);
-  const optionRoom = Math.max(1, Math.min(picker.visible ?? WINDOW, maxRows - fixed));
-  const selectedAt = Math.max(0, found.findIndex((entry) => entry.index === picker.index));
-  const { first, last } = menuWindow(found.length, selectedAt, optionRoom);
-  const shown = found.slice(first, last);
-  const colors = pal;
-  const options = colors === undefined
-    ? []
-    : shown.length === 0
-    ? [row(width, [{ text: "no matches", fg: colors.ink.muted }])]
-    : renderMenuRows(
-        shown.map(({ option, index }) => ({
-          label: option.label,
-          description: option.description,
-          hint: option.hint,
-          value: option.value,
-          adjustable: option.adjustable,
-          selected: index === picker.index,
-        })),
-        width,
-        colors,
-      );
-
-  const progress = found.length > shown.length || picker.searchable === true
-    ? `${found.length === 0 ? "0" : `${first + 1}–${first + shown.length}`} / ${found.length}` +
-      (found.length === picker.options.length ? "" : ` · ${picker.options.length} total`)
-    : "";
-  const titleRight = hasTitle
-    ? picker.right ?? (picker.searchable === true ? undefined : progress)
-    : undefined;
-  const visibleTitleRight = titleRight === undefined
-    ? undefined
-    : elide(titleRight, Math.max(1, Math.floor(width * 0.55)));
-  const queryRow = picker.searchable === true && colors !== undefined
-    ? promptLine(picker.query ?? "", (picker.query ?? "").length, width, colors, {
-        placeholder: "type to filter",
-        right: progress,
-      })
-    : undefined;
-  const queryCursor = picker.searchable === true
-    ? promptCursor(picker.query ?? "", (picker.query ?? "").length, width, { right: progress })
-    : undefined;
-  const queryOffset = (hasTitle ? 1 : 0) + (note === undefined ? 0 : 1);
-
-  return {
-    rows: colors === undefined
-      ? []
-      : [
-          ...(hasTitle
-            ? [row(
-                width,
-                picker.title,
-                visibleTitleRight === undefined || visibleTitleRight === ""
-                  ? []
-                  : [{ text: visibleTitleRight, fg: colors.ink.dim }],
-              )]
-            : []),
-          ...(note === undefined ? [] : [row(width, [{ text: note, fg: colors.ink.muted }])]),
-          ...(queryRow === undefined ? [] : [queryRow.row]),
-          ...options,
-        ],
-    cursor: picker.searchable === true
-      ? { row: queryOffset, col: queryCursor?.col ?? 0 }
-      : undefined,
-  };
+  return layoutPicker(picker, matches(picker), width, undefined, maxRows).cursor;
 }
 
 export function heading(label: string, about: string, pal: Palette): Seg[] {
@@ -192,9 +114,9 @@ export function heading(label: string, about: string, pal: Palette): Seg[] {
   ];
 }
 
-type Match = { option: Option; index: number };
+export type Match = { option: Option; index: number };
 
-function matches(picker: Picker): Match[] {
+export function matches(picker: Picker): Match[] {
   const query = (picker.query ?? "").trim().toLocaleLowerCase();
   return picker.options.flatMap((option, index) => {
     const haystack = `${option.label} ${option.hint ?? ""} ${option.value ?? ""}`.toLocaleLowerCase();

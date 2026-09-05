@@ -138,33 +138,34 @@ test("the footer projection exposes the exact provider route without secondary n
 test("turn blockers use user-facing copy and remain until the next key", () => {
   const needsKey = turnBlocker(session(provider("ANTHROPIC_API_KEY is not set")));
   assert.deepEqual(needsKey, {
-    text: "Anthropic needs an API key · /providers",
+    text: "Anthropic API needs an API key · /providers",
     tone: "warn",
   });
 
   const needsModel = turnBlocker(session(provider(), ""));
   assert.deepEqual(needsModel, {
-    text: "Anthropic needs a model · /models",
+    text: "Anthropic API needs a model · /models",
     tone: "warn",
   });
   assert.equal(turnBlocker(session(provider())), undefined);
 });
 
-test("the ChatGPT provider asks for sign-in instead of an API key", () => {
+test("the OpenAI Account provider asks for sign-in instead of an API key", () => {
   const codex: Provider = {
     ...provider(),
     id: "openai-codex",
     defaultModel: "",
-    auth: { kind: "oauth", account: "openai-codex", label: "ChatGPT" },
-    blocked: () => "ChatGPT account is not connected",
+    auth: { kind: "oauth", account: "openai-codex", label: "OpenAI Account" },
+    blocked: () => "OpenAI Account is not connected",
   };
 
   assert.deepEqual(turnBlocker(session(codex)), {
-    text: "ChatGPT needs sign-in · /providers",
+    text: "OpenAI Account needs sign-in · /providers",
     tone: "warn",
   });
   const failure = turnFailure(session(codex, "gpt-codex"), new Error("401 unauthorized"), false);
-  assert.match(failure.text, /reconnect ChatGPT in \/providers/);
+  assert.match(failure.text, /reconnect OpenAI Account in \/providers/);
+  assert.equal(footerInfo(session(codex)).provider, "OpenAI Account");
 });
 
 test("a real authentication failure remains one actionable transcript notice", () => {
@@ -174,18 +175,18 @@ test("a real authentication failure remains one actionable transcript notice", (
   const failure = turnFailure(session(provider()), error, false);
   assert.equal(failure.kind, "notice");
   assert.equal(failure.tone, "error");
-  assert.match(failure.text, /^Anthropic: authentication failed · /);
+  assert.match(failure.text, /^Anthropic API: authentication failed · /);
   assert.match(failure.text, /access|environment/);
 });
 
 test("an Ollama network failure becomes one actionable transcript notice", () => {
-  const ollama: Provider = { ...provider(), id: "ollama", location: () => "cloud" };
+  const ollama: Provider = { ...provider(), id: "ollama" };
   const failure = turnFailure(
     session(ollama),
     new Error("network error calling https://ollama.com/v1/chat/completions: fetch failed"),
     false,
   );
 
-  assert.equal(failure.text, "Ollama is not reachable · check its connection in /providers");
+  assert.equal(failure.text, "Ollama API: network request failed · check the connection and retry");
   assert.equal(failure.tone, "error");
 });

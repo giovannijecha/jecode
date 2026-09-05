@@ -1,5 +1,10 @@
 # Architecture
 
+This guide explains the current implementation and its module boundaries.
+The [compatibility contract](COMPATIBILITY.md) defines which public behavior
+must remain supported; layout and implementation details here describe the
+current code and evolve with it.
+
 ## Mental model
 
 jecode has one agent loop. The TUI or batch reader supplies a user message;
@@ -10,7 +15,9 @@ until the model returns no tool calls.
 bin/jecode.js → dist/main.js → start.js
                                ├─ tui/app.js       interactive control plane
                                │    ├─ app-input.js
-                               │    └─ app-workflows.js ─ commands.js
+                               │    └─ app-workflows.js
+                               │         ├─ command-workflow.js ─ commands.js
+                               │         └─ turn-workflow.js
                                └─ batch.js         piped control plane
                                         │
                                         ▼
@@ -85,9 +92,8 @@ if compaction cannot recover a saturated request, a bounded newest-first
 projection remains as the final safety fallback.
 
 Before every provider request, the controller resolves the current model
-context policy. Provider adapters cache stable metadata themselves, while this
-boundary lets Ollama observe a smaller runtime allocation after loading a
-model. Its conservative request estimate includes the system prompt, projected
+context policy. Provider adapters cache stable metadata themselves and refresh
+it when needed. The conservative request estimate includes the system prompt, projected
 messages, tool schemas, a fixed wire-envelope allowance, entropy-sensitive
 headroom, and an additional safety reserve. The configured `maxTokens` value is
 an output ceiling: it is reduced when necessary so estimated input plus maximum
@@ -119,7 +125,7 @@ work cannot continue behind a restored terminal.
 There is no startup banner, permanent preamble, or automatic menu. Every launch
 opens on an empty transcript and composer; readiness remains visible in the
 footer, and configuration opens only when the user invokes it. `/providers`
-owns API keys, ChatGPT OAuth, and Ollama connections. `/models` asks every
+owns API keys and OpenAI Account OAuth. `/models` asks every
 currently usable provider for its catalogue concurrently, keeps successful
 catalogues when another provider fails, and presents one searchable list.
 Choosing a row changes provider and model atomically; cancellation or a failed
@@ -134,10 +140,10 @@ usage. Providers translate this vocabulary to four transport/authentication path
 
 | Provider | API | Deployment |
 |---|---|---|
-| Anthropic | Messages | Cloud |
-| OpenAI | Responses | Cloud |
-| OpenAI Codex | ChatGPT Codex Responses | Cloud |
-| Ollama | OpenAI-compatible Chat Completions | Local loopback or hosted |
+| Anthropic API | Messages | Cloud |
+| OpenAI API | Responses | Cloud |
+| OpenAI Account | ChatGPT Codex Responses | Cloud |
+| Ollama API | OpenAI-compatible Chat Completions | Official cloud API |
 
 Each provider has three responsibilities:
 
@@ -195,15 +201,23 @@ model-output-aware aggregate stream, reconstructed tool arguments, model
 catalogue, and per-response tool-call batch have explicit limits; overflow cancels
 or rejects the response before unbounded work reaches the controller.
 
-Ollama initializes its endpoint from `--ollama-host`, `OLLAMA_HOST`, saved
-settings, then key-aware inference. A configured API key selects
-`https://ollama.com`; without one, Jecode targets the local daemon at
-`http://127.0.0.1:11434`. The Ollama connection flow in `/providers` can replace
-that session value live with Cloud, local, or a custom endpoint. HTTP is
-accepted only for exact loopback hosts. Remote endpoints must use HTTPS, and
-credentials embedded in the URL are rejected.
+Ollama uses the fixed `https://ollama.com` API and requires `OLLAMA_API_KEY`
+for catalogue, metadata, and generation requests. Its access menu uses the same
+key flow as the other API providers. `ollama-context.ts` reads cloud model
+capacity from `/api/show`, caches it briefly, and applies safety headroom;
+there is no local daemon discovery, allocation probe, or custom endpoint state.
+`ollama-endpoint.ts` owns the fixed origin and recognizes retired cloud settings
+only for compatibility. Startup rejects other legacy endpoint values before
+any provider request, and settings writes preserve those files until the user
+explicitly removes the retired field.
 
 ## Workspace boundary
+
+`src/tools/index.ts` registers the workspace capabilities. `file-read.ts` owns
+bounded reads and directory listings; `file-write.ts` keeps mutation previews,
+replacement rules, and atomic revalidation together. `search.ts` owns bounded
+discovery and text scanning, using the pure matcher in `glob.ts`. Both paths
+share the filesystem boundaries in `paths.ts` and the stable file readers.
 
 Read and write tools accept paths inside one configured root. Lexical checks
 reject traversal and outside absolute paths. Existing paths are then resolved
@@ -280,7 +294,7 @@ for that process.
 
 Persistent user data lives under `~/.jecode`, outside every workspace.
 `settings.json` contains only non-secret defaults: provider, one remembered
-model per provider, the Ollama endpoint, effort, output and compaction limits,
+model per provider, effort, output and compaction limits,
 and reduced motion. Runtime precedence is CLI flags, environment variables,
 saved settings, then built-in defaults. Root, auto-approval, and the optional
 model-request budget stay process-only.
@@ -343,9 +357,9 @@ historical tool records remain inert.
 Context compaction is automatic and model-aware. Pressure combines the most
 recent normalized input-token count with a conservative byte estimate. The
 provider boundary can advertise one model's usable request window and a stricter
-automatic-compaction ceiling: ChatGPT retains those fields from its live model
-catalogue, Anthropic retains `max_input_tokens`, and Ollama prefers the context
-currently allocated by `/api/ps` before falling back to `/api/show`. The OpenAI
+automatic-compaction ceiling: OpenAI Account retains those fields from its live model
+catalogue, Anthropic retains `max_input_tokens`, and Ollama reads cloud model
+capacity from `/api/show`. The OpenAI
 API model list does not include capacities, so its accepted reasoning families
 use isolated conservative metadata. Discovery failures use a 200k fallback and
 therefore leave ordinary turns available; an envelope that already exceeds that
@@ -364,10 +378,9 @@ It applies to the usable model window while a lower provider safety ceiling and
 the estimator's safety reserve still win. The post-compaction target is one
 quarter of that window and the
 recent exact tail is bounded to half that target; both therefore scale from a
-small Ollama allocation to million-token models. Capacity discovery runs before
-each request; provider adapters retain safe metadata where appropriate, while
-Ollama can replace theoretical capacity with its runtime allocation and refresh
-that observation periodically. The selected provider receives one
+small context windows to million-token models. Capacity discovery runs before
+each request; provider adapters retain safe metadata where appropriate and
+refresh it periodically. The selected provider receives one
 streamed, tool-free summary request with a neutral instruction that treats all
 source content as untrusted data. Opaque provider blocks are removed from that
 request. The resulting user-level summary never enters the system prompt and is
@@ -402,18 +415,30 @@ anchors; schema 3 added durable failed/interrupted outcomes; schema 4 adds
 settled tool durations. The strict decoder continues to accept every older
 schema and upgrades the active node on its next checkpoint.
 
+Under `src/sessions/`, `store.ts` retains publication, checkpoint, and ownership
+transactions. `bucket.ts` holds the workspace identity and directory anchors;
+`files.ts` handles bounded node IO; `load.ts` validates the complete tree and
+adjacent recovery; `catalog-io.ts` lists and repairs catalogue summaries.
+`snapshot.ts` validates the in-memory checkpoint boundary. The file envelopes
+and schema compatibility remain in `codec.ts`, with message and transcript
+codecs in `codec-messages.ts` and `codec-transcript.ts`, sharing bounded value
+validation through `codec-values.ts`.
+
 The interactive persistence owner retains the last fully verified snapshot and
 its exact store-scoped lease. Conversation nodes are deeply immutable, so a
 checkpoint can verify
 shared history by identity, update aggregate size counters for only the changed
-node, reread the bounded head and lease, then write one node followed by the
-head and catalogue summary. A bounded checkpoint marker precedes the node
-mutation, so a crash cannot leave an old summary looking current while an
-adjacent node awaits recovery. A changed head, replaced lease, rematerialized
+node, reread the bounded head and lease, then write the candidate catalogue,
+one node, and finally the head. The candidate catalogue matches only the new
+head, so a partial checkpoint cannot leave an old summary looking current.
+A bounded checkpoint marker prevents concurrent recovery until the writer
+releases ownership. A changed head, replaced lease, rematerialized
 history, or unexpected node outside that snapshot fails closed. Node reads use
 bounded parallel batches with per-file, in-flight, and aggregate byte caps.
-Resume always reads and validates the complete on-disk tree; the persisted
-conversation schema is unchanged.
+Resume always reads and validates the complete on-disk tree. Recovery validates
+the candidate tree and catalogue before advancing the durable head; invalid
+conversation data leaves that head unchanged. The persisted conversation schema
+is unchanged.
 
 Session catalogues use the canonical real workspace path, so another project
 cannot appear in the resume picker. Generation-specific process leases prevent
@@ -435,7 +460,10 @@ to reject a mixed checkpoint view, processes independent sessions in small
 concurrent waves, and sorts the whole admissible set by durable `updatedAt`
 before applying the visible result limit. A missing, malformed, head-stale, or
 abandoned-checkpoint summary triggers the strict full loader while the session
-is idle, then is rebuilt atomically. Selecting a row always performs the strict
+is idle, then is rebuilt atomically. Version 1 indexes also take this path once:
+their writer could leave a current-looking summary hiding an adjacent node
+after a failed head write. Rebuilt indexes use version 2; canonical conversation
+schemas stay unchanged. Selecting a row always performs the strict
 load again, so the summary never authorizes conversation data. The catalogue
 fails explicitly above its entry bound instead of silently hiding an older
 session that was updated most recently.
@@ -448,11 +476,17 @@ part of a checkpoint.
 
 ## TUI composition
 
+The current visual direction and its working examples live in
+[`dev/tui/DIRECTION.md`](../dev/tui/DIRECTION.md) and the
+[TUI lab](../dev/tui/README.md). This section describes runtime composition and
+state ownership. Accessibility and frame-safety guarantees remain in
+[terminal compatibility](COMPATIBILITY.md#terminal-interaction).
+
 The TUI owns the alternate screen and speaks terminal protocols directly:
 raw input, bracketed paste, SGR mouse reports, synchronized frame output, and
-cursor style. `screen.ts` is the only terminal lifecycle boundary.
-
-The rendering path is intentionally pure at its boundary:
+cursor style. `screen.ts` is the terminal lifecycle boundary. `app.ts` owns
+mutable application state and schedules paints; rendering returns rows and a
+cursor without writing to the terminal.
 
 ```text
 state + terminal size
@@ -465,150 +499,81 @@ state + terminal size
   → frame.ts diff
 ```
 
+Each visible section has one renderer under `src/tui/components/`;
+`blocks.ts` routes semantic transcript blocks to them and applies the shared
+reading column to model prose and tool records. `tool.ts` composes target-first
+headers and connectors; `tool-evidence.ts` selects bounded previews and renders
+retained source, and `tool-motion.ts` colours only the active connector.
+The lower dock supplies
+one shell for the editor, completion, selectors, searchable queries, credential
+fields, and help. Shared prompt and menu-row renderers own cell measurement,
+selection, secret masking, progress, and caret placement. `picker.ts` owns
+filtering and selection; `picker-layout.ts` shares one row budget between
+painting and caret measurement. `components/menu.ts` supplies Ribbon rows and
+the bounded detail area to both selectors and command completion. Semantic `Palette`
+tokens keep colour roles out of component implementations.
+
+`batch-view.ts` reuses prose and evidence primitives at the supplied pipe width.
+It keeps static tool summaries and emits every supplied detail without the
+interactive reading column, collapsed selection, or expansion controls.
+
 Blocks store source text, never pre-wrapped rows. A transcript renderer caches
-rows per block, width, and palette: streaming invalidates only the changing
-block, scrolling reuses all cached rows, and resize deliberately reflows them.
-Ephemeral tool motion invalidates only its active block on an adaptive frame
-clock; it is neither stored in the transcript nor replayed after resume.
-The viewport is assembled from only the cached row ranges it intersects rather
-than flattening the complete history on every frame. Cell measurement,
-truncation, and styled spans share complete grapheme boundaries across
-combining marks, emoji, and wide CJK glyphs. Markdown prose uses a readable
-maximum measure while code and tables retain the available width.
+rows per block, width, and palette: streaming invalidates the changing block,
+scrolling reuses cached rows, and resize reflows them. It assembles only the row
+ranges intersecting the viewport and bounds background reflow work. Source
+text, tool evidence, and settled execution duration remain available to
+expansion, resume, and export even when their visible previews are compact.
 
-Untrusted text is neutralized before both cell measurement and paint. C0, C1,
-ESC/CSI/OSC, delete, bidirectional controls, and pasted control sequences
-therefore remain visible data instead of terminal instructions. Renderer-owned
-styling escapes are introduced only after this boundary.
+Tool animation uses the running call's start time and a set of active blocks,
+without per-row arrival or settlement histories. Only visible, collapsed,
+running records request animation frames. Expansion, scrolling away from the
+live tail, `NO_COLOR`, and reduced motion suppress decorative movement;
+clock-driven activity paints still refresh elapsed time. Waiting and historical
+calls neither animate nor replay.
+The viewport is bottom-relative: offset zero follows output; growth below a
+scrolled viewport increases its offset to preserve the reading position.
+Tiny terminals receive a fixed recovery frame instead of overflowing chrome.
 
-The visual grammar follows a transcript rather than a dashboard or execution
-diagram:
+Terminal cell measurement, truncation, styled spans, and editor movement share
+grapheme boundaries across combining marks, emoji, and wide CJK glyphs.
+Untrusted text is neutralized before measurement and paint: control sequences,
+ESC/CSI/OSC, delete, and bidirectional controls remain visible data. Renderer
+styling escapes are introduced only after that boundary. `NO_COLOR` preserves
+structural focus and state marks; reduced motion also makes the cursor steady.
 
-```text
-user input       full-width subtle surface with `❯` in the semantic gutter
-reasoning        unframed, muted, unlabeled three-row tail
-assistant        unframed Markdown on the shared content column
-tool activity    state mark plus continuous evidence rail beneath each call
-selection        bold Slate label/value; arrow fallback without colour
-composer         editor, mid-turn steering, query fields, and contextual menu inside one pair of rules
-footer           identity left, feedback or active state with elapsed time right
-```
-
-Operational feedback is not conversation. Slash-command confirmations,
-configuration guidance, activity state, and preflight blockers share the
-replaceable right side of the one-line footer. Foreground work is summarized as
-`state · elapsed · enter to steer · esc to interrupt`, replacing the steering
-hint with a queue count when needed and adding no spinner or icon. Errors
-and warnings take priority over that summary, followed by informational feedback
-and unseen output. Informational messages expire; warnings and errors remain
-briefly or until the next key. They never become transcript blocks and
-therefore never enter Markdown exports. Turn readiness is checked before the
-editor, recall history, or model history is mutated, so a missing key or model
-leaves the unsent prompt in place.
-
-The command boundary enforces that separation in its types: commands can emit
-only transient notices, open a dock interaction, or request a lifecycle action.
-They cannot create semantic transcript blocks. `/help` is a read-only keyboard
-reference inside the dock and closes with Esc; command discovery remains on the
-`/` completion surface. Token accounting stays internal instead of becoming a
-persistent `/usage` report.
-
-Conversation turns use one blank terminal row as their outer separator. A user
-turn owns a full-width subtle surface whose cue aligns with the shared content
-column. Assistant and reasoning rows remain unframed. Only tool rows form an
-evidence rail: consecutive tools join without repeated gaps, while reasoning
-breaks that rail and keeps its own unframed rhythm.
-
-Short transcripts are bottom-aligned against the dock with one fixed blank row
-before the composer's upper rule. Unused terminal height stays above the
-conversation, so the distance between the newest output and composer does not
-change as the transcript grows or footer status changes.
-
-Each visible section has one renderer under `src/tui/components/`; `blocks.ts`
-only routes semantic transcript blocks to them. The TUI lab imports the same
-production frame composer, so its fixtures cannot drift into a parallel mock.
-Jecode owns the component contracts, design tokens, interaction rules, and
-every emitted terminal cell.
-
-The lower dock has one shell. The normal editor, slash-command autocomplete,
-selectors, searchable queries, credential fields, and the temporary keyboard
-reference provide its inner rows; none draws its own border. Autocomplete opens
-on `/`, keeps selection separate from the typed prefix, and puts window progress
-on that input row. Searchable pickers use the same `→` input and a real caret.
-Up/Down select, Tab completes, Enter runs, and Esc closes. Key legends are not
-repeated inside every picker. Direct control surfaces omit ornamental titles
-and descriptions; row labels and values carry the state. Adjustable rows keep
-their current value on the right and use Left/Right without closing the picker.
-The footer remains outside the shell, so it never jumps when a menu opens.
-
-The input decoder normalizes terminal-specific bytes and escape sequences into
-semantic editor actions before they reach the composer. Character movement and
-deletion remain grapheme-safe; Ctrl+Left/Right moves by whitespace-delimited
-word, and Ctrl+Backspace/Delete removes the adjacent word. Windows Terminal's
-distinct BS/DEL pair is enabled only when `WT_SESSION` identifies that terminal;
-generic terminals retain both traditional plain-Backspace encodings.
+The input path is `keys.ts` → `app-input.ts` → `input.ts`, `editor.ts`,
+`complete.ts`, or `overlay.ts`. The decoder converts terminal-specific bytes
+into semantic actions. Word movement and deletion use whitespace-delimited
+words; Windows Terminal's BS/DEL distinction applies only when `WT_SESSION`
+identifies it. Generic terminals retain traditional Backspace encodings.
 
 Prompt ingress shares the session text boundary: 1,048,576 UTF-16 code units.
-The raw-key decoder bounds bracketed-paste and protocol buffers before
-concatenation, while the editor refuses an insertion that would cross the same
-limit. An overflow stays in the footer and makes the retained prompt
-unsubmittable until the user edits it. Batch stdin is split incrementally at
-the same boundary and fails before echo, history, or provider use.
-Cooperative steering retains its smaller, separate per-turn queue boundary.
+The decoder bounds paste and protocol buffers before concatenation, and the
+editor refuses insertions that cross the same limit. An overflow produces
+footer feedback and prevents submission until the prompt changes. Batch stdin
+uses the same boundary before echo, history, or provider use. Cooperative
+steering has its own smaller per-turn queue.
 
-Writable fields and searchable pickers carry the same `→ ` active prompt. One
-shared renderer owns its terminal-cell width, horizontal window, secret mask,
-right-side progress, and cursor offset, so the interactions cannot drift apart.
-Selection colours only the active label and value in bold Slate, leaving the
-row background untouched. `NO_COLOR` restores the arrow marker so focus remains
-structural when colour is unavailable.
+`app-input.ts` checks readiness before clearing the editor or appending
+history. Active-turn submission offers guidance to the existing steering inbox;
+it does not create another turn. `app-workflows.ts` connects the shell to
+`command-workflow.ts` and `turn-workflow.ts` with one shared automatic-compaction
+gate. The turn workflow retains steering, checkpoint order, and failure recovery
+as one transaction. `turn.ts` translates controller events into semantic
+transcript blocks; `tool-details.ts` constructs their targets, output, and diff
+details. Slash commands can emit transient feedback, open a dock
+interaction, or request a lifecycle action; their types cannot create semantic
+transcript blocks.
 
-Assistant Markdown follows the same restraint. Bright foreground carries prose;
-a dedicated technical cyan identifies paths, links, inline code, list marks,
-and syntax keywords without spending the structural Slate accent. Readable
-secondary text and deliberately dim chrome are separate roles, so explanations
-remain legible without making reasoning, fences, or footer metadata compete
-with the answer. Inline code has no background chip. Fenced code keeps dim
-opening and closing fences with a two-cell body indent; it has no full-width
-surface or decorative left rail.
+Operational state and feedback occupy the footer. Warnings and errors take
+priority over active state, followed by informational feedback and unseen
+output. Replacement and expiry belong to `feedback.ts`; those messages never
+enter the conversation, checkpoint, or Markdown export.
 
-Tool output and diffs stay complete in state. A running tool owns a local
-Braille activity mark and elapsed label; a call waiting to run stays on a static
-open mark. Completion lands briefly in its outcome colour before cooling into
-the transcript, and newly arrived evidence follows the same restrained motion.
-The animation registry is renderer-local, pauses away from the live tail, and
-is bypassed by reduced-motion mode. Settled execution duration is durable.
-`run_command` updates that same block with the
-bounded, redacted capture while the process runs. Collapsed command output
-shows the newest rows because verdicts land at the end. Every collapsed file
-diff uses the same 15-changed-row budget, keeps both the beginning and end, and
-inserts one omission summary when necessary. Diffs retain old/new line numbers
-and intra-line emphasis. `Ctrl+O` toggles the latest detail even while an
-approval is open, so reviewing, exporting, or expanding never depends on
-discarded rows.
-
-Reasoning follows the same retention rule. Its semantic block stores the full
-stream, while the unframed default renderer reflows it at the current terminal
-width and shows only the newest three muted, italicized visual rows. It has no
-label or inline action hint; the visual treatment already identifies it, and
-`/help` documents `Ctrl+O`. The final three-row preview remains visible.
-`Ctrl+O` exposes the complete block; resize reflows the source again before
-selecting the visible tail.
-
-The viewport is bottom-relative. At offset zero it follows output. After the
-user scrolls up, growth below the viewport increases the offset by the same
-number of rows, preserving what is being read; the footer reports unseen
-blocks. Tiny terminals receive a fixed recovery frame instead of fabricated
-dimensions or overflowing chrome.
-
-Jecode exposes one dark Slate identity through semantic colour tokens shared by
-every production component and the TUI Lab. Structural Slate, technical cyan,
-foreground, secondary, dim, and outcome roles are intentionally distinct;
-components never embed literal colours. `NO_COLOR` disables colour while
-retaining structural selection and state marks. Activity state marks remain
-structural without colour. Reduced-motion mode renders resting tool states
-directly and also makes the input cursor steady. Assistant answers animate only
-through real provider streaming; the renderer never simulates typewriter output.
+The development lab imports these production components and input handlers.
+Its host supplies inert callbacks and deterministic fixture time, while the
+release runtime has no dependency on `dev/`. Real persistence, provider access,
+and controller behavior remain covered by their own integration tests.
 
 ## Validation boundaries
 
@@ -620,6 +585,13 @@ and cancellation, provider request bodies, tool-loop semantics,
 symlink/junction confinement, stable file generations, generation-safe leases,
 atomic preview checks, shell process-tree
 termination, credential precedence, and bounded search.
+
+Suites under `test/` follow those behavior boundaries: controller scheduling,
+steering and recovery, provider wire and stream handling, file reads and
+mutations, and distinct TUI workflows. Shared inert factories and host harnesses
+live under `dev/test-support/`; each suite owns its setup and cleanup. Keeping
+helpers outside `test/` prevents Node's default discovery from treating helper
+modules as standalone test files.
 
 Canonical checks:
 

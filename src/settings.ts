@@ -11,7 +11,7 @@ import type { DirectoryAnchor } from "./directory-anchor.ts";
 import { MAX_COMPACTION_PERCENT, MIN_COMPACTION_PERCENT } from "./context/policy.ts";
 import { EFFORTS } from "./effort.ts";
 import { providerNames } from "./providers/index.ts";
-import { parseOllamaEndpoint } from "./providers/ollama-endpoint.ts";
+import { isLegacyOllamaCloudHost, OLLAMA_CLOUD_HOST } from "./providers/ollama-endpoint.ts";
 import { withStoreLock } from "./store-lock.ts";
 import { userDataLabel, userDataPath } from "./user-data.ts";
 import {
@@ -26,6 +26,7 @@ export { EFFORTS } from "./effort.ts";
 export type SavedSettings = {
   provider?: string;
   models?: Record<string, string>;
+  /** Retired input retained only to prevent silent endpoint migration. */
   ollamaHost?: string;
   effort?: string;
   reducedMotion?: boolean;
@@ -41,12 +42,14 @@ export function readSettings(): SavedSettings {
 }
 
 export async function updateSettings(patch: Partial<SavedSettings>): Promise<string> {
+  assertRetiredOllamaHost(patch);
   const file = settingsPath();
   const directory = path.dirname(file);
   const anchor = await preparePrivateDirectory(directory, "settings store directory");
   const anchoredFile = path.join(anchor.path, path.basename(file));
   return withStoreLock(anchoredFile, async () => {
     const next = normalize({ ...readStoreForMutation(anchoredFile, anchor), ...patch });
+    delete next.ollamaHost;
     const text = `${JSON.stringify(next, null, 2)}\n`;
     assertStoreText(text, USER_STORE_LIMITS.settingsBytes);
     await atomicWrite(anchoredFile, text, {
@@ -81,8 +84,8 @@ function readStore(file = settingsPath()): SavedSettings {
       directory,
     ));
   } catch {
-    // Missing, unreadable, and malformed stores all fall back safely. A bad
-    // preference must never prevent the agent from starting.
+    // Missing, unreadable, and malformed stores fall back safely. Parsed
+    // retired endpoint markers survive normalization for startup validation.
     return {};
   }
 }
@@ -125,9 +128,7 @@ function assertMutableSettings(value: Record<string, unknown>): void {
       Object.values(models).some((model) => !boundedNonempty(model, USER_STORE_LIMITS.model))
     ) throw new Error("settings store has invalid models");
   }
-  if ("ollamaHost" in value && endpoint(value["ollamaHost"]) === undefined) {
-    throw new Error("settings store has an invalid Ollama endpoint");
-  }
+  assertRetiredOllamaHost(value);
   if ("effort" in value && member(value["effort"], EFFORTS) === undefined) {
     throw new Error("settings store has an invalid reasoning effort");
   }
@@ -147,7 +148,7 @@ function normalize(value: unknown): SavedSettings {
   const providers = providerNames();
   const provider = member(value["provider"], providers);
   const models = modelsOf(value["models"], providers);
-  const ollamaHost = endpoint(value["ollamaHost"]);
+  const ollamaHost = "ollamaHost" in value ? legacyOllamaHost(value["ollamaHost"]) : undefined;
   const effort = member(value["effort"], EFFORTS);
   const reducedMotion = typeof value["reducedMotion"] === "boolean" ? value["reducedMotion"] : undefined;
   const maxTokens = positiveInteger(value["maxTokens"]);
@@ -179,12 +180,15 @@ function member(value: unknown, values: readonly string[]): string | undefined {
   return typeof value === "string" && values.includes(value) ? value : undefined;
 }
 
-function endpoint(value: unknown): string | undefined {
-  if (!boundedNonempty(value, USER_STORE_LIMITS.endpoint)) return undefined;
-  try {
-    return parseOllamaEndpoint(value).baseUrl;
-  } catch {
-    return undefined;
+function legacyOllamaHost(value: unknown): string {
+  if (isLegacyOllamaCloudHost(value)) return OLLAMA_CLOUD_HOST;
+  // Even an invalid retired value must not disappear and enable cloud use.
+  return boundedNonempty(value, USER_STORE_LIMITS.endpoint) ? value : "unsupported legacy Ollama endpoint";
+}
+
+function assertRetiredOllamaHost(value: object): void {
+  if ("ollamaHost" in value && !isLegacyOllamaCloudHost(value.ollamaHost)) {
+    throw new Error("settings store has a retired Ollama endpoint; remove ollamaHost from settings.json to use Ollama API");
   }
 }
 

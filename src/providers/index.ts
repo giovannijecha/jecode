@@ -1,9 +1,8 @@
 import type { Provider } from "../types.ts";
-import type { Config } from "../config.ts";
 import { anthropic } from "./anthropic.ts";
 import { openai } from "./openai.ts";
 import { openaiCodex } from "./openai-codex.ts";
-import { configureOllama, ollama } from "./ollama.ts";
+import { ollama } from "./ollama.ts";
 
 export const PROVIDERS: readonly Provider[] = [anthropic, openai, openaiCodex, ollama];
 
@@ -17,9 +16,4 @@ export function selectProvider(id: string): Provider {
     throw new Error(`unknown provider "${id}" (available: ${providerNames().join(", ")})`);
   }
   return found;
-}
-
-/** Apply provider-specific process state after startup precedence is resolved. */
-export function configureProviders(config: Config): void {
-  configureOllama(config.ollamaHost);
 }

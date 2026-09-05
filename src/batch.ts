@@ -86,6 +86,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
           provider: session.provider,
           model: session.model,
           compactionPercent: session.config.compactionPercent,
+          signal,
         });
       };
       const user = { role: "user" as const, content: [{ kind: "text" as const, text: line }] };
@@ -136,6 +137,7 @@ export async function runBatch(session: Session, environment: BatchEnvironment =
           provider: session.provider,
           model: session.model,
           effort: session.config.effort,
+          signal,
           context: projected,
           turn: checkpoint.slice(before),
           nodeId: nodeId ?? prospectiveNodeId,

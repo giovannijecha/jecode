@@ -1,4 +1,4 @@
-// Interactive ChatGPT account management for the OpenAI Codex provider.
+// Interactive account management for the OpenAI Codex provider.
 
 import type { Host } from "./commands.ts";
 import { openAICodexAccount } from "./accounts.ts";
@@ -14,7 +14,10 @@ import {
   type OpenAILogin,
 } from "./openai-oauth.ts";
 import type { Session } from "./session.ts";
+import { providerLabel } from "./provider-label.ts";
 import { heading } from "./tui/picker.ts";
+
+const ACCOUNT_LABEL = providerLabel("openai-codex");
 
 export type OpenAIAccountCommandDependencies = {
   beginBrowser(): Promise<OpenAILogin>;
@@ -39,12 +42,12 @@ export async function openAIAccountCommand(
   const connected = openAICodexAccount() !== undefined;
   const actions = connected
     ? [
-        { label: "reconnect ChatGPT", hint: "replace the current sign-in", key: "r" },
+        { label: `reconnect ${ACCOUNT_LABEL}`, hint: "replace the current sign-in", key: "r" },
         { label: "sign out", hint: "remove the saved account", key: "s" },
       ]
-    : [{ label: "connect ChatGPT", hint: "sign in with OpenAI", key: "c" }];
+    : [{ label: `connect ${ACCOUNT_LABEL}`, hint: "sign in with OpenAI", key: "c" }];
   const action = await host.choose({
-    title: heading("ChatGPT", openAIAccountHint(), session.palette),
+    title: heading(ACCOUNT_LABEL, openAIAccountHint(), session.palette),
     options: actions,
     index: 0,
   });
@@ -58,8 +61,8 @@ export async function openAIAccountCommand(
     host.emit({
       kind: "notice",
       text: result.revokeFailed
-        ? `ChatGPT disconnected · remote sign-out could not be confirmed${route}`
-        : `ChatGPT disconnected${route}`,
+        ? `${ACCOUNT_LABEL} disconnected · remote sign-out could not be confirmed${route}`
+        : `${ACCOUNT_LABEL} disconnected${route}`,
       tone: result.revokeFailed ? "warn" : "info",
     });
     return result.removed;
@@ -87,14 +90,14 @@ async function connectOpenAIAccount(
     { label: "sign in with device code", hint: "WSL, SSH, or headless", key: "d" },
   ];
   const choice = await host.choose({
-    title: heading("connect ChatGPT", "OpenAI OAuth", session.palette),
+    title: heading(`connect ${ACCOUNT_LABEL}`, "OpenAI OAuth", session.palette),
     description: "Choose the flow for this terminal. Your password stays on OpenAI's website.",
     options: methods,
     index: dependencies.headless() ? 1 : 0,
   });
   if (choice === undefined) return false;
 
-  host.status?.("Starting ChatGPT sign-in");
+  host.status?.(`Starting ${ACCOUNT_LABEL} sign-in`);
   let login: OpenAILogin;
   try {
     login = choice === 1
@@ -136,8 +139,8 @@ async function waitForLogin(
         host.emit({
           kind: "notice",
           text: session.provider.id === "openai-codex"
-            ? "ChatGPT connected · current provider route"
-            : "ChatGPT connected · choose a ChatGPT model in /models to use this account",
+            ? `${ACCOUNT_LABEL} connected · current provider route`
+            : `${ACCOUNT_LABEL} connected · choose an ${ACCOUNT_LABEL} model in /models to use this account`,
           tone: "info",
         });
         return true;
@@ -150,7 +153,7 @@ async function waitForLogin(
         await openUrl(login.url);
         continue;
       }
-      local.abort(new Error("ChatGPT sign-in cancelled"));
+      local.abort(new Error(`${ACCOUNT_LABEL} sign-in cancelled`));
       return false;
     }
   } finally {
@@ -163,7 +166,7 @@ function waitingPicker(login: OpenAILogin, session: Session) {
     ? "Finish sign-in in your browser. Jecode will continue automatically."
     : `Enter ${login.code} on OpenAI's device page. Jecode will continue automatically.`;
   return {
-    title: heading("ChatGPT sign-in", login.code ?? "waiting for browser", session.palette),
+    title: heading(`${ACCOUNT_LABEL} sign-in`, login.code ?? "waiting for browser", session.palette),
     description: detail,
     options: [
       { label: "open browser again", key: "o" },

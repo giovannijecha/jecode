@@ -1,6 +1,6 @@
 import type { Command } from "../../commands.ts";
 import type { Palette } from "../../ui/theme.ts";
-import { menuWindow, renderMenuRows } from "./menu.ts";
+import { renderMenu } from "./menu.ts";
 
 const MAX_ROWS = 4;
 
@@ -13,20 +13,13 @@ export function renderCommandMenu(
   pal: Palette,
 ): CommandMenu {
   const selectedIndex = selected === undefined ? 0 : Math.max(0, Math.min(commands.length - 1, selected));
-  const { first, last } = menuWindow(commands.length, selectedIndex, MAX_ROWS);
-  const shown = commands.slice(first, last);
-  if (shown.length === 0) return { rows: [], right: "" };
+  if (commands.length === 0) return { rows: [], right: "" };
+  const menu = renderMenu(commands.map((command, index) => ({
+    label: `/${command.name}`, description: command.blurb, selected: selectedIndex === index,
+  })), width, pal, { maxRows: MAX_ROWS + 2, visible: MAX_ROWS });
   return {
-    rows: renderMenuRows(
-      shown.map((command, index) => ({
-        label: `/${command.name}`,
-        description: command.blurb,
-        selected: selectedIndex === first + index,
-      })),
-      width,
-      pal,
-    ),
-    right: commands.length > shown.length ? `${first + 1}–${last} / ${commands.length}` : "",
+    rows: menu.rows,
+    right: commands.length > menu.last - menu.first ? `${menu.first + 1}–${menu.last} / ${commands.length}` : "",
   };
 }
 

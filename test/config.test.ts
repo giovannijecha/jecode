@@ -144,7 +144,7 @@ test("saved defaults include a model for each provider", () => {
   const saved = {
     provider: "ollama",
     models: { anthropic: "claude-saved", ollama: "qwen-saved" },
-    ollamaHost: "https://models.example.test/team/",
+    ollamaHost: "https://ollama.com/",
     effort: "medium",
     maxTokens: 8192,
     maxSteps: 12,
@@ -154,7 +154,7 @@ test("saved defaults include a model for each provider", () => {
   const loaded = config([], saved);
   assert.equal(loaded.providerId, "ollama");
   assert.equal(loaded.model, "qwen-saved");
-  assert.equal(loaded.ollamaHost, "https://models.example.test/team");
+  assert.equal("ollamaHost" in loaded, false);
   assert.equal(loaded.effort, "medium");
   assert.equal(loaded.maxTokens, 8192);
   assert.equal(loaded.maxModelRequests, undefined);
@@ -162,27 +162,62 @@ test("saved defaults include a model for each provider", () => {
   assert.equal(loaded.reducedMotion, true);
 });
 
-test("Ollama host precedence is flag, environment, then saved settings", () => {
+test("retired official-cloud settings are accepted without adding runtime endpoints", () => {
   const before = process.env["OLLAMA_HOST"];
-  process.env["OLLAMA_HOST"] = "https://environment.example.test";
   try {
-    const saved = { ollamaHost: "https://saved.example.test" };
-    assert.equal(loadConfig([], saved).ollamaHost, "https://environment.example.test");
-    assert.equal(
-      loadConfig(["--ollama-host", "https://flag.example.test/path/"], saved).ollamaHost,
-      "https://flag.example.test/path",
-    );
+    for (const host of ["https://ollama.com", " https://OLLAMA.COM:443/// "]) {
+      process.env["OLLAMA_HOST"] = host;
+      assert.equal("ollamaHost" in loadConfig([], {}), false);
+      assert.equal("ollamaHost" in loadConfig([], { ollamaHost: host }), false);
+    }
+    process.env["OLLAMA_HOST"] = "";
+    assert.equal("ollamaHost" in loadConfig([], {}), false);
   } finally {
     if (before === undefined) delete process.env["OLLAMA_HOST"];
     else process.env["OLLAMA_HOST"] = before;
   }
 });
 
-test("unsafe remote Ollama hosts are rejected at launch", () => {
-  assert.throws(
-    () => config(["--ollama-host", "http://models.example.test"]),
-    /must use HTTPS/,
-  );
+test("the retired endpoint flag fails without echoing its value", () => {
+  for (const args of [
+    ["--ollama-host", "https://ollama.com"],
+    ["--ollama-host=https://user:private-value@models.example.test"],
+    ["--ollama-host"],
+  ]) {
+    assert.throws(() => config(args), (error: Error) => {
+      assert.match(error.message, /--ollama-host is no longer supported.*remove it/);
+      assert.doesNotMatch(error.message, /private-value|models\.example/);
+      return true;
+    });
+  }
+});
+
+test("local, custom and malformed legacy endpoints cannot silently select cloud", () => {
+  const before = process.env["OLLAMA_HOST"];
+  try {
+    for (const host of [
+      "http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:11434",
+      "https://models.example.test", "https://user:private-value@ollama.com",
+      "https://ollama.com/v1", "https://ollama.com?token=private-value",
+      "https://ollama.com.example.test", "https://ollama.com:444", "not a URL",
+    ]) {
+      process.env["OLLAMA_HOST"] = host;
+      assert.throws(() => loadConfig(["--provider", "anthropic"], { ollamaHost: "https://ollama.com" }), (error: Error) => {
+        assert.match(error.message, /OLLAMA_HOST.*remove it/);
+        assert.doesNotMatch(error.message, /private-value|models\.example|127\.0\.0\.1/);
+        return true;
+      });
+      process.env["OLLAMA_HOST"] = "https://ollama.com";
+      assert.throws(() => loadConfig(["--provider", "ollama"], { ollamaHost: host }), (error: Error) => {
+        assert.match(error.message, /settings\.json.*remove ollamaHost/);
+        assert.doesNotMatch(error.message, /private-value|models\.example|127\.0\.0\.1/);
+        return true;
+      });
+    }
+  } finally {
+    if (before === undefined) delete process.env["OLLAMA_HOST"];
+    else process.env["OLLAMA_HOST"] = before;
+  }
 });
 
 test("flags and environment override saved defaults", () => {

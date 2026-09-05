@@ -13,9 +13,12 @@ import { openaiCodex } from "../src/providers/openai-codex.ts";
 
 const CLAIMS = "https://api.openai.com/auth";
 
-test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded", async (context) => {
+test("the OpenAI Account catalogue is authenticated, visible-only, ordered, and bounded", async (context) => {
   await inStore(async () => {
+    assert.deepEqual(openaiCodex.auth, { kind: "oauth", account: "openai-codex", label: "OpenAI Account" });
+    assert.equal(openaiCodex.blocked(), "OpenAI Account is not connected");
     await saveAccount("catalog-access", "catalog-refresh");
+    assert.equal(openaiCodex.blocked(), undefined);
     const previousFetch = globalThis.fetch;
     let seenUrl = "";
     let seenHeaders: Headers | undefined;
@@ -59,7 +62,7 @@ test("the ChatGPT catalogue is authenticated, visible-only, ordered, and bounded
   });
 });
 
-test("the ChatGPT catalogue retains a minimum 4K context after headroom", async (context) => {
+test("the OpenAI Account catalogue retains a minimum 4K context after headroom", async (context) => {
   await inStore(async () => {
     await saveAccount("small-context-access", "small-context-refresh");
     const previousFetch = globalThis.fetch;
@@ -79,7 +82,7 @@ test("the ChatGPT catalogue retains a minimum 4K context after headroom", async 
   });
 });
 
-test("the ChatGPT provider rejects an effort omitted by the live model catalogue", async (context) => {
+test("the OpenAI Account provider rejects an effort omitted by the live model catalogue", async (context) => {
   await inStore(async () => {
     await saveAccount("catalog-access", "catalog-refresh");
     const previousFetch = globalThis.fetch;
@@ -116,7 +119,7 @@ test("the ChatGPT provider rejects an effort omitted by the live model catalogue
   });
 });
 
-test("the ChatGPT provider sends a stateless Codex response without API token settings", async (context) => {
+test("the OpenAI Account provider sends a stateless Codex response without API token settings", async (context) => {
   await inStore(async () => {
     await saveAccount("send-access", "send-refresh");
     const previousFetch = globalThis.fetch;
@@ -169,7 +172,7 @@ test("the ChatGPT provider sends a stateless Codex response without API token se
   });
 });
 
-test("the ChatGPT provider retains a streamed tool call when completed output is empty", async (context) => {
+test("the OpenAI Account provider retains a streamed tool call when completed output is empty", async (context) => {
   await inStore(async () => {
     await saveAccount("send-access", "send-refresh");
     const previousFetch = globalThis.fetch;
@@ -276,7 +279,7 @@ test("one 401 refreshes the account once and retries with the rotated access tok
   });
 });
 
-test("the ChatGPT provider omits prompt cache routing from compaction", async (context) => {
+test("the OpenAI Account provider omits prompt cache routing from compaction", async (context) => {
   await inStore(async () => {
     await saveAccount("send-access", "send-refresh");
     const previousFetch = globalThis.fetch;

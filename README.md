@@ -26,9 +26,9 @@
   <a href="https://github.com/giovannijecha/jecode/releases">Releases</a>
 </p>
 
-> Jecode is currently pre-1.0. The core loop is usable today, but commands and
-> terminal interactions may still evolve before 1.0. The release-candidate
-> surface is now frozen in the [compatibility contract](https://github.com/giovannijecha/jecode/blob/main/docs/COMPATIBILITY.md).
+> Jecode is stabilizing for 1.0. New capabilities are deferred while correctness,
+> recovery, performance, accessibility, and interface refinements continue within
+> the [compatibility contract](https://github.com/giovannijecha/jecode/blob/main/docs/COMPATIBILITY.md).
 
 ## Why Jecode
 
@@ -37,8 +37,16 @@ follow tool calls and diffs, steer the model while it runs, and resume the same
 conversation later. One controller carries each turn from prompt to result—no
 delegated agents or hidden model workers.
 
-Choose Anthropic API, OpenAI API, an eligible ChatGPT account, or Ollama without
-changing the workflow. API connections and account access stay separate, and
+Tool records keep the target, outcome, and compact evidence together. Expand a
+record to inspect its complete output or diff while the composer stays ready
+at the full width of the terminal.
+
+Menus keep the selected choice and its details together. Approvals separate
+the target from the decision and make the scope of remembered access explicit.
+
+Choose Anthropic API, OpenAI API, OpenAI Account with eligible ChatGPT access,
+or Ollama API without changing the workflow. Ollama uses its cloud API only.
+API connections and account access stay separate, and
 the footer always names the route selected for the next request. Jecode is
 written in TypeScript and released as plain JavaScript for Node.js, with no
 installation scripts and zero third-party runtime dependencies. The runtime
@@ -165,6 +173,15 @@ inherited Windows path below `/mnt/c`. Do not ignore `EBADENGINE`: `node
 The [user guide](https://github.com/giovannijecha/jecode/blob/main/docs/USAGE.md)
 covers provider access, TUI controls, sessions and compaction, batch mode,
 configuration, and safety boundaries.
+
+The [architecture guide](https://github.com/giovannijecha/jecode/blob/main/docs/ARCHITECTURE.md)
+explains the current implementation and module boundaries. Maintainers use the
+[release guide](https://github.com/giovannijecha/jecode/blob/main/docs/RELEASING.md)
+for publishing and release recovery.
+
+The [development environments](https://github.com/giovannijecha/jecode/blob/main/dev/README.md)
+provide the TUI lab, current interface direction, and manual performance probes
+for working from a source checkout.
 
 ## Community
 

@@ -1,9 +1,9 @@
-// One visual row grammar for autocomplete and every interactive selector.
+// Ribbon rows and a stable detail area shared by completion and selectors.
 
 import type { Palette } from "../../ui/theme.ts";
-import type { Seg } from "../../ui/render.ts";
-import { hasColor, plainLen, row } from "../../ui/render.ts";
-import { elide } from "../../ui/width.ts";
+import { row } from "../../ui/render.ts";
+import { terminalText } from "../../ui/terminal-text.ts";
+import { elide, textWidth, wrapText } from "../../ui/width.ts";
 
 export type MenuEntry = {
   label: string;
@@ -15,10 +15,56 @@ export type MenuEntry = {
 };
 
 export function renderMenuRows(entries: readonly MenuEntry[], width: number, pal: Palette): string[] {
-  if (entries.length === 0) return [];
-  const widest = Math.max(...entries.map(primaryWidth));
-  const labelWidth = Math.min(42, Math.max(12, widest + 2));
-  return entries.map((entry) => renderEntry(entry, labelWidth, width, pal));
+  return entries.map((entry) => {
+    const right = summary(entry, width);
+    return row(width, [
+      { text: entry.selected ? "● " : "  ", fg: pal.focus },
+      { text: entry.label, fg: entry.selected ? pal.ink.bright : pal.ink.muted, bold: entry.selected },
+    ], right === "" ? [] : [{ text: right, fg: entry.selected ? pal.focus : pal.ink.dim }],
+    entry.selected ? pal.surface.subtle : undefined);
+  });
+}
+
+/** A missing palette measures the window without producing styled rows. */
+export function renderMenu(
+  entries: readonly MenuEntry[], width: number, pal: Palette | undefined,
+  options: { maxRows: number; visible?: number },
+): { rows: string[]; first: number; last: number } {
+  const room = Math.max(0, options.maxRows);
+  if (room === 0) return { rows: [], first: 0, last: 0 };
+  const detailLimit = Math.min(2, room - 1);
+  let detailRows = 0;
+  // Measure every possible selection to keep the dock stable without reserving
+  // a second row when all details fit on one line at this width.
+  for (const entry of entries) {
+    detailRows = Math.max(detailRows, detailLines(entry, width, detailLimit).length);
+    if (detailRows === detailLimit) break;
+  }
+  const visible = Math.min(options.visible ?? 6, room - detailRows);
+  const at = Math.max(0, entries.findIndex((entry) => entry.selected));
+  const { first, last } = menuWindow(entries.length, at, visible);
+  if (pal === undefined) return { rows: [], first, last };
+  if (entries.length === 0) return {
+    rows: [row(width, [{ text: "No matches. Change the filter.", fg: pal.ink.muted }])], first, last,
+  };
+  const active = entries.find((entry) => entry.selected);
+  const lines = detailLines(active, width, detailRows);
+  return {
+    rows: [
+      ...renderMenuRows(entries.slice(first, last), width, pal),
+      ...Array.from({ length: detailRows }, (_, index) => lines[index] === undefined ? ""
+        : row(width, [{ text: "  " + lines[index], fg: pal.ink.muted }])),
+    ], first, last,
+  };
+}
+
+function detailLines(entry: MenuEntry | undefined, width: number, maxRows: number): string[] {
+  if (entry === undefined || maxRows <= 0) return [];
+  // Complete identity and values take priority over explanatory copy.
+  const room = Math.max(1, width - 2);
+  const lines = menuText(clippedParts(entry, width).join(" · "), room, maxRows);
+  lines.push(...menuText(entry.description ?? "", room, maxRows - lines.length));
+  return lines;
 }
 
 export function menuWindow(length: number, selected: number, visible: number): { first: number; last: number } {
@@ -29,48 +75,31 @@ export function menuWindow(length: number, selected: number, visible: number): {
   return { first, last: Math.min(count, first + room) };
 }
 
-function renderEntry(entry: MenuEntry, labelWidth: number, width: number, pal: Palette): string {
-  // Colour terminals spend focus on the active label instead of painting a
-  // full-width band. Monochrome has no colour, so it alone reserves a fixed
-  // arrow column to keep selection visible without shifting peer rows.
-  const monochrome = !hasColor();
-  const selectedMark = monochrome ? (entry.selected ? "→ " : "  ") : "";
-  const fg = entry.selected ? pal.focus : pal.ink.fg;
-  const primary: Seg[] = [
-    { text: selectedMark, fg },
-    { text: entry.label, fg, bold: entry.selected || undefined },
-  ];
-
-  if (width > 40 && entry.description !== undefined) {
-    const gap = Math.max(2, labelWidth - primaryWidth(entry));
-    primary.push({
-      text: `${" ".repeat(gap)}${entry.description}`,
-      fg: entry.selected ? pal.ink.bright : pal.ink.muted,
-    });
-  }
-
-  const value = entry.value === undefined
-    ? undefined
-    : entry.selected && entry.adjustable === true
-    ? `‹ ${entry.value} ›`
-    : entry.value;
-  const summary = [entry.hint, value]
-    .filter((part): part is string => part !== undefined)
-    .join(" · ");
-  const rightColor = entry.selected ? pal.focus : pal.ink.muted;
-  const right = summary === "" || (width <= 40 && entry.value === undefined)
-    ? []
-    : [{
-        text: elide(
-          summary,
-          Math.max(1, Math.floor(entry.value === undefined ? width / 4 : width * 0.45)),
-        ),
-        fg: rightColor,
-        bold: entry.selected || undefined,
-      }];
-  return row(width, primary, right);
+/** Wrap untrusted menu copy, marking a bounded final row when it omits text. */
+export function menuText(text: string, width: number, maxRows: number): string[] {
+  if (text === "" || maxRows <= 0) return [];
+  const lines = wrapText(terminalText(text), Math.max(1, width));
+  return lines.slice(0, maxRows).map((line, index) =>
+    index === maxRows - 1 && lines.length > maxRows ? elide(line + " …", width) : line);
 }
 
-function primaryWidth(entry: Pick<MenuEntry, "label">): number {
-  return plainLen([{ text: entry.label }]);
+function fullSummary(entry: MenuEntry): string {
+  const value = entry.value === undefined ? "" : entry.selected && entry.adjustable ? "‹ " + entry.value + " ›" : entry.value;
+  return [entry.hint, value].filter(Boolean).join(" · ");
+}
+
+function summary(entry: MenuEntry, width: number): string {
+  return elide(terminalText(fullSummary(entry)), Math.max(1, Math.floor(width * 0.42)));
+}
+
+function clippedParts(entry: MenuEntry, width: number): string[] {
+  // Reserve the stepper's width for every peer, so moving selection cannot
+  // make the shared detail area appear or disappear.
+  const stable = entry.adjustable ? { ...entry, selected: true } : entry;
+  const right = summary(stable, width);
+  const leftRoom = Math.max(0, width - 2 - (right === "" ? 0 : textWidth(right) + 1));
+  return [
+    ...(textWidth(terminalText(entry.label)) > leftRoom ? [entry.label] : []),
+    ...(right !== terminalText(fullSummary(stable)) ? [fullSummary(stable)] : []),
+  ];
 }

@@ -10,6 +10,7 @@ import type { Block } from "./blocks.ts";
 import { renderCommandMenu } from "./components/command-menu.ts";
 import { renderComposer } from "./components/composer.ts";
 import { renderDock } from "./components/dock.ts";
+import type { DockBody } from "./components/dock.ts";
 import type { FooterInfo } from "./components/footer.ts";
 import { renderFooter } from "./components/footer.ts";
 import { renderStatus } from "./components/status.ts";
@@ -101,7 +102,7 @@ export function compose(
   };
 }
 
-function dockRows(view: View, width: number, height: number): { rows: string[]; cursor?: Cursor } {
+function dockRows(view: View, width: number, height: number): DockBody {
   const status = renderStatus({
     // A modal already names the interaction in progress. Let command feedback
     // use the footer while that interaction is open instead of repeating a

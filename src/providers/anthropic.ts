@@ -87,7 +87,6 @@ export const anthropic: Provider = {
     }
   },
 
-  location: () => "cloud",
 
   async send(req: SendRequest): Promise<Message> {
     const key = requireKey();

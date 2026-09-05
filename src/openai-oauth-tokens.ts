@@ -1,7 +1,9 @@
 // Validate OAuth token responses and extract the ChatGPT account claims.
 
 import type { OpenAICodexAccount } from "./accounts.ts";
+import { providerLabel } from "./provider-label.ts";
 
+const ACCOUNT_LABEL = providerLabel("openai-codex");
 const CLAIMS = "https://api.openai.com/auth";
 
 export type OpenAITokenReply = {
@@ -15,13 +17,13 @@ export function openAITokenReply(
   value: unknown,
   previousRefresh?: string,
 ): OpenAITokenReply {
-  if (!record(value)) throw new Error("OpenAI sign-in returned an invalid token response");
+  if (!record(value)) throw new Error(`${ACCOUNT_LABEL} sign-in returned an invalid token response`);
   const accessToken = required(value["access_token"], "access token");
   const refreshToken = optional(value["refresh_token"]) ?? previousRefresh;
   const expiresIn = value["expires_in"];
-  if (refreshToken === undefined) throw new Error("OpenAI sign-in did not return a refresh token");
+  if (refreshToken === undefined) throw new Error(`${ACCOUNT_LABEL} sign-in did not return a refresh token`);
   if (typeof expiresIn !== "number" || !Number.isFinite(expiresIn) || expiresIn <= 0) {
-    throw new Error("OpenAI sign-in did not return a valid token lifetime");
+    throw new Error(`${ACCOUNT_LABEL} sign-in did not return a valid token lifetime`);
   }
   const idToken = optional(value["id_token"]);
   return {
@@ -37,7 +39,7 @@ export function openAIAccountFromTokens(token: OpenAITokenReply): OpenAICodexAcc
   const identity = token.idToken === undefined ? undefined : jwt(token.idToken);
   const auth = record(access[CLAIMS]) ? access[CLAIMS] : {};
   const accountId = optional(auth["chatgpt_account_id"]) ?? optional(identity?.["chatgpt_account_id"]);
-  if (accountId === undefined) throw new Error("OpenAI sign-in did not identify a ChatGPT account");
+  if (accountId === undefined) throw new Error(`${ACCOUNT_LABEL} sign-in did not identify an account`);
   const email = optional(identity?.["email"]);
   const plan = optional(auth["chatgpt_plan_type"]) ?? optional(identity?.["chatgpt_plan_type"]);
   return {
@@ -52,19 +54,19 @@ export function openAIAccountFromTokens(token: OpenAITokenReply): OpenAICodexAcc
 
 function jwt(token: string): Record<string, unknown> {
   const part = token.split(".")[1];
-  if (part === undefined) throw new Error("OpenAI sign-in returned an unreadable token");
+  if (part === undefined) throw new Error(`${ACCOUNT_LABEL} sign-in returned an unreadable token`);
   try {
     const value = JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as unknown;
     if (!record(value)) throw new Error("invalid payload");
     return value;
   } catch {
-    throw new Error("OpenAI sign-in returned an unreadable token");
+    throw new Error(`${ACCOUNT_LABEL} sign-in returned an unreadable token`);
   }
 }
 
 function required(value: unknown, label: string): string {
   const found = optional(value);
-  if (found === undefined) throw new Error(`OpenAI sign-in returned no ${label}`);
+  if (found === undefined) throw new Error(`${ACCOUNT_LABEL} sign-in returned no ${label}`);
   return found;
 }
 

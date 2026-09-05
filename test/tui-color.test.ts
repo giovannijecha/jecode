@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ToolBlock } from "../src/transcript-types.ts";
 import { STEEL } from "../src/ui/theme.ts";
+import { textWidth } from "../src/ui/width.ts";
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
@@ -55,7 +56,7 @@ test("historical diff emphasis cannot split an emoji with or without color", asy
 test("settled tool markers retain semantic success and failure colours", async () => {
   const { renderAll } = await import("../src/tui/blocks.ts");
   const { configureColor } = await import("../src/ui/render.ts");
-  const colour = (rgb: readonly number[]) => `${ESC}[38;2;${rgb.join(";")}m●`;
+  const colour = (rgb: readonly number[], mark: string) => `${ESC}[38;2;${rgb.join(";")}m${mark}`;
 
   try {
     configureColor(true);
@@ -66,14 +67,14 @@ test("settled tool markers retain semantic success and failure colours", async (
       { kind: "tool", name: "run_command", target: "npm test", right: "exit 1", tone: "fail" },
     ], 60, STEEL).join("\n");
 
-    assert.ok(success.includes(colour(STEEL.ink.added)));
-    assert.ok(failure.includes(colour(STEEL.ink.removed)));
+    assert.ok(success.includes(colour(STEEL.ink.added, "✓")));
+    assert.ok(failure.includes(colour(STEEL.ink.removed, "×")));
   } finally {
     configureColor(false);
   }
 });
 
-test("user turns retain a Slate surface and a monochrome marker", async () => {
+test("user turns use half-cell Slate edges with the same spacing in monochrome", async () => {
   const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
   const noColor = process.env["NO_COLOR"];
   const term = process.env["TERM"];
@@ -86,16 +87,32 @@ test("user turns retain a Slate surface and a monochrome marker", async () => {
     const { renderAll } = await import("../src/tui/blocks.ts");
     const { configureColor } = await import("../src/ui/render.ts");
     const surface = `${ESC}[48;2;${STEEL.surface.subtle.join(";")}m`;
+    const edge = `${ESC}[38;2;${STEEL.surface.subtle.join(";")}m`;
     try {
-      configureColor(true);
-      const coloured = renderAll([{ kind: "user", text: "distinct turn" }], 40, STEEL);
-      assert.equal(coloured.length, 4);
-      assert.ok(coloured.slice(1).every((line) => line.includes(surface)));
+      for (const width of [38, 70]) {
+        configureColor(true);
+        const coloured = renderAll([{ kind: "user", text: "distinct turn" }], width, STEEL);
+        const plain = coloured.map((line) => line.replace(ANSI, ""));
+        assert.equal(coloured.length, 4);
+        assert.equal(plain[0], "");
+        assert.equal(plain[1], "▄".repeat(width));
+        assert.equal(plain[3], "▀".repeat(width));
+        assert.ok(coloured[1]?.includes(edge));
+        assert.ok(coloured[3]?.includes(edge));
+        assert.ok(!coloured[1]?.includes(surface));
+        assert.ok(!coloured[3]?.includes(surface));
+        assert.ok(coloured[2]?.includes(surface));
+        assert.match(plain[2] ?? "", /^  distinct turn\s*$/);
+        assert.ok(plain.every((line) => textWidth(line) <= width));
 
-      configureColor(false);
-      const monochrome = renderAll([{ kind: "user", text: "distinct turn" }], 40, STEEL);
-      assert.ok(monochrome.every((line) => !line.includes(ESC)));
-      assert.match(monochrome.join("\n"), /^❯ distinct turn\s*$/m);
+        configureColor(false);
+        const monochrome = renderAll([{ kind: "user", text: "distinct turn" }], width, STEEL);
+        assert.equal(monochrome.length, coloured.length);
+        assert.ok(monochrome.every((line) => !line.includes(ESC)));
+        assert.equal(monochrome[1], " ".repeat(width));
+        assert.equal(monochrome[3], " ".repeat(width));
+        assert.equal(monochrome[2], plain[2]);
+      }
     } finally {
       configureColor(false);
     }

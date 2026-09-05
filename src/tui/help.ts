@@ -15,7 +15,7 @@ const CONTROLS: readonly { key: string; description: string }[] = [
   { key: "alt+enter", description: "insert a new line" },
   { key: "esc", description: "close UI or interrupt work" },
   { key: "ctrl+c", description: "interrupt work or exit" },
-  { key: "ctrl+o", description: "toggle reasoning or tool details" },
+  { key: "ctrl+o", description: "expand/collapse reasoning or evidence" },
   { key: "wheel / pgup/dn", description: "scroll the transcript" },
   { key: "ctrl+l", description: "redraw the screen" },
 ];

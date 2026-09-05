@@ -11,6 +11,7 @@ import {
   updateSettings,
 } from "../src/settings.ts";
 import type { SavedSettings } from "../src/settings.ts";
+import { loadConfig } from "../src/config.ts";
 import { USER_STORE_LIMITS } from "../src/user-store.ts";
 
 async function inSettingsHome(body: () => Promise<void> | void): Promise<void> {
@@ -44,7 +45,6 @@ test("saved defaults and provider-specific models survive a reload", async () =>
     const legacyVisualSettings = {
       provider: "ollama",
       models: { anthropic: "claude-sonnet-5", ollama: "qwen3-coder" },
-      ollamaHost: "https://models.example.test/team/",
       effort: "medium",
       theme: "mono",
       palette: "violet",
@@ -59,7 +59,6 @@ test("saved defaults and provider-specific models survive a reload", async () =>
     assert.deepEqual(readSettings(), {
       provider: "ollama",
       models: { anthropic: "claude-sonnet-5", ollama: "qwen3-coder" },
-      ollamaHost: "https://models.example.test/team",
       effort: "medium",
       reducedMotion: true,
       maxTokens: 8192,
@@ -67,7 +66,7 @@ test("saved defaults and provider-specific models survive a reload", async () =>
     });
     const saved = JSON.parse(await readFile(settingsPath(), "utf8"));
     assert.equal(saved.provider, "ollama");
-    assert.equal(saved.ollamaHost, "https://models.example.test/team");
+    assert.equal(saved.ollamaHost, undefined);
     assert.equal(saved.theme, undefined);
     assert.equal(saved.palette, undefined);
     assert.equal(saved.maxSteps, undefined);
@@ -91,7 +90,6 @@ test("invalid saved values are discarded rather than breaking startup", async ()
     await updateSettings({
       provider: "unknown",
       models: { unknown: "model", ollama: "" },
-      ollamaHost: "http://models.example.test",
       effort: "turbo",
       maxTokens: -1,
       compactionPercent: 100,
@@ -144,7 +142,7 @@ test("a settings mutation preserves unsupported or invalid stored fields", async
   });
 });
 
-test("settings discard strings outside their bounded schema", async () => {
+test("settings discard oversized model strings but retain an invalid endpoint marker", async () => {
   await inSettingsHome(async () => {
     await writeFile(settingsPath(), JSON.stringify({
       models: { ollama: "x".repeat(USER_STORE_LIMITS.model + 1) },
@@ -152,7 +150,75 @@ test("settings discard strings outside their bounded schema", async () => {
     }), "utf8");
     reloadSettings();
 
-    assert.deepEqual(readSettings(), {});
+    assert.deepEqual(readSettings(), { ollamaHost: "unsupported legacy Ollama endpoint" });
+  });
+});
+
+test("official-cloud legacy settings are retired on the next explicit write", async () => {
+  await inSettingsHome(async () => {
+    const before = JSON.stringify({ provider: "ollama", models: { ollama: "cloud-model" },
+      ollamaHost: " https://OLLAMA.COM:443/// ", effort: "medium" });
+    await writeFile(settingsPath(), before, "utf8");
+    reloadSettings();
+    assert.deepEqual(readSettings(), { provider: "ollama", models: { ollama: "cloud-model" },
+      ollamaHost: "https://ollama.com", effort: "medium" });
+    assert.equal(await readFile(settingsPath(), "utf8"), before, "reading does not migrate the store");
+    await updateSettings({ effort: "high" });
+    reloadSettings();
+    const expected = { provider: "ollama", models: { ollama: "cloud-model" }, effort: "high" };
+    assert.deepEqual(readSettings(), expected);
+    assert.deepEqual(JSON.parse(await readFile(settingsPath(), "utf8")), expected);
+  });
+});
+
+test("non-cloud legacy settings block startup and unrelated writes without losing the stored value", async () => {
+  await inSettingsHome(async () => {
+    const oldHost = process.env["OLLAMA_HOST"];
+    delete process.env["OLLAMA_HOST"];
+    try {
+      for (const host of [
+        "http://localhost:11434", "https://models.example.test/team", "http://models.example.test",
+        "https://user:private-value@ollama.com", "not a URL", "", null, { endpoint: "private-value" },
+        "x".repeat(USER_STORE_LIMITS.endpoint + 1),
+      ]) {
+        const before = JSON.stringify({ provider: "ollama", models: { ollama: "saved-model" }, ollamaHost: host, effort: "medium" });
+        await writeFile(settingsPath(), before, "utf8");
+        reloadSettings();
+        const saved = readSettings();
+        assert.equal(saved.provider, "ollama");
+        assert.deepEqual(saved.models, { ollama: "saved-model" });
+        assert.ok(saved.ollamaHost !== undefined, "normalization must retain the retired setting");
+        if (typeof host === "string" && host !== "" && host.length <= USER_STORE_LIMITS.endpoint) {
+          assert.equal(saved.ollamaHost, host);
+        }
+        assert.throws(() => loadConfig([], saved), (error: Error) => {
+          assert.match(error.message, /settings\.json.*remove ollamaHost/);
+          assert.doesNotMatch(error.message, /private-value|models\.example/);
+          return true;
+        });
+        await assert.rejects(updateSettings({ effort: "high" }), (error: Error) => {
+          assert.match(error.message, /retired Ollama endpoint.*remove ollamaHost/);
+          assert.doesNotMatch(error.message, /private-value|models\.example/);
+          return true;
+        });
+        assert.equal(await readFile(settingsPath(), "utf8"), before);
+        assert.deepEqual(readSettings(), saved, "a rejected write also preserves the cached read");
+      }
+    } finally {
+      if (oldHost === undefined) delete process.env["OLLAMA_HOST"];
+      else process.env["OLLAMA_HOST"] = oldHost;
+    }
+  });
+});
+
+test("a retired non-cloud endpoint cannot be introduced through a settings patch", async () => {
+  await inSettingsHome(async () => {
+    await updateSettings({ effort: "medium" });
+    const before = await readFile(settingsPath(), "utf8");
+    await assert.rejects(updateSettings({ ollamaHost: "http://localhost:11434" }), /retired Ollama endpoint/);
+    assert.equal(await readFile(settingsPath(), "utf8"), before);
+    await updateSettings({ ollamaHost: "https://ollama.com" });
+    assert.deepEqual(JSON.parse(await readFile(settingsPath(), "utf8")), { effort: "medium" });
   });
 });
 

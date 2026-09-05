@@ -105,7 +105,6 @@ export const openai: Provider = {
     return openAIContextWindow(model);
   },
 
-  location: () => "cloud",
 
   async send(req: SendRequest): Promise<Message> {
     const key = requireKey();
