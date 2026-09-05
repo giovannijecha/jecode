@@ -4,7 +4,7 @@ This file records notable changes, with unreleased work listed separately.
 Prereleases are omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
-## Unreleased
+## [0.8.6] - 2026-09-05
 
 ### Changed
 
@@ -19,6 +19,8 @@ install artifacts and provenance are published with the [npm package].
   scopes and shortcuts.
 - Standardized provider names as Anthropic API, OpenAI API, Ollama API, and
   OpenAI Account across menus, status, and account management.
+- Organized runtime modules, test support, TUI development scenarios, and
+  release scripts around separate responsibilities.
 
 ### Fixed
 
@@ -619,6 +621,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[0.8.6]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.6
 [0.8.5]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.5
 [0.8.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.4
 [0.8.3]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.3
