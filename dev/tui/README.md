@@ -19,6 +19,8 @@ permission counts stay on their choice rows, without explanatory descriptions
 below them. Clipped identity or values get up to two stable overflow rows at
 narrow widths; menus whose content fits need no extra rows. Model samples use
 the same title-free search and provider-route values as the production picker.
+Timeline previews use one row per turn without overflow copies or reserved gaps.
+`menu-timeline` includes long branch labels to inspect selection and resizing.
 
 ## Run and capture
 
@@ -28,6 +30,7 @@ Run from the repository root with the same Node.js prerequisites as Jecode:
 npm run tui:lab
 npm run tui:lab -- --scene tools-workflow --paused
 npm run tui:lab -- --scene menu-workflow --time 4000 --paused
+npm run tui:lab -- --scene menu-timeline --paused
 npm run tui:lab -- --scene tools-stream --paused
 npm run tui:lab -- --scene menu-providers --size 38x14 --color off
 npm run tui:lab -- --list
@@ -153,5 +156,6 @@ npm run check
 The lab tests cover the complete scene registry at multiple terminal sizes,
 colour and `NO_COLOR`, reduced motion, fixture progression, interactive input,
 headless commands, and host cleanup. Development files are typechecked but are
-excluded from release compilation and npm artifacts. Keep generated captures
-and machine-specific notes in ignored `sandbox/`.
+excluded from release compilation and npm artifacts. Generated captures and
+machine-specific notes follow the shared
+[temporary-output lifecycle](../README.md#temporary-outputs).

@@ -8,6 +8,15 @@ install artifacts and provenance are published with the [npm package].
 
 ### Changed
 
+- Used the full terminal width for model responses, reasoning, and tool records,
+  aligned with the composer's left edge.
+- Kept timeline previews on one row per turn, removing reserved overflow space
+  and duplicate selected labels beneath the list.
+- Coalesced terminal updates while asynchronous output is full, then redrew the
+  current frame on drain instead of accumulating stale frames. The TUI lab uses
+  the same output path, and shutdown removes the drain listener.
+- Released transcript caches for every retained width when a conversation is
+  cleared, including `/new` after terminal resizing.
 - Kept composer commands and menus available during generation, with independent
   cancellation and approval focus that preserves the open menu. Model and context
   settings apply to the next turn; running requests and checkpoints keep their

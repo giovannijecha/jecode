@@ -5,6 +5,12 @@ The [compatibility contract](COMPATIBILITY.md) defines which public behavior
 must remain supported; layout and implementation details here describe the
 current code and evolve with it.
 
+Read by concern: [turn execution](#one-turn), [foreground activity](#foreground-activity),
+[providers](#provider-boundary), [workspace access](#workspace-boundary),
+[local data](#settings-credentials-and-local-data),
+[sessions and recovery](#conversation-state-and-resume),
+[terminal composition](#tui-composition), or [validation](#validation-boundaries).
+
 ## Mental model
 
 Jecode has one agent loop. The TUI supplies a user message;
@@ -530,9 +536,16 @@ state + terminal size
   → frame.ts diff
 ```
 
+The painter checks asynchronous output readiness before encoding a frame. While
+the stream needs a drain, input and semantic state continue to advance without
+queuing intermediate frames. A drain schedules a fresh composition against the
+last accepted frame. Both the application and lab remove their drain listener
+before returning the terminal; synchronous OS writes remain outside this control.
+
 Each visible section has one renderer under `src/tui/components/`;
-`blocks.ts` routes semantic transcript blocks to them and applies the shared
-reading column to model prose and tool records. `tool.ts` composes target-first
+`blocks.ts` routes semantic transcript blocks to them at the full terminal width.
+Model prose and tool records share the composer's left edge; user surfaces keep
+their own content padding. `tool.ts` composes target-first
 headers and connectors; `tool-evidence.ts` selects bounded previews and renders
 retained source, and `tool-motion.ts` colours only the active connector.
 The lower dock supplies
@@ -542,10 +555,14 @@ selection, secret masking, progress, and caret placement. `picker.ts` owns
 filtering and selection; `picker-layout.ts` shares one row budget between
 painting and caret measurement. `components/menu.ts` supplies Ribbon rows and
 bounded overflow recovery for clipped labels and values to selectors and command
-completion. Options carry no explanatory description. Model catalogue failures
+completion. Timeline previews opt into in-row truncation, so long turns never
+reserve overflow rows or repeat the selected preview below the list.
+Options carry no explanatory description. Model catalogue failures
 use footer feedback instead of a persistent picker preamble. Semantic `Palette`
 tokens keep colour roles out of component implementations.
 
+Clearing the transcript releases every retained width and active-tool reference,
+so `/new` cannot keep the previous conversation alive through a resize cache.
 Blocks store source text, never pre-wrapped rows. A transcript renderer caches
 rows per block, width, and palette: streaming invalidates the changing block,
 scrolling reuses cached rows, and resize reflows them. It assembles only the row
@@ -622,17 +639,16 @@ live under `dev/test-support/`; each suite owns its setup and cleanup. Keeping
 helpers outside `test/` prevents Node's default discovery from treating helper
 modules as standalone test files.
 
-Canonical checks:
+[`npm run check`](../scripts/README.md) is the canonical automated gate. Its
+shared compiler rules cover runtime source, development tools, scripts, and
+tests; release builds inherit the same rules. Coverage, source-tree, package,
+and installed-CLI checks run through the documented scripts.
 
-```powershell
-npm run check
-```
-
-The check enforces a source-only Git tree, type safety, line/branch/function
-coverage thresholds, zero runtime dependencies, a freshly compiled runtime,
-and a bounded package containing only the executable, plain JavaScript runtime,
-license, manifest, and README. It then installs that package into an isolated
-global prefix and runs its version command.
+Automated checks do not establish live provider behavior, physical terminal
+accessibility, or long-session reliability. The
+[candidate validation protocol](../dev/validation/README.md) defines those
+checks and their evidence; the [compatibility contract](COMPATIBILITY.md#release-candidate-gate)
+owns promotion requirements.
 
 ## Deliberate omissions
 

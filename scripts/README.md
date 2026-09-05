@@ -12,6 +12,7 @@ Run these commands from the repository root after `npm ci --ignore-scripts`:
 | `npm run build:release` | Remove the repository's generated `dist/`, compile `src/`, and verify that the output contains only JavaScript. |
 | `npm run pack:release` | Clean-build and create the npm tarball with lifecycle scripts disabled. |
 | `npm run check:source-tree` | Verify that `dist/` is ignored and untracked. |
+| `npm run typecheck` | Check source, development tools, scripts, and tests with strict types, unused-local/parameter checks, complete return paths, and no switch fallthrough. |
 | `npm run check:package` | Clean-build and inspect npm's dry-run manifest, runtime dependencies, packaged README references, and release settings. |
 | `npm run check:install` | Clean-build, pack, install into a temporary global prefix, and verify the installed executable's version. |
 | `npm run check:release-tag -- <tag>` | Require the exact package version and select `latest` for stable versions or `next` for prereleases; substitute the actual tag. |
@@ -21,6 +22,13 @@ The package and installation checks intentionally remain independently runnable
 and each performs its own clean build. `build:release` also accepts `--quiet`.
 Generated `dist/` is never source code and must remain untracked. Installation
 and packaging lifecycle hooks must not implicitly compile the runtime.
+
+`tsconfig.json` is the shared source of compiler checks. The release configuration
+extends it, and all CI matrix jobs run `typecheck`; no separate lint command or
+CI-only rule set is required. An intentionally unused callback parameter may use
+an underscore prefix. Remove obsolete declarations instead of suppressing them.
+These checks do not cover unhandled promises or enforce a formatting style;
+additional tooling needs a concrete defect class and a small, reviewed rule set.
 
 `release-policy.ts` holds the shared release-channel and README rules.
 `check-release-tag.ts` reads `package.json` from the working directory and exports

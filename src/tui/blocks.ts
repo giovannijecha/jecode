@@ -5,7 +5,6 @@ import { renderAnswer, renderReasoning, renderUser } from "./components/messages
 import { renderNotice } from "./components/misc.ts";
 import { renderTool } from "./components/tool.ts";
 import type { Block } from "./components/types.ts";
-import { insetTranscript, modelTranscriptWidth } from "./transcript-grammar.ts";
 
 export type RenderContext = {
   previous?: Block;
@@ -27,22 +26,21 @@ export type {
 } from "./components/types.ts";
 
 export function render(block: Block, width: number, pal: Palette, context: RenderContext = {}): string[] {
-  const inner = modelTranscriptWidth(width);
   switch (block.kind) {
     case "user":
       return renderUser(block, width, pal);
     case "answer":
-      return insetTranscript(renderAnswer(block, inner, pal));
+      return renderAnswer(block, width, pal);
     case "reasoning":
-      return insetTranscript(renderReasoning(block, inner, pal, {
+      return renderReasoning(block, width, pal, {
         continues: context.previous?.kind === "reasoning",
-      }));
+      });
     case "tool":
-      return insetTranscript(renderTool(block, inner, pal, {
+      return renderTool(block, width, pal, {
         continues: context.previous?.kind === "reasoning",
         now: context.now,
         reducedMotion: context.reducedMotion,
-      }));
+      });
     case "notice":
       return renderNotice(block, width, pal);
   }

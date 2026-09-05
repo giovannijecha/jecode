@@ -72,6 +72,7 @@ export async function runApp(
   let escapeTimer: NodeJS.Timeout | undefined;
   let stopResize = (): void => {};
   let stopInput = (): void => {};
+  let stopOutput = (): void => {};
   let stopShutdown = (): void => {};
   let failure: { error: unknown } | undefined;
   const activeWorkflows = new Set<Promise<void>>();
@@ -182,8 +183,8 @@ export async function runApp(
     if (state.follow) state.unseen = 0;
   };
 
-  const replaceTranscript = (): void => {
-    state.blocks.splice(0, state.blocks.length, ...session.conversation.transcript);
+  const replaceTranscript = (blocks: readonly Block[] = session.conversation.transcript): void => {
+    state.blocks.splice(0, state.blocks.length, ...blocks);
     state.scroll = 0;
     state.follow = true;
     state.unseen = 0;
@@ -197,6 +198,7 @@ export async function runApp(
     if (!live) return;
     live = false;
     safely(stopInput);
+    safely(stopOutput);
     safely(stopResize);
     safely(stopShutdown);
     if (activityTimer !== undefined) clearInterval(activityTimer);
@@ -364,6 +366,7 @@ export async function runApp(
     shutdownSignal?.addEventListener("abort", onShutdown, { once: true });
     stopShutdown = () => shutdownSignal?.removeEventListener("abort", onShutdown);
     terminal.enter(session.config.reducedMotion);
+    stopOutput = paint.onReady?.(() => guard(() => render())) ?? (() => {});
     stopResize = terminal.onResize(() => guard(() => {
       paint.invalidate();
       render();

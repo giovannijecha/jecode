@@ -20,7 +20,11 @@ export function layoutPicker(
   const note = menuText(picker.description ?? picker.footer ?? "", width, Math.min(2, contextRoom));
   const prefix = titleRows + target.length + note.length + queryRows;
   const menu = renderMenu(found.map(({ option, index }) => ({ ...option, selected: index === picker.index })),
-    width, pal, { maxRows: budget - prefix - controlRows, visible: picker.visible ?? 6 });
+    width, pal, {
+      maxRows: budget - prefix - controlRows,
+      visible: picker.visible ?? 6,
+      overflow: picker.overflow,
+    });
   const progress = found.length > menu.last - menu.first || picker.searchable
     ? `${found.length === 0 ? "0" : `${menu.first + 1}–${menu.last}`} / ${found.length}` +
       (found.length === picker.options.length ? "" : ` · ${picker.options.length} total`)

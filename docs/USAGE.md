@@ -99,13 +99,17 @@ Approvals show the question and target separately. **Enter** confirms the
 highlighted choice; **Y** approves once, **A** remembers the displayed scope
 for this session, and **N** or **Esc** refuses with feedback.
 
-Assistant text and tool records share a reading column; the composer keeps the
-full terminal width. Each tool names its target and execution state, with
-connected evidence below. Compact diffs show six changed lines shared between
+Assistant text, reasoning, and tool records use the full terminal width and
+share the composer's left edge. Each tool names its target and execution state,
+with connected evidence below. Compact diffs show six changed lines shared between
 the beginning and end, with a count of omitted changes. Command previews show
 up to four output rows; failures retain a diagnostic line alongside the tail
 when one is recognized. Ctrl+O reveals the complete retained source, including
 unchanged diff context. These previews never shorten saved history or export.
+
+When asynchronous terminal output falls behind, Jecode combines pending display
+updates into the current frame as output becomes available. Conversation history
+remains complete, and input and menu state continue to update.
 
 The footer keeps the running turn's provider route, model, effort, and workspace
 visible, then shows the next selection after settlement. During work, it adds the current state, elapsed time, steering
@@ -130,7 +134,9 @@ conversation keeps its durable session identity and updates one picker entry
 instead of creating duplicates.
 
 `/timeline` shows completed, failed, and interrupted turns in the conversation
-tree. Selecting an older turn changes only the in-memory path: it creates and
+tree, with one row per turn. Long previews truncate within their row; selection
+does not repeat them below the list or reserve extra space.
+Selecting an older turn changes only the in-memory path: it creates and
 saves a branch only after the next real user message. Cancelling the picker or
 exiting before that message leaves the durable head unchanged. A failed turn
 keeps the same partial evidence and outcome in the live transcript, export, and

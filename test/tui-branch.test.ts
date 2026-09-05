@@ -26,7 +26,7 @@ function settledFrame(view: View, size: Size, transcript: TranscriptRenderer = t
   throw new Error("the workflow transcript did not finish reflowing");
 }
 
-test("the response measure preserves the full-width composer and grapheme caret", () => {
+test("full-width responses preserve the composer and grapheme caret", () => {
   const long = Array.from({ length: 12 }, (_, index) => `${index}: 保持 👩‍💻 é ${"detail ".repeat(15)}`).join("\n");
   for (const draft of ["", long]) {
     const view = workflowScene({ ...initial, tick: WORKFLOW_DURATION_MS / TICK_MS });
@@ -50,7 +50,7 @@ test("the response measure preserves the full-width composer and grapheme caret"
   }
 });
 
-test("the production response inset leaves the accepted user surface unchanged", () => {
+test("full-width responses leave the accepted user surface unchanged", () => {
   const user = { kind: "user", text: "Check `src/providers/http.ts` — 保持 👩‍💻 é\nKeep the change small." } as const;
   const before = structuredClone(user);
   for (const width of [38, 80, 160]) assert.deepEqual(render(user, width, STEEL), renderUser(user, width, STEEL));
@@ -91,6 +91,12 @@ test("only running connectors animate under fresh colour initialization", () => 
     const { textWidth } = await import("./src/ui/width.ts");
     const { TICK_MS } = await import("./dev/tui/model.ts");
     assert.equal(hasColor(), process.env.NO_COLOR === undefined);
+    for (const kind of ["answer", "reasoning"]) for (const width of [38, 100, 200]) {
+      const rows = render({ kind, text: "wide response 保持 👩‍💻 é ".repeat(30), expanded: true }, width, STEEL);
+      const lines = rows.map(row => row.replace(/\\x1b\\[[0-9;]*m/g, "")).filter(Boolean);
+      assert.ok(lines.every(line => !line.startsWith("  ") && textWidth(line) <= width));
+      assert.ok(lines.some(line => textWidth(line) > width - 10));
+    }
     const at = now => workflowScene({ scene: "tools-workflow", palette: STEEL,
       selected: 0, expanded: false, tick: now / TICK_MS });
     const command = now => at(now).blocks.find(block => block.kind === "tool" && block.name === "run_command");

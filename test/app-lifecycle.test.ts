@@ -15,6 +15,8 @@ test("the TUI owns and restores a screen around a real /exit interaction", async
   let left = false;
   let inputStopped = false;
   let resizeStopped = false;
+  let outputStopped = false;
+  let outputReady = () => {};
   const frames: string[][] = [];
 
   const screen: AppScreen = {
@@ -39,10 +41,17 @@ test("the TUI owns and restores a screen around a real /exit interaction", async
   const paint: Painter = {
     paint: (rows) => frames.push([...rows]),
     invalidate: () => {},
+    onReady: (handler) => {
+      outputReady = handler;
+      return () => { outputStopped = true; };
+    },
   };
 
   const running = runApp(session(), process.cwd(), { screen, paint });
   while (feed === undefined) await new Promise<void>((resolve) => setImmediate(resolve));
+  const firstFrames = frames.length;
+  outputReady();
+  await waitFor(() => frames.length > firstFrames, "redraw after output drain");
   feed("/exit\r");
   await running;
 
@@ -50,6 +59,11 @@ test("the TUI owns and restores a screen around a real /exit interaction", async
   assert.equal(left, true);
   assert.equal(inputStopped, true);
   assert.equal(resizeStopped, true);
+  assert.equal(outputStopped, true);
+  const finalFrames = frames.length;
+  outputReady();
+  await delay(30);
+  assert.equal(frames.length, finalFrames);
   assert.ok(frames.length > 0);
   assert.ok(frames.every((frame) => frame.length === 18));
 });

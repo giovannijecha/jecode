@@ -176,6 +176,22 @@ authorized live accounts, physical terminal checks cover the supported
 platforms, and no confirmed critical, high, or medium finding remains open.
 
 Before promoting a candidate to stable `1.0.0`, complete an explicit
-release-candidate soak across supported providers and platforms. Exercise long
-sessions, interruption and crash recovery, resume and branching, compaction,
-and provider failures, and resolve confirmed regressions before promotion.
+release-candidate soak against one immutable candidate version and commit:
+
+- Observe at least seven consecutive calendar days and ten real work sessions
+  across at least two workspaces. Include three sessions of at least one hour
+  and thirty completed turns each; idle time alone is not soak evidence.
+- Exercise every stable provider in at least two sessions and complete a live
+  sign-in and conversation through the experimental ChatGPT integration. This
+  does not promote that integration into the stable compatibility promise.
+- Complete the terminal, recovery, security-boundary, and performance checks in
+  the [validation protocol](../dev/validation/README.md). Record the environment,
+  outcome, and evidence for each required check; a missing result is not a pass.
+- Close all confirmed critical, high, or medium findings and confirmed candidate
+  regressions. Every fix needs a focused regression check. A replacement
+  candidate repeats the automated matrix and restarts the soak.
+
+The stable promotion may change version and release metadata only. Runtime or
+shipped-interface changes require another candidate. The promotion commit still
+needs review, the complete CI matrix, and package verification before tagging.
+Keep the reviewed validation record linked from the promotion pull request.

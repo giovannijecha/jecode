@@ -27,6 +27,8 @@ export function timelinePicker(conversation: ConversationTree, palette: Palette)
       searchable: true,
       query: "",
       visible: 8,
+      // Turn labels are previews; keep each node on its own row without a second copy.
+      overflow: "truncate",
       options: entries.map((entry) => ({
         label: `${entry.prefix}${preview(entry.node)}`,
         hint: stamp(entry.node.createdAt),

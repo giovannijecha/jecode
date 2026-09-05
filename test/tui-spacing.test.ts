@@ -51,17 +51,17 @@ test("a wrapped user surface stays inside narrow terminal bounds", () => {
   }
 });
 
-test("assistant prose and tool records share a two-cell inset and an 86-cell measure", () => {
+test("assistant prose, reasoning and tool records use the full terminal width", () => {
   const blocks: Block[] = [
     { kind: "answer", text: "bounded answer ".repeat(30) },
     { kind: "reasoning", text: "bounded reasoning ".repeat(30), expanded: true },
     { kind: "tool", name: "read_file", target: "folder/".repeat(30), right: "1 line", tone: "ok" },
   ];
-  for (const width of [38, 100, 200]) {
-    const drawn = plain(renderAll(blocks, width, STEEL)).filter((line) => line !== "");
-    assert.ok(drawn.every((line) => line.startsWith("  ")));
-    assert.ok(drawn.every((line) => textWidth(line) <= Math.min(width - 2, 88)));
-    assert.ok(drawn.some((line) => textWidth(line) > Math.min(width - 10, 75)));
+  for (const width of [38, 100, 200]) for (const block of blocks) {
+    const drawn = plain(render(block, width, STEEL)).filter((line) => line !== "");
+    assert.ok(drawn.every((line) => !line.startsWith("  ")), block.kind);
+    assert.ok(drawn.every((line) => textWidth(line) <= width));
+    assert.ok(drawn.some((line) => textWidth(line) > width - 10), block.kind);
   }
 });
 
@@ -70,8 +70,8 @@ test("consecutive tool calls keep one gap between their independent records", ()
     { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
     { kind: "tool", name: "search_text", target: "needle", right: "2 matches", tone: "ok" },
   ], 60, STEEL));
-  const first = drawn.findIndex((line) => line === "  ┌ a.ts");
-  const second = drawn.findIndex((line) => line === "  ┌ needle");
+  const first = drawn.findIndex((line) => line === "┌ a.ts");
+  const second = drawn.findIndex((line) => line === "┌ needle");
   assert.equal(first, 1);
   assert.equal(second, first + 3);
   assert.equal(drawn[second - 1], "");
@@ -84,12 +84,12 @@ test("reasoning leads directly into a tool while the following thought keeps one
     { kind: "tool", name: "read_file", target: "a.ts", right: "1 line", tone: "ok" },
     { kind: "reasoning", text: "continue after the result" },
   ], 60, STEEL));
-  const tool = drawn.findIndex((line) => line === "  ┌ a.ts");
+  const tool = drawn.findIndex((line) => line === "┌ a.ts");
   const continued = drawn.findIndex((line) => line.includes("continue after"));
 
-  assert.equal(drawn[tool - 1], "  inspect first");
+  assert.equal(drawn[tool - 1], "inspect first");
   assert.equal(drawn[continued - 1], "");
-  assert.equal(drawn[continued], "  continue after the result");
+  assert.equal(drawn[continued], "continue after the result");
 });
 
 test("response groups keep one leading gap except after a continuing thought", () => {

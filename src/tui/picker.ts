@@ -29,6 +29,8 @@ export type Picker = {
   query?: string;
   /** Override the compact default when one control plane should show more rows. */
   visible?: number;
+  /** Repeat clipped choice content below the list by default, or only elide it. */
+  overflow?: "detail" | "truncate";
   /** Change the selected row without settling or closing the picker. */
   adjust?(index: number, step: -1 | 1): Picker;
   index: number;

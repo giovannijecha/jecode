@@ -39,7 +39,7 @@ test("literal user input stays distinct from rendered assistant Markdown", () =>
 
   assert.match(drawn, /^  \*\*keep this\*\* +$/m);
   assert.match(drawn, /^  `src\/main\.ts` +$/m);
-  assert.match(drawn, /^  Formatted answer with code\.$/m);
+  assert.match(drawn, /^Formatted answer with code\.$/m);
 });
 
 test("literal user wrapping preserves complete graphemes at narrow widths", () => {

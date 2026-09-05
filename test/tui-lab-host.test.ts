@@ -61,6 +61,26 @@ test("catalogue controls do not steal preview text and terminal resources are re
   assert.equal(host.frames.length, count);
 });
 
+test("the lab repaints after output drain and releases its listener on exit", async () => {
+  const host = terminal();
+  let ready = () => {};
+  let stopped = false;
+  host.paint.onReady = (handler) => {
+    ready = handler;
+    return () => { stopped = true; };
+  };
+  const running = runLab(parseOptions(["--scene", "conversation", "--paused"]), host);
+  const before = host.frames.length;
+  ready();
+  assert.equal(host.frames.length, before + 1);
+  host.feed("q");
+  await running;
+  assert.equal(stopped, true);
+  const after = host.frames.length;
+  ready();
+  assert.equal(host.frames.length, after);
+});
+
 test("playback follows the fixture clock despite input, and pause permits exact stepping", async (context) => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
   const host = terminal();

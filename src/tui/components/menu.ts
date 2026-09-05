@@ -27,11 +27,11 @@ export function renderMenuRows(entries: readonly MenuEntry[], width: number, pal
 /** A missing palette measures the window without producing styled rows. */
 export function renderMenu(
   entries: readonly MenuEntry[], width: number, pal: Palette | undefined,
-  options: { maxRows: number; visible?: number },
+  options: { maxRows: number; visible?: number; overflow?: "detail" | "truncate" },
 ): { rows: string[]; first: number; last: number } {
   const room = Math.max(0, options.maxRows);
   if (room === 0) return { rows: [], first: 0, last: 0 };
-  const detailLimit = Math.min(2, room - 1);
+  const detailLimit = options.overflow === "truncate" ? 0 : Math.min(2, room - 1);
   let detailRows = 0;
   // Measure every possible selection so revealing clipped identity and values
   // does not move the dock when the selected row changes.
