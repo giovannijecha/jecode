@@ -65,7 +65,8 @@ for (const boundary of ["catalogue", "node", "head"] as const) {
       try {
         await persistence.checkpoint(unfinished);
         const id = persistence.sessionId!;
-        const directory = path.join(fixture.sessions, store.workspaceDigest, id);
+        // The store canonicalizes temp-directory aliases and Windows short names.
+        const directory = await fs.realpath(path.join(fixture.sessions, store.workspaceDigest, id));
         const nodeFile = path.join(directory, "nodes", "000001.json");
         const headFile = path.join(directory, "head.json");
         const beforeHead = await fs.readFile(headFile, "utf8");
