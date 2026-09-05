@@ -139,8 +139,8 @@ test("command autocomplete shares the composer and carries its count", () => {
   assert.match(rows[input] ?? "", new RegExp(`^/.*1–4 / ${COMMANDS.length}$`));
   assert.equal(rows.findIndex((line) => line.includes("/help")), input + 1);
   assert.match(rows[input - 1] ?? "", /^─+$/);
-  assert.match(rows[input + 5] ?? "", /show keyboard controls/);
-  assert.match(rows[input + 6] ?? "", /^─+$/);
+  assert.doesNotMatch(rows.join("\n"), /show keyboard controls/);
+  assert.match(rows[input + 5] ?? "", /^─+$/);
   assert.equal(frame.cursor?.col, 1);
 });
 

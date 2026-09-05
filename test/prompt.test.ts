@@ -11,7 +11,7 @@ const config: Config = {
   maxTokens: 1_000,
   compactionPercent: 85,
   root: "/workspace/jecode",
-  autoApprove: false,
+
   ephemeral: false,
 };
 

@@ -1,6 +1,7 @@
 // Keyboard and pointer intent for the TUI shell.
 
 import type { Session } from "../session.ts";
+import { commandNeedsIdle } from "../commands.ts";
 import type { SteeringOffer } from "../steering.ts";
 import { PROMPT_LIMIT_MESSAGE, PromptLimitError } from "../input-boundary.ts";
 import type { AppState } from "./app-state.ts";
@@ -44,7 +45,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
   const { session, state, feedback, actions } = options;
 
   function handle(key: Key): void {
-    if (!options.live()) return;
+    if (!options.live() || state.closeWhenIdle) return;
 
     // The wheel only changes what is visible. It never answers an open prompt.
     if (key.name === "pointer") {
@@ -56,7 +57,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
     if (state.feedback !== undefined) feedback.dismiss();
 
     if (key.name === "input_limit") {
-      if (state.open === undefined) rejectPrompt();
+      if (state.open === undefined && state.approval === undefined) rejectPrompt();
       else showInputLimit();
       return;
     }
@@ -70,17 +71,23 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
       return;
     }
 
-    if (state.open !== undefined) {
-      const outcome = overlay.handle(state.open, key);
-      state.open = outcome.open;
+    const open = state.approval ?? state.open;
+    if (open !== undefined) {
+      const approving = state.approval !== undefined;
+      const outcome = overlay.handle(open, key);
+      if (approving) state.approval = outcome.open;
+      else state.open = outcome.open;
       if (outcome.inputLimit === true) showInputLimit();
-      if (outcome.abort === true) state.activity?.control.abort(new Error("interrupted"));
+      if (outcome.abort === true) {
+        (approving ? state.activity : state.command ?? state.activity)?.control.abort(new Error("interrupted"));
+      }
       if (outcome.quit === true) options.requestQuit();
       return;
     }
 
     if (key.ctrl && key.name === "c") {
-      if (state.activity !== undefined) state.activity.control.abort(new Error("interrupted"));
+      const activity = state.command ?? state.activity;
+      if (activity !== undefined) activity.control.abort(new Error("interrupted"));
       else options.quit();
       return;
     }
@@ -96,7 +103,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
           state.completing = undefined;
           return;
         }
-        state.activity?.control.abort(new Error("interrupted"));
+        (state.command ?? state.activity)?.control.abort(new Error("interrupted"));
         return;
       case "enter": {
         if (state.completing !== undefined) {
@@ -111,7 +118,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
         return;
       }
       case "tab": {
-        if (state.activity !== undefined) return;
+        if (state.command !== undefined) return;
         const completion = state.completing ?? activateCompletion(state.editor.text);
         const completed = completion === undefined ? undefined : selectedCompletion(completion);
         if (completed !== undefined) {
@@ -155,7 +162,7 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
       if (edited !== undefined) {
         if (edited.text !== state.editor.text) state.promptRejected = false;
         state.editor = edited;
-        state.completing = state.activity === undefined ? activateCompletion(edited.text) : undefined;
+        state.completing = state.command === undefined ? activateCompletion(edited.text) : undefined;
       }
     } catch (error) {
       if (!(error instanceof PromptLimitError)) throw error;
@@ -194,11 +201,20 @@ export function appInput(options: InputOptions): { handle(key: Key): void } {
     if (text === "") return;
 
     const isCommand = text.startsWith("/");
-    if (state.activity !== undefined) {
-      if (isCommand) {
-        keep("Slash commands run after the active work finishes");
-        return;
-      }
+    if (isCommand && text.slice(1).trim().split(/\s+/)[0] === "exit") {
+      accept(text);
+      options.requestQuit();
+      return;
+    }
+    if (state.command !== undefined) {
+      keep("Wait for the active command to finish");
+      return;
+    }
+    if (isCommand && state.activity !== undefined && commandNeedsIdle(text)) {
+      keep(`Stop the active turn before ${text.split(/\s+/)[0]}`);
+      return;
+    }
+    if (state.activity !== undefined && !isCommand) {
       const result = actions.steer(text);
       if (result !== "queued") {
         keep(

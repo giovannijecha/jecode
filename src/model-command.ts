@@ -42,9 +42,6 @@ export async function modelsCommand(
   const connected = availability
     .filter((entry) => entry.blocked === undefined)
     .map((entry) => entry.provider);
-  const disconnected = availability
-    .filter((entry) => entry.blocked !== undefined)
-    .map((entry) => entry.provider);
   if (connected.length === 0) {
     host.emit({
       kind: "notice",
@@ -99,10 +96,15 @@ export async function modelsCommand(
     return false;
   }
 
-  const description = catalogDescription(disconnected, failed);
+  if (failed.length > 0) {
+    host.emit({
+      kind: "notice",
+      text: `model catalogs unavailable: ${failed.map((entry) => providerLabel(entry.provider.id)).join(", ")}`,
+      tone: "warn",
+    });
+  }
   const index = await choose({
     title: [],
-    ...(description === undefined ? {} : { description }),
     options: choices.map((choice) => ({
       label: choice.model,
       // Provider identity is part of the choice, not optional help: keep it
@@ -186,22 +188,6 @@ async function alignEffort(
     });
     return { ok: false };
   }
-}
-
-function catalogDescription(
-  disconnected: readonly Provider[],
-  failed: readonly FailedCatalog[],
-): string {
-  const parts = [
-    "The connection on the right will run this model; API and account usage stay separate",
-    disconnected.length === 0
-      ? undefined
-      : `Not connected: ${disconnected.map((provider) => providerLabel(provider.id)).join(", ")}`,
-    failed.length === 0
-      ? undefined
-      : `Unavailable: ${failed.map((entry) => providerLabel(entry.provider.id)).join(", ")}`,
-  ].filter((part): part is string => part !== undefined);
-  return `${parts.join(" · ")} · manage access in /providers`;
 }
 
 function emptyCatalogMessage(

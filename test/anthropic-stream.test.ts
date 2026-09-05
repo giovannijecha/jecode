@@ -251,7 +251,7 @@ test("keeps partial text but rejects a tool call truncated at max_tokens", async
   const message = fromWireResponse(data);
   assert.deepEqual(message.content, [
     { kind: "text", text: "partial" },
-    { kind: "text", text: "[truncated: hit max_tokens — raise --max-tokens]" },
+    { kind: "text", text: "[truncated: hit max_tokens — raise max output tokens in /settings]" },
   ]);
   assert.equal(message.raw, undefined);
   assert.equal(message.rawFrom, undefined);

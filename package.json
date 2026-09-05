@@ -45,6 +45,7 @@
     "pack:release": "npm run build:release && npm pack --ignore-scripts",
     "start": "node src/main.ts",
     "tui:lab": "node dev/tui/main.ts",
+    "web:preview": "node dev/web/main.ts",
     "bench:context": "node dev/benchmarks/context.ts",
     "bench:redaction": "node dev/benchmarks/redaction.ts",
     "bench:search": "node dev/benchmarks/search.ts",

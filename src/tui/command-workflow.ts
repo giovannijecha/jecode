@@ -1,6 +1,6 @@
 // Foreground slash-command interactions and their session updates.
 
-import { handleCommand } from "../commands.ts";
+import { commandNeedsIdle, handleCommand } from "../commands.ts";
 import { compactSession } from "../context/manual.ts";
 import { resetRequestIdentity } from "../request-identity.ts";
 import { updateSettings } from "../settings.ts";
@@ -20,11 +20,13 @@ export function commandWorkflow(
 
   const choose = (picker: Picker) =>
     new Promise<number | undefined>((resolve) => {
+      state.command?.control.signal.throwIfAborted();
       state.open = { picker, settle: resolve };
       options.render();
     });
 
   async function command(text: string): Promise<void> {
+    if (state.activity !== undefined && commandNeedsIdle(text)) return;
     const activity = options.startActivity("command", `Running ${text.split(/\s+/)[0]}`);
     if (activity === undefined) return;
     const status = (label: string): void => transition(activity, label);
@@ -35,6 +37,7 @@ export function commandWorkflow(
         signal: activity.control.signal,
         showHelp: () =>
           new Promise<void>((resolve) => {
+            activity.control.signal.throwIfAborted();
             state.open = { help: true, settle: resolve };
             options.render();
           }),
@@ -45,6 +48,7 @@ export function commandWorkflow(
         },
         type: (field) =>
           new Promise<string | undefined>((resolve) => {
+            activity.control.signal.throwIfAborted();
             state.open = { field, settle: resolve };
             options.render();
           }),
@@ -66,7 +70,7 @@ export function commandWorkflow(
           state.committedNodeId = 0;
         },
         permissions,
-        exportTranscript: () => saveTranscript(options.transcriptRoot, state.blocks),
+        exportTranscript: () => saveTranscript(options.transcriptRoot, structuredClone(state.blocks)),
         saveSettings: async (patch) => {
           await updateSettings(patch);
         },

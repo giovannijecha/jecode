@@ -13,7 +13,7 @@ import { isContextOverflow } from "../context/policy.ts";
 import { steeringInbox } from "../steering.ts";
 import type { SteeringInbox } from "../steering.ts";
 import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "../usage.ts";
-import type { Message } from "../types.ts";
+import type { Message, ToolCallBlock } from "../types.ts";
 import { toolSpecs } from "../tools/index.ts";
 import { requestIdentityForSession } from "../request-identity.ts";
 import { transition } from "./activity.ts";
@@ -21,7 +21,7 @@ import type { AppActions } from "./app-input.ts";
 import type { AppState } from "./app-state.ts";
 import { answerAt } from "./approve.ts";
 import * as edit from "./editor.ts";
-import { controllerOptions, turnFailure } from "./session-view.ts";
+import { controllerOptions, footerInfo, turnFailure } from "./session-view.ts";
 import { transcribe } from "./turn.ts";
 import type { WorkflowOptions } from "./workflow-types.ts";
 
@@ -37,6 +37,11 @@ export function turnWorkflow(
   async function turn(text: string): Promise<void> {
     const activity = options.startActivity("turn", WAITING);
     if (activity === undefined) return;
+    // Settings menus remain live, but every request, compaction, and checkpoint
+    // in this turn must retain the selection with which the turn started.
+    const runtime = { ...session, config: { ...session.config } };
+    const requestIdentity = requestIdentityForSession(session);
+    state.turnFooter = footerInfo(runtime);
     const inbox = steeringInbox((pending, accepting) => {
       if (activeSteering !== inbox) return;
       state.steering = accepting ? pending : undefined;
@@ -66,9 +71,9 @@ export function turnWorkflow(
         options.render();
       }
       return resolveContextPolicy({
-        provider: session.provider,
-        model: session.model,
-        compactionPercent: session.config.compactionPercent,
+        provider: runtime.provider,
+        model: runtime.model,
+        compactionPercent: runtime.config.compactionPercent,
         signal: activity.control.signal,
         onStatus: (said) => {
           visible = true;
@@ -82,6 +87,10 @@ export function turnWorkflow(
         }
       });
     };
+    const requestOptions = {
+      ...controllerOptions(session, policy, turnTools, inbox),
+      toolAllowed: (call: ToolCallBlock) => permissions.allowed(call),
+    };
     options.emit({ kind: "user", text });
     const user = { role: "user" as const, content: [{ kind: "text" as const, text }] };
     history.push(user);
@@ -94,7 +103,7 @@ export function turnWorkflow(
       approved: (call) => permissions.approved(call),
       remember: (call) => permissions.remember(call),
       ask: (prompt, settle) => {
-        state.open = { picker: prompt, settle: (index?: number) => settle(answerAt(index)) };
+        state.approval = { picker: prompt, settle: (index?: number) => settle(answerAt(index)) };
         options.render();
       },
       status: (text) => {
@@ -113,9 +122,9 @@ export function turnWorkflow(
         parentId,
         createdAt,
         identity: {
-          providerId: session.provider.id,
-          model: session.model,
-          effort: session.config.effort,
+          providerId: runtime.provider.id,
+          model: runtime.model,
+          effort: runtime.config.effort,
         },
         messages: checkpoint.slice(historyStart),
         blocks: state.blocks.slice(blockStart),
@@ -142,8 +151,8 @@ export function turnWorkflow(
       }
       const force = request.reason === "overflow" || request.projectionSaturated;
       const key = automaticCompactionKey(
-        session.provider.id,
-        session.model,
+        runtime.provider.id,
+        runtime.model,
         nodeId ?? prospectiveNodeId,
         checkpoint.length,
       );
@@ -151,9 +160,9 @@ export function turnWorkflow(
       if (!automaticCompaction.allows(attempt)) return undefined;
       let attempted = false;
       const result = await compactContext({
-        provider: session.provider,
-        model: session.model,
-        effort: session.config.effort,
+        provider: runtime.provider,
+        model: runtime.model,
+        effort: runtime.config.effort,
         context: projected,
         turn: checkpoint.slice(historyStart),
         nodeId: nodeId ?? prospectiveNodeId,
@@ -164,11 +173,11 @@ export function turnWorkflow(
         force,
         policy: request.policy,
         requestEnvelope: {
-          system: session.system,
+          system: runtime.system,
           tools: specs,
-          maxOutputTokens: session.config.maxTokens,
+          maxOutputTokens: runtime.config.maxTokens,
         },
-        requestIdentity: requestIdentityForSession(session),
+        requestIdentity,
         onBegin: () => {
           attempted = true;
           status("Compacting");
@@ -212,7 +221,7 @@ export function turnWorkflow(
     try {
       await runTurn(
         history,
-        controllerOptions(session, policy, turnTools, inbox),
+        requestOptions,
         events,
         activity.control.signal,
         modelHistory,
@@ -222,7 +231,7 @@ export function turnWorkflow(
       const completed = nodeId !== undefined && session.conversation.activeNodeId === nodeId &&
         session.conversation.activeNode?.settlement === "completed";
       if (completed) {
-        const notice = turnFailure(session, error as Error, interrupted);
+        const notice = turnFailure(runtime, error as Error, interrupted);
         feedback.show({ text: notice.text, tone: notice.tone, timeoutMs: 6_000 });
       } else {
         finishReason = interrupted ? "interrupted" : "failed";
@@ -235,7 +244,7 @@ export function turnWorkflow(
       try {
         events.finish(finishReason);
         if (failed !== undefined) {
-          const notice = turnFailure(session, failed.error, failed.interrupted);
+          const notice = turnFailure(runtime, failed.error, failed.interrupted);
           const settlement = failed.interrupted ? "interrupted" : "failed";
           const failure: TurnFailure = {
             text: notice.text,

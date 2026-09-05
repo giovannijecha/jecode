@@ -34,8 +34,8 @@ test("Ribbon uses a full-width selected dot band while writable prompts keep the
     assert.match(commands[0] ?? "", /^● \/help/);
     assert.match(commands[1] ?? "", /^  \/exit/);
     assert.equal(commands[0]?.length, 60, "the selected band fills the menu width");
-    assert.match(commands.slice(2).join("\n"), /show keyboard controls/);
-    assert.doesNotMatch(commands[0] ?? "", /show keyboard controls/);
+    assert.equal(commands.length, 2);
+    assert.doesNotMatch(commands.join("\n"), /show keyboard controls/);
 
     const settings = plain(picker.panel({
       title: [],
@@ -48,20 +48,20 @@ test("Ribbon uses a full-width selected dot band while writable prompts keep the
     const adjustable = plain(renderMenu([
       {
         label: "run_command",
-        description: "1 remembered",
+        hint: "1 remembered",
         value: "ask",
         adjustable: true,
         selected: true,
       },
     ], 60, STEEL, { maxRows: 6 }).rows);
     assert.match(adjustable[0] ?? "", /^● run_command.*‹ ask ›/);
-    assert.doesNotMatch(adjustable[0] ?? "", /remembered/);
-    assert.match(adjustable.slice(1).join("\n"), /1 remembered/);
+    assert.match(adjustable[0] ?? "", /1 remembered/);
+    assert.equal(adjustable.length, 1);
 
     const narrow = plain(renderMenuRows([
       {
         label: "run_command",
-        description: "1 remembered",
+        hint: "1 remembered",
         value: "deny",
         adjustable: true,
         selected: true,
@@ -111,22 +111,22 @@ test("Ribbon uses a full-width selected dot band while writable prompts keep the
   }
 });
 
-test("menu details reserve only the rows required by their content", async () => {
+test("menus use only choice rows when their labels and values fit", async () => {
   const { renderMenu } = await import("../src/tui/components/menu.ts");
-  for (const description of [undefined, "", "One line."]) {
-    const rows = plain(renderMenu([{ label: "Choice", description, selected: true }], 80, STEEL, { maxRows: 6 }).rows);
-    assert.equal(rows.length, description ? 2 : 1);
+  for (const value of [undefined, "", "One value"]) {
+    const rows = plain(renderMenu([{ label: "Choice", value, selected: true }], 80, STEEL, { maxRows: 6 }).rows);
+    assert.equal(rows.length, 1);
     assert.ok(rows.every((row) => row.trim() !== ""));
   }
 });
 
-test("wrapped details keep a stable height across visible and offscreen choices", async () => {
+test("clipped values remain readable without changing height across visible and offscreen choices", async () => {
   const { renderMenu } = await import("../src/tui/components/menu.ts");
   const { textWidth } = await import("../src/ui/width.ts");
   const entries = [
-    { label: "First", description: "One line." },
-    { label: "Second", description: "Another line." },
-    { label: "Last", description: "界".repeat(20) },
+    { label: "First", value: "Short" },
+    { label: "Second", value: "Other" },
+    { label: "Last", value: "界".repeat(20) },
   ];
   for (const width of [38, 80]) for (const selected of [0, 1, 2]) {
     const choices = entries.map((entry, index) => ({ ...entry, selected: index === selected }));
@@ -134,7 +134,7 @@ test("wrapped details keep a stable height across visible and offscreen choices"
     const rows = plain(rendered.rows);
     assert.equal(rows.length, width === 38 ? 4 : 3);
     assert.ok(rows.every((row) => textWidth(row) <= width));
-    if (selected === 2) assert.equal(rows.slice(2).join("").replace(/\s/gu, ""), entries[2]!.description);
+    if (selected === 2) assert.equal(rows.slice(2).join("").replace(/\s/gu, ""), entries[2]!.value);
     const measured = renderMenu(choices, width, undefined, { maxRows: 6, visible: 2 });
     assert.equal(measured.first, rendered.first);
     assert.equal(measured.last, rendered.last);

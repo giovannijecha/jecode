@@ -2,35 +2,26 @@
 
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
-import {
-  DEFAULT_COMPACTION_PERCENT,
-  MAX_COMPACTION_PERCENT,
-  MIN_COMPACTION_PERCENT,
-} from "./context/policy.ts";
 
 const HELP = `jecode — an owned coding agent for the terminal
 
 Usage:
   jecode [options]
-  jecode resume [--latest] [options]
+  jecode -c [options]
+  jecode resume [--last] [options]
 
 Options:
   --root <path>          workspace root (default: current directory)
-  --provider <id>        anthropic, openai, openai-codex, or ollama
-  --model <id>           model for the selected provider
-  --effort <level>       low, medium, high, xhigh, or max
-  --max-tokens <number>  output-token ceiling
-  --max-steps <number>   optional per-turn model-request budget
-  --compaction-percent <${MIN_COMPACTION_PERCENT}-${MAX_COMPACTION_PERCENT}>
-                          context usage that triggers compaction (default: ${DEFAULT_COMPACTION_PERCENT})
-  --reduced-motion       use a steady terminal cursor
-  --auto-approve         allow dangerous tools for this process
+  --reduced-motion       disable decorative motion and keep the cursor steady
   --ephemeral            do not save this conversation
-  --latest               resume the newest session without a picker
+  -c                     resume the newest session in this workspace
+  --last                 with resume, skip the session picker (same as -c)
   -h, --help             show this help
   -v, --version          show the installed version
 
-Inside Jecode, type / to discover interactive commands.`;
+Jecode requires an interactive terminal on stdin and stdout.
+Inside Jecode, use /models, /settings, and /permissions to configure your session.
+Type / to discover interactive commands.`;
 
 export async function showCliInfo(
   args: readonly string[],

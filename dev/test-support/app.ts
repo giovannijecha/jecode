@@ -38,7 +38,7 @@ export function session(from = provider()): Session {
       maxTokens: 4096,
       compactionPercent: 85,
       root: process.cwd(),
-      autoApprove: false,
+
       ephemeral: false,
     },
     provider: from,
@@ -49,10 +49,6 @@ export function session(from = provider()): Session {
     conversation: ConversationTree.empty(),
     usage: emptyUsage(),
   };
-}
-
-export async function* input(...lines: string[]): AsyncIterable<string> {
-  for (const line of lines) yield line;
 }
 
 export function messageText(message: Message | undefined): string {

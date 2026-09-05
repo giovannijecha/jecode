@@ -25,22 +25,38 @@ newer, on Windows, Ubuntu, and macOS. The supported startup forms are:
 
 ```text
 jecode [options]
-jecode resume [--latest] [options]
+jecode -c [options]
+jecode resume [--last] [options]
 ```
 
-The stable options are `--root`, `--provider`, `--model`,
-`--effort`, `--max-tokens`, `--max-steps`, `--compaction-percent`,
-`--reduced-motion`, `--auto-approve`, and `--ephemeral`, plus `-h`/`--help`
-and `-v`/`--version`. `--latest` is valid only with `resume`.
+The stable startup options are `--root`, `--reduced-motion`, and `--ephemeral`,
+plus `-h`/`--help` and `-v`/`--version`. `-c` is equivalent to `resume --last`;
+both resume the newest available conversation in the selected workspace without
+a picker.
+`--last` is valid only with `resume`. The pre-1.0 `--latest` spelling was
+replaced by `--last` and is rejected with guidance to use the new forms.
 
-Persistent configuration precedence remains command-line flag, environment
-variable, saved setting, then built-in default. `--max-steps` and
-`JECODE_MAX_STEPS` are an opt-in process budget: no limit applies by default,
-and no value is stored in settings. The stable environment names are
-`JECODE_PROVIDER`, `JECODE_MODEL`, `JECODE_EFFORT`,
-`JECODE_MAX_TOKENS`, `JECODE_MAX_STEPS`, `JECODE_COMPACTION_PERCENT`,
-`JECODE_REDUCED_MOTION`, `JECODE_AUTO_APPROVE`, and `JECODE_EPHEMERAL`.
-Provider credentials retain their documented environment names.
+All conversation launches require a terminal on both stdin and stdout. Other
+streams are rejected on stderr with a non-zero exit before configuration,
+provider selection, or session work. `--help` and `--version` remain available
+through pipes and redirection and finish before those checks. Batch execution
+was removed before 1.0.
+
+Provider, model, effort, output limits, and compaction preferences come from
+saved settings or built-in defaults and are changed through `/models`, `/effort`,
+and `/settings`. Reduced motion retains flag, environment, saved setting, then
+default precedence. Ephemeral mode retains flag, environment, then default
+precedence and is not saved. The supported preference environment names are
+`JECODE_REDUCED_MOTION` and `JECODE_EPHEMERAL`. `NO_COLOR` and provider credential
+environment names remain supported.
+
+The pre-1.0 `--provider`, `--model`, `--effort`, `--max-tokens`, `--max-steps`,
+`--compaction-percent`, and `--auto-approve` flags are rejected with removal
+guidance and the applicable TUI control. Their corresponding `JECODE_PROVIDER`,
+`JECODE_MODEL`, `JECODE_EFFORT`, `JECODE_MAX_TOKENS`, `JECODE_MAX_STEPS`,
+`JECODE_COMPACTION_PERCENT`, and `JECODE_AUTO_APPROVE` environment variables stop
+startup when nonempty; diagnostics identify the variable without echoing its
+value. There is no public model-request budget or automatic approval at launch.
 
 ### Interactive commands
 
@@ -51,6 +67,11 @@ and `/providers`.
 Their documented outcomes are stable. Menus, wording, spacing, colours, and
 other presentation details may improve without constituting a compatibility
 break.
+
+Menus remain available during a model turn. Model and context settings apply
+to the next turn; the current turn retains its request and checkpoint identity.
+Approvals temporarily take focus and then restore the open menu. Conversation
+reset, timeline selection, and manual compaction require a settled turn.
 
 ### Providers
 
@@ -82,17 +103,14 @@ The following behavioral guarantees are stable:
 - one model-facing controller owns the visible loop;
 - interactive guidance enters the active turn at a safe provider/tool boundary
   without replaying already-issued work or creating another controller;
-- ordinary turns have no arbitrary model-request ceiling; an explicit
-  `--max-steps` budget can constrain deterministic automation;
+- ordinary turns have no arbitrary model-request ceiling;
 - historical tool calls are never replayed during resume or branching;
-- dangerous tools require the applicable permission unless launch policy
-  explicitly allows them;
+- dangerous tools ask by default and require the applicable approval or session
+  permission; session policies remain mutable and `/new` resets them;
 - interruption settles or rolls back foreground work at its documented commit
   boundary;
 - automatic and manual compaction change only model-facing context, not the
-  canonical conversation, transcript, export, or tree;
-- batch mode remains stateless, line-oriented, and non-zero on terminal
-  failure.
+  canonical conversation, transcript, export, or tree.
 
 Tool schemas may gain optional fields during 1.x. Removing a tool, renaming a
 required field, or weakening its workspace and permission boundary is a
@@ -106,6 +124,9 @@ User data remains under `~/.jecode`:
 - `credentials.json` stores explicitly saved API keys;
 - `accounts.json` stores ChatGPT OAuth accounts;
 - `sessions/` stores workspace-scoped durable conversations.
+
+The TUI-only startup change does not alter saved settings or session schemas
+and requires no data migration.
 
 These files are implementation-owned. Use Jecode's controls for ordinary changes;
 manual edits are reserved for explicit migration or recovery instructions, such
@@ -129,11 +150,11 @@ The resume catalogue refuses to scan a workspace store containing more than
 
 ### Terminal interaction
 
-The interactive UI requires a TTY with UTF-8 text, ANSI cursor control, an
-alternate screen, and bracketed paste support. Non-interactive streams use
-batch mode. `NO_COLOR` disables semantic colour, and `--reduced-motion` avoids
-tool-state and evidence animations and keeps the input cursor steady. Provider
-text continues to stream in either mode.
+The interactive UI requires a TTY on both stdin and stdout with UTF-8 text,
+ANSI cursor control, an alternate screen, and bracketed paste support.
+`NO_COLOR` disables semantic colour, and `--reduced-motion` avoids tool-state
+and evidence animations and keeps the input cursor steady. Provider text
+continues to stream with either accessibility setting.
 
 Keyboard actions documented in the [user guide](USAGE.md#keyboard-controls)
 remain supported. Exact glyphs, palette values, line wrapping, and component

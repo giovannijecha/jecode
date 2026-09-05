@@ -242,9 +242,9 @@ export const commandApproval = {
 
 export const modelQuery = "cla";
 export const modelChoices = [
-  { label: "claude-sonnet-5", hint: "balanced" },
-  { label: "claude-opus-5", hint: "deep" },
-  { label: "claude-haiku-4.5", hint: "fast" },
-  { label: "gpt-5.4", hint: providerLabel("openai") },
-  { label: "kimi-k2.7-code", hint: providerLabel("ollama") },
+  { label: "claude-sonnet-5", value: providerLabel("anthropic") },
+  { label: "claude-opus-5", value: providerLabel("anthropic") },
+  { label: "claude-haiku-4.5", value: providerLabel("anthropic") },
+  { label: "gpt-5.4", value: `${providerLabel("openai")} · billed usage` },
+  { label: "kimi-k2.7-code", value: providerLabel("ollama") },
 ];

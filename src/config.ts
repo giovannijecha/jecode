@@ -1,4 +1,4 @@
-// Runtime configuration: flags, environment, saved defaults, built-ins.
+// Saved runtime settings with a small set of process-only launch options.
 
 import * as path from "node:path";
 import {
@@ -16,48 +16,45 @@ export type Config = {
   reducedMotion: boolean;
   effort: string;
   maxTokens: number;
-  /** Optional process-only model-request budget for deterministic automation. */
-  maxModelRequests?: number;
   compactionPercent: number;
   root: string;
-  autoApprove: boolean;
   ephemeral: boolean;
 };
 
-const VALUE_FLAGS = [
-  "provider",
-  "model",
-  "effort",
-  "max-tokens",
-  "max-steps",
-  "compaction-percent",
-  "root",
-] as const;
+const VALUE_FLAGS = ["root"] as const;
 const BOOLEAN_FLAGS = [
   "reduced-motion",
-  "auto-approve",
   "ephemeral",
 ] as const;
 const FLAGS: readonly string[] = [...VALUE_FLAGS, ...BOOLEAN_FLAGS];
+const RETIRED_FLAGS: Readonly<Record<string, string>> = {
+  provider: "/models",
+  model: "/models",
+  effort: "/effort",
+  "max-tokens": "/settings",
+  "compaction-percent": "/settings",
+  "auto-approve": "/permissions",
+  "max-steps": "",
+};
 
 export function loadConfig(argv: string[], saved: SavedSettings = readSettings()): Config {
   const flags = parseFlags(argv);
+  for (const [name, command] of Object.entries(RETIRED_FLAGS)) {
+    const variable = `JECODE_${name.toUpperCase().replaceAll("-", "_")}`;
+    if (process.env[variable] !== undefined && process.env[variable] !== "") {
+      throw new Error(`${variable} is no longer supported; remove it${replacement(command)}`);
+    }
+  }
   assertRetiredOllamaSettings(saved);
 
-  const providerId = pick(flags.provider, process.env.JECODE_PROVIDER, saved.provider ?? "anthropic");
-  const effort = pick(flags.effort, process.env.JECODE_EFFORT, saved.effort ?? "high");
+  const providerId = saved.provider ?? "anthropic";
+  const effort = saved.effort ?? "high";
   if (!(EFFORTS as readonly string[]).includes(effort)) {
     throw new Error(`unknown effort "${effort}" (expected one of: ${EFFORTS.join(", ")})`);
   }
-  const maxModelRequests = optional(
-    flags["max-steps"],
-    process.env.JECODE_MAX_STEPS,
-    undefined,
-  );
-
   return {
     providerId,
-    model: pick(flags.model, process.env.JECODE_MODEL, saved.models?.[providerId] ?? ""),
+    model: saved.models?.[providerId] ?? "",
     reducedMotion: bool(
       flags["reduced-motion"],
       process.env.JECODE_REDUCED_MOTION,
@@ -66,22 +63,9 @@ export function loadConfig(argv: string[], saved: SavedSettings = readSettings()
     effort,
     // This is a ceiling, not a target. Request budgeting may lower it to fit
     // the selected model, while provider rate and billing limits still apply.
-    maxTokens: toInt(
-      pick(flags["max-tokens"], process.env.JECODE_MAX_TOKENS, String(saved.maxTokens ?? 64000)),
-      "max-tokens",
-    ),
-    ...(maxModelRequests === undefined
-      ? {}
-      : { maxModelRequests: toInt(maxModelRequests, "max-steps") }),
-    compactionPercent: toPercent(
-      pick(
-        flags["compaction-percent"],
-        process.env.JECODE_COMPACTION_PERCENT,
-        String(saved.compactionPercent ?? DEFAULT_COMPACTION_PERCENT),
-      ),
-    ),
-    root: path.resolve(pick(flags.root, undefined, process.cwd())),
-    autoApprove: autoApproval(flags["auto-approve"], process.env.JECODE_AUTO_APPROVE),
+    maxTokens: toInt(saved.maxTokens ?? 64000, "max output tokens"),
+    compactionPercent: toPercent(saved.compactionPercent ?? DEFAULT_COMPACTION_PERCENT),
+    root: path.resolve(flags.root ?? process.cwd()),
     ephemeral: bool(flags.ephemeral, process.env.JECODE_EPHEMERAL, false),
   };
 }
@@ -102,44 +86,25 @@ function bool(flag: string | undefined, env: string | undefined, fallback: boole
   return fallback;
 }
 
-function autoApproval(flag: string | undefined, env: string | undefined): boolean {
-  if (flag !== undefined) return flag === "true" || flag === "1";
-  return env === "1";
+function replacement(command: string): string {
+  return command === "" ? "; interactive turns have no request limit" : ` and use ${command} in the TUI`;
 }
 
-function pick(flag: string | undefined, env: string | undefined, fallback: string): string {
-  if (flag !== undefined && flag !== "") return flag;
-  if (env !== undefined && env !== "") return env;
-  return fallback;
-}
-
-function optional(
-  flag: string | undefined,
-  env: string | undefined,
-  fallback: string | undefined,
-): string | undefined {
-  if (flag !== undefined && flag !== "") return flag;
-  if (env !== undefined && env !== "") return env;
-  return fallback;
-}
-
-function toInt(value: string, name: string): number {
-  const n = Number(value);
-  if (!Number.isSafeInteger(n) || n <= 0) {
-    throw new Error(`--${name} must be a positive safe integer`);
+function toInt(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} in /settings must be a positive safe integer`);
   }
-  return n;
+  return value;
 }
 
-function toPercent(value: string): number {
-  const percent = Number(value);
+function toPercent(percent: number): number {
   if (
     !Number.isSafeInteger(percent) ||
     percent < MIN_COMPACTION_PERCENT ||
     percent > MAX_COMPACTION_PERCENT
   ) {
     throw new Error(
-      `--compaction-percent must be an integer from ${MIN_COMPACTION_PERCENT} to ${MAX_COMPACTION_PERCENT}`,
+      `context compaction in /settings must be an integer from ${MIN_COMPACTION_PERCENT} to ${MAX_COMPACTION_PERCENT}`,
     );
   }
   return percent;
@@ -162,6 +127,9 @@ function parseFlags(argv: string[]): Record<string, string> {
     const inline = eq === -1 ? undefined : body.slice(eq + 1);
     if (name === "ollama-host") {
       throw new Error("--ollama-host is no longer supported; remove it to use Ollama API at https://ollama.com");
+    }
+    if (Object.hasOwn(RETIRED_FLAGS, name)) {
+      throw new Error(`--${name} is no longer supported; remove it${replacement(RETIRED_FLAGS[name] as string)}`);
     }
     if (!FLAGS.includes(name)) {
       throw new Error(`unknown flag --${name} (known: ${FLAGS.map((flag) => `--${flag}`).join(", ")})`);

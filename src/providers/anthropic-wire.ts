@@ -59,7 +59,7 @@ export function stopNotice(data: AnthropicResponse): string | undefined {
     return `[refused: ${category}] ${why}`;
   }
   if (data.stop_reason === "max_tokens") {
-    return "[truncated: hit max_tokens — raise --max-tokens]";
+    return "[truncated: hit max_tokens — raise max output tokens in /settings]";
   }
   return undefined;
 }

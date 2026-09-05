@@ -1,12 +1,14 @@
 # Development environments
 
 This directory contains reproducible environments for developing and measuring
-Jecode. The active interface work lives in [`tui/`](tui/README.md); another
-environment can be added when an explicit product task needs it.
+Jecode. Interactive terminal work lives in [`tui/`](tui/README.md), and browser
+sign-in pages live in [`web/`](web/README.md). Add another environment only when
+an explicit product task needs it.
 
 | Location | Responsibility |
 | --- | --- |
 | [`tui/`](tui/README.md) | Production TUI previews, inert scenarios, interaction checks, and fixture playback. |
+| [`web/`](web/README.md) | Production browser sign-in pages with inert success and failure states. |
 | [`tui/DIRECTION.md`](tui/DIRECTION.md) | Current TUI direction and the reasons behind choices still in use. |
 | [`tui/experiments/`](tui/experiments/README.md) | Temporary investigations with a question, comparable evidence, and an exit condition. |
 | [`benchmarks/`](benchmarks/README.md) | Manual probes for context, redaction, workspace search, sessions, and transcript rendering. |

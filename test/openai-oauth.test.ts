@@ -43,9 +43,11 @@ test("browser sign-in uses PKCE, verifies state, and returns one ChatGPT account
     const rendered = await page;
     assert.equal(rendered.status, 200);
     assert.equal(rendered.connection, "close");
-    assert.match(rendered.body, /Signed in to Jecode/);
+    assert.match(rendered.body, /<h1>You're signed in<\/h1>/);
+    assert.match(rendered.body, /Return to your terminal\. You can close this tab\./);
     assert.match(rendered.body, /data:image\/png;base64,/);
     assert.match(rendered.body, /history\.replaceState/);
+    assert.doesNotMatch(rendered.body, /authorization-code|access-one|refresh-one/);
     assert.equal(account.accessToken, accessToken("access-one"));
     assert.equal(account.refreshToken, "refresh-one");
     assert.equal(account.accountId, "account-1");
@@ -147,7 +149,11 @@ test("browser rejection details end on a complete grapheme", async () => {
       assert.equal(error.message.isWellFormed(), true);
       return true;
     });
-    assert.equal((await page).status, 400);
+    const rendered = await page;
+    assert.equal(rendered.status, 400);
+    assert.match(rendered.body, /<h1>Sign-in failed<\/h1>/);
+    assert.match(rendered.body, /Return to your terminal to try again\./);
+    assert.doesNotMatch(rendered.body, new RegExp(prefix));
   } finally {
     await login.close();
   }

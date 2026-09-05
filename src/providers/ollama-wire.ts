@@ -123,6 +123,6 @@ function normalizeUsage(reply: ChatReply): Usage | undefined {
 
 export function stopNotice(reply: ChatReply): string | undefined {
   return reply.finishReason === "length"
-    ? "[truncated: hit the output limit — raise --max-tokens]"
+    ? "[truncated: hit the output limit — raise max output tokens in /settings]"
     : undefined;
 }

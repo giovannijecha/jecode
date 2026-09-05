@@ -26,9 +26,9 @@ export type Emit = (notice: NoticeBlock) => void;
 /**
  * What a command has to work with.
  *
- * `choose` and `status` are optional because the batch path has no screen to
- * put a menu on. A command that needs one says so and stops, which is better
- * than every caller having to invent an answer to a question it cannot ask.
+ * Hosts expose the interactions they support. Focused tests and development
+ * previews can omit capabilities; commands report an unavailable interaction
+ * instead of inventing a response.
  */
 export type Host = {
   emit: Emit;
@@ -55,7 +55,7 @@ export type Host = {
   compact?(): Promise<CompactCommandResult>;
 };
 
-export type Command = { name: string; blurb: string };
+export type Command = { name: string; blurb: string; idleOnly?: boolean };
 
 /**
  * The commands, declared once.
@@ -67,16 +67,21 @@ export type Command = { name: string; blurb: string };
 export const COMMANDS: readonly Command[] = [
   { name: "help", blurb: "show keyboard controls" },
   { name: "exit", blurb: "exit and restore the terminal" },
-  { name: "new", blurb: "start clean and reset tool permissions" },
+  { name: "new", blurb: "start clean and reset tool permissions", idleOnly: true },
   { name: "export", blurb: "save this transcript as Markdown" },
-  { name: "timeline", blurb: "navigate this conversation tree" },
-  { name: "compact", blurb: "compact the active context now" },
+  { name: "timeline", blurb: "navigate this conversation tree", idleOnly: true },
+  { name: "compact", blurb: "compact the active context now", idleOnly: true },
   { name: "permissions", blurb: "manage session tool access" },
   { name: "settings", blurb: "change and save jecode defaults" },
   { name: "effort", blurb: "set the reasoning effort" },
   { name: "models", blurb: "choose from every available provider" },
   { name: "providers", blurb: "manage provider access and connections" },
 ];
+
+export function commandNeedsIdle(line: string): boolean {
+  const name = line.slice(1).trim().split(/\s+/)[0];
+  return COMMANDS.some((command) => command.name === name && command.idleOnly === true);
+}
 
 export async function handleCommand(
   line: string,

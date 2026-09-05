@@ -4,11 +4,11 @@ import type { Picker } from "../src/tui/picker.ts";
 import { handleCommand } from "../src/commands.ts";
 import { builtinTools } from "../src/tools/index.ts";
 import { sessionPermissions } from "../src/permissions.ts";
-import { provider, session, host, texts } from "../dev/test-support/commands.ts";
+import { provider, session, host } from "../dev/test-support/commands.ts";
 
 test("permissions always opens the tool control plane without footer noise", async () => {
   const screen = host(undefined);
-  screen.permissions = sessionPermissions(builtinTools(), false);
+  screen.permissions = sessionPermissions(builtinTools());
 
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
@@ -24,12 +24,14 @@ test("permissions always opens the tool control plane without footer noise", asy
   assert.deepEqual(screen.pickers[0]?.title, []);
   assert.equal(screen.pickers[0]?.description, undefined);
   assert.equal(screen.pickers[0]?.visible, 7);
+  assert.ok(screen.pickers[0]?.options.every((option) => option.adjustable === true));
+  assert.equal(screen.pickers[0]?.options[0]?.hint, "read only");
   assert.deepEqual(screen.blocks, []);
 });
 
 test("enter on a tool without remembered approvals keeps the control plane open", async () => {
   const screen = host(0, undefined);
-  screen.permissions = sessionPermissions(builtinTools(), false);
+  screen.permissions = sessionPermissions(builtinTools());
 
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
@@ -41,7 +43,7 @@ test("enter on a tool without remembered approvals keeps the control plane open"
 
 test("permissions changes one dangerous tool inline for the session", async () => {
   const screen = host();
-  const control = sessionPermissions(builtinTools(), false);
+  const control = sessionPermissions(builtinTools());
   screen.permissions = control;
   let changed: Picker | undefined;
   screen.choose = (picker) => {
@@ -60,19 +62,20 @@ test("permissions changes one dangerous tool inline for the session", async () =
 
 test("enter reviews and revokes a remembered approval", async () => {
   const screen = host(6, 0, undefined);
-  const control = sessionPermissions(builtinTools(), false);
+  const control = sessionPermissions(builtinTools());
   control.remember({ kind: "tool_call", id: "1", name: "run_command", input: { command: "npm test" } });
   screen.permissions = control;
 
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
+  assert.equal(screen.pickers[0]?.options[6]?.hint, "1 remembered");
   assert.deepEqual(control.listGrants("run_command"), []);
   assert.deepEqual(screen.blocks, []);
 });
 
 test("permissions can hide a read-only tool from later turns", async () => {
   const screen = host();
-  const control = sessionPermissions(builtinTools(), false);
+  const control = sessionPermissions(builtinTools());
   screen.permissions = control;
   screen.choose = (picker) => {
     screen.pickers.push(picker);
@@ -88,7 +91,7 @@ test("permissions can hide a read-only tool from later turns", async () => {
 
 test("permissions can revoke every remembered approval for one tool", async () => {
   const screen = host(6, 2, undefined);
-  const control = sessionPermissions(builtinTools(), false);
+  const control = sessionPermissions(builtinTools());
   control.remember({ kind: "tool_call", id: "1", name: "run_command", input: { command: "npm test" } });
   control.remember({ kind: "tool_call", id: "2", name: "run_command", input: { command: "npm run check" } });
   screen.permissions = control;
@@ -96,15 +99,4 @@ test("permissions can revoke every remembered approval for one tool", async () =
   await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
 
   assert.deepEqual(control.listGrants("run_command"), []);
-});
-
-test("permissions keeps a launch-time auto-approve override locked inline", async () => {
-  const screen = host(6, undefined);
-  screen.permissions = sessionPermissions(builtinTools(), true);
-
-  await handleCommand("/permissions", session(provider("fake", ["a"])), screen);
-
-  assert.equal(screen.pickers[0]?.options[6]?.value, "allow · locked");
-  assert.equal(screen.pickers[0]?.options[6]?.adjustable, false);
-  assert.match(texts(screen.blocks)[0] ?? "", /restart without --auto-approve/);
 });

@@ -22,7 +22,6 @@ export type PermissionTool = {
   dangerous: boolean;
   mode: PermissionMode;
   remembered: number;
-  locked: boolean;
 };
 
 export type SessionPermissions = {
@@ -33,6 +32,8 @@ export type SessionPermissions = {
   revokeTool(tool: string): void;
   reset(): void;
   availableTools(): Tool[];
+  /** Recheck revocation before a previously advertised call starts. */
+  allowed(call: ToolCallBlock): boolean;
   approved(call: ToolCallBlock): boolean;
   remember(call: ToolCallBlock): void;
 };
@@ -40,7 +41,6 @@ export type SessionPermissions = {
 /** One permission control plane for one interactive process. */
 export function sessionPermissions(
   tools: readonly Tool[],
-  autoApprove: boolean,
 ): SessionPermissions {
   const catalogue = [...tools];
   const byName = new Map(catalogue.map((tool) => [tool.name, tool]));
@@ -49,9 +49,6 @@ export function sessionPermissions(
 
   const configured = (tool: Tool): PermissionMode =>
     modes.get(tool.name) ?? defaultMode(tool);
-
-  const effective = (tool: Tool): PermissionMode =>
-    autoApprove && tool.dangerous ? "allow" : configured(tool);
 
   const revokeTool = (name: string): void => {
     for (const [key, grant] of grants) {
@@ -64,15 +61,14 @@ export function sessionPermissions(
       return catalogue.map((tool) => ({
         name: tool.name,
         dangerous: tool.dangerous,
-        mode: effective(tool),
+        mode: configured(tool),
         remembered: [...grants.values()].filter((grant) => grant.tools.includes(tool.name)).length,
-        locked: autoApprove && tool.dangerous,
       }));
     },
 
     set(name, mode) {
       const tool = byName.get(name);
-      if (tool === undefined || (autoApprove && tool.dangerous)) return false;
+      if (tool === undefined) return false;
       if (!tool.dangerous && mode === "ask") return false;
       if (configured(tool) === mode) return true;
 
@@ -98,13 +94,18 @@ export function sessionPermissions(
     },
 
     availableTools() {
-      return catalogue.filter((tool) => effective(tool) !== "deny");
+      return catalogue.filter((tool) => configured(tool) !== "deny");
+    },
+
+    allowed(call) {
+      const tool = byName.get(call.name);
+      return tool !== undefined && configured(tool) !== "deny";
     },
 
     approved(call) {
       const tool = byName.get(call.name);
       if (tool === undefined) return false;
-      const mode = effective(tool);
+      const mode = configured(tool);
       if (mode === "allow") return true;
       if (mode === "deny") return false;
       return grants.has(scopeFor(call).key);
@@ -112,7 +113,7 @@ export function sessionPermissions(
 
     remember(call) {
       const tool = byName.get(call.name);
-      if (tool === undefined || effective(tool) !== "ask") return;
+      if (tool === undefined || configured(tool) !== "ask") return;
       const scope = scopeFor(call);
       grants.set(scope.key, { key: scope.key, tools: grantTools(call), label: scope.summary });
     },

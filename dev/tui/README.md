@@ -14,9 +14,11 @@ The fixture is synthetic; `n` opens its next paused evidence sample.
 The accepted Ribbon menus also use the production renderer. Run
 `npm run tui:lab -- --scene menu-workflow --time 4000 --paused` to inspect an
 edit approval; `n` cycles eight interaction samples. The selected choice uses
-a `●` marker and a subtle focus band in colour. Descriptions and clipped
-content get a stable detail area sized to the longest detail in the current
-menu, up to two rows. One-line details reserve one row; simple lists need none.
+a `●` marker and a subtle focus band in colour. Labels, values, and remembered
+permission counts stay on their choice rows, without explanatory descriptions
+below them. Clipped identity or values get up to two stable overflow rows at
+narrow widths; menus whose content fits need no extra rows. Model samples use
+the same title-free search and provider-route values as the production picker.
 
 ## Run and capture
 

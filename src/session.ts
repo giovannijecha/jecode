@@ -19,7 +19,7 @@ export type Session = {
   system: string;
   conversation: ConversationTree;
   usage: UsageTotals;
-  /** Absent in batch mode and when --ephemeral was requested. */
+  /** Absent when --ephemeral was requested. */
   persistence?: SessionPersistence;
   /** Present only for an unresolved `jecode resume` selector. */
   resume?: {

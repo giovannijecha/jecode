@@ -41,9 +41,9 @@ test("the permissions preview uses production dangerous modes and clears related
   const lab = permissionsLab();
   try {
     const option = (name: string) => picker(lab).options.find((item) => item.label === name);
-    assert.equal(option("edit_file")?.description, "2 remembered");
-    assert.equal(option("write_file")?.description, "2 remembered");
-    assert.equal(option("run_command")?.description, "1 remembered");
+    assert.equal(option("edit_file")?.hint, "2 remembered");
+    assert.equal(option("write_file")?.hint, "2 remembered");
+    assert.equal(option("run_command")?.hint, "1 remembered");
 
     select(lab, "edit_file");
     for (const [key, expected] of [["right", "allow"], ["right", "deny"], ["right", "ask"], ["left", "deny"]] as const) {
@@ -51,9 +51,9 @@ test("the permissions preview uses production dangerous modes and clears related
       assert.equal(picker(lab).options[picker(lab).index]?.label, "edit_file");
       assert.equal(option("edit_file")?.value, expected);
     }
-    assert.equal(option("edit_file")?.description, undefined);
-    assert.equal(option("write_file")?.description, undefined);
-    assert.equal(option("run_command")?.description, "1 remembered");
+    assert.equal(option("edit_file")?.hint, undefined);
+    assert.equal(option("write_file")?.hint, undefined);
+    assert.equal(option("run_command")?.hint, "1 remembered");
   } finally {
     lab.close();
   }
@@ -71,7 +71,7 @@ test("permission changes stay local to one preview and reset with the scene", ()
     assert.equal(first.view().modal, undefined);
     first.restart();
     assert.equal(picker(first).options[0]?.value, "allow");
-    assert.equal(picker(first).options.find((option) => option.label === "edit_file")?.description, "2 remembered");
+    assert.equal(picker(first).options.find((option) => option.label === "edit_file")?.hint, "2 remembered");
   } finally {
     first.close();
     second.close();

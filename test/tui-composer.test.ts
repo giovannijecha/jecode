@@ -86,8 +86,8 @@ test("command suggestions stay between the composer's two rails", () => {
   assert.equal(rows[input - 1], "─".repeat(80));
   assert.match(rows[input] ?? "", new RegExp(`^/.*1–${visible} / ${COMMANDS.length}$`));
   assert.equal(first, input + 1);
-  assert.ok(rows[last + 1]?.includes(COMMANDS[0]!.blurb));
-  assert.equal(rows[last + 2], "─".repeat(80), "one-line details leave no empty row before the lower rail");
+  assert.ok(rows.every((line) => !line.includes(COMMANDS[0]!.blurb)));
+  assert.equal(rows[last + 1], "─".repeat(80), "choices touch the lower rail without a description or empty row");
   assert.match(rows[first] ?? "", /^● \/help/);
 });
 

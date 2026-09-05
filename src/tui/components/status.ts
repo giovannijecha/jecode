@@ -4,6 +4,7 @@ import type { Feedback } from "../feedback.ts";
 
 export type StatusInfo = {
   status: string | undefined;
+  interruptible?: boolean;
   steering?: number;
   feedback: Feedback | undefined;
   readiness: Feedback | undefined;
@@ -30,7 +31,7 @@ export function renderStatus(info: StatusInfo, pal: Palette): Seg[] {
         ];
     return withUnseen([
       ...active,
-      { text: " · esc to interrupt", fg: pal.ink.dim, optional: true },
+      ...(info.interruptible === false ? [] : [{ text: " · esc to interrupt", fg: pal.ink.dim, optional: true }]),
     ], info.unseen, pal);
   }
   if (info.feedback !== undefined) {

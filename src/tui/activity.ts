@@ -1,4 +1,4 @@
-// One foreground operation owns cancellation and elapsed time.
+// Each turn or command owns its cancellation and elapsed time.
 
 export type ActivityKind = "turn" | "command";
 

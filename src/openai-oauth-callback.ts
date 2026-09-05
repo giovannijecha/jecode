@@ -1,11 +1,11 @@
 // Loopback callback used by the browser OAuth flow.
 
 import { timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { leadingText } from "./text-boundary.ts";
 import { providerLabel } from "./provider-label.ts";
+import { oauthResultPage } from "./oauth-result-page.ts";
 
 const ACCOUNT_LABEL = providerLabel("openai-codex");
 const CALLBACK_PORTS = [1455, 1457] as const;
@@ -91,7 +91,7 @@ export async function openAICallback(state: string): Promise<OpenAICallback> {
         "referrer-policy": "no-referrer",
         "x-content-type-options": "nosniff",
       });
-      response.end(resultPage(success));
+      response.end(oauthResultPage(success));
       await flushed;
     },
     close: () => closeServer(listening.server),
@@ -150,57 +150,6 @@ function closeServer(server: Server): Promise<void> {
     server.close(finish);
     server.closeIdleConnections();
   });
-}
-
-function resultPage(success: boolean): string {
-  const title = success ? "Signed in to Jecode" : "Jecode sign-in failed";
-  const status = success ? "Authentication complete" : "Authentication stopped";
-  const detail = success
-    ? "Return to your terminal. Jecode will continue automatically."
-    : "Return to your terminal to see what stopped the connection.";
-  const state = success ? "success" : "failure";
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>${title}</title>
-  <style>
-    :root{--night:#000;--steel:#669bd2;--steel-soft:#8db4dd;--bright:#ebeff4;--danger:#e87070}
-    *{box-sizing:border-box}
-    body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--night);color:var(--steel-soft);font-family:"Segoe UI",system-ui,sans-serif}
-    main{width:min(34rem,calc(100vw - 3rem));padding:3rem 1.5rem;text-align:center}
-    img{display:block;width:clamp(7.5rem,20vw,10rem);height:auto;margin:0 auto 1.75rem;filter:drop-shadow(0 1.25rem 2rem rgba(102,155,210,.16))}
-    .rail{width:min(18rem,70vw);height:1px;margin:0 auto 1.5rem;background:linear-gradient(90deg,transparent,var(--steel),transparent)}
-    .status{margin:0 0 .75rem;color:var(--steel);font:600 .72rem/1.2 ui-monospace,"Cascadia Mono",monospace;letter-spacing:.14em;text-transform:uppercase}
-    h1{margin:0;color:var(--steel);font-size:clamp(2rem,6vw,3.25rem);font-weight:720;letter-spacing:-.04em;line-height:1.05}
-    p:last-of-type{max-width:30rem;margin:1.25rem auto 0;color:var(--steel-soft);font-size:1.05rem;line-height:1.6}
-    .failure h1,.failure .status{color:var(--danger)}
-    @media (prefers-reduced-motion:no-preference){main{animation:arrive .45s ease-out both}@keyframes arrive{from{opacity:0;transform:translateY(.6rem)}to{opacity:1;transform:none}}}
-  </style>
-</head>
-<body>
-  <main class="${state}">
-    <img src="${mascotDataUri()}" alt="Jeco, the Jecode gecko">
-    <div class="rail" aria-hidden="true"></div>
-    <p class="status">${status}</p>
-    <h1>${title}</h1>
-    <p>${detail}</p>
-  </main>
-  <script>history.replaceState(null,"","/auth/complete")</script>
-</body>
-</html>`;
-}
-
-let mascot: string | undefined;
-
-function mascotDataUri(): string {
-  if (mascot === undefined) {
-    const file = new URL("../assets/jeco-256.png", import.meta.url);
-    mascot = `data:image/png;base64,${readFileSync(file).toString("base64")}`;
-  }
-  return mascot;
 }
 
 function sameState(expected: string, received: string | null): boolean {

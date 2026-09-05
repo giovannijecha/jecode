@@ -181,8 +181,8 @@ test("an interrupted turn agrees across screen, export, resume, and the next req
   }
 });
 
-test("a max-steps failure stays actionable, durable, and recoverable", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "jecode-max-steps-turn-"));
+test("a provider failure after tool results stays actionable, durable, and recoverable", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jecode-tool-failure-turn-"));
   const workspace = path.join(root, "workspace");
   const sessions = path.join(root, "sessions");
   await mkdir(workspace);
@@ -192,12 +192,13 @@ test("a max-steps failure stays actionable, durable, and recoverable", async () 
     send(request): Promise<Message> {
       requests.push(structuredClone(request.messages));
       if (messageText(request.messages.at(-1)) === "continue") {
-        request.onStream?.({ kind: "text", text: "Recovered after the budget." });
+        request.onStream?.({ kind: "text", text: "Recovered after the provider failure." });
         return Promise.resolve({
           role: "assistant",
-          content: [{ kind: "text", text: "Recovered after the budget." }],
+          content: [{ kind: "text", text: "Recovered after the provider failure." }],
         });
       }
+      if (requests.length === 3) return Promise.reject(new Error("provider stopped after tool results"));
       return Promise.resolve({
         role: "assistant",
         content: [{
@@ -214,7 +215,6 @@ test("a max-steps failure stays actionable, durable, and recoverable", async () 
     const store = await DurableSessionStore.open(workspace, sessions);
     const current = session(looping);
     current.config.root = workspace;
-    current.config.maxModelRequests = 2;
     current.persistence = SessionPersistence.fresh(store);
     const harness = virtualScreen(120);
     const running = runApp(current, workspace, harness.environment);
@@ -223,37 +223,37 @@ test("a max-steps failure stays actionable, durable, and recoverable", async () 
     feed("loop\r");
     await waitFor(
       () => current.conversation.activeNode?.settlement === "failed",
-      "durable max-steps failure",
+      "durable provider failure",
     );
     await waitFor(
       () => harness.frames.flat().join("\n").includes(
-        "stopped after 2 model requests (--max-steps limit reached)",
+        "provider stopped after tool results",
       ),
-      "painted max-steps failure",
+      "painted provider failure",
     );
     const sessionId = current.persistence.sessionId;
     assert.ok(sessionId !== null);
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     assert.match(
       harness.frames.flat().join("\n"),
-      /stopped after 2 model requests \(--max-steps limit reached\)/,
+      /provider stopped after tool results/,
     );
     assert.match(
       current.conversation.activeNode?.failure?.text ?? "",
-      /--max-steps limit reached/,
+      /provider stopped after tool results/,
     );
 
     feed("continue\r");
     await waitFor(
       () => current.conversation.activeNode?.settlement === "completed",
-      "turn after max-steps failure",
+      "turn after provider failure",
     );
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 4);
     assert.equal(current.conversation.nodes.length, 2);
     assert.equal(current.conversation.node(1)?.settlement, "failed");
     assert.equal(current.conversation.node(2)?.settlement, "completed");
-    assert.match(JSON.stringify(requests[2]), /failed before completion/);
-    assert.match(JSON.stringify(requests[2]), /continue/);
+    assert.match(JSON.stringify(requests[3]), /failed before completion/);
+    assert.match(JSON.stringify(requests[3]), /continue/);
 
     feed("/exit\r");
     await running;
@@ -261,7 +261,7 @@ test("a max-steps failure stays actionable, durable, and recoverable", async () 
     assert.equal(resumed.conversation.nodes.length, 2);
     assert.equal(resumed.conversation.node(1)?.settlement, "failed");
     assert.equal(resumed.conversation.node(2)?.settlement, "completed");
-    assert.match(JSON.stringify(resumed.conversation.transcript), /--max-steps limit reached/);
+    assert.match(JSON.stringify(resumed.conversation.transcript), /provider stopped after tool results/);
     await resumed.persistence.close();
   } finally {
     await rm(root, { recursive: true, force: true });

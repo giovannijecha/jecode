@@ -20,8 +20,9 @@ Jecode keeps its built-in filesystem tools inside the selected workspace, asks
 before dangerous actions by default, and redacts credentials it recognizes.
 
 Jecode is not an operating-system sandbox. A shell command you approve can
-access the same files and accounts as your user. Review commands carefully and
-use `--auto-approve` only in controlled environments.
+access the same files and accounts as your user. Review commands and remembered
+approval scopes carefully. `/permissions` lets you change session tool policies
+and revoke remembered approvals; `/new` restores their defaults.
 
 See the [safety model](docs/USAGE.md#understand-the-safety-model) for the detailed
 technical boundaries.

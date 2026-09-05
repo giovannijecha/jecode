@@ -26,7 +26,6 @@ export function controllerOptions(
     contextPolicy,
     effort: session.config.effort,
     requestIdentity: requestIdentityForSession(session),
-    maxModelRequests: session.config.maxModelRequests,
     toolContext: { root: session.config.root },
     ...(steering === undefined ? {} : { steering }),
   };

@@ -37,6 +37,8 @@ export type ContextRequest = Readonly<{
 export type ControllerOptions = {
   provider: Provider;
   tools: Tool[];
+  /** Live session access check for calls already advertised to the model. */
+  toolAllowed?(call: ToolCallBlock): boolean;
   model: string;
   system: string;
   maxTokens: number;
@@ -45,7 +47,7 @@ export type ControllerOptions = {
   effort: string;
   /** Stable for this logical conversation; providers may use it for cache routing. */
   requestIdentity?: import("./types.ts").ConversationRequestIdentity;
-  /** Stop after this many model requests when an explicit launch budget is set. */
+  /** Explicit budget for internal callers and fixtures; interactive turns leave it unset. */
   maxModelRequests?: number;
   toolContext: ToolContext;
   /** Cooperative user guidance consumed only at safe request boundaries. */
@@ -131,7 +133,7 @@ export async function runTurn(
     ) {
       const requestLabel = options.maxModelRequests === 1 ? "request" : "requests";
       throw new Error(
-        `stopped after ${options.maxModelRequests} model ${requestLabel} (--max-steps limit reached)`,
+        `stopped after ${options.maxModelRequests} model ${requestLabel} (request budget reached)`,
       );
     }
     appendSteering(options.steering?.drain() ?? []);
@@ -322,10 +324,17 @@ async function settle(
   if (tool === undefined) {
     return refuse(call, `no such tool: ${call.name}`, "unknown tool");
   }
+  if (options.toolAllowed?.(call) === false) {
+    return refuse(call, "this tool is denied by the current session permissions", "denied");
+  }
   const approved = !tool.dangerous || await events.approve(call);
   throwIfAborted(signal);
   if (!approved) {
     return refuse(call, "the user declined this call — ask them how to proceed", "declined");
+  }
+
+  if (options.toolAllowed?.(call) === false) {
+    return refuse(call, "this tool is denied by the current session permissions", "denied");
   }
 
   throwIfAborted(signal);
@@ -358,6 +367,7 @@ async function look(
   signal: AbortSignal | undefined,
 ): Promise<ToolPreview | undefined> {
   if (call.inputError !== undefined) return undefined;
+  if (options.toolAllowed?.(call) === false) return undefined;
   const tool = findTool(options.tools, call.name);
   if (tool?.preview === undefined) return undefined;
 

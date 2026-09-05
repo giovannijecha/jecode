@@ -1,7 +1,6 @@
-// Application bootstrap: resolve one session, then choose its terminal surface.
+// Application bootstrap: validate the terminal and resolve one interactive session.
 
 import * as path from "node:path";
-import { runBatch } from "./batch.ts";
 import { showCliInfo } from "./cli-info.ts";
 import { loadConfig } from "./config.ts";
 import { ConversationTree } from "./conversation.ts";
@@ -9,6 +8,7 @@ import { parseLaunch } from "./launch.ts";
 import { systemPrompt } from "./prompt.ts";
 import { selectProvider } from "./providers/index.ts";
 import type { Session } from "./session.ts";
+import type { SavedSettings } from "./settings.ts";
 import { SessionPersistence } from "./sessions/runtime.ts";
 import { DurableSessionStore } from "./sessions/store.ts";
 import { builtinTools } from "./tools/index.ts";
@@ -25,7 +25,7 @@ export type StartEnvironment = {
   signal?: AbortSignal;
   interactive?(): boolean;
   runInteractive?(session: Session, applicationRoot: string, signal?: AbortSignal): Promise<void>;
-  runNonInteractive?(session: Session, signal?: AbortSignal): Promise<void>;
+  readSettings?(): SavedSettings;
   write?(text: string): void;
 };
 
@@ -38,24 +38,19 @@ export async function start(
   const write = environment.write ?? ((text: string) => process.stdout.write(text));
   if (await showCliInfo(args, applicationRoot, write)) return;
   const launch = parseLaunch(args);
-  const config = loadConfig(launch.configArgs);
-  const provider = selectProvider(config.providerId);
   const hasScreen = environment.interactive?.() ?? interactive();
-  if (launch.kind === "resume" && !hasScreen) {
-    throw new Error("resume needs an interactive terminal");
+  if (!hasScreen) {
+    throw new Error("an interactive terminal is required on stdin and stdout; run jecode directly without pipes or redirection");
   }
+  const config = loadConfig(launch.configArgs, environment.readSettings?.());
+  const provider = selectProvider(config.providerId);
   if (launch.kind === "resume" && config.ephemeral) {
     throw new Error("--ephemeral cannot be combined with resume");
   }
 
-  // A provider whose catalogue is not fixed has no sensible default model.
-  // The TUI can ask; a pipe cannot, so batch mode still requires one up front.
   const model = config.model === "" ? provider.defaultModel : config.model;
-  if (model === "" && !hasScreen) {
-    throw new Error(`${provider.id} has no default model — pass --model <id> (or set JECODE_MODEL)`);
-  }
 
-  configureColor(hasScreen);
+  configureColor(true);
   const session: Session = {
     config,
     provider,
@@ -67,42 +62,34 @@ export async function start(
     usage: emptyUsage(),
   };
 
-  if (hasScreen) {
-    if (!config.ephemeral) {
-      const store = await DurableSessionStore.open(config.root, environment.sessionsRoot);
-      if (launch.kind === "resume") {
-        const candidates = await SessionPersistence.candidates(store);
-        if (candidates.length === 0) throw new Error("no resumable sessions found for this workspace");
-        const open = async (id: string): Promise<void> => {
-          const resumed = await SessionPersistence.resume(store, id);
-          try {
-            applyResumedSession(session, resumed.conversation, resumed.persistence);
-          } catch (error) {
-            await resumed.persistence.close();
-            throw error;
-          }
-        };
-        if (launch.latest) await open((candidates[0] as (typeof candidates)[number]).id);
-        else session.resume = { candidates, open };
-      } else {
-        session.persistence = SessionPersistence.fresh(store);
-      }
-    }
-    try {
-      if (environment.runInteractive === undefined) {
-        await runApp(session, transcriptRoot, { shutdownSignal: environment.signal });
-      } else {
-        await environment.runInteractive(session, transcriptRoot, environment.signal);
-      }
-    } finally {
-      await session.persistence?.close();
-    }
-  } else {
-    if (environment.runNonInteractive === undefined) {
-      await runBatch(session, { signal: environment.signal });
+  if (!config.ephemeral) {
+    const store = await DurableSessionStore.open(config.root, environment.sessionsRoot);
+    if (launch.kind === "resume") {
+      const candidates = await SessionPersistence.candidates(store);
+      if (candidates.length === 0) throw new Error("no resumable sessions found for this workspace");
+      const open = async (id: string): Promise<void> => {
+        const resumed = await SessionPersistence.resume(store, id);
+        try {
+          applyResumedSession(session, resumed.conversation, resumed.persistence);
+        } catch (error) {
+          await resumed.persistence.close();
+          throw error;
+        }
+      };
+      if (launch.latest) await open((candidates[0] as (typeof candidates)[number]).id);
+      else session.resume = { candidates, open };
     } else {
-      await environment.runNonInteractive(session, environment.signal);
+      session.persistence = SessionPersistence.fresh(store);
     }
+  }
+  try {
+    if (environment.runInteractive === undefined) {
+      await runApp(session, transcriptRoot, { shutdownSignal: environment.signal });
+    } else {
+      await environment.runInteractive(session, transcriptRoot, environment.signal);
+    }
+  } finally {
+    await session.persistence?.close();
   }
 }
 

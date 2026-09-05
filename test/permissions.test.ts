@@ -9,24 +9,24 @@ function call(name: string, input: Record<string, unknown>): ToolCallBlock {
 }
 
 test("session permissions expose safe and dangerous defaults", () => {
-  const permissions = sessionPermissions(builtinTools(), false);
+  const permissions = sessionPermissions(builtinTools());
 
   assert.deepEqual(
-    permissions.listTools().map(({ name, mode, locked }) => ({ name, mode, locked })),
+    permissions.listTools().map(({ name, mode }) => ({ name, mode })),
     [
-      { name: "read_file", mode: "allow", locked: false },
-      { name: "list_dir", mode: "allow", locked: false },
-      { name: "find_files", mode: "allow", locked: false },
-      { name: "search_text", mode: "allow", locked: false },
-      { name: "edit_file", mode: "ask", locked: false },
-      { name: "write_file", mode: "ask", locked: false },
-      { name: "run_command", mode: "ask", locked: false },
+      { name: "read_file", mode: "allow" },
+      { name: "list_dir", mode: "allow" },
+      { name: "find_files", mode: "allow" },
+      { name: "search_text", mode: "allow" },
+      { name: "edit_file", mode: "ask" },
+      { name: "write_file", mode: "ask" },
+      { name: "run_command", mode: "ask" },
     ],
   );
 });
 
 test("denied tools are hidden from the next model turn", () => {
-  const permissions = sessionPermissions(builtinTools(), false);
+  const permissions = sessionPermissions(builtinTools());
 
   assert.equal(permissions.set("read_file", "deny"), true);
   assert.equal(permissions.set("run_command", "deny"), true);
@@ -40,7 +40,7 @@ test("denied tools are hidden from the next model turn", () => {
 });
 
 test("dangerous policies and remembered scopes authorize only what they name", () => {
-  const permissions = sessionPermissions(builtinTools(), false);
+  const permissions = sessionPermissions(builtinTools());
   const first = call("write_file", { path: "a.ts", content: "a" });
   const sameFile = call("edit_file", { path: "a.ts", old_text: "a", new_text: "b" });
   const other = call("write_file", { path: "b.ts", content: "b" });
@@ -57,23 +57,23 @@ test("dangerous policies and remembered scopes authorize only what they name", (
   assert.deepEqual(permissions.listGrants(), []);
 });
 
-test("launch auto-approve locks dangerous tools but not read-only controls", () => {
-  const permissions = sessionPermissions(builtinTools(), true);
+test("dangerous policies remain adjustable and never revive revoked approvals", () => {
+  const permissions = sessionPermissions(builtinTools());
+  const command = call("run_command", { command: "npm test" });
+  permissions.remember(command);
+  assert.equal(permissions.approved(command), true);
 
-  const command = permissions.listTools().find((tool) => tool.name === "run_command");
-  assert.deepEqual(command, {
-    name: "run_command",
-    dangerous: true,
-    mode: "allow",
-    remembered: 0,
-    locked: true,
-  });
-  assert.equal(permissions.set("run_command", "deny"), false);
-  assert.equal(permissions.set("read_file", "deny"), true);
+  assert.equal(permissions.set("run_command", "deny"), true);
+  assert.equal(permissions.approved(command), false);
+  assert.deepEqual(permissions.listGrants(), []);
+  assert.equal(permissions.set("run_command", "allow"), true);
+  assert.equal(permissions.approved(command), true);
+  assert.equal(permissions.set("run_command", "ask"), true);
+  assert.equal(permissions.approved(command), false);
 });
 
 test("reset restores defaults and clears remembered approvals", () => {
-  const permissions = sessionPermissions(builtinTools(), false);
+  const permissions = sessionPermissions(builtinTools());
   permissions.set("read_file", "deny");
   permissions.remember(call("run_command", { command: "npm test" }));
 

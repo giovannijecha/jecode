@@ -65,7 +65,7 @@ export function stopNotice(data: OpenAIResponse): string | undefined {
     return data.status === "incomplete" ? "[incomplete response]" : undefined;
   }
   return reason === "max_output_tokens"
-    ? "[truncated: hit max_output_tokens — raise --max-tokens]"
+    ? "[truncated: hit max_output_tokens — raise max output tokens in /settings]"
     : `[incomplete: ${reason}]`;
 }
 

@@ -1,4 +1,4 @@
-// Ribbon rows and a stable detail area shared by completion and selectors.
+// Ribbon rows and bounded overflow recovery shared by completion and selectors.
 
 import type { Palette } from "../../ui/theme.ts";
 import { row } from "../../ui/render.ts";
@@ -7,7 +7,6 @@ import { elide, textWidth, wrapText } from "../../ui/width.ts";
 
 export type MenuEntry = {
   label: string;
-  description?: string;
   hint?: string;
   value?: string;
   adjustable?: boolean;
@@ -34,8 +33,8 @@ export function renderMenu(
   if (room === 0) return { rows: [], first: 0, last: 0 };
   const detailLimit = Math.min(2, room - 1);
   let detailRows = 0;
-  // Measure every possible selection to keep the dock stable without reserving
-  // a second row when all details fit on one line at this width.
+  // Measure every possible selection so revealing clipped identity and values
+  // does not move the dock when the selected row changes.
   for (const entry of entries) {
     detailRows = Math.max(detailRows, detailLines(entry, width, detailLimit).length);
     if (detailRows === detailLimit) break;
@@ -60,11 +59,8 @@ export function renderMenu(
 
 function detailLines(entry: MenuEntry | undefined, width: number, maxRows: number): string[] {
   if (entry === undefined || maxRows <= 0) return [];
-  // Complete identity and values take priority over explanatory copy.
   const room = Math.max(1, width - 2);
-  const lines = menuText(clippedParts(entry, width).join(" · "), room, maxRows);
-  lines.push(...menuText(entry.description ?? "", room, maxRows - lines.length));
-  return lines;
+  return menuText(clippedParts(entry, width).join(" · "), room, maxRows);
 }
 
 export function menuWindow(length: number, selected: number, visible: number): { first: number; last: number } {
@@ -84,12 +80,22 @@ export function menuText(text: string, width: number, maxRows: number): string[]
 }
 
 function fullSummary(entry: MenuEntry): string {
-  const value = entry.value === undefined ? "" : entry.selected && entry.adjustable ? "‹ " + entry.value + " ›" : entry.value;
-  return [entry.hint, value].filter(Boolean).join(" · ");
+  return [entry.hint, displayedValue(entry)].filter(Boolean).join(" · ");
 }
 
 function summary(entry: MenuEntry, width: number): string {
-  return elide(terminalText(fullSummary(entry)), Math.max(1, Math.floor(width * 0.42)));
+  const room = Math.max(1, Math.floor(width * 0.42));
+  const value = terminalText(displayedValue(entry));
+  const hint = terminalText(entry.hint ?? "");
+  if (value === "" || hint === "") return elide(value || hint, room);
+  // Keep the current policy visible even when its remembered-scope hint is long.
+  const hintRoom = room - textWidth(value) - 3;
+  return hintRoom <= 0 ? elide(value, room) : `${elide(hint, hintRoom)} · ${value}`;
+}
+
+function displayedValue(entry: MenuEntry): string {
+  if (entry.value === undefined) return "";
+  return entry.selected && entry.adjustable ? `‹ ${entry.value} ›` : entry.value;
 }
 
 function clippedParts(entry: MenuEntry, width: number): string[] {
