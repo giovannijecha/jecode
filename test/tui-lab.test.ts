@@ -45,7 +45,7 @@ test("the golden frame carries the complete production hierarchy", () => {
   assert.match(shown, /Harden the OpenAI retry path/);
   assert.match(shown, /inspect the HTTP boundary first/);
   assert.doesNotMatch(shown, /thinking|thought/);
-  assert.match(shown, /┌ src\/providers\/http\.ts\n  │ read_file\s+✓ 146 lines/);
+  assert.match(shown, /┌ src\/providers\/http\.ts\n│ read_file\s+✓ 146 lines/);
   assert.match(shown, /│ search_text\s+✓ 6 matches/);
   assert.match(shown, /The request path is mapped/);
   assert.match(shown, /\/help/);
@@ -67,7 +67,7 @@ test("command output uses a diagnostic tail while expanded output stays complete
     composeLab({ ...state("tools-trace"), expanded: false }, { rows: 36, cols: 100 }).rows,
   ).join("\n");
 
-  assert.match(expanded, /┌ node --test test\/http\.test\.ts\n  │ run_command\s+× failed/);
+  assert.match(expanded, /┌ node --test test\/http\.test\.ts\n│ run_command\s+× failed/);
   assert.match(expanded, /AssertionError/);
   assert.match(expanded, /failed · 612ms/);
   assert.match(expanded, /request 1 started/);
@@ -75,7 +75,7 @@ test("command output uses a diagnostic tail while expanded output stays complete
   assert.match(collapsed, /AssertionError/);
   assert.doesNotMatch(collapsed, /request 1 started/);
   assert.match(collapsed, /9 other lines · ctrl\+o/);
-  assert.match(expanded, /┌ "signal\.aborted" in src\/providers\/http\.ts\n  └─ search_text/);
+  assert.match(expanded, /┌ "signal\.aborted" in src\/providers\/http\.ts\n└─ search_text/);
   assert.match(expanded, /running · 0\.2s/);
 });
 
@@ -83,7 +83,7 @@ test("live command output is bounded to the newest rows", () => {
   const shown = plain(
     composeLab({ ...state("tools-stream"), tick: 30, expanded: false }, { rows: 30, cols: 100 }).rows,
   ).join("\n");
-  assert.match(shown, /┌ node --test test\/http\.test\.ts\n  │ run_command\s+○ running/);
+  assert.match(shown, /┌ node --test test\/http\.test\.ts\n│ run_command\s+○ running/);
   assert.match(shown, /13 earlier lines · ctrl\+o/);
   assert.match(shown, /# duration_ms 1398/);
   assert.doesNotMatch(shown, /TAP version 13/);
@@ -95,7 +95,7 @@ test("compact diffs show the changed head and tail with an explicit omission cou
   const shown = plain(
     composeLab({ ...state("tools-diff"), expanded: false }, { rows: 34, cols: 100 }).rows,
   ).join("\n");
-  assert.match(shown, /┌ src\/tools\/shell\.ts\n  │ edit_file\s+✓ applied/);
+  assert.match(shown, /┌ src\/tools\/shell\.ts\n│ edit_file\s+✓ applied/);
   assert.match(shown, /\+7 −3 · 3 regions/);
   assert.match(shown, /OUTPUT_CAP/);
   assert.match(shown, /return capped/);
@@ -107,7 +107,7 @@ test("compact diffs show the changed head and tail with an explicit omission cou
 
 test("edit approval and its exact diff remain visible together", () => {
   const shown = plain(composeLab(state("approve-edit"), { rows: 30, cols: 100 }).rows).join("\n");
-  assert.match(shown, /┌ src\/providers\/http\.ts\n  │ edit_file\s+○ pending approval/);
+  assert.match(shown, /┌ src\/providers\/http\.ts\n│ edit_file\s+○ pending approval/);
   assert.match(shown, /boundedText/);
   assert.match(shown, /Allow this edit\?/);
   assert.match(shown, /Yes, once/);

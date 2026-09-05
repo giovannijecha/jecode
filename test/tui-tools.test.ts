@@ -23,8 +23,8 @@ test("a pending tool keeps one stable state node and its elapsed time", () => {
   };
   const first = strip(compose({ ...view, now: 1_000 }, { rows: 24, cols: 80 }).rows).join("\n");
   const later = strip(compose({ ...view, now: 2_000 }, { rows: 24, cols: 80 }).rows).join("\n");
-  assert.match(first, /^  ┌ npm test$/m);
-  assert.match(later, /^  ┌ npm test$/m);
+  assert.match(first, /^┌ npm test$/m);
+  assert.match(later, /^┌ npm test$/m);
   assert.match(first, /run_command\s+○ running/);
   assert.match(later, /run_command\s+○ running/);
   assert.match(first, /running · 1\.0s/);
@@ -97,7 +97,7 @@ test("a tool is a compact execution rail with evidence beneath it", () => {
 
   const ESCAPE = String.fromCharCode(27);
   const bare = renderAll([block], 60, STEEL).map((r) => r.replace(new RegExp(`${ESCAPE}\[[0-9;]*m`, "g"), ""));
-  assert.match(bare.join("\n"), /^  ┌ ls$/m);
+  assert.match(bare.join("\n"), /^┌ ls$/m);
   assert.match(bare.join("\n"), /│\s+run_command\s+✓ exit 0/);
   assert.match(bare.join("\n"), /│\s+one/);
   assert.match(bare.join("\n"), /│\s+two/);
@@ -229,11 +229,11 @@ test("conversation blocks separate user surface, free reasoning, and tool rail",
   ];
   const drawn = strip(renderAll(blocks, 50, STEEL)).join("\n");
   assert.match(drawn, /^  ask\s*$/m);
-  assert.match(drawn, /^  think$/m);
+  assert.match(drawn, /^think$/m);
   assert.match(drawn, /read_file\s+✓ 1 line/);
-  assert.match(drawn, /^  done$/m);
-  assert.match(drawn, /think\n  ┌ a\.ts/);
-  assert.match(drawn, /└─ read_file[^\n]+\n\n  done/);
+  assert.match(drawn, /^done$/m);
+  assert.match(drawn, /think\n┌ a\.ts/);
+  assert.match(drawn, /└─ read_file[^\n]+\n\ndone/);
 });
 
 test("tool identity is semantic rather than encoded in decorative glyphs", () => {

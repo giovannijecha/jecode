@@ -6,11 +6,16 @@ the npm artifact through trusted publishing.
 
 For the 1.0 cycle, follow the
 [release-candidate requirements](COMPATIBILITY.md#release-candidate-gate),
-including the soak before stable promotion.
+including the soak before stable promotion. Use the
+[validation protocol and record](../dev/validation/README.md) to collect evidence;
+the existence of that checklist does not mean its checks have passed.
 
 ## Prepare a stable release
 
 1. Create a release branch from current `main`.
+   For the first `1.0.0` promotion, link the completed candidate validation
+   record and verify that only version and release metadata will differ from
+   the candidate. Missing live or terminal results block promotion.
 2. Update the version in `package.json` and both root-package entries in
    `package-lock.json`.
 3. Promote the accumulated changelog entries to the dated release and update

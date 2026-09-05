@@ -59,6 +59,15 @@ export function write(text: string): void {
   process.stdout.write(text);
 }
 
+export function outputReady(): boolean {
+  return !process.stdout.writableNeedDrain;
+}
+
+export function onDrain(handler: () => void): () => void {
+  process.stdout.on("drain", handler);
+  return () => { process.stdout.off("drain", handler); };
+}
+
 export function enter(reducedMotion = false): void {
   if (active) return;
   active = true;

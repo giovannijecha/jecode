@@ -1,12 +1,15 @@
 # Jecode brand
 
-Jecode is an owned coding agent for the terminal. Its primary line is:
+Jecode is an owned coding agent with a native full-screen terminal interface.
+Its primary line is:
 
 > **Your code. Your loop.**
 
-Jeco, the steel-blue gecko, is the visual companion. Jeco makes the product
-approachable without turning it into a toy: calm expression, curled tail, white
-belly, visible hands and feet, and no clothing, robot parts, or detailed scales.
+Jeco, the steel-blue gecko, is the brand mascot used in the README and browser
+sign-in result. Its defining features are a calm expression, curled tail, white
+belly, and visible hands and feet, with no clothing, robot parts, or detailed
+scales. The terminal interface communicates activity through text, tool evidence,
+and semantic colors.
 
 ## Voice
 
@@ -39,18 +42,11 @@ do not recolor the mascot.
 
 | Asset | Use |
 |---|---|
-| assets/wordmark-steel.svg | Universal wordmark for README and renderer-neutral surfaces |
-| assets/wordmark-dark.svg | Wordmark on light surfaces |
-| assets/wordmark-light.svg | Wordmark on dark surfaces |
-| assets/jeco-256.png | Standalone mascot |
-| assets/app-icon-512.png | Square application or social icon |
-| assets/pet-states.png | Reference sheet for functional status poses |
-| assets/tokens.json | Machine-readable brand tokens |
+| [wordmark-steel.svg](wordmark-steel.svg) | Primary wordmark used in the README |
+| [wordmark-dark.svg](wordmark-dark.svg) | Wordmark variant for light backgrounds |
+| [wordmark-light.svg](wordmark-light.svg) | Wordmark variant for dark backgrounds |
+| [jeco-256.png](jeco-256.png) | Mascot used in the README and browser sign-in result |
+| [tokens.json](tokens.json) | Machine-readable brand identity and color tokens |
 
-The pixel poses are a product direction, not a promise that a terminal pet is
-already part of the current release. If introduced, each pose must correspond to
-real controller activity and reduced-motion mode must use static state changes.
-
-<p align="center">
-  <img src="pet-states.png" width="720" alt="Jeco pixel status poses">
-</p>
+The npm package includes `jeco-256.png` and `wordmark-steel.svg` for these uses.
+The remaining files are repository references.

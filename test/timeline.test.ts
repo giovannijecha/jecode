@@ -6,6 +6,10 @@ import { selectTimeline, timelinePicker } from "../src/timeline.ts";
 import type { Message, Provider } from "../src/types.ts";
 import { STEEL } from "../src/ui/theme.ts";
 import { emptyUsage } from "../src/usage.ts";
+import * as picker from "../src/tui/picker.ts";
+import { compose } from "../src/tui/view.ts";
+import { textWidth } from "../src/ui/width.ts";
+import { base, strip } from "../dev/test-support/tui.ts";
 
 const identity = { providerId: "fake", model: "fake-1", effort: "high" };
 
@@ -45,6 +49,44 @@ test("timeline previews end before a grapheme that crosses their boundary", () =
     assert.equal(label?.slice(2), prefix, `${name} was split`);
     assert.equal(label?.isWellFormed(), true, `${name} produced malformed UTF-16`);
   }
+});
+
+test("timeline keeps five turns on five rows without overflow duplicates or reserved gaps", () => {
+  const prompts = ["first", `second ${"long preview 保持 👩‍💻 é ".repeat(8)}`, "third",
+    `fourth ${"long preview 保持 👩‍💻 é ".repeat(8)}`, "fifth"];
+  let tree = ConversationTree.empty();
+  for (const [index, prompt] of prompts.entries()) {
+    tree = append(tree, tree.activeNodeId, prompt, "done", `10:0${index}`);
+  }
+  const timeline = timelinePicker(tree, STEEL);
+  const original = structuredClone(tree.nodes);
+  for (const size of [{ cols: 38, rows: 14 }, { cols: 120, rows: 30 }, { cols: 200, rows: 40 }]) {
+    let current = picker.edge(timeline.picker, "home");
+    for (let index = 0; index < prompts.length; index++) {
+      const frame = compose({ ...base(), modal: { kind: "pick", picker: current } }, size);
+      const rows = strip(frame.rows);
+      const title = rows.findIndex((line) => line.startsWith("timeline"));
+      const choices = rows.slice(title + 2, -3);
+      assert.equal(choices.length, prompts.length, "one row per turn, no reserved overflow area");
+      assert.ok(choices.every((line) => line.trim() !== ""));
+      assert.equal(choices.filter((line) => line.startsWith("● ")).length, 1);
+      assert.ok(choices[index]?.startsWith("● "));
+      assert.match(rows.at(-3) ?? "", /^↑↓ move/);
+      assert.match(choices.at(-1) ?? "", /active$/);
+      assert.ok(rows.every((line) => textWidth(line) <= size.cols));
+      assert.equal(rows.length, size.rows);
+      assert.deepEqual(frame.cursor, { row: title + 1, col: 2 });
+      current = picker.move(current, 1);
+    }
+  }
+  const filtered = picker.type(timeline.picker, "second");
+  assert.equal(picker.selected(filtered), 1);
+  assert.equal(picker.panel(filtered, 38, STEEL).length, 4);
+  const missing = picker.type(filtered, " missing");
+  assert.equal(picker.selected(missing), undefined);
+  assert.match(strip(picker.panel(missing, 38, STEEL)).join("\n"), /No matches/);
+  assert.deepEqual(tree.nodes, original, "navigation does not change the conversation");
+  assert.equal(tree.activeNodeId, 5);
 });
 
 test("timeline selection changes only the active in-memory path", async () => {

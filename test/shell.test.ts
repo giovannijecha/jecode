@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -178,7 +179,7 @@ test("does not wait indefinitely for a descendant holding output pipes", { timeo
 test("a timeout force-kills a descendant that ignores graceful termination", {
   skip: process.platform === "win32",
   timeout: 5_000,
-}, async () => {
+}, async (context) => {
   const area = await mkdtemp(path.join(tmpdir(), "jecode-shell-tree-"));
   const pidFile = path.join(area, "pid");
   const source = [
@@ -190,23 +191,29 @@ test("a timeout force-kills a descendant that ignores graceful termination", {
   const encoded = Buffer.from(source).toString("base64");
   let pid: number | undefined;
 
-  try {
-    const result = await runCommand.run(
-      {
-        command: `"${process.execPath}" -e "eval(Buffer.from('${encoded}','base64').toString())"`,
-        timeout_ms: 300,
-      },
-      { root },
-    );
-    pid = Number(await readFile(pidFile, "utf8"));
+  context.after(async () => {
+    try {
+      // Cleanup must still run when process observation itself fails.
+      if (pid !== undefined) process.kill(pid, "SIGKILL");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    } finally {
+      await rm(area, { recursive: true, force: true });
+    }
+  });
 
-    assert.equal(result.summary, "timed out after 300ms");
-    await waitForExit(pid);
-    assert.equal(alive(pid), false, `descendant ${pid} survived the timeout`);
-  } finally {
-    if (pid !== undefined && alive(pid)) process.kill(pid, "SIGKILL");
-    await rm(area, { recursive: true, force: true });
-  }
+  const result = await runCommand.run(
+    {
+      command: `"${process.execPath}" -e "eval(Buffer.from('${encoded}','base64').toString())"`,
+      timeout_ms: 300,
+    },
+    { root },
+  );
+  pid = Number(await readFile(pidFile, "utf8"));
+
+  assert.equal(result.summary, "timed out after 300ms");
+  await waitForExit(pid);
+  assert.equal(alive(pid), false, `descendant ${pid} survived the timeout`);
 });
 
 test("does not pass credential-like variables to a shell command", async (context) => {
@@ -315,12 +322,132 @@ function restoreEnvironment(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
-function alive(pid: number): boolean {
+test("process observation treats unreaped Linux zombies and dead tasks as terminated", () => {
+  for (const state of ["Z", "X", "x"]) {
+    for (const name of ["node", "worker name", "worker)\nname"]) {
+      assert.equal(alive(539, {
+        platform: "linux", check: () => {}, stat: () => `539 (${name}) ${state} 1 539 539`,
+      }), false);
+    }
+  }
+});
+
+test("process observation propagates probe failures other than a missing PID", () => {
+  const denied = Object.assign(new Error("probe denied"), { code: "EPERM" });
+  assert.throws(() => alive(539, {
+    platform: "linux",
+    check: () => { throw denied; },
+    stat: () => { throw new Error("unexpected stat read"); },
+  }), (error) => error === denied);
+});
+
+test("process observation rejects malformed or mismatched Linux status", () => {
+  for (const stat of ["", "539 (node Z 1", "540 (node) Z 1", "539 (node) ? 1", "539 (node) ZZ 1"]) {
+    assert.throws(() => alive(539, {
+      platform: "linux", check: () => {}, stat: () => stat,
+    }), /invalid process status/);
+  }
+});
+
+test("process observation confirms a PID that disappears during the Linux status read", () => {
+  const missingFile = Object.assign(new Error("status vanished"), { code: "ENOENT" });
+  const missingPid = Object.assign(new Error("PID vanished"), { code: "ESRCH" });
+  let checks = 0;
+  assert.equal(alive(539, {
+    platform: "linux",
+    check: () => { if (checks++ > 0) throw missingPid; },
+    stat: () => { throw missingFile; },
+  }), false);
+});
+
+test("process observation keeps running, sleeping, and stopped Linux tasks active", () => {
+  for (const state of ["R", "S", "D", "T", "t", "W", "K", "P", "I"]) {
+    assert.equal(alive(539, {
+      platform: "linux", check: () => {}, stat: () => `539 (worker) name) ${state} 1 539 539`,
+    }), true);
+  }
+});
+
+test("process observation recognizes a missing PID without reading Linux status", () => {
+  const missing = Object.assign(new Error("PID missing"), { code: "ESRCH" });
+  assert.equal(alive(539, {
+    platform: "linux",
+    check: () => { throw missing; },
+    stat: () => { throw new Error("unexpected stat read"); },
+  }), false);
+});
+
+test("process observation does not mistake unavailable Linux status for exit", () => {
+  for (const code of ["ENOENT", "EACCES", "EIO"]) {
+    const failure = Object.assign(new Error("status unavailable"), { code });
+    assert.throws(() => alive(539, {
+      platform: "linux", check: () => {}, stat: () => { throw failure; },
+    }), (error) => error === failure);
+  }
+});
+
+test("process observation exposes a failed PID recheck after Linux status disappears", () => {
+  const missing = Object.assign(new Error("status missing"), { code: "ENOENT" });
+  const denied = Object.assign(new Error("probe denied"), { code: "EPERM" });
+  let checks = 0;
+  assert.throws(() => alive(539, {
+    platform: "linux",
+    check: () => { if (checks++ > 0) throw denied; },
+    stat: () => { throw missing; },
+  }), (error) => error === denied);
+});
+
+test("process observation does not read proc status on Windows or macOS", () => {
+  for (const platform of ["win32", "darwin"] as const) {
+    assert.equal(alive(539, {
+      platform, check: () => {}, stat: () => { throw new Error("unexpected stat read"); },
+    }), true);
+  }
+});
+
+test("process observation recognizes the current test process through the real adapter", () => {
+  assert.equal(alive(process.pid), true);
+});
+
+type ProcessProbe = {
+  platform: NodeJS.Platform;
+  check(pid: number): void;
+  stat(pid: number): string;
+};
+
+const systemProcesses: ProcessProbe = {
+  platform: process.platform,
+  check: (pid) => { process.kill(pid, 0); },
+  stat: (pid) => readFileSync(`/proc/${pid}/stat`, "utf8"),
+};
+
+function alive(pid: number, probe: ProcessProbe = systemProcesses): boolean {
+  if (!pidExists(pid, probe)) return false;
+  if (probe.platform !== "linux") return true;
+  let stat: string;
   try {
-    process.kill(pid, 0);
+    stat = probe.stat(pid);
+  } catch (error) {
+    // Missing /proc access is not evidence of exit unless the PID also vanished.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && !pidExists(pid, probe)) return false;
+    throw error;
+  }
+  // comm can contain spaces, newlines, and closing parentheses.
+  const state = /^ ([RSDZTtWXxKPI]) /u.exec(stat.slice(stat.lastIndexOf(")") + 1))?.[1];
+  if (!stat.startsWith(`${pid} (`) || state === undefined) {
+    throw new Error(`invalid process status for PID ${pid}`);
+  }
+  // An init that does not reap orphans can leave a terminated child observable.
+  return state !== "Z" && state !== "X" && state !== "x";
+}
+
+function pidExists(pid: number, probe: ProcessProbe): boolean {
+  try {
+    probe.check(pid);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
   }
 }
 

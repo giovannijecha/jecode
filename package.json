@@ -51,6 +51,7 @@
     "bench:search": "node dev/benchmarks/search.ts",
     "bench:session": "node dev/benchmarks/session.ts",
     "bench:transcript": "node dev/benchmarks/transcript.ts",
+    "bench:tui": "node --expose-gc dev/benchmarks/tui.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:release && node --test",
     "coverage": "npm run build:release && node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=80 --test-coverage-branches=75 --test-coverage-functions=75",

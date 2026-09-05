@@ -11,7 +11,8 @@ an explicit product task needs it.
 | [`web/`](web/README.md) | Production browser sign-in pages with inert success and failure states. |
 | [`tui/DIRECTION.md`](tui/DIRECTION.md) | Current TUI direction and the reasons behind choices still in use. |
 | [`tui/experiments/`](tui/experiments/README.md) | Temporary investigations with a question, comparable evidence, and an exit condition. |
-| [`benchmarks/`](benchmarks/README.md) | Manual probes for context, redaction, workspace search, sessions, and transcript rendering. |
+| [`benchmarks/`](benchmarks/README.md) | Manual probes for context, redaction, workspace search, sessions, transcript rendering, and integrated TUI responsiveness. |
+| [`validation/`](validation/README.md) | Release-candidate scenarios, evidence format, and manual checks that automated tests cannot establish. |
 | [`test-support/`](test-support/) | Small shared factories and host harnesses for automated tests, excluded from the release runtime. |
 | [`../scripts/`](../scripts/README.md) | Required repository checks, release builds, and package verification. |
 | [`../test/`](../test/) | Automated regression tests, including tests of the development environments. |
@@ -39,13 +40,25 @@ create fresh mutable state per call, and leave setup and cleanup in each suite.
 Helpers stay outside `test/` because Node's default test discovery includes
 modules throughout that directory, including files without a `.test.ts` suffix.
 
+## Temporary outputs
+
+Store generated logs, captures, benchmark reports, package verification files,
+and PR or release drafts in a task-specific directory under the system temporary
+directory (`$env:TEMP` in PowerShell or `os.tmpdir()` in Node.js). Remove that
+directory when the task closes.
+
+Reusable tools and active experiments belong in the relevant development
+environment. Retain only the reviewed fixtures or evidence needed to reproduce
+a result; keep conclusions in the relevant documentation and remove superseded
+scripts, comparisons, and drafts.
+
 ## Source availability and optional private work
 
 The npm artifact excludes `dev/`, `scripts/`, and `test/`. The source repository
 retains everything required by its documented commands, tests, CI, and release
 build. Moving exploratory notes to private storage must not break those paths.
 
-Private research can live outside the tracked tree or in ignored `sandbox/`.
-It is optional input to an investigation, never a dependency of a public test,
-build, fixture, or direction document. Keep public conclusions self-contained.
+Keep private research outside the repository in a deliberate location. It is
+optional input to an investigation, never a dependency of a public test, build,
+fixture, or direction document. Keep public conclusions self-contained.
 This structure does not change repository visibility or create a private store.

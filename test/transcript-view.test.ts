@@ -7,6 +7,21 @@ import { STEEL } from "../src/ui/theme.ts";
 import { hasColor } from "../src/ui/render.ts";
 import { strip } from "../dev/test-support/tui.ts";
 
+test("clearing a transcript discards cached blocks at every retained width", () => {
+  const block: Block = { kind: "answer", text: "old conversation" };
+  const blocks: Block[] = [block];
+  const transcript = transcriptRenderer();
+  transcript.viewport(blocks, 60, 20, 0, STEEL);
+  transcript.viewport(blocks, 120, 20, 0, STEEL);
+  blocks.length = 0;
+  assert.equal(transcript.viewport(blocks, 60, 20, 0, STEEL).maxScroll, 0);
+  block.text = "new conversation";
+  blocks.push(block);
+  const next = transcript.viewport(blocks, 120, 20, 0, STEEL);
+  assert.match(next.rows.join("\n"), /new conversation/);
+  assert.doesNotMatch(next.rows.join("\n"), /old conversation/);
+});
+
 test("a cold long transcript paints its tail before bounded background reflow", () => {
   const blocks: Block[] = Array.from(
     { length: 1_000 },

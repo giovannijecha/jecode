@@ -37,9 +37,9 @@ follow tool calls and diffs, steer the model while it runs, and resume the same
 conversation later. One controller carries each turn from prompt to result—no
 delegated agents or hidden model workers.
 
-Tool records keep the target, outcome, and compact evidence together. Expand a
-record to inspect its complete output or diff while the composer stays ready
-at the full width of the terminal.
+The transcript and composer use the full width of the terminal. Tool records
+keep the target, outcome, and compact evidence together. Expand a record to
+inspect its complete output or diff while the composer stays ready.
 
 Menus use compact choices with aligned values and stay available while the
 model works. Approvals separate

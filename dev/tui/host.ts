@@ -41,6 +41,7 @@ export async function runLab(options: LabOptions, environment: LabEnvironment = 
   let escapeTimer: NodeJS.Timeout | undefined;
   let stopInput = () => {};
   let stopResize = () => {};
+  let stopOutput = () => {};
   let live = true;
   let failure: unknown;
   let finish = () => {};
@@ -135,6 +136,7 @@ export async function runLab(options: LabOptions, environment: LabEnvironment = 
   try {
     environment.signal?.throwIfAborted();
     terminal.enter(options.reducedMotion);
+    stopOutput = paint.onReady?.(() => guard(draw)) ?? (() => {});
     stopResize = terminal.onResize(() => guard(() => { paint.invalidate(); draw(); }));
     stopInput = terminal.onInput((chunk) => guard(() => {
       for (const key of keys.push(chunk)) handle(key);
@@ -155,7 +157,7 @@ export async function runLab(options: LabOptions, environment: LabEnvironment = 
     if (timer !== undefined) clearTimeout(timer);
     if (playbackTimer !== undefined) clearTimeout(playbackTimer);
     if (escapeTimer !== undefined) clearTimeout(escapeTimer);
-    stopInput(); stopResize();
+    stopInput(); stopResize(); stopOutput();
     environment.signal?.removeEventListener("abort", abort);
     lab.close();
     terminal.leave();

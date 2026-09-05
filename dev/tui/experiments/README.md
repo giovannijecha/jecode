@@ -21,8 +21,9 @@ Keep candidate-only code inside that folder. Reuse production components and
 lab helpers; avoid copying the entire renderer or creating a second fixture
 catalogue. An experiment must not become an import of `src/`, a release-build
 requirement, or an undocumented prerequisite for the normal lab and tests.
-Keep screenshots and generated captures under ignored `sandbox/` unless a
-small, reviewed asset is necessary to explain a reproducible result.
+Screenshots and generated captures follow the shared
+[temporary-output lifecycle](../../README.md#temporary-outputs), unless a small,
+reviewed asset is necessary to explain a reproducible result.
 
 ## Close it deliberately
 
@@ -33,7 +34,7 @@ short rationale in the reviewed change only when it explains an ongoing tradeoff
 Git history already preserves the investigation. Do not create an archive of
 obsolete designs or an append-only decision log.
 
-Optional private research can remain in a separate private location or ignored
-scratch space. Public scenarios and conclusions must work without access to it.
+Optional private research stays outside the repository. Public scenarios and
+conclusions must work without access to it.
 This folder itself belongs to the reproducible source repository; npm excludes
 the entire development environment from the installed product.

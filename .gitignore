@@ -12,7 +12,7 @@ dist/
 .jecode/
 jecode-transcript-*.md
 
-# Local scratch material is not part of the shipped project
+# Keep legacy local scratch material untracked
 sandbox/
 
 .DS_Store

@@ -208,10 +208,11 @@ test("fresh colour and NO_COLOR keep the same selected dot band and writable que
     const { textWidth } = await import("./src/ui/width.ts");
     const plain = rows => rows.map(row => row.replace(/\\x1b\\[[0-9;]*m/g, ""));
     assert.equal(hasColor(), process.env.NO_COLOR === undefined);
-    for (const time of [0, 1_000, 3_000]) {
-      const current = createLab({ scene: "menu-workflow", palette: STEEL, selected: 0, expanded: false, tick: time / TICK_MS });
+    for (const [scene, time, steps] of [["menu-workflow", 0, 1], ["menu-workflow", 1_000, 1],
+      ["menu-workflow", 3_000, 1], ...[1, 2, 3, 4].map(steps => ["menu-timeline", 0, steps])]) {
+      const current = createLab({ scene, palette: STEEL, selected: 0, expanded: false, tick: time / TICK_MS });
       try {
-        current.handle({ name: "down", text: "", ctrl: false });
+        for (let step = 0; step < steps; step++) current.handle({ name: "down", text: "", ctrl: false });
         for (const size of [{ cols: 38, rows: 14 }, { cols: 100, rows: 30 }, { cols: 160, rows: 40 }]) {
           configureColor(true);
           current.invalidate();
@@ -225,11 +226,24 @@ test("fresh colour and NO_COLOR keep the same selected dot band and writable que
           if (time === 1_000) assert.ok(rows.some(row => row.startsWith("→ ")), "the search prompt keeps its arrow");
           assert.ok(rows.every(row => textWidth(row) <= size.cols));
           assert.equal(coloured.rows.some(row => row.includes("\\x1b[")), hasColor());
+          if (scene === "menu-timeline") {
+            const title = rows.findIndex(row => row.startsWith("timeline"));
+            const choices = rows.slice(title + 2, -3);
+            assert.equal(choices.length, 4, "one row per node, including long selected previews");
+            assert.ok(choices.every(row => row.trim() !== ""));
+            assert.equal(current.view().modal.picker.index, steps % 4);
+            assert.deepEqual(coloured.cursor, { row: title + 1, col: 2 });
+          }
           configureColor(false);
           current.invalidate();
           const monochrome = current.render(size);
-          assert.deepEqual(monochrome.rows, rows);
+          // User surfaces use half-cell colour edges and blank NO_COLOR padding.
+          assert.deepEqual(monochrome.rows, rows.map(row => /^[▄▀]+$/u.test(row) ? " ".repeat(textWidth(row)) : row));
           assert.deepEqual(monochrome.cursor, coloured.cursor);
+        }
+        if (scene === "menu-timeline") {
+          current.handle({ name: "escape", text: "", ctrl: false });
+          assert.equal(current.view().modal, undefined);
         }
       } finally { current.close(); }
     }

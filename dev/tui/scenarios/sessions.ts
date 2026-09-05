@@ -63,8 +63,12 @@ export function timelineScene(state: LabState): View {
     blocks: [{ kind: "user", text: user }, { kind: "answer", text: answer }],
   }, "completed");
   const first = append(ConversationTree.empty(), 0, "Design durable sessions", "Session identity is stable.", "00");
-  const main = append(first, 1, "Add context compaction", "Compaction is model-aware.", "04");
-  const alternate = append(main.select(1), 1, "Explore a smaller storage format", "The existing format stays canonical.", "07");
+  const main = append(first, 1,
+    "Add context compaction while preserving complete messages, tool evidence, exported history, and branch-local summaries across session recovery",
+    "Compaction is model-aware.", "04");
+  const alternate = append(main.select(1), 1,
+    "Explore a smaller storage format with bounded reads, atomic checkpoints, recoverable indexes, and clear failures that preserve the existing conversation",
+    "The existing format stays canonical.", "07");
   const tree = append(alternate.select(2), 2, "Add timeline navigation", "Branching is deferred.", "12").select(3);
   const timeline = timelinePicker(tree, state.palette).picker;
   return {

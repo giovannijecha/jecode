@@ -60,13 +60,9 @@ export function commandWorkflow(
           await session.persistence?.reset();
           resetRequestIdentity(session);
           resetCompaction();
-          state.blocks.splice(0);
           state.past.length = 0;
           permissions.reset();
-          state.scroll = 0;
-          state.follow = true;
-          state.unseen = 0;
-          state.lastMaxScroll = 0;
+          options.replaceTranscript([]);
           state.committedNodeId = 0;
         },
         permissions,

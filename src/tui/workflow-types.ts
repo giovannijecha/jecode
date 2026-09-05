@@ -16,7 +16,7 @@ export type WorkflowOptions = {
   emit(block: Block): void;
   commandNotice(notice: NoticeBlock): void;
   render(block?: Block): void;
-  replaceTranscript(): void;
+  replaceTranscript(blocks?: readonly Block[]): void;
   refreshSettings(): void;
   startActivity(kind: Activity["kind"], label: string): Activity | undefined;
   finishActivity(activity: Activity): void;

@@ -75,6 +75,10 @@ export function transcriptRenderer(
 
   return {
     viewport(blocks, width, height, scroll, palette, state = {}) {
+      if (blocks.length === 0 && layouts.some((layout) => layout.entries.length > 0)) {
+        layouts = [];
+        activeTools.clear();
+      }
       const layout = layoutFor(blocks, width, palette);
       state = { ...state, now: state.now ?? clock() };
       if (scroll === 0) invalidateRunningEntries(layout);
