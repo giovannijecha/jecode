@@ -174,7 +174,7 @@ function session(provider: Provider): Session {
       maxTokens: 4_096,
       compactionPercent: 85,
       root: process.cwd(),
-      autoApprove: false,
+
       ephemeral: false,
     },
     provider,

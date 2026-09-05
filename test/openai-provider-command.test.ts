@@ -74,7 +74,7 @@ function session(): Session {
       maxTokens: 64_000,
       compactionPercent: 85,
       effort: "high",
-      autoApprove: false,
+
       ephemeral: false,
       reducedMotion: false,
     },

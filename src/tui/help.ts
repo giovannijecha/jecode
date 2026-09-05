@@ -7,6 +7,7 @@ import { textWidth } from "../ui/width.ts";
 const CONTROL_WIDTH = 18;
 
 const CONTROLS: readonly { key: string; description: string }[] = [
+  { key: "/", description: "open commands, also while working" },
   { key: "up / down", description: "move through menus or history" },
   { key: "left / right", description: "move cursor or change a value" },
   { key: "ctrl+left / right", description: "move cursor by word" },
@@ -14,7 +15,7 @@ const CONTROLS: readonly { key: string; description: string }[] = [
   { key: "enter / tab", description: "select, send/steer · complete" },
   { key: "alt+enter", description: "insert a new line" },
   { key: "esc", description: "close UI or interrupt work" },
-  { key: "ctrl+c", description: "interrupt work or exit" },
+  { key: "ctrl+c", description: "cancel menu, interrupt work or exit" },
   { key: "ctrl+o", description: "expand/collapse reasoning or evidence" },
   { key: "wheel / pgup/dn", description: "scroll the transcript" },
   { key: "ctrl+l", description: "redraw the screen" },

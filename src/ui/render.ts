@@ -61,11 +61,6 @@ export function plainLen(segs: readonly Seg[]): number {
   return segs.reduce((n, seg) => n + textWidth(terminalText(seg.text)), 0);
 }
 
-export function columns(): number {
-  const width = process.stdout.columns;
-  return typeof width === "number" && width >= 40 ? width : 80;
-}
-
 /**
  * The margin every row keeps from the edges of the terminal: none.
  *

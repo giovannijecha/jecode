@@ -36,7 +36,7 @@ function session(from: Provider, model = from.defaultModel): Session {
       maxTokens: 4096,
       compactionPercent: 85,
       root: process.cwd(),
-      autoApprove: false,
+
       ephemeral: false,
     },
     provider: from,
@@ -246,21 +246,41 @@ test("enter queues ordinary guidance during a turn without opening another workf
   assert.deepEqual(current.state.past, ["change the test, not the implementation"]);
 });
 
-test("active work keeps slash commands and command-time prompts in the composer", () => {
+test("turns accept menu commands while conversation mutations keep the prompt", () => {
   const slash = harness();
   slash.state.activity = begin("turn", "Working");
   slash.state.editor = edit.of("/models");
   slash.input.handle(key("enter"));
-  assert.equal(slash.state.editor.text, "/models");
-  assert.deepEqual(slash.commands, []);
-  assert.match(slash.feedback[0]?.text ?? "", /Slash commands.*prompt kept/);
+  assert.equal(slash.state.editor.text, "");
+  assert.deepEqual(slash.commands, ["/models"]);
+  for (const name of ["new", "timeline", "compact"]) {
+    slash.state.editor = edit.of(`/${name}`);
+    slash.input.handle(key("enter"));
+    assert.equal(slash.state.editor.text, `/${name}`);
+    assert.match(slash.feedback.at(-1)?.text ?? "", /Stop the active turn.*prompt kept/);
+  }
 
   const command = harness();
-  command.state.activity = begin("command", "Running /models");
+  command.state.command = begin("command", "Running /models");
   command.state.editor = edit.of("keep this");
   command.input.handle(key("enter"));
   assert.equal(command.state.editor.text, "keep this");
   assert.match(command.feedback[0]?.text ?? "", /active command.*prompt kept/);
+});
+
+test("slash completion, Tab and Escape remain available during a model turn", () => {
+  const current = harness();
+  current.state.activity = begin("turn", "Working");
+  current.input.handle(key("char", "/sett"));
+  assert.ok(current.state.completing);
+  current.input.handle(key("escape"));
+  assert.equal(current.state.completing, undefined);
+  assert.equal(current.state.activity.control.signal.aborted, false);
+  current.input.handle(key("tab"));
+  assert.equal(current.state.editor.text, "/settings");
+  current.input.handle(key("enter"));
+  assert.deepEqual(current.commands, ["/settings"]);
+  assert.deepEqual(current.steering, []);
 });
 
 test("ctrl+o can inspect a compacted tool diff before answering an open prompt", () => {

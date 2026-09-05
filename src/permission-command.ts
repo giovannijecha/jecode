@@ -22,15 +22,11 @@ export async function permissionsCommand(session: Session, host: Host): Promise<
 
   let selected = 0;
   while (true) {
-    const index = await choose(permissionControlPicker(control, host, selected));
+    const index = await choose(permissionControlPicker(control, selected));
     if (index === undefined) return;
     const tool = control.listTools()[index];
     if (tool === undefined) return;
     selected = index;
-    if (tool.locked) {
-      lockedNotice(tool.name, host);
-      continue;
-    }
     if (tool.remembered > 0) {
       await reviewGrants(tool.name, control, choose, session.palette);
     }
@@ -45,12 +41,12 @@ export function permissionsPicker(
   return {
     title: [],
     options: tools.map((tool) => {
-      const description = toolDescription(tool);
+      const hint = toolHint(tool);
       return {
         label: tool.name,
-        ...(description === undefined ? {} : { description }),
-        value: tool.locked ? `${tool.mode} · locked` : tool.mode,
-        adjustable: !tool.locked,
+        ...(hint === undefined ? {} : { hint }),
+        value: tool.mode,
+        adjustable: true,
       };
     }),
     visible: tools.length,
@@ -61,22 +57,17 @@ export function permissionsPicker(
 
 export function permissionControlPicker(
   control: Pick<SessionPermissions, "listTools" | "set">,
-  host: Pick<Host, "emit">,
   selected: number,
 ): Picker {
   return permissionsPicker(control.listTools(), selected, (index, step) => {
     const tool = control.listTools()[index];
-    if (tool === undefined) return permissionControlPicker(control, host, selected);
-    if (tool.locked) {
-      lockedNotice(tool.name, host);
-      return permissionControlPicker(control, host, index);
-    }
+    if (tool === undefined) return permissionControlPicker(control, selected);
 
     const modes = modesFor(tool);
     const at = Math.max(0, modes.indexOf(tool.mode));
     const next = modes[(at + step + modes.length) % modes.length];
     if (next !== undefined) control.set(tool.name, next);
-    return permissionControlPicker(control, host, index);
+    return permissionControlPicker(control, index);
   });
 }
 
@@ -116,18 +107,10 @@ function modesFor(tool: PermissionTool): readonly PermissionMode[] {
   return tool.dangerous ? ["ask", "allow", "deny"] : ["allow", "deny"];
 }
 
-function toolDescription(tool: PermissionTool): string | undefined {
+function toolHint(tool: PermissionTool): string | undefined {
   const parts = [
     tool.dangerous ? undefined : "read only",
     tool.remembered === 0 ? undefined : `${tool.remembered} remembered`,
   ].filter((part): part is string => part !== undefined);
   return parts.length === 0 ? undefined : parts.join(" · ");
-}
-
-function lockedNotice(tool: string, host: Pick<Host, "emit">): void {
-  host.emit({
-    kind: "notice",
-    text: `restart without --auto-approve to change ${tool}`,
-    tone: "warn",
-  });
 }

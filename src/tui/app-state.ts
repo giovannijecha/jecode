@@ -7,6 +7,7 @@ import type { Editor } from "./editor.ts";
 import * as edit from "./editor.ts";
 import type { Feedback } from "./feedback.ts";
 import type { Open } from "./overlay.ts";
+import type { FooterInfo } from "./components/footer.ts";
 
 export type AppState = {
   blocks: Block[];
@@ -20,7 +21,12 @@ export type AppState = {
   draft: string;
   feedback?: Feedback;
   open?: Open;
+  /** Tool approval takes focus without discarding an open command menu. */
+  approval?: Open;
   activity?: Activity;
+  command?: Activity;
+  /** The running turn keeps its original model and effort until settlement. */
+  turnFooter?: FooterInfo;
   /** Pending guidance count while the active model turn still accepts steering. */
   steering?: number;
   closeWhenIdle: boolean;

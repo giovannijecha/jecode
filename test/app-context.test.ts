@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { ConversationTree } from "../src/conversation.ts";
 import type { Message, Provider, SendRequest } from "../src/types.ts";
 import { runApp } from "../src/tui/app.ts";
-import { provider, session } from "../dev/test-support/app.ts";
-import { virtualScreen, waitFor, plainRow } from "../dev/test-support/app-harness.ts";
+import { provider, session, messageText } from "../dev/test-support/app.ts";
+import { virtualScreen, waitFor, waitForIdle, plainRow } from "../dev/test-support/app-harness.ts";
 
 test("the footer reports compaction without adding it to the transcript", async () => {
+  const requests: SendRequest[] = [];
   let started = (): void => {};
   const entered = new Promise<void>((resolve) => {
     started = resolve;
@@ -19,6 +20,7 @@ test("the footer reports compaction without adding it to the transcript", async 
     ...provider(),
     contextWindow: () => Promise.resolve({ tokens: 64_000 }),
     async send(request): Promise<Message> {
+      requests.push({ ...request, messages: structuredClone(request.messages) });
       if (request.system.includes("durable working memory")) {
         started();
         await gate;
@@ -72,6 +74,15 @@ test("the footer reports compaction without adding it to the transcript", async 
   );
   release();
   await waitFor(() => current.conversation.history.length === 4, "compacted TUI turn");
+  assert.equal(requests.length, 2);
+  assert.match(requests[0]?.system ?? "", /durable working memory/);
+  assert.match(messageText(requests[1]?.messages[0]), /Earlier conversation summary/);
+  assert.doesNotMatch(JSON.stringify(requests[1]?.messages), /old context/);
+  assert.match(JSON.stringify(current.conversation.history), /old context/);
+  assert.equal(current.conversation.activeNode?.context?.throughNodeId, 2);
+  assert.equal(current.conversation.activeNode?.context?.messageCount, 0);
+  assert.equal(current.usage.requests, 2);
+  assert.equal(current.usage.lastInputTokens, 100);
   assert.doesNotMatch(JSON.stringify(current.conversation.transcript), /Persisted summary/);
 
   feed("/exit\r");
@@ -84,7 +95,10 @@ test("/compact revises context without adding its summary to the transcript", as
     ...provider(),
     contextWindow: () => Promise.resolve({ tokens: 64_000 }),
     async send(request): Promise<Message> {
-      requests.push(request);
+      requests.push({ ...request, messages: structuredClone(request.messages) });
+      if (!request.system.includes("durable working memory")) {
+        return provider("After manual compaction.").send(request);
+      }
       return {
         role: "assistant",
         content: [{ kind: "text", text: "Manual durable summary." }],
@@ -130,6 +144,16 @@ test("/compact revises context without adding its summary to the transcript", as
   assert.match(JSON.stringify(current.conversation.history), /large canonical context/);
   assert.doesNotMatch(JSON.stringify(current.conversation.transcript), /Manual durable summary/);
   assert.match(JSON.stringify(current.conversation.contextHistory), /Manual durable summary/);
+
+  await waitForIdle(harness, "manual compaction idle state");
+  feed("next request\r");
+  await waitFor(() => current.conversation.history.length === 4, "turn after manual compaction");
+  assert.equal(requests.length, 2);
+  assert.match(messageText(requests[1]?.messages[0]), /Earlier conversation summary/);
+  assert.match(JSON.stringify(requests[1]?.messages), /Manual durable summary/);
+  assert.doesNotMatch(JSON.stringify(requests[1]?.messages), /large canonical context/);
+  assert.match(JSON.stringify(current.conversation.history), /large canonical context/);
+  assert.doesNotMatch(JSON.stringify(current.conversation.transcript), /Manual durable summary/);
 
   feed("/exit\r");
   await running;

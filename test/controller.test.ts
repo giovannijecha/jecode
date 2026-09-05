@@ -118,7 +118,7 @@ test("an unknown tool is reported to the model", async () => {
   assert.match(result?.kind === "tool_result" ? result.output : "", /no such tool/);
 });
 
-test("an explicit max-steps budget stops a deterministic run", async () => {
+test("an explicit internal request budget stops a deterministic run", async () => {
   const looping = Array.from({ length: 5 }, (): Message => ({
     role: "assistant",
     content: [{ kind: "tool_call", id: "a", name: "echo", input: { text: "again" } }],
@@ -127,7 +127,7 @@ test("an explicit max-steps budget stops a deterministic run", async () => {
 
   await assert.rejects(
     runTurn([], options(provider, { maxModelRequests: 3 }), events()),
-    /stopped after 3 model requests \(--max-steps limit reached\)/,
+    /stopped after 3 model requests \(request budget reached\)/,
   );
 });
 

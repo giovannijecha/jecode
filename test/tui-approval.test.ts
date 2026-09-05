@@ -19,8 +19,9 @@ test("an approval is a menu of answers, not a key to guess at", () => {
   assert.match(shown, /Yes, this file for the session/);
   assert.match(shown, /No, and say why/);
   assert.match(shown, /esc deny/);
-  const detail = bare.findIndex((row) => row.includes("Approve only this call."));
-  assert.match(bare[detail + 1] ?? "", /↑↓ choose/, "one-line approval details touch the controls without an empty row");
+  const lastChoice = bare.findIndex((row) => row.includes("No, and say why"));
+  assert.match(bare[lastChoice + 1] ?? "", /↑↓ choose/, "controls follow the choices without a description or empty row");
+  assert.doesNotMatch(shown, /Approve only this call/);
   assert.deepEqual(prompt.options.map((option) => option.key), ["y", "a", "n"]);
 });
 

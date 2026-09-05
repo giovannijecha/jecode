@@ -94,7 +94,7 @@ function fixtureSession(persistence?: SessionPersistence): Session {
       maxTokens: 4_096,
       compactionPercent: 85,
       root: process.cwd(),
-      autoApprove: false,
+
       ephemeral: persistence === undefined,
     },
     provider,

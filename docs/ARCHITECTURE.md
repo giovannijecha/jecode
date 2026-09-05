@@ -7,27 +7,30 @@ current code and evolve with it.
 
 ## Mental model
 
-jecode has one agent loop. The TUI or batch reader supplies a user message;
+Jecode has one agent loop. The TUI supplies a user message;
 the controller sends it to one provider, executes requested tools, and repeats
 until the model returns no tool calls.
 
 ```text
 bin/jecode.js → dist/main.js → start.js
-                               ├─ tui/app.js       interactive control plane
-                               │    ├─ app-input.js
-                               │    └─ app-workflows.js
-                               │         ├─ command-workflow.js ─ commands.js
-                               │         └─ turn-workflow.js
-                               └─ batch.js         piped control plane
-                                        │
-                                        ▼
-                                   controller.js   the only agent loop
-                                     ├─ providers/ wire-format boundaries
-                                     └─ tools/     workspace capabilities
+                               └─ tui/app.js       interactive control plane
+                                    ├─ app-input.js
+                                    └─ app-workflows.js
+                                         ├─ command-workflow.js ─ commands.js
+                                         └─ turn-workflow.js
+                                              └─ controller.js   the only agent loop
+                                                   ├─ providers/ wire-format boundaries
+                                                   └─ tools/     workspace capabilities
 
 npm run start → src/main.ts    direct development path
 npm run pack:release → clean build → dist/ inside the release tarball
 ```
+
+`start.ts` handles help and version before configuration or terminal takeover.
+Every conversation launch then requires a TTY on both stdin and stdout before
+loading settings, selecting a provider, or opening session storage. A failed
+terminal check returns a stderr diagnostic and non-zero exit; there is no
+fallback execution surface.
 
 There are no subagents, workers, delegated tasks, or concurrent controller
 loops. One model response may overlap consecutive read-only tool calls inside a bounded
@@ -55,13 +58,16 @@ workspace content the model reads or content the user supplies.
    Consecutive shared reads run in bounded parallel waves; exclusive calls
    remain ordered barriers. Collect every result in original call order inside
    one user message, then append any queued guidance.
-6. Repeat until the model answers, the user interrupts, a fatal error occurs,
-   or an explicit process-only `--max-steps` budget is exhausted.
+6. Repeat until the model answers, the user interrupts, or a fatal error occurs.
+
+Ordinary turns have no model-request ceiling. The controller accepts an
+internal request budget for deterministic test fixtures; configuration and
+TUI launch do not expose or pass that option.
 
 The controller awaits a checkpoint after every complete tool-result batch and
 after the final assistant response. It never begins the next provider request
-until that checkpoint succeeds. Batch mode commits only to memory; the TUI
-commits the same canonical turn to its durable session owner first.
+until that checkpoint succeeds. The TUI commits the canonical turn to its
+durable session owner first; ephemeral conversations commit only in memory.
 
 Interactive steering is cooperative rather than preemptive. The composer feeds
 one bounded inbox owned by the active turn. Guidance is consumed after the
@@ -111,14 +117,23 @@ the foreground operation can end promptly.
 
 ## Foreground activity
 
-The interactive shell permits one foreground activity: a slash command or a
-model turn. One `AbortController` owns its cancellation. The composer may feed
-cooperative guidance into that model turn without opening another activity. This
-prevents a network-backed `/models` request from overlapping a turn and gives
-`Esc`, `Ctrl+C`, and `Ctrl+D` one consistent target.
+The interactive shell owns one model turn and at most one command interaction,
+each with its own `AbortController`. Commands may load catalogues or open menus
+while the model streams. Tool approvals have a separate overlay slot and take
+focus without discarding a command's picker, query, or field. Settling either
+workflow closes only its own interaction. Input cancellation targets the visible
+owner; process shutdown and `Ctrl+D` cancel both and reject new input.
 
-A fatal rendering or input callback failure cancels any open overlay, aborts
-that foreground activity, and awaits its settlement before closing session
+The turn captures provider, model, effort, request identity, and context settings
+before its first await. Continuations, compaction, errors, and checkpoints use
+that snapshot; menu changes configure the next turn. The footer keeps the active
+identity until settlement. Live permission revocation is rechecked before tool
+preview, approval, and execution. Already-running tools are not retroactively
+cancelled. `/new`, `/timeline`, and `/compact` require idle conversation state;
+`/export` clones the visible transcript before asynchronous writing.
+
+A fatal rendering or input callback failure cancels all open overlays, aborts
+both workflows, and awaits their settlement before closing session
 persistence. Only then can control return to the caller, so provider or tool
 work cannot continue behind a restored terminal.
 
@@ -173,6 +188,9 @@ Retries and subsequent requests on that route reuse it for provider cache
 affinity without coupling API-key traffic to ChatGPT account traffic.
 Refusals, incomplete responses, nested failures, and usage are normalized
 rather than disappearing at the stream boundary.
+Truncated responses never authorize tool execution. Output-limit diagnostics
+direct the user to maximum output tokens in `/settings` when that control
+applies to the selected provider.
 Malformed, scalar, and array tool arguments retain a transient invalid marker
 through dispatch. The controller returns a matching error result without
 previewing or executing the call; durable codecs omit the marker after that
@@ -192,9 +210,8 @@ or waiting for the model. A request has 60 seconds to receive response headers,
 and an open JSON or SSE body can remain idle for at most 120 seconds. OpenAI
 Responses streams also have five minutes to produce substantive model progress;
 protocol keepalives do not extend that deadline.
-These internal deadlines also cover batch mode. Process
-signals cancel the active provider or tool in either surface before Jecode
-exits, with a bounded hard-exit fallback. The client handles redirects manually
+Process signals cancel the active provider or tool before Jecode exits, with a
+bounded hard-exit fallback. The client handles redirects manually
 and rejects every 3xx response without retrying or forwarding headers to
 another endpoint. Retry state is surfaced in the TUI. Each SSE event, the
 model-output-aware aggregate stream, reconstructed tool arguments, model
@@ -268,8 +285,7 @@ canonical file order. It never delegates workspace reads to an executable from
 
 `run_command` is not a filesystem sandbox. A shell can address anything the
 user account can address, which is why every exact command asks by default
-unless its session policy allows it or the process started with
-`--auto-approve`. On cancellation or
+unless its session policy or a remembered approval allows it. On cancellation or
 timeout, jecode terminates the process tree and escalates if it does not exit.
 The child receives an explicit copy of the process environment with
 credential-like names removed. Known environment, session, and saved
@@ -285,19 +301,27 @@ file changes, or one exact shell command. `/permissions` exposes every tool in
 one session-only control plane. Read-only tools can be allowed or denied;
 dangerous tools can ask, allow, or deny. Left/Right changes the selected policy
 without opening another menu, while Enter opens remembered approvals only when
-that tool has any. Denied tools are omitted from the next model request, and
-changing a tool policy clears its remembered grants. `/new` restores the
-defaults. A launch-time `--auto-approve` keeps dangerous tools locked to allow
-for that process.
+that tool has any. Denied tools are omitted from the next model turn's catalogue;
+calls already advertised in the current turn are denied before execution, and
+changing a tool policy clears its remembered grants. Every policy remains
+adjustable, and `/new` restores the defaults and clears remembered approvals.
 
 ## Settings, credentials, and local data
 
 Persistent user data lives under `~/.jecode`, outside every workspace.
 `settings.json` contains only non-secret defaults: provider, one remembered
-model per provider, effort, output and compaction limits,
-and reduced motion. Runtime precedence is CLI flags, environment variables,
-saved settings, then built-in defaults. Root, auto-approval, and the optional
-model-request budget stay process-only.
+model per provider, effort, output and compaction limits, and reduced motion.
+Provider and model selection, effort, output, and compaction use saved settings
+or built-in defaults; `/models`, `/effort`, and `/settings` own their changes.
+Root and ephemeral mode stay process-only. Reduced motion retains flag,
+environment, saved setting, then default precedence, while ephemeral mode uses
+its flag, environment, then default. The remaining preference environment
+variables are `JECODE_REDUCED_MOTION` and `JECODE_EPHEMERAL`.
+
+`config.ts` rejects retired model-setting, request-budget, and auto-approval
+flags with removal guidance. Their nonempty legacy environment overrides also
+stop startup; diagnostics report only the variable name and applicable TUI
+control. This startup cleanup changes no saved schema and migrates no data.
 
 API keys resolve from environment, then in-memory session values, then the
 saved `~/.jecode/credentials.json` file. The environment wins. ChatGPT OAuth is
@@ -333,6 +357,13 @@ ChatGPT identity and plan hint. OAuth uses PKCE for
 browser login, supports OpenAI's device-code path for WSL/headless terminals,
 refreshes early, and retries one 401 after refresh. Logout removes the local
 account even when remote revocation cannot be confirmed.
+
+The loopback callback serves the self-contained result page from
+`oauth-result-page.ts`: a small Jeco identity, one outcome, and a return-to-terminal
+instruction. Success and failure share a static layout. The page loads no external
+assets and removes the authorization query from browser history; protocol checks
+and response security headers remain in `openai-oauth-callback.ts`.
+`dev/web/` previews the same renderer without authenticating or reading account data.
 
 `/export` is an explicit, argument-free operation that writes an automatically
 named Markdown transcript in the directory from which Jecode was launched. It
@@ -392,10 +423,10 @@ selected path and timeline branching can choose another one later. The
 canonical prefix remains untouched. TUI checkpoints persist the ordinary turn
 before attempting optional compaction, then atomically revise that same leaf if
 a summary succeeds. Cancellation or failure therefore cannot discard a
-completed response or a settled tool batch. Batch mode applies the same policy
-in memory. `/compact` forces that same policy below the automatic trigger and
-atomically revises only the active leaf with a newer anchor. It is a silent
-no-op when there is too little useful prefix. A temporary historical selection
+completed response or a settled tool batch. `/compact` forces that same policy
+below the automatic trigger and atomically revises only the active leaf with a
+newer anchor. It is a silent no-op when there is too little useful prefix. A
+temporary historical selection
 must receive a new user turn first, because compacting the shared branch point
 would rewrite history owned by more than one path.
 
@@ -468,11 +499,11 @@ load again, so the summary never authorizes conversation data. The catalogue
 fails explicitly above its entry bound instead of silently hiding an older
 session that was updated most recently.
 
-`jecode resume` opens a searchable selector; `jecode resume --latest` chooses
-the newest available source. `--ephemeral` omits the persistence owner entirely.
-Batch mode is always stateless. Draft editor content, ordinary transient notices,
-permission policies, approvals, credentials, and pending UI blocks are never
-part of a checkpoint.
+`jecode resume` opens a searchable selector; `jecode -c` and its equivalent
+`jecode resume --last` choose the newest available source through the same launch
+path. `--ephemeral` omits the persistence owner entirely. Draft editor content,
+ordinary transient notices, permission policies, approvals, credentials, and
+pending UI blocks are never part of a checkpoint.
 
 ## TUI composition
 
@@ -510,12 +541,10 @@ fields, and help. Shared prompt and menu-row renderers own cell measurement,
 selection, secret masking, progress, and caret placement. `picker.ts` owns
 filtering and selection; `picker-layout.ts` shares one row budget between
 painting and caret measurement. `components/menu.ts` supplies Ribbon rows and
-the bounded detail area to both selectors and command completion. Semantic `Palette`
+bounded overflow recovery for clipped labels and values to selectors and command
+completion. Options carry no explanatory description. Model catalogue failures
+use footer feedback instead of a persistent picker preamble. Semantic `Palette`
 tokens keep colour roles out of component implementations.
-
-`batch-view.ts` reuses prose and evidence primitives at the supplied pipe width.
-It keeps static tool summaries and emits every supplied detail without the
-interactive reading column, collapsed selection, or expansion controls.
 
 Blocks store source text, never pre-wrapped rows. A transcript renderer caches
 rows per block, width, and palette: streaming invalidates the changing block,
@@ -550,13 +579,13 @@ identifies it. Generic terminals retain traditional Backspace encodings.
 Prompt ingress shares the session text boundary: 1,048,576 UTF-16 code units.
 The decoder bounds paste and protocol buffers before concatenation, and the
 editor refuses insertions that cross the same limit. An overflow produces
-footer feedback and prevents submission until the prompt changes. Batch stdin
-uses the same boundary before echo, history, or provider use. Cooperative
+footer feedback and prevents submission until the prompt changes. Cooperative
 steering has its own smaller per-turn queue.
 
 `app-input.ts` checks readiness before clearing the editor or appending
-history. Active-turn submission offers guidance to the existing steering inbox;
-it does not create another turn. `app-workflows.ts` connects the shell to
+history. During a turn, slash commands retain their command semantics while
+ordinary text offers guidance to the existing steering inbox. Neither creates
+another model turn. `app-workflows.ts` connects the shell to
 `command-workflow.ts` and `turn-workflow.ts` with one shared automatic-compaction
 gate. The turn workflow retains steering, checkpoint order, and failure recovery
 as one transaction. `turn.ts` translates controller events into semantic
@@ -579,7 +608,7 @@ and controller behavior remain covered by their own integration tests.
 
 Pure translation, layout, width, activity, scroll, permission, and transcript
 logic is unit tested. Integration tests cover the packaged command, bootstrap
-routing, batch conversations, durable session recovery, context projection and
+routing and terminal rejection, durable session recovery, context projection and
 compaction, TUI screen ownership and restoration, stream assembly, HTTP retry
 and cancellation, provider request bodies, tool-loop semantics,
 symlink/junction confinement, stable file generations, generation-safe leases,

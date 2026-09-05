@@ -1,10 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { MAX_PROMPT_CODE_UNITS } from "../src/input-boundary.ts";
 
 function runExecutable(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return runNode(path.resolve("bin/jecode.js"), args);
@@ -54,69 +53,54 @@ function runNode(
   });
 }
 
-test("the packaged jecode executable reaches batch help without a developer script", async () => {
+test("the packaged jecode executable shows help without a terminal or developer script", async () => {
   const result = await runExecutable(["--help"]);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Usage:\s+jecode \[options\]/);
-  assert.match(result.stdout, /--provider/);
-  assert.match(result.stdout, /optional per-turn model-request budget/);
-  assert.match(result.stdout, /type \/ to discover/);
+  assert.match(result.stdout, /jecode -c \[options\]/);
+  assert.match(result.stdout, /jecode resume \[--last\] \[options\]/);
+  assert.doesNotMatch(result.stdout, /--latest/);
+  assert.doesNotMatch(result.stdout, /--provider|--model|--effort|--max-tokens|--max-steps|--compaction-percent|--auto-approve/);
+  assert.match(result.stdout, /interactive terminal on stdin and stdout/);
+  assert.match(result.stdout, /Type \/ to discover/);
   assert.equal(result.stderr, "");
 });
 
-test("the packaged batch executable reports terminal failures on stderr", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "jecode-batch-home-"));
-  const environment: NodeJS.ProcessEnv = {
-    ...process.env,
-    HOME: directory,
-    USERPROFILE: directory,
-    APPDATA: directory,
-    LOCALAPPDATA: directory,
-    JECODE_HOME: directory,
-    XDG_CONFIG_HOME: directory,
-  };
-  for (const name of Object.keys(environment)) {
-    if (name.toUpperCase() === "ANTHROPIC_API_KEY") delete environment[name];
-  }
-
-  try {
-    const result = await runNode(
-      path.resolve("bin/jecode.js"),
-      ["--provider", "anthropic", "--model", "fixture-model"],
-      { input: "hello\n", environment },
-    );
-
-    assert.equal(result.code, 1);
-    assert.match(result.stdout, /> hello/);
-    assert.doesNotMatch(result.stdout, /ANTHROPIC_API_KEY is not set/);
-    assert.match(result.stderr, /^jecode: Anthropic API: ANTHROPIC_API_KEY is not set/m);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+test("the packaged executable redirects the retired resume spelling before startup", async () => {
+  const result = await runExecutable(["resume", "--latest"]);
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /--latest has been renamed to --last.*jecode -c.*jecode resume --last/);
 });
 
-test("the packaged batch executable rejects an oversized final line on stderr", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "jecode-batch-limit-home-"));
+test("the packaged executable rejects non-interactive launches before configuration or input", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jecode-terminal-home-"));
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
-    HOME: directory,
-    USERPROFILE: directory,
-    APPDATA: directory,
-    LOCALAPPDATA: directory,
     JECODE_HOME: directory,
-    XDG_CONFIG_HOME: directory,
+    JECODE_PROVIDER: "retired-provider-override",
+    OLLAMA_HOST: "http://127.0.0.1:11434",
   };
-
   try {
-    const result = await runNode(
-      path.resolve("bin/jecode.js"),
-      ["--provider", "anthropic", "--model", "fixture-model", "--ephemeral"],
-      { input: "x".repeat(MAX_PROMPT_CODE_UNITS + 1), environment },
-    );
-
-    assert.equal(result.code, 1);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, /^jecode: Prompt cannot exceed 1,048,576 UTF-16 code units/m);
+    for (const args of [[], ["-c"], ["resume", "--last"]]) {
+      for (const input of [undefined, "do not process this request\n"]) {
+        const result = await runNode(path.resolve("bin/jecode.js"), args, {
+          environment, ...(input === undefined ? {} : { input }),
+        });
+        assert.equal(result.code, 1);
+        assert.equal(result.stdout, "");
+        assert.match(result.stderr, /^jecode: an interactive terminal is required on stdin and stdout/m);
+        assert.doesNotMatch(result.stderr, /retired-provider|127|do not process/);
+        assert.deepEqual(await readdir(directory), []);
+      }
+    }
+    for (const args of [["--help"], ["--version"]]) {
+      const result = await runNode(path.resolve("bin/jecode.js"), args, { environment });
+      assert.equal(result.code, 0, result.stderr);
+      assert.notEqual(result.stdout, "");
+      assert.equal(result.stderr, "");
+    }
+    assert.deepEqual(await readdir(directory), []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -127,6 +111,20 @@ test("the packaged executable reports its manifest version", async () => {
   const result = await runExecutable(["--version"]);
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.stdout.trim(), manifest.version);
+});
+
+test("either redirected stream prevents terminal takeover", async () => {
+  const launcher = new URL("../bin/jecode.js", import.meta.url).href;
+  for (const terminalStream of ["stdin", "stdout"]) {
+    const source = [
+      `Object.defineProperty(process.${terminalStream}, "isTTY", { value: true });`,
+      `await import(${JSON.stringify(launcher)});`,
+    ].join("\n");
+    const result = await runNode("--input-type=module", ["--eval", source]);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /interactive terminal is required on stdin and stdout/);
+  }
 });
 
 test("the launcher rejects the unverified Node 23 type-stripping gap", async () => {

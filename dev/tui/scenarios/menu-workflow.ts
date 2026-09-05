@@ -25,13 +25,5 @@ export function menuScene(state: LabState): View {
   const sample = samples[Math.max(0, index)]!;
   const view = sample.create(state);
   if (sample.title !== "Models" || view.modal?.kind !== "pick") return view;
-  const picker = view.modal.picker;
-  return {
-    ...view,
-    modal: { kind: "pick", picker: {
-      ...picker,
-      query: "",
-      title: picker.title.length > 0 ? picker.title : [{ text: sample.title, fg: state.palette.accent, bold: true }],
-    } },
-  };
+  return { ...view, modal: { kind: "pick", picker: { ...view.modal.picker, query: "" } } };
 }

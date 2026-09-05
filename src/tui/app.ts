@@ -63,7 +63,7 @@ export async function runApp(
   state.blocks.push(...session.conversation.transcript);
   state.committedNodeId = session.conversation.activeNodeId;
 
-  const permissions = sessionPermissions(session.tools, session.config.autoApprove);
+  const permissions = sessionPermissions(session.tools);
 
   let closed: (() => void) | undefined;
   let frameTimer: NodeJS.Timeout | undefined;
@@ -74,7 +74,7 @@ export async function runApp(
   let stopInput = (): void => {};
   let stopShutdown = (): void => {};
   let failure: { error: unknown } | undefined;
-  let activeWorkflow: Promise<void> | undefined;
+  const activeWorkflows = new Set<Promise<void>>();
   // Timers outlive the teardown they were scheduled before. Painting after the
   // terminal has been handed back would write escapes into the user's shell.
   let live = true;
@@ -92,22 +92,25 @@ export async function runApp(
 
   const view = () => {
     const now = Date.now();
+    const activity = state.command !== undefined && state.open === undefined && state.approval === undefined
+      ? state.command : state.activity ?? state.command;
     return {
       blocks: state.blocks,
       editor: state.editor,
       scroll: state.scroll,
       unseen: state.unseen,
       pal: session.palette,
-      footer: footerInfo(session, workspace),
-      status: state.activity === undefined
+      footer: state.turnFooter === undefined ? footerInfo(session, workspace) : { ...state.turnFooter, workspace },
+      status: activity === undefined
         ? undefined
-        : activityStatus(state.activity, now),
-      steering: state.steering,
+        : activityStatus(activity, now),
+      turnActive: state.activity !== undefined,
+      steering: state.command === undefined ? state.steering : undefined,
       feedback: state.feedback,
       readiness: turnBlocker(session),
       now,
       reducedMotion: session.config.reducedMotion,
-      modal: overlay.shown(state.open),
+      modal: overlay.shown(state.approval ?? state.open),
       menu: completionOptions(state.completing),
       menuIndex: state.completing?.index,
     };
@@ -216,7 +219,9 @@ export async function runApp(
   function fail(error: unknown): void {
     failure ??= { error };
     state.open = overlay.cancel(state.open);
+    state.approval = overlay.cancel(state.approval);
     state.activity?.control.abort(error);
+    state.command?.control.abort(error);
     quit();
   }
 
@@ -224,28 +229,31 @@ export async function runApp(
     const tracked = work
       .catch((error: unknown) => fail(error))
       .finally(() => {
-        if (activeWorkflow === tracked) activeWorkflow = undefined;
+        activeWorkflows.delete(tracked);
       });
-    activeWorkflow = tracked;
+    activeWorkflows.add(tracked);
     return tracked;
   }
 
   function requestQuit(reason: unknown = new Error("interrupted")): void {
     state.open = overlay.cancel(state.open);
-    const activity = state.activity;
-    if (activity === undefined) {
+    state.approval = overlay.cancel(state.approval);
+    if (state.activity === undefined && state.command === undefined) {
       quit();
       return;
     }
     state.closeWhenIdle = true;
-    activity.control.abort(reason);
+    state.activity?.control.abort(reason);
+    state.command?.control.abort(reason);
   }
 
   function startActivity(kind: ActivityKind, label: string): Activity | undefined {
-    if (state.activity !== undefined) return undefined;
+    if (state.closeWhenIdle) return undefined;
+    if (state.command !== undefined || (kind === "turn" && state.activity !== undefined)) return undefined;
     const activity = begin(kind, label);
-    state.activity = activity;
-    activityTimer = setInterval(
+    if (kind === "turn") state.activity = activity;
+    else state.command = activity;
+    activityTimer ??= setInterval(
       () => guard(() => {
         let activeTool: Block | undefined;
         for (let index = state.blocks.length - 1; index >= 0; index--) {
@@ -263,12 +271,20 @@ export async function runApp(
   }
 
   function finishActivity(activity: Activity): void {
-    if (state.activity !== activity) return;
-    if (activityTimer !== undefined) clearInterval(activityTimer);
-    activityTimer = undefined;
-    state.activity = undefined;
-    state.open = overlay.cancel(state.open);
-    if (state.closeWhenIdle) quit();
+    if (state.activity === activity) {
+      state.activity = undefined;
+      state.turnFooter = undefined;
+      state.approval = overlay.cancel(state.approval);
+    } else if (state.command === activity) {
+      state.command = undefined;
+      state.open = overlay.cancel(state.open);
+    } else return;
+    const idle = state.activity === undefined && state.command === undefined;
+    if (idle && activityTimer !== undefined) {
+      clearInterval(activityTimer);
+      activityTimer = undefined;
+    }
+    if (state.closeWhenIdle && idle) quit();
     else render();
   }
 
@@ -375,7 +391,7 @@ export async function runApp(
   } finally {
     try {
       quit();
-      await activeWorkflow;
+      await Promise.allSettled([...activeWorkflows]);
     } finally {
       await session.persistence?.close();
     }

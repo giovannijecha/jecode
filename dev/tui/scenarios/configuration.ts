@@ -85,7 +85,7 @@ export function permissionsScene(state: LabState): View {
     scroll: 0,
     modal: {
       kind: "pick",
-      picker: permissionControlPicker(control, { emit() {} }, state.selected),
+      picker: permissionControlPicker(control, state.selected),
     },
   };
 }
@@ -95,7 +95,7 @@ function permissionFixture() {
     name, description, input, dangerous, concurrency,
     async run(): Promise<never> { throw new Error("the TUI lab cannot execute tools"); },
   }));
-  const control = sessionPermissions(tools, false);
+  const control = sessionPermissions(tools);
   control.set("search_text", "deny");
   for (const path of ["fixture-one.ts", "fixture-two.ts"]) {
     control.remember({ kind: "tool_call", id: path, name: "edit_file", input: { path } });

@@ -105,7 +105,7 @@ test("permission adjustments retain their selected row and changed policy across
   current.handle(key("right"));
   const changed = picker(current);
   assert.equal(changed.options[index]?.value, "allow");
-  assert.equal(changed.options[index]?.description, undefined);
+  assert.equal(changed.options[index]?.hint, undefined);
   for (const size of sizes) {
     current.render(size);
     assert.equal(picker(current), changed);
@@ -157,7 +157,7 @@ test("masked fields retain their editor without exposing its contents", (context
   assert.doesNotMatch(JSON.stringify(current.view().blocks), /synthetic-value|masked-demo-value|👩/);
 });
 
-test("navigating descriptions keeps dock height and selected labels and values visible at every size", (context) => {
+test("navigating menus keeps dock height and selected labels and values visible at every size", (context) => {
   const current = lab();
   context.after(() => current.close());
   for (const moment of MENU_MOMENTS) {

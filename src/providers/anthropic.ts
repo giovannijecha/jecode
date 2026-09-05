@@ -46,7 +46,7 @@ export function anthropicEfforts(model: string): readonly string[] {
 export const anthropic: Provider = {
   id: ID,
   // Sonnet is the default because it is the one that can be left running.
-  // Opus via `--model claude-opus-5`, Haiku via `--model claude-haiku-4-5`.
+  // Other models are selected through the shared model catalogue.
   defaultModel: "claude-sonnet-5",
   auth: { kind: "api-key", keyVar: KEY },
 

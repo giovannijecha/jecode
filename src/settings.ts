@@ -1,4 +1,4 @@
-// Persistent, non-secret defaults for interactive and batch sessions.
+// Persistent, non-secret defaults for interactive sessions.
 
 import * as path from "node:path";
 import { atomicWrite } from "./atomic.ts";

@@ -15,7 +15,7 @@ export function renderCommandMenu(
   const selectedIndex = selected === undefined ? 0 : Math.max(0, Math.min(commands.length - 1, selected));
   if (commands.length === 0) return { rows: [], right: "" };
   const menu = renderMenu(commands.map((command, index) => ({
-    label: `/${command.name}`, description: command.blurb, selected: selectedIndex === index,
+    label: `/${command.name}`, selected: selectedIndex === index,
   })), width, pal, { maxRows: MAX_ROWS + 2, visible: MAX_ROWS });
   return {
     rows: menu.rows,

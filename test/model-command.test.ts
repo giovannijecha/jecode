@@ -17,6 +17,7 @@ test("the model menu offers what the provider says it has", async () => {
     ["big", "small"],
   );
   assert.deepEqual(screen.pickers[0]?.title, []);
+  assert.equal(screen.pickers[0]?.description, undefined);
   assert.equal(live.model, "small");
 });
 
@@ -124,7 +125,7 @@ test("the model menu aggregates providers and switches provider and model atomic
     screen.pickers[0]?.options.map((option) => `${option.label}:${option.value}`),
     ["shared:First", "first-only:First", "shared:Second", "second-only:Second"],
   );
-  assert.match(screen.pickers[0]?.description ?? "", /Not connected: Blocked/);
+  assert.equal(screen.pickers[0]?.description, undefined);
   assert.equal(live.provider, second);
   assert.equal(live.model, "second-only");
   assert.equal(live.config.providerId, "second");
@@ -152,7 +153,7 @@ test("the model menu names every API route and distinguishes OpenAI Account usag
       "shared-model:OpenAI Account", "cloud-model:Ollama API",
     ],
   );
-  assert.match(screen.pickers[0]?.description ?? "", /API and account usage stay separate/);
+  assert.equal(screen.pickers[0]?.description, undefined);
 });
 
 test("one failed catalogue does not hide models from another provider", async () => {
@@ -167,8 +168,8 @@ test("one failed catalogue does not hide models from another provider", async ()
   await modelsCommand(live, screen, { save: false }, [good, failed]);
 
   assert.deepEqual(screen.pickers[0]?.options.map((option) => option.label), ["usable"]);
-  assert.match(screen.pickers[0]?.description ?? "", /Unavailable: Failed/);
-  assert.deepEqual(screen.blocks, []);
+  assert.equal(screen.pickers[0]?.description, undefined);
+  assert.deepEqual(screen.blocks, [{ kind: "notice", text: "model catalogs unavailable: Failed", tone: "warn" }]);
 });
 
 test("model catalogues start concurrently", async () => {

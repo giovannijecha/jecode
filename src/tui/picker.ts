@@ -9,7 +9,6 @@ import type { Cursor } from "./frame.ts";
 
 export type Option = {
   label: string;
-  description?: string;
   hint?: string;
   /** A compact row-local value which remains visible on narrow terminals. */
   value?: string;

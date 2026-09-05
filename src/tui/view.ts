@@ -41,6 +41,8 @@ export type View = {
   pal: Palette;
   footer: FooterInfo;
   status?: string;
+  /** Keep active model work visible while a command owns the composer. */
+  turnActive?: boolean;
   /** Pending cooperative guidance; defined only while a model turn accepts it. */
   steering?: number;
   /** Replaceable operational feedback shown in the footer, never transcribed. */
@@ -104,10 +106,10 @@ export function compose(
 
 function dockRows(view: View, width: number, height: number): DockBody {
   const status = renderStatus({
-    // A modal already names the interaction in progress. Let command feedback
-    // use the footer while that interaction is open instead of repeating a
-    // generic "Running /…" label beside it.
-    status: view.modal === undefined ? view.status : undefined,
+    // A modal names its command; background model work still needs visible
+    // status. Its interruption/steering keys are suspended while a menu owns input.
+    status: view.modal === undefined || view.turnActive ? view.status : undefined,
+    interruptible: view.modal === undefined,
     steering: view.modal === undefined ? view.steering : undefined,
     feedback: view.feedback,
     readiness: view.readiness,

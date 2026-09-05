@@ -213,7 +213,7 @@ test("keeps partial text but rejects a tool call truncated by the output limit",
   const message = fromWireReply(reply);
   assert.deepEqual(message.content, [
     { kind: "text", text: "partial" },
-    { kind: "text", text: "[truncated: hit the output limit — raise --max-tokens]" },
+    { kind: "text", text: "[truncated: hit the output limit — raise max output tokens in /settings]" },
   ]);
   assert.equal(message.raw, undefined);
   assert.equal(message.rawFrom, undefined);

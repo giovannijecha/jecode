@@ -41,20 +41,22 @@ Tool records keep the target, outcome, and compact evidence together. Expand a
 record to inspect its complete output or diff while the composer stays ready
 at the full width of the terminal.
 
-Menus keep the selected choice and its details together. Approvals separate
+Menus use compact choices with aligned values and stay available while the
+model works. Approvals separate
 the target from the decision and make the scope of remembered access explicit.
 
 Choose Anthropic API, OpenAI API, OpenAI Account with eligible ChatGPT access,
 or Ollama API without changing the workflow. Ollama uses its cloud API only.
 API connections and account access stay separate, and
-the footer always names the route selected for the next request. Jecode is
+the footer names the running turn's route, then the selection for the next turn. Jecode is
 written in TypeScript and released as plain JavaScript for Node.js, with no
 installation scripts and zero third-party runtime dependencies. The runtime
 stays small enough to inspect, understand, and change.
 
 ## Quick start
 
-Jecode requires **Node.js 22.18+ on the 22.x line, or Node.js 24+**, and npm.
+Jecode requires **Node.js 22.18+ on the 22.x line, or Node.js 24+**, npm, and an
+interactive terminal on both stdin and stdout.
 
 ### Install or update
 
@@ -90,6 +92,12 @@ change to improve startup performance.
 
 Use `jecode --root path/to/project` to select another workspace, or
 `jecode --ephemeral` when the conversation must stay memory-only.
+Use `/effort` and `/settings` to save reasoning effort, output limits, and
+context compaction preferences. `--reduced-motion` keeps decorative motion still.
+
+Start Jecode directly in the terminal. Piped or redirected sessions are rejected
+before configuration, provider, or session work. `--help` and `--version` remain
+available through pipes and redirection.
 
 ### Resume a conversation
 
@@ -102,8 +110,10 @@ jecode resume
 Resume the most recently updated conversation directly:
 
 ```console
-jecode resume --latest
+jecode -c
 ```
+
+The equivalent long form is `jecode resume --last`.
 
 List every startup option:
 
@@ -171,7 +181,7 @@ inherited Windows path below `/mnt/c`. Do not ignore `EBADENGINE`: `node
 ## Documentation
 
 The [user guide](https://github.com/giovannijecha/jecode/blob/main/docs/USAGE.md)
-covers provider access, TUI controls, sessions and compaction, batch mode,
+covers provider access, TUI controls, sessions and compaction, startup options,
 configuration, and safety boundaries.
 
 The [architecture guide](https://github.com/giovannijecha/jecode/blob/main/docs/ARCHITECTURE.md)

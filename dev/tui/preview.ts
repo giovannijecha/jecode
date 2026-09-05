@@ -96,6 +96,7 @@ export function createPreview(initial: View, actions: PreviewActions) {
       modal: overlay.shown(state.open), menu: completionOptions(state.completing),
       menuIndex: state.completing?.index, feedback: state.feedback,
       status: interrupted ? undefined : source.status,
+      turnActive: state.activity !== undefined,
       steering: interrupted ? undefined : state.steering,
     };
   }
@@ -203,7 +204,7 @@ function inertSession(view: View): Session {
     config: {
       providerId: "anthropic", model, root: "/lab", effort: "high",
       reducedMotion: false, maxTokens: 4096, compactionPercent: 85,
-      autoApprove: false, ephemeral: true,
+      ephemeral: true,
     },
     provider: {
       id: "anthropic", defaultModel: model,

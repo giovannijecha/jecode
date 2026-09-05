@@ -101,31 +101,26 @@ function settingsItems(values: SettingsValues): SettingsItem[] {
       option: {
         label: "model",
         value: `${providerLabel(values.provider)} · ${values.model || "choose a model"}`,
-        description: "Choose the provider and model used for subsequent requests.",
       },
     },
-    { action: "effort", option: { label: "effort", value: values.effort,
-      description: "Set the saved reasoning effort for model requests." } },
+    { action: "effort", option: { label: "effort", value: values.effort } },
     ...(values.maxTokens === undefined
       ? []
       : [{
           action: "maxTokens" as const,
-          option: { label: "max output tokens", value: String(values.maxTokens),
-            description: "Limit the output tokens requested from the model in each response." },
+          option: { label: "max output tokens", value: String(values.maxTokens) },
         }]),
     {
       action: "compactionPercent",
-      option: { label: "context compaction", value: `${values.compactionPercent}%`,
-        description: "Compact model context near this share of its usable window. The transcript stays complete." },
+      option: { label: "context compaction", value: `${values.compactionPercent}%` },
     },
     {
       action: "reducedMotion",
-      option: { label: "reduced motion", value: values.reducedMotion ? "on" : "off",
-        description: "Keep decorative movement still while output continues to update." },
+      option: { label: "reduced motion", value: values.reducedMotion ? "on" : "off" },
     },
     {
       action: "providers",
-      option: { label: "providers", hint: "manage connections", description: "Manage API keys and account connections." },
+      option: { label: "providers", hint: "manage connections" },
     },
   ];
 }

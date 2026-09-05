@@ -1,23 +1,27 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as path from "node:path";
 import { loadConfig } from "../src/config.ts";
+import type { SavedSettings } from "../src/settings.ts";
 
+const RETIRED = {
+  provider: "/models",
+  model: "/models",
+  effort: "/effort",
+  "max-tokens": "/settings",
+  "max-steps": "interactive turns have no request limit",
+  "compaction-percent": "/settings",
+  "auto-approve": "/permissions",
+};
 const CONFIG_ENV = [
-  "JECODE_PROVIDER",
-  "JECODE_MODEL",
-  "OLLAMA_HOST",
-  "JECODE_EFFORT",
-  "JECODE_MAX_TOKENS",
-  "JECODE_MAX_STEPS",
-  "JECODE_COMPACTION_PERCENT",
-  "JECODE_REDUCED_MOTION",
-  "JECODE_AUTO_APPROVE",
-  "JECODE_EPHEMERAL",
-] as const;
+  ...Object.keys(RETIRED).map((name) => "JECODE_" + name.toUpperCase().replaceAll("-", "_")),
+  "OLLAMA_HOST", "JECODE_REDUCED_MOTION", "JECODE_EPHEMERAL",
+];
 
-const config = (argv: string[], saved = {}) => {
+function config(argv: string[], saved: SavedSettings = {}, environment: Record<string, string> = {}) {
   const before = new Map(CONFIG_ENV.map((name) => [name, process.env[name]]));
   for (const name of CONFIG_ENV) delete process.env[name];
+  Object.assign(process.env, environment);
   try {
     return loadConfig(argv, saved);
   } finally {
@@ -26,156 +30,110 @@ const config = (argv: string[], saved = {}) => {
       else process.env[name] = value;
     }
   }
-};
+}
 
-test("falls back to defaults", () => {
-  const defaults = config([]);
-  assert.equal(defaults.providerId, "anthropic");
-  assert.equal(defaults.effort, "high");
-  assert.equal(defaults.maxTokens, 64000);
-  assert.equal(defaults.maxModelRequests, undefined);
-  assert.equal(defaults.compactionPercent, 85);
-  assert.equal(defaults.autoApprove, false);
-  assert.equal(defaults.reducedMotion, false);
-  assert.equal(defaults.ephemeral, false);
+test("falls back to defaults without launch budgets or global approval", () => {
+  assert.deepEqual(config([]), {
+    providerId: "anthropic", model: "", effort: "high", maxTokens: 64000,
+    compactionPercent: 85, root: process.cwd(), reducedMotion: false, ephemeral: false,
+  });
 });
 
-test("reads --key value and --key=value alike", () => {
-  assert.equal(config(["--provider", "openai"]).providerId, "openai");
-  assert.equal(config(["--provider=openai"]).providerId, "openai");
-  assert.equal(config(["--provider", "openai-codex"]).providerId, "openai-codex");
+test("workspace selection accepts both value forms", () => {
+  assert.equal(config(["--root", "work"]).root, path.resolve("work"));
+  assert.equal(config(["--root=work"]).root, path.resolve("work"));
 });
 
-test("treats a bare flag as true", () => {
-  assert.equal(config(["--auto-approve"]).autoApprove, true);
-  assert.equal(config(["--auto-approve", "--provider", "openai"]).autoApprove, true);
-  assert.equal(config(["--reduced-motion"]).reducedMotion, true);
-  assert.equal(config(["--reduced-motion=false"]).reducedMotion, false);
-  assert.equal(config(["--reduced-motion", "false"]).reducedMotion, false);
-  assert.equal(config(["--ephemeral"]).ephemeral, true);
-});
-
-test("explicit auto-approve flags override the environment", () => {
-  const before = process.env["JECODE_AUTO_APPROVE"];
-  try {
-    process.env["JECODE_AUTO_APPROVE"] = "1";
-    assert.equal(loadConfig([], {}).autoApprove, true);
-    assert.equal(loadConfig(["--auto-approve=false"], {}).autoApprove, false);
-    assert.equal(loadConfig(["--auto-approve=0"], {}).autoApprove, false);
-
-    process.env["JECODE_AUTO_APPROVE"] = "0";
-    assert.equal(loadConfig([], {}).autoApprove, false);
-    assert.equal(loadConfig(["--auto-approve=true"], {}).autoApprove, true);
-    assert.equal(loadConfig(["--auto-approve=1"], {}).autoApprove, true);
-
-    process.env["JECODE_AUTO_APPROVE"] = "true";
-    assert.equal(loadConfig([], {}).autoApprove, false);
-  } finally {
-    if (before === undefined) delete process.env["JECODE_AUTO_APPROVE"];
-    else process.env["JECODE_AUTO_APPROVE"] = before;
-  }
-});
-
-test("rejects an unknown effort", () => {
-  assert.throws(() => config(["--effort", "turbo"]), /unknown effort/);
-});
-
-test("accepts only positive safe integer budgets", () => {
-  assert.throws(() => config(["--max-tokens", "0"]), /positive safe integer/);
-  assert.throws(() => config(["--max-steps", "n"]), /positive safe integer/);
-  assert.throws(
-    () => config(["--max-tokens", String(Number.MAX_SAFE_INTEGER + 1)]),
-    /positive safe integer/,
-  );
-});
-
-test("max-steps is an opt-in process budget and ignores legacy saved values", () => {
-  assert.equal(config([], { maxSteps: 12 }).maxModelRequests, undefined);
-  assert.equal(config(["--max-steps", "12"]).maxModelRequests, 12);
-
-  const before = process.env["JECODE_MAX_STEPS"];
-  process.env["JECODE_MAX_STEPS"] = "7";
-  try {
-    assert.equal(loadConfig([], {}).maxModelRequests, 7);
-  } finally {
-    if (before === undefined) delete process.env["JECODE_MAX_STEPS"];
-    else process.env["JECODE_MAX_STEPS"] = before;
-  }
-});
-
-test("accepts only a safe context compaction percentage", () => {
-  assert.equal(config(["--compaction-percent", "90"]).compactionPercent, 90);
-  assert.throws(() => config(["--compaction-percent", "49"]), /50 to 95/);
-  assert.throws(() => config(["--compaction-percent", "96"]), /50 to 95/);
-});
-
-test("a flag nobody declared is refused, not swallowed", () => {
-  assert.throws(() => config(["--sandbox"]), /unknown flag --sandbox/);
-  assert.throws(() => config(["--modell", "gpt-5"]), /unknown flag --modell/);
-  assert.throws(() => config(["--theme", "light"]), /unknown flag --theme/);
-  assert.throws(() => config(["--palette", "violet"]), /unknown flag --palette/);
-});
-
-test("the flags that do exist still parse", () => {
-  const parsed = config([
-    "--provider",
-    "openai",
-    "--model=gpt-5",
-    "--auto-approve",
-  ]);
-  assert.equal(parsed.providerId, "openai");
-  assert.equal(parsed.model, "gpt-5");
-  assert.equal(parsed.autoApprove, true);
-});
-
-test("rejects missing flag values and stray positional arguments", () => {
-  assert.throws(() => config(["--root"]), /--root requires a value/);
-  assert.throws(() => config(["--model"]), /--model requires a value/);
-  assert.throws(() => config(["--provider="]), /--provider requires a value/);
-  assert.throws(() => config(["--auto-approve=perhaps"]), /must be true or false/);
-  assert.throws(() => config(["positional"]), /unexpected argument "positional"/);
-  assert.throws(
-    () => config(["--auto-approve", "typo"]),
-    /unexpected argument "typo"/,
-  );
-});
-
-test("saved defaults include a model for each provider", () => {
-  const saved = {
-    provider: "ollama",
-    models: { anthropic: "claude-saved", ollama: "qwen-saved" },
-    ollamaHost: "https://ollama.com/",
-    effort: "medium",
-    maxTokens: 8192,
-    maxSteps: 12,
-    compactionPercent: 92,
-    reducedMotion: true,
-  };
-  const loaded = config([], saved);
-  assert.equal(loaded.providerId, "ollama");
-  assert.equal(loaded.model, "qwen-saved");
-  assert.equal("ollamaHost" in loaded, false);
-  assert.equal(loaded.effort, "medium");
-  assert.equal(loaded.maxTokens, 8192);
-  assert.equal(loaded.maxModelRequests, undefined);
-  assert.equal(loaded.compactionPercent, 92);
-  assert.equal(loaded.reducedMotion, true);
-});
-
-test("retired official-cloud settings are accepted without adding runtime endpoints", () => {
-  const before = process.env["OLLAMA_HOST"];
-  try {
-    for (const host of ["https://ollama.com", " https://OLLAMA.COM:443/// "]) {
-      process.env["OLLAMA_HOST"] = host;
-      assert.equal("ollamaHost" in loadConfig([], {}), false);
-      assert.equal("ollamaHost" in loadConfig([], { ollamaHost: host }), false);
+test("process booleans accept bare and explicit values", () => {
+  for (const flag of ["reduced-motion", "ephemeral"]) {
+    const key = flag === "ephemeral" ? "ephemeral" : "reducedMotion";
+    assert.equal(config(["--" + flag])[key], true);
+    for (const value of ["true", "1", "false", "0"]) {
+      const expected = value === "true" || value === "1";
+      assert.equal(config(["--" + flag, value])[key], expected);
+      assert.equal(config(["--" + flag + "=" + value])[key], expected);
     }
-    process.env["OLLAMA_HOST"] = "";
-    assert.equal("ollamaHost" in loadConfig([], {}), false);
-  } finally {
-    if (before === undefined) delete process.env["OLLAMA_HOST"];
-    else process.env["OLLAMA_HOST"] = before;
   }
+});
+
+test("retained process flags override environment and saved motion preferences", () => {
+  const saved = { reducedMotion: true };
+  assert.equal(config([], saved).reducedMotion, true);
+  assert.equal(config([], saved, { JECODE_REDUCED_MOTION: "0" }).reducedMotion, false);
+  assert.equal(config(["--reduced-motion"], saved, { JECODE_REDUCED_MOTION: "0" }).reducedMotion, true);
+  assert.equal(config(["--reduced-motion=false"], saved, { JECODE_REDUCED_MOTION: "1" }).reducedMotion, false);
+  assert.equal(config([], {}, { JECODE_EPHEMERAL: "1" }).ephemeral, true);
+  assert.equal(config(["--ephemeral=false"], {}, { JECODE_EPHEMERAL: "1" }).ephemeral, false);
+});
+
+for (const [flag, guidance] of Object.entries(RETIRED)) {
+  test("retired --" + flag + " gives replacement guidance without echoing values", () => {
+    for (const args of [["--" + flag, "private-value"], ["--" + flag + "=private-value"], ["--" + flag]]) {
+      assert.throws(() => config(args), (error: Error) => {
+        assert.ok(error.message.includes("--" + flag + " is no longer supported"));
+        assert.ok(error.message.includes(guidance));
+        assert.ok(!error.message.includes("private-value"));
+        return true;
+      });
+    }
+  });
+
+  test("retired " + flag + " environment cannot silently change saved defaults", () => {
+    const variable = "JECODE_" + flag.toUpperCase().replaceAll("-", "_");
+    assert.throws(() => config([], { provider: "openai", models: { openai: "saved-model" } }, {
+      [variable]: "private-value",
+    }), (error: Error) => {
+      assert.ok(error.message.includes(variable + " is no longer supported; remove it"));
+      assert.ok(error.message.includes(guidance));
+      assert.ok(!error.message.includes("private-value"));
+      return true;
+    });
+    assert.equal(config([], {}, { [variable]: "" }).providerId, "anthropic");
+  });
+}
+
+test("unknown flags, missing values, and stray arguments are rejected", () => {
+  for (const flag of ["sandbox", "modell", "theme", "palette", "__proto__"]) {
+    assert.throws(() => config(["--" + flag]), /unknown flag/);
+  }
+  assert.throws(() => config(["--root"]), /--root requires a value/);
+  assert.throws(() => config(["--root="]), /--root requires a value/);
+  assert.throws(() => config(["--root", "--ephemeral"]), /--root requires a value/);
+  assert.throws(() => config(["--ephemeral=perhaps"]), /must be true or false/);
+  assert.throws(() => config(["positional"]), /unexpected argument/);
+  assert.throws(() => config(["--ephemeral", "typo"]), /unexpected argument/);
+});
+
+test("saved defaults remain authoritative and preserve their source", () => {
+  const saved = {
+    provider: "ollama", models: { anthropic: "claude-saved", ollama: "qwen-saved" },
+    ollamaHost: "https://ollama.com/", effort: "medium", maxTokens: 8192,
+    compactionPercent: 92, reducedMotion: true,
+  };
+  const before = structuredClone(saved);
+  assert.deepEqual(config([], saved), {
+    providerId: "ollama", model: "qwen-saved", effort: "medium", maxTokens: 8192,
+    compactionPercent: 92, reducedMotion: true, root: process.cwd(), ephemeral: false,
+  });
+  assert.deepEqual(saved, before);
+});
+
+test("invalid runtime settings retain meaningful validation", () => {
+  assert.throws(() => config([], { effort: "turbo" }), /unknown effort/);
+  for (const maxTokens of [0, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => config([], { maxTokens }), /positive safe integer/);
+  }
+  for (const compactionPercent of [49, 96, 85.5]) {
+    assert.throws(() => config([], { compactionPercent }), /50 to 95/);
+  }
+});
+
+test("retired official-cloud settings do not add runtime endpoints", () => {
+  for (const host of ["https://ollama.com", " https://OLLAMA.COM:443/// "]) {
+    assert.equal("ollamaHost" in config([], {}, { OLLAMA_HOST: host }), false);
+    assert.equal("ollamaHost" in config([], { ollamaHost: host }), false);
+  }
+  assert.equal("ollamaHost" in config([], {}, { OLLAMA_HOST: "" }), false);
 });
 
 test("the retired endpoint flag fails without echoing its value", () => {
@@ -186,52 +144,28 @@ test("the retired endpoint flag fails without echoing its value", () => {
   ]) {
     assert.throws(() => config(args), (error: Error) => {
       assert.match(error.message, /--ollama-host is no longer supported.*remove it/);
-      assert.doesNotMatch(error.message, /private-value|models\.example/);
+      assert.doesNotMatch(error.message, /private-value|models/);
       return true;
     });
   }
 });
 
 test("local, custom and malformed legacy endpoints cannot silently select cloud", () => {
-  const before = process.env["OLLAMA_HOST"];
-  try {
-    for (const host of [
-      "http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:11434",
-      "https://models.example.test", "https://user:private-value@ollama.com",
-      "https://ollama.com/v1", "https://ollama.com?token=private-value",
-      "https://ollama.com.example.test", "https://ollama.com:444", "not a URL",
-    ]) {
-      process.env["OLLAMA_HOST"] = host;
-      assert.throws(() => loadConfig(["--provider", "anthropic"], { ollamaHost: "https://ollama.com" }), (error: Error) => {
-        assert.match(error.message, /OLLAMA_HOST.*remove it/);
-        assert.doesNotMatch(error.message, /private-value|models\.example|127\.0\.0\.1/);
-        return true;
-      });
-      process.env["OLLAMA_HOST"] = "https://ollama.com";
-      assert.throws(() => loadConfig(["--provider", "ollama"], { ollamaHost: host }), (error: Error) => {
-        assert.match(error.message, /settings\.json.*remove ollamaHost/);
-        assert.doesNotMatch(error.message, /private-value|models\.example|127\.0\.0\.1/);
-        return true;
-      });
-    }
-  } finally {
-    if (before === undefined) delete process.env["OLLAMA_HOST"];
-    else process.env["OLLAMA_HOST"] = before;
-  }
-});
-
-test("flags and environment override saved defaults", () => {
-  const before = process.env["JECODE_PROVIDER"];
-  process.env["JECODE_PROVIDER"] = "openai";
-  try {
-    const loaded = loadConfig(["--provider", "ollama", "--model", "flag-model"], {
-      provider: "anthropic",
-      models: { anthropic: "saved-model" },
+  for (const host of [
+    "http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:11434",
+    "https://models.example.test", "https://user:private-value@ollama.com",
+    "https://ollama.com/v1", "https://ollama.com?token=private-value",
+    "https://ollama.com.example.test", "https://ollama.com:444", "not a URL",
+  ]) {
+    assert.throws(() => config([], { ollamaHost: "https://ollama.com" }, { OLLAMA_HOST: host }), (error: Error) => {
+      assert.match(error.message, /OLLAMA_HOST.*remove it/);
+      assert.doesNotMatch(error.message, /private-value|models|127/);
+      return true;
     });
-    assert.equal(loaded.providerId, "ollama");
-    assert.equal(loaded.model, "flag-model");
-  } finally {
-    if (before === undefined) delete process.env["JECODE_PROVIDER"];
-    else process.env["JECODE_PROVIDER"] = before;
+    assert.throws(() => config([], { ollamaHost: host }), (error: Error) => {
+      assert.match(error.message, /settings.json.*remove ollamaHost/);
+      assert.doesNotMatch(error.message, /private-value|models|127/);
+      return true;
+    });
   }
 });

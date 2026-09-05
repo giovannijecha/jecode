@@ -4,6 +4,42 @@ This file records notable changes, with unreleased work listed separately.
 Prereleases are omitted. Extended notes for 0.1.1 and later are available on [GitHub Releases];
 install artifacts and provenance are published with the [npm package].
 
+## [Unreleased]
+
+### Changed
+
+- Kept composer commands and menus available during generation, with independent
+  cancellation and approval focus that preserves the open menu. Model and context
+  settings apply to the next turn; running requests and checkpoints keep their
+  original identity. Permission revocation is checked before pending calls run.
+- Removed explanatory text below menu choices and the model selector's routine
+  preamble. Provider routes and permission values remain on their rows, with
+  bounded overflow recovery on narrow terminals and footer feedback for errors.
+- Simplified browser sign-in results to a small Jeco identity, one outcome, and
+  a return-to-terminal instruction, with the same static layout for success
+  and failure.
+- Added `jecode -c` to continue the newest available conversation in the current
+  workspace and renamed `jecode resume --latest` to `jecode resume --last`.
+  The former spelling now reports the replacement; `jecode resume` still opens
+  the searchable session picker.
+- Required an interactive terminal on both stdin and stdout for every
+  conversation launch, with a clear stderr failure before configuration,
+  provider, or session work. Help and version still work through pipes.
+- Centralized provider, model, effort, output, and compaction preferences in
+  saved TUI settings. Retired startup overrides report removal guidance;
+  environment diagnostics name the variable without printing its value.
+  Existing saved settings and conversations require no migration.
+
+### Removed
+
+- Removed automatic batch execution and its line-oriented renderer.
+- Removed `--provider`, `--model`, `--effort`, `--max-tokens`, `--max-steps`,
+  and `--compaction-percent`, together with their corresponding `JECODE_*`
+  environment overrides. Ordinary turns have no model-request ceiling.
+- Removed `--auto-approve`, `JECODE_AUTO_APPROVE`, and locked session permission
+  policies. `/permissions` retains adjustable tool access and remembered
+  approvals; `/new` resets them.
+
 ## [0.8.6] - 2026-09-05
 
 ### Changed
@@ -621,6 +657,7 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
+[Unreleased]: https://github.com/giovannijecha/jecode/compare/v0.8.6...HEAD
 [0.8.6]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.6
 [0.8.5]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.5
 [0.8.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.4
