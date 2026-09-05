@@ -4,6 +4,7 @@ import type { Message } from "../../src/types.ts";
 import { estimateRequestInputTokensResponsive } from "../../src/context/budget.ts";
 import { planCompaction, policyForContextWindow } from "../../src/context/policy.ts";
 import { reportBenchmark, round } from "./report.ts";
+import { contextWorkflowProbe } from "./context-workflow.ts";
 
 const MAX_TOTAL_MS = 2_000;
 const MAX_EVENT_LOOP_STALL_MS = 75;
@@ -46,6 +47,11 @@ const planning = await sample(async () => {
   if (plan === undefined) throw new Error("forced benchmark plan was not produced");
 });
 
+const shortWorkflow = await contextWorkflowProbe(12);
+const longWorkflow = await contextWorkflowProbe(40);
+const workflowPassed = shortWorkflow.summaries === 0 && longWorkflow.summaries > 0 &&
+  longWorkflow.summaries <= 2;
+
 reportBenchmark("context-responsiveness", {
   iterations: ITERATIONS,
   request: {
@@ -64,10 +70,13 @@ reportBenchmark("context-responsiveness", {
     medianMilliseconds: MAX_TOTAL_MS,
     medianMaximumStallMilliseconds: MAX_EVENT_LOOP_STALL_MS,
   },
-  passed: [request, planning].every((result) =>
+  workflows: [shortWorkflow, longWorkflow],
+  passed: workflowPassed && [request, planning].every((result) =>
     result.total <= MAX_TOTAL_MS && result.maxStall <= MAX_EVENT_LOOP_STALL_MS
   ),
 });
+
+if (!workflowPassed) throw new Error("context workflow compacted too often or failed to compact");
 
 for (const [label, result] of [["request estimate", request], ["forced plan", planning]] as const) {
   if (result.total > MAX_TOTAL_MS) throw new Error(`${label} exceeded ${MAX_TOTAL_MS} ms`);

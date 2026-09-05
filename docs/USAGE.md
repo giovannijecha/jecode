@@ -146,11 +146,18 @@ If a process stops abruptly inside a tool loop, Jecode resumes from the latest
 safe ancestor and lets the next user turn create a branch. `/export` writes
 only the currently selected path.
 
-When model-facing context approaches the selected model's usable capacity,
-Jecode asks the provider for a bounded summary of the older prefix and keeps
-recent turns exact. The default trigger is 85% and can be changed from 50% to
-95% in `/settings`. Live provider model metadata determines the budget
-when available; provider safety limits always win.
+Before a model request, Jecode measures its complete input and compacts an older
+prefix when it approaches the selected model's usable capacity. Recent exchanges
+stay exact when they fit. The default trigger is 85% and can be changed from
+50% to 95% in `/settings`; provider safety limits always win. Tool output size
+alone does not trigger a summary, and completed answers do not start a trailing
+compact. Ordinary requests keep full tool evidence; bounded excerpts are an
+emergency fallback when an input cannot fit.
+
+Compaction uses the same model, with `low` effort when supported and a 60-second
+deadline. Failed or ineffective summaries leave the previous context available
+and are not retried for each small addition. See [context management](CONTEXT.md)
+for token measurement, budgets, and recovery behavior.
 
 Compaction changes only the projection sent to the model. Complete messages,
 tool evidence, transcript, export, and conversation tree remain intact. The

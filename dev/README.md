@@ -12,6 +12,7 @@ an explicit product task needs it.
 | [`tui/DIRECTION.md`](tui/DIRECTION.md) | Current TUI direction and the reasons behind choices still in use. |
 | [`tui/experiments/`](tui/experiments/README.md) | Temporary investigations with a question, comparable evidence, and an exit condition. |
 | [`benchmarks/`](benchmarks/README.md) | Manual probes for context, redaction, workspace search, sessions, transcript rendering, and integrated TUI responsiveness. |
+| [`context/`](context/README.md) | Opt-in, bounded numeric diagnostics from real production TUI sessions. |
 | [`validation/`](validation/README.md) | Release-candidate scenarios, evidence format, and manual checks that automated tests cannot establish. |
 | [`test-support/`](test-support/) | Small shared factories and host harnesses for automated tests, excluded from the release runtime. |
 | [`../scripts/`](../scripts/README.md) | Required repository checks, release builds, and package verification. |
@@ -46,6 +47,11 @@ Store generated logs, captures, benchmark reports, package verification files,
 and PR or release drafts in a task-specific directory under the system temporary
 directory (`$env:TEMP` in PowerShell or `os.tmpdir()` in Node.js). Remove that
 directory when the task closes.
+
+The opt-in [context recorder](context/README.md) uses the development user-data
+home's `diagnostics/` directory so a capture remains discoverable after restart.
+Keep those bounded recordings local; remove them after retaining the sanitized
+evidence needed for the investigation or candidate review.
 
 Reusable tools and active experiments belong in the relevant development
 environment. Retain only the reviewed fixtures or evidence needed to reproduce

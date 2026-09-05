@@ -3,27 +3,25 @@
 import type { ControllerEvents, ControllerOptions } from "./controller.ts";
 import {
   budgetRequestFromInputTokens,
-  estimateRequestInputTokensResponsive,
 } from "./context/budget.ts";
 import type { ContextPolicy } from "./context/policy.ts";
 import { isContextOverflow } from "./context/policy.ts";
-import {
-  projectToolResults,
-  projectToolResultsNewest,
-  toolResultProjectionBudget,
-} from "./context/request-projection.ts";
+import type { InputMeasurement, InputMeter } from "./context/measurement.ts";
+import { fitRequestInput } from "./context/request.ts";
 import type { Message, ToolSpec } from "./types.ts";
 
 export type ControllerResponse = Readonly<{
   message: Message;
   context: Message[];
   inputTokens: number;
+  measurement: InputMeasurement;
 }>;
 
 type PreparedContext = Readonly<{
   context: Message[];
   requestMessages: Message[];
   inputTokens: number;
+  measurement: InputMeasurement;
 }>;
 
 export async function requestAssistant(
@@ -32,6 +30,7 @@ export async function requestAssistant(
   specs: ToolSpec[],
   options: ControllerOptions,
   events: ControllerEvents,
+  meter: InputMeter,
   signal?: AbortSignal,
 ): Promise<ControllerResponse> {
   let policy = await options.contextPolicy();
@@ -41,6 +40,7 @@ export async function requestAssistant(
     specs,
     options,
     events,
+    meter,
     policy,
     "budget",
     signal,
@@ -48,6 +48,7 @@ export async function requestAssistant(
   let context = prepared.context;
   let requestMessages = prepared.requestMessages;
   let inputTokens = prepared.inputTokens;
+  let measurement = prepared.measurement;
   let recovered = false;
 
   for (;;) {
@@ -67,7 +68,7 @@ export async function requestAssistant(
         onStream: (event) => events.onStream(event),
         onStatus: (status) => events.onStatus?.(status),
       });
-      return { message, context, inputTokens: budget.inputTokens };
+      return { message, context, inputTokens: budget.inputTokens, measurement };
     } catch (error) {
       if (recovered) throw error;
       if (isContextOverflow(error as Error)) policy = await options.contextPolicy();
@@ -77,6 +78,7 @@ export async function requestAssistant(
         specs,
         options,
         events,
+        meter,
         policy,
         "overflow",
         signal,
@@ -86,6 +88,7 @@ export async function requestAssistant(
       context = next.context;
       requestMessages = next.requestMessages;
       inputTokens = next.inputTokens;
+      measurement = next.measurement;
       recovered = true;
     }
   }
@@ -97,50 +100,36 @@ async function prepareContext(
   specs: ToolSpec[],
   options: ControllerOptions,
   events: ControllerEvents,
+  meter: InputMeter,
   policy: ContextPolicy,
   reason: "budget" | "overflow",
   signal?: AbortSignal,
   error?: Error,
 ): Promise<PreparedContext> {
-  const projectionBudget = toolResultProjectionBudget(policy);
-  const initialProjection = projectToolResults(
-    context,
-    projectionBudget,
-  );
-  const initialRequest = initialProjection.messages;
-  const inputTokens = await estimateRequestInputTokensResponsive(
-    {
-      system: options.system,
-      messages: initialRequest,
-      tools: specs,
-    },
-    signal,
-  );
+  const input = {
+    model: options.model,
+    effort: options.effort,
+    system: options.system,
+    messages: [...context],
+    tools: specs,
+  };
+  const initial = await meter.measure(input, signal);
   const projected = await events.onContext?.(history, context, {
     reason,
     policy,
-    inputTokens,
-    projectionSaturated: initialProjection.saturated,
+    inputTokens: initial.inputTokens,
     ...(error === undefined ? {} : { error }),
   });
   const semantic = projected === undefined ? clone(context) : clone(projected);
-  const stableProjection = projected === undefined
-    ? initialProjection
-    : projectToolResults(semantic, projectionBudget);
-  const requestMessages = stableProjection.saturated
-    ? projectToolResultsNewest(semantic, projectionBudget).messages
-    : stableProjection.messages;
-  const canReuseEstimate = projected === undefined && !stableProjection.saturated;
+  if (projected !== undefined) meter.reset();
+  const semanticInput = { ...input, messages: semantic };
+  const measurement = projected === undefined ? initial : await meter.measure(semanticInput, signal);
+  const fitted = await fitRequestInput(semanticInput, meter, policy, measurement, signal);
   return {
     context: semantic,
-    requestMessages,
-    inputTokens: canReuseEstimate
-      ? inputTokens
-      : await estimateRequestInputTokensResponsive({
-          system: options.system,
-          messages: requestMessages,
-          tools: specs,
-        }, signal),
+    requestMessages: fitted.messages,
+    inputTokens: fitted.measurement.inputTokens,
+    measurement: fitted.measurement,
   };
 }
 

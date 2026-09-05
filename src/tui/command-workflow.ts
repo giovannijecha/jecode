@@ -15,6 +15,7 @@ import type { WorkflowOptions } from "./workflow-types.ts";
 export function commandWorkflow(
   options: WorkflowOptions,
   resetCompaction: () => void,
+  resetInput: () => void,
 ): AppActions["command"] {
   const { session, state, permissions, feedback } = options;
 
@@ -74,6 +75,7 @@ export function commandWorkflow(
         timeline: async () => {
           const selected = await selectTimeline(session, choose);
           if (!selected) return "unchanged";
+          resetCompaction();
           options.replaceTranscript();
           return session.conversation.activeNodeId === state.committedNodeId
             ? "unchanged"
@@ -107,6 +109,9 @@ export function commandWorkflow(
         });
       }
     } finally {
+      // Access can change while a turn is running. Discard even an observation
+      // from an in-flight response that used the previous connection.
+      if (text.trim().split(/\s+/)[0] === "/providers") resetInput();
       options.finishActivity(activity);
     }
   }

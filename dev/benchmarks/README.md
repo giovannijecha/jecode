@@ -39,7 +39,7 @@ fail the command.
 
 | Probe | Scenario and interpretation |
 | --- | --- |
-| `context.ts` | Estimate one request just below 8 MiB and force a compaction plan for 128 messages totaling 4 MiB. One warm-up, then five measurements. Each operation must have a median duration at most 2,000 ms and a median of per-run maximum event-loop stalls at most 75 ms. |
+| `context.ts` | Estimate one request just below 8 MiB and force a compaction plan for 128 messages totaling 4 MiB. One warm-up, then five measurements; each operation must have a median duration at most 2,000 ms and median maximum event-loop stall at most 75 ms. Then run 12/40 inert 16 KiB reads through the controller and context manager: require zero summaries for the short case and one or two for the long case, while preserving complete canonical evidence. |
 | `redaction.ts` | Redact one 30,000-character non-matching chunk against the maximum supported number of synthetic secrets. One warm-up, then five measurements; report the median. |
 | `search.ts` | Search 600 temporary 4 KiB files for an absent string. One warm-up, then five measurements; report the median. |
 | `session.ts` | Compare checkpoints at 50/750 nodes, catalogues of 12 sessions at 1/200 nodes each, and loads at 1/200/750/1,024 nodes. Warm each scenario first; measure five checkpoint/catalogue runs and three load runs. The report includes all size, duration, scaling, and depth-delta thresholds. |

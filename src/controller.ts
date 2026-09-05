@@ -18,6 +18,9 @@ import type { SteeringSource } from "./steering.ts";
 import type { Tool, ToolContext, ToolPreview, ToolRun } from "./tools/index.ts";
 import { findTool, runTool, toolSpecs } from "./tools/index.ts";
 import { requestAssistant } from "./controller-request.ts";
+import { inputMeter } from "./context/measurement.ts";
+import type { InputMeter } from "./context/measurement.ts";
+import { publishDiagnostic } from "./context/diagnostics.ts";
 
 export const MAX_TOOL_CALLS_PER_RESPONSE = 32;
 /** Independent read calls share one bounded execution wave. */
@@ -29,12 +32,12 @@ export type ContextRequest = Readonly<{
   reason: ContextReason;
   policy: ContextPolicy;
   inputTokens: number;
-  /** Stable tool excerpts exhausted their aggregate request budget. */
-  projectionSaturated: boolean;
   error?: Error;
 }>;
 
 export type ControllerOptions = {
+  /** Process-local observation shared by consecutive turns of one conversation. */
+  inputMeter?: InputMeter;
   provider: Provider;
   tools: Tool[];
   /** Live session access check for calls already advertised to the model. */
@@ -101,6 +104,7 @@ export async function runTurn(
   modelHistory: Message[] = history,
 ): Promise<void> {
   const specs = toolSpecs(options.tools);
+  const meter = options.inputMeter ?? inputMeter(options.provider);
   let context = modelHistory;
   throwIfAborted(signal);
 
@@ -146,6 +150,7 @@ export async function runTurn(
       specs,
       options,
       events,
+      meter,
       signal,
     );
     const assistant = response.message;
@@ -163,6 +168,13 @@ export async function runTurn(
     }
     assertToolCallIds(calls);
     if (assistant.usage !== undefined) events.onUsage?.(assistant.usage);
+    meter.observe(response.measurement, assistant.usage?.inputTokens);
+    publishDiagnostic({
+      kind: "request", source: response.measurement.source,
+      estimatedTokens: response.measurement.estimatedTokens,
+      inputTokens: response.inputTokens,
+      ...(assistant.usage === undefined ? {} : { reportedInputTokens: assistant.usage.inputTokens }),
+    });
     events.onRequestInput?.(
       assistant.usage !== undefined && assistant.usage.inputTokens > 0
         ? assistant.usage.inputTokens

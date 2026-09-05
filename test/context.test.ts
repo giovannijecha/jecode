@@ -5,7 +5,6 @@ import { estimateRequestInputTokens } from "../src/context/budget.ts";
 import { compactContext } from "../src/context/compactor.ts";
 import type { ContextPolicy } from "../src/context/policy.ts";
 import {
-  projectToolResults,
   projectToolResultsNewest,
   TOOL_RESULT_CLIP_MARKER,
 } from "../src/context/request-projection.ts";
@@ -304,40 +303,6 @@ test("the exhausted fallback bounds tool evidence while preserving ids and recen
     : 0, 1_000);
 });
 
-test("the normal tool projection keeps its existing prefix stable as results append", () => {
-  const result = (id: string, value: string) => ({
-    kind: "tool_result" as const,
-    id,
-    output: value.repeat(100_000),
-    isError: false,
-  });
-  const firstThree: Message[] = [{
-    role: "user",
-    content: [result("one", "a"), result("two", "b"), result("three", "c")],
-  }];
-  const appended: Message[] = [{
-    role: "user",
-    content: [...firstThree[0]!.content, result("four", "d")],
-  }];
-
-  const before = projectToolResults(firstThree, 50_000);
-  const after = projectToolResults(appended, 50_000);
-  const beforeOutputs = before.messages[0]!.content
-    .filter((block) => block.kind === "tool_result")
-    .map((block) => block.output);
-  const afterOutputs = after.messages[0]!.content
-    .filter((block) => block.kind === "tool_result")
-    .map((block) => block.output);
-
-  assert.equal(before.saturated, false);
-  assert.equal(after.saturated, true);
-  assert.deepEqual(afterOutputs.slice(0, 3), beforeOutputs);
-  assert.ok(after.outputCodeUnits <= 50_000);
-  assert.equal(firstThree[0]?.content[0]?.kind === "tool_result"
-    ? firstThree[0].content[0].output.length
-    : 0, 100_000);
-});
-
 test("clips tool evidence only at complete grapheme boundaries", () => {
   const family = "👨‍👩‍👧‍👦";
   const source: Message[] = [{
@@ -345,7 +310,7 @@ test("clips tool evidence only at complete grapheme boundaries", () => {
     content: [{ kind: "tool_result", id: "unicode", output: family.repeat(100), isError: false }],
   }];
 
-  const projected = projectToolResults(source, 80);
+  const projected = projectToolResultsNewest(source, 80);
   const output = projected.messages[0]?.content[0]?.kind === "tool_result"
     ? projected.messages[0].content[0].output
     : "";

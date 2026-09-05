@@ -19,6 +19,7 @@ import {
   throwProviderError,
 } from "./failure.ts";
 import { fromWireResponse, stopNotice, toWireMessage, toWireTool } from "./anthropic-wire.ts";
+import { measureAnthropicInput } from "./input-measurement.ts";
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const MODELS = "https://api.anthropic.com/v1/models?limit=100";
@@ -87,6 +88,8 @@ export const anthropic: Provider = {
     }
   },
 
+
+  measureInput: measureAnthropicInput,
 
   async send(req: SendRequest): Promise<Message> {
     const key = requireKey();

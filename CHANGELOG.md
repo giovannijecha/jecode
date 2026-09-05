@@ -8,6 +8,16 @@ install artifacts and provenance are published with the [npm package].
 
 ### Changed
 
+- Centralized automatic context management before model requests. Complete tool
+  outputs remain available while they fit; character limits no longer force
+  premature compaction, and settled answers do not start a trailing summary.
+- Measured outgoing provider content once, including bounded opaque reasoning
+  reserves, and associated reported input usage only with its unchanged prefix.
+  Added meaningful-growth retry suppression, summary deadlines and savings
+  checks, low summary effort when supported, and inert long-tool-turn probes.
+- Preserved valid input calibration across consecutive conversation turns,
+  with reset boundaries that reject late observations. Added an opt-in,
+  bounded development recorder for content-free context diagnostics.
 - Used the full terminal width for model responses, reasoning, and tool records,
   aligned with the composer's left edge.
 - Kept timeline previews on one row per turn, removing reserved overflow space

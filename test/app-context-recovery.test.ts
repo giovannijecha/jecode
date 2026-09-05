@@ -7,7 +7,7 @@ import { runApp } from "../src/tui/app.ts";
 import { provider, session } from "../dev/test-support/app.ts";
 import { virtualScreen, waitFor, waitForIdle } from "../dev/test-support/app-harness.ts";
 
-function pressure(repetitions = 10_000): ConversationTree {
+function pressure(repetitions = 11_000): ConversationTree {
   return ConversationTree.empty().commit({
     parentId: 0,
     createdAt: "2026-09-04T10:00:00.000Z",
@@ -71,7 +71,7 @@ test("a TUI provider overflow can compact again after budget compaction", async 
   }
 });
 
-test("TUI replies without usage replace stale context pressure with the sent estimate", async () => {
+test("TUI ignores stale pre-turn usage and tracks the current sent estimate", async () => {
   const requests: string[] = [];
   const withoutUsage: Provider = {
     ...provider(),
@@ -97,10 +97,10 @@ test("TUI replies without usage replace stale context pressure with the sent est
     assert.ok(current.usage.lastInputTokens < 3_500);
     feed("second\r");
     await waitFor(() => current.conversation.activeNodeId === 3, "second turn without usage");
-    assert.deepEqual(requests, ["summary", "normal", "normal"]);
+    assert.deepEqual(requests, ["normal", "normal"]);
     assert.ok(current.usage.lastInputTokens < 3_500);
     assert.match(JSON.stringify(current.conversation.history), /old context/);
-    assert.match(JSON.stringify(current.conversation.contextHistory), /Earlier work/);
+    assert.match(JSON.stringify(current.conversation.contextHistory), /old context/);
   } finally {
     feed("/exit\r");
     await running;

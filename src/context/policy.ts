@@ -38,13 +38,14 @@ export async function planCompaction(
   policy: ContextPolicy,
   estimatedInputTokens?: number,
   signal?: AbortSignal,
+  countMessages: typeof estimateTokensResponsive = estimateTokensResponsive,
 ): Promise<CompactionPlan | undefined> {
   if (!validPolicy(policy) || coveredMessages < 0 || coveredMessages > turn.length) return undefined;
   if (
     estimatedInputTokens !== undefined &&
     (!Number.isSafeInteger(estimatedInputTokens) || estimatedInputTokens <= 0)
   ) return undefined;
-  const estimated = estimatedInputTokens ?? await estimateTokensResponsive(context, signal);
+  const estimated = estimatedInputTokens ?? await countMessages(context, signal);
   if (
     !force &&
     (estimated < policy.targetTokens || Math.max(estimated, lastInputTokens) < policy.triggerTokens)
@@ -60,13 +61,13 @@ export async function planCompaction(
   )) return undefined;
 
   const targetTokens = force
-    ? Math.min(policy.targetTokens, Math.max(512, Math.floor(estimated / 4)))
+    ? Math.min(policy.targetTokens, Math.max(512, Math.floor(estimated / 2)))
     : policy.targetTokens;
   const recentTokens = Math.min(policy.recentTokens, Math.max(256, Math.floor(targetTokens / 2)));
-  const recent = await recentBoundary(turn, coveredMessages, recentTokens, signal);
+  const recent = await recentBoundary(turn, coveredMessages, recentTokens, signal, countMessages);
   let boundary = recent.boundary;
   let tail = turn.slice(boundary);
-  if (turn.length > 1 && recent.tokens > targetTokens) {
+  if (turn.length > 1 && recent.tokens > policy.requestLimitTokens) {
     boundary = turn.length;
     tail = [];
   }
@@ -74,7 +75,7 @@ export async function planCompaction(
   const prefixEnd = contextPrefix + boundary - coveredMessages;
   if (prefixEnd <= 0 || prefixEnd > context.length) return undefined;
   const prefix = context.slice(0, prefixEnd);
-  if (!force && await estimateTokensResponsive(prefix, signal) < policy.minimumPrefixTokens) {
+  if (!force && await countMessages(prefix, signal) < policy.minimumPrefixTokens) {
     return undefined;
   }
 
@@ -131,14 +132,18 @@ export function policyForContextWindow(
 }
 
 export function estimateTokens(messages: readonly Message[]): number {
-  return estimateSerializedTokens(messages) + messages.length * 8;
+  return estimateSerializedTokens(normalized(messages)) + messages.length * 8;
 }
 
 export async function estimateTokensResponsive(
   messages: readonly Message[],
   signal?: AbortSignal,
 ): Promise<number> {
-  return await estimateSerializedTokensResponsive(messages, signal) + messages.length * 8;
+  return await estimateSerializedTokensResponsive(normalized(messages), signal) + messages.length * 8;
+}
+
+function normalized(messages: readonly Message[]): Message[] {
+  return messages.map(({ role, content }) => ({ role, content }));
 }
 
 export function isContextOverflow(error: Error): boolean {
@@ -153,6 +158,7 @@ async function recentBoundary(
   coveredMessages: number,
   recentTokens: number,
   signal: AbortSignal | undefined,
+  countMessages: typeof estimateTokensResponsive,
 ): Promise<Readonly<{ boundary: number; tokens: number }>> {
   const minimum = Math.max(coveredMessages, minimumRecentBoundary(turn));
   const candidates: number[] = [];
@@ -163,7 +169,7 @@ async function recentBoundary(
   const estimateAt = (candidate: number): Promise<number> => {
     let estimate = cache.get(candidate);
     if (estimate === undefined) {
-      estimate = estimateTokensResponsive(turn.slice(candidate), signal);
+      estimate = countMessages(turn.slice(candidate), signal);
       cache.set(candidate, estimate);
     }
     return estimate;
