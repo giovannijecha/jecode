@@ -71,8 +71,6 @@ export type CompactContextOptions = Readonly<{
   onUsage?(usage: Usage): void;
   onOutcome?(outcome: CompactionOutcome): void;
   onSummary?(measurement: SummaryMeasurement): void;
-  /** Deterministic deadline override for inert development fixtures. */
-  timeoutMs?: number;
 }>;
 
 export type CompactionResult = Readonly<{
@@ -106,7 +104,7 @@ async function performCompaction(options: CompactContextOptions): Promise<Compac
   );
   if (plan === undefined) return undefined;
 
-  const deadline = AbortSignal.timeout(options.timeoutMs ?? SUMMARY_TIMEOUT_MS);
+  const deadline = AbortSignal.timeout(SUMMARY_TIMEOUT_MS);
   const sizeLimit = new AbortController();
   const signal = AbortSignal.any([deadline, sizeLimit.signal, ...(options.signal ? [options.signal] : [])]);
   let summarySize = 0;

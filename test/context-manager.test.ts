@@ -115,34 +115,37 @@ test("rejected summaries still account for consumed usage and require useful sav
   assert.deepEqual(outcomes, ["insufficient-savings"]);
 });
 
-test("summary requests select low only when supported and time out without changing context", async () => {
+test("summary requests select low only when supported and time out without changing context", async (t) => {
   const outcomes: CompactionOutcome[] = [];
   const diagnostics: ContextDiagnostic[] = [];
   let effort: string | undefined;
-  // Keep an event-loop handle alive: production fetch owns one during the request.
-  const keepAlive = setInterval(() => {}, 100);
-  try {
-    const result = await compactContext({
-      provider: { ...provider(), efforts: async () => ["low", "high"], async send(req) {
-        effort = req.effort;
-        return new Promise((_resolve, reject) => {
-          req.signal?.addEventListener("abort", () => reject(req.signal?.reason), { once: true });
-        });
-      } },
-      model: "fake-1", effort: "high", context: history, turn: [history.at(-1)!],
-      nodeId: 1, coveredMessages: 0, lastInputTokens: 0, estimatedInputTokens: 58_000,
-      policy, timeoutMs: 25, onOutcome: (outcome) => outcomes.push(outcome),
-      onDiagnostic: (value) => diagnostics.push(value),
-    });
-    assert.equal(result, undefined);
-    assert.equal(effort, "low");
-    assert.deepEqual(outcomes, ["timeout"]);
-    assert.equal(diagnostics[0]?.summaryChars, 0);
-    assert.equal(diagnostics[0]?.firstSummaryTextMs, undefined);
-    assert.ok(typeof diagnostics[0]?.summaryProviderMs === "number");
-  } finally {
-    clearInterval(keepAlive);
-  }
+  const deadline = new AbortController();
+  t.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
+    assert.equal(milliseconds, 60_000);
+    return deadline.signal;
+  });
+  const result = await compactContext({
+    provider: { ...provider(), efforts: async () => ["low", "high"], async send(req) {
+      effort = req.effort;
+      assert.ok(req.signal);
+      assert.equal(req.signal.aborted, false);
+      return new Promise((_resolve, reject) => {
+        req.signal!.addEventListener("abort", () => reject(req.signal?.reason), { once: true });
+        // Expire only once the send is waiting; preparation speed is irrelevant.
+        setImmediate(() => deadline.abort(new DOMException("Summary deadline", "TimeoutError")));
+      });
+    } },
+    model: "fake-1", effort: "high", context: history, turn: [history.at(-1)!],
+    nodeId: 1, coveredMessages: 0, lastInputTokens: 0, estimatedInputTokens: 58_000,
+    policy, onOutcome: (outcome) => outcomes.push(outcome),
+    onDiagnostic: (value) => diagnostics.push(value),
+  });
+  assert.equal(result, undefined);
+  assert.equal(effort, "low");
+  assert.deepEqual(outcomes, ["timeout"]);
+  assert.equal(diagnostics[0]?.summaryChars, 0);
+  assert.equal(diagnostics[0]?.firstSummaryTextMs, undefined);
+  assert.ok(typeof diagnostics[0]?.summaryProviderMs === "number");
 });
 
 test("streaming summary size is bounded even when a provider ignores the output token cap", async () => {
