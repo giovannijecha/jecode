@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { ConversationTree } from "../src/conversation.ts";
 import { encodeHead } from "../src/sessions/codec.ts";
@@ -245,14 +245,30 @@ test("checkpoint refuses a replaced session directory before creating its lock",
     const published = await store.publish(first);
     directory = path.join(fixture.sessions, store.workspaceDigest, published.meta.id);
     parked = `${directory}.parked`;
+    const originalHead = await readFile(path.join(directory, "head.json"), "utf8");
+    const originalNodes = await readdir(path.join(directory, "nodes"));
     const lease = await store.claim(published.meta.id);
     replace = true;
     try {
       await assert.rejects(
         store.checkpoint(published, turn(first, 1, "second", "two"), lease),
-        /lease is no longer owned|directory changed|not a direct directory/,
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          const failure = error as NodeJS.ErrnoException & { path?: string };
+          // Concurrent anchor checks may detect the missing nested directory
+          // before detecting the replaced parent or lost lease.
+          if (failure.code === "ENOENT") {
+            assert.equal(failure.syscall, "lstat");
+            assert.equal(failure.path, path.join(directory, "nodes"));
+          } else {
+            assert.match(error.message, /lease is no longer owned|directory changed|not a direct directory/);
+          }
+          return true;
+        },
       );
       assert.deepEqual(await readdir(outside), []);
+      assert.equal(await readFile(path.join(parked, "head.json"), "utf8"), originalHead);
+      assert.deepEqual(await readdir(path.join(parked, "nodes")), originalNodes);
     } finally {
       await unlink(directory).catch(() => undefined);
       await rename(parked, directory).catch(() => undefined);

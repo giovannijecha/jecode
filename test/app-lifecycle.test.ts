@@ -152,17 +152,14 @@ test("initial and scheduled paint failures restore every TUI owner", async () =>
 });
 
 test("a fatal paint failure aborts active work before persistence closes", async () => {
-  let started = (): void => {};
-  const providerStarted = new Promise<void>((resolve) => {
-    started = resolve;
-  });
+  let providerStarted = false;
   let aborted = false;
   let providerSettled = false;
   let persistenceClosedAfterSettlement = false;
   const waiting: Provider = {
     ...provider(),
     send: (request) => {
-      started();
+      providerStarted = true;
       return new Promise<Message>((_resolve, reject) => {
         request.signal?.addEventListener("abort", () => {
           aborted = true;
@@ -180,22 +177,25 @@ test("a fatal paint failure aborts active work before persistence closes", async
       persistenceClosedAfterSettlement = providerSettled;
     },
   } as SessionPersistence;
-  let paints = 0;
+  let failPaint = false;
   const harness = virtualScreen();
   harness.environment.paint = {
     paint: (rows) => {
-      paints++;
-      if (paints === 2) throw new Error("fatal fixture paint failure");
+      if (failPaint) throw new Error("fatal fixture paint failure");
       harness.frames.push([...rows]);
     },
     invalidate: () => {},
   };
 
   const running = runApp(current, process.cwd(), harness.environment);
+  const rejected = assert.rejects(running, /fatal fixture paint failure/);
   const feed = await harness.input();
   feed("wait\r");
-  await providerStarted;
-  await assert.rejects(running, /fatal fixture paint failure/);
+  await waitFor(() => providerStarted, "provider request before paint failure");
+  // Preparation can paint any number of frames before the send is active.
+  failPaint = true;
+  feed("x");
+  await rejected;
 
   assert.equal(aborted, true);
   assert.equal(providerSettled, true);
