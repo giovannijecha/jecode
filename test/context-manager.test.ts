@@ -93,6 +93,8 @@ test("accepted summaries preserve canonical history, record usage and settle dia
   assert.equal(usage.length, 1);
   assert.equal(manager.anchor?.messageCount, 0);
   assert.equal(diagnostics[0]?.outcome, "accepted");
+  assert.equal(diagnostics[0]?.summaryChars, "Durable working state".length);
+  assert.ok(typeof diagnostics[0]?.firstSummaryTextMs === "number");
   assert.ok((diagnostics[0]?.afterTokens ?? Infinity) < policy.triggerTokens);
   assert.equal(await manager.compact(history, history, {
     reason: "overflow", policy, inputTokens: 58_000, error: new Error("unrelated network error"),
@@ -115,6 +117,7 @@ test("rejected summaries still account for consumed usage and require useful sav
 
 test("summary requests select low only when supported and time out without changing context", async () => {
   const outcomes: CompactionOutcome[] = [];
+  const diagnostics: ContextDiagnostic[] = [];
   let effort: string | undefined;
   // Keep an event-loop handle alive: production fetch owns one during the request.
   const keepAlive = setInterval(() => {}, 100);
@@ -129,11 +132,33 @@ test("summary requests select low only when supported and time out without chang
       model: "fake-1", effort: "high", context: history, turn: [history.at(-1)!],
       nodeId: 1, coveredMessages: 0, lastInputTokens: 0, estimatedInputTokens: 58_000,
       policy, timeoutMs: 25, onOutcome: (outcome) => outcomes.push(outcome),
+      onDiagnostic: (value) => diagnostics.push(value),
     });
     assert.equal(result, undefined);
     assert.equal(effort, "low");
     assert.deepEqual(outcomes, ["timeout"]);
+    assert.equal(diagnostics[0]?.summaryChars, 0);
+    assert.equal(diagnostics[0]?.firstSummaryTextMs, undefined);
+    assert.ok(typeof diagnostics[0]?.summaryProviderMs === "number");
   } finally {
     clearInterval(keepAlive);
   }
+});
+
+test("streaming summary size is bounded even when a provider ignores the output token cap", async () => {
+  const outcomes: CompactionOutcome[] = [];
+  let bounded = false;
+  const result = await compactContext({
+    provider: { ...provider(), async send(request) {
+      request.onStream?.({ kind: "text", text: "x".repeat(32_769) });
+      bounded = request.signal?.aborted === true;
+      request.signal?.throwIfAborted();
+      throw new Error("summary was not stopped");
+    } }, model: "fake-1", effort: "high", context: history, turn: [history.at(-1)!],
+    nodeId: 1, coveredMessages: 0, lastInputTokens: 0, estimatedInputTokens: 58_000,
+    policy, onOutcome: (value) => outcomes.push(value),
+  });
+  assert.equal(bounded, true);
+  assert.equal(result, undefined);
+  assert.deepEqual(outcomes, ["oversized"]);
 });

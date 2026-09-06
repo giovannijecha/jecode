@@ -131,6 +131,8 @@ export type Provider = {
   ): Promise<ModelContextWindow | undefined>;
   /** Local estimate of the actual outgoing input; no authentication or network I/O. */
   measureInput?(request: RequestInput, signal?: AbortSignal): Promise<number>;
+  /** Diagnostic description of the local counter, never a provider-exact claim. */
+  inputTokenization?(model: string): "o200k-reference" | "heuristic";
   send(req: SendRequest): Promise<Message>;
 };
 

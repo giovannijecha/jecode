@@ -29,8 +29,9 @@ summary request. `/compact` remains an explicit operation on the active leaf.
 
 There is no claim of a universal exact offline tokenizer. Tokenization depends
 on the model, and protocol framing and opaque reasoning also affect context.
-Jecode's installed runtime has no tokenizer dependency, downloaded vocabulary,
-or extra counting request on each tool boundary.
+Jecode's installed runtime has no tokenizer dependency or extra counting request
+on each tool boundary. It includes a checksum-pinned vocabulary as package data;
+installation and execution never download it.
 
 `Provider.measureInput` is a local adapter boundary. It measures the same wire
 conversion used for generation, counting the outgoing representation once.
@@ -38,17 +39,33 @@ Unsent normalized duplicates, foreign raw blocks, and accounting metadata do
 not count as prompt text. Providers without this hook use a conservative
 normalized-content estimate.
 
-The owned estimator combines UTF-8 byte, compression, and literal-content
-floors. It yields between bounded chunks and supports cancellation. Its values
-are estimates, not billing counts. Known opaque reasoning fields are not
+Modern OpenAI API model families with an o200k mapping use an owned byte-pair
+counter and OpenAI's `o200k_base` vocabulary. OpenAI Account uses the same
+reference encoding, including aliases whose actual encoding is unpublished.
+The adapter counts serialized outgoing content with a 10% allowance, plus fixed
+protocol/item allowances. This remains an estimate of the request, not an exact
+provider count. Unknown or legacy API models, Anthropic, and Ollama retain the
+conservative UTF-8 byte, compression, and literal-content estimator.
+
+The tokenizer loads lazily, yields between vocabulary batches and 8,192-code-unit
+text chunks, and preserves surrogate pairs at chunk boundaries. Chunk splits
+reserve eight additional tokens per boundary. Ordinary user text resembling a
+special token stays literal. Completed counts use a 2,048-entry digest-only
+cache; repeated chunks use a per-call cache bounded to 131,072 code units.
+The implementation and [vocabulary provenance](../dev/context/TOKENIZER.md)
+are tested against independent tiktoken fixtures. The vocabulary adds about
+1.69 MB of package data and does not introduce an executable dependency.
+
+Both counters support cancellation. Their values are estimates, not billing
+counts. Known opaque reasoning fields are not
 treated as tokenizable ciphertext when the same assistant response has valid
 output usage: the adapter reserves the greater of the visible estimate and
 reported output tokens once for that message. Without valid usage, opaque data
 retains a conservative byte estimate. Raw protocol data itself is never changed.
 
 Across consecutive turns of an open conversation, the input meter anchors a
-successfully sent prefix to the provider's reported input count and adds the conservative estimate of newly
-appended content. The observation is valid only while instructions, tools,
+successfully sent prefix to the provider's reported input count and adds the
+conservative estimate of newly appended content. The observation is valid only while instructions, tools,
 model, effort, and the entire measured prefix remain unchanged. Changed raw
 data, compaction, emergency projection, or a replacement history invalidates it.
 Only hashes and numeric measurements are retained by the meter.
@@ -60,6 +77,9 @@ provider access interactions, and failed or interrupted turns reset its lifetime
 Provider routes remain separate. Reset generations also reject a late observation
 from a request that started before the reset. Restart/resume begins without an
 observation: persisted usage alone cannot prove that the wire prefix is unchanged.
+The tokenizer therefore measures the restored projection afresh, avoiding the
+older punctuation-heavy heuristic on the supported routes. No raw provider
+payload or calibration metadata is added to the session format.
 
 The most recent historical usage value is not an estimate of a newly extended
 or resumed conversation. Cumulative usage is accounting, not context pressure.
@@ -97,10 +117,19 @@ otherwise it keeps the selected effort. Source content remains untrusted
 historical data, and the resulting memory is a user-level context message,
 never a new system instruction.
 
+The prompt asks for at most 500 words focused on the active or most recent task:
+still-relevant constraints, decisions, exact paths needed to continue, current
+changes, final verification results, unresolved work, and next steps. Completed
+and unverified work remain distinct. Full code, logs, exhaustive inventories,
+and superseded retries are omitted. This is a generation target, not a claim
+that the provider enforces a word limit; the bounds below remain authoritative.
+
 The summary request has a 60-second deadline and observes turn cancellation.
 The usual local output ceiling is at most 4,096 tokens. Provider transport
 limitations still apply: OpenAI Account does not send that ceiling to the
 server. Returned summaries must be nonempty and at most 32,768 code units.
+Streaming text is also counted and the request is cancelled as soon as it
+exceeds that limit, even if the server ignores the output token ceiling.
 Acceptance additionally requires at least 20% estimated input savings, at
 least 256 tokens saved, and a result below both the automatic trigger and the
 safe request limit. A weak or oversized result leaves the previous context intact.
@@ -113,8 +142,13 @@ invalidates its pressure scope. Ambiguous generation failures are never retried
 as context recovery.
 
 Usage from a returned summary is accounted even when its text is rejected.
-The owned `jecode.context` diagnostics channel emits numeric request measurements
-and compaction outcomes, including failures and cancellation. No listener is
+The owned `jecode.context` diagnostics channel emits numeric request measurements,
+resolved limits, preparation/provider durations, time to first stream event, and
+compaction outcomes. Summary sends also report streamed character count, provider
+duration, and time to first nonempty summary text, including unsuccessful sends.
+Failed or cancelled provider sends and local preparation
+failures are recorded too. Unrelated transport errors never re-enter context
+preparation or compaction. No listener is
 installed in the ordinary product, and nothing is written to session files or
 exports. The [development recorder](../dev/context/README.md) can capture bounded,
 content-free evidence during real work. An `accepted` event means the summary
@@ -133,6 +167,8 @@ failure follow the normal turn-settlement and persistence rollback rules.
 | `src/context/measurement.ts` | Local measurement and exact-prefix usage observations |
 | `src/context/lifetime.ts` | Observation lifetime across turns and safe reset boundaries |
 | `src/context/diagnostics.ts` | Content-free request and compaction observation channel |
+| `src/context/request-observation.ts` | Provider/preparation outcome and timing boundaries |
+| `src/context/tokenizer/` | Pinned vocabulary loading, ranked byte merges, bounded text counting |
 | `src/providers/input-measurement.ts` | Provider wire measurement and opaque reserves |
 | `src/context/manager.ts` | Automatic decision, lifecycle, anchor, and diagnostics |
 | `src/context/policy.ts` | Model budgets and safe prefix/tail planning |
@@ -143,8 +179,12 @@ failure follow the normal turn-settlement and persistence rollback rules.
 
 Focused tests cover full TUI tool sequences, prefix invalidation, raw and opaque
 measurement, malformed counts, narrow-window recovery, failed summaries,
-deadlines, interruption, and preserved history. `npm run bench:context` also
+deadlines, interruption, normalized session restart, and preserved history.
+Tokenizer fixtures cover ordinary-text counts against tiktoken; a real TUI
+fixture verifies restart without premature compact or historical tool execution.
+`npm run bench:context` also
 exercises 12- and 40-read workflows with an inert provider, alongside local
-estimation/planning responsiveness. These synthetic checks do not establish
+estimation/planning responsiveness, cold vocabulary loading, and tokenization
+of uncached multi-megabyte documents. These synthetic checks do not establish
 summary quality or live provider latency; use the [validation protocol](../dev/validation/README.md)
 for those observations.

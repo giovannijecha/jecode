@@ -6,8 +6,9 @@ import { estimateSerializedTokensResponsive } from "../context/estimate.ts";
 import { toWireItems, toWireTool as responsesTool } from "./openai-wire.ts";
 import { toWireMessage, toWireTool as anthropicTool } from "./anthropic-wire.ts";
 import { toWireMessages, toWireTool as ollamaTool } from "./ollama-wire.ts";
+import { countO200k } from "../context/tokenizer/o200k.ts";
 
-type WireMessage = Readonly<{ items: readonly unknown[]; outputTokens?: number }>;
+type WireMessage = Readonly<{ items: readonly unknown[]; outputTokens?: number; unmeasuredOpaque?: boolean }>;
 
 export function measureResponsesInput(
   request: RequestInput,
@@ -19,7 +20,8 @@ export function measureResponsesInput(
     request.messages.map((message) => {
       const items = toWireItems(message, providerId);
       const outputTokens = opaqueReserve(message, providerId);
-      if (outputTokens === undefined) return { items };
+      if (outputTokens === undefined) return { items,
+        unmeasuredOpaque: items.some((item) => hasOpaqueField(item, "reasoning", "encrypted_content")) };
       return {
         items: items.map((item) => withoutOpaqueField(item, "reasoning", "encrypted_content")),
         outputTokens,
@@ -27,6 +29,7 @@ export function measureResponsesInput(
     }),
     request.tools.length,
     signal,
+    responsesTokenCounter(request.model, providerId),
   );
 }
 
@@ -68,16 +71,29 @@ async function measure(
   messages: readonly WireMessage[],
   toolCount: number,
   signal?: AbortSignal,
+  count = estimateSerializedTokensResponsive,
 ): Promise<number> {
-  let tokens = 64 + toolCount * 16 + await estimateSerializedTokensResponsive(envelope, signal);
+  let tokens = 64 + toolCount * 16 + await count(envelope, signal);
   for (const message of messages) {
     if (message.items.length === 0) continue;
-    const visible = await estimateSerializedTokensResponsive(message.items, signal);
+    const visible = await (message.unmeasuredOpaque ? estimateSerializedTokensResponsive : count)(message.items, signal);
     // Reported output already includes hidden reasoning. Reserve it once for
     // this assistant message, never once per opaque item or in addition to it.
     tokens += Math.max(visible, message.outputTokens ?? 0) + message.items.length * 8;
   }
   return tokens;
+}
+
+/** Account aliases may precede tiktoken's model map: use a reference encoding,
+ * never label this a provider-exact count. Legacy/unknown API routes stay conservative. */
+function responsesTokenCounter(model: string, providerId: string): typeof estimateSerializedTokensResponsive {
+  if (responsesTokenization(model, providerId) === "heuristic") return estimateSerializedTokensResponsive;
+  return async (value, signal) => Math.max(1, Math.ceil(await countO200k(JSON.stringify(value), signal) * 1.1));
+}
+
+export function responsesTokenization(model: string, providerId: string): "o200k-reference" | "heuristic" {
+  const modern = /^(?:gpt-5|gpt-4\.[15](?:-|$)|gpt-4o(?:-|$)|chatgpt-4o-|o[13](?:-|$)|o4-mini(?:-|$)|ft:gpt-4o)/u.test(model);
+  return providerId === "openai-codex" || modern ? "o200k-reference" : "heuristic";
 }
 
 function opaqueReserve(message: Message, providerId: string): number | undefined {

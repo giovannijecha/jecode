@@ -107,6 +107,10 @@ up to four output rows; failures retain a diagnostic line alongside the tail
 when one is recognized. Ctrl+O reveals the complete retained source, including
 unchanged diff context. These previews never shorten saved history or export.
 
+OpenAI reasoning summaries keep separate paragraphs for successive summary parts.
+Normal streaming fragments within each part remain continuous; empty parts do
+not create blank rows.
+
 When asynchronous terminal output falls behind, Jecode combines pending display
 updates into the current frame as output becomes available. Conversation history
 remains complete, and input and menu state continue to update.

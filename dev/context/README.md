@@ -4,6 +4,10 @@ Use the production TUI with an opt-in diagnostic subscriber when investigating
 context pressure, unexpected compaction, or differences between estimates and
 provider-reported counts. This development launcher is not part of the npm CLI.
 
+The [tokenizer reference](TOKENIZER.md) documents vocabulary provenance and the
+independent fixture corpus; [context management](../../docs/CONTEXT.md) describes
+measurement, calibration, and compaction behavior.
+
 From the workspace being tested, invoke the checkout's launcher. Normal launch
 arguments still apply; `-c` resumes the latest conversation in that workspace:
 
@@ -26,12 +30,29 @@ the run; ignore an incomplete last line after an abrupt stop. Normal close drain
 pending writes and appends an `end` record.
 
 - Request records contain local estimate, chosen input budget, calibration source,
-  and returned provider input tokens when present. Cached tokens remain part of
-  input usage; these records are not billing calculations.
+  reference-tokenizer/heuristic method, and returned provider input tokens when
+  present. They also contain the resolved window, compaction trigger, safe request
+  limit, output budget, and number of tool results shortened to fit. Cached tokens
+  remain part of input usage; these records are not billing calculations.
+- `preparationMs` covers local preparation before the send, including any
+  compaction; `providerMs` covers the adapter call, including internal transport
+  retries. `firstEventMs` measures the first text, thinking, or tool stream event
+  from that call; it is absent if no such event arrived. These are not terminal
+  rendering or input-latency measurements. A failed or cancelled send also emits
+  a request record. `completed` means the adapter returned, not that the turn or
+  its checkpoint succeeded. Older recordings omit these optional fields.
+- Preparation failures before a send emit `preparation` records with numeric
+  limits, elapsed time, and failed/cancelled outcome. Early capacity-discovery
+  cancellation and individual HTTP retries are outside this recorder's boundary.
 - Compaction records contain budget/overflow/manual cause, outcome, before/after
-  counts when available, and total local-plus-provider duration. `no-prefix` means
+  counts when available, resolved limits, and total local-plus-provider duration. `no-prefix` means
   planning found no eligible prefix; `cancelled` and `timeout` remain distinct.
   A zero `beforeTokens` means an internal caller did not supply a measurement.
+- Once a summary send starts, compaction records also include `summaryChars`
+  (streamed UTF-16 code units) and `summaryProviderMs`. `firstSummaryTextMs` is
+  absent when no nonempty summary text arrived. These distinguish a silent wait
+  from a still-growing summary that reaches the deadline; no summary text is
+  recorded. Older traces omit these fields.
 - Records contain no prompts, summaries, file paths, tool arguments, output,
   credentials, account IDs, provider raw data, or arbitrary error messages.
 - Each file accepts at most 4,096 events plus the end record. The asynchronous

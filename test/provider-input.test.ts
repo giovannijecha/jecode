@@ -9,6 +9,21 @@ import { ollama } from "../src/providers/ollama.ts";
 const PROVIDERS = [anthropic, openai, openaiCodex, ollama];
 const OPAQUE_PROVIDERS = [anthropic, openai, openaiCodex];
 
+test("modern OpenAI API models use the reference tokenizer while unknown API routes stay conservative", async () => {
+  const request = input([{ role: "user", content: [{ kind: "text",
+    text: "const value = { enabled: true, count: 10 };\n".repeat(1000) }] }]);
+  request.model = "gpt-5.1";
+  const modern = await measure(openai, request);
+  assert.equal(modern, await measure(openaiCodex, request));
+  assert.equal(openai.inputTokenization?.(request.model), "o200k-reference");
+  request.model = "gpt-4";
+  const legacy = await measure(openai, request);
+  assert.ok(legacy > modern);
+  request.model = "unknown-route";
+  assert.equal(await measure(openai, request), legacy);
+  assert.equal(openai.inputTokenization?.(request.model), "heuristic");
+});
+
 test("every provider measures system text, tools, and Unicode input without network access", async (context) => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("measurement must stay local"); };

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
 type Packed = { filename: string };
 type Manifest = { name: string; version: string };
@@ -51,6 +52,9 @@ try {
   if (result.stdout.trim() !== manifest.version) {
     throw new Error(`installed jecode reported ${JSON.stringify(result.stdout.trim())}, expected ${manifest.version}`);
   }
+  const tokenizerUrl = pathToFileURL(path.resolve(path.dirname(entry), "../dist/context/tokenizer/o200k.js"));
+  const tokenizer = await import(tokenizerUrl.href) as { countO200k(text: string): Promise<number> };
+  if (await tokenizer.countO200k("hello world") !== 2) throw new Error("installed tokenizer failed");
   process.stdout.write(`installed cli: jecode ${manifest.version}\n`);
 } finally {
   await rm(root, { recursive: true, force: true });

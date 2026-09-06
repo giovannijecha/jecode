@@ -1,0 +1,578 @@
+{
+  "encoding": "o200k_base",
+  "reference": "tiktoken 0.12.0",
+  "cases": [
+    {
+      "text": "",
+      "tokens": 0
+    },
+    {
+      "text": "hello world",
+      "tokens": 2
+    },
+    {
+      "text": "antidisestablishmentarianism",
+      "tokens": 6
+    },
+    {
+      "text": "2 + 2 = 4",
+      "tokens": 7
+    },
+    {
+      "text": "We'Re I'LL can't it's",
+      "tokens": 6
+    },
+    {
+      "text": "Ciao, come stai?",
+      "tokens": 7
+    },
+    {
+      "text": "\u304a\u8a95\u751f\u65e5\u304a\u3081\u3067\u3068\u3046",
+      "tokens": 8
+    },
+    {
+      "text": "\u4e16\u754c \ud83d\udc69\ud83c\udffd\u200d\ud83d\udcbb",
+      "tokens": 8
+    },
+    {
+      "text": "<|endoftext|> <|endofprompt|>",
+      "tokens": 14
+    },
+    {
+      "text": "\r\n\n\t    /\r\n",
+      "tokens": 4
+    },
+    {
+      "text": "\u0085\u00a0\u1680\u2000\u2028\u2029\u202f\u205f\u3000\ufeff",
+      "tokens": 16
+    },
+    {
+      "text": "e\u0301 \u00e9 \u0130 \u0131 \u017f",
+      "tokens": 8
+    },
+    {
+      "text": "\u0645\u0631\u062d\u0628\u0627 \u0928\u092e\u0938\u094d\u0924\u0947",
+      "tokens": 5
+    },
+    {
+      "text": "const data = { name: \"hello\", value: 42 };\nconsole.log(data);",
+      "tokens": 18
+    },
+    {
+      "text": "\u0000\u0001\u0002\u001c\u001d\u001e\u001f",
+      "tokens": 7
+    },
+    {
+      "text": "\u00a0\n\ufeff{}[]();\\\"const \u4e16\u754c=>function \u2028function \r\n\ud83d\ude00\u4e16\u754cfunction const \ud83d\ude00DON'T\u4e16\u754c\u00a0\ufeff{}[]();\ud83d\ude001234567890\ufeffconst \ufefffunction =>\u4e16\u754c\ud83d\ude00name  function \tconst =>\u0301{}[]();\\\"\t1234567890  =>\u0085function \n1234567890 we'reconst {}[]();\r\nconst \ud83d\ude00\u2028 we're\n\u00851234567890\u0301\ud83d\ude00\ufeff\u4e16\u754c\u00a0\ud83d\ude00name\u0301{}[]();function \u0085\r\n\\\"function \u00a0\ufeff\\\"\n\u0301\t{}[]();function \n{}[]();\u0085  \u0301\\\"function  we're{}[]();\u00a0\u00a0\\\"",
+      "tokens": 129
+    },
+    {
+      "text": "\\\"\u4e16\u754c{}[]();\ufeffconst \u0085\u0085{}[]();\ud83d\ude00const \u0301  name\ufeff",
+      "tokens": 21
+    },
+    {
+      "text": "\u00851234567890\u00851234567890\t\ud83d\ude00\n we're1234567890\n{}[]();\u20281234567890\r\n\ud83d\ude00  \t\u0301\u0085DON'Tfunction \n\n we're\u00a01234567890=>=>const DON'T\u0301=>=>function \u0085\u4e16\u754c\u0085\u0085\\\"function \u0301{}[]();function const \u0085\u0085name\ufeffconst \u4e16\u754cname\u4e16\u754c\u0301\ufeff\n\t1234567890DON'T\ufeffDON'T\u2028DON'T\u0085\u0301\tDON'T\u0301function =>\u4e16\u754cfunction \n=>DON'T\u00851234567890\r\n  DON'TDON'T{}[]();const \u4e16\u754c\nfunction \u00a0=>  \n\ufeff\u0301\u2028\\\"12345678901234567890\n\ufeff1234567890\ufeff",
+      "tokens": 151
+    },
+    {
+      "text": "const \u0301\u00a0 we're\\\"DON'T\ufeff\u0085=>{}[]();  DON'Tname1234567890\u2028\r\n\u00a0\ufeff\u00a0\ud83d\ude0012345678901234567890\ufeff=>\r\n\\\"\\\"namefunction  we're\u00a0=>\t\t\u0085\\\"name\ufeff\r\n\u4e16\u754c{}[]();\\\"\t\u2028const \u0085\n1234567890\u00a0{}[]();\\\"\ufeff\ufefffunction \u0085\ufeff\u0301\ufeff1234567890\n\r\n  \t\u4e16\u754c\u0301=>\u00a0\u4e16\u754c\u0301name1234567890 we're\ufeff  \t\ufeff\ud83d\ude00\ufeff we're{}[]();\\\"\ufeff1234567890name\r\n\u0085\r\n  \u00a0namename  function \u4e16\u754c   we're we're\u4e16\u754c\t\u00a0\u4e16\u754c{}[]();\u4e16\u754c\u00a0 we're\r\n=>name\u00a0 we'reconst \ud83d\ude00\u0085name{}[]();\u0085\t\u2028const function \r\nconst \t\u03011234567890\r\nconst \\\"\ufeff\u4e16\u754c\u00a0 we're\ud83d\ude00=>1234567890\u4e16\u754c\u0301\u0301function \u0085\ufeff\u00a0=>\r\nfunction   \r\n we'refunction function \u4e16\u754c\n\u00a0{}[]();\u2028\ufeff{}[]();\u2028DON'T\u2028\n\\\"function \r\n",
+      "tokens": 217
+    },
+    {
+      "text": "\ufeff1234567890\u00a0\ud83d\ude00\u2028\ud83d\ude00  \u2028{}[]();\u0301\u0085function  we'rename we're\u0301\r\n\u2028\u0301\\\"\ufeff\u0301\u00a0\r\n\u00a01234567890\n\n\u4e16\u754cfunction const function \r\nfunction \t\r\n\n  const   \t\u00a0const \t\n{}[]();  1234567890\ud83d\ude00 we're\u0085\ud83d\ude00{}[]();\u4e16\u754c{}[]();\ud83d\ude00const \r\nconst \r\n\ufeffconst \u2028\\\"\r\nDON'T\u0085\u0301\r\nconst \u4e16\u754c\u0301 we're\ud83d\ude00\\\"\nDON'T\ufeff  1234567890\ufeff\\\"function function \u03011234567890const {}[]();\u00a0function \n we'reDON'T\ufeff   we'refunction function   \r\nDON'T\u2028 we're=>\ud83d\ude00\n\\\"name\u2028\u0085const \r\nfunction   {}[]();function \ud83d\ude00\ud83d\ude00\n\u4e16\u754cfunction \u2028\tconst \\\"\nDON'TDON'TDON'T1234567890\\\"\ud83d\ude00=>\\\"\ufeff{}[]();\ud83d\ude00\r\n we're=>\t we're\u2028DON'T\u0301const \ufeff\u4e16\u754c\\\"\u2028\u0085\ufeff\r\n1234567890{}[]();\u2028\n\\\"name\\\"  \u00a0\u2028name\\\"const \u0301\u2028\ufefffunction \u0085=>",
+      "tokens": 224
+    },
+    {
+      "text": " we're\r\n\r\n\u00a0\n  \ud83d\ude00function \u00a01234567890function \u0301{}[]();\u4e16\u754c1234567890=>name\u2028\ufeff\u00a0\u4e16\u754c\t\ud83d\ude00function \ufeff\t\t\n   we're{}[]();\u00a0\u0085\r\nconst   \ud83d\ude00=>function \u4e16\u754c\ud83d\ude00\u00a0=>\u2028\r\n\r\nnameDON'T\ufeff\ud83d\ude00{}[]();{}[]();function \u4e16\u754c\ufeff\t\u4e16\u754c\ufeff\ufeff=>\u2028DON'Tfunction \u00a0\r\nDON'T  1234567890  \u0301\r\n\ud83d\ude00\u2028\\\"\u4e16\u754cname\ud83d\ude00function \ufefffunction \u4e16\u754c\ud83d\ude00function \u4e16\u754c  \u0085 we're\r\nconst \t\ufeff\u00851234567890\u0085DON'T\tname\u4e16\u754c we're{}[]();\u0085\tfunction {}[]();\\\"\r\n1234567890\n=>const \u4e16\u754c{}[]();{}[]();\ud83d\ude00\ud83d\ude00\u00a0\ufeff\u00a0const \u2028\ufeff\n",
+      "tokens": 160
+    },
+    {
+      "text": "function \u4e16\u754c we're\u0301 we're=>\u2028function \u0085name\ufeff\u2028\u4e16\u754c\u00a0\u00a0function {}[]();\u4e16\u754cfunction const \u00a0function \t\ud83d\ude00name\ufeff\ufeff\u2028\ud83d\ude001234567890\nDON'T we're\u0085function \u2028name\u0301\u0085\\\"\r\n\u0085\u2028{}[]();\u00a0\u0301\u00a0\u2028\t\ufeff=>\nfunction \u00a0\ud83d\ude00function ",
+      "tokens": 73
+    },
+    {
+      "text": "\n\ufeff\r\n\tDON'T\u2028\u2028DON'T\ufeff\ufeff\u0301=>\u0301",
+      "tokens": 14
+    },
+    {
+      "text": "\t=>DON'T\u4e16\u754cconst \t we're\nDON'T\t\\\"\ud83d\ude00    function  we'reDON'T{}[]();\n\u0085\n\t\ud83d\ude00DON'T\ud83d\ude00=>\u0085function  we're{}[]();function \n\ufeff\nDON'T=>\u2028=>\u00851234567890{}[]();\u0301{}[]();{}[]();=>",
+      "tokens": 65
+    },
+    {
+      "text": "\u4e16\u754c\ufeff{}[]();\ud83d\ude00  name\ud83d\ude00DON'T we'refunction \\\" we're\ud83d\ude00\ufeff\u2028name\t\u0301\u00a0\u00a0  1234567890{}[]();\u0085namename\u00a0function =>\u2028\u0301\\\"1234567890name\ufeff\u00a0\r\nconst \ufeff\u00a0{}[]();\ud83d\ude00\u2028\ud83d\ude00\ufefffunction \t\\\"\u0085\u0085{}[]();const \u2028\ud83d\ude00function name we're\\\"",
+      "tokens": 78
+    },
+    {
+      "text": "\u4e16\u754c\u0085\u0301\\\"name\r\n\u0085=>function \r\n\t\nDON'T\u00a0\u2028  \u00a0\ud83d\ude00\r\n we're\u0085\u2028  \n=>\u03011234567890\n1234567890\u00a0\r\n\u00a0DON'T1234567890\u0085=>\u00a0\u4e16\u754c  name\tname\u00a0{}[]();DON'T\u2028\u2028\u2028\\\"\ufeff\u0301\r\n\u4e16\u754c\ud83d\ude00\r\n\u2028  DON'T we're\u00a0\r\n\n  \nname\ud83d\ude00\u4e16\u754c\ud83d\ude00\u03011234567890\ud83d\ude00\\\"name{}[]();function \u00a0 we're\n\u2028const \u4e16\u754c\r\n\u4e16\u754c1234567890\r\n\ud83d\ude00 we're\ufeff{}[]();\nfunction function \u4e16\u754c{}[]();\u0301\t\ufeff  \nDON'T1234567890=> we're1234567890\u4e16\u754c  \n\n=>\u2028namefunction nameconst \u20281234567890\u4e16\u754c\ud83d\ude00\u00a0\t\u00a0\u00851234567890const \\\"=>\\\"DON'Tname\r\n\r\nfunction function \t\\\"\u0085\r\n\u4e16\u754cconst \u00a0\u0301\n{}[]();=>name\u2028",
+      "tokens": 187
+    },
+    {
+      "text": "\u0301\nfunction DON'T\n1234567890\u0301\r\n\nname\u4e16\u754cconst 1234567890\n\u0085\ufeff\ufeff\u0085function \t\tDON'T\u00a0\t we'refunction name{}[]();\u2028\\\"DON'T\\\"\ufeff\n\u00a0\ufeff\r\n\ud83d\ude00\\\"DON'T\\\" we'rename\ud83d\ude00\\\"DON'T we're\u0085DON'T=>\r\n=>  =>\ufeff=>\u00a0\r\n\tfunction  we're\u0085DON'T{}[]();\u0085  \ufeff=>const \u0085\ufeff1234567890=>\\\"  \t\r\n\\\" we're1234567890\t=>nameDON'T\u00a0DON'Tname\u00a0\\\"\u00a0const ",
+      "tokens": 120
+    },
+    {
+      "text": "const \\\" we're\u4e16\u754c1234567890=>\ufeff\ud83d\ude00\r\n\t\u2028\r\n\u00a0\u00a0\ufeff\u0085const \u00a0 we're\r\nconst \r\n\u4e16\u754c\u4e16\u754c\ud83d\ude00\u00a01234567890\\\"\ud83d\ude00\ufeff\\\"\\\"  =>\r\n=>const \t{}[]();\r\n\ufeffname\\\"\n\u2028 we're\nconst const   \u4e16\u754c\ud83d\ude00\r\n  1234567890\u0301 we're   we're\ud83d\ude00\ud83d\ude00{}[]();  \ud83d\ude00name\u00a0{}[]();\ud83d\ude00\n\r\n\ud83d\ude00\u2028DON'T\u00a01234567890\n1234567890\ud83d\ude00\n we're\t we're   we're1234567890\u0301name\\\"function DON'TDON'T\ufeff\u2028\tname\u2028  1234567890\u2028DON'T\\\"\ud83d\ude00const \t\t\r\nconst \ufeff\t1234567890\u0085\r\nfunction \\\"\n\u0085\ufeff  const DON'T\n\ud83d\ude00 we're\ufeffconst \u0085",
+      "tokens": 161
+    },
+    {
+      "text": "const 1234567890DON'T\tconst \tfunction {}[]();name\ud83d\ude00\u4e16\u754c\\\"\u0085const \tDON'T\\\"const function {}[]();\n{}[]();\r\n\\\"\ufeff\u0085function {}[]();\ufeffDON'T\u2028\u00a0\r\nDON'T\u0301\r\n1234567890\t\u2028\\\"\tconst const   function \n\u2028function function \u0085\u0085{}[]();\u00a0\ufeff\u00a01234567890const \ufeff\u0301{}[]();\ufeff we're\u0085 we'refunction \u2028\ud83d\ude001234567890\ufeff=>function \u4e16\u754c\\\"DON'T\t{}[]();\\\"1234567890DON'T    {}[]();1234567890=>=>\nnamenamefunction \ufeffDON'T\u00a0const \u00a0\u4e16\u754c\u2028\u2028\ud83d\ude00DON'T\\\" we'reconst \ud83d\ude00function \u0301\\\"\u0085\\\"\ufeff\n\u4e16\u754c\ufeffDON'T we're  {}[]();\u0301",
+      "tokens": 167
+    },
+    {
+      "text": " we're we're{}[]();\ud83d\ude001234567890\u2028name  \t\ud83d\ude00\u0301function =>\u4e16\u754c1234567890\ud83d\ude00\ud83d\ude00\u0301\n\u4e16\u754c\u00a0\ud83d\ude00 we're{}[]();{}[]();\u0085\\\"\u4e16\u754c\u0301DON'TDON'T\n1234567890\t\\\"1234567890\u00a0\ud83d\ude00\n  \u2028\ufeff\r\n=>\u0085\u00a0\n\u0085 we're\nnameconst  we'refunction \u00a0\t\u4e16\u754c\u00a0\ud83d\ude00\u0085\u03011234567890\u2028\u0085\n   we're\n=>\ud83d\ude00\r\nfunction DON'T  \u0301{}[]();\t\u0085  \r\n\u00a0\\\" we're  \u4e16\u754cname",
+      "tokens": 118
+    },
+    {
+      "text": "\ud83d\ude00function 1234567890\u4e16\u754c  \r\n\\\"1234567890DON'TDON'T1234567890\t=>\n\ud83d\ude00\u4e16\u754c\u4e16\u754c\u0085\r\n=>1234567890\\\"\u00a0name  \\\"\u4e16\u754c\ufeff=>\n\u0301\n\ud83d\ude00const name{}[]();\u0301\\\"const    we're  \ufeff\u0085const \ufeffname{}[]();name we're\u2028\u00a0\ud83d\ude00\ud83d\ude00\t1234567890DON'T\r\n=>nameconst \n\ufeff1234567890  \u2028name=>\r\n\u0085\r\n\ufeff we're\t",
+      "tokens": 102
+    },
+    {
+      "text": "\r\nconst =>12345678901234567890\u00a0\u20281234567890\u2028\u4e16\u754c\r\nDON'T\u4e16\u754c\u00a0=>1234567890name\u0085function  we'rename{}[]();\u2028\u2028\u00a0\u00a0\ud83d\ude001234567890\ufeffDON'T\t1234567890\u00a0=>\u0085\t we're{}[]();\u0301\r\n1234567890\u2028const \t\u0301=>const function DON'T\\\"\u4e16\u754cname\u0085name\u0085=>const  we're=>  \ufeffname\u0301nameconst =>function \ufeff\\\" we're\r\n\ufeff  DON'T\u4e16\u754cconst \u00a0\u0301\u00a0function name{}[]();{}[]();  1234567890  const \\\"\ufeff\u4e16\u754c=>\u2028  =>name\ufefffunction name\u00a0DON'T=>",
+      "tokens": 144
+    },
+    {
+      "text": "\t\u4e16\u754c we're\\\"\u4e16\u754c\ufeff  \u4e16\u754c  namefunction \r\n\r\nDON'T\u00a0\u00a0\tfunction const \u00a01234567890function \u2028\u4e16\u754c we're1234567890\u2028\u2028 we're we're\u4e16\u754c  DON'T\ufeff\ufeff we're\r\n\ud83d\ude001234567890  \t\ud83d\ude00name\n\ufeff1234567890name\u00a0\ufeffname  \u0085\u2028\u4e16\u754c=>const \u20281234567890{}[]();\ud83d\ude00\u2028\u0085\u0301\n\ufeffDON'T we're\r\n\ud83d\ude00\ud83d\ude00\\\"1234567890function  we're\ufeff\u0301{}[]();{}[]();\u2028\nDON'T\\\" we're",
+      "tokens": 112
+    },
+    {
+      "text": "\r\n\n\u4e16\u754c\\\"{}[]();name=>name\u0301\n\ud83d\ude00\u4e16\u754cfunction \u00a0\r\nDON'Tfunction   const {}[]();function   name\ufeffDON'T\u0301name  \t\\\"\r\n we're{}[]();namefunction \u4e16\u754c\n1234567890\ufeff\ud83d\ude00\u00a0 we're\\\"\n\t=> we're\u4e16\u754c\u0301function \u2028name\ufeff\u00a0 we're\nfunction {}[]();\\\"\u4e16\u754c\u2028\u00a0\u2028\ufeff\ud83d\ude00DON'T\t{}[]();1234567890\u2028\u0301DON'T{}[]();\u0301\u2028\\\"\n  {}[]();\u00a0 we're\t\t we're we're\u0085name\u4e16\u754c\u0085const \u2028  DON'T\u2028nameconst \\\"\r\n{}[]();function \r\n\u0301{}[]();DON'T  ",
+      "tokens": 135
+    },
+    {
+      "text": "\ud83d\ude00\u2028 we're\r\n\ufeff\\\"DON'T\u4e16\u754c\u0301function \u4e16\u754c\u0301\ud83d\ude00 we'rename\u0085\\\"\u00a0\u4e16\u754c  DON'T\n\\\"=>\n\u0085\ud83d\ude00const function \u4e16\u754c\\\"1234567890\\\"\ufeff we're\u4e16\u754c\ud83d\ude00nameconst const  we're\\\"\ud83d\ude00\u0085\nfunction const 1234567890=>\ud83d\ude00 we're\t\u2028 we're",
+      "tokens": 66
+    },
+    {
+      "text": "function \u0085\u0301function \u0301const   \t=>\r\n\u4e16\u754c\ud83d\ude00\ud83d\ude00function \t=> we'rename{}[]();\ufeffname\ud83d\ude00{}[]();const \ud83d\ude00\u0085\r\n\u2028DON'T1234567890\u2028\\\"\n\ud83d\ude00function namenameconst \u0085\n1234567890{}[]();\ufeffconst \u2028DON'T\ud83d\ude00\t\u4e16\u754c  \ud83d\ude00\r\n\u00a0  \u0085\ufeff\t=>\t\ud83d\ude001234567890function \ud83d\ude00\r\n  \n\u2028\ufeffnameDON'T\u0301\u0301\ufeffconst \ufeffconst \u0301\u0085\ufeff\ufeffconst {}[]();\u4e16\u754c\u4e16\u754c\\\"\tDON'TDON'T\ud83d\ude00function \t  \\\"",
+      "tokens": 122
+    },
+    {
+      "text": "  namefunction   \u00a0\ufeff\\\"nameDON'T we're\\\"\u00a0\ud83d\ude00function =>\r\nname\\\"\\\"function    we're\r\n\n we'refunction \u2028namefunction \tfunction \u2028",
+      "tokens": 32
+    },
+    {
+      "text": " we'rename{}[]();\t\ud83d\ude00 we're\u2028\n\u4e16\u754c=>const \u2028\u4e16\u754c{}[]();\tname1234567890  \tDON'T\ufeff\tfunction \u00a0\u0085\n\u0085\u00a01234567890\tDON'T1234567890\u0085\u0085\\\"\ud83d\ude00\\\"\u0301name we'refunction {}[]();  =>1234567890=>\u0085\ufeff\r\nconst 1234567890\ud83d\ude00\ud83d\ude00\ufeff\u0085\t\\\"\t{}[]();{}[]();\u0085{}[]();1234567890\r\n\ufeff{}[]();\t\ufeff=>\r\n we're{}[]();\n\n\u0301\u0301\\\"\tconst \\\"\ufeff\n=>\u00a0 we're we're\r\n",
+      "tokens": 126
+    },
+    {
+      "text": "\r\nname we'reDON'T\ufeff=>{}[]();\u00a0  function const  we're{}[]();\ud83d\ude001234567890\nDON'T{}[]();\\\"\u0085  const  we're\u2028\t{}[]();DON'T\ufeff\u4e16\u754cname\u2028function {}[]();const {}[]();{}[]();\u2028\nconst DON'T{}[]();\r\n\u0301\u4e16\u754c\tconst {}[]();name\tconst {}[]();function DON'TDON'T\\\"\ufeff\n=>=>\ufeff\u0301\ud83d\ude00\u0301name\u0301name\nfunction \u0301DON'T\n\u0301 we're\\\"\u0301function 1234567890 we'refunction \u4e16\u754c=> we're\u2028\n\t\u4e16\u754c=>\n=>name\t\ud83d\ude00\t\ufeff\\\"DON'T{}[]();\\\"\t\u2028=>\ufeff  \u2028name\n\n\ufeff\u4e16\u754c\u4e16\u754c\u2028 we're\u00a0const \n\ud83d\ude00\r\n\n\n\nDON'T{}[]();\\\"\u2028\u03011234567890\r\n\u4e16\u754c\u00a0\u2028\r\nfunction function DON'T\u2028\ud83d\ude00\r\nDON'T\u20281234567890\u4e16\u754c\r\n\\\"\u4e16\u754c\u0301\tfunction DON'T\u2028\ufeff\u0085name we're=>\u2028=>const DON'T\u4e16\u754c\r\n\ufeff\\\"function \u0085function \ufeffconst \t12345678901234567890const \n",
+      "tokens": 222
+    },
+    {
+      "text": "\r\n\ud83d\ude001234567890\u2028function \u2028{}[]();name1234567890\u2028\ufeffname{}[]();\u0301namefunction \n we're\u2028  1234567890  \u0085\u00a0const \r\nfunction DON'T\u2028\t  \ufefffunction   1234567890\u00a0\ufeff\u4e16\u754c\u0301\u4e16\u754c1234567890{}[]();=>1234567890 we're\u2028function \t\n{}[]();\ufeff\u2028\\\"DON'T\u0301\u4e16\u754c\\\"1234567890{}[]();=>\tconst {}[]();\u0085\r\n\u00a0\ufeff\u2028name=>\ufeff=>\r\n\u2028const \u2028DON'T  \u03011234567890function \u0301\ufeff\u2028\ufeff\u0301name\u4e16\u754c{}[]();function const \ud83d\ude00  const =>{}[]();\ud83d\ude00\ud83d\ude00  \ud83d\ude00\t\u2028\t\n\u2028{}[]();    \ufeff  \\\"\u0301\\\"{}[]();1234567890 we're\u0085\u4e16\u754c\n{}[]();DON'T\\\"{}[]();\u2028\\\"\u4e16\u754cname\t{}[]();1234567890name\u00a0\\\"function =>",
+      "tokens": 198
+    },
+    {
+      "text": "\u4e16\u754c\ufeff\tfunction name\ud83d\ude00function \u4e16\u754c\u0301\r\nDON'T\ufeff\u2028\t  \r\n\nDON'T\u0301\r\n\\\"\\\"\u00a0name\tconst const   DON'TDON'TDON'T\u00a0function \u00a0\t{}[](); we'refunction   function \n\\\"name\u2028DON'T\u0301  \r\n we're\\\"name=>1234567890\t\u2028=> we're\u00a0{}[]();\n{}[]();12345678901234567890const function const 1234567890\ud83d\ude00 we're\ud83d\ude00\\\"\n=>\r\n{}[]();DON'T\u0085\\\"\u00a0\u4e16\u754c  \u0085\ufeff we're\\\"=>function ",
+      "tokens": 110
+    },
+    {
+      "text": "\u4e16\u754c1234567890const \u00a0\r\n\ufeff\t\ud83d\ude00\ufeff1234567890  \ufeff\u0301=>DON'T  \r\nDON'TDON'T1234567890\r\nDON'T\u4e16\u754c  \t\u03011234567890\\\"\\\"\ud83d\ude00 we'reDON'Tconst const  we'renamefunction 1234567890\u0085\t\r\nname{}[]();\\\"\u4e16\u754c\r\n\u00a0{}[](); we're{}[]();\\\"\\\"\u2028  name=>name1234567890\u00a0\u4e16\u754c  const  we're{}[]();\ufeff\u0085function function => we're    \n{}[]();\\\"namefunction \r\n we're{}[]();\ud83d\ude00\t\ufeff1234567890name\u2028",
+      "tokens": 125
+    },
+    {
+      "text": "\u00a0\u2028\u2028\n we're\u0085  name\ufeff\u4e16\u754c\ud83d\ude00\r\n\u00a0\u4e16\u754c\u00a0\u00a0\u0085const \\\"\u0301{}[]();DON'T  \nfunction namename\ufeff1234567890\u4e16\u754c  const \u0085\u0085  \u00a0function function \ufeff we'renameconst \u00a0\u00a01234567890\u4e16\u754c=>\\\"const \t\ufeffconst function \ud83d\ude00DON'T\u0085{}[]();{}[]();=>{}[]();\u00a0function \n{}[]();DON'T\ud83d\ude00name=> we're\u0085\r\n\r\nDON'T\u4e16\u754c\u03011234567890{}[]();\n\ud83d\ude00\r\n\u4e16\u754c\u4e16\u754c\ufefffunction \ufefffunction 1234567890 we're\ufeff    {}[]();\ufeff\ufefffunction =>  \u0301DON'T\r\nDON'T\\\"\n{}[]();\u0085name\ud83d\ude001234567890const \\\"{}[]();\u4e16\u754c\ufeff\u0085\u0085\u4e16\u754c",
+      "tokens": 161
+    },
+    {
+      "text": "\tconst \\\"1234567890  \u2028name\u4e16\u754cnamefunction   function \u00a0\t\n\ufeff\u0301  const name=>\n\u00a0\u2028\u03011234567890{}[]();=>=>\n\u0301{}[]();\u2028function \t\n we're\ufeff\u008512345678901234567890    \u0301function \t=>DON'T1234567890\u0085const \u2028\t\u4e16\u754c\u0301=>\u0301name  const \\\"\\\"DON'T\u0301\ufeff\ud83d\ude00function const {}[]();\u4e16\u754c\n\u4e16\u754c\t\\\"\u0085\u0301  \r\n\r\n\u4e16\u754cDON'T\n\u0085{}[]();\t we're\\\"    \ufeffDON'T=>\t\u0301\n\\\"name\\\"\n\r\nconst DON'Tfunction \ud83d\ude00 we're\r\n\ufeff\ufeff{}[]();\u4e16\u754c\u2028",
+      "tokens": 137
+    },
+    {
+      "text": "1234567890    \ud83d\ude00\u4e16\u754c we'refunction \u2028\ufeff\u2028\u4e16\u754c=>\u0301\t1234567890\u2028=>\u4e16\u754cname we'reconst  we'reconst \r\n  \ufeffDON'T\\\"DON'T\u4e16\u754c1234567890",
+      "tokens": 43
+    },
+    {
+      "text": "const \u0301\r\n\u0301function const {}[](); we're1234567890DON'T\u0301\t\u00a0\r\n\ud83d\ude00\ud83d\ude00\u0301function {}[]();\\\"DON'T\ud83d\ude00\u0085  1234567890  DON'T\n\\\"\\\"\u0085  function   \t\ud83d\ude00\ud83d\ude00=> we'refunction DON'Tname we're\u0085\u0085name\u0301\\\"\u0301\u00a0\t\u00a0  const DON'T\u0085{}[]();\ud83d\ude00\u00a0 we're\n\u2028\ufeff\n",
+      "tokens": 84
+    },
+    {
+      "text": "\u0085\n\r\n we're\u4e16\u754c\u4e16\u754c\\\"\u4e16\u754c\ufeff\tfunction 1234567890DON'T\r\nDON'Tfunction \u0085\\\"\u0085\u00a0\u00a0\nconst \ufeff\ud83d\ude00const name\u2028  1234567890const \u00a0name\u2028\u0301name\ufeff\n\u0085\tconst \u2028\u0301\u4e16\u754c\r\n1234567890",
+      "tokens": 61
+    },
+    {
+      "text": "\u0301const \\\"\r\n\u0301\\\"function {}[]();{}[]();\u0301 we'refunction \u0085const  we're\u4e16\u754c\t{}[]();\u00a0\ud83d\ude00function \u2028  \ufeff  1234567890name\u4e16\u754c\u4e16\u754c\ud83d\ude00\u0085DON'Tfunction {}[]();const \u00a0{}[]();\u0301{}[]();DON'T\tnamename\nDON'TDON'T\u00a0\u0085 we'reconst const =>function \ufeff\\\"\u00a0\u00a0function \ud83d\ude00 we're\u0301\r\n\u0301\u0085\u00a01234567890\u4e16\u754c\ufeff\u00a0 we'refunction 1234567890const \u2028\\\" we're\u0301\u4e16\u754c\r\n\u2028name\ud83d\ude00\ud83d\ude00=>function \nconst =>=>\u4e16\u754cDON'Tname\r\n\\\"\ufeffconst \u0301const \tDON'T\t\ufeff1234567890DON'T{}[]();\r\n\u00a0\ud83d\ude00\t\tname\\\"\u2028\u2028\t\u0301\tname\u0301\u4e16\u754c  \u0301\u0085\t=>\u0085\nDON'T\ufeffDON'T=>const \u0301 we're\\\"function \\\"\ufeff we're=>{}[]();\u00a0{}[]();\ud83d\ude00\u4e16\u754c\ufeff\u2028\\\"\u0301\u03011234567890\u00a0{}[]();\u0301\ufeff\u00a0",
+      "tokens": 213
+    },
+    {
+      "text": "function \u2028\u2028{}[]();\\\"\tconst \u2028\ud83d\ude00\\\"\u20281234567890\u4e16\u754c\u0301\u0085\u4e16\u754c\u2028\u2028=>1234567890\u4e16\u754c\ud83d\ude00const {}[]();\ud83d\ude00\u0301  \u0301{}[]();function \u0301\\\"const \r\nDON'T\u2028\ud83d\ude00\u2028  \r\n\u4e16\u754c\u0085\t1234567890\u0085DON'T\u0085=>function \u03011234567890\u4e16\u754c\\\"namename we're\\\"\u00a0\r\nDON'T1234567890function name{}[]();\u0085name\u0301\\\"\u0085DON'T\u00a0{}[]();{}[]();\ud83d\ude00=>\ufeff1234567890\\\"\u4e16\u754c\tfunction \u2028\t\u0085DON'T\\\"\\\"\ud83d\ude00{}[]();1234567890\\\"function \u00a0\u4e16\u754c\r\n\ud83d\ude00\u4e16\u754c\u2028nameconst const =>  function name\ud83d\ude00\t we're\u0301nameconst   \n\r\n\nDON'T{}[]();\u0085  \ud83d\ude00=>\u4e16\u754cconst \ud83d\ude00\u00a0=>\r\n we're\r\nname\\\"\u0301\n\r\nDON'T\u00a0",
+      "tokens": 187
+    },
+    {
+      "text": "\u0301\u2028\u00a0const \u2028\ud83d\ude00function \tname=>=> we're\u2028\u0301DON'T=>const \r\n{}[]();\\\"\u0085const \u2028DON'T\ud83d\ude00 we're\u0301\t1234567890function \u4e16\u754c=>\u0085const \n1234567890 we're1234567890const  we're\ufeffconst  we're\\\"\u2028name",
+      "tokens": 65
+    },
+    {
+      "text": "=>\u0301\ufeffname\u0301 we'reDON'T\ufeff  \u0085\u0301\\\"\r\n\u0301\ufeff  1234567890\ufeff\u4e16\u754c\u2028\\\"\n\u00a0\u2028\u0301{}[]();DON'T\r\n=>\u0301\u0085=>\ufeff1234567890\u00a0\r\n{}[]();\ufeff1234567890\ud83d\ude00DON'T\ufeff we're\u00a0\n we'rename\\\"name{}[]();const \u0085const \ud83d\ude00\ufeff\u0301\u0085\u0301\u2028\t\\\"function \ufeff\ud83d\ude00  \\\"  {}[]();\u2028\u4e16\u754cDON'T1234567890\u0085name\u00a0\n  \r\nconst DON'TDON'T{}[]();\u4e16\u754cconst  we're we're\u0085\u0085\t1234567890{}[]();\u00a0=>\ufeffname\u0301const \u0085\ufeff=>   we're\u0301\ud83d\ude00\u0085{}[]();\u2028function \ud83d\ude00  \ud83d\ude00=>\ufeff\ufeff\n\t{}[]();\u2028=>\ufeff\ufeff\ufeff\u0301\u2028\u2028\\\"\ufeff\u2028\r\nconst DON'T\u00a0  \u4e16\u754c=>name\u2028\tnamename1234567890function name we're\ud83d\ude00\\\"\u4e16\u754c\r\nconst \u4e16\u754c we're\n",
+      "tokens": 201
+    },
+    {
+      "text": "\n  \u4e16\u754cDON'T\ufeffnamename\ufeff\u00a01234567890 we're  \ufeff\u4e16\u754c\n\n=>\u2028const \\\"name\u2028DON'T we're  1234567890\u2028\\\" we're\u0301DON'Tname\\\"\ud83d\ude00\u4e16\u754c\u00a0\r\n\u2028function \n\u0085const \u4e16\u754c\ufeff\u00a0\\\"=>1234567890\t\r\n=>\ud83d\ude00\ufeff\u0085\u00a0 we'refunction \u00851234567890 we're{}[]();=>  \\\"\n\\\"\ud83d\ude00\ufeff\ufeff=>function \ufefffunction \u00a0{}[]();DON'Tconst name\\\"\ufeff\\\"\u2028\u4e16\u754c\r\n\ud83d\ude00=>\t\r\n1234567890name    \u4e16\u754c\t\u00a0DON'T\u0085 we're1234567890\\\"\u0301\u0301\t\ufefffunction \u0085 we're\n=>\u00a0\r\n we're we're\t\u0085\ud83d\ude00const \u0085\u4e16\u754cfunction \n\u0301{}[]();\nDON'T\\\"{}[](); we're we're\\\"=>\u0301function name\tDON'TDON'T\u0301\u0085=>",
+      "tokens": 180
+    },
+    {
+      "text": "1234567890=>{}[]();\u4e16\u754c1234567890 we'reDON'T{}[]();1234567890function \t\u4e16\u754c\r\n\u0085\u4e16\u754c\ufeff\tnamefunction =>\ufeff\\\"1234567890\t\u2028{}[]();  DON'Tfunction  we'refunction =>function \u2028\u00a0\ud83d\ude00DON'T\u2028\ufeff\r\nDON'T\u2028\ud83d\ude00function name\nDON'T\\\"\t\t\ufeff\t\\\"\nDON'T\r\n\t\u4e16\u754cconst name\u0301\r\nname\u00851234567890\ufeff\n\r\n we're\t\r\n we're=>function \u0085DON'T\r\n",
+      "tokens": 107
+    },
+    {
+      "text": "\ud83d\ude001234567890const     1234567890  function const   name\r\n\ufeff\t\t we're\u0301\u0085\u2028\n{}[]();{}[]();  const function \u4e16\u754cfunction  we're\u4e16\u754cfunction {}[]();=>\u00a0const \n\u00a0\u0301=>\u00a0\n1234567890const \t\n\u2028function \u00a0\r\n=>\u00a0{}[]();const name  1234567890 we're\\\"1234567890{}[]();\r\nconst 1234567890\u00a0  \tnamefunction ",
+      "tokens": 96
+    },
+    {
+      "text": " we're\ufeffname\n1234567890\u00a0  \ud83d\ude001234567890  \u0085function \u0085{}[]();\n  \u2028\ufeff1234567890=>\ufeff  name\u4e16\u754c{}[]();{}[]();\ud83d\ude00function  we're\u2028function \ud83d\ude00DON'TDON'T we're=>\u0301\u0301\\\"\t\u0301DON'T we're\u2028\\\"\r\n1234567890\u0301\r\n",
+      "tokens": 73
+    },
+    {
+      "text": "\nconst \u4e16\u754c\u0301\ud83d\ude00\t\tconst \n=>\u00a0\u2028function \ud83d\ude00=>\u2028\u4e16\u754c\u0301{}[]();\u2028\ud83d\ude001234567890name\u2028\u00851234567890\u0085\n=>\u0085\t\u0301 we're\u00851234567890\n{}[]();\t\u0301DON'T\ufeff\ufeff\\\"\ufeffconst \n\ufeffDON'T=>\r\n\t\ud83d\ude00\nconst \u00a0DON'T\t\u4e16\u754c=>1234567890\\\"\\\"{}[]();=>function DON'T12345678901234567890\u2028\u00a0\u00a0\n\ufeffname\ufeff",
+      "tokens": 103
+    },
+    {
+      "text": "\r\n  name\u0085=>name\ud83d\ude00\ufeff\t\u0301const {}[]();const {}[]();",
+      "tokens": 19
+    },
+    {
+      "text": "\u4e16\u754c we're  \u00a0\\\"\ufeff\u0301\n1234567890\ufeff{}[]();\u4e16\u754c",
+      "tokens": 17
+    },
+    {
+      "text": "1234567890\u0301\n\nname\u0301\u4e16\u754c\tconst {}[]();\u4e16\u754c\ud83d\ude00\\\"\r\n we're    function =>\u0301namefunction \n\u0085\ud83d\ude00\u2028\u4e16\u754cDON'T\u00a0DON'T{}[]();name\ud83d\ude00{}[]();DON'T\t\ufeff\n we're we're{}[]();\ufeff we're we're we're we're\u4e16\u754c\u0301DON'Tname\\\"\u0301\\\"function name  function =>\n\u4e16\u754c\t\ud83d\ude00  =>\u4e16\u754c we're\t  \u00a0\u00a0DON'TDON'Tfunction {}[]();\u00a0  \ud83d\ude00\t\n\ufeff\u4e16\u754c we're\u2028=>    \tDON'TDON'T\u2028\u0301{}[]();DON'T=>=>1234567890{}[]();function \u2028\r\n\u00a0\n=>\r\n we're{}[]();name1234567890=>\ufefffunction nameconst \u00a0\u4e16\u754c\u0085\u2028\t1234567890\ud83d\ude00\u0301const \t\u4e16\u754cDON'T\u00a01234567890=>name\ufeffname\t\u00a0\u00a0{}[]();\r\n\u0085\u2028\u4e16\u754c\t\u0085  \u00a0DON'T  const \u00a0",
+      "tokens": 188
+    },
+    {
+      "text": "\u0301{}[]();\u0085\r\nfunction {}[]();\\\" we're\u4e16\u754c1234567890  \u03011234567890\ufeff=>\u0085namename  =>\nDON'T\n\t{}[]();    DON'T=>\u0085=>DON'T\u0085=>\u0085const \ufeff\t\u0301\\\"\ufeff\u00a0  1234567890\ufeff\u0301\u0085\u00a0nameDON'T\n\ufeff1234567890\nDON'T\u4e16\u754cfunction \n=>DON'T\ufeff12345678901234567890\u4e16\u754c1234567890\u2028{}[]();{}[]();\r\n\u0301function \tDON'T\t\n we're we're\n\ud83d\ude00{}[]();\tconst \ud83d\ude00\u0301function 1234567890   we're\\\"{}[]();\r\nconst \u00a0\u4e16\u754c\t\ud83d\ude00\u0301\n\u2028\ufeff\u0085const const \u0301  \\\"\u4e16\u754c\u4e16\u754c  DON'T  \ufeffDON'T\u0301  \t1234567890\r\n we're\u2028  ",
+      "tokens": 175
+    },
+    {
+      "text": "=>\t{}[]();\u00a0name\ufeffDON'Tname\n\u4e16\u754c\u4e16\u754c we're1234567890\u2028\tDON'T\u0085\r\n\u2028\r\n\\\"DON'T\t\ufeff\u00a0const const \\\"  \u4e16\u754c\u0085function \r\n we'reDON'T\u4e16\u754c{}[]();function DON'T1234567890\n\t\ufeff1234567890DON'T\u0085\\\"\u4e16\u754c\u2028function \u0301 we're\u0085\\\"const 1234567890\r\n\u0301\ufeff\u0301\u0085  DON'T\u0085const \u4e16\u754c\u4e16\u754c\ufeff we'refunction \t\u2028\ud83d\ude00\n\ud83d\ude00\u0301\u0085\ud83d\ude00\u4e16\u754c\\\"  \u00a0name",
+      "tokens": 113
+    },
+    {
+      "text": "\ud83d\ude00const const   \\\"\tname\u4e16\u754c\t\u00a0{}[]();\r\n1234567890 we'reconst name\u2028\u0301\nnameconst \u00a0\u0301\u00a0namefunction 1234567890\u00a0\ufeff  \u00a0   we're1234567890\nDON'T\ud83d\ude00\u00a0  function =>function \t\t\\\"\ud83d\ude00const \tDON'T{}[]();function \t we're=>  \r\n\u2028\u0301\n\u0301\r\nname we'refunction \r\n\r\n\\\"\u00a0\r\n\u0085\u0301 we're\u0301\ud83d\ude00\u4e16\u754c\t we're\\\"1234567890\u00a0\n=> we're{}[]();const DON'T=>DON'T we're\u00a0\nDON'T\u2028DON'T\u2028 we're   we'reDON'T=>\r\n{}[]();\u0301\u0301const \u0301 we're\n we're{}[]();  \ufeff\\\"const \u4e16\u754c\u4e16\u754cfunction DON'T\t\ud83d\ude00",
+      "tokens": 149
+    },
+    {
+      "text": "=>\u0301\t   we're\u4e16\u754c\n\ud83d\ude00\n\u0085function \u0085\\\"\u0085 we're\u0301\u2028\ufeffname\r\n\u2028\\\"\n\u2028\t=>name=>name\ud83d\ude00\ud83d\ude00DON'T\t\ud83d\ude00 we're\u2028\ufeff\\\"nameDON'Tfunction \ud83d\ude00\u2028  function \\\"\nDON'T{}[]();\u4e16\u754c\\\"1234567890\n\u2028\u0085\u2028DON'T we're\ufeff  \r\n we're{}[]();\u4e16\u754c\\\"\u0301\ufeff\u2028{}[]();=>\u00a0\u0301function \t\u0301\u2028DON'T\r\n\ud83d\ude00=>\u0085DON'T\ud83d\ude00  DON'Tfunction function   \ufefffunction =>\ud83d\ude00nameDON'T\r\n\ufeff\ud83d\ude001234567890\u00a0\tconst \r\nDON'T\r\n\ud83d\ude00\u0085\\\"{}[]();=> we're  \u0301\\\"\ufeff\ud83d\ude00\tDON'T\u00a0 we're\\\"\\\"\u0085\u0085 we're\ufeff\nconst \u4e16\u754c\u4e16\u754cnameDON'T1234567890\\\"=>name\ud83d\ude00\ud83d\ude00DON'Tconst \u0301namename\u0301",
+      "tokens": 179
+    },
+    {
+      "text": "  \ud83d\ude00=>\r\n\r\n{}[]();\r\n{}[]();  {}[]();\u0301 we're  \ufeff\u00a0  \u0085DON'T\u0085=>\n\ufeffDON'T\u0085{}[]();\u03011234567890 we'rename=>function \u2028\u20281234567890\u00a0\t\u0085\ufeff\u2028\\\"\n\t\ud83d\ude00\ufeff",
+      "tokens": 62
+    },
+    {
+      "text": "\u0085\u0085\ufefffunction {}[]();\t\\\"\u0085=>\r\n\u0301\r\n\n\u00a0{}[]();\ufeff\u0301",
+      "tokens": 23
+    },
+    {
+      "text": "\ufeff  \r\n\u0085\u0301\\\"\u2028\u4e16\u754c{}[]();\u0085{}[]();1234567890\ud83d\ude00\ud83d\ude00\u0301\u2028function \r\n\u4e16\u754c\ud83d\ude00function \ufeff=>function \r\n1234567890\u4e16\u754c\u0301  DON'T we're{}[]();\u0301\ud83d\ude00  \t1234567890  1234567890\u4e16\u754c\u2028\ufeff   we're\r\n\r\n\ufeffDON'T\n\n1234567890\u4e16\u754c\u2028",
+      "tokens": 75
+    },
+    {
+      "text": "=>\t\ufeff\ud83d\ude00=>\n\ud83d\ude00\u0301DON'T\tconst  we're\u4e16\u754c\n\u4e16\u754cconst =>\t we'reDON'Tfunction \r\nDON'T\r\n\u4e16\u754c\ud83d\ude00=>\u0085function \u4e16\u754c\\\"\ud83d\ude00\u2028 we're we're\r\n\\\"\u00a0=>\u0085\u0301\u0301\u2028\ud83d\ude00{}[]();DON'Tconst \u0085\u4e16\u754cconst function \r\nname\u4e16\u754c\ufeff=>\ufeff\u0085const  we'reconst \ufefffunction  we're\r\n\ufeff\u0301name{}[]();const name  \u2028\u00a0\ufeff\u0301\r\n\u00851234567890\ud83d\ude00\\\"\u4e16\u754c\u4e16\u754c\ufeff\t\ud83d\ude00\ud83d\ude00name we're\u00a0  1234567890\u4e16\u754cconst \n1234567890\ud83d\ude00\r\n\ud83d\ude00const name\tnamefunction =>\u4e16\u754cfunction function {}[]();const \ud83d\ude00\\\"\ufeff=>1234567890\u4e16\u754cDON'T=>\r\n{}[]();\r\n we're\r\n1234567890\u2028\u00a0\u0085{}[]();1234567890 we're\u2028\u0085\u0301\u00a0function {}[]();    1234567890\\\"const  we'refunction \u4e16\u754c\\\"{}[]();namename we're\u4e16\u754c we're\u00a0\t  const   \\\"1234567890\u2028name\\\"\u0301=>const \u00a0\ufeff\u00a0const {}[]();name\ufeff{}[]();name\tfunction \r\n\ufeff\r\nname",
+      "tokens": 235
+    },
+    {
+      "text": "1234567890\t\u0301\ud83d\ude00name  \u2028\r\n\u0085\ufeff\u00a0\u00a0DON'T\ufeff\nfunction \u2028\\\"{}[]();\n\n\ufeffDON'T\u0085{}[]();\t we're{}[]();\u2028\ud83d\ude00DON'T{}[]();const \\\"function \u00a0\u00a0\\\"\\\"DON'T\u2028 we're=>\ufeff\ud83d\ude00\u00a0=>\ufeff\u0301{}[]();{}[]();\ufeff{}[]();\u0085\u2028\ud83d\ude00\u00a0=>1234567890{}[]();function  we're we're\n\u00a0 we'reDON'Tfunction \u2028\r\nfunction \t{}[]();=>DON'T we're\tname\u4e16\u754c\u00a0\ud83d\ude00\r\n\ud83d\ude00\u0085name\ud83d\ude00=>\t\u4e16\u754c1234567890  \ufeff\u0301\u00a0const \n\\\"\u0301\u4e16\u754c\u0085namefunction \u0085\ud83d\ude00",
+      "tokens": 143
+    },
+    {
+      "text": "nameDON'T\u0301\r\n=>\ud83d\ude00DON'Tname  \\\"\u00a0namename\r\n\u00a0\ud83d\ude00{}[]();\u00a0\\\"\u0301\u4e16\u754c\u0085{}[]();const \nname=>1234567890\u00a0\u0085 we're\n we're\u2028\u0085\r\n\u0085=>DON'Tname we're\u00851234567890\r\n we're\u4e16\u754c we're  =>function \u2028\t\u4e16\u754cfunction DON'T\u2028\t\u00a0name\u4e16\u754cname  \n\t\\\"name{}[]();\\\"\t{}[]();\u4e16\u754c=>\u4e16\u754c{}[]();\u03011234567890\u00a01234567890\ud83d\ude00name  \t1234567890function \r\n\u00a0name\u00a0DON'T\ufefffunction const 1234567890DON'T  \ud83d\ude00\r\n\u00a0\u00a0\n\u00a0  1234567890name\ud83d\ude00\u4e16\u754c\t\ufeff\tconst const {}[]();    \u2028{}[]();\\\"\u4e16\u754c we're\u0085\u0301\n  DON'T we're\u4e16\u754c=> we'rename1234567890name\ud83d\ude00DON'Tname12345678901234567890{}[]();\r\n\u00a0=>\u0301\ufeffname\r\n\u0085 we'rename  DON'T we'reDON'T\\\"const {}[]();\ufeff\nfunction DON'T\t we're we're\u00a0 we'rename\u0085  \t\r\n\ufeff{}[]();DON'T{}[]();nameDON'T\\\"\u0301 we're1234567890",
+      "tokens": 244
+    },
+    {
+      "text": "\n\t1234567890 we're\nconst \u00a01234567890\u2028\u0301\r\n12345678901234567890\u0085=>  \u00a0\u4e16\u754c  \u0301\ud83d\ude00\u4e16\u754c{}[]();function function \t\n=>\t\u4e16\u754c\u4e16\u754c\u2028\u00a01234567890\ufeff  DON'Tfunction \t\u0301\n1234567890\ud83d\ude00  1234567890DON'T=>\u0301const const =>\u0085name\n we're\ufeff\ufeffname\r\n\t\u0301DON'T\ud83d\ude00\r\n\ufeff\ud83d\ude00\u0301\n  =>\u2028  \u2028{}[](); we'rename",
+      "tokens": 106
+    },
+    {
+      "text": "\ufeffDON'T\u0301=>\u4e16\u754c",
+      "tokens": 6
+    },
+    {
+      "text": "function DON'T\n\u00a0const DON'T=>1234567890\r\nDON'T\u2028\u2028=>DON'T\u0301  DON'T\ud83d\ude00DON'T  \ufeff\\\"{}[]();name we're\ud83d\ude00function function \u2028\u0301function \n we're1234567890\u2028\ud83d\ude001234567890const \ud83d\ude00function \u0301\nDON'T\u0301\u00a0\\\"\u0301\ufeff\tfunction \\\"\ud83d\ude00\ufeffname\ufeff\u00a0 we're=>\t\u00a0\u0085\r\n\ud83d\ude00\ufeff\r\n we're\u0301  \t{}[]();\r\n\\\"\\\"\\\"name\u0085 we're  namenamenamefunction DON'T{}[]();\r\n\t\u4e16\u754c\t\t\n\u4e16\u754c1234567890  \\\" we'reDON'Tname\ud83d\ude00DON'T=>\u4e16\u754c1234567890\ud83d\ude00\u2028DON'T\u00a0\u00a0const 1234567890=>\u4e16\u754c\u00a0\r\n\u00a0\ud83d\ude00\nconst \ufefffunction function \n\ud83d\ude00  DON'Tfunction \u0301const function \u00a0\n\u2028\r\n{}[]();\u0085{}[]();\ufeffname\\\"function \u00a0{}[]();\u00a0\u0301function DON'T\u4e16\u754c",
+      "tokens": 186
+    },
+    {
+      "text": "1234567890\u00a0\u0085 we're\u0085\t=>{}[]();\u2028DON'TDON'T\ufeff we're\u2028\ufeff\u4e16\u754c\u4e16\u754cconst \u20281234567890name{}[]();\u4e16\u754c\t{}[]();1234567890function 1234567890\ud83d\ude00\u00a0\u00a0\\\"\t\u0301const \tDON'T\u00a01234567890function  we're\n\u00a0namename\r\n\u00a01234567890\ufeff\u2028\u4e16\u754cfunction  we'refunction \r\nfunction \t\ud83d\ude00\u4e16\u754c{}[]();\n12345678901234567890\u2028\u00851234567890\u0301\u0085\n\r\n we're\r\n1234567890\\\"=>{}[]();{}[]();=>=>{}[]();name\r\nfunction DON'T we're\u0085\u0085=>  DON'T\ud83d\ude00\u4e16\u754c1234567890nameDON'T\n\n\ud83d\ude00\u2028\ud83d\ude00\\\"\u00a0\u0301\u4e16\u754c{}[]();name\u4e16\u754c\u0301\u00a0\u0085\n{}[]();\u0085\u2028=>1234567890\n\u0085\u0301\u00a01234567890\ud83d\ude00\u2028\u0301function name\r\n\u4e16\u754c{}[]();const 1234567890name\r\n\u2028  \u2028\u00a0const \u4e16\u754c\u4e16\u754c\ud83d\ude00\u0301\u00a0function \u00a0\u0085namename\u4e16\u754c\t we're  \n",
+      "tokens": 231
+    },
+    {
+      "text": "1234567890\u2028\r\n\\\"\u2028{}[]();\u0085\ud83d\ude00\t\\\"\ud83d\ude00\u0301\ufeff\n\u00a01234567890function DON'T\u4e16\u754c  \u2028\r\n\ufeff\ufeff1234567890\u2028\ufeffDON'T\u0301\u4e16\u754c\\\" we're\ufeff\ufeff\\\"\r\n we're{}[]();\u2028\n",
+      "tokens": 52
+    },
+    {
+      "text": "\ud83d\ude00\ud83d\ude00const \u00a0\nname    {}[]();\ud83d\ude00\u0085=>  \u4e16\u754c\ud83d\ude00const const \r\n{}[]();const {}[]();  1234567890const \u00a0DON'T=>\u00a01234567890\u4e16\u754c\u0301\\\"\t\u4e16\u754cfunction \u00a0\u00a0{}[]();\u0301\\\" we'refunction \u4e16\u754c we're1234567890",
+      "tokens": 65
+    },
+    {
+      "text": "nameDON'T{}[]();const =>\ufeff\u0301\u0301  \t\u4e16\u754c{}[]();function const \u0085const const 1234567890\u0085function \u0085function \r\n we're we're\ud83d\ude00=>\u0085{}[]();function \u00a0name\ufeff\r\n\u4e16\u754cDON'Tname  \u00a0\ud83d\ude00\u4e16\u754c1234567890\ufeff\\\"\n1234567890\u0085\u0085\r\n\ufeff\ufeff\ufeff",
+      "tokens": 78
+    },
+    {
+      "text": "\u0301 we're  \u0301name  \n\t  const function name\n\r\n\u03011234567890\u4e16\u754c\t{}[]();\r\nname\u00851234567890\u00a0  function \u2028=>\ud83d\ude00\n\u4e16\u754c{}[]();DON'T{}[]();\ud83d\ude001234567890\r\nconst {}[]();\u2028name\t{}[]();\ufeff12345678901234567890function \ufeffDON'T",
+      "tokens": 74
+    },
+    {
+      "text": "1234567890function  we'refunction name  DON'T\u4e16\u754c we're\r\n\u0301\n\nnameconst namename=>\n\u2028\u0085  const 1234567890\ufeff\u4e16\u754c  \u00a0\t\u00a0\ufeffconst {}[]();\u2028\u4e16\u754c we're\u0085{}[]();name1234567890\ufefffunction \u0085const =>\u4e16\u754c\nfunction \u0301nameDON'T\u4e16\u754c\u00a0\r\n\t\r\n we're  DON'T\r\n\\\"\n  \r\n=>\u4e16\u754c\u0085\u2028\ud83d\ude00const {}[]();\ud83d\ude00\r\n\u2028const nameDON'T we'reconst function \u00a0function \r\n\\\"\ufeff\ud83d\ude00{}[]();\u00a0=>{}[]();\tDON'T{}[]();\u4e16\u754cconst \r\nDON'Tname\t\u00a0\u2028\r\n{}[]();function 1234567890\u0301\\\"function \u0301\u00a0{}[]();function \t\r\n\u4e16\u754c\r\nDON'T\\\"\r\n\u4e16\u754c\u4e16\u754c1234567890 we're=>const \n\tfunction \\\"\u0085=>\u2028\u2028\u0301\u0085\\\"\n\u2028\n  \ufeff\u2028 we're\u03011234567890\ufeff{}[]();\ud83d\ude00\ufeff\ufeff\nDON'T\u0085  \\\"const \r\n=>function \ufeff\ufeff\ufeffDON'T\u0085\ufeff\r\n\nname\r\n{}[]();{}[]();const function \r\n1234567890\ud83d\ude001234567890const ",
+      "tokens": 239
+    },
+    {
+      "text": "  name  \ud83d\ude00\u2028\u0301\u2028\u2028\u00851234567890\ufeff\\\"\r\n\ud83d\ude00const \ud83d\ude00namefunction \u00a0DON'T\n=>\r\n\ud83d\ude00\u0085\r\nconst   \u4e16\u754cDON'T\r\n{}[]();\u0085\u4e16\u754cfunction {}[]();  DON'T12345678901234567890\r\n\ud83d\ude00\u0301\u2028\u4e16\u754cDON'T\ud83d\ude00function  we're=>\u2028\t  \ud83d\ude00nameDON'T\\\"\\\"\ufeffname\t\u0085function  we're\u0085=>\u2028\n1234567890\u2028\t  \ufeffDON'T\u2028\ufeffnamenamefunction \r\n\u4e16\u754c\u4e16\u754cDON'T\u00a0name we're\ud83d\ude00name\u00a0DON'TDON'T\nconst \u00a0\u2028\u4e16\u754c\ufeff we'reDON'T{}[]();\ufeff\\\"\\\"\u0085  \u0085 we're\n  \r\n\u0301\u00a0\nDON'T\u00a0\\\" we're\n\ufeff1234567890name\u00851234567890\n\ufeff\ud83d\ude00const \u00a0\tfunction 1234567890\n\\\" we'reDON'T\u2028{}[]();\n\u0085\ufeffconst \\\"1234567890DON'Tname\u00a0DON'T{}[]();\ufeff1234567890DON'T\ufeff\tnameconst \u2028\u4e16\u754cconst \n\r\n\nfunction const   \u0085\u00a0const \ud83d\ude00\u0301 we're",
+      "tokens": 228
+    },
+    {
+      "text": "\n1234567890=>  \ufefffunction   \nfunction \u00a0\u0085=>1234567890{}[]();DON'T\u2028\u0301\u4e16\u754c\\\"  1234567890  \u2028\r\nDON'T=>name\u4e16\u754c we're\ufeff\u00a0\ud83d\ude001234567890",
+      "tokens": 50
+    },
+    {
+      "text": "=>\u0301  DON'T\u00a0  \r\n\u0085\u0301\u2028=> we're\ufeffDON'T\r\n\nDON'T\r\n\u2028\r\n=>\u00a0\ufeff\u2028\r\n1234567890{}[]();{}[]();\u0301\u4e16\u754c\u0301const \u2028\r\nconst \ufeffconst name  \ufeff\ud83d\ude00\u0301\u00a0\ud83d\ude00namefunction name  DON'T we're\\\" we're\ufeff\u4e16\u754cDON'T\t\t{}[]();\r\n  \ud83d\ude00\t\\\"{}[]();\u0301{}[]();\ud83d\ude00\u4e16\u754c{}[]();\u0301const \u4e16\u754c\ufeff\u2028  \u00a0nameDON'T\ufeffnameconst \u2028DON'T\u4e16\u754cDON'T",
+      "tokens": 105
+    },
+    {
+      "text": "DON'Tfunction \u4e16\u754c we're\ud83d\ude00\ufeff\ud83d\ude00name\u0085\\\"name\u2028function \u2028\u2028\u4e16\u754c\\\"\u4e16\u754c\r\n\u2028{}[]();function \t\r\n we're\\\"function {}[]();=>\ud83d\ude00\r\n\\\"function \ud83d\ude00 we're\u2028DON'T\n we're  \nfunction {}[]();\ufeffDON'T  \ufeff\u0085\r\n\u0301\u0085=>\\\"\ud83d\ude00\u0085\u0085\ufeff\r\n\t1234567890\ud83d\ude00name\u0085const \ufeff{}[]();\u0085=>\u2028\u00a0\r\n\u0085  name\u00a0\ud83d\ude00\u2028\u0301\u4e16\u754c\u20281234567890function \u0301\u0085\u0301\n  \u20281234567890\u0301 we're=>DON'T\ufefffunction \ud83d\ude00\u00a0const  we'reconst  we're\t\r\n\u4e16\u754c\\\"\\\"function \\\"\nname\r\n\n\u0301\u00a0\r\n1234567890function name\\\"\u4e16\u754cconst \u0301DON'T\u2028DON'Tfunction {}[]();\n=>name\u2028",
+      "tokens": 168
+    },
+    {
+      "text": "\n we'refunction 1234567890 we're\\\"\n{}[]();\n\r\n\u0085{}[]();=>\r\n\r\n\ufeff    \u0085\n\ufeff\u0301  function \ud83d\ude00\u0301 we're\r\n\ufeff we're\u0301\u4e16\u754c\t\u0085\u00a0\ud83d\ude00{}[](); we'reconst \r\n\u4e16\u754cname1234567890\u2028function \ufeff\r\nDON'Tconst \u0085\\\"\u0301\u0085 we'reconst const =>1234567890\u4e16\u754cDON'T\\\"  1234567890\u4e16\u754cname\u4e16\u754c we're\u2028\u20281234567890\u00a0=>const \nfunction \u4e16\u754c\\\"function   \u0301 we're\r\n\u0085name1234567890 we'rename\ud83d\ude00   we're1234567890DON'T{}[](); we're=>  DON'T\ud83d\ude00=>const name  \t\u4e16\u754c\\\" we're  \ud83d\ude00 we're\u00a0\n",
+      "tokens": 150
+    },
+    {
+      "text": "\nDON'TDON'T\\\"\u0085\t\u4e16\u754c we'refunction \u0301\\\"\u2028\u2028DON'T\u0085const \ud83d\ude00\ud83d\ude00DON'T we'refunction \u00a0  function {}[]();\\\"const {}[]();\n\r\n\u00a0\u2028\t\u2028\n1234567890\u0301\u4e16\u754cname\\\"const \t\n\ufeff\u4e16\u754cname\u0085\n\u0085\n  const \ufeff\t\u4e16\u754c\nDON'T\ud83d\ude00\u0085\n\r\n\\\"\u00851234567890const \u4e16\u754c1234567890\\\"=>\u0085function const \u00a0\u2028\\\"const \ud83d\ude00\t{}[]();\u2028name1234567890\\\"\ufeff1234567890  name\u0301{}[]();=>\u00a0\r\n\t",
+      "tokens": 126
+    },
+    {
+      "text": "{}[]();DON'T\n\ufeff we're{}[]();\u2028name\t\u0085\ud83d\ude00\u0085function name=>\u00a0\u0085\\\"  name\ufeff\n  \u4e16\u754c\u00a0\r\nDON'T=>\r\n\u0085 we're\ud83d\ude00{}[]();{}[]();1234567890\u0085=>\\\"\r\n\t\\\"\n\r\n",
+      "tokens": 60
+    },
+    {
+      "text": "1234567890\ufeff\\\"\r\nname\t\n  \ufeff\u4e16\u754c{}[]();\r\n\u0085\ud83d\ude00\u0301DON'T\\\"\\\"DON'T\u0301\ud83d\ude00 we're\u00a0\u20281234567890function \u0085\u0301\u0085function DON'Tfunction 1234567890\ud83d\ude00\ud83d\ude00\u0085\u00a0function   {}[]();\u00a0\u4e16\u754c1234567890\u2028\r\n we're\u2028const \r\n\r\n{}[]();const {}[]();\u4e16\u754c\\\"\u0301\u2028\u2028{}[]();=>\\\"\r\nname\u2028 we're\\\" we're\u0085=>\t\u0301 we're\u0301name we're\ufeff\ufeff\u00a0\u0301\t\ufeff  \t=>name\r\nDON'T\\\"{}[]();  const 1234567890\ud83d\ude00\ufeff\ud83d\ude00\ud83d\ude00function \u0301",
+      "tokens": 133
+    },
+    {
+      "text": "   we're\u2028  \u00a0\u2028\t\u0085\n\u2028  name\r\n\ud83d\ude001234567890DON'T12345678901234567890  const     \u00a0name\u00a0\\\"\r\n  namenamefunction   \\\"\u4e16\u754c\n\u00a0 we're\u0301\\\"  \t\\\"nameconst  we're1234567890\t12345678901234567890\ud83d\ude00name\r\n\u0085  name\ufeff\u2028{}[]();\u00a0\r\n\\\"const \n\\\"\u4e16\u754c\ud83d\ude00function {}[]();\u00a0\ufeff\\\"DON'T we're\\\"\t  {}[]();\t\r\nfunction \t\u4e16\u754c\u2028function \tfunction  we'renameconst \u00a0name\ud83d\ude00\u4e16\u754cfunction {}[]();\u00a0\u4e16\u754c\\\"\u0085=>\n\t\u4e16\u754c\u0301\u00851234567890const \u0301\t we're{}[]();\u4e16\u754c1234567890\u4e16\u754c\r\n\\\"\\\"\u0085{}[]();\\\"const \u0301\ufeff we'reconst \u0301\\\"{}[]();\u0301\u0301\ud83d\ude00\ufeff\u0085\\\"\u00a0=>\tnameconst const function DON'T\u2028\u0085=>const function =>\r\n\n\u00a0\u0301\u0085name\u4e16\u754c{}[]();\u0085\u00a0DON'T{}[]();\u4e16\u754c\r\n1234567890{}[]();",
+      "tokens": 223
+    },
+    {
+      "text": "  \\\"1234567890function \u0301  {}[]();nameDON'T\n\u03011234567890name\ufeff\u0085\ufeff\u2028\u00a0DON'T\u00a0=>DON'T  \n\u4e16\u754c\u00851234567890  \r\nfunction \t  function function \ufeff\r\nconst {}[]();\ufeff=>{}[]();\u4e16\u754c\\\"\nname{}[]();\n\t\u0301\u0085\n\u0301 we're\nfunction \ud83d\ude00\ud83d\ude00{}[]();\u2028\\\"\n\\\"  \ufeff\u0085{}[](); we're\u0301function \r\n\u0301\u0301\\\"\u4e16\u754cfunction DON'T  \u03011234567890\u00a0const 1234567890\ufeff\u0085\\\"const  we're\u4e16\u754c=>\u0301\u00a0\ufeff\\\"\u4e16\u754c\\\"\u0085\u2028\u00a0\u0085\n\u4e16\u754c\u2028{}[]();1234567890",
+      "tokens": 146
+    },
+    {
+      "text": "\u00a0\u4e16\u754cDON'T\t\r\nDON'T\u00851234567890=>\u0085const \\\"\u4e16\u754c\u0085=>1234567890 we're\u0301\u2028\r\n",
+      "tokens": 30
+    },
+    {
+      "text": "1234567890\r\n\u0301function \\\"=>const \ud83d\ude00  name\\\"name\r\n\tname\ufeff\u4e16\u754c\u2028const \u0301\ufeff=>\t\ud83d\ude00\u2028\t\ud83d\ude001234567890\ud83d\ude00function  we'reDON'T=>\t\r\n  \u4e16\u754cfunction function \u2028\u4e16\u754cnamefunction 1234567890\ufeff we're\u0085\ufeff\u00a0\\\"const   \u0085\u0301 we'refunction \ufeff{}[]();{}[]();1234567890const {}[]();{}[]();const \u00a0\u4e16\u754c\u2028\ufeff\n=>  \r\n12345678901234567890DON'T\u0301\ufeff\u0301{}[]();\u0085\u0085function \\\"name\t\n\u2028\u00a0\u00a0\r\n\u0301\u4e16\u754cconst \n=>DON'T=>DON'Tconst  we're we're\u2028 we're\u0085 we're{}[]();\ud83d\ude00\ud83d\ude00\ud83d\ude00\u4e16\u754c1234567890\r\n\ufeff\t{}[]();\\\"  \\\"DON'T\r\n we're we're\\\"\u00a0\ufeff\u0085{}[]();=>name\ufeffname\n\r\nfunction function \u0085  \u0085function 1234567890const \n  \ufeffnamename we're we're\u0301\u2028const \u0085=>\\\"1234567890\\\"\u0085 we're\ufeff  const \\\"function \u00a0name\u0301{}[]();",
+      "tokens": 228
+    },
+    {
+      "text": "\n\u0301name\\\"\u0085name\u4e16\u754c{}[]();\ufeff\u0085DON'T\r\nnamename\ud83d\ude00const =>=>function const DON'T1234567890DON'T=>name",
+      "tokens": 34
+    },
+    {
+      "text": "\u2028\r\n\t{}[]();{}[]();\r\n\\\"\u2028\n=>1234567890{}[]();\u2028function \u4e16\u754c\u00a0\r\n  \u00a0\u0301\u4e16\u754cDON'T\t\u4e16\u754c\ud83d\ude00\u00a0\u00a0\\\"\r\n\u2028\ufeff\u0301\tname\u0085\u0301\u00a0const =>=>1234567890\u4e16\u754c\u00a0const function \u4e16\u754c=>\u4e16\u754c  function const {}[]();\u0301 we'reDON'T  =>\n\r\n we'refunction \u2028{}[]();\u4e16\u754c\u00a0  1234567890\n\u2028DON'T\n\tname\u00a0\r\n we'refunction function \t    \u0301DON'T1234567890name=>DON'T\u2028=>=>\tconst {}[]();{}[]();\n\u00851234567890\r\n  \u0085\u2028{}[]();\ud83d\ude00\u00a0\u0301\u4e16\u754cDON'T\\\"\u00a0\r\n\ud83d\ude00\ufeff\u4e16\u754c\u00a0\u0085\ufeff\u0301function 1234567890\\\"=>\u2028\t\n=>1234567890\ufeff\ud83d\ude00name{}[]();\ufeff\\\"\nconst =>\ud83d\ude00\u0301\u0301\n\n\\\"\u2028=> we're\u00a0name\ufeff\nDON'Tfunction \\\"\u0085\n1234567890\u00a0\u0301const \u2028\ufeff\u00a0\u0301DON'TDON'T\u0085\u03011234567890\u4e16\u754c\t=>\u2028{}[](); we'reDON'Tnameconst const ",
+      "tokens": 235
+    },
+    {
+      "text": "\u4e16\u754cDON'T\n\ud83d\ude00function =>\u00a0\ufeffconst \r\n=>\r\n we're  \u00a0\u00a0const function \tname\\\"\n\u0085\u2028\u0085const \ufeffconst \ud83d\ude00\u4e16\u754c\u0301\r\n  DON'T\\\"\ud83d\ude00=>\\\"\u2028=>\u2028\\\"\u2028\u0085name\u0085DON'T we'rename\n{}[]();name",
+      "tokens": 60
+    },
+    {
+      "text": "\u2028{}[]();\nfunction function \u4e16\u754c\t\u0301\u4e16\u754c{}[]();\u00a0  \u00a0\u0085{}[]();\ud83d\ude00\\\"\t\ufeff=>name we're\u0301\u0085\\\"function \nname\u0085\u4e16\u754c\u0085{}[]();\u4e16\u754c\r\n\u00a0\ufeffname\u2028\u0085const \ud83d\ude00\u0085\ud83d\ude00 we're1234567890const \n\u0085\nfunction \ud83d\ude00\u00a0\t\u0085\ud83d\ude00\r\n\r\n\n\u00a0DON'T\ufeff\ufefffunction \r\n{}[]();function   1234567890\u20281234567890DON'T\u0085\u4e16\u754c\u2028\u0085\u0301\tfunction \t\n  function \u00a0\u2028\u0301=>\ufeff{}[]();DON'T=>\u2028\u2028=>",
+      "tokens": 123
+    },
+    {
+      "text": "\t{}[]();\u4e16\u754cfunction 1234567890\r\n\\\"\\\"\u4e16\u754c\u0301DON'T\n\u00a01234567890\t\u2028=>function \t\r\n\tname\\\"\ufeff\u0301\t\u0301 we'reconst \u2028  name1234567890{}[]();\ufeff\u2028\t\nnamefunction \r\n\u2028DON'T\n  =>\ufeff\u4e16\u754c=>\ufeff\ud83d\ude00\\\"\tnameDON'T{}[]();\u2028\ud83d\ude00\u2028  \nnamename\ud83d\ude00\n\n\u0301\u0301   we're=>{}[]();\\\"\ufeff\u0085\t\u2028\n\u0085=>\r\n\ud83d\ude00\r\n\u4e16\u754c\n\tname\n\r\n\u00a01234567890const 1234567890\u0085\ud83d\ude00\ud83d\ude00\u00a0function \u0085\u00a0DON'T we're\u00a0name\t\n=>\ud83d\ude00  1234567890=>\\\"function \u00a0const \ufeff=>  =>\u0085DON'T\\\"\ufefffunction \n",
+      "tokens": 157
+    },
+    {
+      "text": "\ud83d\ude00{}[]();\t\\\"\r\n\u0301\n\\\"\u00a0const \u0085=>name\u0085\r\n\tfunction \u0301function \\\"DON'T12345678901234567890{}[]();=>function \\\"=>\r\n\ud83d\ude00\r\n\\\"{}[]();=>DON'T\ufeff{}[]();DON'T we're\u2028=>\ud83d\ude00{}[]();\u2028\u0301 we're\ufeff\t\\\"function \r\n  \u0301function \u0301\u00a0\nfunction function name\ufeff\r\n\u4e16\u754c\t\u00a0  \u4e16\u754c\nconst \u2028\ufeff\u0301name1234567890const \n1234567890=>\u4e16\u754c\u00a0\ud83d\ude00\n\\\"DON'T\u0085\\\"\u00a0\\\"\u00a0function name\u0301const \\\"name\u0085\ufeff1234567890\t\ud83d\ude001234567890\r\n\u0085 we're\n\u0085=>1234567890\u0085\ud83d\ude00\n\t\t{}[]();\\\"function \r\n\\\"function const name1234567890\t\nDON'T  ",
+      "tokens": 176
+    },
+    {
+      "text": "const name=>function \\\"=>\u0085 we're\ufeff\n\u4e16\u754cfunction 1234567890=>\t=>=>DON'T\r\n\t{}[]();const \u4e16\u754cfunction 1234567890\u2028{}[]();const   \u0301  ",
+      "tokens": 45
+    },
+    {
+      "text": "\tconst \u0301\u4e16\u754c\u2028\u0085\ufeff\u0085 we're\r\n",
+      "tokens": 12
+    },
+    {
+      "text": "\u0301\ufeff    \r\n\u2028  \u00a0 we're{}[]();nameconst \\\"DON'T\r\n1234567890\u4e16\u754c1234567890\ud83d\ude00\n\r\n\r\nname\\\"\u4e16\u754c\t  \\\"const \u4e16\u754cfunction \t{}[]();\u4e16\u754c{}[]();\u00a0{}[]();function \ufeff\u00a0nameDON'T1234567890{}[]();name\t\u0085\u0301\ufeff",
+      "tokens": 68
+    },
+    {
+      "text": "{}[]();1234567890\t\n  {}[]();\u00a0\u00a0=>\u00a0function \u4e16\u754cname\u0301 we're\u2028name\u0301\u0085\u2028const \t\r\nconst \n\u0301\u2028{}[](); we're\tconst \u00a0\\\"name1234567890\n  {}[]();\u0085\u0301\r\nDON'T\u4e16\u754c\ufeff\u4e16\u754c\u2028name\ud83d\ude00function \u00a0  \u2028\\\"  \u0301\u0085namename\u2028function 1234567890\\\"\ud83d\ude00const \u00a0\ufeff\t\ufeff{}[]();\ufeff\ufeff\u2028{}[](); we're\u2028\u4e16\u754c\u0301\ud83d\ude00\u00a0 we're\t\u0301=>1234567890\ud83d\ude00\ud83d\ude00\ufeff\u0085\u0085\u20281234567890DON'Tconst function \r\n  \u0085 we're\u008512345678901234567890\r\n\u00a0\u0085\\\"function \u0085\u0085DON'Tname\u00a0{}[]();1234567890\ufefffunction DON'TDON'T\t\ud83d\ude00\r\n\ufeff",
+      "tokens": 173
+    },
+    {
+      "text": "\u2028\u4e16\u754c\u2028\n",
+      "tokens": 4
+    },
+    {
+      "text": "\n\u0301\r\n  const \u00a0\ufeff\u0301\u00a0function \t\\\"=>\ud83d\ude00name we're\ud83d\ude00{}[]();const \t\u0085\u4e16\u754cname\r\n1234567890\u0085{}[]();\n\u0301 we're we'reDON'T{}[]();  function \u2028function =>\\\"  \u0085\\\"\\\"1234567890\u2028\u2028name\n\u0301\ufeff we're\\\"1234567890\\\"\ud83d\ude00  \r\n\u0085  \u2028\r\n\t we're\\\"\u0301\u2028const const namefunction \t\n\\\"=>{}[]();\u0085function  we're\u0085\u00a0{}[](); we'reDON'Tconst \u00a0const {}[](); we're\u2028\n\ud83d\ude00const   \ud83d\ude00\ud83d\ude00\u00a0\r\n",
+      "tokens": 128
+    },
+    {
+      "text": "\ufeff  function const   function \u2028\u2028\u00a0\\\"\u0085\\\"DON'T\u4e16\u754c\n\u4e16\u754c\u2028\ud83d\ude00\tDON'T1234567890name\u00a0{}[]();\t\r\n\ufeff\ud83d\ude00 we'refunction \r\n\\\" we're1234567890\ufeffname\r\n\n{}[]();{}[]();function =>\\\" we're\u00a012345678901234567890\u0085\u0085\r\n{}[]();name we're\u00a0\u2028\u0085\ud83d\ude00\u2028    \u2028=>DON'TnameDON'T\ufeff\u0085\t\ud83d\ude00\u00a0function \u0085\u4e16\u754c{}[]();\u00a0\\\"{}[]();",
+      "tokens": 108
+    },
+    {
+      "text": "\ufeff\nnameconst \u2028\u0301function \u0301const \ufeff\u0085\r\n\u202812345678901234567890\u2028\u0085  DON'T\n\\\"1234567890\u0301=>{}[]();\\\"DON'T\u4e16\u754c{}[]();\u0301name\\\"\ud83d\ude00 we're\t\ufeff\u00a0\u00a0\ufeff\t\u00a0function function function  we're\\\"name we're\r\nconst \u0301\u0301\u00a0\u2028\\\"=>\u2028\r\nDON'T\\\"\u4e16\u754c\u4e16\u754c\ufeff\u4e16\u754c\n=>name  \\\"\ud83d\ude00\u00a0DON'T we're\\\"{}[]();=>\ufeff{}[]();\u00a0\ud83d\ude00  \r\nfunction {}[](); we're",
+      "tokens": 110
+    },
+    {
+      "text": "\tconst function \u00a0name\\\"\tconst \r\n=>const const   \t\r\n\t\tfunction \u0301name1234567890DON'T=>DON'T{}[]();{}[]();\t\ufeff\\\"const   function {}[]();",
+      "tokens": 42
+    },
+    {
+      "text": "\u00851234567890function \ud83d\ude00\\\" we're\u4e16\u754cDON'T\r\n\\\"\u2028\\\"DON'Tname\u00a0\\\"\r\n\t=>=>function \ufeff\n we're  \ud83d\ude00\ufeff\t\u4e16\u754c we're\\\"=> we're{}[]();\\\" we're\n1234567890\u00a0function \\\"\u0085\u0085{}[]();\u00a0\u0085=>\u2028=>  1234567890  \u0301=>function {}[]();\u0085\u2028DON'T\t we're\u4e16\u754c1234567890=>function \ufeff\t\u0301\u0085\ufeff\u0085name\u0301\r\n1234567890\\\" we're\u0301\n\u00a0\u0301 we're\u00a0 we're\\\"\ufeff\nfunction \u0085\n{}[]();{}[]();=>DON'T\u4e16\u754c1234567890\u00a0\u2028\u2028\n\u00a0\u00a0\n\ud83d\ude00\u0301  const \u0085\u2028\ud83d\ude00\ud83d\ude00\\\"\u00a0=>\r\n  \r\n\u0301\u0301const \u0085\u4e16\u754c\u0085\u00a0const =>\u20281234567890\u0301\u4e16\u754c=>\u4e16\u754c\u0301\\\"1234567890DON'T\r\n\\\"\tconst \n\n\u0301",
+      "tokens": 191
+    },
+    {
+      "text": "\ufeff\u0085\r\n\u0301=>\n{}[]();\u4e16\u754c\u0301\ufeff\ufeffconst 1234567890=>\t\r\n we're\\\"\u0085\u2028\ufeff\u4e16\u754c\ufeffname we're  \r\n1234567890\u2028DON'Tname\n\u0301\u2028\u00a0\t\u0085\u4e16\u754c\u0085\n\ud83d\ude00{}[]();  \u4e16\u754c\t\u0085\r\n1234567890function DON'T=>\r\n  \ud83d\ude00\u0301\t\u4e16\u754c{}[]();\u0085 we're{}[]();=>\nDON'T\ufeff  \n\u0085\t\n\u2028\u4e16\u754c  \r\n\u0301\u4e16\u754cDON'T=>\u0085=>\n\u4e16\u754c",
+      "tokens": 105
+    },
+    {
+      "text": "\r\nname\u00a0\ufeffDON'T{}[]();\r\nname\u4e16\u754c1234567890DON'T\ud83d\ude00\u0085{}[]();const =>\ufeff\u0085\ufefffunction \ufeff\n\u0085const \u2028 we're\u00a0\n1234567890\t1234567890const const DON'T1234567890const \n\ufeff\nname we're\ud83d\ude00\\\" we're\r\n\u20281234567890\u0085",
+      "tokens": 71
+    },
+    {
+      "text": "\t\u0301\u0085\u0301=>function \ud83d\ude00  ",
+      "tokens": 9
+    },
+    {
+      "text": "\u00a0\\\"=>function \n=>1234567890\ud83d\ude00\u0301function {}[]();DON'T we're\ufeff1234567890 we're\r\n\u0085nameconst \\\"{}[]();nameconst \u4e16\u754c\u00a0\u0301{}[]();  \\\"\u0085\r\n=>\u4e16\u754c\u4e16\u754c\u4e16\u754c  function const \\\"1234567890name\u4e16\u754c\u00a0\u4e16\u754c\\\"\u0085\u4e16\u754c\n\t we're\nconst \u4e16\u754c\tfunction \u0301name\ud83d\ude00\n{}[]();=> we're=>\nfunction {}[]();\u0085\\\"namenameconst \r\n\u0301\u4e16\u754c\ud83d\ude00\u00a0\t{}[]();\u4e16\u754c\u0301DON'T\nconst 1234567890\\\"1234567890DON'T we'reDON'T\u2028=>  \u0085\n\ud83d\ude00DON'TDON'Tfunction name\ud83d\ude00function DON'T\u4e16\u754c\u2028name\tconst namefunction function =>\u0301",
+      "tokens": 151
+    },
+    {
+      "text": "1234567890\r\n\\\"\u0301\u4e16\u754c\ufeff\u0301\u0301\ufeff\t\t1234567890\u4e16\u754cfunction =>\ud83d\ude00function name\u4e16\u754c\u0301\n\ufefffunction \u2028\u00a0 we're we're",
+      "tokens": 33
+    },
+    {
+      "text": "\u4e16\u754cDON'T\t\u0085\ud83d\ude00  const \u0301\n\u4e16\u754c\u2028  \u4e16\u754c\t\nconst namename\ufefffunction =>{}[]();DON'T\u0301\ufeff=>{}[]();  \ufeff\\\"\t1234567890\ud83d\ude00DON'T\u0085function \\\"",
+      "tokens": 49
+    },
+    {
+      "text": "12345678901234567890name\t\u0085\u0301\\\"\n\u0085\ufeffconst const {}[]();=>{}[]();\u4e16\u754c=>\n1234567890\n\u0085name\t\t\\\"\n\n we're1234567890const \nfunction    we're\u0301{}[]();\u0301\ud83d\ude00\ufeff\r\n\\\"DON'T\ufeff\u00a0\r\n\r\n=> we're\n  =>\u2028\ufeff\u0085DON'T{}[]();1234567890\u4e16\u754c1234567890\u00a01234567890{}[]();\\\"\ud83d\ude00name\r\n\u4e16\u754c\u00a0\u00a0DON'T\ud83d\ude001234567890name\\\" we're\t\t=>function \r\n\ufeff\\\"=>\u2028{}[]();{}[]();\ud83d\ude00\ufeff\ufeff\tname\n\u00a0\n\u4e16\u754c",
+      "tokens": 135
+    },
+    {
+      "text": "const   const =>\u00a0const \ufefffunction const \u00a0\u0301=>\u0301{}[]();DON'T{}[]();const \\\"\r\n\ufeff\u0301\r\n\u0301=>\u0085\u00a0\u2028namename\ud83d\ude00\u0085\r\n\\\"1234567890=>\u0085\r\n\ufeff\\\"const \u2028\ufeff\ud83d\ude00function const \\\" we're\r\n1234567890DON'T\\\"\u4e16\u754c\u00a0\\\"nameconst =>\\\"function function \n1234567890\nDON'T=>\ud83d\ude00\\\" we're=>\u2028function function name\u2028\u0301const \t=>\u0085\u2028\nDON'T\tDON'T\n\u00a01234567890\ufeff\\\"DON'Tconst \u00a0\\\"\t\u03011234567890  \u2028\ud83d\ude00\ufeff\n\n\r\n\\\"\n\ud83d\ude00{}[]();  \u00a0\ufeff\r\n we'refunction \ud83d\ude00\r\n=>\n\u0085  \u00a0\\\"function function {}[]();\ud83d\ude00function \t we'refunction \u0301 we're\ud83d\ude00\ud83d\ude00name\u2028\n=>function \u4e16\u754c\ud83d\ude00\\\"\u0085const name\ufeff\u2028{}[]();\ufeffconst \n\n  \r\n  function  we're\ud83d\ude00\n\u4e16\u754c",
+      "tokens": 198
+    },
+    {
+      "text": "\u0085\u00a0  =>\\\"{}[](); we're\ud83d\ude00\u2028\u4e16\u754c we'rename\u00a0\u00a0name\u00a0DON'T1234567890DON'T\\\"\ufeff\ufeff\u0085\u00a0\u4e16\u754c\ufeff\n\\\"\u4e16\u754c we're1234567890DON'T  \u00a0function const   \u4e16\u754cconst 1234567890\ud83d\ude00\n1234567890\r\n\u0301\r\n\ufeff{}[]();\ud83d\ude00\u00a0\r\n\r\n\u0085\r\n we're\u4e16\u754c\u20281234567890\u00a0\\\"",
+      "tokens": 83
+    },
+    {
+      "text": "\u0085\u4e16\u754c\\\"\nfunction \n\u00a0\u0301=>  1234567890\u2028name\ud83d\ude00  \n\ud83d\ude00\nnamefunction function  we're1234567890DON'T=>\ud83d\ude001234567890\ufeff\ud83d\ude00  \ufeff\ud83d\ude00name\t\u0301\u0085DON'Tname{}[]();\u0085\\\"\u0085  \u0085\u00a0\u0085function name{}[]();\\\"\tfunction \ufeff\r\n\ufeff\t1234567890\u2028\\\"\u0085\ud83d\ude00=> we're\n  \t\ufeffDON'T\u00a0name=>\tconst \u2028\ud83d\ude00DON'T12345678901234567890\r\n  \ud83d\ude001234567890\nfunction DON'Tname\u00a0  function DON'T\ufeff=>\u00a01234567890\t\u4e16\u754c",
+      "tokens": 134
+    },
+    {
+      "text": "\n\u00a0\nfunction \ud83d\ude00\ufeff\\\"\ufeff\u0085{}[]();\u0085\\\"\\\"{}[]();\u2028name\ud83d\ude00\u0085 we're  \t\u0085function \u0301\u2028const \\\"  nameconst 1234567890\ufeff\n=>function \u0301\ud83d\ude00\u0301\r\n\nname\n\r\n\r\n1234567890name\u00a0\\\"DON'T\u0085\u4e16\u754c\u2028=>function \\\"\r\n1234567890\\\"\u00a0  \r\n\u0085\t\t  \n\u00a0 we're\r\n\n\ud83d\ude00\ud83d\ude00\u00a0  \u0301name=>\u00a0 we're\u0085name we're\nDON'T\ud83d\ude00=>\u0085\u4e16\u754c{}[]();  \r\n1234567890const const => we're\u0301\ufeff\\\"  \u00a0{}[]();{}[]();\ud83d\ude00\ud83d\ude00DON'T{}[]();\u00a0DON'T\nname\ud83d\ude00=>\n\u00a0 we're\u4e16\u754c\u2028\ud83d\ude00function \u4e16\u754c\u4e16\u754c\u00a0function \u0301\u0085=>  \ud83d\ude00\ud83d\ude00{}[]();name{}[]();function   ",
+      "tokens": 171
+    },
+    {
+      "text": "\u0301\u2028\ufeff\u0301\t\u0301\\\"\ufeff\r\n=>=>\r\n\t1234567890\ud83d\ude00=>\u0301\r\n\ud83d\ude00\tconst \n\u0301\t\t\t\u4e16\u754c\u0085\u2028\u4e16\u754c=>const \u2028=>\ud83d\ude00=>\u4e16\u754c\\\"  \u00a0\nconst \u0085\u0085  \r\n\u0301name\u2028name\n\ud83d\ude00  \t\ufeffconst => we're=>\ufeff\t we're\r\n\u0085\u00a0\ufeffDON'T\\\"\t\u2028function \n\ud83d\ude00\ufefffunction =>\tDON'T\t\ufeff\ufeff  \u00a0\u4e16\u754c1234567890\ud83d\ude00\t we're\u4e16\u754c\n\ufeff\ud83d\ude00=>\ud83d\ude00\u0085\u0301\ud83d\ude00\t\\\"\u0085function \ud83d\ude00function const 1234567890\ud83d\ude00\\\"{}[]();{}[]();const DON'T  \\\"\t\\\"function \u0085 we're\u00a0\tconst name\u0085=>name\u2028DON'T we're{}[]();\ufeff\u0301\nfunction \u03011234567890{}[]();\u0301\u4e16\u754c1234567890\t{}[](); we're\ud83d\ude00function \r\nfunction \n\t\u4e16\u754c{}[]();\u2028\u0085\nfunction ",
+      "tokens": 192
+    },
+    {
+      "text": "\\\"\r\n\t\n\u03011234567890\\\"\r\n{}[]();namename\n\ufeff\n\u0301const \ud83d\ude00\r\n\r\nfunction \u0085\u00a0 we're\u0301\\\"{}[]();\u0085\u0085  name\t\u2028\ud83d\ude00\ufeff1234567890\ufeff=>\t\u00a0function =>\nconst \ufeff\t\t we're\ufeffconst DON'T  1234567890name  {}[]();\r\n\\\"12345678901234567890\u2028\u0085function \n\u0085\\\"{}[]();=>\u4e16\u754c\u00a0\u0085\u4e16\u754c1234567890\u2028\ud83d\ude00  \u03011234567890const \n  1234567890 we're\u0085DON'Tname1234567890\u0085\ud83d\ude00\t\u4e16\u754c  \r\n\u0301\r\n\u4e16\u754c\r\n\\\"\ud83d\ude00\ufeff{}[]();\u2028  function DON'T\u0085\u4e16\u754c we're\ufeff\r\n=>  \u00851234567890 we're\\\"function   \\\"\t  \u4e16\u754c  \r\nfunction \ud83d\ude00\ud83d\ude00  \ufeffconst \\\" we're we're\ud83d\ude00function  we're\\\"\u00a0\u0301\u4e16\u754c\u0301  \u0301 we're\u0301\t\u0301\r\nconst nameconst =>\\\"\u00a0\ufeff\u00a0=>\ud83d\ude00 we're\\\"\\\"\n\ud83d\ude00=>function \r\n\t1234567890\r\n\\\"DON'T\\\"",
+      "tokens": 220
+    },
+    {
+      "text": "function \t\u00a0=>\u0085\r\n\u4e16\u754c=>\ufeff\n\r\n\u4e16\u754c\\\"\u2028{}[](); we're=>\u2028 we'refunction \t\u0085{}[]();\\\"name\u0085{}[]();const \u0085\u00a0\t\u4e16\u754c\r\n\u00a0\ud83d\ude00\t{}[]();\tconst 1234567890\ufeff=>\u0085\\\"\u0301\u2028=>const \u4e16\u754c\u0085  1234567890=>\u4e16\u754c\tconst \\\"\u0301\ufefffunction \ud83d\ude00  function \u0301DON'T\r\n\u0301\ufeff\u2028\ud83d\ude00\r\n   we're we're\u4e16\u754cDON'T\u0301function \ufeff\r\n\u0301\ud83d\ude00function \u4e16\u754cconst \u0301DON'Tconst   \t\ud83d\ude001234567890\u00a0  \t\r\n we're\u2028 we're  \r\n\ufeff we're\\\"\n\u0301\n\ud83d\ude00name=>\\\"\u20281234567890 we'renameDON'T\t\n\\\"\ud83d\ude00\nconst function ",
+      "tokens": 152
+    },
+    {
+      "text": "\u0301\u0085\t\u0301\u4e16\u754c we're\u00a0\u00a0\ud83d\ude00DON'T\u0085=>\ud83d\ude00\n we're\\\"{}[]();function name=>const \u0301\u0085\ufeff\u0085=>\r\nconst \u4e16\u754c\nconst \n\u03011234567890\n\r\n12345678901234567890{}[]();\ud83d\ude00\u4e16\u754c\u4e16\u754c\u0085\r\n\ufeff\t\u2028  \tDON'T  \\\"name{}[]();\u00a0\u00a0\u2028\r\nconst nameDON'Tfunction \r\n  \t\\\"\ufeff\n\ud83d\ude001234567890\u0085\ud83d\ude00\r\n\u0085  \n\t\ud83d\ude00const const \n\u0301nameDON'T\t\u2028\r\n\u00a0function   \n1234567890\u0301{}[]();\u0301name\u0085\u2028=>\u0301=>\u00851234567890\t\u0301\u0085\u00a0\ud83d\ude00DON'Tconst \u0301\u00a0 we're  \u0301\u0301=>=>=> we're\tfunction \ufeff we're\u0085=>\n\n we're\u0085\r\n  \u0085=>\n\u0301const \u00a0  {}[]();\r\nfunction {}[]();DON'T\r\n\n\u0085=>DON'Tname\u0085function DON'T\u0085  \ud83d\ude00\\\"DON'TDON'T=>",
+      "tokens": 208
+    },
+    {
+      "text": "\u2028function \u4e16\u754cDON'T\u00a0\ud83d\ude00\u0085\u0301  function \ud83d\ude00\u4e16\u754c=>\u0085\ud83d\ude00name\u4e16\u754c\ud83d\ude00\u0301\\\"\ud83d\ude00\ufeff{}[]();function \ud83d\ude00\t\\\"\u00a0\ud83d\ude00\u2028function \u2028{}[]();\u00a0\u2028=>\u0301{}[]();  {}[]();\r\n\u0085\u0301\ud83d\ude00{}[]();\\\"\u4e16\u754c\ufeff=>\ufeff\n{}[]();DON'T  1234567890\ufeff we're1234567890\u2028\nDON'T\t  \u00a0\r\n\u4e16\u754cDON'T we're\\\"name\u03011234567890\u4e16\u754cname\u00a0=>{}[]();\u00a0\u0085  \\\"\u0085nameDON'T\u4e16\u754c\u00a0\\\"\ud83d\ude00  name\\\"DON'T\tconst namename we're\u2028 we're\ufeff\\\"\\\"\u2028\u4e16\u754c\u0085\u4e16\u754c  \u0301name{}[]();\r\n\u20281234567890\u0301\r\n\r\n\ufeff\ufeff\r\n\u2028\ud83d\ude00\u4e16\u754c\ufeff\u2028\\\"\r\n=>{}[](); we're\u2028\u4e16\u754c\\\"1234567890\u4e16\u754cconst \u2028\tfunction \u4e16\u754c\t1234567890\u2028\u4e16\u754c\ud83d\ude00",
+      "tokens": 187
+    },
+    {
+      "text": "\u2028\u4e16\u754cDON'T=>DON'T=>1234567890 we're1234567890\r\nnameDON'Tname we're\\\"\u0085 we'refunction const function 1234567890\ud83d\ude00\u4e16\u754c=> we'reconst \tname=>\ud83d\ude00\r\n1234567890  \u0301=>function \r\nconst \ufeffDON'T we're\t\u0301\n=>=>\u4e16\u754c\u00a0{}[]();\n  \u2028  \ufeff\ud83d\ude00function \u00a0  =>\u0085function \u0301DON'T\u4e16\u754c{}[]();\u2028  \u4e16\u754c we're=>\r\n\ud83d\ude00  \u0301DON'T\u2028\\\"\n1234567890\u2028\u0085DON'T1234567890{}[]();\u2028const function \r\n\u2028\t\u0301DON'T{}[]();\u4e16\u754cDON'T\\\"\nfunction =>namenamenamenameDON'T\\\"\u0301\u00a0{}[]();function \\\"\n1234567890\r\n\ud83d\ude00\u4e16\u754c\ud83d\ude00function \ufeff\n\\\"name{}[]();\u4e16\u754c\u2028\u2028\u4e16\u754c\u00a0\ud83d\ude00\u0085\t\n\\\"const   function 1234567890name\ufeff\n\n\\\"\u00a0\u0085name\ufeff=>1234567890\t\t\u2028\r\n{}[]();\u00a0\u00a0\\\"const =>\ufeff\u4e16\u754c{}[]();\\\"function =>\u0301\u4e16\u754c{}[]();  \ufeff{}[]();{}[]();const 1234567890\u2028\\\"\u0085\r\n  \r\n",
+      "tokens": 246
+    },
+    {
+      "text": "  \u0301DON'T\ud83d\ude00\ud83d\ude00DON'T\t    1234567890\ud83d\ude00\u00a0  \u2028\u4e16\u754c\n  \u2028const \u0301\u0301name\n\\\"function name\u00a0function \u03011234567890\ufefffunction \n\ufeff{}[]();\u2028const const {}[]();\u0085\u0301const namename we're\ud83d\ude00const \u4e16\u754c1234567890\u4e16\u754cnamename=>\\\"\t\t\u0085\ufeff we're\u00a0\\\"\ud83d\ude00\r\n\r\n",
+      "tokens": 81
+    },
+    {
+      "text": "\u0301\u0085\ud83d\ude00\\\"\ufeff\u0085const \u0085\ufeff{}[]();\u00a0\u0085 we'refunction \ufeff\u00a0\n\u4e16\u754c\u0301",
+      "tokens": 26
+    },
+    {
+      "text": "\\\"\r\n\u4e16\u754cconst   {}[]();=>\tDON'T  const 1234567890DON'T\u0301\ufeff=>const \ufeff\ud83d\ude00name\ud83d\ude00\n   we're\u2028\r\n=> we're{}[]();\u0301\u00a0\\\"DON'T\u4e16\u754c\\\"\t  \u0301\u0085\u2028\\\"1234567890 we'reDON'T we're\ud83d\ude00function 1234567890{}[]();function \n\t1234567890\\\"\ud83d\ude00\tconst \u0301\ud83d\ude00\ufeffconst \ufeffconst \\\"\u4e16\u754cDON'T\u00a0function \\\"\\\"\ufeff\u4e16\u754cname{}[]();\r\n we're1234567890=>=>1234567890function {}[](); we'reDON'T\n\ud83d\ude00\u4e16\u754c\n\u00a0function   {}[]();\\\"=> we're\tfunction \ufeff\t{}[]();\u00a0",
+      "tokens": 140
+    },
+    {
+      "text": "\r\nfunction   function 1234567890{}[]();\u2028\u0085{}[]();DON'Tconst \u0085\r\n  \u2028\u0301DON'T\u0085function \\\"function \n\u0301{}[]();=>\ufeff\ud83d\ude00=> we're  {}[]();\t\ufeff1234567890  function \ufeff=>\ufeff\u0085\ud83d\ude00\u0301=> we're\u20281234567890\u0085\ud83d\ude00    const \ud83d\ude00{}[]();\u0301\t\u0085\ud83d\ude00\\\"\ud83d\ude00\u00a0 we're  =>function function \u2028\\\"\ufeff  \t\\\"\u4e16\u754c\ufefffunction \ud83d\ude00\r\n{}[]();  =>=>{}[]();\ufeff=>{}[]();1234567890\u20281234567890\u0301\u2028 we'refunction \nfunction {}[]();\u4e16\u754c\u0301\ud83d\ude00\ufeff we'rename\u4e16\u754cconst \u4e16\u754c\n{}[]();const \ufeff\ufeff\ufeffconst function   \\\"\nname\ud83d\ude00\n\\\"name\u0301\ud83d\ude00\u4e16\u754cfunction const =>\t\u00a0\u0085{}[]();\\\"\u0301function \t{}[]();\r\n\ufeff\ufeff\r\n=>\u0085const   function const \t\ud83d\ude00function \u0085\nconst \u0301function \u00a0\u0301  =>=>const function  we're\\\"\ufeff=>\u4e16\u754cconst ",
+      "tokens": 219
+    },
+    {
+      "text": "const \u00a0{}[]();\u0085\tname\r\n    \ufeff we'refunction DON'T",
+      "tokens": 15
+    },
+    {
+      "text": "\u03011234567890\u0301\ud83d\ude00\u00a0\u4e16\u754c\tfunction DON'T\ud83d\ude00=>\t\ufeff\r\n\u00a0\r\n\r\n\\\"",
+      "tokens": 19
+    },
+    {
+      "text": "\u2028=>\\\"\ud83d\ude00\ufeff\nconst \\\" we're\r\n\n\r\n{}[]();const \ud83d\ude00const \u00a0\n\u0301\u0301\u00a0\r\n\n=>{}[]();function \u2028\\\"  const {}[]();1234567890",
+      "tokens": 39
+    },
+    {
+      "text": "1234567890\u00a0const \u00a0\u0085\u4e16\u754c\\\"\u0301\u0301\\\"name\u0085\u00a0 we're\u4e16\u754c\u2028{}[]();{}[]();nameconst =>1234567890nameDON'T\r\n\u0085\\\"DON'T\\\"  \ufeff\u0085\u4e16\u754c\u4e16\u754c\\\"1234567890\ud83d\ude00\\\"  name\u00a0const const  we'reconst   1234567890\ufeff\r\n=> we're1234567890\u0085{}[]();1234567890function function \u2028\r\n\\\"\t\u0301\r\n\\\"1234567890\u2028\ud83d\ude00\u0301DON'T\u2028function \ufefffunction   \u0301\u4e16\u754c  \u2028\u4e16\u754c\nfunction \u4e16\u754c\r\n\r\n\ud83d\ude00\r\n=>\\\"\u00a0\r\n\tDON'T\u03011234567890\ufeffDON'Tname=>\u4e16\u754c  \ud83d\ude00const \r\n\ud83d\ude00\ud83d\ude00\u00a0function =>\ud83d\ude00\t=>\ud83d\ude00  \ufeff=>name\t\n\r\n\tfunction \u2028\u0085\u4e16\u754c\ufeffDON'T\u2028\u4e16\u754c\u4e16\u754c\t\u2028DON'T we're\u00a0\ud83d\ude00\t\u4e16\u754c\u00a0=>\ud83d\ude00\\\"name=>{}[]();\n=>const name\t  \u4e16\u754c we'rename\u0301=>\u4e16\u754c\t\n  \ud83d\ude00\u2028=>",
+      "tokens": 204
+    },
+    {
+      "text": "DON'T\r\nconst \n\u0085DON'T\u4e16\u754c\ud83d\ude00\\\"\u0301{}[]();\u00851234567890=>\u0085\u4e16\u754c\u20281234567890\ud83d\ude00\u2028\t  =>\ud83d\ude00\u2028\u0085\u4e16\u754c we're\u0301\u0085\ufeff{}[]();   we'renamefunction \ud83d\ude00function \r\n\r\n1234567890=>=>=>\u4e16\u754c1234567890\u4e16\u754c\u4e16\u754cfunction ",
+      "tokens": 71
+    },
+    {
+      "text": "\ud83d\ude00  1234567890\u2028\\\"\t\u0085\t\r\nconst \tname  \u0085function \u0301\r\n\r\n\ud83d\ude00\t=>const \n\u2028\\\"\tfunction \\\" we'rename\t\r\n\t\u2028\u4e16\u754c\ufeff\ufeffname{}[]();1234567890\ufeffname\ud83d\ude001234567890\ufeff\u4e16\u754c\u00a0namefunction const   \r\n1234567890name\ufeffDON'T\\\"const \u00a0\u4e16\u754cDON'T1234567890\r\n\r\n\u0085=>",
+      "tokens": 84
+    },
+    {
+      "text": "\u00a0\u2028\nname\r\nconst \ufeff we're{}[]();\n\ud83d\ude00\u0301=>=>\ud83d\ude00\ufeff\\\"\u0301\u0301const \ufeffnamefunction \ufeff\\\"{}[]();\u4e16\u754c  \u03011234567890\u2028{}[]();name\\\"{}[]();name\n\\\"\r\n\u00a0\t\u0301\u2028name\n\u4e16\u754c\r\n\u2028\tconst \u0085\u0301\u0085   we're1234567890\r\n\nDON'T\ud83d\ude00\u2028const \r\n\r\n\u0301\ufeff\u0085name1234567890DON'T\\\"1234567890DON'T\u0301\ud83d\ude00\nconst \t\\\"\t\u4e16\u754c\u2028function \u4e16\u754c we're\u2028\r\nfunction  we'reDON'Tfunction name=>name\u0085\n\\\"const   \u0301name=>\ud83d\ude00\u0301name\ud83d\ude00name\u00a0const \u4e16\u754c we're\r\n\t{}[]();\u0085\u2028{}[]();\t we're\\\"=>\\\"function \u2028\u00a0function \u2028{}[]();1234567890\t\\\"\n\t\ud83d\ude00 we're12345678901234567890\tfunction \n\u00a0\n\ufeff12345678901234567890\tDON'Tfunction ",
+      "tokens": 199
+    },
+    {
+      "text": "1234567890function \ufeff\u0301\u2028\\\"\n=>\\\"\\\"\\\"\ud83d\ude00\\\"function \nDON'T1234567890\t\u4e16\u754c\u4e16\u754c\t\u0301\u4e16\u754c1234567890DON'T  1234567890\ufeff\t\r\n\u0085\ud83d\ude00\ud83d\ude00\\\"\u2028name\u4e16\u754c  {}[]();\u0085\\\"\\\"\u2028 we'reDON'T\u4e16\u754c\u4e16\u754c\u2028function  we're\u4e16\u754c\u0085\ud83d\ude00\ud83d\ude00const function \u2028\r\nconst \r\n  =>\\\"\ud83d\ude00{}[]();  \u2028  \ufeff\u00a0\t{}[]();\r\n\ud83d\ude00name\u2028{}[]();1234567890\u0301\ud83d\ude00\u20281234567890=>\\\"\u2028\ufeff\ufeff{}[](); we're=>DON'Tconst \u4e16\u754c\u00a0\u2028\u20281234567890 we'rename\\\"{}[]();\t\\\" we're we'renamefunction   const const \tconst   1234567890\\\"DON'Tconst function \ufeff\r\n\u00a0\ufefffunction \ud83d\ude00\ufeffname\u0085\u00a0DON'Tfunction \u0301",
+      "tokens": 178
+    },
+    {
+      "text": "\u0301 we're\r\n\ufeff\\\"\ud83d\ude00\\\"{}[]();\ud83d\ude00const \ufeff=>\u4e16\u754c1234567890\u2028=>name",
+      "tokens": 22
+    },
+    {
+      "text": " we'reDON'T\u2028{}[]();\ud83d\ude00function \r\n\u0085DON'Tfunction \u00a0\ufeff  1234567890 we're=>name we're\n\u00a0\ud83d\ude00\u0301\\\"\r\n=>\u00a0\u4e16\u754c\ufeff  \ufeff\ud83d\ude00function function \n\u0085DON'T\u4e16\u754cname\ufeff\u0301\u2028\\\"  const \t\u00a0\n1234567890\n\u00a0 we're we're\u0301=>\u20281234567890{}[](); we're=>const namefunction \\\"\u0301const DON'Tname we're{}[]();\u4e16\u754c\\\"\\\"\r\n\u2028\u00a0\u0085\u2028name\u4e16\u754c  function \u4e16\u754cDON'T\u2028\r\n{}[]();\\\"const  we'reconst =>const \u0301namefunction \u4e16\u754c\u0085\r\n{}[]();=>\\\"DON'Tconst \r\n\ufeff=>\ufeff\\\"\\\"\u4e16\u754c1234567890function name\ud83d\ude00\u2028\ud83d\ude00\u20281234567890 we'reconst \u0085name1234567890\n\u00a0\n we're\n\u0085 we're\\\"DON'T\t\nconst const \u2028\u2028function DON'T  \r\n we're  ",
+      "tokens": 187
+    },
+    {
+      "text": "\ufeff we'reDON'T\\\"1234567890\t\u0085name\t we're  \u0301\ud83d\ude00\u4e16\u754c\\\"{}[]();  {}[]();\ud83d\ude00\\\"{}[]();\t\r\n\u2028\\\"\t\u2028=>\r\n\u0301\t\u4e16\u754c{}[]();function \u4e16\u754c1234567890{}[]();DON'T=>name1234567890\u4e16\u754c  \n  \u4e16\u754cname\ud83d\ude00{}[]();1234567890=>\u00a0DON'T we're\u0085\r\n\t\u0085\t\u4e16\u754c1234567890\ud83d\ude00function namename1234567890\ufeff\u4e16\u754c\u0085\u00a0\u2028=>\ufeff\u0085=>=>=> we're\t\u00a0\u2028=>=>DON'T\u4e16\u754c=>{}[]();const nameconst 1234567890\tDON'T\ud83d\ude00\r\n we're\u00a0\nfunction \\\"\t we'rename\u2028\r\n\u0085\\\"const   DON'T{}[]();name  const name\n=>\nname\nDON'TDON'T we're=>\r\n\n  \u2028\n\ufeff  \ud83d\ude00\r\n\ufeff\u2028{}[]();\u4e16\u754c\t\u2028function nameDON'T\ufeff\\\"function 1234567890{}[]();\u2028\u2028{}[]();const \\\"DON'T\ufeff\\\"\n\\\"DON'T\u0301name",
+      "tokens": 222
+    },
+    {
+      "text": "function \ufefffunction \r\n\u2028\r\n\u4e16\u754c\ud83d\ude00\\\"\n=>=>=>  \u0301\t\u2028\u2028{}[]();\u4e16\u754c  \ud83d\ude00\t=>\ud83d\ude00\u0085\u00a0\tconst \r\n\u2028\u4e16\u754c\u0085=>\n we're\u0301\u0085namefunction function \n\u00a0\r\n we're we're  \u00a0\r\nconst 1234567890\u0085\r\n{}[](); we'reDON'T\t  \ud83d\ude00\u2028{}[]();1234567890\u4e16\u754c\u2028{}[]();\n1234567890\u0085\n\u00a01234567890function   \u4e16\u754cname\ud83d\ude00\u00a0 we're we'refunction const \u2028\u2028\\\"const \u4e16\u754c\ud83d\ude00\\\"\u4e16\u754c\u00a0\t1234567890\\\" we're\u4e16\u754c1234567890 we're\ufeff\nname\ud83d\ude00\u00a0\u0301\n\nfunction \u00a0=>\u2028\\\"\r\n\\\"\n\\\"const name{}[]();\\\"\u0085\n\u0085\tfunction DON'T{}[]();{}[]();name\ufeff  \ufeff\u0085DON'T\u00a0\n we're\tDON'T\nDON'Tfunction \u0301\u2028DON'Tfunction function  we'reDON'T we're\u4e16\u754c\r\nconst function \ud83d\ude00\n\u00a0{}[]();name\u4e16\u754c",
+      "tokens": 205
+    },
+    {
+      "text": "   we'reDON'Tname{}[]();\ufeff\ud83d\ude00\u4e16\u754c\ufeff\t{}[]();=>const \r\n\ud83d\ude001234567890\n\u0085\t we're\ufeff\ud83d\ude00\u4e16\u754cfunction function \n\u0085\n\tconst =>{}[]();\\\"DON'T we'refunction   \u4e16\u754cDON'T1234567890\ud83d\ude00\u2028\u4e16\u754c\n\u0085\\\"\u2028\u4e16\u754c{}[]();    \u4e16\u754c\\\"1234567890const ",
+      "tokens": 77
+    },
+    {
+      "text": "\t  \n  {}[]();\ufeffnamefunction =>\r\n1234567890\u0085\n\\\" we're\\\"\u4e16\u754c=>\t=>\u0301\tname\u0085\n1234567890 we're\n=>\u4e16\u754c=>\\\" we're\tfunction \n  \u0085\n=>\t\ufeff\u4e16\u754cconst name\n\t\u4e16\u754c\u0301\r\n  \u0301function  we're we're\nfunction \ud83d\ude001234567890\r\n{}[]();function \u2028DON'Tconst \u2028\u4e16\u754c=>\u2028\t\t\u0301\t\ud83d\ude00{}[]();\t\u4e16\u754c\r\n\t\ufeff we'refunction =>\n1234567890\u2028namenamefunction \u0085\u0301\ud83d\ude00\u4e16\u754cDON'T{}[]();",
+      "tokens": 120
+    },
+    {
+      "text": " we'reDON'T=>  \u2028DON'T\u0301\ufeff\u4e16\u754c we're\ufeff=>\u00a0DON'T\u2028",
+      "tokens": 18
+    },
+    {
+      "text": "\\\"\ud83d\ude00\r\n\ud83d\ude00\u0085\u0301=>DON'T\n\u2028\u0085const \ud83d\ude00name\\\"function \u00a0\\\"{}[]();\u0085{}[]();\u4e16\u754c\t we're\u0301\ufeff{}[]();1234567890DON'T\ufeff\n",
+      "tokens": 45
+    }
+  ]
+}

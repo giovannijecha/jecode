@@ -20,6 +20,12 @@ test("diagnostic records whitelist fields and reject malformed counters", () => 
     { ...request, reportedInputTokens: -1 }, { ...request, source: "private" }]) {
     assert.equal(safeDiagnostic(value), undefined);
   }
+  const compact = { kind: "compaction", reason: "budget", outcome: "timeout", beforeTokens: 100_000,
+    elapsedMs: 60_000, summaryChars: 400, summaryProviderMs: 59_980, firstSummaryTextMs: 6000 } as const;
+  assert.deepEqual(safeDiagnostic({ ...compact, summary: "private text" }), compact);
+  for (const invalid of [{ summaryChars: -1 }, { summaryProviderMs: NaN }, { firstSummaryTextMs: "private" }]) {
+    assert.equal(safeDiagnostic({ ...compact, ...invalid }), undefined);
+  }
 });
 
 test("recorder bounds output, strips private fields, closes once, and stops listening", async () => {
@@ -86,7 +92,15 @@ test("cancelled and failed manual summaries publish content-free outcomes", asyn
         { role: "assistant" as const, content: [{ kind: "text" as const, text: "Earlier answer" }] },
         { role: "user" as const, content: [{ kind: "text" as const, text: "Continue" }] }];
       await assert.rejects(compactContext({
-        provider: { ...provider(), async send() { if (cancelled) control.abort(reason); throw reason; } },
+        provider: { ...provider(), async send(request) {
+          request.onStream?.({ kind: "thinking", text: "private thought" });
+          request.onStream?.({ kind: "text", text: "" });
+          if (cancelled) {
+            request.onStream?.({ kind: "text", text: "private partial summary" });
+            control.abort(reason);
+          }
+          throw reason;
+        } },
         model: "fake-1", effort: "high", context: messages, turn: messages.slice(-1), nodeId: 1,
         coveredMessages: 0, lastInputTokens: 0, estimatedInputTokens: 60_000,
         policy: policyForContextWindow({ tokens: 64_000 }, 85), force: true,
@@ -95,6 +109,13 @@ test("cancelled and failed manual summaries publish content-free outcomes", asyn
     }
     assert.deepEqual(events.map((e) => e.kind === "compaction" && [e.reason, e.outcome]),
       [["manual", "failed"], ["manual", "cancelled"]]);
+    const failed = events[0], cancelled = events[1];
+    assert.ok(failed?.kind === "compaction" && cancelled?.kind === "compaction");
+    assert.equal(failed.summaryChars, 0);
+    assert.equal(failed.firstSummaryTextMs, undefined);
+    assert.equal(cancelled.summaryChars, "private partial summary".length);
+    assert.ok(typeof cancelled.firstSummaryTextMs === "number");
+    assert.ok((cancelled.summaryProviderMs ?? -1) >= cancelled.firstSummaryTextMs);
     assert.doesNotMatch(JSON.stringify(events), /private/);
   } finally { source.unsubscribe(receive); }
 });

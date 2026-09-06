@@ -8,6 +8,7 @@ import type { ContextPolicy } from "./context/policy.ts";
 import { isContextOverflow } from "./context/policy.ts";
 import type { InputMeasurement, InputMeter } from "./context/measurement.ts";
 import { fitRequestInput } from "./context/request.ts";
+import { observePreparation, sendObserved } from "./context/request-observation.ts";
 import type { Message, ToolSpec } from "./types.ts";
 
 export type ControllerResponse = Readonly<{
@@ -22,6 +23,7 @@ type PreparedContext = Readonly<{
   requestMessages: Message[];
   inputTokens: number;
   measurement: InputMeasurement;
+  clippedResults: number;
 }>;
 
 export async function requestAssistant(
@@ -33,6 +35,7 @@ export async function requestAssistant(
   meter: InputMeter,
   signal?: AbortSignal,
 ): Promise<ControllerResponse> {
+  let preparing = performance.now();
   let policy = await options.contextPolicy();
   const prepared = await prepareContext(
     history,
@@ -49,12 +52,13 @@ export async function requestAssistant(
   let requestMessages = prepared.requestMessages;
   let inputTokens = prepared.inputTokens;
   let measurement = prepared.measurement;
+  let clippedResults = prepared.clippedResults;
   let recovered = false;
 
   for (;;) {
     const budget = budgetRequestFromInputTokens(inputTokens, options.maxTokens, policy);
     try {
-      const message = await options.provider.send({
+      const message = await sendObserved(options.provider, {
         model: options.model,
         system: options.system,
         messages: requestMessages,
@@ -67,11 +71,12 @@ export async function requestAssistant(
         signal,
         onStream: (event) => events.onStream(event),
         onStatus: (status) => events.onStatus?.(status),
-      });
+      }, measurement, policy, performance.now() - preparing, clippedResults);
       return { message, context, inputTokens: budget.inputTokens, measurement };
     } catch (error) {
-      if (recovered) throw error;
-      if (isContextOverflow(error as Error)) policy = await options.contextPolicy();
+      if (recovered || !isContextOverflow(error as Error)) throw error;
+      preparing = performance.now();
+      policy = await options.contextPolicy();
       const next = await prepareContext(
         history,
         context,
@@ -89,6 +94,7 @@ export async function requestAssistant(
       requestMessages = next.requestMessages;
       inputTokens = next.inputTokens;
       measurement = next.measurement;
+      clippedResults = next.clippedResults;
       recovered = true;
     }
   }
@@ -106,31 +112,35 @@ async function prepareContext(
   signal?: AbortSignal,
   error?: Error,
 ): Promise<PreparedContext> {
-  const input = {
-    model: options.model,
-    effort: options.effort,
-    system: options.system,
-    messages: [...context],
-    tools: specs,
-  };
-  const initial = await meter.measure(input, signal);
-  const projected = await events.onContext?.(history, context, {
-    reason,
-    policy,
-    inputTokens: initial.inputTokens,
-    ...(error === undefined ? {} : { error }),
+  return observePreparation(policy, reason, signal, async () => {
+    const input = {
+      model: options.model,
+      effort: options.effort,
+      system: options.system,
+      messages: [...context],
+      tools: specs,
+    };
+    const initial = await meter.measure(input, signal);
+    const projected = await events.onContext?.(history, context, {
+      reason,
+      policy,
+      inputTokens: initial.inputTokens,
+      ...(error === undefined ? {} : { error }),
+    });
+    const semantic = projected === undefined ? clone(context) : clone(projected);
+    if (projected !== undefined) meter.reset();
+    const semanticInput = { ...input, messages: semantic };
+    const measurement = projected === undefined ? initial : await meter.measure(semanticInput, signal);
+    const fitted = await fitRequestInput(semanticInput, meter, policy, measurement, signal);
+    budgetRequestFromInputTokens(fitted.measurement.inputTokens, options.maxTokens, policy);
+    return {
+      context: semantic,
+      requestMessages: fitted.messages,
+      inputTokens: fitted.measurement.inputTokens,
+      measurement: fitted.measurement,
+      clippedResults: fitted.clippedResults,
+    };
   });
-  const semantic = projected === undefined ? clone(context) : clone(projected);
-  if (projected !== undefined) meter.reset();
-  const semanticInput = { ...input, messages: semantic };
-  const measurement = projected === undefined ? initial : await meter.measure(semanticInput, signal);
-  const fitted = await fitRequestInput(semanticInput, meter, policy, measurement, signal);
-  return {
-    context: semantic,
-    requestMessages: fitted.messages,
-    inputTokens: fitted.measurement.inputTokens,
-    measurement: fitted.measurement,
-  };
 }
 
 function clone(messages: readonly Message[]): Message[] {
