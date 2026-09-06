@@ -1,15 +1,13 @@
 // One model turn, including steering, compaction, durable settlement, and recovery.
 
 import { runTurn } from "../controller.ts";
-import type { ContextRequest } from "../controller.ts";
 import type { TurnFailure, TurnSettlement } from "../conversation.ts";
 import { resolveContextPolicy } from "../context/capacity.ts";
-import { automaticCompactionKey } from "../context/automatic.ts";
 import type { AutomaticCompactionGate } from "../context/automatic.ts";
-import { compactContext } from "../context/compactor.ts";
+import { contextManager } from "../context/manager.ts";
+import type { InputLifetime } from "../context/lifetime.ts";
 import type { ContextAnchor } from "../context/projection.ts";
 import type { ContextPolicy } from "../context/policy.ts";
-import { isContextOverflow } from "../context/policy.ts";
 import { steeringInbox } from "../steering.ts";
 import type { SteeringInbox } from "../steering.ts";
 import { recordAuxiliaryUsage, recordRequestInput, recordUsage } from "../usage.ts";
@@ -30,6 +28,7 @@ const WAITING = "Waiting";
 export function turnWorkflow(
   options: WorkflowOptions,
   automaticCompaction: AutomaticCompactionGate,
+  inputs: InputLifetime,
 ): Pick<AppActions, "turn" | "steer"> {
   const { session, state, permissions, feedback } = options;
   let activeSteering: SteeringInbox | undefined;
@@ -89,6 +88,7 @@ export function turnWorkflow(
     };
     const requestOptions = {
       ...controllerOptions(session, policy, turnTools, inbox),
+      inputMeter: inputs.forTurn(runtime.provider, requestIdentity.conversationId),
       toolAllowed: (call: ToolCallBlock) => permissions.allowed(call),
     };
     options.emit({ kind: "user", text });
@@ -138,82 +138,36 @@ export function turnWorkflow(
       unpersistedSteering.length = 0;
     };
 
-    const compact = async (
-      checkpoint: readonly (typeof history)[number][],
-      projected: readonly (typeof history)[number][],
-      request: ContextRequest,
-    ) => {
-      if (
-        request.reason === "overflow" &&
-        (request.error === undefined || !isContextOverflow(request.error))
-      ) {
-        return undefined;
-      }
-      const force = request.reason === "overflow" || request.projectionSaturated;
-      const key = automaticCompactionKey(
-        runtime.provider.id,
-        runtime.model,
-        nodeId ?? prospectiveNodeId,
-        checkpoint.length,
-      );
-      const attempt = { key, reason: request.reason } as const;
-      if (!automaticCompaction.allows(attempt)) return undefined;
-      let attempted = false;
-      const result = await compactContext({
-        provider: runtime.provider,
-        model: runtime.model,
-        effort: runtime.config.effort,
-        context: projected,
-        turn: checkpoint.slice(historyStart),
-        nodeId: nodeId ?? prospectiveNodeId,
-        coveredMessages: context?.messageCount ?? 0,
-        lastInputTokens: Math.max(session.usage.lastInputTokens, request.inputTokens),
-        estimatedInputTokens: request.inputTokens,
-        signal: activity.control.signal,
-        force,
-        policy: request.policy,
-        requestEnvelope: {
-          system: runtime.system,
-          tools: specs,
-          maxOutputTokens: runtime.config.maxTokens,
-        },
-        requestIdentity,
-        onBegin: () => {
-          attempted = true;
-          status("Compacting");
-          options.render();
-        },
-        onEnd: () => {
-          status(WAITING);
-          options.render();
-        },
-      });
-      if (result === undefined) {
-        if (attempted && !activity.control.signal.aborted) automaticCompaction.failed(attempt);
-        return undefined;
-      }
-      automaticCompaction.succeeded(attempt);
-      context = result.anchor;
-      if (result.usage !== undefined) recordAuxiliaryUsage(session.usage, result.usage);
-      return result.messages;
+    const manager = contextManager({
+      provider: runtime.provider,
+      model: runtime.model,
+      effort: runtime.config.effort,
+      system: runtime.system,
+      tools: specs,
+      maxOutputTokens: runtime.config.maxTokens,
+      historyStart,
+      nodeId: () => nodeId ?? prospectiveNodeId,
+      gate: automaticCompaction,
+      identity: requestIdentity,
+      signal: activity.control.signal,
+      onStatus(active) {
+        status(active ? "Compacting" : WAITING);
+        options.render();
+      },
+      onUsage: (usage) => recordAuxiliaryUsage(session.usage, usage),
+    });
+    events.onContext = async (checkpoint, projected, request) => {
+      const result = await manager.compact(checkpoint, projected, request);
+      context = manager.anchor;
+      return result;
     };
-
-    events.onContext = compact;
     events.onSteering = (guidance) => {
       unpersistedSteering.push(guidance);
       options.emit({ kind: "user", text: guidance });
       options.render();
     };
-    events.onCheckpoint = async (checkpoint, settlement, projected) => {
+    events.onCheckpoint = async (checkpoint, settlement) => {
       await persist(checkpoint, settlement);
-      const compacted = await compact(checkpoint, projected, {
-        reason: "budget",
-        policy: await policy(),
-        inputTokens: session.usage.lastInputTokens,
-        projectionSaturated: false,
-      });
-      if (compacted !== undefined) await persist(checkpoint, settlement);
-      return compacted;
     };
 
     let finishReason: "interrupted" | "failed" | undefined;
@@ -227,6 +181,7 @@ export function turnWorkflow(
         modelHistory,
       );
     } catch (error) {
+      inputs.reset();
       const interrupted = activity.control.signal.aborted;
       const completed = nodeId !== undefined && session.conversation.activeNodeId === nodeId &&
         session.conversation.activeNode?.settlement === "completed";

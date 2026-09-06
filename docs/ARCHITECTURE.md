@@ -96,12 +96,11 @@ always appends authoritative assistant messages and tool results to both, but a
 context hook may replace only the provider-facing array. One definite 400/413
 context-limit rejection can therefore be retried after compaction without
 replaying an ambiguous generation failure or rewriting durable history.
-Provider-facing tool evidence is bounded independently from canonical history.
-Each ordinary result keeps an append-stable excerpt, so adding later evidence
-does not rewrite the request prefix and defeat prompt caching. Semantic
-compaction establishes the only normal boundary that may replace that prefix;
-if compaction cannot recover a saturated request, a bounded newest-first
-projection remains as the final safety fallback.
+Ordinary provider requests retain full collected tool evidence while it fits.
+The context manager may summarize an older prefix before a request; only an
+input that cannot fit afterward uses a bounded newest-first tool projection.
+Character allocations never trigger semantic compaction. Existing ordinary
+input stays stable as new tool results append.
 
 Before every provider request, the controller resolves the current model
 context policy. Provider adapters cache stable metadata themselves and refresh
@@ -113,7 +112,7 @@ output stays inside the model window or a stricter provider safety limit. An
 envelope that cannot leave a small useful response budget is rejected locally
 before network generation begins. Compaction summary requests use the same
 budget boundary. After a successful request, provider-reported input usage is
-the preferred pressure signal; when it is absent, the conservative sent-input
+associated with that exact request; when it is absent, the conservative sent-input
 estimate replaces stale pressure without being added to vendor usage totals.
 
 A tool failure becomes an error result the model can act on. Cancellation is
@@ -391,50 +390,25 @@ cancelling or exiting before then creates no node. The settled transcript and
 full history are materialized again from the newly selected path, while
 historical tool records remain inert.
 
-Context compaction is automatic and model-aware. Pressure combines the most
-recent normalized input-token count with a conservative byte estimate. The
-provider boundary can advertise one model's usable request window and a stricter
-automatic-compaction ceiling: OpenAI Account retains those fields from its live model
-catalogue, Anthropic retains `max_input_tokens`, and Ollama reads cloud model
-capacity from `/api/show`. The OpenAI
-API model list does not include capacities, so its accepted reasoning families
-use isolated conservative metadata. Discovery failures use a 200k fallback and
-therefore leave ordinary turns available; an envelope that already exceeds that
-fallback is rejected locally instead of sending an unbounded request.
+Context management is model-aware and runs before provider requests, never as
+an extra operation after a completed answer. `context/manager.ts` owns automatic
+summary decisions, failure suppression, accepted anchors, and bounded numeric
+diagnostics. `context/measurement.ts` measures the outgoing provider input and
+anchors reported usage only to its unchanged prefix. Provider wire conversion
+and opaque reasoning reserves remain behind `Provider.measureInput`.
 
-Request estimation preserves the same provider-neutral byte, compression, and
-literal floors while processing serialized input in bounded chunks. Large
-estimates yield between chunks, observe cancellation, and are reused by
-automatic or overflow compaction for the exact projection already measured.
-The planner checks only a logarithmic set of safe recent-turn boundaries and
-does not re-estimate the selected tail. Projection changes always receive a
-fresh request estimate before the provider is called.
+Policy, safe tail planning, summary generation, emergency projection, and
+manual leaf compaction stay in separate modules under `src/context/`. Retained
+tails use the same provider-aware measurement, including opaque replay costs.
+Only the summary payload normalizes away opaque protocol data. A failed or
+ineffective automatic summary leaves the original context available and waits
+for meaningful input growth before another optional attempt.
 
-The saved `compactionPercent` setting accepts 50 through 95 and defaults to 85.
-It applies to the usable model window while a lower provider safety ceiling and
-the estimator's safety reserve still win. The post-compaction target is one
-quarter of that window and the
-recent exact tail is bounded to half that target; both therefore scale from a
-small context windows to million-token models. Capacity discovery runs before
-each request; provider adapters retain safe metadata where appropriate and
-refresh it periodically. The selected provider receives one
-streamed, tool-free summary request with a neutral instruction that treats all
-source content as untrusted data. Opaque provider blocks are removed from that
-request. The resulting user-level summary never enters the system prompt and is
-never rendered as transcript content.
-
-A context anchor records the summary and its exact node/message boundary. The
-anchor lives on the active branch, so projection uses the newest anchor on the
-selected path and timeline branching can choose another one later. The
-canonical prefix remains untouched. TUI checkpoints persist the ordinary turn
-before attempting optional compaction, then atomically revise that same leaf if
-a summary succeeds. Cancellation or failure therefore cannot discard a
-completed response or a settled tool batch. `/compact` forces that same policy
-below the automatic trigger and atomically revises only the active leaf with a
-newer anchor. It is a silent no-op when there is too little useful prefix. A
-temporary historical selection
-must receive a new user turn first, because compacting the shared branch point
-would rewrite history owned by more than one path.
+Accepted memory uses the existing branch-local anchor and is saved with the
+next valid checkpoint. Canonical history remains complete. Manual compaction
+atomically revises only the active leaf; a pending historical selection must
+receive a new user turn before it can be compacted. See [context management](CONTEXT.md)
+for counting limits, thresholds, deadlines, acceptance, and verification.
 
 Interactive sessions publish lazily after the first consistent tool
 checkpoint or settled completed, failed, or interrupted turn. They live under

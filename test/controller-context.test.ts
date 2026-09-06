@@ -208,3 +208,17 @@ test("retries one definite context rejection only after the context hook replace
   assert.deepEqual(texts(seen[1] ?? []), ["safe summary"]);
   assert.deepEqual(texts(history), ["hello", "recovered"]);
 });
+
+test("unrelated provider failures never remeasure or enter context recovery", async () => {
+  const failure = Object.assign(new Error("connection failed"), { status: 503 });
+  let measurements = 0;
+  const from = { ...scripted([]),
+    async measureInput() { measurements++; return 100; },
+    async send(): Promise<Message> { throw failure; } };
+  const reasons: string[] = [];
+  const sink = events();
+  sink.onContext = async (_history, _context, request) => { reasons.push(request.reason); return undefined; };
+  await assert.rejects(runTurn([], options(from), sink), e => e === failure);
+  assert.equal(measurements, 1);
+  assert.deepEqual(reasons, ["budget"]);
+});

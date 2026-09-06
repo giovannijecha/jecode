@@ -56,7 +56,7 @@ test("the footer reports compaction without adding it to the transcript", async 
     createdAt: "2026-09-01T10:00:00.000Z",
     identity: { providerId: "fake", model: "fake-1", effort: "high" },
     messages: [
-      { role: "user", content: [{ kind: "text", text: "old context ".repeat(10_000) }] },
+      { role: "user", content: [{ kind: "text", text: "old context ".repeat(11_000) }] },
       { role: "assistant", content: [{ kind: "text", text: "Old answer." }] },
     ],
     blocks: [],

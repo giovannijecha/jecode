@@ -27,6 +27,8 @@
     "dist/",
     "assets/jeco-256.png",
     "assets/wordmark-steel.svg",
+    "assets/tokenizers/o200k-base.tiktoken.gz",
+    "assets/tokenizers/LICENSE",
     "LICENSE",
     "README.md"
   ],

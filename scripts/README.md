@@ -14,7 +14,7 @@ Run these commands from the repository root after `npm ci --ignore-scripts`:
 | `npm run check:source-tree` | Verify that `dist/` is ignored and untracked. |
 | `npm run typecheck` | Check source, development tools, scripts, and tests with strict types, unused-local/parameter checks, complete return paths, and no switch fallthrough. |
 | `npm run check:package` | Clean-build and inspect npm's dry-run manifest, runtime dependencies, packaged README references, and release settings. |
-| `npm run check:install` | Clean-build, pack, install into a temporary global prefix, and verify the installed executable's version. |
+| `npm run check:install` | Clean-build, pack, install into a temporary global prefix, and verify the installed executable and tokenizer assets. |
 | `npm run check:release-tag -- <tag>` | Require the exact package version and select `latest` for stable versions or `next` for prereleases; substitute the actual tag. |
 | `npm run check` | Run source-tree, type, coverage, package, and installation gates. |
 
@@ -22,6 +22,11 @@ The package and installation checks intentionally remain independently runnable
 and each performs its own clean build. `build:release` also accepts `--quiet`.
 Generated `dist/` is never source code and must remain untracked. Installation
 and packaging lifecycle hooks must not implicitly compile the runtime.
+
+`node scripts/import-tokenizer.ts` is a separate, explicit development import
+for the [pinned token vocabulary](../dev/context/TOKENIZER.md). It is not part
+of builds or installation. Package checks require both the vocabulary and its
+license; the size guard includes a bounded allowance for that data.
 
 `tsconfig.json` is the shared source of compiler checks. The release configuration
 extends it, and all CI matrix jobs run `typecheck`; no separate lint command or

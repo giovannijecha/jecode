@@ -9,9 +9,8 @@ import { recordAuxiliaryUsage } from "../usage.ts";
 import { toolSpecs } from "../tools/index.ts";
 import { resolveContextPolicy } from "./capacity.ts";
 import { compactContext } from "./compactor.ts";
-import { estimateRequestInputTokensResponsive } from "./budget.ts";
-import { estimateTokensResponsive, planCompaction } from "./policy.ts";
-import { projectToolResultsNewest, toolResultProjectionBudget } from "./request-projection.ts";
+import { measureInput, messageCounter } from "./measurement.ts";
+import { planCompaction } from "./policy.ts";
 import { requestIdentityForSession } from "../request-identity.ts";
 
 const MIN_PREFIX_TOKENS = 512;
@@ -43,9 +42,11 @@ export async function compactSession(
     onStatus: (status) => options.onStatus?.(status),
   });
   const specs = toolSpecs(session.tools);
-  const estimatedInputTokens = await estimateRequestInputTokensResponsive({
+  const estimatedInputTokens = await measureInput(session.provider, {
+    model: session.model,
+    effort: session.config.effort,
     system: session.system,
-    messages: projectToolResultsNewest(context, toolResultProjectionBudget(policy)).messages,
+    messages: context,
     tools: specs,
   }, options.signal);
   if (estimatedInputTokens < MIN_PREFIX_TOKENS) {
@@ -55,19 +56,21 @@ export async function compactSession(
   const coveredMessages = active.context?.throughNodeId === active.id
     ? active.context.messageCount
     : 0;
+  const countMessages = await messageCounter(session.provider, session.model, session.config.effort, options.signal);
   const plan = await planCompaction(
     context,
     active.messages,
     coveredMessages,
-    session.usage.lastInputTokens,
+    0,
     true,
     policy,
     estimatedInputTokens,
     options.signal,
+    countMessages,
   );
   if (
     plan === undefined ||
-    await estimateTokensResponsive(plan.prefix, options.signal) < MIN_PREFIX_TOKENS
+    await countMessages(plan.prefix, options.signal) < MIN_PREFIX_TOKENS
   ) {
     options.onStatus?.();
     return "unchanged";
@@ -81,7 +84,7 @@ export async function compactSession(
     turn: active.messages,
     nodeId: active.id,
     coveredMessages,
-    lastInputTokens: session.usage.lastInputTokens,
+    lastInputTokens: 0,
     estimatedInputTokens,
     precomputedPlan: plan,
     signal: options.signal,
@@ -96,9 +99,9 @@ export async function compactSession(
     requestIdentity: requestIdentityForSession(session),
     onBegin: () => options.onStatus?.("Compacting"),
     onEnd: () => options.onStatus?.(),
+    onUsage: (usage) => recordAuxiliaryUsage(session.usage, usage),
   });
   if (result === undefined) throw new Error("context could not be compacted");
-  if (result.usage !== undefined) recordAuxiliaryUsage(session.usage, result.usage);
 
   const next = session.conversation.commit({
     nodeId: active.id,

@@ -8,6 +8,29 @@ install artifacts and provenance are published with the [npm package].
 
 ### Changed
 
+- Preserved paragraph boundaries between streamed OpenAI reasoning-summary parts,
+  including older streams with completion events but no part identifiers.
+- Focused context summaries on current working state with a 500-word prompt
+  budget, after live validation exposed verbose summaries exhausting the deadline.
+  Added content-free summary timing and length diagnostics; kept the deadline,
+  size bound, savings checks, and canonical history guarantees.
+- Added an owned, offline o200k reference tokenizer for modern OpenAI API models
+  and OpenAI Account, improving context estimates after resume without persisting
+  raw provider data or old calibration. Kept conservative fallbacks for other
+  routes, bounded caches, and the zero-runtime-dependency contract.
+- Recorded resolved context limits, request timings, clipping, and failed or
+  cancelled sends in development diagnostics. Bounded summary text during
+  streaming and avoided context recovery after unrelated provider failures.
+- Centralized automatic context management before model requests. Complete tool
+  outputs remain available while they fit; character limits no longer force
+  premature compaction, and settled answers do not start a trailing summary.
+- Measured outgoing provider content once, including bounded opaque reasoning
+  reserves, and associated reported input usage only with its unchanged prefix.
+  Added meaningful-growth retry suppression, summary deadlines and savings
+  checks, low summary effort when supported, and inert long-tool-turn probes.
+- Preserved valid input calibration across consecutive conversation turns,
+  with reset boundaries that reject late observations. Added an opt-in,
+  bounded development recorder for content-free context diagnostics.
 - Used the full terminal width for model responses, reasoning, and tool records,
   aligned with the composer's left edge.
 - Kept timeline previews on one row per turn, removing reserved overflow space

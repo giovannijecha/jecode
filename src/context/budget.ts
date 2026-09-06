@@ -27,7 +27,7 @@ export type RequestBudget = Readonly<{
 export function estimateRequestInputTokens(envelope: RequestEnvelope): number {
   const contentTokens = estimateSerializedTokens({
     system: envelope.system,
-    messages: envelope.messages,
+    messages: normalized(envelope.messages),
     tools: envelope.tools,
   });
   return contentTokens +
@@ -43,7 +43,7 @@ export async function estimateRequestInputTokensResponsive(
 ): Promise<number> {
   const contentTokens = await estimateSerializedTokensResponsive({
     system: envelope.system,
-    messages: envelope.messages,
+    messages: normalized(envelope.messages),
     tools: envelope.tools,
   }, signal);
   return contentTokens +
@@ -100,4 +100,8 @@ function requirePositiveInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive safe integer`);
   }
+}
+
+function normalized(messages: readonly Message[]): Message[] {
+  return messages.map(({ role, content }) => ({ role, content }));
 }

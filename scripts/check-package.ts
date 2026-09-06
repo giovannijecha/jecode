@@ -20,6 +20,8 @@ const allowedPackageFile = (file: string): boolean =>
   file === "package.json" ||
   file === "assets/jeco-256.png" ||
   file === "assets/wordmark-steel.svg" ||
+  file === "assets/tokenizers/o200k-base.tiktoken.gz" ||
+  file === "assets/tokenizers/LICENSE" ||
   file.startsWith("bin/") ||
   file.startsWith("dist/");
 if (!paths.every(allowedPackageFile)) {
@@ -32,7 +34,11 @@ if (!paths.includes("dist/main.js")) throw new Error("the compiled entry point i
 if (!paths.includes("assets/jeco-256.png")) throw new Error("the OAuth callback mascot is missing from the package");
 if (!paths.includes("assets/wordmark-steel.svg")) throw new Error("the README wordmark is missing from the package");
 if (paths.some((file) => file.endsWith(".ts"))) throw new Error("release packages must not contain TypeScript runtime files");
-if (packed.size > 1_000_000) throw new Error(`package is unexpectedly large: ${packed.size} bytes`);
+for (const file of ["assets/tokenizers/o200k-base.tiktoken.gz", "assets/tokenizers/LICENSE"]) {
+  if (!paths.includes(file)) throw new Error(`tokenizer asset is missing: ${file}`);
+}
+// The pinned vocabulary adds 1.69 MB; keep a bounded allowance for owned runtime code.
+if (packed.size > 2_500_000) throw new Error(`package is unexpectedly large: ${packed.size} bytes`);
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
   bin?: Record<string, unknown>;

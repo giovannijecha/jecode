@@ -8,6 +8,7 @@
 import type { StreamEvent } from "../types.ts";
 import { providerWireError } from "./failure.ts";
 import type { OpenAIResponse } from "./openai-wire.ts";
+import { OpenAISummary } from "./openai-summary.ts";
 
 export async function assembleOpenAI(
   events: AsyncIterable<unknown>,
@@ -16,6 +17,11 @@ export async function assembleOpenAI(
 ): Promise<OpenAIResponse> {
   const items: unknown[] = [];
   const announcedTools = { identities: new Set<string>(), anonymous: false };
+  const summary = new OpenAISummary();
+  const display = (event: StreamEvent): void => {
+    if (event.kind !== "thinking") summary.reset();
+    onStream?.(event);
+  };
   let refusal = false;
   let activity: string | undefined;
   const status = (next: string): void => {
@@ -31,6 +37,7 @@ export async function assembleOpenAI(
       item?: unknown;
       item_id?: unknown;
       output_index?: unknown;
+      summary_index?: unknown;
       name?: unknown;
       response?: unknown;
       error?: { code?: string; message?: string; type?: string };
@@ -46,37 +53,41 @@ export async function assembleOpenAI(
       case "response.output_text.delta":
         if (typeof event.delta === "string") {
           status("Responding");
-          onStream?.({ kind: "text", text: event.delta });
+          display({ kind: "text", text: event.delta });
         }
         break;
 
       case "response.refusal.delta":
         if (typeof event.delta === "string") {
           status("Responding");
-          onStream?.({ kind: "text", text: `${refusal ? "" : "[refused] "}${event.delta}` });
+          display({ kind: "text", text: `${refusal ? "" : "[refused] "}${event.delta}` });
           refusal = true;
         }
         break;
 
-      case "response.reasoning_summary_text.delta":
-        if (typeof event.delta === "string") {
+      case "response.reasoning_summary_text.delta": {
+        const text = summary.delta(event);
+        if (text !== undefined) {
           status("Thinking");
-          onStream?.({ kind: "thinking", text: event.delta });
+          display({ kind: "thinking", text });
         }
         break;
+      }
 
       case "response.reasoning_summary_part.added":
+        summary.end();
         status("Thinking");
         break;
 
       case "response.reasoning_summary_text.done":
       case "response.reasoning_summary_part.done":
+        summary.end();
         status("Working");
         break;
 
       case "response.output_item.added":
         if (isFunctionCall(event.item)) {
-          announceTool(event, event.item, announcedTools, onStream, status);
+          announceTool(event, event.item, announcedTools, display, status);
         } else if (itemType(event.item) === "reasoning") {
           status("Thinking");
         } else if (itemType(event.item) === "message") {
@@ -86,14 +97,15 @@ export async function assembleOpenAI(
 
       case "response.function_call_arguments.delta":
       case "response.function_call_arguments.done":
-        announceTool(event, undefined, announcedTools, onStream, status);
+        announceTool(event, undefined, announcedTools, display, status);
         break;
 
       case "response.output_item.done":
         if (event.item !== undefined) {
           if (isFunctionCall(event.item)) {
-            announceTool(event, event.item, announcedTools, onStream, status);
+            announceTool(event, event.item, announcedTools, display, status);
           } else if (itemType(event.item) === "reasoning") {
+            summary.end();
             status("Working");
           }
           items.push(event.item);

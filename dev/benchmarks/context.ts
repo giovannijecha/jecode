@@ -4,10 +4,19 @@ import type { Message } from "../../src/types.ts";
 import { estimateRequestInputTokensResponsive } from "../../src/context/budget.ts";
 import { planCompaction, policyForContextWindow } from "../../src/context/policy.ts";
 import { reportBenchmark, round } from "./report.ts";
+import { contextWorkflowProbe } from "./context-workflow.ts";
+import { countO200k } from "../../src/context/tokenizer/o200k.ts";
 
 const MAX_TOTAL_MS = 2_000;
 const MAX_EVENT_LOOP_STALL_MS = 75;
 const ITERATIONS = 5;
+const tokenizerCold = await measure(async () => { await countO200k("Tokenizer cold start."); });
+const source = "export function checked(value) { return value !== undefined ? value : null; }\n".repeat(60_000);
+let tokenizationRun = 0;
+const tokenization = await sample(async () => {
+  // A different document each time bypasses the completed-document count cache.
+  await countO200k(`// run ${tokenizationRun++}\n${source}`);
+});
 const largeContext: Message[] = Array.from({ length: 128 }, (_, index) => ({
   role: index % 2 === 0 ? "user" : "assistant",
   content: [{
@@ -46,8 +55,20 @@ const planning = await sample(async () => {
   if (plan === undefined) throw new Error("forced benchmark plan was not produced");
 });
 
+const shortWorkflow = await contextWorkflowProbe(12);
+const longWorkflow = await contextWorkflowProbe(40);
+const workflowPassed = shortWorkflow.summaries === 0 && longWorkflow.summaries > 0 &&
+  longWorkflow.summaries <= 2;
+
 reportBenchmark("context-responsiveness", {
   iterations: ITERATIONS,
+  tokenizer: {
+    inputCharacters: source.length,
+    coldMilliseconds: round(tokenizerCold.total),
+    coldMaximumStallMilliseconds: round(tokenizerCold.maxStall),
+    medianMilliseconds: round(tokenization.total),
+    medianMaximumStallMilliseconds: round(tokenization.maxStall),
+  },
   request: {
     inputCharacters: 8 * 1_024 * 1_024 - 1_024,
     inputTokens: requestInputTokens,
@@ -64,12 +85,16 @@ reportBenchmark("context-responsiveness", {
     medianMilliseconds: MAX_TOTAL_MS,
     medianMaximumStallMilliseconds: MAX_EVENT_LOOP_STALL_MS,
   },
-  passed: [request, planning].every((result) =>
+  workflows: [shortWorkflow, longWorkflow],
+  passed: workflowPassed && [request, planning, tokenization, tokenizerCold].every((result) =>
     result.total <= MAX_TOTAL_MS && result.maxStall <= MAX_EVENT_LOOP_STALL_MS
   ),
 });
 
-for (const [label, result] of [["request estimate", request], ["forced plan", planning]] as const) {
+if (!workflowPassed) throw new Error("context workflow compacted too often or failed to compact");
+
+for (const [label, result] of [["request estimate", request], ["forced plan", planning],
+  ["tokenizer", tokenization], ["cold tokenizer", tokenizerCold]] as const) {
   if (result.total > MAX_TOTAL_MS) throw new Error(`${label} exceeded ${MAX_TOTAL_MS} ms`);
   if (result.maxStall > MAX_EVENT_LOOP_STALL_MS) {
     throw new Error(`${label} blocked the event loop for ${result.maxStall.toFixed(2)} ms`);

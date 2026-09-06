@@ -56,6 +56,18 @@ test("manual compaction preserves a failed leaf's durable evidence", async () =>
   assert.match(JSON.stringify(current.conversation.transcript), /provider disconnected/);
 });
 
+test("manual compaction remains useful below a large model's ordinary retention budget", async () => {
+  const requests: SendRequest[] = [];
+  const current = session({ ...summarizer(requests),
+    contextWindow: async () => ({ tokens: 258_400, compactAtTokens: 244_800 }) });
+  current.conversation = completed("durable context ".repeat(2_000), "Original answer.");
+  const before = structuredClone(current.conversation.history);
+  assert.equal(await compactSession(current), "compacted");
+  assert.equal(requests.length, 1);
+  assert.deepEqual(current.conversation.history, before);
+  assert.ok(current.conversation.activeNode?.context);
+});
+
 test("manual compaction silently ignores a context too small to summarize", async () => {
   const requests: SendRequest[] = [];
   const current = session(summarizer(requests));

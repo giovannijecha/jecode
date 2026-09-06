@@ -6,6 +6,9 @@ owns eligibility, minimum soak duration, and restart rules. The
 [release runbook](../../docs/RELEASING.md) owns publishing. This page defines
 repeatable checks and the evidence to collect; it is not a completed report.
 
+The [2026-09-06 context investigation](CONTEXT-2026-09-06.md) records focused
+development evidence separately from release-candidate acceptance.
+
 ## Prepare the record
 
 Start with an exact version, commit, package integrity, and CI run. Record
@@ -98,6 +101,12 @@ saved branch. Keep automatic regression tests as the source for fixture formats.
 Automated injection is appropriate for races, invalid data, and transport errors
 that cannot be triggered safely and reliably by hand. Link the passing test and
 state that it was automated; it does not replace the interactive recovery checks.
+
+For context investigations, the [development recorder](../context/README.md)
+captures request estimates, provider counts, and accepted/failed/cancelled summary
+attempts without conversation content. Record its source commit and any dropped
+events. Keep development-launch observations separate from acceptance checks of
+the installed candidate; the recorder does not establish that artifact's behavior.
 
 ## Performance
 
