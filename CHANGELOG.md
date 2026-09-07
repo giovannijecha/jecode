@@ -6,6 +6,13 @@ install artifacts and provenance are published with the [npm package].
 
 ## [Unreleased]
 
+### Changed
+
+- Reduced repeated directory checks while listing durable sessions by grouping
+  validation requests that arrive before filesystem inspection starts. Later
+  read/write boundaries still require fresh checks; file validation, recovery,
+  and persisted formats remain unchanged.
+
 ## [0.8.7] - 2026-09-07
 
 ### Changed

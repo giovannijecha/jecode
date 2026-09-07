@@ -11,18 +11,24 @@ import {
 import type { DirectoryAnchor } from "../directory-anchor.ts";
 import type { SessionMeta } from "./codec.ts";
 import { DIRECTORY_MODE, SESSION_NAME } from "./files.ts";
+import { queuedValidation } from "./validation.ts";
 
 export class SessionBucket {
   readonly workspaceRoot: string;
   readonly workspaceDigest: string;
   readonly anchor: DirectoryAnchor;
   readonly #root: DirectoryAnchor;
+  readonly #validate: () => Promise<void>;
+  readonly #sessionValidation = new WeakMap<DirectoryAnchor, () => Promise<void>>();
 
   private constructor(workspaceRoot: string, root: DirectoryAnchor, anchor: DirectoryAnchor) {
     this.workspaceRoot = workspaceRoot;
     this.workspaceDigest = digestWorkspace(workspaceRoot);
     this.#root = root;
     this.anchor = anchor;
+    this.#validate = queuedValidation(async () => {
+      await Promise.all([assertDirectoryAnchor(this.#root), assertDirectoryAnchor(this.anchor)]);
+    });
     Object.freeze(this);
   }
 
@@ -51,12 +57,19 @@ export class SessionBucket {
     return captureDirectDirectory(this.directory(id), "session directory");
   }
 
-  async assertSession(anchor: DirectoryAnchor): Promise<void> {
-    await Promise.all([this.assert(), assertDirectoryAnchor(anchor)]);
+  assertSession(anchor: DirectoryAnchor): Promise<void> {
+    let validate = this.#sessionValidation.get(anchor);
+    if (validate === undefined) {
+      validate = queuedValidation(async () => {
+        await Promise.all([this.assert(), assertDirectoryAnchor(anchor)]);
+      });
+      this.#sessionValidation.set(anchor, validate);
+    }
+    return validate();
   }
 
-  async assert(): Promise<void> {
-    await Promise.all([assertDirectoryAnchor(this.#root), assertDirectoryAnchor(this.anchor)]);
+  assert(): Promise<void> {
+    return this.#validate();
   }
 
   assertWorkspace(meta: SessionMeta, id: string): void {

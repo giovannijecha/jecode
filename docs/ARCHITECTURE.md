@@ -438,6 +438,15 @@ and schema compatibility remain in `codec.ts`, with message and transcript
 codecs in `codec-messages.ts` and `codec-transcript.ts`, sharing bounded value
 validation through `codec-values.ts`.
 
+`validation.ts` groups directory-check requests until the next event-loop check
+phase, before filesystem inspection starts. `bucket.ts` scopes those groups to
+one storage bucket and, for session directories, the exact anchor object. The
+queued promise is discarded before invoking the check: requests arriving during
+IO or after completion require fresh validation. This reduces duplicate anchor
+stats from concurrent metadata reads without caching a successful observation or
+removing any read/write validation boundary. File identities, metadata stability,
+head rereads, and lease ownership checks remain independent.
+
 The interactive persistence owner retains the last fully verified snapshot and
 its exact store-scoped lease. Conversation nodes are deeply immutable, so a
 checkpoint can verify
