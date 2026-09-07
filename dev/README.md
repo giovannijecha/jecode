@@ -11,7 +11,7 @@ an explicit product task needs it.
 | [`web/`](web/README.md) | Production browser sign-in pages with inert success and failure states. |
 | [`tui/DIRECTION.md`](tui/DIRECTION.md) | Current TUI direction and the reasons behind choices still in use. |
 | [`tui/experiments/`](tui/experiments/README.md) | Temporary investigations with a question, comparable evidence, and an exit condition. |
-| [`benchmarks/`](benchmarks/README.md) | Manual probes for context, redaction, workspace search, sessions, transcript rendering, and integrated TUI responsiveness. |
+| [`benchmarks/`](benchmarks/README.md) | Performance probes and repeatable CI collections for context, redaction, search, sessions, transcript rendering, and TUI responsiveness. |
 | [`context/`](context/README.md) | Opt-in, bounded numeric diagnostics from real production TUI sessions. |
 | [`validation/`](validation/README.md) | Release-candidate scenarios, evidence format, and manual checks that automated tests cannot establish. |
 | [`test-support/`](test-support/) | Small shared factories and host harnesses for automated tests, excluded from the release runtime. |

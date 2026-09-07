@@ -1,0 +1,101 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    paths: ["src/**", "dev/benchmarks/**", "dev/test-support/**", "package*.json", ".github/workflows/benchmarks.yml"]
+  push:
+    branches: [main]
+    paths: ["src/**", "dev/benchmarks/**", "dev/test-support/**", "package*.json", ".github/workflows/benchmarks.yml"]
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: "Baseline commit/ref (default: first parent of the measured commit)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Benchmark observations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out measured commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve baseline
+        id: base
+        working-directory: candidate
+        env:
+          BASE_REF: ${{ inputs.baseline || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: |
+          base=$(git rev-parse --verify --end-of-options "${BASE_REF}^{commit}")
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Check out baseline
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: baseline
+          ref: ${{ steps.base.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.18.0"
+
+      - name: Prepare reports
+        run: mkdir -p "$RUNNER_TEMP/benchmark-reports"
+
+      - name: Collect baseline
+        id: baseline
+        continue-on-error: true
+        run: node candidate/dev/benchmarks/collect.ts baseline "$RUNNER_TEMP/benchmark-reports/baseline.json"
+
+      - name: Collect current
+        id: current
+        continue-on-error: true
+        run: node candidate/dev/benchmarks/collect.ts candidate "$RUNNER_TEMP/benchmark-reports/current.json"
+
+      - name: Compare observations
+        id: comparison
+        continue-on-error: true
+        run: node candidate/dev/benchmarks/compare.ts "$RUNNER_TEMP/benchmark-reports/baseline.json" "$RUNNER_TEMP/benchmark-reports/current.json" "$RUNNER_TEMP/benchmark-reports"
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/benchmark-reports/SUMMARY.md" ]; then
+            cat "$RUNNER_TEMP/benchmark-reports/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Benchmark collection incomplete. Inspect logs and available artifacts." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Retain benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: benchmarks-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/benchmark-reports/
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Check collection completion
+        if: always()
+        env:
+          COMPARISON: ${{ steps.comparison.outcome }}
+        # Complete negative measurements stay in the report; no timing gate is added.
+        # The comparator fails acquisition errors, incomplete reports, and crashes.
+        run: test "$COMPARISON" = success

@@ -1,6 +1,9 @@
-# Manual performance probes
+# Performance probes
 
 These six probes exercise distinct production paths with synthetic fixtures.
+The [collection and comparison workflow](AUTOMATION.md) runs these same probes
+on pull requests, relevant main updates, weekly, and on demand, retaining JSON
+evidence. Individual commands remain useful for local investigations.
 Run them from the repository root, one at a time on an otherwise idle machine:
 
 ```powershell
@@ -49,8 +52,9 @@ fail the command.
 The session thresholds remain: a large-checkpoint median at most 25 ms and scale
 at most 2; a deep-catalogue median at most 20 ms and shallow-to-deep increase at
 most 10 ms; a 1,024-node load median at most 350 ms and scale from 200 nodes at
-most 7. These and the context limits are manual regression tripwires, not CI
-gates or hardware-independent guarantees.
+most 7. These and the context limits remain diagnostic tripwires, not required
+merge checks or hardware-independent guarantees. Automated collections retain
+their failures without changing the thresholds; investigate the raw reports.
 
 Candidate comparisons and the limits of these synthetic measurements are
 described in the [validation protocol](../validation/README.md#performance).
