@@ -116,6 +116,11 @@ and existing threshold outcomes using the [benchmark guide](../benchmarks/README
 Investigate a repeatable regression before accepting it; a noisy sample alone
 does not establish a defect or justify raising a threshold.
 
+The [automated benchmark collections](../benchmarks/AUTOMATION.md) retain paired
+commit measurements and compatible comparisons in CI artifacts. They support
+this investigation; hosted-runner results do not replace a controlled local
+baseline or the physical-terminal observations below.
+
 During long sessions, also record input-to-visible-update latency, resident
 memory at comparable settled points, and responsiveness while output is slow.
 Include streaming text, large tool evidence, open menus, and scrollback. Separate
