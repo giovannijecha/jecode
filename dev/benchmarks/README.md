@@ -71,6 +71,16 @@ The probes import production implementations directly; no provider requests or
 second implementation of the measured behavior belongs here. `report.ts` only
 provides the common JSON envelope and numeric formatting.
 
+For a focused catalogue-cardinality investigation, run `node dev/benchmarks/catalog.ts`
+or supply a separate checkout as its only argument. This optional drill-down
+uses the selected checkout's production session store with 12 sessions at 1/200
+nodes and 50/200 sessions at one node, one warm-up and nine measured listings per
+case. It verifies the returned entries, reports medians/ranges and source provenance,
+and removes its synthetic data. Repeat on an idle machine with matching Node and
+storage, using the same driver for both checkouts. It adds no timing gate and is
+separate from the six automated probes; its four-case JSON is not a collection
+accepted by `bench:compare`.
+
 ## Integrated TUI
 
 `bench:tui` enables `--expose-gc` for memory observations and runs four cases in
