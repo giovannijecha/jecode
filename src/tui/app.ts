@@ -327,10 +327,6 @@ export async function runApp(
     transcriptChanged: (block) => transcript.invalidate(block),
   });
 
-  const resumeAtLaunch = session.resume === undefined
-    ? undefined
-    : track(openResumedSession(session.resume));
-
   async function openResumedSession(launch: NonNullable<Session["resume"]>): Promise<void> {
     while (live) {
       const index = await new Promise<number | undefined>((resolve) => {
@@ -387,10 +383,17 @@ export async function runApp(
       render();
     }));
 
+    const resumeAtLaunch = session.resume === undefined
+      ? undefined
+      : track(openResumedSession(session.resume));
     draw();
     if (resumeAtLaunch !== undefined) await Promise.race([resumeAtLaunch, done]);
     if (live) await done;
     if (failure !== undefined) throw failure.error;
+  } catch (error) {
+    // Startup failures must settle pending menus before teardown waits for work.
+    fail(error);
+    throw error;
   } finally {
     try {
       quit();

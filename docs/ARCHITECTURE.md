@@ -137,13 +137,16 @@ preview, approval, and execution. Already-running tools are not retroactively
 cancelled. `/new`, `/timeline`, and `/compact` require idle conversation state;
 `/export` clones the visible transcript before asynchronous writing.
 
-A fatal rendering or input callback failure cancels all open overlays, aborts
+A fatal startup, rendering, or input callback failure cancels all open overlays, aborts
 both workflows, and awaits their settlement before closing session
 persistence. Only then can control return to the caller, so provider or tool
-work cannot continue behind a restored terminal.
+work cannot continue behind a restored terminal. Startup creates the resume
+picker only after checking shutdown and registering terminal input; a failed
+first frame settles that picker before awaiting workflow completion.
 
-There is no startup banner, permanent preamble, or automatic menu. Every launch
-opens on an empty transcript and composer; readiness remains visible in the
+Fresh conversations open on an empty transcript and composer, without a startup
+banner, permanent preamble, or automatic menu. Explicit resume launches restore
+the saved transcript or open the session picker. Readiness remains visible in the
 footer, and configuration opens only when the user invokes it. `/providers`
 owns API keys and OpenAI Account OAuth. `/models` asks every
 currently usable provider for its catalogue concurrently, keeps successful
