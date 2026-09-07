@@ -13,7 +13,7 @@ body:
     attributes:
       label: Jecode version
       description: Run jecode --version.
-      placeholder: 0.x.y
+      placeholder: 0.8.7
     validations:
       required: true
   - type: textarea
@@ -25,7 +25,7 @@ body:
         Node.js: 24.x
         OS: Windows 11
         Terminal: Windows Terminal
-        Provider/model: Ollama / model-id
+        Provider/model: Ollama API / model-id
     validations:
       required: true
   - type: textarea

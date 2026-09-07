@@ -6,6 +6,8 @@ install artifacts and provenance are published with the [npm package].
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-09-07
+
 ### Changed
 
 - Preserved paragraph boundaries between streamed OpenAI reasoning-summary parts,
@@ -61,6 +63,12 @@ install artifacts and provenance are published with the [npm package].
   saved TUI settings. Retired startup overrides report removal guidance;
   environment diagnostics name the variable without printing its value.
   Existing saved settings and conversations require no migration.
+
+### Fixed
+
+- Settled the startup resume picker before closing the TUI after an initial
+  rendering failure. A shutdown already requested before startup no longer
+  opens a pending picker or delays releasing session ownership.
 
 ### Removed
 
@@ -689,7 +697,8 @@ install artifacts and provenance are published with the [npm package].
 
 [GitHub Releases]: https://github.com/giovannijecha/jecode/releases
 [npm package]: https://www.npmjs.com/package/@giovannijecha/jecode
-[Unreleased]: https://github.com/giovannijecha/jecode/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/giovannijecha/jecode/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.7
 [0.8.6]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.6
 [0.8.5]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.5
 [0.8.4]: https://github.com/giovannijecha/jecode/releases/tag/v0.8.4
