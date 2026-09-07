@@ -95,7 +95,7 @@ jobs:
       - name: Check collection completion
         if: always()
         env:
-          BASELINE: ${{ steps.baseline.outcome }}
-          CURRENT: ${{ steps.current.outcome }}
           COMPARISON: ${{ steps.comparison.outcome }}
-        run: test "$BASELINE" = success && test "$CURRENT" = success && test "$COMPARISON" = success
+        # Complete negative measurements stay in the report; no timing gate is added.
+        # The comparator fails acquisition errors, incomplete reports, and crashes.
+        run: test "$COMPARISON" = success

@@ -2,18 +2,21 @@
 
 import { open, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { validateCollection } from "./collection.ts";
+import { collectionComplete, validateCollection } from "./collection.ts";
 import { compare, markdown } from "./comparison.ts";
 
 const [basePath, currentPath, outputDirectory, ...extra] = process.argv.slice(2);
 if (basePath === undefined || currentPath === undefined || outputDirectory === undefined || extra.length !== 0) {
   throw new Error("usage: compare.ts <baseline.json> <current.json> <existing-output-directory>");
 }
-const comparison = compare(await read(basePath), await read(currentPath));
+const baseline = await read(basePath);
+const current = await read(currentPath);
+const comparison = compare(baseline, current);
 await writeFile(join(resolve(outputDirectory), "comparison.json"), `${JSON.stringify(comparison, null, 2)}\n`);
 await writeFile(join(resolve(outputDirectory), "SUMMARY.md"), markdown(comparison));
-// Collection success is distinct from measurement acceptance. Failed probes stay visible.
-if (comparison.probes.some((probe) => probe.status === "failed")) process.exitCode = 1;
+// A complete negative measurement is evidence, not a new CI performance gate.
+// Crashes, interruption, and unusable output still fail the acquisition workflow.
+if (!collectionComplete(baseline) || !collectionComplete(current)) process.exitCode = 1;
 
 async function read(file: string) {
   const handle = await open(file, "r");

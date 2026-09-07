@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { compare, markdown } from "../dev/benchmarks/comparison.ts";
-import { sample, validateCollection } from "../dev/benchmarks/collection.ts";
+import { collectionComplete, sample, validateCollection } from "../dev/benchmarks/collection.ts";
 import type { Collection } from "../dev/benchmarks/collection.ts";
 import { capture, probeEnvironment } from "../dev/benchmarks/capture.ts";
 import { probes } from "../dev/benchmarks/probes.ts";
@@ -109,9 +109,28 @@ test("probe report validation preserves a failed report and rejects wrong source
     node: process.version, platform: process.platform, arch: process.arch }, results };
   const captured = { exitCode: 1, signal: null, failure: null, stdout: JSON.stringify(report), stderr: "fixture failure" };
   assert.deepEqual(sample(captured, probe).results, results);
-  assert.equal(sample(captured, probe).failure, "probe reported failure");
+  assert.equal(sample(captured, probe).failure, "unexpected probe exit");
+  const negative = { ...report, results: { ...results, passed: false } };
+  assert.equal(sample({ ...captured, stdout: JSON.stringify(negative) }, probe).failure, "probe reported failure");
   assert.equal(sample({ ...captured, stdout: "{}" }, probe).failure, "missing or invalid probe report");
   assert.equal(sample({ ...captured, failure: "timeout" }, probe).results, null);
+});
+
+test("a measured failure stays visible without treating successful acquisition as a timing gate", () => {
+  const a = fixture();
+  const negative = a.probes[3]!.samples[0]!;
+  negative.results!["passed"] = false;
+  negative.exitCode = 1;
+  negative.failure = "probe reported failure";
+  assert.equal(collectionComplete(validateCollection(a)), true);
+  assert.equal(compare(fixture(), a).probes[3]!.status, "failed");
+  negative.failure = "timeout";
+  assert.equal(collectionComplete(a), false);
+  negative.failure = "unexpected probe exit";
+  assert.equal(collectionComplete(a), false);
+  negative.failure = "probe reported failure";
+  negative.exitCode = 2;
+  assert.equal(collectionComplete(a), false);
 });
 
 test("public comparison command writes reports and rejects malformed and oversized input", async () => {
@@ -124,6 +143,15 @@ test("public comparison command writes reports and rejects malformed and oversiz
     assert.equal((await run()).exitCode, 0);
     assert.equal(JSON.parse(await readFile(join(root, "comparison.json"), "utf8")).probes.length, 6);
     assert.match(await readFile(join(root, "SUMMARY.md"), "utf8"), /Benchmark comparison/);
+    const negative = fixture();
+    negative.probes[3]!.samples[0] = { exitCode: 1, failure: "probe reported failure", stderr: "",
+      results: { ...negative.probes[3]!.samples[0]!.results, passed: false } };
+    await writeFile(current, JSON.stringify(negative));
+    assert.equal((await run()).exitCode, 0);
+    assert.match(await readFile(join(root, "SUMMARY.md"), "utf8"), /session \| failed/);
+    negative.probes[3]!.samples[0]!.failure = "timeout";
+    await writeFile(current, JSON.stringify(negative));
+    assert.equal((await run()).exitCode, 1);
     await writeFile(current, "{"); assert.notEqual((await run()).exitCode, 0);
     await writeFile(current, " ".repeat(8 * 1048576 + 1));
     assert.match((await run()).stderr, /exceeds 8 MiB/);

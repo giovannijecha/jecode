@@ -55,11 +55,14 @@ collector checkpoints its output after each sample, so incomplete evidence
 survives a later failure. The comparison reader accepts complete version-1
 collections up to 8 MiB each, and never executes content from reports.
 
-Collection and comparison failures make the diagnostic job fail after uploading
-available evidence. That job is not a required merge check: investigate its
-failure rather than interpreting it as a new performance budget. No additional
-timing thresholds, automatic regression verdicts, or changes to existing probe
-limits are introduced. The ordinary CI matrix tests the collection machinery.
+Job success means complete evidence was collected, not that every probe passed.
+An explicit `passed: false` report with the probe's expected exit 0/1 stays
+`failed` in the comparison and retains the nonzero collector exit, but does not
+make the acquisition workflow fail. Timeouts, cancellation, unexpected exits,
+invalid reports, and missing evidence still fail the job after uploading what
+is available. This distinction keeps the old manual tripwires from becoming
+new CI timing gates. Investigate negative reports; do not weaken their limits
+to obtain a green result. The ordinary CI matrix tests the collection machinery.
 
 For release acceptance, retain the reviewed evidence before artifact expiry.
 These synthetic measurements do not establish physical display latency,

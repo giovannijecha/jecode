@@ -64,9 +64,18 @@ export function sample(captured: Capture, probe: Probe): Sample {
     workload(report["results"], probe);
     result.results = report["results"];
     if (captured.signal !== null) result.failure = `signal: ${captured.signal}`;
-    else if (captured.exitCode !== 0 || result.results["passed"] === false) result.failure = "probe reported failure";
+    else if (result.results["passed"] === false && (captured.exitCode === 0 || captured.exitCode === 1)) {
+      result.failure = "probe reported failure";
+    } else if (captured.exitCode !== 0) result.failure = "unexpected probe exit";
   } catch { result.failure = "missing or invalid probe report"; }
   return result;
+}
+
+export function collectionComplete(collection: Collection): boolean {
+  return collection.probes.every((probe) => probe.samples.every((sample) => sample.results !== null &&
+    (sample.failure === null && sample.exitCode === 0 ||
+      sample.failure === "probe reported failure" && sample.results["passed"] === false &&
+      (sample.exitCode === 0 || sample.exitCode === 1))));
 }
 
 export function validateCollection(value: unknown): Collection {

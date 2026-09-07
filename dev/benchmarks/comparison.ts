@@ -103,6 +103,7 @@ export function markdown(result: Comparison): string {
   const lines = ["# Benchmark comparison", "",
     `Base: \`${result.baseline}\` · Current: \`${result.current}\``, "",
     "Repeated synthetic measurements. Positive changes mean more time/bytes; they are investigation signals, not regression verdicts.",
+    "Job success means evidence was collected, not that all probes passed. Failed probe outcomes remain below.",
     "No new timing gate. Hosted-runner hardware and load can vary; matching metadata does not prove identical conditions.", "",
     "| Probe | Outcome | Compared metrics |", "| --- | --- | ---: |"];
   for (const probe of result.probes) lines.push(`| ${probe.name} | ${probe.status} | ${probe.metrics.length} |`);
