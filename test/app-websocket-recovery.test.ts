@@ -79,6 +79,9 @@ test(`${mode} preserves completed effects across TUI exit and resume without rep
     }];
     return current;
   };
+  const shutdown = new AbortController();
+  let running: Promise<void> | undefined;
+  let resumed: Promise<void> | undefined;
   try {
     const first = makeSession();
     if (mode === "failed terminal after compaction") {
@@ -91,15 +94,17 @@ test(`${mode} preserves completed effects across TUI exit and resume without rep
     }
     first.persistence = SessionPersistence.fresh(store);
     const screen = virtualScreen(40);
-    const running = runApp(first, workspace, screen.environment);
+    running = runApp(first, workspace, { ...screen.environment, shutdownSignal: shutdown.signal });
     const feed = await screen.input();
     feed("record an effect and finish\r");
     if (mode === "failed terminal after compaction") {
-      await waitFor(() => releaseSummary !== undefined, "pending compaction");
+      await waitFor(() => releaseSummary !== undefined, "pending compaction", 10_000);
       feed("Preserve the public API.\r");
       releaseSummary!();
     }
-    await waitFor(() => first.conversation.activeNode?.settlement === "failed", "failed socket turn");
+    // Real loopback traffic and durable checkpoints share a loaded CI runner.
+    // This checks recovery correctness, not a two-second performance contract.
+    await waitFor(() => first.conversation.activeNode?.settlement === "failed", "failed socket turn", 10_000);
     await waitForIdle(screen, "failed socket turn idle");
     assert.equal(sent.length, 2);
     assert.equal(await readFile(path.join(workspace, "effects.txt"), "utf8"), "effect\n");
@@ -125,12 +130,12 @@ test(`${mode} preserves completed effects across TUI exit and resume without rep
     next.persistence = saved.persistence;
     next.conversation = saved.conversation;
     const resumedScreen = virtualScreen(40);
-    const resumed = runApp(next, workspace, resumedScreen.environment);
+    resumed = runApp(next, workspace, { ...resumedScreen.environment, shutdownSignal: shutdown.signal });
     const resumeFeed = await resumedScreen.input();
     await waitForIdle(resumedScreen, "resumed idle before new input");
     assert.equal(sent.length, 2, "resume alone does not generate or replay tools");
     resumeFeed("continue from the saved result\r");
-    await waitFor(() => next.conversation.activeNode?.settlement === "completed", "recovered socket turn");
+    await waitFor(() => next.conversation.activeNode?.settlement === "completed", "recovered socket turn", 10_000);
     await waitForIdle(resumedScreen, "recovered idle");
     assert.equal(sent.length, 3);
     assert.equal(sent[1]!["previous_response_id"], "first");
@@ -150,6 +155,9 @@ test(`${mode} preserves completed effects across TUI exit and resume without rep
     resumeFeed("/exit\r");
     await resumed;
   } finally {
+    // Failed assertions must stop in-flight work before its files are removed.
+    shutdown.abort();
+    await Promise.allSettled([running, resumed]);
     await server.close();
     await rm(root, { recursive: true, force: true });
   }
