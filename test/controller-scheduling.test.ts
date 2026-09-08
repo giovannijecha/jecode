@@ -112,6 +112,52 @@ test("bounds shared-call concurrency", async () => {
   assert.equal(peak, MAX_CONCURRENT_TOOL_CALLS);
 });
 
+test("a free read slot starts the fifth call before a slow first call settles", async () => {
+  const started: string[] = [];
+  let release!: () => void;
+  let firstFinished = false;
+  let refilledBeforeFirstFinished = false;
+  const slow = new Promise<void>((resolve) => { release = resolve; });
+  const shared: Tool = { ...echo, async run(args) {
+    const text = String(args.text);
+    started.push(text);
+    if (text === "0") { await slow; firstFinished = true; }
+    if (text === "4") { refilledBeforeFirstFinished = !firstFinished; release(); }
+    return { output: text };
+  } };
+  const calls = Array.from({ length: 6 }, (_, index) => ({ kind: "tool_call" as const,
+    id: String(index), name: "echo", input: { text: String(index) } }));
+  const provider = scripted([{ role: "assistant", content: calls }, assistantText("done")]);
+  const history: Message[] = [];
+  const timer = setTimeout(() => release(), 2000);
+  try {
+    await runTurn(history, options(provider, { tools: [shared] }), events());
+    assert.equal(refilledBeforeFirstFinished, true, "the fifth read must not wait for the first wave");
+    assert.deepEqual(started, ["0", "1", "2", "3", "4", "5"]);
+    assert.deepEqual(history[1]?.content.map(block => block.kind === "tool_result" && block.output), started);
+  } finally { clearTimeout(timer); release(); }
+});
+
+test("turn transport scopes close after completion, failure, cancellation, and checkpoint failure", async () => {
+  for (const mode of ["completed", "failure", "cancelled", "checkpoint"] as const) {
+    const control = new AbortController();
+    let closed = 0;
+    const provider = scripted([]);
+    provider.openTurn = () => ({ async send() {
+      if (mode === "cancelled") control.abort(new Error("interrupted"));
+      if (mode === "failure") throw new Error("failed");
+      return assistantText("done");
+    }, close() { closed++; } });
+    const sink = events();
+    if (mode === "checkpoint") sink.onCheckpoint = async () => { throw new Error("checkpoint failed"); };
+    const turn = runTurn([], options(provider), sink, control.signal);
+    if (mode === "completed") await turn;
+    else await assert.rejects(turn);
+    assert.equal(closed, 1, mode);
+    assert.equal(provider.seen.length, 0, "the unscoped send is not used");
+  }
+});
+
 test("keeps exclusive calls as ordered barriers between shared batches", async () => {
   const timeline: string[] = [];
   const shared: Tool = {

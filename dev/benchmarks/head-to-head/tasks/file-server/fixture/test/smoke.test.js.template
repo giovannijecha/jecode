@@ -1,0 +1,16 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startServer } from '../src/index.js';
+test('serves a file and rejects a missing path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'file-smoke-'));
+  await writeFile(join(root, 'hello.txt'), 'hello');
+  const service = await startServer(root);
+  try {
+    const response = await fetch(`http://127.0.0.1:${service.port}/hello.txt`);
+    assert.equal(response.status, 200); assert.equal(await response.text(), 'hello');
+    assert.equal((await fetch(`http://127.0.0.1:${service.port}/missing`)).status, 404);
+  } finally { await service.close(); await rm(root, { recursive: true, force: true }); }
+});

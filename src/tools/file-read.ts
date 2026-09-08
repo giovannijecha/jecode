@@ -27,7 +27,8 @@ export const readFile: Tool = {
   name: "read_file",
   description:
     "Read a regular UTF-8 text file inside the workspace. Optionally start at a line " +
-    "(1-based) and cap how many lines come back. Large files are truncated.",
+    "(1-based) and cap how many lines come back. Large files are truncated. " +
+    "A range past the end reports EOF, not an empty file.",
   dangerous: false,
   concurrency: "shared",
   input: {
@@ -53,7 +54,7 @@ export async function runReadFile(
   const target = await resolveExistingInRoot(root, requireString(args, "path"));
   const offset = optionalInt(args, "offset");
   const limit = optionalInt(args, "limit");
-  const { text, truncated, scanCapped } = await readRange(
+  const { text, truncated, scanCapped, emptyFile, lastLine } = await readRange(
     root,
     target,
     offset,
@@ -76,7 +77,20 @@ export async function runReadFile(
       summary: `scan capped at ${MAX_READ_SCAN_BYTES} bytes`,
     };
   }
-  if (text === "") return { output: "[file is empty]", summary: "empty" };
+  if (limit !== undefined && limit <= 0) {
+    return { output: "[no lines requested: limit is 0]", summary: "0 lines requested" };
+  }
+  if (emptyFile) return { output: "[file is empty]", summary: "empty" };
+  if (text === "") {
+    const firstLine = Math.max(1, offset ?? 1);
+    if (firstLine > lastLine) {
+      return {
+        output: `[requested range starts at line ${firstLine}, after end of file (${plural(lastLine, "line", "lines")})]`,
+        summary: "past end of file",
+      };
+    }
+    return { output: "[selected line is blank]", summary: "1 blank line" };
+  }
   return { output: text, summary: `${count(text, "line")}` };
 }
 
@@ -145,18 +159,19 @@ async function readRange(
   limit: number | undefined,
   signal: AbortSignal | undefined,
   dependencies: FileReadDependencies,
-): Promise<{ text: string; truncated: boolean; scanCapped: boolean }> {
+): Promise<{ text: string; truncated: boolean; scanCapped: boolean; emptyFile: boolean; lastLine: number }> {
   throwIfAborted(signal);
   const firstLine = Math.max(1, offset ?? 1);
   const lineCount = limit === undefined ? undefined : Math.max(0, limit);
   const endLine = lineCount === undefined ? Number.POSITIVE_INFINITY : firstLine + lineCount;
-  if (lineCount === 0) return { text: "", truncated: false, scanCapped: false };
-
   const result = await withStableFile(target, {
     label: "read file",
     signal,
     beforeOpen: dependencies.beforeOpen,
   }, async (handle, opened) => {
+    if (lineCount === 0) {
+      return { text: "", truncated: false, scanCapped: false, emptyFile: opened.size === 0n, lastLine: 0 };
+    }
     const decoder = new TextDecoder();
     let text = "";
     let line = 1;
@@ -215,6 +230,8 @@ async function readRange(
       text,
       truncated,
       scanCapped: !stopped && !reachedEnd && position >= MAX_READ_SCAN_BYTES,
+      emptyFile: opened.size === 0n,
+      lastLine: line,
     };
   });
   const confirmed = await resolveExistingInRoot(root, target);

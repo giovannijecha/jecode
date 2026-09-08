@@ -32,6 +32,21 @@ Each uses the same key-management flow. Ollama connects directly to the
 [official cloud API](https://docs.ollama.com/cloud#cloud-api-access) and always
 requires an API key. Local models and custom endpoints are not supported.
 
+OpenAI API and OpenAI Account automatically try a persistent WebSocket during
+each turn to reduce repeated input uploads between tool calls. If the connection
+cannot open, the turn uses streamed HTTP instead. Resuming a conversation sends
+complete context again; saved history does not depend on a live connection.
+An interrupted or broken generation is not automatically replayed. This does
+not change your selected model, reasoning effort, or service-tier configuration.
+These streams allow up to five minutes between substantive model events, even
+when reasoning is temporarily silent. `Esc` still interrupts immediately. A
+local stream timeout is reported separately from a network failure; send a new
+message to continue from the saved work.
+If an opened WebSocket disconnects, the error explicitly invites you to send a
+message to continue. Completed tool results remain saved; partial output does
+not authorize another tool. Restarting with `jecode -c` restores the conversation
+without replaying historical commands.
+
 ## Work in the TUI
 
 Type `/` to open searchable command completion inside the composer.
@@ -107,6 +122,11 @@ up to four output rows; failures retain a diagnostic line alongside the tail
 when one is recognized. Ctrl+O reveals the complete retained source, including
 unchanged diff context. These previews never shorten saved history or export.
 
+File-read feedback distinguishes an empty file from a blank selected line or
+a range past the end of the file. A past-end result reports where the requested
+range begins and how many lines were observed, so the next read can use a valid
+range. A scan-limit notice means the file was not fully scanned.
+
 OpenAI reasoning summaries keep separate paragraphs for successive summary parts.
 Normal streaming fragments within each part remain continuous; empty parts do
 not create blank rows.
@@ -159,9 +179,13 @@ compact. Ordinary requests keep full tool evidence; bounded excerpts are an
 emergency fallback when an input cannot fit.
 
 Compaction uses the same model, with `low` effort when supported and a 60-second
-deadline. Failed or ineffective summaries leave the previous context available
+deadline. Failed, truncated, refused, or ineffective summaries leave the previous context available
 and are not retried for each small addition. See [context management](CONTEXT.md)
 for token measurement, budgets, and recovery behavior.
+
+Guidance sent while context is being checked or compacted joins the request
+before generation starts. The revised input is checked against the model's
+budget again. Guidance sent during generation waits for the next safe boundary.
 
 Compaction changes only the projection sent to the model. Complete messages,
 tool evidence, transcript, export, and conversation tree remain intact. The

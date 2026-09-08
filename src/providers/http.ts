@@ -6,14 +6,17 @@
 
 import { leadingText } from "../text-boundary.ts";
 import { readSseJson } from "./sse.ts";
+import type { SseCompletionPolicy } from "./sse.ts";
+import type { TransportObservation } from "../types.ts";
 import { sseStreamCharacterLimit } from "./stream-limits.ts";
+import { TransportError } from "./transport-error.ts";
+import { MODEL_PROGRESS_TIMEOUT_MS, modelProgressTimeout } from "./stream-timeout.ts";
 
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
 const MAX_JSON_CHARS = 5_000_000;
 const MAX_ERROR_CHARS = 2_000;
 const HANDSHAKE_TIMEOUT_MS = 60_000;
 const BODY_IDLE_TIMEOUT_MS = 120_000;
-const MODEL_PROGRESS_TIMEOUT_MS = 300_000;
 const GET_RETRIES = 3;
 const GENERATION_RATE_LIMIT_RETRIES = 1;
 const MAX_RETRY_DELAY_MS = 60_000;
@@ -32,9 +35,9 @@ function httpError(
   message: string,
   status?: number,
   body?: string,
-  metadata: Pick<HttpError, "retryAfterMs" | "requestId"> = {},
+  metadata: Pick<HttpError, "retryAfterMs" | "requestId"> & ErrorOptions = {},
 ): HttpError {
-  const error = new Error(message) as HttpError;
+  const error = new Error(message, metadata) as HttpError;
   error.status = status;
   error.body = body;
   if (metadata.retryAfterMs !== undefined) error.retryAfterMs = metadata.retryAfterMs;
@@ -87,9 +90,15 @@ export async function postSse(
   onStatus?: HttpStatus,
   progress?: StreamProgress,
   retry?: HttpRetryPolicy,
+  completion?: Omit<SseCompletionPolicy, "signal"> & {
+    onTransport?(event: TransportObservation): void;
+    onHeaders?(headers: Headers): void;
+  },
 ): Promise<AsyncGenerator<unknown>> {
   const maximumChars = sseStreamCharacterLimit(maxOutputTokens);
   onStatus?.("Connecting");
+  const started = performance.now();
+  const encoded = JSON.stringify(body);
   const res = await request(
     url,
     { accept: "text/event-stream", ...headers },
@@ -98,28 +107,29 @@ export async function postSse(
     onStatus,
     GENERATION_RATE_LIMIT_RETRIES,
     retry,
+    undefined,
+    encoded,
   );
   if (res.body === null) throw httpError(`${url} returned no body`, res.status);
+  completion?.onHeaders?.(res.headers);
+  completion?.onTransport?.({ transport: "http", connectMs: Math.round(performance.now() - started),
+    requestBytes: Buffer.byteLength(encoded) });
   onStatus?.("Waiting for model");
   return readSseJson(res.body, maximumChars, {
-    milliseconds: BODY_IDLE_TIMEOUT_MS,
-    error: () => httpError(
-      `${url} SSE stream was idle for ${BODY_IDLE_TIMEOUT_MS}ms without an event`,
-      res.status,
-    ),
+    milliseconds: progress === undefined ? BODY_IDLE_TIMEOUT_MS : MODEL_PROGRESS_TIMEOUT_MS,
+    error: progress === undefined ? () => new TransportError("idle-timeout",
+      `SSE stream was idle for ${BODY_IDLE_TIMEOUT_MS}ms without an event`,
+    ) : modelProgressTimeout,
     ...(progress === undefined
       ? {}
       : {
         progress: {
           milliseconds: MODEL_PROGRESS_TIMEOUT_MS,
           observed: progress,
-          error: () => httpError(
-            `${url} SSE stream made no model progress for ${MODEL_PROGRESS_TIMEOUT_MS}ms`,
-            res.status,
-          ),
+          error: modelProgressTimeout,
         },
       }),
-  });
+  }, { ...completion, signal });
 }
 
 async function request(
@@ -131,8 +141,10 @@ async function request(
   generationRetries = 0,
   generationRetry?: HttpRetryPolicy,
   readRetry?: HttpRetryPolicy,
+  encodedBody?: string,
 ): Promise<Response> {
   const read = body === undefined;
+  const encoded = read ? undefined : encodedBody ?? JSON.stringify(body);
   const maxRetries = read ? GET_RETRIES : generationRetries;
   let lastError: HttpError | undefined;
   let waitMs = 0;
@@ -151,7 +163,7 @@ async function request(
       res = await fetch(url, {
         method: body === undefined ? "GET" : "POST",
         headers: body === undefined ? headers : { "content-type": "application/json", ...headers },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(encoded === undefined ? {} : { body: encoded }),
         redirect: "manual",
         signal: handshake.signal,
       });
@@ -160,7 +172,9 @@ async function request(
       if (timeout !== undefined) throw timeout;
       if (signal?.aborted === true) throw cause;
       const detail = cause instanceof Error ? cause.message : String(cause);
-      lastError = httpError(`network error calling ${url}: ${detail}`);
+      // Keep the native cause available for content-free diagnostic codes.
+      // UI copy and generation retry policy still use the normalized failure.
+      lastError = httpError(`network error calling ${url}: ${detail}`, undefined, undefined, { cause });
       if (!read || attempt >= maxRetries) throw lastError;
       waitMs = backoff(attempt);
       onStatus?.(`Network error · retrying in ${waitLabel(waitMs)}`);

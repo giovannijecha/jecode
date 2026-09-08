@@ -1,0 +1,20 @@
+[
+  {"name":"config-baseline-1","client":"jecode","task":"config-edit","variant":"baseline"},
+  {"name":"config-work-1","client":"jecode","task":"config-edit","variant":"work-state"},
+  {"name":"config-codex-1","client":"codex","task":"config-edit","variant":"baseline"},
+  {"name":"server-work-1","client":"jecode","task":"file-server","variant":"work-state"},
+  {"name":"server-codex-1","client":"codex","task":"file-server","variant":"baseline"},
+  {"name":"server-baseline-1","client":"jecode","task":"file-server","variant":"baseline"},
+  {"name":"config-work-2","client":"jecode","task":"config-edit","variant":"work-state"},
+  {"name":"config-codex-2","client":"codex","task":"config-edit","variant":"baseline"},
+  {"name":"config-baseline-2","client":"jecode","task":"config-edit","variant":"baseline"},
+  {"name":"server-codex-2","client":"codex","task":"file-server","variant":"baseline"},
+  {"name":"server-baseline-2","client":"jecode","task":"file-server","variant":"baseline"},
+  {"name":"server-work-2","client":"jecode","task":"file-server","variant":"work-state"},
+  {"name":"config-codex-3","client":"codex","task":"config-edit","variant":"baseline"},
+  {"name":"config-baseline-3","client":"jecode","task":"config-edit","variant":"baseline"},
+  {"name":"config-work-3","client":"jecode","task":"config-edit","variant":"work-state"},
+  {"name":"server-baseline-3","client":"jecode","task":"file-server","variant":"baseline"},
+  {"name":"server-work-3","client":"jecode","task":"file-server","variant":"work-state"},
+  {"name":"server-codex-3","client":"codex","task":"file-server","variant":"baseline"}
+]

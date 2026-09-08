@@ -110,6 +110,9 @@ export function fromWireResponse(data: AnthropicResponse): Message {
   return {
     role: "assistant",
     content,
+    completion: data.stop_reason === "refusal" ? "refused"
+      : !suppressedToolCall && (data.stop_reason === "end_turn" || data.stop_reason === "stop_sequence" ||
+        data.stop_reason === "tool_use") ? "complete" : "incomplete",
     ...(retainRaw ? { raw, rawFrom: "anthropic" } : {}),
     usage: normalizeUsage(data),
   };

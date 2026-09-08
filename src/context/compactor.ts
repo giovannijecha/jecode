@@ -37,7 +37,7 @@ export type SummaryMeasurement = Readonly<{
 }>;
 
 export type CompactionOutcome =
-  | "accepted" | "empty" | "oversized" | "insufficient-savings" | "failed" | "timeout";
+  | "accepted" | "empty" | "oversized" | "insufficient-savings" | "incomplete" | "failed" | "timeout";
 
 export type CompactContextOptions = Readonly<{
   reason?: CompactionDiagnostic["reason"];
@@ -157,6 +157,13 @@ async function performCompaction(options: CompactContextOptions): Promise<Compac
     }
     signal.throwIfAborted();
     if (response.usage !== undefined) options.onUsage?.(response.usage);
+    // Partial answers remain useful in the transcript, but must never become
+    // replacement memory. A summary request cannot require tool execution.
+    if (response.completion === "incomplete" || response.completion === "refused" ||
+        response.content.some(block => block.kind !== "text")) {
+      options.onOutcome?.("incomplete");
+      return undefined;
+    }
     const summary = response.content
       .filter((block) => block.kind === "text")
       .map((block) => block.text)

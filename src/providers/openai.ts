@@ -6,16 +6,15 @@
 import { randomUUID } from "node:crypto";
 import type { Message, ModelContextWindow, Provider, SendRequest } from "../types.ts";
 import { applicationVersion } from "../version.ts";
-import { postSse } from "./http.ts";
+import { requestResponses } from "./responses-request.ts";
+import { ResponsesSession } from "./responses-session.ts";
 import { listModels } from "./catalog.ts";
 import { keyFor } from "../credentials.ts";
 import { EFFORTS, requireSupportedEffort } from "../effort.ts";
 import {
-  isRetryableGenerationFailure,
   isRetryableReadFailure,
   throwProviderError,
 } from "./failure.ts";
-import { assembleOpenAI, openAIStreamProgress } from "./openai-stream.ts";
 import {
   fromWireResponse,
   stopNotice,
@@ -110,46 +109,48 @@ export const openai: Provider = {
   inputTokenization: (model) => responsesTokenization(model, ID),
 
 
-  async send(req: SendRequest): Promise<Message> {
-    const key = requireKey();
-    const effort = requireSupportedEffort(req.model, req.effort, openAIEfforts(req.model));
-
-    try {
-      const events = await postSse(
-        ENDPOINT,
-        headers(key),
-        {
-          model: req.model,
-          instructions: req.system,
-          input: req.messages.flatMap((message) => toWireItems(message)),
-          tools: req.tools.map(toWireTool),
-          max_output_tokens: req.maxTokens,
-          reasoning: { effort, summary: "auto" },
-          store: false,
-          include: ["reasoning.encrypted_content"],
-          stream: true,
-          ...(req.identity?.purpose === "turn"
-            ? { prompt_cache_key: req.identity.cacheKey }
-            : {}),
-        },
-        req.maxTokens,
-        req.signal,
-        req.onStatus,
-        openAIStreamProgress,
-        (error) => isRetryableGenerationFailure(ID, error),
-      );
-
-      const data = await assembleOpenAI(events, req.onStream, req.onStatus);
-
-      const notice = stopNotice(data);
-      if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
-
-      return fromWireResponse(data);
-    } catch (error) {
-      throwProviderError(ID, req.signal, error);
-    }
+  send,
+  openTurn() {
+    const session = new ResponsesSession();
+    return { send: (request) => send(request, session), close: () => session.close() };
   },
 };
+
+async function send(req: SendRequest, session?: ResponsesSession): Promise<Message> {
+  const key = requireKey();
+  const effort = requireSupportedEffort(req.model, req.effort, openAIEfforts(req.model));
+
+  try {
+    const data = await requestResponses(
+      ID,
+      ENDPOINT,
+      headers(key),
+      {
+        model: req.model,
+        instructions: req.system,
+        input: req.messages.flatMap((message) => toWireItems(message)),
+        tools: req.tools.map(toWireTool),
+        max_output_tokens: req.maxTokens,
+        reasoning: { effort, summary: "auto" },
+        store: false,
+        include: ["reasoning.encrypted_content"],
+        stream: true,
+        ...(req.identity?.purpose === "turn"
+          ? { prompt_cache_key: req.identity.cacheKey }
+          : {}),
+      },
+      req,
+      session,
+    );
+
+    const notice = stopNotice(data);
+    if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
+
+    return fromWireResponse(data);
+  } catch (error) {
+    throwProviderError(ID, req.signal, error);
+  }
+}
 
 function apiKey(): string | undefined {
   return keyFor(KEY);

@@ -1,0 +1,8 @@
+[
+  {"name":"cache-baseline","client":"jecode","task":"cache","variant":"baseline"},
+  {"name":"cache-codex","client":"codex","task":"cache","variant":"baseline"},
+  {"name":"cache-grouped","client":"jecode","task":"cache","variant":"grouped"},
+  {"name":"planner-grouped","client":"jecode","task":"planner","variant":"grouped"},
+  {"name":"planner-codex","client":"codex","task":"planner","variant":"baseline"},
+  {"name":"planner-baseline","client":"jecode","task":"planner","variant":"baseline"}
+]

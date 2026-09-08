@@ -8,6 +8,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { listDir, readFile } from "../src/tools/file-read.ts";
 import { writeFile } from "../src/tools/file-write.ts";
+import { runTool } from "../src/tools/index.ts";
 
 let ctx: ToolContext;
 const execFile = promisify(execFileCallback);
@@ -31,6 +32,40 @@ test("reports an empty file rather than returning nothing", async () => {
   await writeFile.run({ path: "empty.txt", content: " " }, ctx);
   await fs.writeFile(path.join(ctx.root, "empty.txt"), "", "utf8");
   assert.equal((await readFile.run({ path: "empty.txt" }, ctx)).output, "[file is empty]");
+});
+
+test("a range past EOF does not tell the model that a populated file is empty", async () => {
+  await fs.writeFile(path.join(ctx.root, "past-end.txt"), "one\ntwo", "utf8");
+  const { result, summary } = await runTool(readFile, {
+    kind: "tool_call", id: "past-eof", name: "read_file",
+    input: { path: "past-end.txt", offset: 3, limit: 10 },
+  }, ctx);
+  assert.equal(result.isError, false);
+  assert.equal(result.output, "[requested range starts at line 3, after end of file (2 lines)]");
+  assert.equal(summary, "past end of file");
+});
+
+test("zero requested lines are distinct from an empty file", async () => {
+  await fs.writeFile(path.join(ctx.root, "zero-range.txt"), "content", "utf8");
+  const result = await readFile.run({ path: "zero-range.txt", limit: 0 }, ctx);
+  assert.equal(result.output, "[no lines requested: limit is 0]");
+  assert.equal(result.summary, "0 lines requested");
+});
+
+test("zero-length ranges still validate that the target is a regular file", async () => {
+  await assert.rejects(readFile.run({ path: ".", limit: 0 }, ctx), /regular file/);
+});
+
+test("an empty selected line does not describe the whole file as empty", async () => {
+  for (const [index, content, offset] of [
+    [0, "\ncontent", 1], [1, "one\n\nthree", 2], [2, "one\n", 2],
+  ] as const) {
+    const file = `blank-range-${index}.txt`;
+    await fs.writeFile(path.join(ctx.root, file), content, "utf8");
+    const result = await readFile.run({ path: file, offset, limit: 1 }, ctx);
+    assert.equal(result.output, "[selected line is blank]");
+    assert.equal(result.summary, "1 blank line");
+  }
 });
 
 test("refuses a FIFO without waiting for a writer", {

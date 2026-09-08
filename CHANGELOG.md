@@ -8,10 +8,57 @@ install artifacts and provenance are published with the [npm package].
 
 ### Changed
 
+- Include guidance received during metadata lookup, input measurement, or
+  compaction in the first subsequent generation, with a revised input budget.
+- Reject truncated, refused, and tool-bearing summaries before replacing model
+  context. Preserve previous anchors and account for returned summary usage.
+- Reject error-bearing OpenAI terminal envelopes and honor nonempty final
+  output over streamed fallback items, preventing unissued tools from running.
+
+- Group related, independent edits and review fixes in one model response after
+  inspecting the code. Preserve dependent-change boundaries, ordered writes,
+  reasoning effort and necessary verification.
+
+- Reuse a turn-scoped WebSocket for OpenAI API and OpenAI Account Responses,
+  sending incremental input only when the complete request prefix and settings
+  match. Keep full history, stateless HTTP fallback, and cancellation recovery;
+  never replay generation after an ambiguous streaming failure.
+- Drain bounded HTTP tails outside the model/tool critical path so completed
+  streams can reuse connections. Recognize Ollama's terminal marker without
+  waiting for the response body to close.
+- Refill the four shared-read execution slots as calls finish, preserving
+  ordered results and exclusive barriers for writes, commands, and approvals.
+- Cache Ollama capacity metadata for fifteen minutes, briefly cache unavailable
+  metadata, and limit optional probes to two seconds. Use the reference tokenizer
+  for Astra API requests as well as account access.
+- Extend opt-in request diagnostics with transport, request size, incremental
+  reuse, first text/thinking events, and reported cache and reasoning usage.
+  Preserve allowlisted native network failure codes without recording private
+  error details or adding generation retries.
+- Distinguish WebSocket protocol and size-limit failures from connectivity
+  failures. Record bounded transport failure categories, close codes, and
+  received-event sizes so interrupted live turns can be investigated. Distinguish
+  response acknowledgement, opaque output, and terminal events without recording
+  peer event names or content, or enabling generation replay. Include connection
+  age, last-message age, observed socket EOF and pre-teardown native-error flags
+  to distinguish otherwise ambiguous disconnections without recording private data.
+- Let OpenAI reasoning use the existing five-minute progress deadline on both
+  transports without an earlier two-minute event cutoff. Keep cancellation and
+  no-replay guarantees; identify local stream timeouts separately from network
+  failures.
 - Reduced repeated directory checks while listing durable sessions by grouping
   validation requests that arrive before filesystem inspection starts. Later
   read/write boundaries still require fresh checks; file validation, recovery,
   and persisted formats remain unchanged.
+
+### Fixed
+
+- Classify native WebSocket errors after opening as stream disconnections and
+  show how to continue. Verify durable exit/resume after a broken stream without
+  replaying completed tools or executing a partial response's calls.
+- Stop reporting populated files as empty when `read_file` selects a blank line,
+  requests zero lines, or starts past EOF. Report these cases separately with an
+  actionable EOF location; keep bounded reads and validate zero-length targets.
 
 ## [0.8.7] - 2026-09-07
 

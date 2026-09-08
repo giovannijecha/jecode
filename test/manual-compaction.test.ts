@@ -104,6 +104,27 @@ test("manual compaction reports a failed summary without changing history", asyn
   assert.equal(current.conversation.activeNode?.context, undefined);
 });
 
+test("an incomplete manual summary preserves an earlier anchor and the new turn", async () => {
+  const requests: SendRequest[] = [];
+  const provider = summarizer(requests);
+  const current = session(provider);
+  current.conversation = completed("durable context ".repeat(2_000), "Original answer.");
+  assert.equal(await compactSession(current), "compacted");
+  current.conversation = current.conversation.commit({ parentId: 1,
+    createdAt: "2026-09-08T10:00:00.000Z",
+    identity: { providerId: "fake", model: "fake-1", effort: "high" },
+    messages: messages("new evidence ".repeat(2_000), "Recent answer."), blocks: [],
+  }, "completed");
+  const before = current.conversation;
+  provider.send = async request => {
+    requests.push(request);
+    return { role: "assistant", content: [{ kind: "text", text: "Truncated memory." }], completion: "incomplete" };
+  };
+  await assert.rejects(compactSession(current), /context could not be compacted/);
+  assert.equal(requests.length, 2);
+  assert.equal(current.conversation, before, "rejection cannot revise any conversation node or anchor");
+});
+
 test("manual compaction survives resume inside the same logical session", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "jecode-manual-compaction-"));
   const workspace = path.join(root, "workspace");

@@ -1,0 +1,1 @@
+{"name":"build-plan-fixture","private":true,"type":"module","scripts":{"test":"node --test","plan":"node src/cli.js examples/build.json"}}

@@ -92,7 +92,7 @@ function responsesTokenCounter(model: string, providerId: string): typeof estima
 }
 
 export function responsesTokenization(model: string, providerId: string): "o200k-reference" | "heuristic" {
-  const modern = /^(?:gpt-5|gpt-4\.[15](?:-|$)|gpt-4o(?:-|$)|chatgpt-4o-|o[13](?:-|$)|o4-mini(?:-|$)|ft:gpt-4o)/u.test(model);
+  const modern = /^(?:gpt-6-astra(?:-|$)|gpt-5|gpt-4\.[15](?:-|$)|gpt-4o(?:-|$)|chatgpt-4o-|o[13](?:-|$)|o4-mini(?:-|$)|ft:gpt-4o)/u.test(model);
   return providerId === "openai-codex" || modern ? "o200k-reference" : "heuristic";
 }
 

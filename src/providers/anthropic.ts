@@ -126,6 +126,8 @@ export const anthropic: Provider = {
         req.onStatus,
         undefined,
         (error) => isRetryableGenerationFailure(ID, error),
+        { onTransport: req.onTransport, terminal: (event) => typeof event === "object" && event !== null &&
+          "type" in event && event.type === "message_stop" },
       );
 
       const data = await assembleAnthropic(events, req.onStream);

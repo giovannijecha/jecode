@@ -1,0 +1,8 @@
+[
+  {"name":"progress-baseline-1","client":"jecode","task":"planner-progress","variant":"baseline"},
+  {"name":"progress-codex-1","client":"codex","task":"planner-progress","variant":"baseline"},
+  {"name":"progress-grouped-1","client":"jecode","task":"planner-progress","variant":"grouped"},
+  {"name":"progress-grouped-2","client":"jecode","task":"planner-progress","variant":"grouped"},
+  {"name":"progress-codex-2","client":"codex","task":"planner-progress","variant":"baseline"},
+  {"name":"progress-baseline-2","client":"jecode","task":"planner-progress","variant":"baseline"}
+]

@@ -8,12 +8,12 @@ import { providerLabel } from "../provider-label.ts";
 import { applicationVersion } from "../version.ts";
 import { EFFORTS, isEffort, requireSupportedEffort } from "../effort.ts";
 import {
-  isRetryableGenerationFailure,
   isRetryableReadFailure,
   throwProviderError,
 } from "./failure.ts";
-import { getJson, postSse } from "./http.ts";
-import { assembleOpenAI, openAIStreamProgress } from "./openai-stream.ts";
+import { getJson } from "./http.ts";
+import { requestResponses } from "./responses-request.ts";
+import { ResponsesSession } from "./responses-session.ts";
 import {
   fromWireResponse,
   stopNotice,
@@ -90,51 +90,54 @@ export const openaiCodex: Provider = {
   measureInput: (request, signal) => measureResponsesInput(request, ID, signal),
   inputTokenization: (model) => responsesTokenization(model, ID),
 
-  async send(req: SendRequest): Promise<Message> {
-    const efforts = effortByModel.get(req.model) ?? fallbackEfforts(req.model);
-    const effort = requireSupportedEffort(req.model, req.effort, efforts);
-    const sessionId = req.identity?.conversationId ?? randomUUID();
-    const cacheKey = req.identity?.cacheKey ?? sessionId;
-    try {
-      return await withAuthorization(async (authorization) => {
-        const events = await postSse(
-          `${BASE}/responses`,
-          {
-            ...headers(authorization, sessionId, randomUUID()),
-            "openai-beta": "responses=experimental",
-          },
-          {
-            model: req.model,
-            store: false,
-            stream: true,
-            instructions: req.system,
-            input: req.messages.flatMap((message) => toWireItems(message, ID)),
-            tools: req.tools.map(toWireTool),
-            tool_choice: "auto",
-            parallel_tool_calls: true,
-            reasoning: { effort, summary: "auto" },
-            text: { verbosity: "low" },
-            include: ["reasoning.encrypted_content"],
-            ...(req.identity?.purpose === "compaction"
-              ? {}
-              : { prompt_cache_key: cacheKey }),
-          },
-          req.maxTokens,
-          req.signal,
-          req.onStatus,
-          openAIStreamProgress,
-          (error) => isRetryableGenerationFailure(ID, error),
-        );
-        const data = await assembleOpenAI(events, req.onStream, req.onStatus);
-        const notice = stopNotice(data);
-        if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
-        return fromWireResponse(data, ID);
-      }, req.signal, req.onStatus);
-    } catch (error) {
-      throwProviderError(ID, req.signal, error);
-    }
+  send,
+  openTurn() {
+    const session = new ResponsesSession();
+    return { send: (request) => send(request, session), close: () => session.close() };
   },
 };
+
+async function send(req: SendRequest, session?: ResponsesSession): Promise<Message> {
+  const efforts = effortByModel.get(req.model) ?? fallbackEfforts(req.model);
+  const effort = requireSupportedEffort(req.model, req.effort, efforts);
+  const sessionId = req.identity?.conversationId ?? randomUUID();
+  const cacheKey = req.identity?.cacheKey ?? sessionId;
+  try {
+    return await withAuthorization(async (authorization) => {
+      const data = await requestResponses(
+        ID,
+        `${BASE}/responses`,
+        {
+          ...headers(authorization, sessionId, randomUUID()),
+          "openai-beta": "responses=experimental",
+        },
+        {
+          model: req.model,
+          store: false,
+          stream: true,
+          instructions: req.system,
+          input: req.messages.flatMap((message) => toWireItems(message, ID)),
+          tools: req.tools.map(toWireTool),
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+          reasoning: { effort, summary: "auto" },
+          text: { verbosity: "low" },
+          include: ["reasoning.encrypted_content"],
+          ...(req.identity?.purpose === "compaction"
+            ? {}
+            : { prompt_cache_key: cacheKey }),
+        },
+        req,
+        session,
+      );
+      const notice = stopNotice(data);
+      if (notice !== undefined) req.onStream?.({ kind: "text", text: `\n${notice}` });
+      return fromWireResponse(data, ID);
+    }, req.signal, req.onStatus);
+  } catch (error) {
+    throwProviderError(ID, req.signal, error);
+  }
+}
 
 async function loadCatalog(
   signal?: AbortSignal,

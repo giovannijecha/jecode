@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ConversationTree } from "../src/conversation.ts";
 import type { Tool } from "../src/tools/index.ts";
 import type { Message, Provider } from "../src/types.ts";
+import { fromWireResponse } from "../src/providers/openai-wire.ts";
 import { runApp } from "../src/tui/app.ts";
 import { provider, session } from "../dev/test-support/app.ts";
 import { virtualScreen, waitFor, waitForIdle } from "../dev/test-support/app-harness.ts";
@@ -107,7 +108,8 @@ test("TUI ignores stale pre-turn usage and tracks the current sent estimate", as
   }
 });
 
-test("a failed TUI summary is not retried before the unchanged tool follow-up", async () => {
+for (const failure of ["transport failure", "incomplete summary"] as const) {
+test(`TUI ${failure} is not retried before the unchanged tool follow-up`, async () => {
   const requests: string[] = [];
   let normalRequests = 0;
   let toolRuns = 0;
@@ -117,7 +119,12 @@ test("a failed TUI summary is not retried before the unchanged tool follow-up", 
     async send(request) {
       const summary = request.system.includes("durable working memory");
       requests.push(summary ? "summary" : "normal");
-      if (summary) throw new Error("summary unavailable");
+      if (summary) {
+        if (failure === "transport failure") throw new Error("summary unavailable");
+        return fromWireResponse({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" },
+          output: [{ type: "message", content: [{ type: "output_text", text: "Partial working memory." }] }],
+        });
+      }
       if (normalRequests++ === 0) {
         return {
           role: "assistant",
@@ -132,6 +139,8 @@ test("a failed TUI summary is not retried before the unchanged tool follow-up", 
         };
       }
       assert.match(JSON.stringify(request.messages), /fixture evidence/);
+      assert.match(JSON.stringify(request.messages), /old context/);
+      assert.doesNotMatch(JSON.stringify(request.messages), /Partial working memory/);
       return provider("Recovered without duplicate compaction.").send(request);
     },
   };
@@ -169,6 +178,7 @@ test("a failed TUI summary is not retried before the unchanged tool follow-up", 
     await running;
   }
 });
+}
 
 test("TUI /new resets the automatic-compaction breaker", async () => {
   const requests: string[] = [];

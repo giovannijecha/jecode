@@ -1,6 +1,11 @@
 // Opt-in development observations. Never publish text, identities, or raw data.
 
 import { channel } from "node:diagnostics_channel";
+import type { ResponseStage } from "../types.ts";
+import { isNetworkCode } from "../providers/network-diagnostic.ts";
+import type { NetworkCode } from "../providers/network-diagnostic.ts";
+import { isTransportFailure } from "../providers/transport-error.ts";
+import type { TransportFailure } from "../providers/transport-error.ts";
 import type { CompactContextOptions, CompactionResult, CompactionOutcome, SummaryMeasurement } from "./compactor.ts";
 
 export const CONTEXT_DIAGNOSTIC_CHANNEL = "jecode.context";
@@ -37,6 +42,29 @@ export type RequestDiagnostic = Readonly<{
   providerMs?: number;
   firstEventMs?: number;
   clippedResults?: number;
+  firstTextMs?: number;
+  firstThinkingMs?: number;
+  transport?: "http" | "websocket";
+  connectMs?: number;
+  requestBytes?: number;
+  reused?: boolean;
+  incremental?: boolean;
+  fallback?: boolean;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
+  reasoningTokens?: number;
+  networkCode?: NetworkCode;
+  transportFailure?: TransportFailure;
+  webSocketCloseCode?: number;
+  receivedEvents?: number;
+  receivedChars?: number;
+  largestEventChars?: number;
+  connectionAgeMs?: number;
+  lastMessageAgeMs?: number;
+  socketReadEnded?: boolean;
+  nativeWebSocketError?: boolean;
+  responseStage?: ResponseStage;
 }>;
 
 export type PreparationDiagnostic = Readonly<{
@@ -67,11 +95,40 @@ export function safeDiagnostic(value: unknown): ContextDiagnostic | undefined {
     (v["reportedInputTokens"] === undefined || count(v["reportedInputTokens"]))) {
     const extras: Partial<RequestDiagnostic> = {};
     for (const key of ["windowTokens", "triggerTokens", "requestLimitTokens", "outputBudgetTokens",
-      "preparationMs", "providerMs", "firstEventMs", "clippedResults"] as const) {
+      "preparationMs", "providerMs", "firstEventMs", "clippedResults", "firstTextMs", "firstThinkingMs",
+      "connectMs", "requestBytes", "outputTokens", "cachedInputTokens", "cacheWriteInputTokens", "reasoningTokens",
+      "receivedEvents", "receivedChars", "largestEventChars", "connectionAgeMs", "lastMessageAgeMs"] as const) {
       if (v[key] !== undefined) {
         if (!count(v[key])) return undefined;
         Object.assign(extras, { [key]: v[key] });
       }
+    }
+    for (const key of ["reused", "incremental", "fallback", "socketReadEnded", "nativeWebSocketError"] as const) {
+      if (v[key] !== undefined) {
+        if (typeof v[key] !== "boolean") return undefined;
+        Object.assign(extras, { [key]: v[key] });
+      }
+    }
+    if (v["transport"] !== undefined) {
+      if (v["transport"] !== "http" && v["transport"] !== "websocket") return undefined;
+      Object.assign(extras, { transport: v["transport"] });
+    }
+    const stage = v["responseStage"];
+    if (stage !== undefined) {
+      if (stage !== "awaiting" && stage !== "accepted" && stage !== "output" && stage !== "terminal") return undefined;
+      Object.assign(extras, { responseStage: stage });
+    }
+    if (v["networkCode"] !== undefined) {
+      if (!isNetworkCode(v["networkCode"])) return undefined;
+      Object.assign(extras, { networkCode: v["networkCode"] });
+    }
+    if (v["transportFailure"] !== undefined) {
+      if (!isTransportFailure(v["transportFailure"])) return undefined;
+      Object.assign(extras, { transportFailure: v["transportFailure"] });
+    }
+    if (v["webSocketCloseCode"] !== undefined) {
+      if (!count(v["webSocketCloseCode"]) || v["webSocketCloseCode"] < 1000 || v["webSocketCloseCode"] > 4999) return undefined;
+      Object.assign(extras, { webSocketCloseCode: v["webSocketCloseCode"] });
     }
     const result = v["outcome"];
     if (result !== undefined && result !== "completed" && result !== "failed" && result !== "cancelled") return undefined;
@@ -148,6 +205,6 @@ function count(value: unknown): value is number {
 
 function outcome(value: unknown): value is CompactionDiagnostic["outcome"] {
   return value === "accepted" || value === "empty" || value === "oversized" ||
-    value === "insufficient-savings" || value === "failed" || value === "timeout" ||
+    value === "insufficient-savings" || value === "incomplete" || value === "failed" || value === "timeout" ||
     value === "cancelled" || value === "no-prefix";
 }

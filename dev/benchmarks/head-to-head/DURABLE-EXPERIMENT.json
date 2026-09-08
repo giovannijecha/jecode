@@ -1,0 +1,8 @@
+[
+  {"name":"durable-baseline-1","client":"jecode","task":"durable","variant":"baseline"},
+  {"name":"durable-codex-1","client":"codex","task":"durable","variant":"baseline"},
+  {"name":"durable-contract-1","client":"jecode","task":"durable","variant":"contract"},
+  {"name":"durable-contract-2","client":"jecode","task":"durable","variant":"contract"},
+  {"name":"durable-codex-2","client":"codex","task":"durable","variant":"baseline"},
+  {"name":"durable-baseline-2","client":"jecode","task":"durable","variant":"baseline"}
+]

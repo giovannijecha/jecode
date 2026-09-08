@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { summarizeLedger } from '../src/ledger.js';
+
+test('summarizes a simple ledger', () => {
+  assert.deepEqual(summarizeLedger('date,account,amount\n2026-01-01,Sales,12.50\n'), {
+    entries: 1, totalCents: 1250,
+    accounts: [{ account: 'Sales', entries: 1, totalCents: 1250 }],
+  });
+});

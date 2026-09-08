@@ -34,6 +34,10 @@ pending writes and appends an `end` record.
   present. They also contain the resolved window, compaction trigger, safe request
   limit, output budget, and number of tool results shortened to fit. Cached tokens
   remain part of input usage; these records are not billing calculations.
+  `outputTokens`, `reasoningTokens`, `cachedInputTokens`, and
+  `cacheWriteInputTokens` preserve normalized provider usage when returned.
+  A zero cache counter can also mean the adapter did not receive that field;
+  it does not prove that the provider performed no caching.
 - `preparationMs` covers local preparation before the send, including any
   compaction; `providerMs` covers the adapter call, including internal transport
   retries. `firstEventMs` measures the first text, thinking, or tool stream event
@@ -41,12 +45,58 @@ pending writes and appends an `end` record.
   rendering or input-latency measurements. A failed or cancelled send also emits
   a request record. `completed` means the adapter returned, not that the turn or
   its checkpoint succeeded. Older recordings omit these optional fields.
+- `firstTextMs` and `firstThinkingMs` separately measure the first displayed
+  text and thinking events at the adapter boundary. They do not reveal hidden
+  reasoning timing or provider-side token generation speed.
+- `transport` distinguishes HTTP and WebSocket; `connectMs` is elapsed time
+  until HTTP response headers or the WebSocket request send, respectively.
+  HTTP includes request upload and any internal rejection retry; WebSocket
+  includes channel establishment and local request preparation, without waiting
+  for model output. These are different boundaries, not comparable server TTFT.
+  `requestBytes` measures the uncompressed JSON of the latest observed send.
+  `reused` and `incremental` describe socket/prefix reuse; `fallback` identifies
+  HTTP after an unsuccessful upgrade or a full retry after a missing predecessor.
+  These optional fields omit failed attempts that never reached their observation
+  boundary and do not sum all network bytes or retries.
+- Failed requests can include `networkCode`, a fixed allowlist of native DNS,
+  connection, timeout, and TLS error codes. The first recognized code in a
+  bounded cause chain is retained; messages, addresses, and certificate details
+  are never recorded. Missing codes mean the cause was unavailable or outside
+  the allowlist, not that the network was healthy. Cancellation omits this field.
+- WebSocket failures include `transportFailure`: connection failure, peer closure,
+  idle/progress timeout, unavailable channel, malformed JSON, or event/queue/stream
+  size rejection. `webSocketCloseCode` is included when a close event supplies it;
+  close reasons remain private. Native errors may precede the close event, so its
+  absence does not establish a clean or unclean close. Local protocol/size failures
+  keep their specific UI message instead of appearing as connectivity failures.
+- On WebSocket settlement, `receivedEvents`, `receivedChars`, and
+  `largestEventChars` describe decoded messages received for the latest send,
+  including queued or rejected text events. Characters are UTF-16 code units;
+  these counters are not wire bytes or token counts. Non-text messages contribute
+  one event and zero characters. They reset when a new socket request is sent.
+- `connectionAgeMs` measures elapsed time since the socket opened;
+  `lastMessageAgeMs` measures time since its latest decoded message and is absent
+  before the first message of each request. Both stop advancing at channel
+  failure. `socketReadEnded` records observed TCP EOF; `nativeWebSocketError`
+  records a native error before local teardown. Node versions may emit a native
+  error for an unframed EOF too. These observations distinguish symptoms, not
+  the responsible server, proxy, network, or parser. No ping payload, address,
+  close reason, or native error text is recorded.
+- `responseStage` records the furthest recognized phase of the latest WebSocket
+  response: `awaiting`, `accepted`, `output`, or `terminal`. Opaque reasoning and
+  output-item events count as output even without visible text; a terminal error
+  is not a successful completion. Unknown peer event names cannot enter this
+  field. It resets for each send, does not record content, and does not authorize
+  retries. Missing first-text/thinking timings alone do not prove that generation
+  had not started. Older recordings do not contain this optional field.
 - Preparation failures before a send emit `preparation` records with numeric
   limits, elapsed time, and failed/cancelled outcome. Early capacity-discovery
   cancellation and individual HTTP retries are outside this recorder's boundary.
 - Compaction records contain budget/overflow/manual cause, outcome, before/after
   counts when available, resolved limits, and total local-plus-provider duration. `no-prefix` means
   planning found no eligible prefix; `cancelled` and `timeout` remain distinct.
+  `incomplete` means the summary response was truncated, refused, otherwise
+  unfinished, or contained unexpected tool blocks; no new anchor was accepted.
   A zero `beforeTokens` means an internal caller did not supply a measurement.
 - Once a summary send starts, compaction records also include `summaryChars`
   (streamed UTF-16 code units) and `summaryProviderMs`. `firstSummaryTextMs` is

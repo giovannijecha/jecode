@@ -20,9 +20,10 @@ import { findTool, runTool, toolSpecs } from "./tools/index.ts";
 import { requestAssistant } from "./controller-request.ts";
 import { inputMeter } from "./context/measurement.ts";
 import type { InputMeter } from "./context/measurement.ts";
+import { settlePool } from "./controller-pool.ts";
 
 export const MAX_TOOL_CALLS_PER_RESPONSE = 32;
-/** Independent read calls share one bounded execution wave. */
+/** Independent read calls share a pool that refills without waiting for a wave. */
 export const MAX_CONCURRENT_TOOL_CALLS = 4;
 
 export type ContextReason = "budget" | "overflow";
@@ -102,6 +103,22 @@ export async function runTurn(
   signal?: AbortSignal,
   modelHistory: Message[] = history,
 ): Promise<void> {
+  throwIfAborted(signal);
+  const transport = options.provider.openTurn?.();
+  try {
+    await runTurnLoop(history, transport === undefined ? options : {
+      ...options, provider: { ...options.provider, send: (request) => transport.send(request) },
+    }, events, signal, modelHistory);
+  } finally { transport?.close(); }
+}
+
+async function runTurnLoop(
+  history: Message[],
+  options: ControllerOptions,
+  events: ControllerEvents,
+  signal: AbortSignal | undefined,
+  modelHistory: Message[],
+): Promise<void> {
   const specs = toolSpecs(options.tools);
   const meter = options.inputMeter ?? inputMeter(options.provider);
   let context = modelHistory;
@@ -117,9 +134,11 @@ export async function runTurn(
     if (projected !== undefined) context = clone([...projected]);
   };
 
-  const appendSteering = (messages: readonly string[]): boolean => {
+  const appendSteering = (messages: readonly string[], projected = context): boolean => {
     for (const text of messages) {
-      append({ role: "user", content: [{ kind: "text", text }] });
+      const message: Message = { role: "user", content: [{ kind: "text", text }] };
+      history.push(message);
+      if (projected !== history) projected.push(message);
     }
     for (const text of messages) {
       events.onSteering?.(text);
@@ -151,6 +170,7 @@ export async function runTurn(
       events,
       meter,
       signal,
+      (projected) => appendSteering(options.steering?.drain() ?? [], projected),
     );
     const assistant = response.message;
     context = response.context;
@@ -212,10 +232,11 @@ export async function runTurn(
           prepared.push({ call, current, preview });
         }
 
-        const settlements = await Promise.allSettled(
-          prepared.map(({ call, current, preview }) =>
+        const settlements = await settlePool(
+          prepared.map(({ call, current, preview }) => () =>
             settle(call, current, calls.length, options, events, signal, preview)
           ),
+          MAX_CONCURRENT_TOOL_CALLS,
         );
         let batchFailure: { error: unknown } | undefined;
         for (let offset = 0; offset < settlements.length; offset++) {
@@ -286,7 +307,7 @@ function nextBatch(
   const batch: ToolCallBlock[] = [];
   for (
     let index = start;
-    index < calls.length && batch.length < MAX_CONCURRENT_TOOL_CALLS;
+    index < calls.length;
     index++
   ) {
     const call = calls[index] as ToolCallBlock;

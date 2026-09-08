@@ -16,6 +16,9 @@ test("modern OpenAI API models use the reference tokenizer while unknown API rou
   const modern = await measure(openai, request);
   assert.equal(modern, await measure(openaiCodex, request));
   assert.equal(openai.inputTokenization?.(request.model), "o200k-reference");
+  request.model = "gpt-6-astra";
+  assert.equal(await measure(openai, request), modern);
+  assert.equal(openai.inputTokenization?.(request.model), "o200k-reference");
   request.model = "gpt-4";
   const legacy = await measure(openai, request);
   assert.ok(legacy > modern);
