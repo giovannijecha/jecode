@@ -4,8 +4,8 @@
 // code units — wrong three ways at once. An emoji is two units and two cells,
 // a CJK glyph is one unit and two cells, a combining accent is one unit and no
 // cell at all. Every alignment in the UI depends on this file being right:
-// the right-hand column, a ground band, the cursor. Nothing measures with
-// `.length`.
+// the right-hand column, a ground band, the cursor. Only printable ASCII has
+// a cell width equal to its UTF-16 length.
 
 import { graphemes, segmentGraphemes } from "../text-boundary.ts";
 export { graphemes } from "../text-boundary.ts";
@@ -118,6 +118,9 @@ export function charWidth(cluster: string): number {
 }
 
 export function textWidth(text: string): number {
+  // Most chrome, paths and code are printable ASCII. Avoid allocating a
+  // grapheme record per character; any other input keeps Unicode boundaries.
+  if (!/[^\x20-\x7e]/u.test(text)) return text.length;
   let total = 0;
   for (const cluster of segmentGraphemes(text)) total += charWidth(cluster.segment);
   return total;

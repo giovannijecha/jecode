@@ -8,6 +8,9 @@ install artifacts and provenance are published with the [npm package].
 
 ### Changed
 
+- Avoid per-character Unicode segmentation when measuring wholly printable
+  ASCII text, reducing terminal rendering work and allocation pressure while
+  preserving control, combining-mark, emoji, and wide-character handling.
 - Include guidance received during metadata lookup, input measurement, or
   compaction in the first subsequent generation, with a revised input budget.
 - Reject truncated, refused, and tool-bearing summaries before replacing model

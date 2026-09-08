@@ -652,6 +652,9 @@ Tiny terminals receive a fixed recovery frame instead of overflowing chrome.
 
 Terminal cell measurement, truncation, styled spans, and editor movement share
 grapheme boundaries across combining marks, emoji, and wide CJK glyphs.
+Width measurement handles wholly printable ASCII directly without allocating
+grapheme records. Controls and any non-ASCII content retain the Unicode path;
+there is no retained text cache or change to wrapping and cursor boundaries.
 Untrusted text is neutralized before measurement and paint: control sequences,
 ESC/CSI/OSC, delete, and bidirectional controls remain visible data. Renderer
 styling escapes are introduced only after that boundary. `NO_COLOR` preserves

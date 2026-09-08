@@ -45,6 +45,9 @@ The [context and turn continuity checks](CONTEXT-CONTINUITY-2026-09-08.md)
 record subsequent fixes for guidance during preparation, unusable summaries,
 and OpenAI terminal-output validation, including durable TUI recovery tests.
 They are deterministic development checks, not a new live comparison.
+The [terminal width investigation](TUI-WIDTH-2026-09-08.md) follows the menu
+latency signal from PR #138, profiles allocation pressure, and compares a
+printable-ASCII measurement path using the unchanged synthetic TUI benchmark.
 
 ## Prepare the record
 
