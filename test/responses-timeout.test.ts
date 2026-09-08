@@ -40,6 +40,14 @@ async function waitingStream(t: TestContext, transport: "websocket" | "http", pr
     },
   });
   const session = new ResponsesSession();
+  const events = session.events.bind(session);
+  let received: ((event: unknown) => void) | undefined;
+  t.mock.method(session, "events", async function* (...args: Parameters<ResponsesSession["events"]>) {
+    for await (const event of events(...args)) {
+      received?.(event);
+      yield event;
+    }
+  });
   const control = new AbortController();
   t.after(async () => { control.abort(); session.close(); await server.close(); t.mock.timers.reset(); });
   let settled = false;
@@ -51,7 +59,23 @@ async function waitingStream(t: TestContext, transport: "websocket" | "http", pr
   await ready;
   await flush();
   return {
-    emit: (value: unknown) => emit(value),
+    async deliver(value: unknown) {
+      const delivered = new Promise<void>((resolve, reject) => {
+        received = event => {
+          try { assert.deepEqual(event, value); resolve(); }
+          catch (error) { reject(error); }
+        };
+      });
+      emit(value);
+      try {
+        await Promise.race([delivered, result.then(value => {
+          throw value instanceof Error ? value : new Error("stream ended before fixture delivery");
+        })]);
+      } finally { received = undefined; }
+      // A loopback write or one event-loop turn does not prove client receipt.
+      // Observe the parsed event, including keepalives, before advancing time.
+      await flush();
+    },
     async tick(milliseconds: number) { now += milliseconds; t.mock.timers.tick(milliseconds); await flush(); },
     settled: () => settled,
     generations: () => generations,
@@ -66,15 +90,13 @@ for (const transport of ["websocket", "http"] as const) {
     test(`${providerId} ${transport} accepts sparse reasoning without a two-minute cutoff`, async t => {
       const stream = await waitingStream(t, transport, providerId);
       // Arm a new application deadline under the controlled clock.
-      stream.emit({ type: "response.reasoning_summary_text.delta", delta: "thinking" });
-      await flush();
+      await stream.deliver({ type: "response.reasoning_summary_text.delta", delta: "thinking" });
       await stream.tick(150_000);
       assert.equal(stream.settled(), false, "a sparse reasoning gap is not a failed connection");
-      stream.emit({ type: "response.reasoning_summary_text.delta", delta: "more thinking" });
-      await flush();
+      await stream.deliver({ type: "response.reasoning_summary_text.delta", delta: "more thinking" });
       await stream.tick(150_000);
       assert.equal(stream.settled(), false, "substantive progress renews the deadline");
-      stream.emit(completed());
+      await stream.deliver(completed());
       const result = await stream.result;
       assert.ok(!(result instanceof Error), String(result));
       assert.equal(result.status, "completed");
@@ -84,12 +106,10 @@ for (const transport of ["websocket", "http"] as const) {
 
   test(`${transport} keepalives cannot extend the model progress deadline or authorize replay`, async t => {
     const stream = await waitingStream(t, transport);
-    stream.emit({ type: "response.reasoning_summary_text.delta", delta: "thinking" });
-    await flush();
+    await stream.deliver({ type: "response.reasoning_summary_text.delta", delta: "thinking" });
     for (let index = 0; index < 2; index++) {
       await stream.tick(100_000);
-      stream.emit({ type: "response.in_progress" });
-      await flush();
+      await stream.deliver({ type: "response.in_progress" });
     }
     await stream.tick(99_999);
     assert.equal(stream.settled(), false);
@@ -106,8 +126,7 @@ for (const transport of ["websocket", "http"] as const) {
 
   test(`${transport} cancellation during sparse reasoning stops without waiting or replay`, async t => {
     const stream = await waitingStream(t, transport);
-    stream.emit({ type: "response.reasoning_summary_text.delta", delta: "thinking" });
-    await flush();
+    await stream.deliver({ type: "response.reasoning_summary_text.delta", delta: "thinking" });
     await stream.tick(150_000);
     assert.equal(stream.settled(), false);
     const interrupted = new Error("user interrupted sparse reasoning");
