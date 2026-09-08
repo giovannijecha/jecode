@@ -10,6 +10,7 @@ import {
   type ProviderFailureKind,
 } from "./providers/failure.ts";
 import type { HttpError } from "./providers/http.ts";
+import { transportFailureDiagnostic } from "./providers/transport-error.ts";
 
 const MAX_MESSAGE_CHARS = 1_000;
 const MAX_REASON_CHARS = 500;
@@ -21,7 +22,10 @@ export function providerFailure(
   labelProvider = false,
 ): string {
   const details = providerFailureDetails(provider.id, error);
-  let failure = actionableFailure(provider.id, details.kind) ?? rawFailure(error);
+  const disconnected = details.kind === "network" &&
+    transportFailureDiagnostic(error).transportFailure === "closed";
+  let failure = disconnected ? "model stream disconnected · send a message to continue"
+    : actionableFailure(provider.id, details.kind) ?? rawFailure(error);
 
   if (details.requestId !== undefined) failure += ` · request ${details.requestId}`;
 
@@ -47,6 +51,8 @@ function actionableFailure(providerId: string, kind: ProviderFailureKind): strin
       return "context limit reached · compact the conversation or choose a larger-context model";
     case "network":
       return "network request failed · check the connection and retry";
+    case "timeout":
+      return "model stream timed out while waiting for progress · send a message to continue";
     case "unknown":
       return undefined;
   }

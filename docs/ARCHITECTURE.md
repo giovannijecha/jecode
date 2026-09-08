@@ -40,7 +40,7 @@ fallback execution surface.
 
 There are no subagents, workers, delegated tasks, or concurrent controller
 loops. One model response may overlap consecutive read-only tool calls inside a bounded
-four-call wave; writes, commands, approvals, and unknown tools remain ordered
+four-call pool; each free slot starts the next read. Writes, commands, approvals, and unknown tools remain ordered
 barriers. Complex work advances through more iterations of the same loop.
 
 ## One turn
@@ -49,6 +49,16 @@ barriers. Complex work advances through more iterations of the same loop.
 does not assign an assistant or product identity to the model or automatically
 ingest repository files. Project identity enters context only through
 workspace content the model reads or content the user supplies.
+
+The prompt asks the model to group related, non-overlapping edits once reads
+establish what must change, inspect results before dependent changes, and collect
+known review fixes before verification. This reduces unnecessary model round trips;
+it does not change tool execution order, reasoning effort or required checks.
+
+Transport diagnostics distinguish the last recognized response phase from the
+first visible stream event. OpenAI WebSocket output may already contain opaque
+reasoning without visible text; phase observations do not authorize generation
+replay or establish that a response has been durably saved.
 
 `runTurn` owns the protocol:
 
@@ -61,7 +71,7 @@ workspace content the model reads or content the user supplies.
    empty. Pending guidance instead joins the same turn and opens another
    provider request.
 5. Otherwise preview each call, request approval when required, and execute it.
-   Consecutive shared reads run in bounded parallel waves; exclusive calls
+   Consecutive shared reads run in a bounded pool that refills as reads finish; exclusive calls
    remain ordered barriers. Collect every result in original call order inside
    one user message, then append any queued guidance.
 6. Repeat until the model answers, the user interrupts, or a fatal error occurs.
@@ -83,6 +93,12 @@ user message in canonical and model-facing history and remains inside the same
 conversation node. An atomic empty-and-close handshake prevents guidance from
 arriving between final completion and persistence; interruption returns any
 unconsumed guidance to the composer.
+
+Guidance received during capacity discovery, measurement, or compaction is
+consumed before the prepared request starts generation. The revised projection
+is measured and fitted again, including guidance that arrives during that await;
+this does not start another summary or authorize a retry of an unchanged
+context-rejected request. Canonical guidance is retained on preparation failure.
 
 If an interactive provider turn fails or is interrupted, the TUI seals the
 visible partial evidence and commits an explicit `failed` or `interrupted`
@@ -172,7 +188,7 @@ Each provider has three responsibilities:
 
 - `*-wire.ts` translates complete requests and responses.
 - `*-stream.ts` assembles authoritative responses from events.
-- `*.ts` applies authentication, model-specific fields, and HTTP transport.
+- `*.ts` applies authentication, model-specific fields, and transport.
 
 Streamed text is display-only. The complete message returned by `send` is the
 only assistant message appended to history. Anthropic thinking signatures and
@@ -181,11 +197,48 @@ request can echo them without corrupting or inventing fields. Ollama reasoning
 is retained with the assistant tool call for compatible Chat Completions
 continuations. Cross-provider history falls back to normalized content.
 
+Adapters also return a live completion outcome (`complete`, `incomplete`, or
+`refused`). It is not serialized into sessions or sent back to the provider.
+Compaction rejects incomplete/refused responses and unexpected tool blocks
+before creating a replacement anchor; usage still contributes to accounting.
+OpenAI terminal envelopes carrying an error or a nonterminal/failed status cannot
+commit a response or authorize tools. A nonempty final output is authoritative;
+streamed complete items are a fallback only when the final output is empty.
+
 OpenAI Responses requests use `store: false` and request encrypted reasoning
 content for stateless continuation. The `openai` provider authenticates with
 `OPENAI_API_KEY`; the separate `openai-codex` provider uses an explicitly
 connected ChatGPT account and the ChatGPT Codex backend. Their opaque history
 is tagged separately so it is never replayed across those trust boundaries.
+`Provider.openTurn` optionally supplies a transport scope. The controller closes
+it on completion, cancellation, and failure, including checkpoint failure.
+OpenAI routes use `responses-request.ts` for shared assembly and
+`responses-session.ts` for a persistent WebSocket during that scope. Node's
+native WebSocket owns framing; `websocket.ts` bounds decoded messages, queued
+events, and waits. `websocket-upgrade.ts` implements its documented dispatcher
+contract with standard-library HTTP(S), retaining socket ownership so a peer
+that ignores close frames cannot keep an abandoned turn connected. A failed upgrade before `response.create` falls back to the
+existing HTTP path for the rest of the turn. Direct sends, including compaction,
+use HTTP.
+
+Native socket errors after the open event are classified as disconnections,
+not failed handshakes. Both native error and close paths preserve their bounded
+cause diagnostics. The UI offers continuation; it does not start a retry.
+The recovery integration test uses a real loopback WebSocket, a committed tool
+effect, an incomplete later call, durable exit/resume and a new user request.
+
+Incremental requests use `previous_response_id` only when request settings and
+every prior input/output item match stored hashes. Only new input is uploaded;
+canonical messages retain complete provider output, encrypted reasoning, and
+usage. Changed settings, replaced or clipped context, authentication changes,
+reconnects, and a resumed conversation require a full request. The connection
+and predecessor state never enter persisted data. An explicit
+`previous_response_not_found` before any event is forwarded permits one full
+retry; other streaming failures surface without replay. Initial WebSocket
+rejections preserve structured status for authentication and context recovery,
+without enabling those retries after forwarded stream events. Account HTTP
+fallback retains a bounded `x-codex-turn-state` routing header for the current turn
+and authorization only. Neither route changes effort or opts into paid priority.
 Model selection stores the provider and model together, while the footer keeps
 that route visible. Connecting an account or adding a key never changes it.
 OpenAI API requests carry a random client request identifier and bounded server
@@ -206,7 +259,7 @@ result makes the failure explicit.
 
 The shared HTTP client owns bounded transport but not provider semantics.
 Adapters normalize authentication, billing, quota, rate-limit, overload,
-context, network, and unknown failures. Idempotent catalogue GETs may retry
+context, network, local stream timeout, and unknown failures. Idempotent catalogue GETs may retry
 transient network, rate-limit, and 5xx failures. A streaming generation gets one
 retry only when its adapter classifies a pre-stream rejection as a transient
 rate limit and the provider supplies an explicit delay. Billing and quota stops
@@ -215,9 +268,31 @@ and interruptible.
 Generation POSTs are never replayed after an ambiguous network error, a server
 failure, or any stream progress. A generation reports whether it is connecting
 or waiting for the model. A request has 60 seconds to receive response headers,
-and an open JSON or SSE body can remain idle for at most 120 seconds. OpenAI
-Responses streams also have five minutes to produce substantive model progress;
-protocol keepalives do not extend that deadline.
+and a JSON body or a stream without a semantic progress policy can remain idle
+for at most 120 seconds. OpenAI Responses streams instead have five minutes
+between substantive model events, on both HTTP and WebSocket. Sparse reasoning
+does not encounter a separate two-minute cutoff. Protocol keepalives and partial
+SSE framing do not extend the progress deadline; cancellation still stops the wait.
+WebSocket upgrades have a five-second deadline before HTTP fallback. Open sockets
+use the shared `stream-timeout.ts` model-progress policy. Each decoded
+WebSocket message is limited to one million characters and its queue to 4,096
+events or four million characters, with the same aggregate budget as SSE.
+The native WebSocket implementation buffers a complete frame/message before the
+application can validate it; these are decoded-event limits, not a custom frame parser.
+`transport-error.ts` keeps local protocol/size rejection distinct from connectivity
+failure through provider normalization. A local stream timeout is reported as a
+wait for model progress, without attributing it to a failed network connection.
+Opt-in diagnostics retain only fixed
+failure categories, numeric close codes, received-event counts/sizes, connection
+age and time since the latest decoded message. EOF and pre-teardown native-error
+flags distinguish observed symptoms without asserting a root cause. Peer reasons,
+frames, addresses and native error details never enter the recording.
+
+On a provider protocol terminator, SSE assembly completes immediately. A bounded
+background drain gives HTTP EOF up to 250 ms and 64 KiB of trailing data so fetch
+can reuse the socket. Errors, early consumer exits, cancellation, and excessive
+or stalled tails cancel the body. Ollama's `[DONE]` terminator follows the usage
+chunk; waiting for HTTP EOF is unnecessary. No tail drain delays tool dispatch.
 Process signals cancel the active provider or tool before Jecode exits, with a
 bounded hard-exit fallback. The client handles redirects manually
 and rejects every 3xx response without retrying or forwarding headers to
@@ -229,7 +304,11 @@ or rejects the response before unbounded work reaches the controller.
 Ollama uses the fixed `https://ollama.com` API and requires `OLLAMA_API_KEY`
 for catalogue, metadata, and generation requests. Its access menu uses the same
 key flow as the other API providers. `ollama-context.ts` reads cloud model
-capacity from `/api/show`, caches it briefly, and applies safety headroom;
+capacity from `/api/show`, caches valid metadata for fifteen minutes, and applies
+safety headroom. Missing or failed probes are cached for one minute and use the
+conservative context fallback. Optional probes have a two-second deadline and
+the cache is bounded to 128 models; user cancellation still propagates. These
+limits avoid repeated metadata round trips between tools;
 there is no local daemon discovery, allocation probe, or custom endpoint state.
 `ollama-endpoint.ts` owns the fixed origin and recognizes retired cloud settings
 only for compatibility. Startup rejects other legacy endpoint values before
@@ -263,6 +342,11 @@ the irreducible interval between that final check and the rename.
 
 File reads and whole-file mutations accept regular files only. Reads use
 bounded, cancellable handles that cannot wait on FIFOs or other special files.
+Read results distinguish empty files, blank selected lines, zero requested lines
+and ranges past EOF. EOF notices include the observed line count; scan-budget
+exhaustion remains a separate result and never invents a complete file size.
+Even a zero-length range validates the regular-file boundary. Ordinary read
+content and existing output/scan budgets remain unchanged.
 Identity-sensitive metadata remains bigint, and discovery hands the exact file
 generation to the descriptor reader. A replacement between discovery and open
 is rejected rather than searched.
@@ -568,6 +652,9 @@ Tiny terminals receive a fixed recovery frame instead of overflowing chrome.
 
 Terminal cell measurement, truncation, styled spans, and editor movement share
 grapheme boundaries across combining marks, emoji, and wide CJK glyphs.
+Width measurement handles wholly printable ASCII directly without allocating
+grapheme records. Controls and any non-ASCII content retain the Unicode path;
+there is no retained text cache or change to wrapping and cursor boundaries.
 Untrusted text is neutralized before measurement and paint: control sequences,
 ESC/CSI/OSC, delete, and bidirectional controls remain visible data. Renderer
 styling escapes are introduced only after that boundary. `NO_COLOR` preserves

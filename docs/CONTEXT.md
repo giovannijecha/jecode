@@ -16,9 +16,11 @@ Before each model request, including tool follow-ups, the controller:
    configured threshold. A tool-result character count cannot trigger this.
 4. Measures any replacement context again. If it still cannot fit, applies a
    bounded emergency projection to tool results and measures that projection.
-5. Reserves a useful response budget, clamps the configured output ceiling,
+5. Consumes guidance queued during preparation and measures/fits the updated
+   input again before generation. This recheck does not repeat compaction.
+6. Reserves a useful response budget, clamps the configured output ceiling,
    and sends the streaming request. An irreducible oversized input fails locally.
-6. Associates returned usage with the exact input that produced it.
+7. Associates returned usage with the exact input that produced it.
 
 Completed answers and settled tool batches are checkpointed without starting
 another compaction. Automatic compaction runs only when another model request
@@ -133,6 +135,11 @@ exceeds that limit, even if the server ignores the output token ceiling.
 Acceptance additionally requires at least 20% estimated input savings, at
 least 256 tokens saved, and a result below both the automatic trigger and the
 safe request limit. A weak or oversized result leaves the previous context intact.
+The adapter's live completion outcome must not indicate truncation, refusal, or
+an unfinished response, and the summary must contain only text blocks. These
+checks use protocol outcomes rather than guessing from the summary's wording.
+Rejected responses never replace an existing anchor or canonical conversation;
+manual compaction reports failure and automatic compaction retains its retry gate.
 
 Automatic failures are suppressed until input grows meaningfully; an extra
 message alone is insufficient. A definite provider context-limit rejection

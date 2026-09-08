@@ -8,16 +8,26 @@ import {
   addBounded,
   MAX_SSE_EVENT_CHARS,
 } from "./stream-limits.ts";
+import { drainStreamTail } from "./stream-cleanup.ts";
+
+const DONE = Symbol("SSE done");
+export type SseCompletionPolicy = {
+  terminal?(event: unknown): boolean;
+  doneMarker?: boolean;
+  signal?: AbortSignal;
+};
 
 export async function* readSseJson(
   body: ReadableStream<Uint8Array>,
   maximumChars: number,
   idle?: SseIdlePolicy,
+  completion?: SseCompletionPolicy,
 ): AsyncGenerator<unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
-  const parser = new SseEventParser();
+  const parser = new SseEventParser(completion?.doneMarker);
   let finished = false;
+  let terminated = false;
   let total = 0;
   const progressDeadline = idle?.progress === undefined
     ? undefined
@@ -57,15 +67,22 @@ export async function* readSseJson(
       }
 
       for (const payload of payloads) {
+        if (payload === DONE) { terminated = true; return; }
+        terminated = completion?.terminal?.(payload) === true;
         if (idle?.progress?.observed(payload) === true) progressDeadline?.reset();
         yield payload;
+        if (terminated) return;
       }
     }
     finished = true;
   } finally {
     progressDeadline?.clear();
-    if (!finished) await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
+    if (terminated && !completion?.signal?.aborted) {
+      void drainStreamTail(reader, completion?.signal);
+    } else {
+      if (!finished) await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
   }
 }
 
@@ -174,11 +191,14 @@ class TextParts {
 }
 
 export class SseEventParser {
+  readonly #doneMarker: boolean;
   readonly #line = new TextParts();
   #data: string[] = [];
   #eventLength = 0;
   #hasLine = false;
   #pendingTerminatorLength = 0;
+
+  constructor(doneMarker = false) { this.#doneMarker = doneMarker; }
 
   *push(text: string): Generator<unknown> {
     let start = 0;
@@ -199,6 +219,7 @@ export class SseEventParser {
       if (line === "") {
         const payload = this.#finishEvent();
         if (payload !== undefined) yield payload;
+        if (payload === DONE) return;
       } else {
         this.#appendLine(line, crlf ? 2 : 1);
       }
@@ -246,7 +267,7 @@ export class SseEventParser {
     this.#eventLength = 0;
     this.#hasLine = false;
     this.#pendingTerminatorLength = 0;
-    return parseData(data);
+    return data === "[DONE]" && this.#doneMarker ? DONE : parseData(data);
   }
 }
 

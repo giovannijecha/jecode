@@ -8,6 +8,22 @@ Until `1.0.0`, development is limited to correctness, security, stability,
 performance, recovery, accessibility, documentation, and maintenance of the
 capabilities already present. New product surface is deferred.
 
+Provider transports may reuse connections and send verified incremental context
+within a turn. The normalized response, complete canonical history, reasoning
+effort, tool approvals, and cancellation contract remain unchanged. Transport
+state is process-local; resume and reconnect must work with complete context.
+OpenAI routes fall back to HTTP when WebSocket establishment fails before any
+generation is sent. A failure after generation starts is surfaced without an
+automatic replay. Live provider validation must cover both transport paths.
+OpenAI streams allow up to five minutes between substantive model events on
+either transport. Keepalives do not extend that deadline; cancellation remains
+immediate. A local timeout is distinguished from a connection failure.
+
+Guidance queued during request preparation is included and remeasured before
+generation. Incomplete or refused compaction responses cannot replace saved
+memory. These changes preserve session schemas, canonical history, ordered
+tool execution, and the prohibition on replaying a started generation.
+
 ## Version policy
 
 - Pre-1.0 fixes, hardening, polish, and maintenance advance the patch version.

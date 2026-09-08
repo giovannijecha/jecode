@@ -7,6 +7,7 @@ import { toolInputFromJson } from "./tool-input.ts";
 import { wireTokenCount } from "./wire-usage.ts";
 
 export type OpenAIResponse = {
+  id?: string;
   output?: unknown[];
   incomplete_details?: { reason?: string } | null;
   status?: string;
@@ -73,6 +74,7 @@ export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): M
   const raw = Array.isArray(data.output) ? data.output : [];
   const content: Block[] = [];
   let suppressedFunctionCall = false;
+  let refused = false;
 
   for (const entry of raw) {
     const item = entry as {
@@ -90,6 +92,7 @@ export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): M
         if (piece.type === "output_text" && typeof piece.text === "string") {
           content.push({ kind: "text", text: piece.text });
         } else if (piece.type === "refusal" && typeof piece.refusal === "string") {
+          refused = true;
           content.push({ kind: "text", text: `[refused] ${piece.refusal}` });
         }
       }
@@ -119,6 +122,8 @@ export function fromWireResponse(data: OpenAIResponse, providerId = "openai"): M
   return {
     role: "assistant",
     content,
+    completion: refused ? "refused" : data.status === "completed" && !suppressedFunctionCall
+      ? "complete" : "incomplete",
     ...(data.status === "completed" && !suppressedFunctionCall
       ? { raw, rawFrom: providerId }
       : {}),

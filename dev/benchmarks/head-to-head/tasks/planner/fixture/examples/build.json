@@ -1,0 +1,1 @@
+{"tasks":[{"id":"compile","deps":["lint"],"duration":5},{"id":"lint","deps":[],"duration":2},{"id":"test","deps":["compile"],"duration":3}]}

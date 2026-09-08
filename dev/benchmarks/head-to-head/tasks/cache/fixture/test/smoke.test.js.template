@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createDirectory } from '../src/service.js';
+
+test('sequential reads reuse a loaded user until invalidated', async () => {
+  let calls = 0;
+  const directory = createDirectory(async id => ({ id, revision: ++calls }));
+  assert.deepEqual(await directory.user('alice'), { id: 'alice', revision: 1 });
+  assert.equal((await directory.user('alice')).revision, 1);
+  directory.changed('alice');
+  assert.equal((await directory.user('alice')).revision, 2);
+});

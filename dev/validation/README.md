@@ -8,6 +8,46 @@ repeatable checks and the evidence to collect; it is not a completed report.
 
 The [2026-09-06 context investigation](CONTEXT-2026-09-06.md) records focused
 development evidence separately from release-candidate acceptance.
+The [2026-09-07 provider transport checks](PROVIDER-TRANSPORT-2026-09-07.md)
+record local transport and scheduling validation, with live checks still open.
+The [2026-09-07 Codex/Jecode comparison](HEAD-TO-HEAD-2026-09-07.md) records a
+separate live WSL experiment, including an interrupted run. It is not a release
+acceptance record or evidence that all provider routes have been validated.
+The [progress-deadline follow-up](HEAD-TO-HEAD-PROGRESS-2026-09-07.md) keeps the
+timeout regression and subsequent live comparison separate from that baseline.
+The [planning experiment](HEAD-TO-HEAD-PLANNING-2026-09-07.md) records six new
+task trials, a separately hashed grouping instruction and a live interruption/
+resume check. That report kept the instruction experimental; timings are not a ranking
+or a replacement for candidate validation.
+The [quality and follow-up investigation](HEAD-TO-HEAD-QUALITY-2026-09-08.md)
+reviews saved artifacts, distinguishes behavioral defects from incompatible
+test assumptions, and records a new change against the existing planner contract.
+It retains a WebSocket-failed baseline, documents native sandbox capture failures,
+and kept grouping experimental pending a complete repeat. Artifact test success
+alone is not successful task completion.
+The [integration repeat](HEAD-TO-HEAD-INTEGRATION-2026-09-08.md) controls command
+networking before timing, verifies real WebSocket failure recovery and records
+the next six-run comparison separately. Both grouped trials satisfy the frozen
+contract, and their instruction is now integrated. The repeat finds lower elapsed
+time than the Jecode baseline, slightly higher elapsed time than Codex, and no
+demonstrated general output-quality advantage.
+The [durable execution comparison](HEAD-TO-HEAD-DURABLE-2026-09-08.md) extends
+the task to asynchronous scheduling, cancellation, durable restart and atomic
+storage. It keeps the contract-instruction experiment, evaluator corrections
+and supplementary review findings distinct from the previous integrated result.
+The [daily-driver investigation](DAILY-DRIVER-2026-09-08.md) separates transport
+fault-boundary checks, an optional work-state experiment, and two new held-out
+tasks across eighteen completed trials. It retains original acceptance and
+supplementary quality findings separately, and rejects promotion of the slower
+work-state candidate. Experimental tools are not part of the installed product
+surface; the result does not establish a general advantage over Codex.
+The [context and turn continuity checks](CONTEXT-CONTINUITY-2026-09-08.md)
+record subsequent fixes for guidance during preparation, unusable summaries,
+and OpenAI terminal-output validation, including durable TUI recovery tests.
+They are deterministic development checks, not a new live comparison.
+The [terminal width investigation](TUI-WIDTH-2026-09-08.md) follows the menu
+latency signal from PR #138, profiles allocation pressure, and compares a
+printable-ASCII measurement path using the unchanged synthetic TUI benchmark.
 
 ## Prepare the record
 
@@ -60,6 +100,11 @@ cancellation, resumed access after restarting Jecode, a streamed tool turn, and
 interruption. Record transient upstream limitations explicitly. Do not use a
 live account to deliberately provoke rate limits; automated HTTP fixtures cover
 retry, rate-limit, and malformed-stream cases.
+
+For OpenAI API and Account, distinguish WebSocket reuse from HTTP fallback in
+the optional [request diagnostics](../context/README.md). Exercise a multi-tool
+turn, cancellation, resumed context, and compaction. Confirm incremental input
+is used only for a valid continuation and a failed generation is not replayed.
 
 ## Terminal and accessibility paths
 

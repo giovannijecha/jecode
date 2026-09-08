@@ -66,6 +66,9 @@ test("expired cloud context metadata is refreshed", async () => {
       };
       assert.deepEqual(await ollama.contextWindow!("cloud-expiry"), { tokens: 124_518 });
       now += 30_001;
+      assert.deepEqual(await ollama.contextWindow!("cloud-expiry"), { tokens: 124_518 });
+      assert.equal(requests, 1, "tool round trips reuse stable capacity metadata");
+      now += 15 * 60_000;
       assert.deepEqual(await ollama.contextWindow!("cloud-expiry"), { tokens: 62_259 });
       assert.equal(requests, 2);
     } finally { Date.now = realNow; }
@@ -102,6 +105,55 @@ test("cloud context cancellation propagates even with a cached capacity", async 
       throw active.signal.reason;
     };
     await assert.rejects(ollama.contextWindow!("cloud-cancel-active", active.signal), /context interrupted/);
+  });
+});
+
+test("missing cloud metadata is briefly cached and retried after expiry", async () => {
+  await inOllamaHome(async () => {
+    process.env["OLLAMA_API_KEY"] = "fixture-key";
+    const realNow = Date.now;
+    let now = realNow();
+    let requests = 0;
+    Date.now = () => now;
+    try {
+      globalThis.fetch = async () => { requests++; return json({}); };
+      assert.equal(await ollama.contextWindow!("negative-cache"), undefined);
+      assert.equal(await ollama.contextWindow!("negative-cache"), undefined);
+      assert.equal(requests, 1);
+      now += 60_001;
+      globalThis.fetch = async () => { requests++; return json({ model_info: { "fixture.context_length": 32_768 } }); };
+      assert.deepEqual(await ollama.contextWindow!("negative-cache"), { tokens: 31_129 });
+      assert.equal(requests, 2);
+    } finally { Date.now = realNow; }
+  });
+});
+
+test("optional cloud metadata has a short timeout and caches unavailable probes", async () => {
+  await inOllamaHome(async () => {
+    process.env["OLLAMA_API_KEY"] = "fixture-key";
+    let requests = 0;
+    globalThis.fetch = async (_input, init) => {
+      requests++;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      });
+    };
+    const started = performance.now();
+    assert.equal(await ollama.contextWindow!("timeout-cache"), undefined);
+    assert.ok(performance.now() - started < 10_000);
+    assert.equal(await ollama.contextWindow!("timeout-cache"), undefined);
+    assert.equal(requests, 1);
+  });
+});
+
+test("changing an Ollama key invalidates a missing metadata observation", async () => {
+  await inOllamaHome(async () => {
+    process.env["OLLAMA_API_KEY"] = "old-fixture";
+    globalThis.fetch = async () => json({});
+    assert.equal(await ollama.contextWindow!("changed-key"), undefined);
+    process.env["OLLAMA_API_KEY"] = "new-fixture";
+    globalThis.fetch = async () => json({ model_info: { "fixture.context_length": 32_768 } });
+    assert.deepEqual(await ollama.contextWindow!("changed-key"), { tokens: 31_129 });
   });
 });
 

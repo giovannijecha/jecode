@@ -94,6 +94,9 @@ export function fromWireReply(reply: ChatReply): Message {
   return {
     role: "assistant",
     content,
+    completion: reply.finishReason === "content_filter" ? "refused"
+      : !suppressedToolCall && (reply.finishReason === "stop" || reply.finishReason === "tool_calls")
+        ? "complete" : "incomplete",
     ...(raw === undefined ? {} : { raw, rawFrom: "ollama" }),
     usage: normalizeUsage(reply),
   };

@@ -74,6 +74,7 @@ export const ollama: Provider = {
         req.onStatus,
         undefined,
         (error) => isRetryableGenerationFailure(ID, error),
+        { doneMarker: true, onTransport: req.onTransport },
       );
       const reply = await assembleOllama(events, req.onStream);
       const notice = stopNotice(reply);

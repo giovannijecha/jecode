@@ -48,6 +48,8 @@ export type Message = {
   rawFrom?: string;
   /** Usage for the request that produced this assistant message. */
   usage?: Usage;
+  /** Live generation outcome, not persisted or replayed. Missing on legacy/fixture messages. */
+  completion?: "complete" | "incomplete" | "refused";
 };
 
 export type ToolSpec = {
@@ -88,6 +90,32 @@ export type SendRequest = {
   onStream?: (event: StreamEvent) => void;
   /** Provider and HTTP lifecycle updates that are useful on a live screen. */
   onStatus?: (status: string) => void;
+  /** Bounded transport observations; never includes URLs, credentials, or payloads. */
+  onTransport?: (event: TransportObservation) => void;
+};
+
+export type ResponseStage = "awaiting" | "accepted" | "output" | "terminal";
+
+export type TransportObservation = Readonly<{
+  transport: "http" | "websocket";
+  connectMs: number;
+  requestBytes: number;
+  reused?: boolean;
+  incremental?: boolean;
+  fallback?: boolean;
+  receivedEvents?: number;
+  receivedChars?: number;
+  largestEventChars?: number;
+  connectionAgeMs?: number;
+  lastMessageAgeMs?: number;
+  socketReadEnded?: boolean;
+  nativeWebSocketError?: boolean;
+  responseStage?: ResponseStage;
+}>;
+
+export type ProviderTurn = {
+  send(req: SendRequest): Promise<Message>;
+  close(): void;
 };
 
 /** Input identity and content needed to estimate one outgoing provider request. */
@@ -133,6 +161,8 @@ export type Provider = {
   measureInput?(request: RequestInput, signal?: AbortSignal): Promise<number>;
   /** Diagnostic description of the local counter, never a provider-exact claim. */
   inputTokenization?(model: string): "o200k-reference" | "heuristic";
+  /** Optional process-local transport scope, released at every turn settlement. */
+  openTurn?(): ProviderTurn;
   send(req: SendRequest): Promise<Message>;
 };
 

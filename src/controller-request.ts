@@ -34,6 +34,7 @@ export async function requestAssistant(
   events: ControllerEvents,
   meter: InputMeter,
   signal?: AbortSignal,
+  acceptSteering?: (context: Message[]) => boolean,
 ): Promise<ControllerResponse> {
   let preparing = performance.now();
   let policy = await options.contextPolicy();
@@ -56,6 +57,23 @@ export async function requestAssistant(
   let recovered = false;
 
   for (;;) {
+    signal?.throwIfAborted();
+    // Preparation can include a slow metadata lookup or summary. Consume new
+    // guidance before generation, then measure the actual revised request.
+    // Recheck after asynchronous measurement too; do not repeat compaction.
+    while (acceptSteering?.(context) === true) {
+      const fitted = await observePreparation(policy, "budget", signal, async () => {
+        const input = { model: options.model, effort: options.effort,
+          system: options.system, messages: context, tools: specs };
+        const measured = await meter.measure(input, signal);
+        return fitRequestInput(input, meter, policy, measured, signal);
+      });
+      requestMessages = fitted.messages;
+      measurement = fitted.measurement;
+      inputTokens = measurement.inputTokens;
+      clippedResults = fitted.clippedResults;
+      signal?.throwIfAborted();
+    }
     const budget = budgetRequestFromInputTokens(inputTokens, options.maxTokens, policy);
     try {
       const message = await sendObserved(options.provider, {

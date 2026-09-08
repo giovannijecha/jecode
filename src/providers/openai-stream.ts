@@ -5,10 +5,35 @@
 // an empty final `output` after complete `response.output_item.done` events, so
 // those streamed items remain the fallback when the final envelope is empty.
 
-import type { StreamEvent } from "../types.ts";
+import type { ResponseStage, StreamEvent } from "../types.ts";
 import { providerWireError } from "./failure.ts";
 import type { OpenAIResponse } from "./openai-wire.ts";
 import { OpenAISummary } from "./openai-summary.ts";
+
+const OUTPUT_EVENTS = new Set([
+  "response.output_item.added", "response.output_item.done",
+  "response.content_part.added", "response.content_part.done",
+  "response.output_text.delta", "response.output_text.done",
+  "response.refusal.delta", "response.refusal.done",
+  "response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+  "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done",
+  "response.function_call_arguments.delta", "response.function_call_arguments.done",
+]);
+
+/** Diagnostic phase only: output can be opaque reasoning, not visible text or a saved result. */
+export function openAIResponseStage(value: unknown, previous: ResponseStage): ResponseStage {
+  if (previous === "terminal" || typeof value !== "object" || value === null || !("type" in value)) return previous;
+  if (openAITerminalEvent(value) || value.type === "error") return "terminal";
+  if (typeof value.type === "string" && OUTPUT_EVENTS.has(value.type)) return "output";
+  if (previous === "awaiting" && (value.type === "response.created" || value.type === "response.in_progress")) return "accepted";
+  return previous;
+}
+
+export function openAITerminalEvent(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !("type" in value)) return false;
+  return value.type === "response.completed" || value.type === "response.done" ||
+    value.type === "response.incomplete" || value.type === "response.failed";
+}
 
 export async function assembleOpenAI(
   events: AsyncIterable<unknown>,
@@ -231,8 +256,14 @@ function toolIdentities(
 
 function reconcileOutput(completed: OpenAIResponse | undefined, items: unknown[]): OpenAIResponse {
   if (completed === undefined) return { output: items };
+  if (completed.error != null || (completed.status !== undefined &&
+      completed.status !== "completed" && completed.status !== "incomplete")) {
+    throw providerWireError("openai stream error", completed.error?.message ?? "Response did not complete", {
+      code: completed.error?.code, type: completed.error?.type,
+    });
+  }
   const finalCount = Array.isArray(completed.output) ? completed.output.length : 0;
-  return items.length > finalCount ? { ...completed, output: items } : completed;
+  return finalCount === 0 && items.length > 0 ? { ...completed, output: items } : completed;
 }
 
 function withDefaultStatus(response: OpenAIResponse, status: string): OpenAIResponse {

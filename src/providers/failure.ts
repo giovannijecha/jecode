@@ -4,6 +4,7 @@
 
 import { leadingText } from "../text-boundary.ts";
 import type { HttpError } from "./http.ts";
+import { TransportError } from "./transport-error.ts";
 
 const MAX_WIRE_ERROR_CHARS = 2_000;
 
@@ -15,6 +16,7 @@ export type ProviderFailureKind =
   | "overload"
   | "context"
   | "network"
+  | "timeout"
   | "unknown";
 
 export type ProviderFailureDetails = Readonly<{
@@ -88,6 +90,7 @@ export function providerFailureDetails(
   providerId: string,
   error: Error,
 ): ProviderFailureDetails {
+  if (error instanceof TransportError) return { kind: error.kind };
   if (error instanceof ProviderRequestError) {
     return compact({
       kind: error.kind,

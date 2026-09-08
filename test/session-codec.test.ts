@@ -29,6 +29,7 @@ test("session node codec round-trips normalized history without provider raw dat
         }],
         raw: { encrypted: "must not survive" },
         rawFrom: "openai-codex",
+        completion: "complete",
         usage: {
           inputTokens: 10,
           outputTokens: 3,
@@ -71,7 +72,7 @@ test("session node codec round-trips normalized history without provider raw dat
   );
   assert.doesNotMatch(
     encoded,
-    /must not survive|rawFrom|"raw"|inputError|transient parse failure/,
+    /must not survive|rawFrom|"raw"|inputError|transient parse failure|"completion"/,
   );
   const decoded = decodeNode(JSON.parse(encoded));
 

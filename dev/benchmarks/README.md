@@ -1,6 +1,14 @@
 # Performance probes
 
 These six probes exercise distinct production paths with synthetic fixtures.
+The separate [local agent comparison](head-to-head/README.md) runs authorized
+live tasks through Codex and Jecode in WSL, with fixed acceptance checks and
+explicitly different measurement boundaries. It is an optional development
+experiment, not a seventh synthetic probe or a CI timing gate.
+Its [planning experiment](head-to-head/PLANNING.md) compares an isolated prompt
+variant on cache and graph-planner tasks, with recovery measured separately.
+The [quality workflow](head-to-head/QUALITY.md) reviews saved outputs, applies
+common behavioral probes and evaluates a follow-up change on identical files.
 The [collection and comparison workflow](AUTOMATION.md) runs these same probes
 on pull requests, relevant main updates, weekly, and on demand, retaining JSON
 evidence. Individual commands remain useful for local investigations.
