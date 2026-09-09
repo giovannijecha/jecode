@@ -12,7 +12,7 @@ import { runApp } from "../../src/tui/app.ts";
 import { CONTEXT_DIAGNOSTIC_CHANNEL, safeDiagnostic } from "../../src/context/diagnostics.ts";
 import type { ContextDiagnostic } from "../../src/context/diagnostics.ts";
 import { session } from "../test-support/app.ts";
-import { virtualScreen, waitFor, waitForIdle } from "../test-support/app-harness.ts";
+import { plainRow, virtualScreen, waitFor, waitForIdle } from "../test-support/app-harness.ts";
 import { contextFixture, SUMMARY } from "./context-fixture.ts";
 import { CORPUS_SEED, mixedCorpus } from "./corpus.ts";
 import { distribution } from "./samples.ts";
@@ -85,6 +85,11 @@ export async function integratedContextProbe(columns = 60, reads = 12, terminati
     const feed = await screen.input();
     feed("Inspect all fixture files and preserve the API.\r");
     await wait(() => fixture.state().waiting, "stream awaiting interruption");
+    // Server writes can precede client delivery and painting by several frames.
+    if (termination === "interrupt") {
+      await wait(() => screen.frames.some(frame => frame.some(row =>
+        plainRow(row).includes("Waiting for fixture interruption."))), "visible partial stream");
+    }
     const interruption = performance.now();
     if (termination === "interrupt") feed("\x1b");
     await wait(() => first.conversation.activeNode?.settlement ===

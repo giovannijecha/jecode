@@ -124,6 +124,14 @@ before considering a new format or cache.
 
 ## Next evidence
 
+PR review found a race in the new integration fixture: the server's pending flag
+could become observable before the client received its partial text. A controlled
+60 ms delivery delay reproduced the old assertion failure. Waiting for the
+rendered partial text before Esc passed the same reproduction; the delayed case
+is now an automated regression. This changes the interruption workload timing
+boundary; the working-tree observations above predate this fix and are not the
+new clean baseline. The runtime and parser measurements are unaffected.
+
 Review and merge these laboratory changes after CI. Establish clean collections
 using the same new methods. For the next live comparison, freeze held-out complex
 tasks and a blind quality rubric before generation, then counterbalance clients

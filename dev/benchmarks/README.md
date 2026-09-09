@@ -113,6 +113,10 @@ generation/tool replay before new input. Tests cover 40/120 columns and both
 interruption and transport disconnection. Source/JSON/prose/log input comes from
 `corpus.ts` with a recorded fixed seed; it is not a provider-exact token oracle.
 
+The interruption case waits for the partial stream to be painted before sending
+Esc. A separate regression delays delivery from the inert server; server-side
+readiness alone must not trigger premature cancellation.
+
 Reports separate measurement, checkpoint, request preparation, termination and
 resume durations. They retain individual observations. The integrated lifecycle
 is one observation per collector process, not a median of independent user
