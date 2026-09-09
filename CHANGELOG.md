@@ -8,6 +8,11 @@ install artifacts and provenance are published with the [npm package].
 
 ### Changed
 
+- Verify benchmark outputs with mutation calibration and a separate offline
+  Linux CI job. Add an integrated context/streaming/session recovery scenario,
+  catalog cardinality and mixed-content workloads, raw timing distributions,
+  and absolute comparison deltas. Bound and optimize the comparison lab's PTY
+  parser and record its overhead separately from task outcomes.
 - Avoid per-character Unicode segmentation when measuring wholly printable
   ASCII text, reducing terminal rendering work and allocation pressure while
   preserving control, combining-mark, emoji, and wide-character handling.

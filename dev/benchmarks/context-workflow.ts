@@ -28,11 +28,14 @@ export async function contextWorkflowProbe(reads: number) {
     async send(request) {
       if (request.identity?.purpose === "compaction") {
         summaries++;
-        return { role: "assistant", content: [{ kind: "text", text: "Source inspected; continue the requested review." }] };
+        const text = "Source inspected; continue the requested review.";
+        request.onStream?.({ kind: "text", text });
+        return { role: "assistant", content: [{ kind: "text", text }] };
       }
       requests++;
       const inputTokens = estimateRequestInputTokens(request);
       peakInputTokens = Math.max(peakInputTokens, inputTokens);
+      request.onStream?.({ kind: "text", text: toolRuns === reads ? "Review complete." : "Inspecting fixture." });
       assert.ok(inputTokens + request.maxTokens <= policy.requestLimitTokens);
       assert.ok(request.messages.flatMap((m) => m.content)
         .filter((b) => b.kind === "tool_result").every((b) => b.output === evidence));

@@ -48,12 +48,20 @@ nonzero exit code after emitting its report. The other probes report timings
 without a performance pass/fail decision; fixture correctness failures still
 fail the command.
 
+Correctness is checked outside timed intervals. Session probes verify IDs,
+ordering, complete loaded nodes and the final persisted checkpoint; search has
+positive, bounded and negative cases; redaction checks actual fragmented secrets;
+transcript checks fixture content and terminal-cell bounds. Run
+`node dev/benchmarks/validate-probes.ts` to calibrate these entry points against
+six deliberately broken implementations in isolated child processes. A timing
+tripwire does not fail calibration; missing or incorrect work does.
+
 | Probe | Scenario and interpretation |
 | --- | --- |
-| `context.ts` | Load the tokenizer once, then tokenize fresh 4.68-million-character source documents. Estimate one request just below 8 MiB and force a compaction plan for 128 messages totaling 4 MiB. One warm-up, then five measurements; each operation must have a median duration at most 2,000 ms and median maximum event-loop stall at most 75 ms. Then run 12/40 inert 16 KiB reads through the controller and context manager: require zero summaries for the short case and one or two for the long case, while preserving complete canonical evidence. |
-| `redaction.ts` | Redact one 30,000-character non-matching chunk against the maximum supported number of synthetic secrets. One warm-up, then five measurements; report the median. |
-| `search.ts` | Search 600 temporary 4 KiB files for an absent string. One warm-up, then five measurements; report the median. |
-| `session.ts` | Compare checkpoints at 50/750 nodes, catalogues of 12 sessions at 1/200 nodes each, and loads at 1/200/750/1,024 nodes. Warm each scenario first; measure five checkpoint/catalogue runs and three load runs. The report includes all size, duration, scaling, and depth-delta thresholds. |
+| `context.ts` | Cold tokenizer, repetitive 4.68-million-character documents, near-8 MiB estimation and 128-message compaction planning retain their existing tripwires. Add seeded mixed source/JSON/prose/logs, raw timing/stall observations and the integrated lifecycle below. The existing 12/40-read heuristic workflows still require zero and one/two summaries respectively. |
+| `redaction.ts` | Maximum supported synthetic secrets: one 30,000-character miss, complete matches, and one-character chunks with shared prefixes. Separate setup and streaming; one warm-up and five observations per case. |
+| `search.ts` | 600 temporary 4 KiB files, then nested positive matches with binary/oversized exclusions and a result-limit case. Check invalid limits and cancellation separately. One warm-up and five observations per timed case. |
+| `session.ts` | Checkpoints at 50/750 nodes, catalogues of 12 sessions at 1/200 nodes and 50/200 sessions at one node, loads at 1/200/750/1,024 nodes. Five checkpoint/catalogue observations and three load observations after warm-up. Cardinality adds no timing gate. |
 | `transcript.ts` | Render 20,000 answers plus a live reasoning block starting at 200,000 characters. Measure first viewport and background reflow at 100/80/120 columns, 100 cached resizes, 500 stable frames, 200 streaming frames, sealing, and 200 expanded live frames. These are sequential phases on one renderer, not independent median samples. |
 | `tui.ts` | Run the production input loop, frame scheduler, composer, menus, transcript, and differential painter. Compare short/2,000-block histories, 60/120 columns, and a throttled output consumer. Report latency distributions, output pressure, and memory around work/reset/close. See the method below. |
 
@@ -88,6 +96,34 @@ and removes its synthetic data. Repeat on an idle machine with matching Node and
 storage, using the same driver for both checkouts. It adds no timing gate and is
 separate from the six automated probes; its four-case JSON is not a collection
 accepted by `bench:compare`.
+
+## Integrated context lifecycle
+
+`context-integrated.ts`, included in `bench:context`, runs the production TUI,
+controller, Responses wire conversion/stream parser, input measurement, reference
+tokenizer and durable session store. `context-fixture.ts` supplies only an inert
+loopback WebSocket server and a fixed tool with receipts under a disposable root.
+No account, API key, external provider, arbitrary command or user session is used.
+
+The 60-column scenario seeds 32,768 characters of earlier context, processes
+twelve 8,192-character tool results, automatically compacts, interrupts a partial
+stream, exits, resumes and completes one new turn. It verifies complete canonical
+results, the persisted anchor, ordered effects, visible partial text and no
+generation/tool replay before new input. Tests cover 40/120 columns and both
+interruption and transport disconnection. Source/JSON/prose/log input comes from
+`corpus.ts` with a recorded fixed seed; it is not a provider-exact token oracle.
+
+Reports separate measurement, checkpoint, request preparation, termination and
+resume durations. They retain individual observations. The integrated lifecycle
+is one observation per collector process, not a median of independent user
+sessions; full elapsed time includes fixture checks and TUI scheduling. The
+existing repetitive microbenchmarks keep their original thresholds. New mixed
+and integrated scenarios have no timing gate until a stable baseline exists.
+
+Calling `integratedContextProbe()` directly starts with a cold tokenizer; inside
+`bench:context` it runs after tokenizer warm-up. Compare identical entry points
+and phases. Neither this scenario nor the heuristic workflows establish live
+model quality, remote latency or physical-terminal responsiveness.
 
 ## Integrated TUI
 

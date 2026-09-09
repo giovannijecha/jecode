@@ -5,6 +5,32 @@ source snapshot through their real terminal interfaces. It measures complete tas
 outcomes, not pure inference speed or a universal ranking. It is separate from
 the six synthetic performance probes and never ships in the npm runtime.
 
+## Start here
+
+Run `python3 -B dev/benchmarks/head-to-head/offline.py` from the repository on
+Linux or WSL before editing the harness or evaluators. It runs Python tests,
+benchmark correctness calibration, and the self-contained `config-edit` and
+`file-server` evaluator calibrations without credentials or generation. It needs
+Python 3.11+, native Node.js 24.18+, Git, PTYs, and a writable `/var/tmp`; cleanup
+tests intentionally enforce that temporary-directory boundary. Ordinary CI runs
+this entry point in a separate Linux job.
+
+| Area | Status and entry point | Inputs and retained decision |
+| --- | --- | --- |
+| Shared infrastructure | Maintained: `offline.py`, `prepare.py`, `run.py`, `batch.py`, `analyze.py`, `verify.py` | Offline checks are self-contained; live runs need a prepared private laboratory and authorized accounts. |
+| Public held-out tasks | Maintained: `tasks/config-edit/validate-evaluator.mjs`, `tasks/file-server/validate-evaluator.mjs` | Bundled fixtures and reference solutions; use explicit task selection for new comparisons. |
+| Ledger pilot | Completed: default `run.py` task and `acceptance.mjs` | Bundled fixture; preserved to reproduce the initial pilot, not a broad quality claim. |
+| Grouped edits | Completed: `planning_report.py` | Historical private planner starters and frozen runs; the instruction was [integrated](../../validation/HEAD-TO-HEAD-INTEGRATION-2026-09-08.md). |
+| Contract, follow-up, and durability | Historical: quality/follow-up/durable reports and `recover.py` | Prepared private planner/durable starters and saved runs are required; see the [durability evidence](../../validation/HEAD-TO-HEAD-DURABLE-2026-09-08.md). |
+| Work state | Completed, not promoted: `daily_report.py` and `DAILY-EXPERIMENT.json` | Private experimental snapshots and saved runs; [the decision](../../validation/DAILY-DRIVER-2026-09-08.md) remains rejection of promotion. |
+| Transport experiments | Optional: `transport_batch.py ROOT` | An explicitly prepared laboratory and authorized live execution. |
+
+Historical commands do not reconstruct missing private inputs. In particular,
+`precheck.py ROOT` retains historical defaults: select
+`--tasks config-edit file-server --variants baseline` explicitly for the public
+baseline tasks. Offline calibration complements, but does not replace, the live
+preflights and frozen-source verification below.
+
 ## Protocol
 
 - Use native Linux executables and native Linux files in the same WSL2 guest.
@@ -31,6 +57,9 @@ the six synthetic performance probes and never ships in the npm runtime.
 - Compare completion time only alongside the common acceptance results and a
   review of scope, regressions, error handling and test quality. An agent's own
   test count is supporting evidence, not a comparable quality score.
+- For new campaigns, freeze held-out long tasks, acceptance checks, and a blind
+  review rubric before generation. Measure scope compliance and time to a correct
+  outcome; report failed and unfinished tasks separately from completed timings.
 
 The fixture starts with 9 of 56 acceptance checks passing. `PROMPT.md` defines the
 public task; `acceptance.mjs` independently checks CSV parsing, integer money,
@@ -79,6 +108,16 @@ silently reset. Preserve the manifest, outcome, acceptance results and relevant
 transcript evidence. Credentials and raw captures must remain untracked, private
 and local. After the comparison, remove temporary credential copies and retain
 only the evidence needed to reproduce/review conclusions.
+
+The PTY parser advances through each chunk with a read index and retains only an
+incomplete escape suffix, capped at 4,096 characters. Malformed or oversized
+incomplete sequences fail the harness; cleanup still terminates and reaps its
+child. Run and recovery outcomes retain numeric `terminalLifetime` observations:
+chunk/byte counts, largest chunk, chunks above 16 KiB, and total/maximum parser
+time. These include setup and cleanup, exclude raw-log writes, and must not be
+subtracted from model inference time. Older captures lack these observations;
+the parser optimization alone does not quantify bias in earlier comparisons.
+
 `python3 cleanup.py ROOT` removes only account copies in the private `/var/tmp`
 laboratory after all runs have settled. It checks resolved paths before deletion
 and leaves original account stores, projects and measurement records untouched.

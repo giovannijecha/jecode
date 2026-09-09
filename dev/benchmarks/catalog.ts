@@ -1,4 +1,4 @@
-// Focused catalogue-cardinality drill-down. The six CI probes stay unchanged.
+// Focused catalogue-cardinality drill-down with nine samples per case.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

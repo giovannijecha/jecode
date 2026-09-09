@@ -48,6 +48,9 @@ They are deterministic development checks, not a new live comparison.
 The [terminal width investigation](TUI-WIDTH-2026-09-08.md) follows the menu
 latency signal from PR #138, profiles allocation pressure, and compares a
 printable-ASCII measurement path using the unchanged synthetic TUI benchmark.
+The [benchmark laboratory validation](BENCHMARK-LAB-2026-09-09.md) records probe
+calibration, the PTY parser comparison, integrated context/session recovery,
+and catalogue/tokenizer observations. It introduces no live quality ranking.
 
 ## Prepare the record
 
@@ -165,6 +168,17 @@ The [automated benchmark collections](../benchmarks/AUTOMATION.md) retain paired
 commit measurements and compatible comparisons in CI artifacts. They support
 this investigation; hosted-runner results do not replace a controlled local
 baseline or the physical-terminal observations below.
+
+Calibrate the laboratory with its [offline entry point](../benchmarks/head-to-head/README.md#start-here)
+before trusting timings: deliberately incomplete results must fail correctness
+checks. Compare the primary metrics with absolute and relative deltas, retain
+raw samples and failures, and keep unavailable measurements explicit. Confirm
+a suspected regression with alternating baseline/candidate runs (AB/BA or ABBA)
+on a stable host; the ordinary CI collection remains a sequential screening run.
+The [integrated context lifecycle](../benchmarks/README.md#integrated-context-lifecycle)
+adds measured tokenization, streaming, compaction, persistence and resume with an
+inert transport. Its elapsed time includes fixture checks and cannot stand in
+for remote generation latency or output quality.
 
 During long sessions, also record input-to-visible-update latency, resident
 memory at comparable settled points, and responsiveness while output is slow.

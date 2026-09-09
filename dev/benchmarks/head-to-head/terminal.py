@@ -12,6 +12,11 @@ import termios
 import time
 import unicodedata
 
+CSI = re.compile(r'\x1b\[([0-?]*)([ -/]*)([@-~])')
+CSI_PREFIX = re.compile(r'\x1b\[[0-?]*[ -/]*\Z')
+OSC_END = re.compile(r'\x07|\x1b\\')
+MAX_PENDING = 4096
+
 
 class Terminal:
     def __init__(self, command, cwd, env, log):
@@ -21,12 +26,16 @@ class Terminal:
         self.pending = ''
         self.decoder = codecs.getincrementaldecoder('utf-8')('replace')
         self.log = log
+        self.observations = {'chunks': 0, 'bytes': 0, 'maximumChunkBytes': 0,
+                             'chunksOver16KiB': 0, 'feedMilliseconds': 0.0,
+                             'maximumFeedMilliseconds': 0.0}
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(cwd)
             fcntl.ioctl(1, termios.TIOCSWINSZ, struct.pack('HHHH', self.rows, self.cols, 0, 0))
             os.execvpe(command[0], command, env)
         self.dead = False
+        self.closed = False
 
     def send(self, text):
         data = text.encode()
@@ -48,17 +57,33 @@ class Terminal:
         if not self.log.closed:
             self.log.write(data)
             self.log.flush()
-        self.feed(self.decoder.decode(data))
+        self.observations['chunks'] += 1
+        self.observations['bytes'] += len(data)
+        self.observations['maximumChunkBytes'] = max(self.observations['maximumChunkBytes'], len(data))
+        self.observations['chunksOver16KiB'] += int(len(data) > 16384)
+        started = time.perf_counter()
+        try:
+            self.feed(self.decoder.decode(data))
+        finally:
+            elapsed = (time.perf_counter() - started) * 1000
+            self.observations['feedMilliseconds'] += elapsed
+            self.observations['maximumFeedMilliseconds'] = max(
+                self.observations['maximumFeedMilliseconds'], elapsed)
 
     def feed(self, text):
-        self.pending += text
-        while self.pending:
-            if self.pending.startswith('\x1b['):
-                match = re.match(r'\x1b\[([0-?]*)([ -/]*)([@-~])', self.pending)
+        data = self.pending + text
+        self.pending = ''
+        at = 0
+        while at < len(data):
+            if data.startswith('\x1b[', at):
+                match = CSI.match(data, at)
                 if not match:
+                    if not CSI_PREFIX.fullmatch(data, at):
+                        raise ValueError('malformed terminal CSI sequence')
+                    self._retain(data, at)
                     return
                 raw, final = match[1], match[3]
-                self.pending = self.pending[match.end():]
+                at = match.end()
                 if final == 'n' and raw == '6':
                     self.send(f'\x1b[{self.row+1};{self.col+1}R')
                 elif final == 'c':
@@ -87,17 +112,20 @@ class Terminal:
                         start,end = (0,self.cols) if parts[0]==2 else ((0,self.col+1) if parts[0]==1 else (self.col,self.cols))
                         self.lines[self.row][start:end] = [' ']*(end-start)
                 continue
-            if self.pending.startswith('\x1b]'):
-                match = re.search(r'\x07|\x1b\\',self.pending)
-                if not match: return
-                self.pending = self.pending[match.end():]
-                continue
-            char, self.pending = self.pending[0], self.pending[1:]
-            if char == '\x1b':
-                if not self.pending:
-                    self.pending = char
+            if data.startswith('\x1b]', at):
+                match = OSC_END.search(data, at + 2)
+                if not match:
+                    self._retain(data, at)
                     return
-                self.pending = self.pending[1:]
+                at = match.end()
+                continue
+            char = data[at]
+            at += 1
+            if char == '\x1b':
+                if at == len(data):
+                    self._retain(data, at - 1)
+                    return
+                at += 1
             elif char == '\r': self.col = 0
             elif char == '\n':
                 self.row += 1
@@ -110,6 +138,12 @@ class Terminal:
                     self.col = 0; self.row = min(self.rows-1,self.row+1)
                 self.lines[self.row][self.col] = char
                 self.col += 2 if unicodedata.east_asian_width(char) in ('W','F') else 1
+
+    def _retain(self, data, at):
+        # Fail the measurement instead of retaining unlimited output or dropping bytes.
+        if len(data) - at > MAX_PENDING:
+            raise ValueError('incomplete terminal sequence exceeds 4096 characters')
+        self.pending = data[at:]
 
     def text(self):
         return '\n'.join(''.join(row).rstrip() for row in self.lines)
@@ -127,18 +161,28 @@ class Terminal:
         while time.monotonic()<deadline and not self.dead: self.pump()
 
     def close(self):
-        if not self.dead:
-            self.send('\x03'); self.pause(0.5)
-            self.send('\x03'); self.pause(0.5)
+        if self.closed:
+            return
+        failure = None
+        try:
+            if not self.dead:
+                self.send('\x03'); self.pause(0.5)
+                self.send('\x03'); self.pause(0.5)
+        except (OSError, ValueError) as error:
+            failure = error
         try: os.killpg(self.pid,signal.SIGTERM)
         except ProcessLookupError: pass
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
             result,_ = os.waitpid(self.pid,os.WNOHANG)
             if result: break
-            self.pump()
+            try: self.pump()
+            except (OSError, ValueError) as error: failure = failure or error
         else:
             try: os.killpg(self.pid,signal.SIGKILL)
             except ProcessLookupError: pass
             os.waitpid(self.pid,0)
         os.close(self.fd)
+        self.closed = self.dead = True
+        if failure is not None:
+            raise failure

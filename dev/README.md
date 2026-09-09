@@ -25,6 +25,11 @@ Install development dependencies with `npm ci --ignore-scripts`, then run
 options. The lab imports production components and input handling; fixtures
 never contact providers, execute tools, or write product data.
 
+For benchmark work, run `python3 -B dev/benchmarks/head-to-head/offline.py`
+in Linux or WSL. The [comparison lab index](benchmarks/head-to-head/README.md#start-here)
+distinguishes maintained tools and public fixtures from completed experiments
+that require historical private inputs. Live comparison is a separate operation.
+
 ## Keep information in one place
 
 Public behavior and compatibility belong in [`docs/`](../docs/ARCHITECTURE.md).

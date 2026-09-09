@@ -218,7 +218,9 @@ def main():
     finally:
         if terminal:
             try: terminal.close()
-            except OSError as error: outcome['cleanupError']=str(error)
+            except (OSError, ValueError) as error:
+                outcome.update(status='harness-error', cleanupError=str(error))
+            outcome['terminalLifetime'] = terminal.observations
         if collector:
             collector.close()
             outcome['telemetry']={'records':collector.records,'errors':collector.errors}

@@ -1,6 +1,9 @@
 // Manual performance probe for the incremental transcript renderer.
 
 import { performance } from "node:perf_hooks";
+import assert from "node:assert/strict";
+import { stripVTControlCharacters } from "node:util";
+import { textWidth } from "../../src/ui/width.ts";
 import type { Block } from "../../src/tui/blocks.ts";
 import type { TranscriptViewport } from "../../src/tui/transcript-view.ts";
 import { transcriptRenderer } from "../../src/tui/transcript-view.ts";
@@ -29,37 +32,43 @@ const narrowStart = firstViewport(80);
 const narrowReflow = settle(narrowStart.viewport, 80);
 const wideStart = firstViewport(120);
 const wideReflow = settle(wideStart.viewport, 120);
+let lastViewport = wideStart.viewport;
 const cachedResize = measure(() => {
   for (let frame = 0; frame < 100; frame++) {
-    transcript.viewport(blocks, frame % 2 === 0 ? 80 : 120, 40, 0, STEEL);
+    lastViewport = transcript.viewport(blocks, frame % 2 === 0 ? 80 : 120, 40, 0, STEEL);
   }
 });
+verify(lastViewport, 120, /working/);
 const stable = measure(() => {
   for (let frame = 0; frame < stableFrames; frame++) {
-    transcript.viewport(blocks, 120, 40, frame % 80, STEEL);
+    lastViewport = transcript.viewport(blocks, 120, 40, frame % 80, STEEL);
   }
 });
+verify(lastViewport, 120, /answer \d+/);
 const streaming = measure(() => {
   for (let frame = 0; frame < streamingFrames; frame++) {
     live.text += ` ${frame}`;
     transcript.invalidate(live);
-    transcript.viewport(blocks, 120, 40, 0, STEEL);
+    lastViewport = transcript.viewport(blocks, 120, 40, 0, STEEL);
   }
 });
+verify(lastViewport, 120, /199/);
 const sealed = measure(() => {
   live.live = false;
   transcript.invalidate(live);
-  transcript.viewport(blocks, 120, 40, 0, STEEL);
+  lastViewport = transcript.viewport(blocks, 120, 40, 0, STEEL);
 });
+verify(lastViewport, 120, /199/);
 const expandedLive = measure(() => {
   live.live = true;
   live.expanded = true;
   for (let frame = 0; frame < streamingFrames; frame++) {
     live.text += ` expanded-${frame}`;
     transcript.invalidate(live);
-    transcript.viewport(blocks, 120, 40, 0, STEEL);
+    lastViewport = transcript.viewport(blocks, 120, 40, 0, STEEL);
   }
 });
+verify(lastViewport, 120, /expanded-199/);
 
 reportBenchmark("incremental-transcript", {
   blocks: blocks.length,
@@ -90,7 +99,9 @@ function measure(run: () => void): number {
 function firstViewport(width: number): { viewport: TranscriptViewport; milliseconds: number } {
   const started = performance.now();
   const viewport = transcript.viewport(blocks, width, 40, 0, STEEL);
-  return { viewport, milliseconds: performance.now() - started };
+  const milliseconds = performance.now() - started;
+  verify(viewport, width, /working/);
+  return { viewport, milliseconds };
 }
 
 function settle(initial: TranscriptViewport, width: number): { milliseconds: number; frames: number } {
@@ -98,9 +109,18 @@ function settle(initial: TranscriptViewport, width: number): { milliseconds: num
   let frames = 0;
   const milliseconds = measure(() => {
     while (viewport.pending) {
+      if (frames >= blockCount) throw new Error("transcript reflow did not settle");
       viewport = transcript.viewport(blocks, width, 40, 0, STEEL);
       frames++;
     }
   });
+  verify(viewport, width, /answer 19999/);
   return { milliseconds, frames };
+}
+
+function verify(viewport: TranscriptViewport, width: number, expected: RegExp): void {
+  assert.equal(viewport.rows.length, 40, "transcript must fill the requested viewport");
+  const rows = viewport.rows.map(stripVTControlCharacters);
+  assert.ok(rows.every(row => textWidth(row) <= width), "transcript rows must fit terminal cells");
+  assert.match(rows.join("\n"), expected, "transcript must contain the expected fixture content");
 }

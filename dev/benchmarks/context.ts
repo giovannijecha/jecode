@@ -6,6 +6,8 @@ import { planCompaction, policyForContextWindow } from "../../src/context/policy
 import { reportBenchmark, round } from "./report.ts";
 import { contextWorkflowProbe } from "./context-workflow.ts";
 import { countO200k } from "../../src/context/tokenizer/o200k.ts";
+import { integratedContextProbe } from "./context-integrated.ts";
+import { CORPUS_SEED, mixedCorpus } from "./corpus.ts";
 
 const MAX_TOTAL_MS = 2_000;
 const MAX_EVENT_LOOP_STALL_MS = 75;
@@ -17,6 +19,13 @@ const tokenization = await sample(async () => {
   // A different document each time bypasses the completed-document count cache.
   await countO200k(`// run ${tokenizationRun++}\n${source}`);
 });
+let corpusRun = 0;
+let mixedTokens = 0;
+const corpora = Array.from({ length: ITERATIONS + 1 }, (_, index) => mixedCorpus(131_072, CORPUS_SEED + index));
+const mixedTokenization = await sample(async () => {
+  mixedTokens = await countO200k(corpora[corpusRun++]!);
+});
+if (mixedTokens <= 0) throw new Error("mixed corpus must contain tokens");
 const largeContext: Message[] = Array.from({ length: 128 }, (_, index) => ({
   role: index % 2 === 0 ? "user" : "assistant",
   content: [{
@@ -57,6 +66,7 @@ const planning = await sample(async () => {
 
 const shortWorkflow = await contextWorkflowProbe(12);
 const longWorkflow = await contextWorkflowProbe(40);
+const integrated = await integratedContextProbe();
 const workflowPassed = shortWorkflow.summaries === 0 && longWorkflow.summaries > 0 &&
   longWorkflow.summaries <= 2;
 
@@ -68,27 +78,35 @@ reportBenchmark("context-responsiveness", {
     coldMaximumStallMilliseconds: round(tokenizerCold.maxStall),
     medianMilliseconds: round(tokenization.total),
     medianMaximumStallMilliseconds: round(tokenization.maxStall),
+    observations: tokenization.observations,
+    passed: [tokenizerCold, tokenization].every(withinThresholds),
   },
   request: {
     inputCharacters: 8 * 1_024 * 1_024 - 1_024,
     inputTokens: requestInputTokens,
     medianMilliseconds: round(request.total),
     medianMaximumStallMilliseconds: round(request.maxStall),
+    observations: request.observations,
+    passed: withinThresholds(request),
   },
   planning: {
     messages: largeContext.length,
     inputCharacters: 128 * 32_768,
     medianMilliseconds: round(planning.total),
     medianMaximumStallMilliseconds: round(planning.maxStall),
+    observations: planning.observations,
+    passed: withinThresholds(planning),
   },
   thresholds: {
     medianMilliseconds: MAX_TOTAL_MS,
     medianMaximumStallMilliseconds: MAX_EVENT_LOOP_STALL_MS,
   },
   workflows: [shortWorkflow, longWorkflow],
-  passed: workflowPassed && [request, planning, tokenization, tokenizerCold].every((result) =>
-    result.total <= MAX_TOTAL_MS && result.maxStall <= MAX_EVENT_LOOP_STALL_MS
-  ),
+  mixedTokenizer: { inputCharacters: 131_072, seed: CORPUS_SEED, lastInputTokens: mixedTokens,
+    medianMilliseconds: round(mixedTokenization.total), medianMaximumStallMilliseconds: round(mixedTokenization.maxStall),
+    observations: mixedTokenization.observations },
+  integrated,
+  passed: workflowPassed && [request, planning, tokenization, tokenizerCold].every(withinThresholds),
 });
 
 if (!workflowPassed) throw new Error("context workflow compacted too often or failed to compact");
@@ -126,6 +144,7 @@ async function measure(run: () => Promise<void>): Promise<Readonly<{
 async function sample(run: () => Promise<void>): Promise<Readonly<{
   total: number;
   maxStall: number;
+  observations: { milliseconds: number; maximumStallMilliseconds: number }[];
 }>> {
   await measure(run);
   const measurements = [];
@@ -134,10 +153,15 @@ async function sample(run: () => Promise<void>): Promise<Readonly<{
   }
   const total = median(measurements.map((measurement) => measurement.total));
   const maxStall = median(measurements.map((measurement) => measurement.maxStall));
-  return { total, maxStall };
+  return { total, maxStall, observations: measurements.map(value => ({
+    milliseconds: round(value.total), maximumStallMilliseconds: round(value.maxStall) })) };
 }
 
 function median(values: number[]): number {
   values.sort((left, right) => left - right);
   return values[Math.floor(values.length / 2)] as number;
+}
+
+function withinThresholds(result: { total: number; maxStall: number }): boolean {
+  return result.total <= MAX_TOTAL_MS && result.maxStall <= MAX_EVENT_LOOP_STALL_MS;
 }

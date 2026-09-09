@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { compare, markdown } from "../dev/benchmarks/comparison.ts";
-import { collectionComplete, sample, validateCollection } from "../dev/benchmarks/collection.ts";
+import { collectionComplete, sample, sourceHash, validateCollection, validateEnvironment } from "../dev/benchmarks/collection.ts";
 import type { Collection } from "../dev/benchmarks/collection.ts";
 import { capture, probeEnvironment } from "../dev/benchmarks/capture.ts";
 import { probes } from "../dev/benchmarks/probes.ts";
@@ -42,11 +42,66 @@ test("compares medians and ranges, excludes thresholds, and retains raw evidence
   assert.equal(metric.path, "medianMilliseconds");
   assert.deepEqual(metric.baseline, { median: 11, min: 10, max: 100 });
   assert.equal(metric.current.median, 13);
+  assert.equal(metric.changeAbsolute, 2);
   assert.equal(metric.rangesOverlap, true);
   assert.ok(Math.abs(metric.changePercent! - 18.1818) < 0.001);
   assert.equal(result.probes[5]!.metrics.find((metric) => metric.path.endsWith("rss"))!.unit, "bytes");
   assert.match(markdown(result), /not regression verdicts/);
   assert.equal(a.probes[0]!.samples[2]!.results!["medianMilliseconds"], 100);
+});
+
+test("headline metrics and absolute changes take precedence over tiny percentage swings", () => {
+  const a = fixture(); const b = fixture();
+  for (const sample of a.probes[0]!.samples) {
+    sample.results!["tokenizer"] = { inputCharacters: 100, coldMaximumStallMilliseconds: 20 };
+    sample.results!["observations"] = [{ milliseconds: 9_999_999 }];
+    sample.results!["samplesMilliseconds"] = [1, 2, 3];
+    for (let index = 0; index < 10; index++) sample.results![`tiny${index}Milliseconds`] = 0.001;
+  }
+  for (const sample of b.probes[0]!.samples) {
+    sample.results!["tokenizer"] = { inputCharacters: 100, coldMaximumStallMilliseconds: 15 };
+    sample.results!["observations"] = [{ milliseconds: 1 }];
+    sample.results!["samplesMilliseconds"] = [1, 2, 3];
+    for (let index = 0; index < 10; index++) sample.results![`tiny${index}Milliseconds`] = 0.002;
+  }
+  const result = compare(a, b);
+  const headline = result.probes[0]!.metrics.find(metric => metric.primary)!;
+  assert.equal(headline.changeAbsolute, -5);
+  assert.equal(headline.changePercent, -25);
+  assert.ok(!result.probes[0]!.metrics.some(metric => /observations|samplesMilliseconds/.test(metric.path)));
+  const output = markdown(result);
+  assert.ok(output.indexOf("* tokenizer.coldMaximumStallMilliseconds") < output.indexOf("tiny0Milliseconds"));
+  assert.match(output, /Absolute change/);
+});
+
+test("failed measurements remain visible without comparison ratios", () => {
+  const a = fixture(); const b = fixture();
+  b.probes[0]!.samples[0]!.results!["passed"] = false;
+  b.probes[0]!.samples[0]!.failure = "threshold | failed";
+  const result = compare(a, b);
+  assert.equal(result.probes[0]!.metrics.length, 0);
+  assert.equal(result.probes[0]!.observations[3]!.measurements[0]!.value, 10);
+  assert.match(markdown(result), /Observed values only/);
+  assert.match(markdown(result), /threshold _ failed/);
+});
+
+test("new workloads differ from missing historical scenarios and CPU metadata is required", () => {
+  const a = fixture(); const b = fixture();
+  b.probes[0]!.samples.forEach(sample => { sample.results!["integrated"] = { workload: { reads: 12 } }; });
+  assert.equal(compare(a, b).probes[0]!.status, "incompatible");
+  for (const environment of [{ ...a.environment, cpuCount: 0 }, { ...a.environment, cpu: "" },
+    { ...a.environment, totalMemoryBytes: NaN }]) assert.throws(() => validateEnvironment(environment));
+});
+
+test("new helpers absent from an old method hash differently without preventing its acquisition", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jecode-probe-hash-"));
+  try {
+    const before = await sourceHash(root, probes[0]);
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(join(root, "dev", "benchmarks"), { recursive: true });
+    await fs.writeFile(join(root, "dev", "benchmarks", "context-integrated.ts"), "// new method\n");
+    assert.notEqual(await sourceHash(root, probes[0]), before);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("rejects different environments, dirty runs, methods, repetition counts, and workload", () => {

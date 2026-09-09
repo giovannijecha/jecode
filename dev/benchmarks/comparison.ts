@@ -1,7 +1,7 @@
 // Compare repeated measurements only when environment, probe, and workload agree.
 
 import type { Collection } from "./collection.ts";
-import { isRecord, probes, workload } from "./probes.ts";
+import { isRecord, primaryMetric, probes, workload } from "./probes.ts";
 
 interface Distribution { median: number; min: number; max: number }
 interface Metric {
@@ -10,6 +10,8 @@ interface Metric {
   baseline: Distribution;
   current: Distribution;
   changePercent: number | null;
+  changeAbsolute: number;
+  primary: boolean;
   rangesOverlap: boolean;
 }
 export interface Comparison {
@@ -18,7 +20,9 @@ export interface Comparison {
   current: string;
   environment: Collection["environment"];
   probes: Array<{ name: string; status: "compared" | "incompatible" | "failed";
-    reason: string | null; metrics: Metric[]; unavailable: string[] }>;
+    reason: string | null; metrics: Metric[]; unavailable: string[];
+    observations: Array<{ side: string; sample: number; outcome: string;
+      measurements: Array<{ path: string; value: number; unit: "ms" | "bytes" }> }> }>;
 }
 
 export function compare(baseline: Collection, current: Collection): Comparison {
@@ -31,8 +35,18 @@ export function compare(baseline: Collection, current: Collection): Comparison {
     const after = current.probes[index]!;
     const samples = [...before.samples, ...after.samples];
     const entry: Comparison["probes"][number] = { name: probe.name, status: "compared", reason: null,
-      metrics: [], unavailable: [] };
+      metrics: [], unavailable: [], observations: [] };
     result.probes.push(entry);
+    for (const [side, values] of [["base", before.samples], ["current", after.samples]] as const) {
+      values.forEach((sample, index) => {
+        let observed: ReturnType<typeof metrics> = new Map();
+        try { if (sample.results !== null) observed = metrics(sample.results); } catch { /* Invalid evidence stays unavailable. */ }
+        entry.observations.push({ side, sample: index + 1,
+          outcome: sample.failure ?? (sample.exitCode !== 0 ? `exit ${sample.exitCode}` :
+            sample.results?.["passed"] === false ? "threshold failed" : "reported"),
+          measurements: [...observed].map(([path, value]) => ({ path, ...value })) });
+      });
+    }
     if (samples.some((sample) => sample.failure !== null || sample.exitCode !== 0 ||
       sample.results === null || sample.results["passed"] === false)) {
       entry.status = "failed";
@@ -57,6 +71,7 @@ export function compare(baseline: Collection, current: Collection): Comparison {
           const b = distribution(currentMetrics.map((sample) => sample.get(path)!.value));
           const percent = a.median === 0 ? null : (b.median / a.median - 1) * 100;
           entry.metrics.push({ path, unit: all[0]!.get(path)!.unit, baseline: a, current: b,
+            changeAbsolute: b.median - a.median, primary: primaryMetric(probe.name, path),
             changePercent: percent !== null && Number.isFinite(percent) ? percent : null,
             rangesOverlap: a.min <= b.max && b.min <= a.max });
         }
@@ -83,7 +98,7 @@ function metrics(results: Record<string, unknown>): Map<string, { value: number;
   const visit = (value: unknown, path: string[], depth: number): void => {
     if (depth > 24) throw new Error("report nesting limit");
     const key = path.at(-1) ?? "";
-    if (key === "thresholds" || key === "diagnostics") return;
+    if (["thresholds", "diagnostics", "samplesMilliseconds", "observations"].includes(key)) return;
     const label = path.join(".");
     const unit = /Milliseconds|millisecondsPerFrame/.test(label) ? "ms" :
       path.includes("memory") || path.includes("bytesPerWrittenFrame") ||
@@ -109,19 +124,32 @@ export function markdown(result: Comparison): string {
   for (const probe of result.probes) lines.push(`| ${probe.name} | ${probe.status} | ${probe.metrics.length} |`);
   for (const probe of result.probes) {
     lines.push("", `## ${probe.name}`, "");
-    if (probe.reason !== null) { lines.push(probe.reason); continue; }
-    lines.push("Metrics ordered by percentage change (up to 8); all measurements and ranges are in comparison.json.", "",
-      "| Measurement | Unit | Base median [min, max] | Current median [min, max] | Change | Ranges overlap |",
-      "| --- | --- | ---: | ---: | ---: | --- |");
-    const selected = probe.metrics.toSorted((a, b) => (b.changePercent ?? -Infinity) - (a.changePercent ?? -Infinity)).slice(0, 8);
+    if (probe.reason !== null) {
+      lines.push(probe.reason, "", "Observed values only; no improvement or regression ratios.", "",
+        "| Side / sample | Outcome | Measurement | Value |", "| --- | --- | --- | ---: |");
+      for (const sample of probe.observations) {
+        const observed = sample.measurements.toSorted((a, b) =>
+          Number(primaryMetric(probe.name, b.path)) - Number(primaryMetric(probe.name, a.path))).slice(0, 8);
+        if (observed.length === 0) lines.push(`| ${sample.side} / ${sample.sample} | ${safe(sample.outcome)} | unavailable | — |`);
+        for (const value of observed) lines.push(`| ${sample.side} / ${sample.sample} | ${safe(sample.outcome)} | ${safe(value.path)} | ${value.value.toFixed(3)} ${value.unit} |`);
+      }
+      continue;
+    }
+    lines.push("Primary workload metrics first; remaining metrics ordered by absolute change within each unit (up to 8). Full observations are in comparison.json and the collections.", "",
+      "| Measurement | Unit | Base median [min, max] | Current median [min, max] | Absolute change | Change | Ranges overlap |",
+      "| --- | --- | ---: | ---: | ---: | ---: | --- |");
+    const selected = probe.metrics.toSorted((a, b) => Number(b.primary) - Number(a.primary) ||
+      a.unit.localeCompare(b.unit) || Math.abs(b.changeAbsolute) - Math.abs(a.changeAbsolute)).slice(0, 8);
     for (const metric of selected) {
       const format = (value: number): string => value.toFixed(3);
       const range = (values: Distribution): string => `${format(values.median)} [${format(values.min)}, ${format(values.max)}]`;
       const percent = metric.changePercent === null ? "n/a (zero base)" : `${metric.changePercent.toFixed(1)}%`;
-      const label = metric.path.replace(/[|\r\n`<>]/g, "_").slice(0, 200);
-      lines.push(`| ${label} | ${metric.unit} | ${range(metric.baseline)} | ${range(metric.current)} | ${percent} | ${metric.rangesOverlap ? "yes" : "no"} |`);
+      const label = `${metric.primary ? "* " : ""}${safe(metric.path)}`;
+      lines.push(`| ${label} | ${metric.unit} | ${range(metric.baseline)} | ${range(metric.current)} | ${format(metric.changeAbsolute)} | ${percent} | ${metric.rangesOverlap ? "yes" : "no"} |`);
     }
     if (probe.unavailable.length > 0) lines.push("", `${probe.unavailable.length} measurements lack complete numeric samples; no zero substitution.`);
   }
   return `${lines.join("\n")}\n`;
 }
+
+function safe(value: string): string { return value.replace(/[|\r\n`<>]/g, "_").slice(0, 200); }

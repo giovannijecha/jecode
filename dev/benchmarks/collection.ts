@@ -31,21 +31,33 @@ export function collection(root: string, repetitions: number): Collection {
     cwd: root, encoding: "utf8", windowsHide: true, maxBuffer: 1_048_576,
   }).trim();
   const cpu = cpus();
+  const environment = { node: process.version, platform: process.platform, arch: process.arch,
+    osRelease: release(), cpu: [...new Set(cpu.map((entry) => entry.model))].sort().join("; "),
+    cpuCount: cpu.length, totalMemoryBytes: totalmem(), color: "off",
+    runnerImage: process.env["ImageOS"] ?? "", runnerImageVersion: process.env["ImageVersion"] ?? "" };
+  validateEnvironment(environment);
+  try {
+    if (!(process.memoryUsage().rss > 0)) throw new Error("RSS is not positive");
+  } catch (cause) { throw new Error("benchmark environment cannot measure RSS; collection unavailable", { cause }); }
   return { schema: 1, commit: git(["rev-parse", "HEAD"]),
     dirty: git(["status", "--porcelain", "--untracked-files=normal"]) !== "",
     capturedAt: new Date().toISOString(), repetitions,
-    environment: { node: process.version, platform: process.platform, arch: process.arch,
-      osRelease: release(), cpu: [...new Set(cpu.map((entry) => entry.model))].sort().join("; "),
-      cpuCount: cpu.length, totalMemoryBytes: totalmem(), color: "off",
-      runnerImage: process.env["ImageOS"] ?? "", runnerImageVersion: process.env["ImageVersion"] ?? "" },
+    environment,
     probes: [] };
 }
 
 export async function sourceHash(root: string, probe: Probe): Promise<string> {
   const hash = createHash("sha256");
   for (const file of [...probe.files, "report.ts"].sort()) {
-    hash.update(file).update("\0").update((await readFile(join(root, "dev/benchmarks", file), "utf8"))
-      .replaceAll("\r\n", "\n")).update("\0");
+    // A helper introduced by a newer method may not exist in the baseline.
+    // Hash its absence so the comparison reports incompatible methods instead
+    // of failing acquisition before the historical entry point can run.
+    const content = await readFile(join(root, "dev/benchmarks", file), "utf8").catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    hash.update(file).update("\0").update(content === null ? "absent\0" : "present\0")
+      .update(content?.replaceAll("\r\n", "\n") ?? "").update("\0");
   }
   return hash.digest("hex");
 }
@@ -87,13 +99,7 @@ export function validateCollection(value: unknown): Collection {
     !Array.isArray(value["probes"]) || value["probes"].length !== probes.length) {
     throw new Error("invalid benchmark collection");
   }
-  const environment = value["environment"];
-  const fields = ["node", "platform", "arch", "osRelease", "cpu", "color", "runnerImage", "runnerImageVersion"];
-  if (fields.some((field) => typeof environment[field] !== "string") ||
-    ["cpuCount", "totalMemoryBytes"].some((field) => typeof environment[field] !== "number" ||
-      !Number.isFinite(environment[field]) || environment[field] <= 0)) {
-    throw new Error("invalid benchmark environment");
-  }
+  validateEnvironment(value["environment"]);
   for (const [index, probe] of probes.entries()) {
     const entry: unknown = value["probes"][index];
     if (!isRecord(entry) || entry["name"] !== probe.name || typeof entry["sourceHash"] !== "string" ||
@@ -106,4 +112,14 @@ export function validateCollection(value: unknown): Collection {
     }
   }
   return value as unknown as Collection;
+}
+
+export function validateEnvironment(environment: Record<string, unknown>): void {
+  const fields = ["node", "platform", "arch", "osRelease", "cpu", "color", "runnerImage", "runnerImageVersion"];
+  if (fields.some((field) => typeof environment[field] !== "string") ||
+    ["cpuCount", "totalMemoryBytes"].some((field) => typeof environment[field] !== "number" ||
+      !Number.isFinite(environment[field]) || environment[field] <= 0) ||
+      typeof environment["cpu"] !== "string" || environment["cpu"].trim() === "") {
+    throw new Error("invalid benchmark environment: identifiable CPU and positive memory/CPU counts are required");
+  }
 }
