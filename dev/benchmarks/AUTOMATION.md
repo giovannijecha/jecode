@@ -6,6 +6,12 @@ implementation of the measured behavior. It runs on relevant pull requests and
 main updates, Mondays at 05:23 UTC, and manual dispatch. It does not publish a
 package, post comments, or change the required CI matrix.
 
+The separate `Offline benchmark laboratory` job in the ordinary CI workflow
+executes Python harness tests, probe mutation calibration, and the self-contained
+`config-edit`/`file-server` evaluator calibrations. It needs no account, Codex
+installation, npm dependencies or private starter. Run the same path with
+`python3 -B dev/benchmarks/head-to-head/offline.py` on Linux/WSL.
+
 ## Baseline and environment
 
 For a pull request, the measured code is GitHub's merge commit and the baseline
@@ -23,6 +29,10 @@ order on a quiet local machine, before drawing a conclusion.
 
 Reports record commit, dirty status, capture time, repetitions, exact Node,
 OS/kernel, architecture, CPU model/count, total RAM, and hosted image version.
+An identifiable CPU, positive CPU/memory counts, working RSS observation, child
+processes and writable temporary storage are required. Missing CPU/RSS capacity
+fails preflight explicitly before a collection is written; it is never replaced
+with zero. Linux laboratory cleanup tests additionally require `/var/tmp`.
 The collector forces `NO_COLOR` and uses an isolated development home. Children
 receive only path/system/temp variables needed to run Node, not provider keys,
 GitHub tokens, user Node flags, or the user's Jecode data.
@@ -35,9 +45,10 @@ paired run is stronger evidence than comparing unrelated machines.
 
 The workflow retains `baseline.json`, `current.json`, `comparison.json`, and
 `SUMMARY.md` as an artifact named with the measured SHA and run attempt, for 90
-days. The job summary shows per-probe outcomes and up to eight largest relative
-increases per probe; the JSON comparison contains every comparable latency and
-memory/output-byte metric, with median, minimum, maximum, percentage change, and
+days. The job summary shows per-probe outcomes and up to eight metrics, prioritizing
+declared headline workloads, then absolute changes within each unit. The JSON
+comparison contains every comparable latency and memory/output-byte metric,
+with median, minimum, maximum, absolute and percentage changes, and
 whether the sample ranges overlap. A percentage is unavailable when the base
 median is zero. Overlapping ranges are not a statistical significance test.
 
@@ -47,9 +58,15 @@ withholds ratios when these differ, a schema is invalid, or there are no common
 measurements. Missing/null numeric samples are listed as unavailable, never
 replaced with zero. Benchmark changes deliberately start a new comparison
 baseline; include new fixture/helper files and workload fields in `probes.ts`.
+New helper absence is fingerprinted, allowing an old entry point to run while
+withholding incompatible ratios. Optional new workload fields use an explicit
+absent signature; missing scenarios cannot compare as zero work. Inner samples
+remain in raw reports and are not treated as independent process repetitions.
 
 `failed` retains nonzero exits, existing tripwire failures, cancellation,
 timeouts, and diagnostic stderr. A failed probe is not reported as an improvement.
+Available numeric observations remain visible per side/process in the summary,
+even when a tripwire fails. These rows have no comparative ratios.
 Each child is bounded to three minutes and 1 MiB of combined output. The
 collector checkpoints its output after each sample, so incomplete evidence
 survives a later failure. The comparison reader accepts complete version-1

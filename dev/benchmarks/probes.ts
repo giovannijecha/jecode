@@ -2,16 +2,19 @@
 
 export const probes = [
   { name: "context", benchmark: "context-responsiveness",
-    files: ["context.ts", "context-workflow.ts"],
+    files: ["context.ts", "context-workflow.ts", "context-integrated.ts", "context-fixture.ts", "corpus.ts", "samples.ts",
+      "../test-support/app.ts", "../test-support/app-harness.ts", "../test-support/responses-server.ts"],
     workload: ["iterations", "tokenizer.inputCharacters", "request.inputCharacters",
-      "planning.messages", "planning.inputCharacters", "workflows.*.reads", "workflows.*.outputCharactersPerRead"] },
-  { name: "redaction", benchmark: "streaming-redaction", files: ["redaction.ts"],
-    workload: ["secrets", "outputCharacters", "iterations"] },
-  { name: "search", benchmark: "workspace-search", files: ["search.ts"],
-    workload: ["files", "fileBytes", "inputBytes", "iterations"] },
-  { name: "session", benchmark: "durable-session-store", files: ["session.ts"],
+      "planning.messages", "planning.inputCharacters", "workflows.*.reads", "workflows.*.outputCharactersPerRead",
+      "?integrated.workload", "?mixedTokenizer.inputCharacters", "?mixedTokenizer.seed"] },
+  { name: "redaction", benchmark: "streaming-redaction", files: ["redaction.ts", "samples.ts"],
+    workload: ["secrets", "outputCharacters", "iterations", "?cases.*.name", "?cases.*.chunks", "?cases.*.inputCharacters"] },
+  { name: "search", benchmark: "workspace-search", files: ["search.ts", "samples.ts"],
+    workload: ["files", "fileBytes", "inputBytes", "iterations", "?cases.*.name", "?correctness"] },
+  { name: "session", benchmark: "durable-session-store", files: ["session.ts", "samples.ts"],
     workload: ["checkpoint.iterations", "checkpoint.results.*.nodes", "catalog.iterations",
-      "catalog.sessions", "catalog.results.*.nodesPerSession", "load.iterations", "load.results.*.nodes"] },
+      "catalog.sessions", "catalog.results.*.nodesPerSession", "load.iterations", "load.results.*.nodes",
+      "?cardinality.*.sessions", "?cardinality.*.nodesPerSession"] },
   { name: "transcript", benchmark: "incremental-transcript", files: ["transcript.ts"],
     workload: ["blocks", "liveReasoningCharacters", "viewports.*.columns", "cachedResize.frames",
       "stable.frames", "streaming.frames", "expandedLive.frames"] },
@@ -30,7 +33,24 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function workload(results: Record<string, unknown>, probe: Probe): unknown[] {
-  return probe.workload.map((pattern) => select(results, pattern.split(".")));
+  return probe.workload.map((pattern) => {
+    // New scenarios can be absent in a historical report. Their absence is part
+    // of the signature, never equivalent to a present scenario or zero work.
+    if (pattern.startsWith("?")) {
+      try { return select(results, pattern.slice(1).split(".")); } catch { return null; }
+    }
+    return select(results, pattern.split("."));
+  });
+}
+
+/** Stable headline metrics; tiny percentage changes must not crowd out the workload. */
+export function primaryMetric(probe: string, path: string): boolean {
+  if (probe === "context") return /^(tokenizer\.coldMaximumStallMilliseconds|mixedTokenizer\.medianMilliseconds|integrated\.(elapsedMilliseconds|resumeMilliseconds|terminationMilliseconds|(measurement|checkpoint|preparation)\.medianMilliseconds))$/.test(path);
+  if (probe === "session") return /^(checkpoint\.results\.1|catalog\.results\.1|load\.results\.3|cardinality\.\d+)\.medianMilliseconds$/.test(path);
+  if (probe === "search") return /^cases\.\d+\.medianMilliseconds$/.test(path);
+  if (probe === "redaction") return /^cases\.\d+\.(setup|streaming)\.medianMilliseconds$/.test(path);
+  if (probe === "transcript") return /^(streaming\.millisecondsPerFrame|viewports\.\d+\.firstViewportMilliseconds)$/.test(path);
+  return /^results\.\d+\.scenarios\.typingWhileStreaming\.inputToFrameMilliseconds\.p95$/.test(path);
 }
 
 function select(value: unknown, parts: string[]): unknown {

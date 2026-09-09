@@ -717,6 +717,15 @@ shared compiler rules cover runtime source, development tools, scripts, and
 tests; release builds inherit the same rules. Coverage, source-tree, package,
 and installed-CLI checks run through the documented scripts.
 
+A separate Linux CI job runs the offline benchmark laboratory: Python harness
+tests, probe mutation calibration, and self-contained evaluator checks. The
+integrated context probe connects production input measurement, Responses wire
+handling, TUI, controller, and durable sessions to an inert loopback transport.
+It verifies compaction, interruption or disconnection, and resume without tool
+replay. These checks establish local invariants, not live provider performance.
+See the [benchmark guide](../dev/benchmarks/README.md) and
+[collection methods](../dev/benchmarks/AUTOMATION.md).
+
 Automated checks do not establish live provider behavior, physical terminal
 accessibility, or long-session reliability. The
 [candidate validation protocol](../dev/validation/README.md) defines those

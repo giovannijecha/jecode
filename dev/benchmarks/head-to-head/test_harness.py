@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -180,6 +181,18 @@ class DriverTests(unittest.TestCase):
             log.close()
             terminal.close()
             with self.assertRaises(ChildProcessError): os.waitpid(terminal.pid,os.WNOHANG)
+
+    def test_parser_failure_during_close_still_reaps_the_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            terminal = Terminal(['/bin/sh','-c','printf ready; sleep 30'], directory,
+                                {'PATH':'/usr/bin:/bin'}, io.BytesIO())
+            terminal.wait_for('ready', 3)
+            with patch.object(terminal, 'pump', side_effect=ValueError('malformed terminal sequence')):
+                with self.assertRaisesRegex(ValueError, 'malformed'):
+                    terminal.close()
+            with self.assertRaises(ChildProcessError): os.waitpid(terminal.pid, os.WNOHANG)
+            terminal.close()
+            self.assertGreater(terminal.observations['chunks'], 0)
 
     def test_partial_jsonl_tail_is_not_a_complete_event(self):
         with tempfile.TemporaryDirectory() as directory:

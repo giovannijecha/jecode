@@ -116,7 +116,9 @@ def main(args):
         observe(terminal,home,lambda saved: any(n['settlement']=='interrupted' for n in saved.values()),20)
         evidence['interruptionMs'] = (time.monotonic_ns()-interrupted)/1e6
         (run/'interrupted-screen.txt').write_text(terminal.text())
-        exit_tui(terminal); terminal = None
+        exit_tui(terminal)
+        evidence['interruptedTerminalLifetime'] = terminal.observations
+        terminal = None
         original_nodes = {file:sha(Path(file)) for file in nodes(home)}
         files = workspace_hashes(workspace); count = request_count(home)
         private_json(run/'before-resume.json',{'nodes':original_nodes,'workspace':files,'requests':count})
@@ -144,12 +146,18 @@ def main(args):
                         historicalNodesPreserved=all(sha(Path(file))==value for file,value in original_nodes.items()),
                         settlements=[n['settlement'] for n in nodes(home).values()])
         (run/'final-screen.txt').write_text(terminal.text())
-        exit_tui(terminal); terminal = None
+        exit_tui(terminal)
+        evidence['resumedTerminalLifetime'] = terminal.observations
+        terminal = None
     except Exception as error:
         outcome = {'status':'harness-error','error':str(error)}
     finally:
         if terminal:
-            (run/'failure-screen.txt').write_text(terminal.text()); terminal.close()
+            (run/'failure-screen.txt').write_text(terminal.text())
+            try: terminal.close()
+            except (OSError, ValueError) as error:
+                outcome.update(status='harness-error', cleanupError=str(error))
+            evidence['failedTerminalLifetime'] = terminal.observations
         for log in logs: log.close()
         private_json(run/'recovery.json',evidence)
         private_json(run/'outcome.json',outcome)

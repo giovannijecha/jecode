@@ -1,6 +1,7 @@
 // Manual regression probe for incremental durable session checkpoints.
 
 import { performance } from "node:perf_hooks";
+import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -9,6 +10,7 @@ import type { TurnNode } from "../../src/conversation.ts";
 import { DurableSessionStore } from "../../src/sessions/store.ts";
 import { SessionPersistence } from "../../src/sessions/runtime.ts";
 import { reportBenchmark, round } from "./report.ts";
+import { distribution } from "./samples.ts";
 
 const ITERATIONS = 5;
 const SMALL_NODES = 50;
@@ -29,6 +31,7 @@ const identity = {
   model: "deepseek-v4-flash:0731",
   effort: "high",
 };
+const observations: Record<string, ReturnType<typeof distribution>> = {};
 
 const small = await sampleCheckpoint(SMALL_NODES);
 const large = await sampleCheckpoint(LARGE_NODES);
@@ -36,6 +39,11 @@ const scale = large / small;
 const checkpointPassed = large <= MAX_LARGE_MEDIAN_MS && scale <= MAX_SCALE;
 const shallowCatalog = await sampleCatalog(CATALOG_SMALL_NODES);
 const deepCatalog = await sampleCatalog(CATALOG_LARGE_NODES);
+const cardinality = [];
+for (const sessions of [50, 200]) {
+  cardinality.push({ sessions, nodesPerSession: 1,
+    medianMilliseconds: round(await sampleCatalog(1, sessions)) });
+}
 const catalogDepthDelta = deepCatalog - shallowCatalog;
 const catalogPassed = deepCatalog <= MAX_CATALOG_MEDIAN_MS &&
   catalogDepthDelta <= MAX_CATALOG_DEPTH_DELTA_MS;
@@ -90,6 +98,8 @@ reportBenchmark("durable-session-store", {
     observedScaleFrom200To1024: round(loadScale),
     passed: loadPassed,
   },
+  cardinality,
+  observations,
   passed,
 });
 
@@ -114,6 +124,15 @@ async function sampleCheckpoint(nodeCount: number): Promise<number> {
       const elapsed = performance.now() - startedAt;
       if (iteration > 0) timings.push(elapsed);
     }
+    assert.ok(persistence.sessionId, "checkpoint must publish a session");
+    await persistence.close();
+    const saved = await store.load(persistence.sessionId);
+    assert.ok(saved, "checkpoint must be readable from the store");
+    assert.equal(saved.meta.id, persistence.sessionId);
+    assert.deepEqual(saved.conversation.nodes, JSON.parse(JSON.stringify(conversation.nodes)),
+      "checkpoint must persist the final revision");
+    assert.equal(saved.conversation.activeNodeId, conversation.activeNodeId);
+    observations[`checkpoint-${nodeCount}`] = distribution(timings);
     return median(timings);
   } finally {
     await persistence?.close();
@@ -121,7 +140,7 @@ async function sampleCheckpoint(nodeCount: number): Promise<number> {
   }
 }
 
-async function sampleCatalog(nodeCount: number): Promise<number> {
+async function sampleCatalog(nodeCount: number, sessionCount = CATALOG_SESSIONS): Promise<number> {
   const root = await mkdtemp(path.join(tmpdir(), "jecode-session-catalog-bench-"));
   const workspace = path.join(root, "workspace");
   const sessions = path.join(root, "sessions");
@@ -129,16 +148,23 @@ async function sampleCatalog(nodeCount: number): Promise<number> {
   try {
     const store = await DurableSessionStore.open(workspace, sessions);
     const conversation = ConversationTree.restore(nodes(nodeCount), nodeCount);
-    for (let index = 0; index < CATALOG_SESSIONS; index++) {
-      await store.publish(conversation);
+    const expected = [];
+    for (let index = 0; index < sessionCount; index++) {
+      const published = await store.publish(conversation);
+      expected.push({ id: published.meta.id, updatedAt: published.head.updatedAt });
     }
-    await store.list();
+    const ids = expected.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, 64).map(entry => entry.id);
+    await store.list(64);
     const timings: number[] = [];
     for (let iteration = 0; iteration < ITERATIONS; iteration++) {
       const startedAt = performance.now();
-      await store.list();
+      const entries = await store.list(64);
       timings.push(performance.now() - startedAt);
+      assert.deepEqual(entries.map(entry => entry.id), ids, "catalogue must return the newest sessions in order");
+      assert.ok(entries.every(entry => entry.turns === nodeCount && !entry.active && entry.preview === "question 0"));
     }
+    observations[`catalog-${sessionCount}-${nodeCount}`] = distribution(timings);
     return median(timings);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -152,14 +178,20 @@ async function sampleLoad(nodeCount: number): Promise<number> {
   await mkdir(workspace);
   try {
     const store = await DurableSessionStore.open(workspace, sessions);
-    const published = await store.publish(ConversationTree.restore(nodes(nodeCount), nodeCount));
+    const expected = ConversationTree.restore(nodes(nodeCount), nodeCount);
+    const published = await store.publish(expected);
     await store.load(published.meta.id);
     const timings: number[] = [];
     for (let iteration = 0; iteration < LOAD_ITERATIONS; iteration++) {
       const startedAt = performance.now();
-      await store.load(published.meta.id);
+      const loaded = await store.load(published.meta.id);
       timings.push(performance.now() - startedAt);
+      assert.ok(loaded, "load must return the published session");
+      assert.equal(loaded.meta.id, published.meta.id);
+      assert.equal(loaded.conversation.activeNodeId, nodeCount);
+      assert.deepEqual(loaded.conversation.nodes, expected.nodes, "load must return every complete node");
     }
+    observations[`load-${nodeCount}`] = distribution(timings);
     return median(timings);
   } finally {
     await rm(root, { recursive: true, force: true });
