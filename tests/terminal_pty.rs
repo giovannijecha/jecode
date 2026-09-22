@@ -108,7 +108,7 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
             .spawn()
             .unwrap(),
     );
-    let first = until(&mut master, "Ctrl+Q exit");
+    let first = until(&mut master, "Local demo");
     assert!(first.contains("jecode"));
     assert!(!first.contains("1049"));
     assert!(!first.contains("\x1b[36m"));
@@ -164,7 +164,7 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
     until(&mut master, "Interrupted / partial response kept");
     for (rows, columns) in [(12, 40), (24, 80), (16, 60), (24, 80)] {
         resize(&master, rows, columns);
-        let resized = until(&mut master, "Ctrl+Q exit");
+        let resized = until(&mut master, "Local demo");
         assert!(resized.contains("\r\x1b[J"));
         assert!(!resized.contains("\x1b[2J"));
         assert!(!resized.contains("\x1b[3J"));

@@ -198,7 +198,14 @@ fn blocked_partial_record_cancels_and_all_workers_are_joined() {
                 .unwrap();
             socket.write_all(&[23, 3]).unwrap();
             cancelled.store(true, Ordering::Release);
-            assert_eq!(socket.read(&mut [0; 1]).unwrap(), 0);
+            // Cancellation may close before the partial record is consumed.
+            // The peer can observe EOF or reset; neither permits more data.
+            let closed = socket.read(&mut [0; 1]);
+            assert!(
+                matches!(&closed, Ok(0))
+                    || matches!(&closed, Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset),
+                "cancelled peer was not closed: {closed:?}"
+            );
         });
         let mut socket = TcpStream::connect(address).unwrap();
         socket::configure(&socket).unwrap();

@@ -1,11 +1,13 @@
 //! The lock covers read/refresh/replace. It never covers model generation.
 use super::{Error, auth};
-use crate::{state::Store, tls::Budget};
-use std::fs::File;
+use crate::{
+    state::{Lease, Store},
+    tls::Budget,
+};
 
 pub(super) struct Credentials {
     store: Store,
-    _lock: File,
+    _lock: Lease,
 }
 impl Credentials {
     pub fn open(store: Store, budget: &Budget<'_>) -> Result<Self, Error> {

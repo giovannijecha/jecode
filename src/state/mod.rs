@@ -18,6 +18,19 @@ pub struct Store {
     root: PathBuf,
 }
 
+/// One logical owner, even while a forked child temporarily inherits the file.
+#[derive(Debug)]
+pub struct Lease {
+    file: File,
+}
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // Closing just this descriptor can leave a Linux flock held by a child
+        // before exec. Explicitly release ownership before closing our handle.
+        let _ = self.file.unlock();
+    }
+}
+
 impl Store {
     pub fn user() -> io::Result<Self> {
         let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
@@ -125,8 +138,8 @@ impl Store {
         result
     }
 
-    /// OS locks are released on close/crash. Keep the lock file to preserve its identity.
-    pub fn lock(&self, name: &str, cancelled: &AtomicBool, deadline: Instant) -> io::Result<File> {
+    /// Keep the lock file to preserve its identity; the lease releases ownership.
+    pub fn lock(&self, name: &str, cancelled: &AtomicBool, deadline: Instant) -> io::Result<Lease> {
         let file = platform::create(&self.path(name)?, true)?;
         platform::check_file(&file)?;
         loop {
@@ -134,7 +147,7 @@ impl Store {
                 return Err(io::ErrorKind::Interrupted.into());
             }
             match file.try_lock() {
-                Ok(()) => return Ok(file),
+                Ok(()) => return Ok(Lease { file }),
                 Err(fs::TryLockError::Error(error)) => return Err(error),
                 Err(fs::TryLockError::WouldBlock) => {}
             }

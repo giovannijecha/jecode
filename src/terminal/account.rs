@@ -17,6 +17,11 @@ enum Phase {
     Updating,
     Closed,
 }
+enum LocalOperation {
+    Model,
+    Context,
+    Compact(String),
+}
 pub(super) struct View {
     phase: Phase,
     pub notice: String,
@@ -28,35 +33,35 @@ pub(super) struct View {
     pub command: Option<super::command_view::Run>,
     pub selected: session::Model,
     pub id: Option<String>,
+    pub workspace: Option<String>,
+    pub access: crate::workspace::Access,
+    local_operation: Option<LocalOperation>,
 }
 impl View {
+    pub fn ready(&self) -> bool {
+        self.phase == Phase::Ready
+    }
+    pub fn inspecting(&mut self) {
+        self.phase = Phase::Updating;
+        self.local_operation = Some(LocalOperation::Context);
+        self.notice = "Measuring context…".into();
+    }
     pub fn generating(&self) -> bool {
         self.phase == Phase::Generating
     }
     pub fn updating(&mut self) {
         self.phase = Phase::Updating;
+        self.local_operation = Some(LocalOperation::Model);
         self.notice = "Changing model…".into();
     }
 }
 pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path>) -> Model {
     let mut model = Model::new(Instant::now());
-    model.blocks =
-        vec![Block {
-        speaker: "Jecode", text: if workspace.is_some() {
-            "Changes and commands need approval. Sessions save automatically. Type / for commands."
-        } else {
-            "Conversation only · sessions save automatically. Type / for commands."
-        }.into(),
-    }];
-    if let Some(path) = workspace {
+    model.blocks.clear();
+    let workspace = workspace.map(|path| {
         let path = path.to_string_lossy();
-        let path = path.strip_prefix(r"\\?\").unwrap_or(&path);
-        model.blocks.push(Block {
-            speaker: "Workspace",
-            text: format!("Workspace / {path}"),
-        });
-    }
-    model.subtitle = format!("OpenAI Account / {} / medium", selected.id());
+        path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+    });
     model.account = Some(View {
         phase: Phase::Login,
         notice: "Connecting for sign-in / Esc cancels".into(),
@@ -68,6 +73,9 @@ pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path
         command: None,
         selected,
         id: None,
+        workspace,
+        access: crate::workspace::Access::Workspace,
+        local_operation: None,
     });
     model
 }
@@ -165,14 +173,23 @@ pub(super) fn event(model: &mut Model, event: Event) {
             });
         }
         Event::ContextReport(text) => {
-            model.blocks.push(Block {
-                speaker: "Status",
-                text,
-            });
-            if view.phase == Phase::Generating {
+            if matches!(view.local_operation, Some(LocalOperation::Context)) {
+                view.local_operation = None;
+                view.phase = Phase::Ready;
+                view.notice.clear();
                 model.blocks.push(Block {
-                    speaker: "Assistant",
-                    text: String::new(),
+                    speaker: "Status",
+                    text,
+                });
+            } else if let Some(LocalOperation::Compact(report)) = &mut view.local_operation {
+                report.clone_from(&text);
+                view.notice = text;
+            } else if view.phase == Phase::Generating {
+                view.notice = text;
+            } else {
+                model.blocks.push(Block {
+                    speaker: "Status",
+                    text,
                 });
             }
         }
@@ -214,16 +231,13 @@ pub(super) fn event(model: &mut Model, event: Event) {
         }
         Event::Ready => {
             view.phase = Phase::Ready;
-            view.notice = "Ready".into();
+            view.notice.clear();
         }
         Event::ModelChanged(selected) => {
             view.selected = selected;
             view.phase = Phase::Ready;
-            view.notice = format!("Ready · {}", selected.id());
-            model.blocks.push(Block {
-                speaker: "Status",
-                text: format!("Model changed to {} · medium", selected.id()),
-            });
+            view.local_operation = None;
+            view.notice.clear();
         }
         Event::Thinking if view.phase == Phase::Generating => {
             view.notice = "Thinking / Esc stops".into();
@@ -275,7 +289,22 @@ pub(super) fn event(model: &mut Model, event: Event) {
             };
             view.failed = matches!(end, End::Failed(_));
             view.notice = completion(end, metrics);
-            if !matches!(end, End::Complete | End::Refused) {
+            if let Some(operation) = view.local_operation.take() {
+                let text = match operation {
+                    LocalOperation::Compact(report)
+                        if end == End::Complete && !report.is_empty() =>
+                    {
+                        report
+                    }
+                    _ => view.notice.clone(),
+                };
+                model.blocks.push(Block {
+                    speaker: if view.failed { "Error" } else { "Status" },
+                    text,
+                });
+                view.notice.clear();
+                view.failed = false;
+            } else if !matches!(end, End::Complete | End::Refused) {
                 // The visible attempt remains in scrollback. Its unfinished text
                 // is never invented as a completed assistant item in model input.
                 model.blocks.push(Block {
@@ -307,6 +336,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
 pub(super) fn compacting(model: &mut Model) {
     if let Some(view) = &mut model.account {
         view.phase = Phase::Generating;
+        view.local_operation = Some(LocalOperation::Compact(String::new()));
         view.notice = "Compacting context / Esc stops".into();
     }
 }

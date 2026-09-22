@@ -8,11 +8,10 @@ mod transcript;
 use super::{Model, history::History};
 use crate::{
     json::{self, Value},
-    state::Store,
+    state::{Lease, Store},
     workspace::{Access, Workspace},
 };
 use std::{
-    fs::File,
     io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
@@ -52,7 +51,7 @@ pub(super) struct Record {
     workspace: Option<String>,
     access: Access,
     created: u64,
-    _lock: File,
+    _lock: Lease,
 }
 impl Record {
     pub(super) fn id(&self) -> &str {
