@@ -105,7 +105,7 @@ fn native_menu_selects_with_arrows_and_preserves_transcript_across_resize() {
     wait_for(|| console.output().contains("· current"));
     console.resize(48, 24);
     console.input.write_all(b"\x1b[B\r").unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+    wait_for(|| console.output().contains("gpt-5.6-terra · medium"));
     let selected = snapshot(&fixture.0, "selected");
     assert!(selected.contains("gpt-5.6-terra") && !selected.contains("· current"));
     console.input.write_all(b"/unknown").unwrap();

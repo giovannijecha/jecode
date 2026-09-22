@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.2 - 2026-09-22
 
 - Minimal startup with directory, active model and effort in a single footer row.
 - Command-only slash menu and selection controls inside the expandable composer.

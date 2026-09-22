@@ -2,12 +2,12 @@
 
 Versions use SemVer. Alpha versions identify an incomplete, experimental product;
 they do not imply independent security review or support for untested platforms.
-The current source candidate is `0.1.0-alpha.1`.
+The current source candidate is `0.1.0-alpha.2`.
 
 From a clean, reviewed checkout:
 
 ```text
-cargo run --locked --offline --bin jecode-check -- release-check v0.1.0-alpha.1
+cargo run --locked --offline --bin jecode-check -- release-check v0.1.0-alpha.2
 ```
 
 The command requires a matching version, clean source, an empty external dependency
