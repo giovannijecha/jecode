@@ -13,6 +13,25 @@ use std::{
 };
 
 struct Backend(Arc<Mutex<Vec<String>>>);
+
+#[test]
+fn changing_model_survives_resume_without_rewriting_canonical_turns() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history = create(&store, Model::Luna, None).unwrap();
+    history.begin("retained prompt".into()).unwrap();
+    history.turns[0].end = Some(End::Complete);
+    let canonical = crate::json::encode(&codec::encode(&history), LIMIT).unwrap();
+    history.set_model(Model::Terra).unwrap();
+    let id = history.record.as_ref().unwrap().id.clone();
+    drop(history);
+    let saved = load(&store, &id, true).unwrap();
+    assert_eq!(saved.model, Model::Terra);
+    assert_eq!(
+        crate::json::encode(&codec::encode(&saved.history), LIMIT).unwrap(),
+        canonical
+    );
+}
 impl session::worker::Backend for Backend {
     fn login(
         &mut self,
@@ -210,7 +229,7 @@ fn failed_checkpoint_stops_before_an_approved_effect_can_be_requested() {
         return;
     };
     let workspace = crate::workspace::Workspace::open(&fixture.0).unwrap();
-    let history = create(&store, Model::Luna, Some(workspace.path())).unwrap();
+    let history = create(&store, Model::Luna, Some(&workspace)).unwrap();
     let record = history.record.as_ref().unwrap();
     let file = record.store.root().join(format!("{}.json", record.id));
     let mut run =

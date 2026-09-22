@@ -109,6 +109,9 @@ fn start(fail_first: bool, flood: bool) -> (Session, Arc<Observed>) {
     assert!(matches!(next(&mut session), Event::Ready));
     (session, observed)
 }
+pub(crate) fn ready_fixture() -> Session {
+    start(false, false).0
+}
 fn finish(session: &mut Session) -> (String, End, Metrics) {
     let mut text = String::new();
     loop {
@@ -119,6 +122,29 @@ fn finish(session: &mut Session) -> (String, End, Metrics) {
             _ => panic!("unexpected event during generation"),
         }
     }
+}
+
+#[test]
+fn model_switch_is_ordered_and_next_request_keeps_the_conversation() {
+    let (mut session, observed) = start(false, false);
+    assert!(session.submit("first prompt"));
+    assert!(!session.set_model(Model::Terra));
+    assert_eq!(finish(&mut session).1, End::Complete);
+    assert!(session.set_model(Model::Terra));
+    assert!(!session.submit("too soon"));
+    assert!(!session.enqueue("not guidance"));
+    assert!(!session.set_model(Model::Luna));
+    assert!(matches!(
+        next(&mut session),
+        Event::ModelChanged(Model::Terra)
+    ));
+    assert!(session.submit("continue with Terra"));
+    assert_eq!(finish(&mut session).1, End::Complete);
+    let requests = observed.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].contains("gpt-5.6-terra"));
+    assert!(requests[1].contains("first prompt"));
+    assert!(!requests[1].contains("too soon"));
 }
 
 #[test]

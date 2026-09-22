@@ -177,7 +177,8 @@ fn real_tools_return_ordered_results_and_usage_then_stream_a_final_answer() {
             "result:false",
             "tool:search_text",
             "result:false",
-            "tool:rejected tool",
+            // Syntax is valid; the active workspace profile rejects access.
+            "tool:read_file",
             "result:true",
             "request",
             "text:The answer is ",

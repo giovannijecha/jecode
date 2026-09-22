@@ -1,4 +1,5 @@
 //! Development commands use only the Rust standard library and installed tools.
+mod package;
 
 use std::{
     env, io,
@@ -152,8 +153,9 @@ fn entry() -> Result<(), String> {
         [command] if command == "check" => check(),
         [command] if command == "ownership" => ownership(),
         [command, tag] if command == "release-check" => release_check(tag),
+        [command, destination] if command == "package-windows" => package::windows(Path::new(destination)),
         _ => {
-            Err("usage: cargo run --bin jecode-check -- <check|ownership|release-check TAG>".into())
+            Err("usage: cargo run --bin jecode-check -- <check|ownership|release-check TAG|package-windows target/DEST>".into())
         }
     }
 }

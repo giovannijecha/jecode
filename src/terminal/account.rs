@@ -14,6 +14,7 @@ enum Phase {
     Login,
     Ready,
     Generating,
+    Updating,
     Closed,
 }
 pub(super) struct View {
@@ -25,19 +26,26 @@ pub(super) struct View {
     active_tool: Option<usize>,
     pub approval: Option<super::approval_view::Approval>,
     pub command: Option<super::command_view::Run>,
+    pub selected: session::Model,
+    pub id: Option<String>,
 }
 impl View {
     pub fn generating(&self) -> bool {
         self.phase == Phase::Generating
     }
+    pub fn updating(&mut self) {
+        self.phase = Phase::Updating;
+        self.notice = "Changing model…".into();
+    }
 }
 pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path>) -> Model {
     let mut model = Model::new(Instant::now());
-    model.blocks = vec![Block {
+    model.blocks =
+        vec![Block {
         speaker: "Jecode", text: if workspace.is_some() {
-            "File changes and commands require your approval. Selected content and command output are sent to the model.\nSessions are saved locally. Commands run with your user permissions."
+            "Changes and commands need approval. Sessions save automatically. Type / for commands."
         } else {
-            "Sessions are saved locally.\nStart with --workspace PATH to enable file tools with approval for each change."
+            "Conversation only · sessions save automatically. Type / for commands."
         }.into(),
     }];
     if let Some(path) = workspace {
@@ -58,6 +66,8 @@ pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path
         active_tool: None,
         approval: None,
         command: None,
+        selected,
+        id: None,
     });
     model
 }
@@ -168,10 +178,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
         }
         Event::Restored { id, items, turns } => {
             view.turns = turns;
-            model.blocks.push(Block {
-                speaker: "Status",
-                text: format!("Session / {id}"),
-            });
+            view.id = Some(id);
             model.blocks.extend(items.into_iter().map(|item| Block {
                 speaker: item.role,
                 text: item.text,
@@ -207,7 +214,16 @@ pub(super) fn event(model: &mut Model, event: Event) {
         }
         Event::Ready => {
             view.phase = Phase::Ready;
-            view.notice = "Signed in / ready".into();
+            view.notice = "Ready".into();
+        }
+        Event::ModelChanged(selected) => {
+            view.selected = selected;
+            view.phase = Phase::Ready;
+            view.notice = format!("Ready · {}", selected.id());
+            model.blocks.push(Block {
+                speaker: "Status",
+                text: format!("Model changed to {} · medium", selected.id()),
+            });
         }
         Event::Thinking if view.phase == Phase::Generating => {
             view.notice = "Thinking / Esc stops".into();

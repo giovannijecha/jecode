@@ -1,4 +1,6 @@
 //! Plain versioned session snapshots. A lease prevents two owners of one conversation.
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod access_tests;
 mod codec;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
@@ -7,6 +9,7 @@ use super::{Model, history::History};
 use crate::{
     json::{self, Value},
     state::Store,
+    workspace::{Access, Workspace},
 };
 use std::{
     fs::File,
@@ -17,10 +20,27 @@ use std::{
 };
 const LIMIT: usize = 16 * 1024 * 1024;
 
+impl History {
+    pub(super) fn set_model(&mut self, model: Model) -> io::Result<()> {
+        let Some(mut record) = self.record.take() else {
+            return Ok(());
+        };
+        let previous = record.model;
+        record.model = model;
+        let result = record.save(self);
+        if result.is_err() {
+            record.model = previous;
+        }
+        self.record = Some(record);
+        result
+    }
+}
+
 pub struct Saved {
     pub id: String,
     pub model: Model,
     pub workspace: Option<PathBuf>,
+    pub access: Access,
     pub title: String,
     pub turns: usize,
     pub(super) history: History,
@@ -30,6 +50,7 @@ pub(super) struct Record {
     id: String,
     model: Model,
     workspace: Option<String>,
+    access: Access,
     created: u64,
     _lock: File,
 }
@@ -47,6 +68,7 @@ impl Record {
                 self.workspace.as_deref().map_or(Value::Null, text),
             ),
             ("created", Value::Number(self.created.to_string())),
+            ("file_access", text(self.access.name())),
             ("updated", Value::Number(now()?.to_string())),
             ("history", codec::encode(history)),
             (
@@ -69,7 +91,11 @@ impl Record {
         self.store.replace(&format!("{}.json", self.id), &contents)
     }
 }
-pub(super) fn create(store: &Store, model: Model, workspace: Option<&Path>) -> io::Result<History> {
+pub(super) fn create(
+    store: &Store,
+    model: Model,
+    workspace: Option<&Workspace>,
+) -> io::Result<History> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let settings = crate::state::settings::Settings::load(store)?;
     let store = store.directory("sessions")?;
@@ -94,8 +120,15 @@ pub(super) fn create(store: &Store, model: Model, workspace: Option<&Path>) -> i
         created,
         _lock: lock,
         workspace: workspace
-            .map(|path| path.to_str().map(str::to_owned).ok_or_else(invalid))
+            .map(|workspace| {
+                workspace
+                    .path()
+                    .to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(invalid)
+            })
             .transpose()?,
+        access: workspace.map_or(Access::Workspace, Workspace::access),
     };
     let mut history = History {
         record: Some(record),
@@ -155,6 +188,14 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
         .get("created")
         .and_then(Value::unsigned)
         .ok_or_else(invalid)?;
+    // Missing means the original bounded profile, never today's user default.
+    let access = match value.get("file_access") {
+        None => Access::Workspace,
+        Some(value) => value.text().and_then(Access::parse).ok_or_else(invalid)?,
+    };
+    if workspace.is_none() && access != Access::Workspace {
+        return Err(invalid());
+    }
     let mut history = codec::decode(value.get("history").ok_or_else(invalid)?)?;
     let projection = value.get("projection").ok_or_else(invalid)?;
     history.projection.through = projection
@@ -188,6 +229,7 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
             model,
             workspace: workspace.as_ref().map(|p| p.to_string_lossy().into_owned()),
             created,
+            access,
             _lock: lock,
         });
     }
@@ -195,9 +237,11 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
         id: id.into(),
         model,
         workspace,
-        title: history.turns.first().map_or(String::new(), |turn| {
-            turn.prompt.chars().take(100).collect()
-        }),
+        access,
+        title: history
+            .turns
+            .first()
+            .map_or(String::new(), |turn| turn.prompt.clone()),
         turns: history.turns.len(),
         history,
     })
@@ -207,6 +251,8 @@ pub struct Listed {
     pub model: Option<Model>,
     pub title: String,
     pub turns: usize,
+    pub workspace: Option<PathBuf>,
+    pub modified: SystemTime,
 }
 pub fn list() -> io::Result<Vec<Listed>> {
     let root = Store::user()?;
@@ -224,7 +270,7 @@ pub fn list() -> io::Result<Vec<Listed>> {
         .collect();
     names.sort_by(|a, b| b.cmp(a));
     let mut sessions = Vec::new();
-    for (_, name) in names.into_iter().take(50) {
+    for (modified, name) in names.into_iter().take(50) {
         if let Some(id) = name.strip_suffix(".json")
             && valid_id(id)
         {
@@ -234,12 +280,16 @@ pub fn list() -> io::Result<Vec<Listed>> {
                     model: Some(saved.model),
                     title: saved.title,
                     turns: saved.turns,
+                    workspace: saved.workspace,
+                    modified,
                 },
                 Err(_) => Listed {
                     id: id.into(),
                     model: None,
                     title: "Unreadable session / file kept on disk".into(),
                     turns: 0,
+                    workspace: None,
+                    modified,
                 },
             });
         }

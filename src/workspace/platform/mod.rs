@@ -29,6 +29,9 @@ mod unsupported {
     pub fn open(_: &File, _: &str, _: bool) -> io::Result<Opened> {
         Err(io::ErrorKind::Unsupported.into())
     }
+    pub fn absolute(_: &Path, _: bool) -> io::Result<Opened> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
     pub fn names(_: &File, _: &mut dyn FnMut(OsString) -> bool) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }

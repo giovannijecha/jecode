@@ -8,7 +8,7 @@ to the model schema.
 | --- | --- | --- |
 | `list_files` | Discover entries in a selected directory | No |
 | `read_file` | Read a bounded range of UTF-8 text with line numbers | No |
-| `search_text` | Find literal text in supported workspace files | No |
+| `search_text` | Find literal text in supported local files | No |
 | `create_file` | Propose one new UTF-8 file | Once per proposal |
 | `edit_file` | Propose an exact text replacement in an existing file | Once per proposal |
 | `run_command` | Run a non-interactive shell command | Once per proposal |
@@ -18,12 +18,25 @@ paths. Tool results report omissions and truncation so a partial result is not
 mistaken for a complete search. Tool output is bounded to 32 KiB of encoded JSON.
 Reads operate on supported ordinary text files up to 1 MiB.
 
-## Workspace boundary
+## Working directory and access
 
-File tools accept relative workspace paths. Parent traversal, links, reparse points,
-dot directories and known credential locations are rejected.
-The workspace is held through native directory handles rather than reopened from
-an untrusted replacement path. Paths do not authorize effects by themselves.
+The default `local` profile accepts paths relative to the working directory,
+including `../sibling/file`, and native absolute paths. Windows accepts drive paths
+with either slash style. Changing a command's starting directory does not change
+the base for later file tools. The model receives that base and the active profile.
+
+The `workspace` profile retains the narrower contract: forward-slash relative
+paths inside the selected directory, without parent traversal. Choose it with
+`--access workspace` or the `file_access` user setting. Resume uses the session's
+saved profile, not a newly changed default. Sessions saved before access profiles
+were added retain `workspace` access.
+
+Both profiles reject links, reparse points, network/device paths, dot paths and
+known credential names. These name checks cannot identify secrets in arbitrary
+file contents. In `local`, generated directories are omitted from discovery but
+known files inside them can be addressed directly. Paths are normalized before
+opening through native directory handles. External changes and commands show
+their absolute destination before approval. A path alone never authorizes an effect.
 
 Treat file content and command output as potentially sensitive: requested contents
 are sent to the provider. Do not put secrets in a task that asks the model to print

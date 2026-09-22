@@ -126,13 +126,18 @@ pub(crate) fn prepare(
     if cwd.chars().any(capture::invisible) {
         return Err("working directory contains hidden controls");
     }
-    let directory = workspace
-        .directory(cwd, budget)
-        .map_err(|_| "starting directory unavailable or outside the workspace")?;
+    let directory = workspace.directory(cwd, budget).map_err(
+        |_| "starting directory unavailable or excluded by the session's file-access profile",
+    )?;
+    let shown_cwd = if workspace.access() == crate::workspace::Access::Local {
+        directory.path.to_string_lossy().replace('\\', "/")
+    } else {
+        cwd.into()
+    };
     Ok(Proposal {
         preview: Preview {
             command: command.into(),
-            cwd: cwd.into(),
+            cwd: shown_cwd,
             shell: shell::NAME,
             timeout_seconds,
         },

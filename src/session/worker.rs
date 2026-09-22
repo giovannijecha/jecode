@@ -108,7 +108,7 @@ impl Context {
 }
 
 pub(super) fn run(
-    model: Model,
+    mut model: Model,
     mut backend: impl Backend,
     commands: Receiver<Command>,
     context: Context,
@@ -177,6 +177,20 @@ pub(super) fn run(
         let mut metrics = Metrics::default();
         let prompt = match command {
             Command::Prompt(prompt) => prompt,
+            Command::Model(selected) => {
+                if history.set_model(selected).is_err() {
+                    let _ = context.send(
+                        Event::Finished(End::Failed(Failure::Storage), metrics),
+                        false,
+                    );
+                    break;
+                }
+                model = selected;
+                if context.send(Event::ModelChanged(model), false).is_break() {
+                    break;
+                }
+                continue;
+            }
             Command::Inspect => {
                 let _ = context.send(
                     Event::ContextReport(super::context::report(

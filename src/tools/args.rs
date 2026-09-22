@@ -54,9 +54,9 @@ impl Prepared {
             None if matches!(name, "list_files" | "search_text" | "run_command") => ".",
             _ => return Err("path must be a string; file tools require a path"),
         };
-        let path = workspace::relative(path).map_err(|error| match error {
+        let path = workspace::input(path).map_err(|error| match error {
             workspace::Error::Excluded => "path is excluded from workspace reads",
-            _ => "use a relative workspace path with forward slashes and no parent traversal",
+            _ => "use a valid local file path without hidden controls or device/network names",
         })?;
         Ok(match name {
             "run_command" => Self::Command {

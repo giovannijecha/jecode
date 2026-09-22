@@ -28,12 +28,14 @@ enum Command {
     Prompt(String),
     Inspect,
     Compact,
+    Model(Model),
 }
 #[derive(PartialEq)]
 enum Phase {
     Login,
     Ready,
     Generating,
+    Updating,
     Closed,
 }
 
@@ -58,20 +60,22 @@ impl Session {
         model: Model,
         workspace: Option<crate::workspace::Workspace>,
     ) -> io::Result<Self> {
-        let history = persistence::create(
-            &crate::state::Store::user()?,
-            model,
-            workspace.as_ref().map(crate::workspace::Workspace::path),
-        )?;
+        let history =
+            persistence::create(&crate::state::Store::user()?, model, workspace.as_ref())?;
         Self::with_history(model, worker::Account::default(), workspace, history)
     }
     pub fn resume(
         saved: persistence::Saved,
         workspace: Option<crate::workspace::Workspace>,
     ) -> io::Result<Self> {
-        if workspace.as_ref().map(crate::workspace::Workspace::path) != saved.workspace.as_deref() {
+        if workspace.as_ref().map(crate::workspace::Workspace::path) != saved.workspace.as_deref()
+            || workspace.as_ref().map_or(
+                crate::workspace::Access::Workspace,
+                crate::workspace::Workspace::access,
+            ) != saved.access
+        {
             return Err(io::Error::other(
-                "saved workspace does not match the selected directory",
+                "saved workspace or file-access profile does not match the selected environment",
             ));
         }
         Self::with_history(
@@ -93,9 +97,12 @@ impl Session {
         model: Model,
         backend: impl worker::Backend + 'static,
         workspace: Option<crate::workspace::Workspace>,
-        history: history::History,
+        mut history: history::History,
     ) -> io::Result<Self> {
         let turns = history.turns.len();
+        history.environment = workspace
+            .as_ref()
+            .map_or(String::new(), crate::workspace::Workspace::instructions);
         let (command_tx, command_rx) = mpsc::sync_channel(1);
         let (event_tx, event_rx) = mpsc::sync_channel(64);
         let (decision_tx, decision_rx) = mpsc::sync_channel(1);
@@ -170,6 +177,18 @@ impl Session {
     pub fn inspect_context(&mut self) -> bool {
         self.local_command(Command::Inspect)
     }
+    pub fn ready(&self) -> bool {
+        self.phase == Phase::Ready && self.queued == 0
+    }
+    /// Model changes are ordered between turns and acknowledged after persistence.
+    pub fn set_model(&mut self, model: Model) -> bool {
+        if self.ready() && self.local_command(Command::Model(model)) {
+            self.phase = Phase::Updating;
+            true
+        } else {
+            false
+        }
+    }
     pub fn compact(&mut self) -> bool {
         if self.phase != Phase::Ready || self.queued != 0 {
             return false;
@@ -230,7 +249,7 @@ impl Session {
                 }
                 self.phase = match &event {
                     Event::Finished(End::Failed(Failure::Storage), _) => Phase::Closed,
-                    Event::Ready | Event::Finished(_, _) => Phase::Ready,
+                    Event::Ready | Event::ModelChanged(_) | Event::Finished(_, _) => Phase::Ready,
                     Event::LoginFailed(_) => Phase::Closed,
                     _ => return Some(event),
                 };
@@ -261,6 +280,6 @@ pub(crate) mod command_tests;
 #[cfg(test)]
 pub(crate) mod edit_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 mod tool_tests;

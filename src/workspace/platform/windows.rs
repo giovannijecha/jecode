@@ -109,6 +109,32 @@ pub fn open(root: &File, path: &str, directory: bool) -> io::Result<Opened> {
     }
     Err(io::ErrorKind::InvalidInput.into())
 }
+pub fn absolute(path: &Path, directory: bool) -> io::Result<Opened> {
+    let mut parts = path.components();
+    let drive = match parts.next() {
+        Some(Component::Prefix(p)) => match p.kind() {
+            Prefix::Disk(d) => d,
+            _ => return Err(io::ErrorKind::Unsupported.into()),
+        },
+        _ => return Err(io::ErrorKind::InvalidInput.into()),
+    };
+    if parts.next() != Some(Component::RootDir) {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let volume = root(Path::new(&format!("{}:/", char::from(drive))))?;
+    let relative = parts
+        .as_path()
+        .to_str()
+        .ok_or(io::ErrorKind::InvalidInput)?
+        .replace('\\', "/");
+    let mut opened = open(
+        &volume,
+        if relative.is_empty() { "." } else { &relative },
+        directory,
+    )?;
+    opened._parents.push(volume);
+    Ok(opened)
+}
 fn child(parent: &File, name: &str, directory: bool) -> io::Result<File> {
     child_options(
         parent,

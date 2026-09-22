@@ -81,6 +81,8 @@ impl Decoder {
                     return;
                 }
                 let key = match self.pending.as_slice() {
+                    b"\x1b[A" | b"\x1bOA" => Some(Key::Up),
+                    b"\x1b[B" | b"\x1bOB" => Some(Key::Down),
                     b"\x1b[D" | b"\x1bOD" => Some(Key::Left),
                     b"\x1b[C" | b"\x1bOC" => Some(Key::Right),
                     b"\x1b[H" | b"\x1bOH" | b"\x1b[1~" => Some(Key::Home),
