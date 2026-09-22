@@ -137,6 +137,8 @@ impl Terminal {
                     0x1b => Some(Key::Escape),
                     0x08 => Some(Key::Backspace),
                     0x25 => Some(Key::Left),
+                    0x26 => Some(Key::Up),
+                    0x28 => Some(Key::Down),
                     0x27 => Some(Key::Right),
                     0x24 => Some(Key::Home),
                     0x23 => Some(Key::End),

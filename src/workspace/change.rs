@@ -1,5 +1,5 @@
 //! Prepared content is immutable. Preparing a proposal never creates a file.
-use super::{Budget, Error, MAX_FILE_BYTES, Workspace, diff, platform, relative};
+use super::{Budget, Error, MAX_FILE_BYTES, Workspace, diff, platform};
 use std::{
     fs::File,
     io::{self, Read, Seek},
@@ -141,12 +141,21 @@ impl Workspace {
         budget: &Budget<'_>,
     ) -> Result<(String, super::Opened, String), ChangeError> {
         budget.check()?;
-        let path = relative(path)?;
+        let path = self.resolve(path)?.display;
         if path == "." || path.chars().any(bidi) {
-            return fail("change requires an unambiguous relative file path");
+            return fail("change requires an unambiguous file path");
         }
         let (parent, name) = path.rsplit_once('/').unwrap_or((".", &path));
-        let opened = platform::open(&self.root, parent, true)?;
+        if name.is_empty() {
+            return fail("change requires a file name, not a filesystem root");
+        }
+        let parent = if parent.is_empty() { "/" } else { parent };
+        let parent = if parent.ends_with(':') {
+            format!("{parent}/")
+        } else {
+            parent.into()
+        };
+        let opened = self.open_location(&self.resolve(&parent)?, true)?;
         let name = name.to_owned();
         Ok((path, opened, name))
     }

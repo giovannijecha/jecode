@@ -41,7 +41,7 @@ fn local_account_commands_use_only_the_selected_fake_home() {
         );
         return;
     }
-    for option in ["--sessions", "--logout"] {
+    for option in ["--sessions", "sessions", "--logout", "logout"] {
         let output = Command::new(env!("CARGO_BIN_EXE_jecode"))
             .arg(option)
             .env("USERPROFILE", &home.0)
@@ -67,6 +67,11 @@ fn invalid_input_is_rejected_without_echoing_arbitrary_text() {
         vec!["--api-key=secret-123\x1b[2J"],
         vec!["--help", "extra"],
         vec!["--demo"],
+        vec!["chat"],
+        vec!["resume"],
+        vec!["--model", "gpt-5.6-luna"],
+        vec!["--workspace", ".", "--access", "local"],
+        vec!["chat", "--workspace", "."],
         vec!["--account"],
         vec!["--account", "--model", "gpt-5.6-luna"],
         vec!["--account", "--model", "gpt-5.6-terra"],
@@ -75,6 +80,17 @@ fn invalid_input_is_rejected_without_echoing_arbitrary_text() {
         vec!["--account", "--model", "gpt-5.6-luna", "extra"],
         vec!["--account", "--workspace"],
         vec!["--account", "--workspace", ""],
+        vec!["--account", "--access", "local"],
+        vec!["--account", "--workspace", ".", "--access", "unknown"],
+        vec![
+            "--account",
+            "--workspace",
+            ".",
+            "--access",
+            "local",
+            "--access",
+            "workspace",
+        ],
         vec!["--account", "--workspace", ".", "--workspace", "."],
         vec!["--account", "--workspace", ".", "--model", "gpt-5.6-luna"],
         vec!["--account", "--model", "gpt-5.6-luna", "--workspace", "."],

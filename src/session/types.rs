@@ -96,6 +96,7 @@ pub enum Event {
     },
     LoginCode(String),
     Ready,
+    ModelChanged(Model),
     Thinking,
     RequestStarted,
     ToolStarted {

@@ -161,7 +161,7 @@ pub fn chrome(model: &Model, columns: usize, height: usize) -> Vec<Row> {
     rows.extend(composer(&model.editor, width));
     rows.push(Row::new(rule, Tone::Accent));
     let hint = if width >= 60 {
-        "Enter send  ·  Esc stop  ·  Ctrl+Q exit"
+        "Enter send  ·  / commands  ·  Esc stop  ·  Ctrl+Q exit"
     } else {
         "Enter send / Ctrl+Q exit"
     };
@@ -178,9 +178,8 @@ pub fn chrome(model: &Model, columns: usize, height: usize) -> Vec<Row> {
             Tone::Muted,
         ));
     }
-    if let Some(hint) = super::commands::hint(model) {
-        rows.push(super::tool_view::clipped(&hint, width, Tone::Muted));
-    }
+    let available = height.saturating_sub(1 + rows.len());
+    rows.splice(0..0, super::menu::rows(model, width, available));
     if active {
         let available = height.saturating_sub(1 + rows.len());
         let activity = if let Some(command) = command {

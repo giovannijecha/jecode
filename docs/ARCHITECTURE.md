@@ -23,6 +23,12 @@ execute tool effects. Exact proposals stay with the worker; approval messages
 contain an operation ID and a decision. Effects are ordered. Cancellation reaches
 the provider, tools and process owner, and closing the UI joins its worker.
 
+The workspace owns a starting directory and a separate file-access profile.
+Path resolution and native opens enforce that profile; changing a command's
+directory does not grant an effect. The controller still owns each approval.
+Sessions store the profile, while model instructions derive from the active
+workspace so request-size measurements include the same environment description.
+
 Canonical history holds user messages, accepted guidance, provider output,
 tool receipts and turn outcomes. Requests project validated assistant items and
 paired tool results. Partial output is not invented as a completed model response.

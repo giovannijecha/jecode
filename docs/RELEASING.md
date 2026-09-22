@@ -30,4 +30,20 @@ verification remains reproducible.
 The npm package name is `@giovannijecha/jecode`. A registry version cannot be reused
 after publication or unpublishing. Native npm distribution must preserve that
 constraint and verify its installer and platform artifacts before changing a
-distribution tag. No native npm installer is included in this candidate.
+distribution tag. The first npm alpha supports Windows x64. Linux x64 uses the
+native release archive. No JavaScript launcher or install script is required.
+
+After building `target/release/jecode.exe` from the verified commit:
+
+```text
+cargo run --locked --offline --bin jecode-check -- package-windows target/npm-candidate
+npm pack ./target/npm-candidate --ignore-scripts
+```
+
+The owned packager checks the native PE architecture and version, then copies
+only the executable, README, license and generated manifest to a new directory.
+Inspect the four-file tarball inventory, install it into an isolated npm prefix,
+test `jecode --version` and startup, and verify replacement of the retired package.
+The app must also launch with Node and the build toolchain absent from PATH.
+Publish the tested tarball with `--tag next --access public`. Only point `latest`
+at it after verifying a registry download; keep the alpha label explicit.

@@ -138,7 +138,7 @@ fn strict_arguments_and_schemas_cover_the_advertised_tools() {
         ("list_files", r#"{"path":null}"#),
         ("list_files", r#"{"limit":1.0}"#),
         ("list_files", r#"{"follow_links":true}"#),
-        ("list_files", r#"{"path":"../"}"#),
+        ("list_files", r#"{"path":""}"#),
         ("search_text", r#"{"query":""}"#),
         ("search_text", r#"{"query":"x","max_results":-1}"#),
         ("edit_file", r#"{"path":"file","old_text":"x"}"#),

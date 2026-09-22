@@ -11,6 +11,12 @@ use std::{
 };
 type Handle = *mut c_void;
 #[repr(C)]
+struct Security {
+    size: u32,
+    descriptor: Handle,
+    inherit: i32,
+}
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct Coord {
     x: i16,
@@ -65,7 +71,8 @@ struct Process {
 }
 #[link(name = "kernel32")]
 unsafe extern "system" {
-    fn CreatePipe(read: *mut Handle, write: *mut Handle, security: Handle, size: u32) -> i32;
+    fn CreatePipe(read: *mut Handle, write: *mut Handle, security: *mut Security, size: u32)
+    -> i32;
     fn CreatePseudoConsole(
         size: Coord,
         input: Handle,
@@ -135,6 +142,9 @@ pub struct Console {
 }
 impl Console {
     pub fn start(directory: &std::path::Path) -> Self {
+        Self::start_named(directory, "native_console_child")
+    }
+    pub fn start_named(directory: &std::path::Path, test: &str) -> Self {
         let (input_read, input) = pipe();
         let (mut output_read, output_write) = pipe();
         let output = Arc::new(Mutex::new(Vec::new()));
@@ -196,13 +206,11 @@ impl Console {
             );
         }
         let executable = std::env::current_exe().unwrap();
-        let mut command: Vec<u16> = format!(
-            "\"{}\" --exact native_console_child --nocapture",
-            executable.display()
-        )
-        .encode_utf16()
-        .chain([0])
-        .collect();
+        let mut command: Vec<u16> =
+            format!("\"{}\" --exact {test} --nocapture", executable.display())
+                .encode_utf16()
+                .chain([0])
+                .collect();
         let mut vars: Vec<(String, String)> = std::env::vars()
             .filter(|(k, _)| {
                 !k.eq_ignore_ascii_case("JECODE_TUI_TEST_DIR")

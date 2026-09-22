@@ -104,3 +104,30 @@ fn junctions_cannot_escape_and_selected_root_cannot_be_replaced() {
     assert!(fs::rename(fixture.0.join("root"), fixture.0.join("replaced")).is_err());
     assert_eq!(workspace.read("owned.txt", &budget).unwrap(), "owned");
 }
+
+#[test]
+fn local_access_still_rejects_external_junctions() {
+    let fixture = support::Fixture::new();
+    fixture.write("a/file", "A");
+    fixture.write("b/file", "B");
+    junction(&fixture.0.join("alias"), &fixture.0.join("b"));
+    let workspace = Workspace::open(&fixture.0.join("a"))
+        .unwrap()
+        .with_access(jecode::workspace::Access::Local);
+    let cancelled = AtomicBool::new(false);
+    let budget = Budget {
+        cancelled: &cancelled,
+        deadline: Instant::now() + Duration::from_secs(5),
+    };
+    assert_eq!(workspace.read("../b/file", &budget).unwrap(), "B");
+    assert_eq!(
+        workspace.read("../alias/file", &budget),
+        Err(Error::Unavailable)
+    );
+    assert!(
+        workspace
+            .prepare_create("../alias/new", "unchanged", &budget)
+            .is_err()
+    );
+    assert!(!fixture.0.join("b/new").exists());
+}

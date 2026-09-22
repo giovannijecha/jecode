@@ -1,4 +1,5 @@
 //! Explicit workspace, opened once and addressed through native handles.
+mod access;
 mod change;
 mod diff;
 mod directory;
@@ -6,9 +7,10 @@ mod path;
 mod platform;
 mod transaction;
 
+pub use access::Access;
 pub use change::{Change, ChangeError, Preview};
 pub(crate) use directory::Directory;
-pub use path::relative;
+pub use path::{input, relative};
 use std::{
     fs::File,
     io::Read,
@@ -35,9 +37,7 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Path => {
-                "use a relative workspace path with forward slashes and no parent traversal"
-            }
+            Self::Path => "invalid path or unavailable in this session's file-access profile",
             Self::Excluded => "path is excluded from workspace reads",
             Self::Unavailable => {
                 "entry unavailable, unsupported or not an ordinary workspace file/directory"
@@ -71,6 +71,7 @@ impl Budget<'_> {
 pub struct Workspace {
     root: File,
     display: PathBuf,
+    access: Access,
 }
 pub struct Entry {
     pub name: String,
@@ -94,15 +95,19 @@ impl Workspace {
         if !root.metadata().is_ok_and(|m| m.is_dir()) {
             return Err(Error::Unavailable);
         }
-        Ok(Self { root, display })
+        Ok(Self {
+            root,
+            display,
+            access: Access::Workspace,
+        })
     }
     pub fn path(&self) -> &Path {
         &self.display
     }
     pub fn list(&self, path: &str, budget: &Budget<'_>) -> Result<Listing, Error> {
         budget.check()?;
-        let path = relative(path)?;
-        let opened = platform::open(&self.root, &path, true).map_err(|_| Error::Unavailable)?;
+        let path = self.resolve(path)?;
+        let opened = self.open_location(&path, true)?;
         let mut names = Vec::new();
         let mut truncated = false;
         let mut omitted = 0;
@@ -127,18 +132,25 @@ impl Workspace {
         let mut entries = Vec::new();
         for name in names {
             budget.check()?;
-            let candidate = if path == "." {
+            let candidate = if path.display == "." {
                 name.clone()
             } else {
-                format!("{path}/{name}")
+                format!("{}/{name}", path.display.trim_end_matches('/'))
             };
-            if relative(&candidate).is_err() {
+            if path::name(&name, true).is_err() {
                 omitted += 1;
                 continue;
             }
+            let candidate = match self.resolve(&candidate) {
+                Ok(candidate) => candidate,
+                Err(_) => {
+                    omitted += 1;
+                    continue;
+                }
+            };
             // Resolve again through the root, never trust a directory entry's type.
-            let directory = platform::open(&self.root, &candidate, true).is_ok();
-            if directory || platform::open(&self.root, &candidate, false).is_ok() {
+            let directory = self.open_location(&candidate, true).is_ok();
+            if directory || self.open_location(&candidate, false).is_ok() {
                 entries.push(Entry { name, directory });
             } else {
                 omitted += 1;
@@ -152,9 +164,8 @@ impl Workspace {
     }
     pub fn read(&self, path: &str, budget: &Budget<'_>) -> Result<String, Error> {
         budget.check()?;
-        let path = relative(path)?;
-        let mut opened =
-            platform::open(&self.root, &path, false).map_err(|_| Error::Unavailable)?;
+        let path = self.resolve(path)?;
+        let mut opened = self.open_location(&path, false)?;
         let before = opened.file.metadata().map_err(|_| Error::Unavailable)?;
         if !before.is_file() {
             return Err(Error::Unavailable);

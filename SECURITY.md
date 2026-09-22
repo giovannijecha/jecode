@@ -26,6 +26,13 @@ Workspace tools validate arguments, paths and bounds. File changes require a
 preview and a matching approval; stale files are rejected and existing originals
 have a recovery copy. Historical tool calls are never executed on resume.
 
+New workspace sessions default to the `local` file-access profile, which permits
+reads outside the starting directory. Dot paths, known credential names and links
+remain excluded; these checks do not detect secrets saved under arbitrary names.
+Choose `--access workspace` for bounded file tools. Neither profile sandboxes an
+approved shell. Resume retains the session's saved profile; older records retain
+their original workspace boundary.
+
 An approved shell runs with your user permissions. Its starting directory is not
 a sandbox: it can access other files or the network. Review the command before
 approving it. Cancellation stops owned processes and waits for cleanup, but cannot

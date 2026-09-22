@@ -14,6 +14,8 @@ pub struct Model {
     pub account: Option<super::account::View>,
     pub tools: super::tool_activity::Activity,
     pub action_demo: Option<super::action_demo::Demo>,
+    pub menu: super::menu::Menu,
+    pub navigation: Option<super::navigation::Request>,
     tool_demo: Option<super::tool_demo::Demo>,
     pending: String,
     offset: usize,
@@ -33,6 +35,8 @@ impl Model {
             account: None,
             tools: super::tool_activity::Activity::default(),
             action_demo: None,
+            menu: super::menu::Menu::default(),
+            navigation: None,
             tool_demo: None,
             pending: String::new(),
             offset: 0,
@@ -63,7 +67,7 @@ impl Model {
             Key::End => self.editor.cursor = self.editor.text.len(),
             Key::Backspace => self.editor.backspace(),
             Key::Delete => self.editor.delete(),
-            Key::PageUp | Key::PageDown | Key::Tab => {}
+            Key::PageUp | Key::PageDown | Key::Tab | Key::Up | Key::Down => {}
             Key::Quit => self.quit = true,
             Key::Escape | Key::Interrupt if self.streaming() => {
                 self.pending.clear();

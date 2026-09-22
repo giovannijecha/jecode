@@ -2,7 +2,7 @@
 
 An owned coding harness for your terminal, written in Rust.
 
-Jecode streams model responses, reads a selected workspace, proposes file changes,
+Jecode streams model responses, reads local project files, proposes file changes,
 and runs commands after approval. Conversations live in the terminal's natural
 scrollback. Sessions, settings and account credentials belong to your user profile.
 
@@ -12,8 +12,21 @@ One controller owns the conversation and orders tool effects.
 
 ## Try it
 
-Jecode is an **alpha** for Windows and Linux. Build from source with the pinned
-Rust 1.95.0 toolchain and a native linker:
+Jecode is an **alpha** for Windows and Linux.
+
+Windows x64, using npm:
+
+```text
+npm install -g @giovannijecha/jecode@next
+jecode
+```
+
+The npm package contains the native executable. It has no install scripts or
+package dependencies; Node is only needed to use npm. For Linux x64, download
+the native archive from [releases](https://github.com/giovannijecha/jecode/releases),
+extract it and run `./jecode` in your project directory. macOS is not supported yet.
+
+Or build from source with Rust 1.95.0 and a native linker:
 
 ```text
 cargo build --locked --offline --release --bin jecode
@@ -22,29 +35,33 @@ cargo build --locked --offline --release --bin jecode
 Windows PowerShell, from the repository:
 
 ```powershell
-.\target\release\jecode.exe --account --workspace .
+.\target\release\jecode.exe
 ```
 
 Linux:
 
 ```sh
-./target/release/jecode --account --workspace .
+./target/release/jecode
 ```
 
 Follow the device sign-in instructions on first use. Subsequent runs reuse the
 saved account and refresh access when needed. GPT-5.6 Luna with medium effort is
 the default; `--model gpt-5.6-terra` selects Terra for that run.
-Without `--workspace`, Jecode has no file or command tools.
+`jecode` uses your current directory; `--workspace PATH` selects another directory.
+Use `jecode chat` for a conversation without file or command tools.
+The workspace is the starting directory for relative paths. The default `local`
+profile also accepts paths outside it; changes and commands still require approval.
+Use `--access workspace` to restrict file tools to the selected directory.
 
 ```text
-jecode --sessions
-jecode --resume SESSION_ID
-jecode --logout
+jecode resume
+jecode sessions
+jecode logout
 jecode --demo
 ```
 
-`--demo` is an offline interface preview. `--account` connects to OpenAI Account;
-Cargo's `--offline` flag only controls build dependency resolution.
+`--demo` is an offline interface preview. Normal conversations connect to OpenAI
+Account; Cargo's `--offline` flag only controls build dependency resolution.
 
 ## Working with Jecode
 
@@ -53,7 +70,9 @@ Cargo's `--offline` flag only controls build dependency resolution.
 - File changes show a diff. Commands show their shell, directory and timeout.
 - `/context` shows request size and available provider token counts.
 - `/compact` summarizes earlier context while retaining the full saved history.
-- Tab completes local slash commands. `NO_COLOR` and reduced motion are supported.
+- Type `/` for a command menu; arrows select, Enter opens and Tab completes.
+- `/new`, `/resume`, `/model` and `/settings` manage conversations and preferences.
+- `NO_COLOR` and reduced motion are supported.
 
 See [usage and configuration](docs/USAGE.md), [tools](docs/TOOLS.md),
 [architecture](docs/ARCHITECTURE.md), and [platform support](docs/COMPATIBILITY.md).

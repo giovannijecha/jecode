@@ -10,11 +10,14 @@ mod diagnostics;
 #[cfg(any(test, windows, target_os = "linux"))]
 mod input;
 mod markdown;
+mod menu;
 mod model;
+mod navigation;
 mod platform;
 mod render;
 mod resize;
 mod schedule;
+mod session_browser;
 mod spinner;
 mod style;
 mod text;
@@ -37,6 +40,8 @@ enum Key {
     Quit,
     Left,
     Right,
+    Up,
+    Down,
     Home,
     End,
     Backspace,
@@ -56,7 +61,7 @@ pub fn account(model: crate::session::Model) -> io::Result<()> {
     account_in(model, None)
 }
 
-/// Only this selected root is available to reads and individually approved changes.
+/// The selected workspace carries its file-access policy; effects require approval.
 pub fn account_in(
     model: crate::session::Model,
     workspace: Option<crate::workspace::Workspace>,
@@ -67,28 +72,29 @@ pub fn account_in(
 pub fn configured_account(
     model: Option<crate::session::Model>,
     workspace: Option<crate::workspace::Workspace>,
+    access: Option<crate::workspace::Access>,
 ) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("Jecode needs an interactive terminal"));
     }
     let settings = crate::state::settings::Settings::user()?;
-    account_in(model.unwrap_or(settings.model), workspace)
+    account_in(
+        model.unwrap_or(settings.model),
+        workspace.map(|w| w.with_access(access.unwrap_or(settings.file_access))),
+    )
 }
 
 pub fn resume(id: &str) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("Jecode needs an interactive terminal"));
     }
-    let saved = crate::session::persistence::resume(id)?;
-    let workspace = saved
-        .workspace
-        .as_ref()
-        .map(|path| {
-            crate::workspace::Workspace::open(path)
-                .map_err(|_| io::Error::other("saved workspace is unavailable"))
-        })
-        .transpose()?;
-    run(Some(saved.model), workspace, Some(saved))
+    let start = navigation::resume(id)?;
+    run(start.selected, start.workspace, start.saved)
+}
+
+/// Browse saved sessions; selection returns an ID from the same displayed list.
+pub fn sessions(select: bool) -> io::Result<Option<String>> {
+    session_browser::show(select)
 }
 
 fn run(
@@ -96,6 +102,23 @@ fn run(
     workspace: Option<crate::workspace::Workspace>,
     saved: Option<crate::session::persistence::Saved>,
 ) -> io::Result<()> {
+    let mut start = navigation::Start {
+        selected,
+        workspace,
+        saved,
+    };
+    while let Some(next) = run_once(start)? {
+        start = next;
+    }
+    Ok(())
+}
+
+fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
+    let navigation::Start {
+        selected,
+        workspace,
+        saved,
+    } = start;
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("Jecode needs an interactive terminal"));
     }
@@ -116,6 +139,19 @@ fn run(
             )
         },
     );
+    let location = navigation::Location::from_workspace(workspace.as_ref());
+    if workspace.is_some() {
+        model.blocks.push(model::Block {
+            speaker: "Status",
+            text: match location.access {
+                crate::workspace::Access::Local => {
+                    "Access · local paths, including outside this directory"
+                }
+                crate::workspace::Access::Workspace => "Access · paths within this workspace",
+            }
+            .into(),
+        });
+    }
     let configured_motion = if selected.is_some() {
         crate::state::settings::Settings::user()?.reduced_motion
     } else {
@@ -192,7 +228,25 @@ fn run(
             }
             paint.request();
             if model.quit {
-                return Ok(());
+                return Ok(None);
+            }
+            if let Some(request) = model.navigation.take() {
+                match location.resolve(request) {
+                    Ok(next) => {
+                        let frame = renderer.with_chrome(Vec::new());
+                        output
+                            .write_all(renderer.draw(frame, terminal.size()?, color).as_bytes())?;
+                        output.flush()?;
+                        // The current worker and lease are joined/released before the next run.
+                        drop(session);
+                        return Ok(Some(next));
+                    }
+                    Err(_) => {
+                        if let Some(view) = &mut model.account {
+                            view.notice = "Cannot open that conversation · check its folder or another running owner · current session kept".into();
+                        }
+                    }
+                }
             }
         }
         if let Some(session) = &mut session {
@@ -221,6 +275,10 @@ impl Drop for Screen {
 mod action_tests;
 #[cfg(test)]
 mod layout_tests;
+#[cfg(all(test, windows))]
+mod menu_native_tests;
+#[cfg(test)]
+mod menu_tests;
 #[cfg(test)]
 mod performance_tests;
 #[cfg(test)]
