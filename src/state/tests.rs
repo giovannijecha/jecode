@@ -110,6 +110,25 @@ fn lock_serializes_writers_and_drop_allows_next_owner() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn released_lease_is_not_kept_alive_by_an_inherited_descriptor() {
+    let fixture = Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let cancel = AtomicBool::new(false);
+    let lock = store.lock("session.lock", &cancel, Instant::now()).unwrap();
+    // A duplicate retains the same open file description as a child between
+    // fork and exec. Keep it alive deterministically, without racing a process.
+    let inherited = lock.file.try_clone().unwrap();
+    assert!(store.lock("session.lock", &cancel, Instant::now()).is_err());
+    drop(lock);
+    let next = store.lock("session.lock", &cancel, Instant::now()).unwrap();
+    drop(inherited);
+    assert!(store.lock("session.lock", &cancel, Instant::now()).is_err());
+    drop(next);
+    assert!(store.lock("session.lock", &cancel, Instant::now()).is_ok());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn private_permissions_links_and_non_utf8_are_checked() {
     use std::os::unix::fs::{PermissionsExt, symlink};
     let fixture = Fixture::new();
