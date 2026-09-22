@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Minimal startup with directory, active model and effort in a single footer row.
+- Command-only slash menu and selection controls inside the expandable composer.
+  Help and context reports go to scrollback and leave the input clear.
+- Use Ctrl+Q to save and exit; removed the redundant `/quit` command.
+- Explicitly release local state locks so Linux session resume does not wait for
+  a descriptor temporarily inherited by a concurrently starting process.
+
 ## 0.1.0-alpha.1 - 2026-09-22
 
 - Inline terminal conversation with streamed OpenAI Account responses.

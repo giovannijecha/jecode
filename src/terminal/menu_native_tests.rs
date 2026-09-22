@@ -70,6 +70,19 @@ fn snapshot(path: &std::path::Path, name: &str) -> String {
     fs::read_to_string(file).unwrap()
 }
 
+fn inside_composer(screen: &str, text: &str) {
+    let rows: Vec<_> = screen.lines().collect();
+    let rules: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with('─'))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(rules.len(), 2, "{screen}");
+    let at = rows.iter().position(|line| line.contains(text)).unwrap();
+    assert!(rules[0] < at && at < rules[1], "{screen}");
+}
+
 #[test]
 fn native_menu_selects_with_arrows_and_preserves_transcript_across_resize() {
     let fixture = crate::state::tests::Fixture::new();
@@ -79,17 +92,22 @@ fn native_menu_selects_with_arrows_and_preserves_transcript_across_resize() {
     );
     wait_for(|| console.output().contains("Retained answer"));
     console.input.write_all(b"/").unwrap();
-    wait_for(|| console.output().contains("Commands"));
+    wait_for(|| console.output().contains("/resume"));
     let wide = snapshot(&fixture.0, "wide");
     println!("{wide}");
     assert!(wide.contains("/resume") && wide.contains("/model"));
+    inside_composer(&wide, "/resume");
+    assert!(!wide.contains("Commands") && !wide.contains("choose"));
+    assert!(!wide.contains("Ctrl+Q"));
     assert_eq!(wide.matches("Retained answer").count(), 1);
     // New -> resume -> model. These are actual native console key events.
     console.input.write_all(b"\x1b[B\x1b[B\r").unwrap();
-    wait_for(|| console.output().contains("Model · this conversation"));
+    wait_for(|| console.output().contains("· current"));
     console.resize(48, 24);
     console.input.write_all(b"\x1b[B\r").unwrap();
-    wait_for(|| console.output().contains("Model changed to gpt-5.6-terra"));
+    std::thread::sleep(Duration::from_millis(100));
+    let selected = snapshot(&fixture.0, "selected");
+    assert!(selected.contains("gpt-5.6-terra") && !selected.contains("· current"));
     console.input.write_all(b"/unknown").unwrap();
     wait_for(|| console.output().contains("No matches"));
     let narrow = snapshot(&fixture.0, "narrow");
@@ -99,7 +117,34 @@ fn native_menu_selects_with_arrows_and_preserves_transcript_across_resize() {
     std::thread::sleep(Duration::from_millis(100));
     let closed = snapshot(&fixture.0, "closed");
     assert!(!closed.contains("No matches"));
+    assert!(
+        !closed.contains("Model changed"),
+        "old local output returned: {closed}"
+    );
     assert!(closed.contains("/unknown"));
+    // Reports remain in scrollback across resize; they never occupy the input.
+    console.input.write_all(b"\x03/context\r").unwrap();
+    wait_for(|| console.output().contains("canonical turns"));
+    std::thread::sleep(Duration::from_millis(100));
+    let report = snapshot(&fixture.0, "report");
+    println!("{report}");
+    assert!(report.find("canonical turns").unwrap() < report.find('─').unwrap());
+    inside_composer(&report, "Ask anything");
+    console.resize(80, 30);
+    std::thread::sleep(Duration::from_millis(100));
+    let resized = snapshot(&fixture.0, "report-resized");
+    inside_composer(&resized, "Ask anything");
+    console.input.write_all(b"\x1b").unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let dismissed = snapshot(&fixture.0, "report-retained");
+    println!("{dismissed}");
+    assert_eq!(
+        dismissed.matches("canonical turns").count(),
+        1,
+        "{dismissed}"
+    );
+    assert_eq!(dismissed.matches("Retained answer").count(), 1);
+    assert_eq!(dismissed.matches("Ask anything").count(), 1);
     console.input.write_all(&[17]).unwrap();
     drop(console);
     assert!(!fixture.0.join(".jecode").exists());

@@ -151,7 +151,7 @@ fn real_windows_resize_keeps_one_composer() {
     std::fs::create_dir(&directory).unwrap();
     let mut console = conpty::Console::start(&directory);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !console.output().contains("Ctrl+Q exit") {
+    while !console.output().contains("Local demo") {
         assert!(Instant::now() < deadline, "startup: {}", console.output());
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -270,7 +270,7 @@ fn real_windows_resize_keeps_one_composer() {
         let screen = snapshot(&directory, &mut counter);
         std::fs::write(directory.join(format!("screen-{counter}.txt")), &screen).unwrap();
         assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
-        assert_eq!(screen.matches("Ctrl+Q exit").count(), 1, "{screen}");
+        assert_eq!(screen.matches("Local demo").count(), 1, "{screen}");
         assert!(screen.contains("28."), "last paragraph lost: {screen}");
         for n in 1..=28 {
             assert!(
@@ -288,7 +288,7 @@ fn real_windows_resize_keeps_one_composer() {
     let screen = snapshot(&directory, &mut counter);
     std::fs::write(directory.join("rapid-screen.txt"), &screen).unwrap();
     assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
-    assert_eq!(screen.matches("Ctrl+Q exit").count(), 1, "{screen}");
+    assert_eq!(screen.matches("Local demo").count(), 1, "{screen}");
     assert!(screen.contains("28."), "last paragraph lost: {screen}");
     console.input.write_all(b"draft-kept").unwrap();
     std::thread::sleep(Duration::from_millis(150));

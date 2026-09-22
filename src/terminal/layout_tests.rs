@@ -198,7 +198,7 @@ fn command_denied_before_output_has_one_gap_before_its_outcome() {
 }
 
 #[test]
-fn status_and_approval_share_the_composer_gap_without_losing_small_window_controls() {
+fn status_and_approval_stay_inside_the_composer_without_losing_small_window_controls() {
     let now = Instant::now();
     for prompt in ["/edit", "/command", "/tools"] {
         let mut model = Model::new(now);
@@ -209,11 +209,17 @@ fn status_and_approval_share_the_composer_gap_without_losing_small_window_contro
             let rows = super::view::chrome(&model, size.0, size.1);
             assert!(rows.len() < size.1);
             let rule = rows.iter().position(|r| r.text.starts_with('─')).unwrap();
-            if size.1 == 24 {
-                assert!(rows[rule - 1].text.is_empty(), "{prompt}: {rows:?}");
-                assert!(!rows[rule - 2].text.is_empty());
+            assert_eq!(rule, 0, "all transient controls belong inside the composer");
+            assert!(!rows[rule + 1].text.is_empty(), "{prompt}: {rows:?}");
+            let bottom = rows.iter().rposition(|r| r.text.starts_with('─')).unwrap();
+            assert_eq!(rows.len() - bottom - 1, 1, "{rows:?}");
+            if prompt != "/tools" {
+                assert!(
+                    rows[..bottom]
+                        .iter()
+                        .any(|r| r.text.contains("Enter confirm"))
+                );
             }
-            assert!(rows.iter().any(|r| r.text.contains("Ctrl+Q")));
         }
     }
 }

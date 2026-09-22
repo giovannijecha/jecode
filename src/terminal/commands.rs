@@ -12,6 +12,12 @@ use crate::{
 
 pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool {
     if matches!(key, Key::Text(_) | Key::Backspace | Key::Delete) {
+        if (model.menu.active(&model.editor.text)
+            || matches!(key, Key::Text(text) if model.editor.text.is_empty() && text.starts_with('/')))
+            && let Some(view) = model.account.as_mut().filter(|view| view.ready())
+        {
+            view.notice.clear();
+        }
         model.menu.selected = 0;
         model.menu.hidden = false;
         return false;
@@ -25,6 +31,9 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
                     model.editor.take();
                 }
                 model.menu.close();
+                if session.ready() {
+                    model.account.as_mut().unwrap().notice.clear();
+                }
                 return true;
             }
             Key::Up | Key::Down => {
@@ -49,8 +58,6 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
             Key::Enter => {
                 if let Some(entry) = entries.get(model.menu.selected.min(count.saturating_sub(1))) {
                     execute(model, session, entry.action.clone());
-                } else {
-                    notice(model, "No matching command or conversation · Esc closes");
                 }
                 return true;
             }
@@ -70,13 +77,11 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
 }
 
 fn execute(model: &mut Model, session: &mut Session, action: Action) {
-    if !matches!(action, Action::Help | Action::Quit) && !session.ready() {
-        notice(
-            model,
-            "Wait for the current operation · draft kept · Esc stops",
-        );
+    if !session.ready() || !model.account.as_ref().is_some_and(|v| v.ready()) {
+        notice(model, "Wait for the current operation · Esc stops");
         return;
     }
+    model.account.as_mut().unwrap().notice.clear();
     let done = match action {
         Action::New => {
             model.navigation = Some(Request::New);
@@ -123,10 +128,6 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
                     let selected = model.menu.selected;
                     model.menu.open(menu::settings(&settings));
                     model.menu.selected = selected;
-                    notice(
-                        model,
-                        "Preferences saved · model and access defaults apply to new conversations",
-                    );
                     true
                 }
                 Err(_) => {
@@ -148,7 +149,12 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
         }
         Action::Context => {
             model.menu.close();
-            session.inspect_context()
+            if session.inspect_context() {
+                model.account.as_mut().unwrap().inspecting();
+                true
+            } else {
+                false
+            }
         }
         Action::Compact => {
             if !session.compact() {
@@ -164,12 +170,20 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
                 .map(|e| format!("{} — {}", e.label, e.description))
                 .collect::<Vec<_>>()
                 .join("\n");
-            model.blocks.push(Block { speaker: "Status", text: format!("{commands}\n\nType /, then ↑↓ and Enter to choose. Tab completes. Esc closes a menu or stops a running turn.\nWhile a turn runs, Enter queues your message for the next model boundary. Ctrl+Q saves and exits.") });
+            let view = model.account.as_ref().unwrap();
+            let location = view.workspace.as_deref().unwrap_or("Conversation only");
+            let access = if view.workspace.is_some() {
+                view.access.name()
+            } else {
+                "no file tools"
+            };
+            model.blocks.push(Block {
+                speaker: "Status",
+                text: format!(
+                    "{commands}\n\n↑↓ choose · Enter select · Tab complete\nEsc closes menus or stops work · Ctrl+Q saves and exits\nEnter queues guidance while a turn runs.\n\nDirectory: {location}\nAccess: {access}. Changes and commands require approval."
+                ),
+            });
             model.menu.close();
-            true
-        }
-        Action::Quit => {
-            model.quit = true;
             true
         }
     };

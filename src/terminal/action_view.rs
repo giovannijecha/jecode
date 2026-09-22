@@ -15,12 +15,14 @@ pub fn approval(demo: &Demo, width: usize, draft: bool) -> Vec<Row> {
     decision(title, demo.allow, width, draft)
 }
 pub fn decision(title: &str, allow: bool, width: usize, draft: bool) -> Vec<Row> {
-    let mut rows = vec![clipped(title, width, Tone::Heading)];
+    let rule = "─".repeat(width);
+    let mut rows = vec![
+        Row::new(&rule, Tone::Accent),
+        clipped(title, width, Tone::Heading),
+    ];
     if draft {
         rows.push(clipped("  Draft kept while you decide", width, Tone::Muted));
     }
-    let rule = "─".repeat(width);
-    rows.push(Row::new(&rule, Tone::Accent));
     let choice = if allow {
         "  Deny  › Allow once"
     } else {
@@ -39,17 +41,16 @@ pub fn decision(title: &str, allow: bool, width: usize, draft: bool) -> Vec<Row>
     };
     row.spans.push((start..end, Tone::Heading));
     rows.push(row);
-    rows.push(Row::new(rule, Tone::Accent));
-    if width >= 70 {
+    if width >= 40 {
         rows.push(Row::new(
-            "Left/Right choose · Enter confirm · Esc deny · Ctrl+Q exit",
+            "←→ choose · Enter confirm · Esc deny",
             Tone::Muted,
         ));
     } else {
-        rows.push(Row::new("Left/Right choose", Tone::Muted));
+        rows.push(Row::new("←→ choose", Tone::Muted));
         rows.push(Row::new("Enter confirm / Esc deny", Tone::Muted));
-        rows.push(Row::new("Ctrl+Q exit", Tone::Muted));
     }
+    rows.push(Row::new(rule, Tone::Accent));
     rows
 }
 

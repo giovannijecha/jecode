@@ -6,6 +6,7 @@ mod approval_view;
 mod block;
 mod command_view;
 mod commands;
+mod composer;
 mod diagnostics;
 #[cfg(any(test, windows, target_os = "linux"))]
 mod input;
@@ -140,17 +141,8 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         },
     );
     let location = navigation::Location::from_workspace(workspace.as_ref());
-    if workspace.is_some() {
-        model.blocks.push(model::Block {
-            speaker: "Status",
-            text: match location.access {
-                crate::workspace::Access::Local => {
-                    "Access · local paths, including outside this directory"
-                }
-                crate::workspace::Access::Workspace => "Access · paths within this workspace",
-            }
-            .into(),
-        });
+    if let Some(view) = &mut model.account {
+        view.access = location.access;
     }
     let configured_motion = if selected.is_some() {
         crate::state::settings::Settings::user()?.reduced_motion
@@ -273,6 +265,8 @@ impl Drop for Screen {
 
 #[cfg(test)]
 mod action_tests;
+#[cfg(test)]
+mod composer_tests;
 #[cfg(test)]
 mod layout_tests;
 #[cfg(all(test, windows))]

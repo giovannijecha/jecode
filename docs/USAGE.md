@@ -117,12 +117,21 @@ scrollback remains available. Bracketed paste does not submit text automatically
 - `/help`: list local commands.
 - `/context`: measured request bytes and the latest available provider token counts.
 - `/compact`: summarize earlier turns while keeping the two most recent turns intact.
-- `/quit`: exit.
 
-Type `/` to open the menu, then type to filter. Up/Down selects, Enter executes
-and Tab completes the selected command. Esc closes a menu before cancelling work.
-Local commands do not become model
-tools. Automatic compaction runs before a new turn when the configured byte
+Startup shows only the Jecode name above the conversation. The directory, active
+model and effort share one footer row below the composer. Long paths and model
+names shorten to fit narrow windows; `/help` shows the directory in full.
+
+Type `/` to expand the composer with the command menu, then type to filter.
+Up/Down selects, Enter executes and Tab completes the selected command. The menu
+shows only command names, between the composer's two lines. Esc closes it and
+retains the draft. Help and context reports are printed in terminal scrollback,
+leaving the composer ready for the next input; they are not saved as conversation
+messages or sent to the model. Model changes update the footer after being saved.
+Use Ctrl+Q to save and exit.
+
+Local commands run between turns and do not become model tools. Automatic
+compaction runs before a new turn when the configured byte
 threshold is exceeded and older turns can be summarized. It uses the selected
 model and consumes tokens. A failed or interrupted summary is not automatically
 retried; `/compact` requests a new explicit attempt.

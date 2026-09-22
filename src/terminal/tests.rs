@@ -190,7 +190,7 @@ fn native_scrollback_keeps_completed_prefix_out_of_tail_updates() {
     assert!(!resized.contains("\x1b[2J"));
     assert!(!resized.contains("old row"));
     assert!(!resized.contains("\x1b[3J"));
-    assert!(resized.contains("Ctrl+Q exit"));
+    assert!(resized.contains("Local demo"));
 }
 
 #[test]

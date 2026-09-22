@@ -1,4 +1,4 @@
-//! Pure, bounded command and selection surfaces above the composer.
+//! Pure, bounded command and selection surfaces inside the composer.
 use super::{
     model::Model,
     style::{Row, Tone},
@@ -21,7 +21,6 @@ pub(super) enum Action {
     Context,
     Compact,
     Help,
-    Quit,
 }
 pub(super) struct Entry {
     pub label: String,
@@ -103,7 +102,6 @@ pub(super) fn commands() -> Vec<Entry> {
             Compact,
         ),
         ("/help", "Show shortcuts and available commands", Help),
-        ("/quit", "Save and exit", Quit),
     ]
     .into_iter()
     .map(|(name, description, action)| Entry::new(name, description, action))
@@ -112,17 +110,17 @@ pub(super) fn commands() -> Vec<Entry> {
 
 pub(super) fn models(current: session::Model) -> Panel {
     Panel {
-        title: "Model · this conversation",
+        title: "Model",
         entries: [session::Model::Luna, session::Model::Terra]
             .into_iter()
             .map(|model| {
                 Entry::new(
-                    model.id(),
-                    if model == current {
-                        "Current · medium effort"
-                    } else {
-                        "Medium effort · keeps this conversation"
-                    },
+                    &format!(
+                        "{}{}",
+                        model.id(),
+                        if model == current { " · current" } else { "" }
+                    ),
+                    "",
                     Action::Model(model),
                 )
             })
@@ -136,16 +134,16 @@ pub(super) fn settings(settings: &Settings) -> Panel {
         session::Model::Luna
     };
     Panel {
-        title: "Settings · saved in ~/.jecode/v1/settings.json",
+        title: "Settings",
         entries: vec![
             Entry::new(
                 &format!("Default model · {}", settings.model.id()),
-                &format!("New conversations · Enter selects {}", next.id()),
+                "Applies to new conversations",
                 Action::Preference(Change::Model(next)),
             ),
             Entry::new(
                 &format!("File access · {}", settings.file_access.name()),
-                "New conversations · Enter switches local/workspace",
+                "Applies to new conversations",
                 Action::Preference(Change::ToggleAccess),
             ),
             Entry::new(
@@ -157,7 +155,7 @@ pub(super) fn settings(settings: &Settings) -> Panel {
                         "on"
                     }
                 ),
-                "Enter toggles · applies now and on next launch",
+                "Applies immediately",
                 Action::Preference(Change::ToggleMotion),
             ),
         ],
@@ -168,7 +166,7 @@ pub(super) fn sessions(
     current: Option<&str>,
 ) -> Panel {
     Panel {
-        title: "Resume · type to filter by title or folder",
+        title: "Resume",
         entries: sessions
             .into_iter()
             .filter(|s| s.model.is_some() && Some(s.id.as_str()) != current)
@@ -193,19 +191,28 @@ pub(super) fn sessions(
 }
 
 pub(super) fn rows(model: &Model, width: usize, available: usize) -> Vec<Row> {
-    if model.account.is_none() || !model.menu.active(&model.editor.text) || available < 2 {
+    if model.account.is_none() || !model.menu.active(&model.editor.text) || available == 0 {
         return Vec::new();
     }
     let menu = &model.menu;
     let entries = menu.entries(&model.editor.text);
-    let title = menu.panel.as_ref().map_or("Commands", |p| p.title);
-    let mut rows = vec![clipped(title, width, Tone::Heading)];
+    let mut rows = Vec::new();
+    if let Some(panel) = &menu.panel {
+        rows.push(clipped(panel.title, width, Tone::Heading));
+        if available == 1 {
+            return rows;
+        }
+    }
     if entries.is_empty() {
-        rows.push(clipped("No matches · Esc closes", width, Tone::Muted));
+        rows.push(clipped("No matches", width, Tone::Muted));
         return rows;
     }
     let selected = menu.selected.min(entries.len() - 1);
-    let count = available.saturating_sub(3).clamp(1, 6).min(entries.len());
+    let details = menu.panel.is_some() && !entries[selected].description.is_empty();
+    let count = available
+        .saturating_sub(rows.len() + usize::from(details))
+        .max(1)
+        .min(entries.len());
     let start = selected.saturating_sub(count - 1);
     for (index, entry) in entries.iter().enumerate().skip(start).take(count) {
         rows.push(clipped(
@@ -218,23 +225,12 @@ pub(super) fn rows(model: &Model, width: usize, available: usize) -> Vec<Row> {
             if index == selected {
                 Tone::Accent
             } else {
-                Tone::Muted
+                Tone::Text
             },
         ));
     }
-    if rows.len() < available {
+    if details && rows.len() < available {
         rows.push(clipped(&entries[selected].description, width, Tone::Muted));
-    }
-    if rows.len() < available {
-        rows.push(clipped(
-            &format!(
-                "↑↓ choose · Enter select · Esc close   {}/{}",
-                selected + 1,
-                entries.len()
-            ),
-            width,
-            Tone::Muted,
-        ));
     }
     rows.truncate(available);
     rows

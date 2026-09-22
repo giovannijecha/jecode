@@ -15,7 +15,8 @@ fn restored_history_and_context_notices_do_not_swallow_streamed_text() {
         },
     );
     event(&mut model, Event::Ready);
-    compacting(&mut model);
+    model.account.as_mut().unwrap().phase = Phase::Generating;
+    event(&mut model, Event::RequestStarted);
     event(&mut model, Event::ContextReport("Context unchanged".into()));
     event(&mut model, Event::Text("Following response".into()));
     assert_eq!(model.blocks.last().unwrap().text, "Following response");
@@ -144,9 +145,9 @@ fn tool_activity_and_later_text_keep_distinct_stable_blocks() {
             },
         ),
     );
-    assert_eq!(model.blocks[2].text, "Inspecting the source.");
-    assert_eq!(model.blocks[3].text, "read_file / src/main.rs\n  12 lines");
-    assert_eq!(model.blocks[4].text, "The file has one entry point.");
+    assert_eq!(model.blocks[0].text, "Inspecting the source.");
+    assert_eq!(model.blocks[1].text, "read_file / src/main.rs\n  12 lines");
+    assert_eq!(model.blocks[2].text, "The file has one entry point.");
     assert_eq!(model.editor.text, "next draft");
     assert!(
         model
@@ -248,7 +249,7 @@ fn login_notice_never_enters_transcript_and_partial_output_survives_failure() {
         &mut model,
         Event::Finished(End::Failed(Failure::Cancelled), Metrics::default()),
     );
-    assert_eq!(model.blocks[1].text, "retained partial");
+    assert_eq!(model.blocks[0].text, "retained partial");
     assert_eq!(model.editor.text, "next draft");
     assert!(!model.streaming());
     // A finished failure belongs to scrollback once, not also to the composer.
