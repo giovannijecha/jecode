@@ -1,0 +1,79 @@
+//! Bounded workspace tools. Changes require the controller's explicit approval path.
+mod args;
+mod read;
+mod schema;
+mod search;
+
+use crate::{
+    json::{self, Value},
+    workspace::{Budget, Workspace},
+};
+pub use args::Prepared;
+pub use schema::definitions;
+
+pub const MAX_OUTPUT: usize = 32 * 1024;
+pub struct Output {
+    pub text: String,
+    pub summary: String,
+    pub failed: bool,
+    /// Successful output with truncation or omitted entries.
+    pub limited: bool,
+}
+impl Output {
+    pub fn error(message: &str) -> Self {
+        Self {
+            text: json::encode(
+                &json::object([("ok", Value::Bool(false)), ("error", string(message))]),
+                MAX_OUTPUT,
+            )
+            .expect("bounded owned tool error"),
+            summary: message.into(),
+            failed: true,
+            limited: false,
+        }
+    }
+    pub(crate) fn success(value: Value, summary: String, limited: bool) -> Self {
+        match json::encode(&value, MAX_OUTPUT) {
+            Ok(text) => Self {
+                text,
+                summary,
+                failed: false,
+                limited,
+            },
+            Err(_) => Self::error("tool result exceeded its output limit; narrow the request"),
+        }
+    }
+}
+impl Prepared {
+    pub fn execute(&self, workspace: &Workspace, budget: &Budget<'_>) -> Output {
+        let result = match self {
+            Self::Command { .. } => {
+                return Output::error(
+                    "commands require a prepared preview and an explicit controller approval",
+                );
+            }
+            Self::Create { .. } | Self::Edit { .. } => {
+                return Output::error(
+                    "file changes require a prepared diff and an explicit controller approval",
+                );
+            }
+            Self::List { path, limit } => read::list(workspace, path, *limit, budget),
+            Self::Read { path, start, lines } => {
+                read::read(workspace, path, *start, *lines, budget)
+            }
+            Self::Search { path, query, limit } => {
+                search::search(workspace, path, query, *limit, budget)
+            }
+        };
+        match result {
+            Ok(output) => output,
+            Err(error) => Output::error(&error.to_string()),
+        }
+    }
+}
+fn string(text: &str) -> Value {
+    Value::String(text.into())
+}
+fn number(value: usize) -> Value {
+    Value::Number(value.to_string())
+}

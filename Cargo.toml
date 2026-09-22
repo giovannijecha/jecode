@@ -1,0 +1,33 @@
+[package]
+name = "jecode"
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+description = "An owned terminal coding harness in Rust"
+license = "MIT"
+repository = "https://github.com/giovannijecha/jecode"
+default-run = "jecode"
+publish = false
+include = ["/src/**", "/checks/**", "/tests/**", "/docs/**", "/.cargo/config.toml", "/rust-toolchain.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/CONTRIBUTING.md", "/SECURITY.md", "/LICENSE", "!**/.jecode-staging-*", "!**/.jecode-recovery-*"]
+
+[[bin]]
+name = "jecode-check"
+path = "checks/main.rs"
+
+[dependencies]
+
+[dev-dependencies]
+
+[build-dependencies]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+overflow-checks = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"

@@ -1,0 +1,4 @@
+# Link the compiler's C/unwind support statically on Windows GNU LLVM.
+# The produced application must not require the developer's LLVM-MinGW PATH.
+[target.x86_64-pc-windows-gnullvm]
+rustflags = ["-C", "target-feature=+crt-static"]

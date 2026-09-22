@@ -1,0 +1,51 @@
+name: Rust
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out public source
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init .
+          if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+          git remote add origin "https://github.com/$env:SOURCE_REPOSITORY.git"
+          if ($LASTEXITCODE -ne 0) { throw 'git remote failed' }
+          git fetch --depth=1 origin $env:SOURCE_COMMIT
+          if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
+      - name: Provision pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+          if ($LASTEXITCODE -ne 0) { throw 'Rust provisioning failed' }
+      - name: Reject dependencies before compilation
+        run: |
+          $graph = @(cargo tree --locked --offline --all-features --target all --edges normal,build,dev --prefix none)
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency inspection failed' }
+          if ($graph.Count -ne 1 -or $graph[0] -notmatch '^jecode v[^ ]+ \(') { throw 'External or unexpected package in Cargo graph' }
+      - name: Verify native source
+        run: |
+          cargo run --locked --offline --bin jecode-check -- check
+          if ($LASTEXITCODE -ne 0) { throw 'Native checks failed' }
+          cargo build --locked --offline --release --bin jecode
+          if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }

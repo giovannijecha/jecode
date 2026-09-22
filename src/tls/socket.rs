@@ -1,0 +1,68 @@
+//! Exact record reads avoid consuming bytes from the next TLS key epoch.
+use super::{Budget, Error, NetworkError};
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+    time::Duration,
+};
+pub(super) fn configure(stream: &TcpStream) -> Result<(), NetworkError> {
+    stream
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .map_err(|_| NetworkError::Io)?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(50)))
+        .map_err(|_| NetworkError::Io)?;
+    stream.set_nodelay(true).map_err(|_| NetworkError::Io)
+}
+pub(super) fn write(
+    stream: &mut TcpStream,
+    mut bytes: &[u8],
+    budget: &Budget<'_>,
+) -> Result<(), NetworkError> {
+    while !bytes.is_empty() {
+        budget.check()?;
+        match stream.write(bytes) {
+            Ok(0) => return Err(NetworkError::Io),
+            Ok(count) => bytes = &bytes[count..],
+            Err(error) if retryable(&error) => {}
+            Err(_) => return Err(NetworkError::Io),
+        }
+    }
+    budget.check()
+}
+fn read(
+    stream: &mut TcpStream,
+    mut bytes: &mut [u8],
+    budget: &Budget<'_>,
+) -> Result<(), NetworkError> {
+    while !bytes.is_empty() {
+        budget.check()?;
+        match stream.read(bytes) {
+            Ok(0) => return Err(Error::Truncated.into()),
+            Ok(count) => bytes = &mut bytes[count..],
+            Err(error) if retryable(&error) => {}
+            Err(_) => return Err(NetworkError::Io),
+        }
+    }
+    budget.check()
+}
+pub(super) fn record(stream: &mut TcpStream, budget: &Budget<'_>) -> Result<Vec<u8>, NetworkError> {
+    let mut header = [0; 5];
+    read(stream, &mut header, budget)?;
+    let length = usize::from(u16::from_be_bytes([header[3], header[4]]));
+    if length == 0 || length > 16_401 {
+        return Err(Error::Limit.into());
+    }
+    let mut record = vec![0; 5 + length];
+    record[..5].copy_from_slice(&header);
+    read(stream, &mut record[5..], budget)?;
+    Ok(record)
+}
+fn retryable(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::Interrupted
+    )
+}

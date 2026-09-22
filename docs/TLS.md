@@ -1,0 +1,53 @@
+# TLS profile
+
+Jecode implements its own authenticated TLS 1.3 client. The profile is X25519,
+`TLS_AES_128_GCM_SHA256` and HTTP/1.1. Native APIs provide randomness and trust
+roots; handshake, record protection, signature checks and certificate-path
+decisions are owned code.
+
+This is experimental infrastructure without an independent security audit.
+Protocol vectors and interoperability checks do not establish general WebPKI
+compatibility, certification or a side-channel audit.
+
+## Supported path
+
+The handshake validates negotiation, server Finished, certificate identity/path
+and CertificateVerify before releasing application keys. AES-GCM authenticates
+records before delivering plaintext. Sequence numbers and key epochs cannot be
+reset or cloned. NewSessionTicket messages are bounded and discarded; KeyUpdate
+updates the relevant keys in protocol order. Unsupported messages fail closed.
+
+The client offers ECDSA-P256-SHA256 and RSA-PSS-SHA256 handshake verification.
+Certificate signatures support ECDSA P-256/P-384 with SHA-256/SHA-384 and bounded
+RSA 2048-4096 verification with PKCS#1 v1.5 or the supported PSS profile.
+Certificates require canonical DER, matching DNS SAN, validity, key purpose,
+issuer signatures and CA/path constraints. Wildcards consume one leftmost label;
+there is no Common Name fallback.
+
+Windows trust uses CurrentUser/LocalMachine ROOT and Disallowed data through
+Crypt32. Linux reads the supported system PEM certificate bundle. Jecode ships
+no bundled roots. Enterprise roots installed locally can authorize interception;
+certificate verification failures are not silently accepted.
+
+## Limits
+
+There is no HelloRetryRequest, PSK/session resumption, client-certificate support,
+HTTP/2, AIA fetching, online OCSP/CRL checking or certificate-transparency enforcement.
+Unsupported name/policy constraints and must-staple fail closed. This profile does
+not establish fresh certificate revocation status. Certificate RSA-PSS algorithm
+parameters outside the implemented profile are unsupported.
+
+Parsing, records, certificate bodies and path search have explicit bounds.
+Connections are single-use. A model terminal event can establish completion before
+transport closure; the connection is then disposed rather than pooled.
+
+Cancellation and deadlines are checked during connect, reads and writes. The
+standard-library DNS resolver is synchronous and cannot be interrupted inside its
+OS call. Cleanup remains joined. Bounded CPU verification is not interruptible at
+every instruction. Memory clearing cannot guarantee removal of compiler, allocator,
+OS or crash-dump copies of secrets.
+
+The implementation has offline known-answer and negative tests, including TLS
+1.3 handshake vectors, record tampering, invalid signatures and certificate/path
+rejection. The public test suite uses synthetic fixtures and never real account
+credentials.

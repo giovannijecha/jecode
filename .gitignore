@@ -1,0 +1,14 @@
+/.archive/
+/target/
+/artifacts/
+/.jecode/
+.jecode-staging-*
+.jecode-recovery-*
+/AGENTS.md
+/.local/
+/dev/
+/knowledge/
+.env
+.env.*
+*.log
+.DS_Store
