@@ -189,6 +189,64 @@ fn startup_has_only_the_brand_and_current_metadata_below_the_composer() {
 }
 
 #[test]
+fn login_code_notice_remains_above_the_composer_at_supported_widths() {
+    for columns in [25, 30, 34, 80] {
+        let mut model = account::model(session::Model::Luna, None);
+        account::event(&mut model, Event::LoginCode("FAKE-CODE".into()));
+        let rows = view::chrome(&model, columns, 24);
+        let upper = rows
+            .iter()
+            .position(|row| row.text.starts_with('─'))
+            .unwrap();
+        let code = rows
+            .iter()
+            .position(|row| row.text.contains("Enter code: FAKE-CODE"))
+            .unwrap_or_else(|| panic!("login code hidden at {columns} columns: {rows:?}"));
+        assert!(code < upper, "login code entered the composer: {rows:?}");
+        assert!(rows.iter().all(|row| row.transient));
+        assert!(
+            model.blocks.is_empty(),
+            "login code entered canonical history"
+        );
+        assert!(
+            transcript(&model)
+                .iter()
+                .all(|row| !row.text.contains("FAKE-CODE"))
+        );
+    }
+}
+
+#[test]
+fn long_login_notice_preserves_small_terminal_controls_and_bounds() {
+    for columns in [25, 30, 34, 80] {
+        let mut model = account::model(session::Model::Luna, None);
+        account::event(&mut model, Event::LoginCode("FAKE-CODE".into()));
+        for height in [9, 10, 12] {
+            let rows = view::chrome(&model, columns, height);
+            assert!(rows.len() < height, "{columns}x{height}: {rows:?}");
+            assert!(
+                rows.iter()
+                    .all(|row| row.transient && text::width(&row.text) < columns)
+            );
+            let upper = rows
+                .iter()
+                .position(|row| row.text.starts_with('─'))
+                .unwrap();
+            let lower = rows
+                .iter()
+                .rposition(|row| row.text.starts_with('─'))
+                .unwrap();
+            assert!(
+                rows[upper + 1..lower]
+                    .iter()
+                    .any(|row| row.text.contains("Ask anything"))
+            );
+            assert_eq!(rows.len() - lower - 1, 1, "{rows:?}");
+        }
+    }
+}
+
+#[test]
 fn command_menu_contains_only_aligned_commands_and_dismisses_without_transcript_changes() {
     let (mut model, mut session) = ready();
     model.blocks.push(model::Block {

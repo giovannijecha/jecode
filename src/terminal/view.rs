@@ -143,7 +143,9 @@ pub fn chrome(model: &Model, columns: usize, height: usize) -> Vec<Row> {
 }
 
 fn activity_prefix(model: &Model, width: usize, height: usize, controls: usize) -> Vec<Row> {
-    let capacity = height.saturating_sub(controls + 1).min(3);
+    // Running panels are intrinsically compact; account notices can wrap to
+    // more rows. Clip either one only to the space left for composer controls.
+    let capacity = height.saturating_sub(controls + 1);
     let mut rows = super::activity_view::rows(model, width, capacity);
     if !rows.is_empty() && rows.len() + controls + 1 < height {
         rows.push(Row::blank());

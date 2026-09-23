@@ -222,6 +222,98 @@ fn account_activity_updates_through_chrome_only_resizes_without_replaying_histor
 }
 
 #[test]
+fn completed_metrics_wrap_above_one_composer_through_resizes() {
+    use super::{account, view};
+    use crate::session::{self, End, Event, Metrics};
+    let mut model = account::model(session::Model::Luna, None);
+    account::event(&mut model, Event::Ready);
+    model.blocks.push(Block {
+        speaker: "Assistant",
+        text: "Final answer.".into(),
+    });
+    account::event(
+        &mut model,
+        Event::Finished(
+            End::Complete,
+            Metrics {
+                elapsed_ms: 2400,
+                tool_calls: 3,
+                requests: 4,
+                input_tokens: Some(120),
+                output_tokens: Some(45),
+                ..Metrics::default()
+            },
+        ),
+    );
+    let mut layout = Layout::default();
+    let mut renderer = Renderer::default();
+    let mut terminal = vt::Screen::new(80, 30);
+    for (index, size) in [(80, 30), (25, 24), (34, 24), (80, 30), (25, 24)]
+        .into_iter()
+        .enumerate()
+    {
+        terminal.resize(size.0, size.1);
+        let chrome = view::chrome(&model, size.0, size.1);
+        let upper = chrome
+            .iter()
+            .position(|row| row.text.starts_with('─'))
+            .unwrap();
+        let lower = chrome
+            .iter()
+            .rposition(|row| row.text.starts_with('─'))
+            .unwrap();
+        let summary: String = chrome[..upper]
+            .iter()
+            .flat_map(|row| row.text.chars())
+            .filter(|ch| !ch.is_whitespace())
+            .collect();
+        assert!(
+            summary.contains("Complete/2.4s/3tools/4requests/tokens:120in,45out"),
+            "{size:?}: {chrome:?}"
+        );
+        assert!(
+            chrome[upper..]
+                .iter()
+                .all(|row| !row.text.contains("Complete"))
+        );
+        assert!(
+            chrome[upper..]
+                .iter()
+                .all(|row| !row.text.contains("tokens"))
+        );
+        assert!(
+            chrome[upper + 1..lower]
+                .iter()
+                .any(|row| row.text.contains("Ask anything"))
+        );
+        assert_eq!(chrome.len() - lower - 1, 1, "{chrome:?}");
+        let frame = if index == 0 {
+            layout.frame(&model, size.0, size.1)
+        } else {
+            renderer.with_chrome(chrome)
+        };
+        terminal.feed(&renderer.draw(frame, size, false));
+        let shown = terminal.text();
+        assert_eq!(shown.matches("Complete").count(), 1, "{size:?}: {shown}");
+        assert_eq!(
+            shown.matches("Final answer.").count(),
+            1,
+            "{size:?}: {shown}"
+        );
+        assert_eq!(
+            shown.matches("Ask anything").count(),
+            1,
+            "{size:?}: {shown}"
+        );
+        assert_eq!(
+            shown.lines().filter(|line| line.contains('─')).count(),
+            2,
+            "{shown}"
+        );
+    }
+}
+
+#[test]
 fn streaming_continues_through_reflow_without_replaying_completed_text() {
     use std::time::{Duration, Instant};
     let now = Instant::now();
