@@ -93,9 +93,9 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
         edit.submitted = true;
         view.notice = if allow {
             if edit.kind == Kind::Edit {
-                "Applying approved change / Esc stops"
+                "Applying approved change"
             } else {
-                "Starting approved command / Esc stops"
+                "Starting approved command"
             }
         } else {
             "Recording denial"
@@ -134,7 +134,7 @@ pub(super) fn finished(model: &mut Model, id: u64, summary: String, applied: boo
             text,
         });
     }
-    view.notice = "Processing tool result / Esc stops".into();
+    view.notice = "Processing tool result".into();
 }
 pub(super) fn displayed(model: &mut Model, size: (usize, usize), transcript: bool) {
     if let Some(edit) = model.account.as_mut().and_then(|v| v.approval.as_mut()) {

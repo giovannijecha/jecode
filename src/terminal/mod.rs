@@ -36,6 +36,10 @@ use std::{
     time::Instant,
 };
 
+const START_SEQUENCE: &[u8] = b"\r\x1b[?25l\x1b[?2004h";
+const NAVIGATION_SEQUENCE: &[u8] = b"\x1b[0m\x1b[?2004l\x1b[?25h";
+const EXIT_SEQUENCE: &[u8] = b"\x1b[0m\x1b[?2004l\x1b[?25h\r\n";
+
 #[derive(Debug, Eq, PartialEq)]
 enum Key {
     Text(String),
@@ -131,9 +135,11 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     let mut terminal = platform::Terminal::open()?;
     let mut trace = diagnostics::Trace::open()?;
     // Guard exists before any escape write so partial startup also restores state.
-    let _screen = Screen;
+    let mut screen = Screen {
+        newline_on_drop: true,
+    };
     let mut output = io::stdout().lock();
-    output.write_all(b"\r\n\x1b[?25l\x1b[?2004h")?;
+    output.write_all(START_SEQUENCE)?;
     output.flush()?;
     let mut model = selected.map_or_else(
         || model::Model::new(Instant::now()),
@@ -168,6 +174,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     let mut resize = resize::Resize::default();
     let mut paint = schedule::PaintSchedule::default();
     paint.request();
+    let mut transcript_pending = true;
     let mut previous_size = (0, 0);
     loop {
         let size = terminal.size()?;
@@ -175,12 +182,19 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         if size != previous_size {
             trace.changed();
             paint.request();
+            transcript_pending = true;
         }
         let now = Instant::now();
         let region = resize.region(size, previous_size, now);
         if paint.ready(now)
             && let Some(region) = region
         {
+            let geometry_preview = region == resize::Region::Composer;
+            let region = if region == resize::Region::Transcript && !transcript_pending {
+                resize::Region::Composer
+            } else {
+                region
+            };
             let frame = match region {
                 resize::Region::Transcript => layout.frame(&model, size.0, size.1),
                 resize::Region::Composer => {
@@ -210,8 +224,11 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                 )?;
             }
             previous_size = size;
+            if region == resize::Region::Transcript {
+                transcript_pending = false;
+            }
             paint.painted(Instant::now());
-            if region == resize::Region::Composer {
+            if geometry_preview {
                 // The composer-only paint must not consume pending source work.
                 paint.request();
             }
@@ -223,6 +240,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                 model.input(key, Instant::now());
             }
             paint.request();
+            transcript_pending = true;
             if model.quit {
                 return Ok(None);
             }
@@ -233,6 +251,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                         output
                             .write_all(renderer.draw(frame, terminal.size()?, color).as_bytes())?;
                         output.flush()?;
+                        screen.newline_on_drop = false;
                         // The current worker and lease are joined/released before the next run.
                         drop(session);
                         return Ok(Some(next));
@@ -251,19 +270,30 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                 let Some(event) = session.poll() else { break };
                 account::event(&mut model, event);
                 paint.request();
+                transcript_pending = true;
             }
         }
         if model.tick(Instant::now()) {
             paint.request();
+            // Account ticks only change transient animation and elapsed status.
+            // Demo ticks may also append scripted transcript output.
+            transcript_pending |= model.account.is_none();
         }
     }
 }
 
-struct Screen;
+struct Screen {
+    newline_on_drop: bool,
+}
 impl Drop for Screen {
     fn drop(&mut self) {
         let mut out = io::stdout().lock();
-        let _ = out.write_all(b"\x1b[0m\x1b[?2004l\x1b[?25h\r\n");
+        let sequence = if self.newline_on_drop {
+            EXIT_SEQUENCE
+        } else {
+            NAVIGATION_SEQUENCE
+        };
+        let _ = out.write_all(sequence);
         let _ = out.flush();
     }
 }
@@ -272,6 +302,8 @@ impl Drop for Screen {
 mod action_tests;
 #[cfg(test)]
 mod composer_tests;
+#[cfg(test)]
+mod consistency_tests;
 #[cfg(test)]
 mod layout_tests;
 #[cfg(all(test, windows))]

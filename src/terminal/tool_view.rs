@@ -9,16 +9,7 @@ pub fn active(model: &Model, width: usize) -> Vec<Row> {
     let Some(group) = model.tools.active() else {
         return Vec::new();
     };
-    let mut header = clipped(
-        &format!("{} Exploring workspace", model.tools.marker()),
-        width,
-        Tone::Heading,
-    );
-    if header.text.len() >= model.tools.marker().len() {
-        header
-            .spans
-            .push((0..model.tools.marker().len(), Tone::Accent));
-    }
+    let header = indicator(model.tools.marker(), "Exploring workspace", width);
     let call = group.calls.last().unwrap();
     let target = model.blocks[call.block].text.lines().next().unwrap_or("");
     let reading = call.outcome == super::tool_activity::Outcome::Running
@@ -55,6 +46,14 @@ pub fn active(model: &Model, width: usize) -> Vec<Row> {
             if has_errors { Tone::Error } else { Tone::Muted },
         ),
     ]
+}
+
+pub(super) fn indicator(marker: &str, label: &str, width: usize) -> Row {
+    let mut row = clipped(&format!("{marker} {label}"), width, Tone::Heading);
+    if row.text.len() >= marker.len() {
+        row.spans.push((0..marker.len(), Tone::Accent));
+    }
+    row
 }
 
 pub(super) fn clipped(value: &str, width: usize, tone: Tone) -> Row {

@@ -156,16 +156,11 @@ fn account_completion_failure_and_cancel_clear_activity_without_duplicate_result
 }
 
 #[test]
-fn startup_has_only_the_brand_and_current_metadata_below_the_composer() {
+fn startup_has_no_transcript_rows_and_one_current_metadata_footer() {
     let (mut model, _) = ready();
     assert!(model.blocks.is_empty());
     let header = transcript(&model);
-    let text: Vec<_> = header
-        .iter()
-        .filter(|r| !r.text.is_empty())
-        .map(|r| r.text.as_str())
-        .collect();
-    assert_eq!(text, ["jecode"]);
+    assert!(header.is_empty());
     for selected in [session::Model::Luna, session::Model::Terra] {
         account::event(&mut model, Event::ModelChanged(selected));
         for (width, height) in [(25, 9), (48, 12), (120, 36)] {

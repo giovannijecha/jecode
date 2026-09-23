@@ -8,7 +8,6 @@ use super::{
 #[derive(Default)]
 pub struct Layout {
     blocks: Vec<Option<BlockLayout>>,
-    header_width: Option<usize>,
 }
 impl Layout {
     pub fn frame(&mut self, model: &Model, columns: usize, height: usize) -> Vec<Row> {
@@ -19,12 +18,7 @@ impl Layout {
         let width = columns - 1;
         // A displayed block keeps its original hard line boundaries. The terminal
         // reflows those rows on resize; regenerating them would replay scrollback.
-        let header_width = *self.header_width.get_or_insert(width);
-        let mut rows = vec![Row::blank(), Row::new("jecode", Tone::Brand), Row::blank()];
-        rows = rows
-            .into_iter()
-            .flat_map(|row| lines(&row.text, header_width, row.tone))
-            .collect();
+        let mut rows = Vec::new();
         let mut groups = model.tools.groups.iter().peekable();
         for (index, block) in model.blocks.iter().enumerate() {
             if index == self.blocks.len() {
@@ -49,13 +43,17 @@ impl Layout {
                 .rows(block);
             let rendered = content_rows(rendered);
             if !rendered.is_empty() {
+                if !rows.is_empty() {
+                    rows.push(Row::blank());
+                }
                 rows.extend_from_slice(rendered);
-                // A tool-only model request has no visible assistant block.
-                // Separators belong to displayed content, not request count.
-                rows.push(Row::blank());
             }
         }
         self.blocks.truncate(model.blocks.len());
+        // The transcript owns its single boundary with transient activity or input.
+        if !rows.is_empty() {
+            rows.push(Row::blank());
+        }
         rows.extend(chrome(model, columns, height));
         rows
     }
