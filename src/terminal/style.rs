@@ -50,7 +50,11 @@ impl Row {
                 out.push_str(tone.ansi());
             }
             if !color && *tone == Tone::Cursor {
-                out.push('|');
+                // Reverse the terminal's own colors to keep the block visible
+                // under NO_COLOR without replacing the character beneath it.
+                out.push_str("\x1b[7m");
+                out.push_str(&self.text[range.clone()]);
+                out.push_str("\x1b[27m");
             } else {
                 out.push_str(&self.text[range.clone()]);
             }

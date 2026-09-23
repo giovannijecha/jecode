@@ -194,7 +194,12 @@ fn active_status_tracks_provider_wait_and_stopping_and_stays_bounded() {
             for row in rows {
                 assert!(row.transient);
                 assert!(super::text::width(&row.text) < width);
-                assert!(!row.paint(false).contains('\x1b'));
+                assert_eq!(
+                    row.paint(false)
+                        .replace("\x1b[7m", "")
+                        .replace("\x1b[27m", ""),
+                    row.text
+                );
                 row.paint(true);
             }
         }

@@ -151,9 +151,17 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
 
 fn input(editor: &Editor, width: usize, height: usize, menu: bool, filter: bool) -> Vec<Row> {
     let available = width.saturating_sub(2).max(1);
-    // Reserve one cell for the insertion caret so moving it never changes wrapping.
+    // Reserve one cell for a block at a line end; wrapping never depends on
+    // which editing boundary the cursor currently occupies.
     let layout = Visual::new(&editor.text, available.saturating_sub(1).max(1));
     let cursor = layout.stop(editor.cursor);
+    let marked_end = (cursor.display_end > cursor.byte).then(|| {
+        if editor.text[editor.cursor..].starts_with('\t') {
+            cursor.byte + 1 // A tab occupies several blank cells; mark its first.
+        } else {
+            cursor.display_end // Highlight a whole displayed grapheme, including wide ones.
+        }
+    });
     let start = cursor.row.saturating_sub(height - 1);
     layout
         .rows
@@ -165,8 +173,11 @@ fn input(editor: &Editor, width: usize, height: usize, menu: bool, filter: bool)
             let prefix = if index == 0 && !menu { "› " } else { "  " };
             let cursor_span = if index == cursor.row {
                 let position = cursor.byte.min(shown.len());
-                shown.insert(position, ' ');
-                Some(prefix.len() + position..prefix.len() + position + 1)
+                let end = marked_end.unwrap_or_else(|| {
+                    shown.insert(position, ' ');
+                    position + 1
+                });
+                Some(prefix.len() + position..prefix.len() + end)
             } else {
                 None
             };

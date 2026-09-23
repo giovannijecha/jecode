@@ -169,7 +169,7 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
     assert_eq!(rows[upper + 7], "  /help");
     assert_eq!(rows[upper + 8], "  /login");
     assert_eq!(rows[upper + 9], "  /logout");
-    assert_eq!(rows[upper + 10], "  /|");
+    assert_eq!(rows[upper + 10], "  / ");
     assert_eq!(lower, upper + 11, "menu and input must touch: {shown}");
     assert_eq!(rows[upper + 1..lower].join("\n").matches('›').count(), 1);
 
@@ -182,7 +182,7 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
     let (upper, lower) = rules(&shown);
     assert_eq!(rows[upper + 1], "  /context");
     assert_eq!(rows[upper + 2], "› /compact");
-    assert_eq!(rows[upper + 3], "  /c|o");
+    assert_eq!(rows[upper + 3], "  /co");
     assert_eq!(lower, upper + 4);
 
     account::input(&mut model, Key::Escape, &mut session);
@@ -190,7 +190,7 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
     let shown = surface.text();
     let rows: Vec<_> = shown.lines().collect();
     let (upper, lower) = rules(&shown);
-    assert_eq!(rows[upper + 1], "› /c|o");
+    assert_eq!(rows[upper + 1], "› /co");
     assert_eq!(lower, upper + 2);
     assert_eq!(shown.matches("/context").count(), 0, "{shown}");
 
@@ -205,7 +205,7 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
     let (upper, lower) = rules(&shown);
     assert_eq!(rows[upper + 1], "Model");
     assert!(rows[upper + 2].starts_with("› gpt-5.6-luna"));
-    assert_eq!(rows[lower - 1], "  |Filter…");
+    assert_eq!(rows[lower - 1], "   Filter…");
     assert_eq!(rows[upper + 1..lower].join("\n").matches('›').count(), 1);
 }
 
@@ -244,7 +244,7 @@ fn model_tool_command_approval_and_completion_replace_one_status_in_place() {
     let shown = surface.text();
     active_row(&shown, "Thinking");
     assert!(shown.contains("› /new\n"));
-    assert!(shown.contains("  /|\n"));
+    assert!(shown.contains("  / \n"));
     account::input(&mut model, Key::Escape, &mut session);
 
     account::event(

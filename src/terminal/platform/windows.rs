@@ -57,6 +57,12 @@ fn control_key(virtual_key: u16) -> Option<Key> {
         _ => None,
     }
 }
+fn modified_backspace(record: &Record, control_down: bool) -> bool {
+    record.modifiers & 3 == 0
+        && matches!(record.key, 0 | 0x08)
+        && record.character == 8
+        && (record.modifiers & 12 != 0 || control_down)
+}
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn GetStdHandle(id: u32) -> Handle;
@@ -72,6 +78,7 @@ pub(in crate::terminal) struct Terminal {
     input_mode: u32,
     output_mode: u32,
     high: Option<u16>,
+    control_down: bool,
     decoder: Decoder,
 }
 impl Terminal {
@@ -92,6 +99,7 @@ impl Terminal {
             input_mode,
             output_mode,
             high: None,
+            control_down: false,
             decoder: Decoder::default(),
         };
         // Guard is established before either mutation, including partial failure.
@@ -133,7 +141,16 @@ impl Terminal {
         if unsafe { ReadConsoleInputW(self.input, &mut record, 1, &mut count) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        if count != 1 || record.kind != 1 || record.down == 0 {
+        if count != 1 || record.kind != 1 {
+            return Ok(Vec::new());
+        }
+        if matches!(record.key, 0x11 | 0xa2 | 0xa3) {
+            // ConPTY can synthesize a Ctrl key-down before a BS character,
+            // then put no modifier on the character's own key record.
+            self.control_down = record.down != 0 || record.modifiers & 12 != 0;
+            return Ok(Vec::new());
+        }
+        if record.down == 0 {
             return Ok(Vec::new());
         }
         let mut keys = Vec::new();
@@ -141,7 +158,9 @@ impl Terminal {
             let control = record.modifiers & 12 != 0;
             let alt = record.modifiers & 3 != 0;
             let shift = record.modifiers & 0x10 != 0;
-            let key = if control && !alt {
+            let key = if modified_backspace(&record, self.control_down) {
+                Some(Key::WordBackspace)
+            } else if control && !alt && record.key != 0 {
                 control_key(record.key)
             } else if shift && !alt && record.key == 0x0d {
                 Some(Key::Newline)
@@ -244,4 +263,28 @@ fn native_control_records_distinguish_editor_actions_from_exit_and_submit() {
     assert_eq!(control_key(0x27), Some(Key::WordRight));
     assert_eq!(control_key(0x24), Some(Key::DraftStart));
     assert_eq!(control_key(0x23), Some(Key::DraftEnd));
+}
+
+#[cfg(test)]
+#[test]
+fn synthesized_ctrl_backspace_requires_a_distinguishable_ctrl_record() {
+    let mut record = Record {
+        kind: 1,
+        down: 1,
+        key: 0,
+        character: 8,
+        ..Record::default()
+    };
+    assert!(!modified_backspace(&record, false));
+    assert!(modified_backspace(&record, true));
+    record.modifiers = 8;
+    assert!(modified_backspace(&record, false));
+    record.modifiers = 2;
+    assert!(!modified_backspace(&record, true));
+    record.modifiers = 0;
+    record.character = 127;
+    assert!(!modified_backspace(&record, true));
+    record.character = 8;
+    record.key = 0x57;
+    assert!(!modified_backspace(&record, true));
 }

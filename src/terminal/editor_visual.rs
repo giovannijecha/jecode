@@ -7,6 +7,9 @@ pub struct Stop {
     pub row: usize,
     pub column: usize,
     pub byte: usize,
+    /// End of the unit starting here, before a later soft wrap can move its
+    /// following insertion stop to the next row.
+    pub display_end: usize,
 }
 pub struct Visual {
     pub rows: Vec<String>,
@@ -22,7 +25,8 @@ impl Visual {
                 index: 0,
                 row: 0,
                 column: 0,
-                byte: 0
+                byte: 0,
+                display_end: 0,
             };
             boundaries.len()
         ];
@@ -35,6 +39,7 @@ impl Visual {
                     row: rows.len() - 1,
                     column,
                     byte: rows.last().unwrap().len(),
+                    display_end: rows.last().unwrap().len(),
                 };
                 rows.push(String::new());
                 column = 0;
@@ -43,6 +48,7 @@ impl Visual {
                     row: rows.len() - 1,
                     column,
                     byte: 0,
+                    display_end: 0,
                 };
                 continue;
             }
@@ -64,19 +70,22 @@ impl Visual {
                 shown = ".".repeat(columns.min(3));
                 size = shown.len();
             }
+            let start_byte = rows.last().unwrap().len();
+            rows.last_mut().unwrap().push_str(&shown);
             stops[i] = Stop {
                 index: pair[0],
                 row: rows.len() - 1,
                 column,
-                byte: rows.last().unwrap().len(),
+                byte: start_byte,
+                display_end: start_byte + shown.len(),
             };
-            rows.last_mut().unwrap().push_str(&shown);
             column += size;
             stops[i + 1] = Stop {
                 index: pair[1],
                 row: rows.len() - 1,
                 column,
                 byte: rows.last().unwrap().len(),
+                display_end: rows.last().unwrap().len(),
             };
         }
         Self { rows, stops }

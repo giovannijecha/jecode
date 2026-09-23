@@ -366,3 +366,120 @@ fn real_windows_composer_preserves_bracketed_multiline_paste_and_newline_key() {
     );
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+fn current_composer(screen: &str) -> String {
+    let rows: Vec<_> = screen.lines().collect();
+    let rules: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.contains('─'))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(rules.len(), 2, "{screen}");
+    rows[rules[0] + 1..rules[1]].join("\n")
+}
+
+fn wait_for_composer(directory: &Path, counter: &mut usize, expected: &str) -> String {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let screen = snapshot(directory, counter);
+        let composer = current_composer(&screen);
+        if composer == expected {
+            return screen;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "expected {expected:?}, got {composer:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn conpty_block_cursor_keeps_ciao_in_the_same_cells() {
+    let root = std::env::current_dir().unwrap().join("target");
+    std::fs::create_dir_all(&root).unwrap();
+    let directory = root.join(format!("conpty-cursor-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let mut console = conpty::Console::start(&directory);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !console.output().contains("Local demo") {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let mut counter = 0;
+    console.input.write_all(b"ciao").unwrap();
+    wait_for_composer(&directory, &mut counter, "› ciao");
+    for _ in 0..4 {
+        console.input.write_all(b"\x1b[D").unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        let screen = snapshot(&directory, &mut counter);
+        assert_eq!(current_composer(&screen), "› ciao", "{screen}");
+    }
+    console.input.write_all(b"X").unwrap();
+    wait_for_composer(&directory, &mut counter, "› Xciao");
+    console.input.write_all(b"\x7f").unwrap();
+    wait_for_composer(&directory, &mut counter, "› ciao");
+    console.input.write_all(b"\x1b[3~").unwrap();
+    wait_for_composer(&directory, &mut counter, "› iao");
+    console.input.write_all(b"c").unwrap();
+    wait_for_composer(&directory, &mut counter, "› ciao");
+    console.input.write_all(b"\x11").unwrap();
+    drop(console);
+    assert!(
+        directory
+            .canonicalize()
+            .unwrap()
+            .starts_with(root.canonicalize().unwrap())
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn conpty_ctrl_backspace_and_neighbor_shortcuts_edit_without_losing_input() {
+    let root = std::env::current_dir().unwrap().join("target");
+    std::fs::create_dir_all(&root).unwrap();
+    let directory = root.join(format!("conpty-shortcuts-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let mut console = conpty::Console::start(&directory);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !console.output().contains("Local demo") {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let mut counter = 0;
+    console.input.write_all(b"alpha beta").unwrap();
+    wait_for_composer(&directory, &mut counter, "› alpha beta");
+    // This BS byte makes ConPTY emit a Ctrl-down record followed by a BS
+    // character record with no modifier. DEL below remains ordinary Backspace.
+    console.input.write_all(b"\x08").unwrap();
+    wait_for_composer(&directory, &mut counter, "› alpha");
+    console.input.write_all(b"\x1b\x7f").unwrap();
+    wait_for_composer(&directory, &mut counter, "›  Ask anything…");
+
+    console.input.write_all(b"word\x7f").unwrap();
+    wait_for_composer(&directory, &mut counter, "› wor");
+    console.input.write_all(b"\x03red blue\x17").unwrap();
+    wait_for_composer(&directory, &mut counter, "› red");
+    console
+        .input
+        .write_all(b"\x03red blue\x01\x1b[3;5~")
+        .unwrap();
+    wait_for_composer(&directory, &mut counter, "› blue");
+    console.input.write_all(b"\x1b[1;5DZ\x1b[1;5C!").unwrap();
+    wait_for_composer(&directory, &mut counter, "› Zblue!");
+    console
+        .input
+        .write_all(b"\x03\x1b[200~one two\x08three\x1b[201~")
+        .unwrap();
+    wait_for_composer(&directory, &mut counter, "› one two?three");
+    console.input.write_all(b"\x11").unwrap();
+    drop(console);
+    assert!(
+        directory
+            .canonicalize()
+            .unwrap()
+            .starts_with(root.canonicalize().unwrap())
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}

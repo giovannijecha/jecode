@@ -155,7 +155,12 @@ fn approval_and_running_chrome_stay_within_terminal_bounds() {
                     for row in rows {
                         assert!(row.transient);
                         assert!(super::text::width(&row.text) < width, "{row:?}");
-                        assert!(!row.paint(false).contains('\x1b'));
+                        assert_eq!(
+                            row.paint(false)
+                                .replace("\x1b[7m", "")
+                                .replace("\x1b[27m", ""),
+                            row.text
+                        );
                         row.paint(true);
                     }
                 }

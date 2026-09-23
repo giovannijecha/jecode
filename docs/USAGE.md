@@ -169,8 +169,9 @@ draft.
 
 Left/Right move by display-safe text units. Ctrl+Left/Right move by words when
 delivered; VT terminals can also use Alt+B/F. Ctrl+Backspace/Delete delete a word
-where distinguishable, and Ctrl+W deletes the previous word. In terminals that
-send ordinary Backspace for Ctrl+Backspace, use Ctrl+W or VT Alt+Backspace.
+where distinguishable, and Ctrl+W deletes the previous word. The Windows console
+path distinguishes DEL from BS when the terminal sends those different codes;
+if both keys send the same code, use Ctrl+W or VT Alt+Backspace.
 Home/End move to the start/end of the current logical line; Ctrl+A/E do the same.
 Ctrl+Home/End move to the start/end of the whole draft where delivered. Up/Down
 move through visual rows of a multiline or wrapped draft. On a single visual row, Up recalls a user

@@ -392,6 +392,8 @@ mod composer_tests;
 #[cfg(test)]
 mod consistency_tests;
 #[cfg(test)]
+mod cursor_tests;
+#[cfg(test)]
 mod editor_tests;
 #[cfg(test)]
 mod layout_tests;
