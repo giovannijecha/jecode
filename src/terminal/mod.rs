@@ -1,5 +1,6 @@
 //! Inline terminal presentation; network and conversation ownership stay separate.
 mod account;
+mod account_login;
 mod action_demo;
 mod action_view;
 mod activity_view;
@@ -62,7 +63,12 @@ enum Key {
 
 /// Run an explicitly local demo. No credentials, network, commands or persistence.
 pub fn demo() -> io::Result<()> {
-    run(None, None, None)
+    run(None, None, None, None)
+}
+
+/// Authenticate without opening or creating a conversation.
+pub fn login() -> io::Result<bool> {
+    account_login::run()
 }
 
 /// Start an account conversation with saved access and canonical history.
@@ -75,11 +81,17 @@ pub fn account_in(
     model: crate::session::Model,
     workspace: Option<crate::workspace::Workspace>,
 ) -> io::Result<()> {
-    run(Some(model), workspace, None)
+    let directory = crate::session::scope::Directory::open(
+        workspace
+            .as_ref()
+            .map_or(std::path::Path::new("."), crate::workspace::Workspace::path),
+    )?;
+    run(Some(model), Some(directory), workspace, None)
 }
 
 pub fn configured_account(
     model: Option<crate::session::Model>,
+    directory: crate::session::scope::Directory,
     workspace: Option<crate::workspace::Workspace>,
     access: Option<crate::workspace::Access>,
 ) -> io::Result<()> {
@@ -87,34 +99,47 @@ pub fn configured_account(
         return Err(io::Error::other("Jecode needs an interactive terminal"));
     }
     let settings = crate::state::settings::Settings::user()?;
-    account_in(
-        model.unwrap_or(settings.model),
+    run(
+        Some(model.unwrap_or(settings.model)),
+        Some(directory),
         workspace.map(|w| w.with_access(access.unwrap_or(settings.file_access))),
+        None,
     )
 }
 
-pub fn resume(id: &str) -> io::Result<()> {
+pub fn resume(id: &str, directory: crate::session::scope::Directory) -> io::Result<()> {
+    let start = navigation::resume(id, &directory)?;
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("Jecode needs an interactive terminal"));
     }
-    let start = navigation::resume(id)?;
-    run(start.selected, start.workspace, start.saved)
+    run(
+        start.selected,
+        start.directory,
+        start.workspace,
+        start.saved,
+    )
 }
 
 /// Browse saved sessions; selection returns an ID from the same displayed list.
-pub fn sessions(select: bool) -> io::Result<Option<String>> {
-    session_browser::show(select)
+pub fn sessions(
+    select: bool,
+    directory: &crate::session::scope::Directory,
+) -> io::Result<Option<String>> {
+    session_browser::show(select, directory)
 }
 
 fn run(
     selected: Option<crate::session::Model>,
+    directory: Option<crate::session::scope::Directory>,
     workspace: Option<crate::workspace::Workspace>,
     saved: Option<crate::session::persistence::Saved>,
 ) -> io::Result<()> {
     let mut start = navigation::Start {
         selected,
+        directory,
         workspace,
         saved,
+        prepared: None,
     };
     while let Some(next) = run_once(start)? {
         start = next;
@@ -125,8 +150,10 @@ fn run(
 fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     let navigation::Start {
         selected,
+        directory,
         workspace,
         saved,
+        prepared,
     } = start;
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("Jecode needs an interactive terminal"));
@@ -146,13 +173,17 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         |selected| {
             account::model(
                 selected,
-                workspace.as_ref().map(crate::workspace::Workspace::path),
+                directory
+                    .as_ref()
+                    .map(crate::session::scope::Directory::path),
             )
         },
     );
-    let location = navigation::Location::from_workspace(workspace.as_ref());
+    let location =
+        directory.map(|directory| navigation::Location::new(directory, workspace.as_ref()));
     if let Some(view) = &mut model.account {
-        view.access = location.access;
+        view.access = location.as_ref().unwrap().access;
+        view.file_tools = workspace.is_some();
     }
     let configured_motion = if selected.is_some() {
         crate::state::settings::Settings::user()?.reduced_motion
@@ -163,11 +194,25 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         .map_or(configured_motion, |value| !value.is_empty() && value != "0");
     // Start only after terminal/diagnostic initialization succeeded. Closing the
     // UI drops this owner, cancels its operation and joins its worker.
-    let mut session = match saved {
-        Some(saved) => Some(crate::session::Session::resume(saved, workspace)?),
-        None => selected
-            .map(|selected| crate::session::Session::with_workspace(selected, workspace))
-            .transpose()?,
+    let mut session = if let Some(prepared) = prepared {
+        Some(prepared)
+    } else {
+        match saved {
+            Some(saved) => Some(crate::session::Session::resume(
+                saved,
+                &location.as_ref().unwrap().directory,
+                workspace,
+            )?),
+            None => selected
+                .map(|selected| {
+                    crate::session::Session::with_directory(
+                        selected,
+                        location.as_ref().unwrap().directory.path(),
+                        workspace,
+                    )
+                })
+                .transpose()?,
+        }
     };
     let mut renderer = render::Renderer::default();
     let mut layout = view::Layout::default();
@@ -245,8 +290,14 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                 return Ok(None);
             }
             if let Some(request) = model.navigation.take() {
-                match location.resolve(request) {
-                    Ok(next) => {
+                match location.as_ref().unwrap().resolve(request) {
+                    Ok(mut next) => {
+                        if next.prepare().is_err() {
+                            if let Some(view) = &mut model.account {
+                                view.local_notice = "Cannot open that conversation · check its directory or another owner · current session and draft kept".into();
+                            }
+                            continue;
+                        }
                         let frame = renderer.with_chrome(Vec::new());
                         output
                             .write_all(renderer.draw(frame, terminal.size()?, color).as_bytes())?;

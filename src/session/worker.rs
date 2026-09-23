@@ -20,6 +20,9 @@ pub(crate) trait Backend: Send {
         budget: &Budget<'_>,
         code: &mut dyn FnMut(&str) -> ControlFlow<()>,
     ) -> Result<(), client::Error>;
+    fn logout(&mut self, _: &Budget<'_>) -> Result<(), client::Error> {
+        Ok(())
+    }
     fn generate(
         &mut self,
         request: &Request,
@@ -36,6 +39,11 @@ impl Backend for Account {
         code: &mut dyn FnMut(&str) -> ControlFlow<()>,
     ) -> Result<(), client::Error> {
         self.0 = Some(client::Client::connect(budget, code)?);
+        Ok(())
+    }
+    fn logout(&mut self, budget: &Budget<'_>) -> Result<(), client::Error> {
+        client::Client::logout(budget)?;
+        self.0 = None;
         Ok(())
     }
     fn generate(
@@ -115,17 +123,6 @@ pub(super) fn run(
     workspace: Option<crate::workspace::Workspace>,
     mut history: History,
 ) {
-    let login = backend.login(
-        &Budget {
-            deadline: Instant::now() + Duration::from_secs(900),
-            cancelled: &context.cancelled,
-        },
-        &mut |code| context.send(Event::LoginCode(code.into()), true),
-    );
-    if let Err(error) = login {
-        let _ = context.send(Event::LoginFailed(failure(error, &context)), false);
-        return;
-    }
     if let Some(record) = &history.record
         && context
             .send(
@@ -140,9 +137,7 @@ pub(super) fn run(
     {
         return;
     }
-    if context.send(Event::Ready, false).is_break() {
-        return;
-    }
+    let mut signed_in = login(&mut backend, &context);
     loop {
         let command = match commands.recv_timeout(Duration::from_millis(20)) {
             Ok(command) => command,
@@ -173,9 +168,44 @@ pub(super) fn run(
         if context.stopped.load(Ordering::Acquire) {
             break;
         }
+        match command {
+            Command::Login => {
+                if signed_in {
+                    let _ = context.send(Event::Ready, false);
+                } else {
+                    signed_in = login(&mut backend, &context);
+                }
+                continue;
+            }
+            Command::Logout => {
+                // Guidance accepted during the previous turn must be returned
+                // before sign-out completes, so a later login cannot send it.
+                super::queue::return_pending(&context);
+                let unaffected = AtomicBool::new(false);
+                let budget = Budget {
+                    cancelled: &unaffected,
+                    deadline: Instant::now() + Duration::from_secs(5),
+                };
+                match backend.logout(&budget) {
+                    Ok(()) => {
+                        signed_in = false;
+                        let _ = context.send(Event::LoggedOut, false);
+                    }
+                    Err(error) => {
+                        let _ = context.send(
+                            Event::LogoutFailed(Failure::Account(error), signed_in),
+                            false,
+                        );
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
         let started = Instant::now();
         let mut metrics = Metrics::default();
         let prompt = match command {
+            Command::Login | Command::Logout => unreachable!(),
             Command::Prompt(prompt) => prompt,
             Command::Model(selected) => {
                 if history.set_model(selected).is_err() {
@@ -255,6 +285,9 @@ pub(super) fn run(
         if end != End::Complete {
             super::queue::return_pending(&context);
         }
+        if end.needs_login() {
+            signed_in = false;
+        }
         if context
             .send(Event::Finished(end, metrics), false)
             .is_break()
@@ -263,6 +296,23 @@ pub(super) fn run(
         }
         if end == End::Failed(Failure::Storage) {
             break;
+        }
+    }
+}
+
+fn login(backend: &mut impl Backend, context: &Context) -> bool {
+    let result = backend.login(
+        &Budget {
+            deadline: Instant::now() + Duration::from_secs(900),
+            cancelled: &context.cancelled,
+        },
+        &mut |code| context.send(Event::LoginCode(code.into()), true),
+    );
+    match result {
+        Ok(()) => context.send(Event::Ready, false).is_continue(),
+        Err(error) => {
+            let _ = context.send(Event::LoginFailed(failure(error, context)), false);
+            false
         }
     }
 }

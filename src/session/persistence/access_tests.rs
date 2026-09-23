@@ -185,7 +185,8 @@ fn saved_access_is_authoritative_and_missing_legacy_access_stays_bounded() {
     drop(history);
     let saved = load(&store, &id, true).unwrap();
     let wrong = Workspace::open(&home.0).unwrap();
-    assert!(Session::resume(saved, Some(wrong)).is_err()); // Fails before any real login.
+    let directory = crate::session::scope::Directory::open(&home.0).unwrap();
+    assert!(Session::resume(saved, &directory, Some(wrong)).is_err()); // Fails before any real login.
     let sessions = store.directory("sessions").unwrap();
     let body = sessions
         .read(&format!("{id}.json"), LIMIT)

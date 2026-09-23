@@ -45,6 +45,18 @@ impl fmt::Display for Failure {
         }
     }
 }
+impl Failure {
+    pub(crate) fn needs_login(self) -> bool {
+        matches!(
+            self,
+            Self::Account(
+                client::Error::Expired
+                    | client::Error::AccountChanged
+                    | client::Error::Login(crate::providers::openai_account::auth::Error::Denied)
+            )
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum End {
@@ -52,6 +64,11 @@ pub enum End {
     Incomplete,
     Refused,
     Failed(Failure),
+}
+impl End {
+    pub(crate) fn needs_login(self) -> bool {
+        matches!(self, Self::Failed(failure) if failure.needs_login())
+    }
 }
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -96,6 +113,8 @@ pub enum Event {
     },
     LoginCode(String),
     Ready,
+    LoggedOut,
+    LogoutFailed(Failure, bool),
     ModelChanged(Model),
     Thinking,
     RequestStarted,

@@ -10,8 +10,10 @@ use std::{
 
 pub const OLDER: &str = "s-0000000000000001-00000000-00000000";
 pub const NEWER: &str = "s-0000000000000002-00000000-00000000";
+pub const OTHER: &str = "other-directory";
 
 pub fn populate(home: &Path) -> io::Result<()> {
+    std::fs::create_dir(home.join(OTHER))?;
     let store = Store::in_home(home)?.directory("sessions")?;
     for (id, title, age) in [
         (OLDER, "Older conversation", 3600),
@@ -43,12 +45,15 @@ pub fn populate(home: &Path) -> io::Result<()> {
         for (key, value) in fields {
             match key.as_str() {
                 "id" => *value = Value::String(id.into()),
-                // An unavailable fixture workspace stops real CLI resume before login.
                 "workspace" => {
                     *value = Value::String(
-                        home.join("unavailable-workspace")
-                            .to_string_lossy()
-                            .into_owned(),
+                        (if id == OLDER {
+                            home.join(OTHER)
+                        } else {
+                            home.to_owned()
+                        })
+                        .to_string_lossy()
+                        .into_owned(),
                     )
                 }
                 "history" => {

@@ -167,8 +167,10 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
     let (upper, lower) = rules(&shown);
     assert_eq!(rows[upper + 1], "› /new");
     assert_eq!(rows[upper + 7], "  /help");
-    assert_eq!(rows[upper + 8], "  /|");
-    assert_eq!(lower, upper + 9, "menu and input must touch: {shown}");
+    assert_eq!(rows[upper + 8], "  /login");
+    assert_eq!(rows[upper + 9], "  /logout");
+    assert_eq!(rows[upper + 10], "  /|");
+    assert_eq!(lower, upper + 11, "menu and input must touch: {shown}");
     assert_eq!(rows[upper + 1..lower].join("\n").matches('›').count(), 1);
 
     account::input(&mut model, Key::Text("co".into()), &mut session);

@@ -10,6 +10,7 @@ fn listing() -> Vec<Listed> {
             title: "Read settings.rs, change retry_limit from 2 to 3, then run the tests".into(),
             turns: 1,
             workspace: Some(std::path::PathBuf::from("project-b")),
+            directory: Some(std::path::PathBuf::from("project-b")),
             modified: UNIX_EPOCH + Duration::from_secs(1000),
         },
         Listed {
@@ -18,6 +19,7 @@ fn listing() -> Vec<Listed> {
             title: "Unreadable session".into(),
             turns: 0,
             workspace: None,
+            directory: None,
             modified: UNIX_EPOCH,
         },
     ]
@@ -100,6 +102,7 @@ fn empty_titles_times_and_unicode_truncation_remain_explicit() {
     let mut sessions = listing();
     sessions[0].title.clear();
     sessions[0].workspace = None;
+    sessions[0].directory = None;
     assert!(
         rows(&sessions, 80, now, false)
             .iter()

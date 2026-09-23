@@ -12,6 +12,8 @@ use std::time::Instant;
 #[derive(PartialEq)]
 enum Phase {
     Login,
+    SignedOut,
+    SigningOut,
     Ready,
     Generating,
     Updating,
@@ -36,13 +38,27 @@ pub(super) struct View {
     pub command: Option<super::command_view::Run>,
     pub selected: session::Model,
     pub id: Option<String>,
-    pub workspace: Option<String>,
+    pub directory: Option<String>,
+    pub file_tools: bool,
     pub access: crate::workspace::Access,
     local_operation: Option<LocalOperation>,
 }
 impl View {
     pub fn ready(&self) -> bool {
         self.phase == Phase::Ready
+    }
+    pub fn signed_out(&self) -> bool {
+        self.phase == Phase::SignedOut
+    }
+    pub fn logging_in(&mut self) {
+        self.phase = Phase::Login;
+        self.failed = false;
+        self.notice = "Connecting for sign-in / Esc cancels".into();
+    }
+    pub fn signing_out(&mut self) {
+        self.phase = Phase::SigningOut;
+        self.failed = false;
+        self.notice = "Signing out / stopping active work".into();
     }
     pub fn inspecting(&mut self) {
         self.phase = Phase::Updating;
@@ -58,10 +74,10 @@ impl View {
         self.notice = "Changing model…".into();
     }
 }
-pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path>) -> Model {
+pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path>) -> Model {
     let mut model = Model::new(Instant::now());
     model.blocks.clear();
-    let workspace = workspace.map(|path| {
+    let directory = directory.map(|path| {
         let path = path.to_string_lossy();
         path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
     });
@@ -79,7 +95,8 @@ pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path
         command: None,
         selected,
         id: None,
-        workspace,
+        directory,
+        file_tools: false,
         access: crate::workspace::Access::Workspace,
         local_operation: None,
     });
@@ -98,6 +115,10 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
     };
     match key {
         Key::Enter => {
+            if view.phase == Phase::SignedOut && !model.editor.text.trim().is_empty() {
+                view.notice = "Signed out / use /login to sign in; draft kept and will not send automatically".into();
+                return;
+            }
             if view.phase == Phase::Generating && !model.editor.text.trim().is_empty() {
                 if session.enqueue(&model.editor.text) {
                     model.editor.take();
@@ -155,7 +176,10 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
 }
 
 pub(super) fn event(model: &mut Model, event: Event) {
-    if matches!(event, Event::Finished(..) | Event::LoginFailed(_)) {
+    if matches!(
+        event,
+        Event::Finished(..) | Event::LoginFailed(_) | Event::LoggedOut
+    ) {
         super::approval_view::stop(model);
         super::command_view::stop(model);
     }
@@ -248,6 +272,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
         }
         Event::Ready => {
             view.phase = Phase::Ready;
+            view.failed = false;
             view.notice.clear();
         }
         Event::ModelChanged(selected) => {
@@ -310,6 +335,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
             }
         }
         Event::Finished(end, metrics) => {
+            let signing_out = view.phase == Phase::SigningOut;
             model.tools.close(
                 &model.blocks,
                 !matches!(end, End::Complete | End::Refused),
@@ -319,6 +345,8 @@ pub(super) fn event(model: &mut Model, event: Event) {
             view.local_failed = false;
             view.phase = if end == End::Failed(session::Failure::Storage) {
                 Phase::Closed
+            } else if end.needs_login() {
+                Phase::SignedOut
             } else {
                 Phase::Ready
             };
@@ -351,13 +379,53 @@ pub(super) fn event(model: &mut Model, event: Event) {
             if view.phase == Phase::Closed {
                 view.notice =
                     "Session stopped / check local storage before resuming / Ctrl+Q exits".into();
+            } else if view.phase == Phase::SignedOut {
+                view.notice = "Account access ended / use /login to sign in; draft kept".into();
+            } else if signing_out {
+                view.phase = Phase::SigningOut;
+                view.notice = "Signing out / waiting for cleanup".into();
             }
         }
         Event::LoginFailed(failure) => {
             model.tools.close(&model.blocks, true, Instant::now());
-            view.phase = Phase::Closed;
+            let signing_out =
+                view.phase == Phase::SigningOut && failure != session::Failure::Worker;
+            view.phase = if failure == session::Failure::Worker {
+                Phase::Closed
+            } else if signing_out {
+                Phase::SigningOut
+            } else {
+                Phase::SignedOut
+            };
+            view.failed = failure != session::Failure::Cancelled;
+            view.notice = if signing_out {
+                "Signing out / waiting for cleanup".into()
+            } else if failure == session::Failure::Cancelled {
+                "Sign-in cancelled / use /login to retry; session and draft kept".into()
+            } else if failure == session::Failure::Worker {
+                format!("{failure}\nRestart Jecode to recover / Ctrl+Q exits")
+            } else {
+                format!("{failure}\nUse /login to retry; your conversation and draft are kept")
+            };
+        }
+        Event::LoggedOut => {
+            model.tools.close(&model.blocks, true, Instant::now());
+            view.phase = Phase::SignedOut;
+            view.queued = 0;
+            view.failed = false;
+            view.notice =
+                "Signed out locally / use /login to sign in; session and draft kept".into();
+        }
+        Event::LogoutFailed(failure, was_signed_in) => {
+            view.phase = if was_signed_in {
+                Phase::Ready
+            } else {
+                Phase::SignedOut
+            };
             view.failed = true;
-            view.notice = format!("{failure}\nRestart --account to sign in / Ctrl+Q exits");
+            view.notice = format!(
+                "Could not remove saved account: {failure}\nUse /logout to retry; session and draft kept"
+            );
         }
         Event::Thinking
         | Event::EditProposed { .. }

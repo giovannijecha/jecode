@@ -13,7 +13,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(super) fn show(select: bool) -> io::Result<Option<String>> {
+pub(super) fn show(
+    select: bool,
+    directory: &crate::session::scope::Directory,
+) -> io::Result<Option<String>> {
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
     if select && !interactive {
         return Err(io::Error::other(
@@ -21,7 +24,7 @@ pub(super) fn show(select: bool) -> io::Result<Option<String>> {
         ));
     }
     // No lease, authentication or history write occurs while browsing.
-    let sessions = persistence::list()?;
+    let sessions = persistence::list_in(directory)?;
     let mut terminal = interactive.then(platform::Terminal::open).transpose()?;
     let columns = match &terminal {
         Some(terminal) => terminal.size()?.0,
@@ -175,12 +178,12 @@ fn rows(sessions: &[Listed], columns: usize, now: SystemTime, ids: bool) -> Vec<
         push(format!(" {}. {title}", index + 1), Tone::Heading);
         if let Some(model) = session.model {
             let workspace = session
-                .workspace
+                .directory
                 .as_ref()
                 .map(|path| path.to_string_lossy());
             let workspace = workspace.as_deref().unwrap_or("Conversation only");
             let workspace = workspace.strip_prefix(r"\\?\").unwrap_or(workspace);
-            let folder = session.workspace.as_ref().and_then(|path| path.file_name());
+            let folder = session.directory.as_ref().and_then(|path| path.file_name());
             let label = folder.map_or_else(
                 || workspace.to_owned(),
                 |folder| format!("{} · {workspace}", folder.to_string_lossy()),
@@ -189,10 +192,15 @@ fn rows(sessions: &[Listed], columns: usize, now: SystemTime, ids: bool) -> Vec<
             let unit = if session.turns == 1 { "turn" } else { "turns" };
             push(
                 format!(
-                    "    {} · {} {unit} · {}",
+                    "    {} · {} {unit} · {}{}",
                     age(session.modified, now),
                     session.turns,
-                    model.id()
+                    model.id(),
+                    if session.workspace.is_none() {
+                        " · Conversation only"
+                    } else {
+                        ""
+                    }
                 ),
                 Tone::Muted,
             );

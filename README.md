@@ -49,16 +49,24 @@ saved account and refresh access when needed. GPT-5.6 Luna with medium effort is
 the default; `--model gpt-5.6-terra` selects Terra for that run.
 `jecode` uses your current directory; `--workspace PATH` selects another directory.
 Use `jecode chat` for a conversation without file or command tools.
+It still belongs to the directory where it was launched.
 The workspace is the starting directory for relative paths. The default `local`
 profile also accepts paths outside it; changes and commands still require approval.
 Use `--access workspace` to restrict file tools to the selected directory.
 
 ```text
+jecode login
 jecode resume
 jecode sessions
 jecode logout
 jecode --demo
 ```
+
+`jecode login` signs in without creating a conversation. Esc or Ctrl+C cancels.
+`jecode logout` removes only Jecode's local account access; it does not revoke
+remote provider sessions. `sessions` and `resume` use the current directory, or
+`--workspace PATH` when supplied. A session from another directory cannot be
+resumed until you select its saved directory.
 
 `--demo` is an offline interface preview. Normal conversations connect to OpenAI
 Account; Cargo's `--offline` flag only controls build dependency resolution.
@@ -71,6 +79,7 @@ Account; Cargo's `--offline` flag only controls build dependency resolution.
 - `/context` shows request size and available provider token counts.
 - `/compact` summarizes earlier context while retaining the full saved history.
 - Type `/` for a command menu; arrows select, Enter opens and Tab completes.
+- `/login` and `/logout` change account access without closing the conversation.
 - `/new`, `/resume`, `/model` and `/settings` manage conversations and preferences.
 - `NO_COLOR` and reduced motion are supported.
 

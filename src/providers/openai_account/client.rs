@@ -57,9 +57,9 @@ impl fmt::Display for Error {
             Self::Http(error) => error.fmt(f),
             Self::Content => f.write_str("login endpoint did not return valid JSON content"),
             Self::Trust => f.write_str("native certificate trust data unavailable"),
-            Self::Expired => f.write_str("account access expired; restart to sign in again"),
-            Self::Storage => f.write_str("cannot read or update ~/.jecode/v1/credentials.json; check permissions and JSON format"),
-            Self::AccountChanged => f.write_str("the saved account changed or signed out; restart to continue"),
+            Self::Expired => f.write_str("account access expired; use /login or jecode login to sign in again"),
+            Self::Storage => f.write_str("cannot read or update ~/.jecode/v1/credentials.json; check permissions, JSON format and other Jecode instances, then retry"),
+            Self::AccountChanged => f.write_str("the saved account changed or signed out; sign in again with /login or jecode login"),
         }
     }
 }
@@ -114,7 +114,9 @@ impl Client {
         progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, Error> {
         budget.check()?;
-        self.ensure_access(budget)?;
+        // Keep this lease through the response: a completed logout cannot leave
+        // an older request using credentials after the local account is removed.
+        let _credentials = self.ensure_access(budget)?;
         if unix_seconds()? >= self.tokens.expires_at().saturating_sub(30) {
             return Err(Error::Expired);
         }

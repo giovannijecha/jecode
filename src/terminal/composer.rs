@@ -14,7 +14,7 @@ pub(super) fn metadata(model: &Model, width: usize) -> Vec<Row> {
             Tone::Muted,
         )];
     };
-    let path = view.workspace.as_deref().unwrap_or("Conversation only");
+    let path = view.directory.as_deref().unwrap_or("Conversation only");
     let full = format!("{} · medium", view.selected.id());
     let model = if text::width(&full) + 10 <= width {
         full
