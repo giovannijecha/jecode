@@ -86,7 +86,7 @@ pub(super) fn response(text: &str, status: Status) -> Response {
         usage: Default::default(),
     }
 }
-pub(super) fn next(session: &mut Session) -> Event {
+pub(crate) fn next(session: &mut Session) -> Event {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(event) = session.poll() {
@@ -160,10 +160,15 @@ impl worker::Backend for Boundaries {
     }
 }
 
-#[test]
-fn terminal_reconciliation_replaces_only_the_current_provisional_request() {
+pub(crate) fn boundaries_fixture() -> Session {
     let mut session = Session::with_backend(Model::Luna, Boundaries, None).unwrap();
     assert!(matches!(next(&mut session), Event::Ready));
+    session
+}
+
+#[test]
+fn terminal_reconciliation_replaces_only_the_current_provisional_request() {
+    let mut session = boundaries_fixture();
     assert!(session.submit("first"));
     assert!(matches!(next(&mut session), Event::Text(text) if text == "SameSame"));
     assert!(matches!(next(&mut session), Event::TextReconciled(text) if text == "Same\n\nSame"));

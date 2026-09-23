@@ -293,11 +293,15 @@ pub(super) fn event(model: &mut Model, event: Event) {
             view.notice = "Streaming / Esc stops".into();
         }
         Event::TextReconciled(text) if view.phase == Phase::Generating => {
-            if let Some(block) = model.blocks.last_mut()
+            if let Some(block) = model.blocks.last()
                 && block.speaker == "Assistant"
             {
-                block.text = text;
-                view.partial_output = !block.text.is_empty();
+                // Emitted rows may already be in immutable terminal scrollback.
+                // Keep that visible preview and append the exact correction.
+                model.blocks.push(Block {
+                    speaker: "Status",
+                    text: super::reconcile::note(&block.text, &text),
+                });
             }
         }
         Event::Finished(end, metrics) => {

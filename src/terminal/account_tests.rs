@@ -267,7 +267,7 @@ fn login_notice_never_enters_transcript_and_partial_output_survives_failure() {
 }
 
 #[test]
-fn terminal_reconciliation_and_transport_failure_keep_canonical_visible_text() {
+fn terminal_reconciliation_and_transport_failure_keep_a_visible_correction() {
     use crate::providers::openai_account::client::{Error, RequestStage};
     use crate::tls::{IoOperation, NetworkError};
     let mut model = model(session::Model::Luna, None);
@@ -279,7 +279,8 @@ fn terminal_reconciliation_and_transport_failure_keep_canonical_visible_text() {
     });
     event(&mut model, Event::Text("SameSame".into()));
     event(&mut model, Event::TextReconciled("Same\n\nSame".into()));
-    assert_eq!(model.blocks.last().unwrap().text, "Same\n\nSame");
+    assert_eq!(model.blocks[0].text, "SameSame");
+    assert!(model.blocks[1].text.contains("insert a paragraph break"));
     let failure = Failure::Account(Error::Transport {
         stage: RequestStage::ResponseRead,
         error: NetworkError::io(
@@ -291,7 +292,7 @@ fn terminal_reconciliation_and_transport_failure_keep_canonical_visible_text() {
         &mut model,
         Event::Finished(End::Failed(failure), Metrics::default()),
     );
-    assert_eq!(model.blocks[0].text, "Same\n\nSame");
-    assert!(model.blocks[1].text.contains("response read"));
-    assert!(model.blocks[1].text.contains("partial output retained"));
+    assert_eq!(model.blocks[0].text, "SameSame");
+    assert!(model.blocks[2].text.contains("response read"));
+    assert!(model.blocks[2].text.contains("partial output retained"));
 }
