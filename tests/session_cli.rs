@@ -151,7 +151,15 @@ fn session_cards_are_ordered_readable_and_browsing_is_non_mutating() {
         jecode::json::Value::String("workspace".into()),
     );
     let legacy_path = root.join(format!("{legacy_id}.json"));
-    std::fs::write(&legacy_path, jecode::json::encode(&legacy, 65536).unwrap()).unwrap();
+    jecode::state::Store::in_home(&home.0)
+        .unwrap()
+        .directory("sessions")
+        .unwrap()
+        .replace(
+            &format!("{legacy_id}.json"),
+            &jecode::json::encode(&legacy, 65536).unwrap(),
+        )
+        .unwrap();
     let legacy_before = std::fs::read(&legacy_path).unwrap();
     let legacy_resume = Command::new(env!("CARGO_BIN_EXE_jecode"))
         .arg("resume")
@@ -164,10 +172,10 @@ fn session_cards_are_ordered_readable_and_browsing_is_non_mutating() {
         .output()
         .unwrap();
     assert_eq!(legacy_resume.status.code(), Some(2));
+    let diagnostic = String::from_utf8(legacy_resume.stderr).unwrap();
     assert!(
-        String::from_utf8(legacy_resume.stderr)
-            .unwrap()
-            .contains("origin cannot be inferred")
+        diagnostic.contains("origin cannot be inferred"),
+        "{diagnostic}"
     );
     assert_eq!(std::fs::read(legacy_path).unwrap(), legacy_before);
 }
