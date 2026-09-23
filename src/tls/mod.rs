@@ -9,7 +9,7 @@ pub mod certificate;
 mod connection;
 mod crypto;
 mod socket;
-pub use connection::{Budget, Connection, NetworkError};
+pub use connection::{Budget, Connection, IoFailure, IoOperation, NetworkError};
 mod entropy;
 mod handshake;
 mod record;

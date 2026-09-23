@@ -265,3 +265,33 @@ fn login_notice_never_enters_transcript_and_partial_output_survives_failure() {
         assert_eq!(errors[0].tone, super::super::style::Tone::Error);
     }
 }
+
+#[test]
+fn terminal_reconciliation_and_transport_failure_keep_canonical_visible_text() {
+    use crate::providers::openai_account::client::{Error, RequestStage};
+    use crate::tls::{IoOperation, NetworkError};
+    let mut model = model(session::Model::Luna, None);
+    event(&mut model, Event::Ready);
+    model.account.as_mut().unwrap().phase = Phase::Generating;
+    model.blocks.push(Block {
+        speaker: "Assistant",
+        text: String::new(),
+    });
+    event(&mut model, Event::Text("SameSame".into()));
+    event(&mut model, Event::TextReconciled("Same\n\nSame".into()));
+    assert_eq!(model.blocks.last().unwrap().text, "Same\n\nSame");
+    let failure = Failure::Account(Error::Transport {
+        stage: RequestStage::ResponseRead,
+        error: NetworkError::io(
+            IoOperation::ReadRecordBody,
+            &std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+        ),
+    });
+    event(
+        &mut model,
+        Event::Finished(End::Failed(failure), Metrics::default()),
+    );
+    assert_eq!(model.blocks[0].text, "Same\n\nSame");
+    assert!(model.blocks[1].text.contains("response read"));
+    assert!(model.blocks[1].text.contains("partial output retained"));
+}

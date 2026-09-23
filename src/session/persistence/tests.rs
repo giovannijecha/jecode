@@ -32,6 +32,47 @@ fn changing_model_survives_resume_without_rewriting_canonical_turns() {
         canonical
     );
 }
+
+#[test]
+fn older_joined_text_resumes_without_rewriting_saved_message_items() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history = create(&store, Model::Luna, None).unwrap();
+    let id = history.record.as_ref().unwrap().id.clone();
+    history.begin("legacy display".into()).unwrap();
+    let crate::json::Value::Array(output) = crate::json::parse(
+        r#"[{"type":"message","id":"one","status":"completed","content":[{"type":"output_text","text":"Same"}]},{"type":"message","id":"two","status":"completed","content":[{"type":"output_text","text":"Same"}]}]"#,
+        Default::default(),
+    ).unwrap() else { unreachable!() };
+    history.turns[0].steps.push(Step {
+        text: "SameSame".into(),
+        response: Some(Response {
+            id: "legacy_fixture".into(),
+            status: Status::Completed,
+            output,
+            text: "Same\n\nSame".into(),
+            tool_calls: Vec::new(),
+            usage: Default::default(),
+        }),
+        accepted: true,
+        ..Default::default()
+    });
+    history.turns[0].end = Some(End::Complete);
+    history.turns[0].outcome = "Complete".into();
+    history.checkpoint().unwrap();
+    let before = codec::encode(&history);
+    drop(history);
+    let saved = load(&store, &id, true).unwrap();
+    let step = &saved.history.turns[0].steps[0];
+    assert_eq!(step.text, "SameSame");
+    assert_eq!(step.response.as_ref().unwrap().text, "Same\n\nSame");
+    assert_eq!(step.response.as_ref().unwrap().output.len(), 2);
+    assert_eq!(codec::encode(&saved.history), before);
+    saved.history.checkpoint().unwrap();
+    drop(saved);
+    let saved_again = load(&store, &id, true).unwrap();
+    assert_eq!(codec::encode(&saved_again.history), before);
+}
 impl session::worker::Backend for Backend {
     fn login(
         &mut self,

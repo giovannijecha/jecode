@@ -6,18 +6,61 @@ use super::{
     trust::TrustStore,
 };
 use std::{
-    fmt,
+    fmt, io,
     net::{Shutdown, TcpStream, ToSocketAddrs},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IoOperation {
+    Resolve,
+    Connect,
+    ConfigureRead,
+    ConfigureWrite,
+    ConfigureNoDelay,
+    WriteRecord,
+    ReadRecordHeader,
+    ReadRecordBody,
+}
+impl fmt::Display for IoOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Resolve => "host resolution",
+            Self::Connect => "TCP connect",
+            Self::ConfigureRead => "read timeout setup",
+            Self::ConfigureWrite => "write timeout setup",
+            Self::ConfigureNoDelay => "TCP option setup",
+            Self::WriteRecord => "TLS record write",
+            Self::ReadRecordHeader => "TLS record header read",
+            Self::ReadRecordBody => "TLS record body read",
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IoFailure {
+    pub operation: IoOperation,
+    pub kind: io::ErrorKind,
+    pub os_code: Option<i32>,
+}
+impl IoFailure {
+    pub fn new(operation: IoOperation, error: &io::Error) -> Self {
+        Self {
+            operation,
+            kind: error.kind(),
+            os_code: error.raw_os_error(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkError {
     Cancelled,
     Timeout,
-    Io,
-    Dns,
+    Io(IoFailure),
+    Dns(IoFailure),
+    Eof(IoOperation),
     Closed,
     Tls(Error),
     Certificate(super::certificate::Error),
@@ -28,18 +71,34 @@ impl From<Error> for NetworkError {
         Self::Tls(error)
     }
 }
+impl NetworkError {
+    pub fn io(operation: IoOperation, error: &io::Error) -> Self {
+        Self::Io(IoFailure::new(operation, error))
+    }
+}
 impl fmt::Display for NetworkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
+        match self {
             Self::Cancelled => "connection cancelled",
             Self::Timeout => "connection deadline exceeded",
-            Self::Io => "network I/O failed",
-            Self::Dns => "host resolution failed",
+            Self::Io(failure) | Self::Dns(failure) => {
+                write!(
+                    f,
+                    "network I/O failed during {} ({:?}",
+                    failure.operation, failure.kind
+                )?;
+                if let Some(code) = failure.os_code {
+                    write!(f, ", OS {code}")?;
+                }
+                return f.write_str(")");
+            }
+            Self::Eof(operation) => return write!(f, "connection ended during {operation}"),
             Self::Closed => "connection closed",
             Self::Tls(_) => "secure transport failed",
             Self::Certificate(_) => "server identity verification failed",
             Self::Clock => "invalid system clock",
-        })
+        }
+        .fmt(f)
     }
 }
 impl std::error::Error for NetworkError {}
@@ -82,23 +141,35 @@ impl Connection {
         let flight = ServerFlight::start(host)?;
         let addresses: Vec<_> = (host, 443)
             .to_socket_addrs()
-            .map_err(|_| NetworkError::Dns)?
+            .map_err(|error| NetworkError::Dns(IoFailure::new(IoOperation::Resolve, &error)))?
             .take(8)
             .collect();
         budget.check()?;
         let mut stream = None;
+        let mut last_error = None;
         for address in addresses {
             budget.check()?;
             let timeout = budget
                 .deadline
                 .saturating_duration_since(Instant::now())
                 .min(Duration::from_millis(500));
-            if let Ok(connected) = TcpStream::connect_timeout(&address, timeout) {
-                stream = Some(connected);
-                break;
+            match TcpStream::connect_timeout(&address, timeout) {
+                Ok(connected) => {
+                    stream = Some(connected);
+                    break;
+                }
+                Err(error) => last_error = Some(error),
             }
         }
-        let stream = stream.ok_or(NetworkError::Io)?;
+        let stream = match stream {
+            Some(stream) => stream,
+            None => {
+                budget.check()?;
+                let error =
+                    last_error.unwrap_or_else(|| io::Error::from(io::ErrorKind::AddrNotAvailable));
+                return Err(NetworkError::io(IoOperation::Connect, &error));
+            }
+        };
         let now = i64::try_from(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

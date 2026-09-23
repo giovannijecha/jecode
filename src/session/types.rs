@@ -137,6 +137,7 @@ pub enum Event {
         failed: bool,
     },
     Text(String),
+    TextReconciled(String),
     Finished(End, Metrics),
     LoginFailed(Failure),
 }

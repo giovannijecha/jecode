@@ -144,7 +144,9 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
                         .iter()
                         .zip(&step.results)
                         .any(|(call, receipt)| call.id != receipt.call_id)
-                    || step.accepted && response.text != step.text
+                    || step.accepted
+                        && response.text != step.text
+                        && response.legacy_text().map_err(|_| invalid())? != step.text
                 {
                     return Err(invalid());
                 }

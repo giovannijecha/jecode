@@ -270,6 +270,13 @@ pub(super) fn run(
 pub(super) fn failure(error: client::Error, context: &Context) -> Failure {
     if context.cancelled.load(Ordering::Acquire)
         || error == client::Error::Network(NetworkError::Cancelled)
+        || matches!(
+            error,
+            client::Error::Transport {
+                error: NetworkError::Cancelled,
+                ..
+            }
+        )
     {
         Failure::Cancelled
     } else {

@@ -41,7 +41,11 @@ impl worker::Backend for Fixture {
         let count = requests.len();
         drop(requests);
         if matches!(self.mode, Mode::FailFollowup) && count == 2 {
-            return Err(NetworkError::Io.into());
+            return Err(NetworkError::io(
+                crate::tls::IoOperation::ReadRecordHeader,
+                &std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+            )
+            .into());
         }
         let more_tools = count == 1 || matches!(self.mode, Mode::Repeat) && count <= 8;
         let mut response = if more_tools {
