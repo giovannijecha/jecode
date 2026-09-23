@@ -267,6 +267,53 @@ fn login_notice_never_enters_transcript_and_partial_output_survives_failure() {
 }
 
 #[test]
+fn cancelled_login_stays_recoverable_and_outside_canonical_history() {
+    let mut model = model(session::Model::Luna, None);
+    model.editor.insert("preserved draft");
+    event(&mut model, Event::LoginCode("SYNTHETIC-CODE".into()));
+    event(&mut model, Event::LoginFailed(Failure::Cancelled));
+    let view = model.account.as_ref().unwrap();
+    assert!(view.signed_out());
+    assert!(!view.failed);
+    assert!(view.notice.contains("/login to retry"));
+    assert_eq!(model.editor.text, "preserved draft");
+    assert!(
+        !model
+            .blocks
+            .iter()
+            .any(|block| block.text.contains("SYNTHETIC-CODE"))
+    );
+}
+
+#[test]
+fn failed_login_keeps_restored_history_and_draft_visible() {
+    let mut model = model(session::Model::Luna, None);
+    model.editor.insert("unsent follow-up");
+    event(
+        &mut model,
+        Event::Restored {
+            id: "synthetic-session".into(),
+            items: vec![session::TranscriptItem {
+                role: "Assistant",
+                text: "Saved answer".into(),
+            }],
+            turns: 1,
+        },
+    );
+    event(
+        &mut model,
+        Event::LoginFailed(Failure::Account(
+            crate::providers::openai_account::client::Error::Expired,
+        )),
+    );
+    let view = model.account.as_ref().unwrap();
+    assert!(view.signed_out());
+    assert!(view.notice.contains("/login to retry"));
+    assert_eq!(model.editor.text, "unsent follow-up");
+    assert_eq!(model.blocks[0].text, "Saved answer");
+}
+
+#[test]
 fn terminal_reconciliation_and_transport_failure_keep_a_visible_correction() {
     use crate::providers::openai_account::client::{Error, RequestStage};
     use crate::tls::{IoOperation, NetworkError};

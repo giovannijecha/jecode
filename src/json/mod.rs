@@ -46,7 +46,7 @@ impl Value {
     }
 }
 
-pub fn object<const N: usize>(pairs: [(&str, Value); N]) -> Value {
+pub fn object<'a>(pairs: impl IntoIterator<Item = (&'a str, Value)>) -> Value {
     Value::Object(
         pairs
             .into_iter()

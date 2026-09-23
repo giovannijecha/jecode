@@ -11,6 +11,8 @@ use crate::{
 
 #[derive(Clone)]
 pub(super) enum Action {
+    Login,
+    Logout,
     New,
     Browse,
     Resume(String),
@@ -102,6 +104,12 @@ pub(super) fn commands() -> Vec<Entry> {
             Compact,
         ),
         ("/help", "Show shortcuts and available commands", Help),
+        ("/login", "Sign in to the saved account", Login),
+        (
+            "/logout",
+            "Remove local account access; keep this conversation",
+            Logout,
+        ),
     ]
     .into_iter()
     .map(|(name, description, action)| Entry::new(name, description, action))
@@ -172,7 +180,7 @@ pub(super) fn sessions(
             .filter(|s| s.model.is_some() && Some(s.id.as_str()) != current)
             .map(|s| {
                 let path = s
-                    .workspace
+                    .directory
                     .as_ref()
                     .map_or("Conversation only".into(), |p| p.to_string_lossy());
                 let path = path.strip_prefix(r"\\?\").unwrap_or(&path);
@@ -182,7 +190,15 @@ pub(super) fn sessions(
                     } else {
                         &s.title
                     },
-                    &format!("{path} · {} turns", s.turns),
+                    &format!(
+                        "{path} · {} turns{}",
+                        s.turns,
+                        if s.workspace.is_none() {
+                            " · Conversation only"
+                        } else {
+                            ""
+                        }
+                    ),
                     Action::Resume(s.id),
                 )
             })

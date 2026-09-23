@@ -58,6 +58,31 @@ fn local_account_commands_use_only_the_selected_fake_home() {
     );
     let saved = std::fs::read_to_string(home.0.join(".jecode/v1/credentials.json")).unwrap();
     assert!(saved.contains("signed_out"));
+
+    let login = Command::new(env!("CARGO_BIN_EXE_jecode"))
+        .arg("login")
+        .env("USERPROFILE", &home.0)
+        .env("HOME", &home.0)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(login.status.code(), Some(2));
+    assert!(
+        String::from_utf8(login.stderr)
+            .unwrap()
+            .contains("interactive terminal")
+    );
+    assert_eq!(
+        std::fs::read_dir(home.0.join(".jecode/v1/sessions"))
+            .unwrap()
+            .count(),
+        0,
+        "CLI login must not create a conversation"
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.0.join(".jecode/credentials.json")).unwrap(),
+        "untouched-legacy-fixture"
+    );
 }
 
 #[test]

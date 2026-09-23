@@ -86,8 +86,46 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
 }
 
 fn execute(model: &mut Model, session: &mut Session, action: Action) {
-    if !session.ready() || !model.account.as_ref().is_some_and(|v| v.ready()) {
+    if matches!(action, Action::Login) {
+        if session.signed_out() && session.login() {
+            model.account.as_mut().unwrap().logging_in();
+        } else if session.ready() {
+            notice(model, "Already signed in");
+        } else {
+            notice(model, "Wait for the current account transition");
+        }
+        model.menu.close();
+        if model.editor.text.starts_with('/') {
+            model.editor.take();
+        }
+        return;
+    }
+    if matches!(action, Action::Logout) {
+        if session.logout() {
+            model.account.as_mut().unwrap().signing_out();
+        } else {
+            notice(
+                model,
+                "Sign-out is already running or this session is closed",
+            );
+        }
+        model.menu.close();
+        if model.editor.text.starts_with('/') {
+            model.editor.take();
+        }
+        return;
+    }
+    if (!session.ready() && !session.signed_out())
+        || (!model.account.as_ref().is_some_and(|v| v.ready())
+            && !model.account.as_ref().is_some_and(|v| v.signed_out()))
+    {
         notice(model, "Wait for the current operation");
+        return;
+    }
+    if session.signed_out()
+        && matches!(action, Action::Model(_) | Action::Context | Action::Compact)
+    {
+        notice(model, "Sign in with /login before using this command");
         return;
     }
     let view = model.account.as_mut().unwrap();
@@ -95,6 +133,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
     view.local_notice.clear();
     view.local_failed = false;
     let done = match action {
+        Action::Login | Action::Logout => unreachable!(),
         Action::New => {
             model.navigation = Some(Request::New);
             true
@@ -103,7 +142,17 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             model.navigation = Some(Request::Resume(id));
             true
         }
-        Action::Browse => match crate::session::persistence::list() {
+        Action::Browse => match crate::session::scope::Directory::open(std::path::Path::new(
+            model
+                .account
+                .as_ref()
+                .unwrap()
+                .directory
+                .as_deref()
+                .unwrap_or(""),
+        ))
+        .and_then(|directory| crate::session::persistence::list_in(&directory))
+        {
             Ok(sessions) => {
                 let id = model.account.as_ref().and_then(|v| v.id.as_deref());
                 model.menu.open(menu::sessions(sessions, id));
@@ -183,8 +232,8 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
                 .collect::<Vec<_>>()
                 .join("\n");
             let view = model.account.as_ref().unwrap();
-            let location = view.workspace.as_deref().unwrap_or("Conversation only");
-            let access = if view.workspace.is_some() {
+            let location = view.directory.as_deref().unwrap_or("Conversation only");
+            let access = if view.file_tools {
                 view.access.name()
             } else {
                 "no file tools"
@@ -207,5 +256,86 @@ fn notice(model: &mut Model, text: &str) {
     if let Some(view) = &mut model.account {
         view.local_notice = text.into();
         view.local_failed = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::{self, Event};
+    use crate::terminal::{account, style::Tone, view};
+
+    #[test]
+    fn local_account_commands_keep_draft_history_and_runtime_regions() {
+        let mut session = session::tests::ready_fixture();
+        let mut model = account::model(session::Model::Luna, None);
+        account::event(&mut model, Event::Ready);
+        model.blocks.push(Block {
+            speaker: "Assistant",
+            text: "Saved answer".into(),
+        });
+        model.editor.insert("unsent draft");
+        let before = model.blocks.len();
+        execute(&mut model, &mut session, Action::Login);
+        assert_eq!(
+            model.account.as_ref().unwrap().local_notice,
+            "Already signed in"
+        );
+        execute(&mut model, &mut session, Action::Logout);
+        assert_eq!(model.editor.text, "unsent draft");
+        assert!(matches!(
+            session::tests::next(&mut session),
+            Event::LoggedOut
+        ));
+        account::event(&mut model, Event::LoggedOut);
+        assert_eq!(model.blocks.len(), before);
+        account::input(&mut model, crate::terminal::Key::Enter, &mut session);
+        assert_eq!(model.editor.text, "unsent draft");
+        assert!(
+            model
+                .account
+                .as_ref()
+                .unwrap()
+                .notice
+                .contains("draft kept")
+        );
+        let rows = view::chrome(&model, 80, 24);
+        let upper = rows
+            .iter()
+            .position(|row| row.text.starts_with('─'))
+            .unwrap();
+        let lower = rows
+            .iter()
+            .rposition(|row| row.text.starts_with('─'))
+            .unwrap();
+        assert!(
+            rows[..upper]
+                .iter()
+                .any(|row| row.text.contains("Signed out"))
+        );
+        assert!(
+            !rows[lower + 1..]
+                .iter()
+                .any(|row| row.text.contains("Signed out"))
+        );
+        assert!(
+            rows[upper..lower]
+                .iter()
+                .any(|row| row.text.contains("unsent draft"))
+        );
+        assert!(rows.iter().all(|row| row.tone != Tone::Error));
+        execute(&mut model, &mut session, Action::Login);
+        assert!(matches!(
+            session::tests::next(&mut session),
+            Event::LoginCode(_)
+        ));
+        account::event(&mut model, Event::Ready);
+        assert!(matches!(session::tests::next(&mut session), Event::Ready));
+        assert_eq!(model.editor.text, "unsent draft");
+        assert_eq!(model.blocks.len(), before);
+        assert!(
+            session.poll().is_none(),
+            "draft must not be sent after login"
+        );
     }
 }

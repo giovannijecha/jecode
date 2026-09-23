@@ -263,7 +263,9 @@ fn command_menu_contains_only_aligned_commands_and_dismisses_without_transcript_
             "  /settings",
             "  /context",
             "  /compact",
-            "  /help"
+            "  /help",
+            "  /login",
+            "  /logout"
         ]
     );
     assert_inside(&view::chrome(&model, 80, 24), "/resume");
@@ -344,7 +346,7 @@ fn command_results_enter_scrollback_once_and_leave_a_clean_composer() {
 #[test]
 fn panels_remain_bounded_with_long_paths_drafts_and_untrusted_labels() {
     let (mut model, _) = ready();
-    model.account.as_mut().unwrap().workspace =
+    model.account.as_mut().unwrap().directory =
         Some(format!("{}project-中文", "parent/".repeat(60)));
     model.editor.insert(&"draft 👩‍💻 ".repeat(40));
     let mut panel = menu::models(session::Model::Luna);

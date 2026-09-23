@@ -316,3 +316,123 @@ fn failed_checkpoint_stops_before_an_approved_effect_can_be_requested() {
     drop(run);
     assert!(!fixture.0.join("unexpected.txt").exists());
 }
+
+#[test]
+fn directory_scope_separates_file_tools_from_association_without_rewriting_legacy_files() {
+    let home = crate::state::tests::Fixture::new();
+    let Some(store) = home.store() else {
+        return;
+    };
+    let first = home.0.join("first");
+    let second = home.0.join("second");
+    let child = first.join("child");
+    std::fs::create_dir(&first).unwrap();
+    std::fs::create_dir(&second).unwrap();
+    std::fs::create_dir(&child).unwrap();
+    let first_scope = crate::session::scope::Directory::open(&first).unwrap();
+    let second_scope = crate::session::scope::Directory::open(&second).unwrap();
+    let same_scope = crate::session::scope::Directory::open(&child.join("..")).unwrap();
+    assert_eq!(first_scope.path(), same_scope.path());
+    let old_workspace = Workspace::open(&first).unwrap();
+    let old = create(&store, Model::Luna, Some(&old_workspace)).unwrap();
+    let old_id = old.record.as_ref().unwrap().id.clone();
+    drop(old);
+    let sessions = store.directory("sessions").unwrap();
+    let name = format!("{old_id}.json");
+    let mut older = json::parse(
+        &sessions.read(&name, LIMIT).unwrap().unwrap(),
+        Default::default(),
+    )
+    .unwrap();
+    let Value::Object(fields) = &mut older else {
+        unreachable!()
+    };
+    fields.remove("directory");
+    let older = json::encode(&older, LIMIT).unwrap();
+    sessions.replace(&name, &older).unwrap();
+
+    let chat = create_in(&store, Model::Luna, Some(&first), None).unwrap();
+    let chat_id = chat.record.as_ref().unwrap().id.clone();
+    drop(chat);
+    let second_workspace = Workspace::open(&second).unwrap();
+    let other = create_in(&store, Model::Terra, Some(&second), Some(&second_workspace)).unwrap();
+    let other_id = other.record.as_ref().unwrap().id.clone();
+    drop(other);
+    let legacy = create(&store, Model::Luna, None).unwrap();
+    let legacy_id = legacy.record.as_ref().unwrap().id.clone();
+    drop(legacy);
+
+    let first_list = list_in_store(&store, &first_scope).unwrap();
+    assert_eq!(first_list.len(), 2);
+    assert!(first_list.iter().any(|listed| listed.id == old_id));
+    assert!(
+        first_list
+            .iter()
+            .any(|listed| listed.id == chat_id && listed.workspace.is_none())
+    );
+    assert_eq!(list_in_store(&store, &second_scope).unwrap().len(), 1);
+    assert!(
+        list_in_store(
+            &store,
+            &crate::session::scope::Directory::open(&child).unwrap()
+        )
+        .unwrap()
+        .is_empty()
+    );
+    assert_eq!(sessions.read(&name, LIMIT).unwrap().unwrap(), older);
+
+    assert_eq!(
+        resume_in_store(&store, &other_id, &first_scope)
+            .err()
+            .unwrap()
+            .kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    assert_eq!(
+        resume_in_store(&store, &legacy_id, &first_scope)
+            .err()
+            .unwrap()
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+    let owned = resume_in_store(&store, &chat_id, &first_scope).unwrap();
+    assert!(owned.workspace.is_none());
+    assert!(
+        owned
+            .directory
+            .as_deref()
+            .is_some_and(|path| first_scope.contains(path))
+    );
+    assert_eq!(
+        resume_in_store(&store, &chat_id, &second_scope)
+            .err()
+            .unwrap()
+            .kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    assert!(resume_in_store(&store, &chat_id, &first_scope).is_err());
+    drop(owned);
+    assert!(resume_in_store(&store, &chat_id, &same_scope).is_ok());
+    assert_eq!(sessions.read(&name, LIMIT).unwrap().unwrap(), older);
+    let mut changed_between_menu_and_start =
+        resume_in_store(&store, &old_id, &first_scope).unwrap();
+    changed_between_menu_and_start.directory = Some(second.clone());
+    let candidate = Workspace::open(&first).unwrap();
+    assert!(
+        Session::resume(
+            changed_between_menu_and_start,
+            &first_scope,
+            Some(candidate)
+        )
+        .is_err()
+    );
+    drop(second_workspace);
+    std::fs::remove_dir(&second).unwrap();
+    assert_eq!(
+        resume_in_store(&store, &other_id, &second_scope)
+            .err()
+            .unwrap()
+            .kind(),
+        io::ErrorKind::NotFound
+    );
+}

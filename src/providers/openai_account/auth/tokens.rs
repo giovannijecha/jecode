@@ -8,6 +8,8 @@ pub struct Tokens {
     pub(super) refresh: String,
     pub(super) account_id: String,
     pub(super) expires_at: u64,
+    // Identifies one local sign-in across refreshes, including the same provider account.
+    pub(super) generation: Option<String>,
 }
 impl fmt::Debug for Tokens {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -26,6 +28,9 @@ impl Tokens {
     }
     pub fn expires_at(&self) -> u64 {
         self.expires_at
+    }
+    pub(crate) fn generation(&self) -> Option<&str> {
+        self.generation.as_deref()
     }
     pub(super) fn parse(body: &str, now: u64) -> Result<Self, Error> {
         let value = parse(body)?;
@@ -67,8 +72,26 @@ impl Tokens {
             refresh: refresh.to_owned(),
             account_id,
             expires_at,
+            generation: previous.map_or_else(
+                || Some(new_generation()),
+                |tokens| tokens.generation.clone(),
+            ),
         })
     }
+}
+
+pub(crate) fn new_generation() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!(
+        "{time:032x}-{:08x}-{:016x}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 pub(super) fn claims(token: &str) -> Result<Value, Error> {

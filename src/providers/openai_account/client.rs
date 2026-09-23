@@ -1,4 +1,6 @@
 //! Account access through Jecode's authenticated TLS, with optional user JSON storage.
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod coordination_tests;
 mod credentials;
 mod login;
 mod persistent;
@@ -57,9 +59,9 @@ impl fmt::Display for Error {
             Self::Http(error) => error.fmt(f),
             Self::Content => f.write_str("login endpoint did not return valid JSON content"),
             Self::Trust => f.write_str("native certificate trust data unavailable"),
-            Self::Expired => f.write_str("account access expired; restart to sign in again"),
-            Self::Storage => f.write_str("cannot read or update ~/.jecode/v1/credentials.json; check permissions and JSON format"),
-            Self::AccountChanged => f.write_str("the saved account changed or signed out; restart to continue"),
+            Self::Expired => f.write_str("account access expired; use /login or jecode login to sign in again"),
+            Self::Storage => f.write_str("cannot read or update ~/.jecode/v1/credentials.json; check permissions, JSON format and other Jecode instances, then retry"),
+            Self::AccountChanged => f.write_str("the saved account changed or signed out; sign in again with /login or jecode login"),
         }
     }
 }
@@ -113,7 +115,35 @@ impl Client {
         budget: &Budget<'_>,
         progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, Error> {
+        self.generate_with(request, budget, progress, |trust, connect| {
+            Connection::connect("chatgpt.com", trust, connect)
+        })
+    }
+
+    fn generate_with<C: ResponseChannel>(
+        &mut self,
+        request: &Request,
+        budget: &Budget<'_>,
+        progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
+        connect_channel: impl FnOnce(&TrustStore, &Budget<'_>) -> Result<C, NetworkError>,
+    ) -> Result<Response, Error> {
         budget.check()?;
+        self.ensure_access(budget)?;
+        let connect = Budget {
+            deadline: budget
+                .deadline
+                .min(std::time::Instant::now() + Duration::from_secs(30)),
+            cancelled: budget.cancelled,
+        };
+        let mut connection =
+            connect_channel(&self.trust, &connect).map_err(|error| Error::Transport {
+                stage: RequestStage::Connect,
+                error,
+            })?;
+        // The connection may have taken time while another instance signed out
+        // or replaced the account. This is the last local authorization before
+        // sending. Once it passes, another instance's logout cannot revoke the
+        // remote request; it may still be sent or finish after local sign-out.
         self.ensure_access(budget)?;
         if unix_seconds()? >= self.tokens.expires_at().saturating_sub(30) {
             return Err(Error::Expired);
@@ -123,19 +153,6 @@ impl Client {
             self.tokens.access_token(),
             self.tokens.account_id(),
         )?;
-        let connect = Budget {
-            deadline: budget
-                .deadline
-                .min(std::time::Instant::now() + Duration::from_secs(30)),
-            cancelled: budget.cancelled,
-        };
-        let mut connection =
-            Connection::connect("chatgpt.com", &self.trust, &connect).map_err(|error| {
-                Error::Transport {
-                    stage: RequestStage::Connect,
-                    error,
-                }
-            })?;
         exchange(&mut connection, &bytes, budget, &connect, progress)
     }
 }

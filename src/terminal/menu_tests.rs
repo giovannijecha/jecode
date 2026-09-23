@@ -66,6 +66,7 @@ fn resume_filters_captured_ids_excludes_current_and_cancel_is_inert() {
         turns: 1,
         model: Some(session::Model::Luna),
         workspace: Some("fixture-folder".into()),
+        directory: Some("fixture-folder".into()),
         modified: SystemTime::now(),
     };
     model.menu.open(menu::sessions(

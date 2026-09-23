@@ -22,6 +22,8 @@ fn native_console_child() {
     let directory = PathBuf::from(directory);
     let launch = || {
         Command::new(env!("CARGO_BIN_EXE_jecode"))
+            .arg("--workspace")
+            .arg(&directory)
             .arg("--resume")
             .env("USERPROFILE", &directory)
             .env("HOME", &directory)
@@ -30,7 +32,11 @@ fn native_console_child() {
     };
     assert!(launch().success(), "Escape should cancel without resuming");
     std::fs::write(directory.join("cancelled"), conpty::snapshot()).unwrap();
-    assert_eq!(launch().code(), Some(2), "fixture workspace is unavailable");
+    assert_eq!(
+        launch().code(),
+        Some(2),
+        "another owner keeps the chosen session locked"
+    );
     std::fs::write(directory.join("selected"), conpty::snapshot()).unwrap();
 }
 
@@ -49,12 +55,23 @@ fn cancelling_is_inert_and_selection_leases_only_the_chosen_session() {
     sessions::populate(&home.0).unwrap();
     let root = home.0.join(".jecode/v1/sessions");
     let saved = std::fs::read(root.join(format!("{}.json", sessions::NEWER))).unwrap();
+    let store = jecode::state::Store::in_home(&home.0)
+        .unwrap()
+        .directory("sessions")
+        .unwrap();
+    let _lease = store
+        .lock(
+            &format!("{}.lock", sessions::NEWER),
+            &std::sync::atomic::AtomicBool::new(false),
+            Instant::now(),
+        )
+        .unwrap();
     let mut console = conpty::Console::start(&home.0);
     wait_for(&console, |output| output.contains("Resume >"));
     console.resize(48, 36);
     console.input.write_all(b"\x1b").unwrap();
     wait_for(&console, |_| home.0.join("cancelled").exists());
-    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 3);
     let screen = std::fs::read_to_string(home.0.join("cancelled")).unwrap();
     println!("{screen}");
     assert!(screen.contains("Saved sessions"), "{screen}");
@@ -65,7 +82,7 @@ fn cancelling_is_inert_and_selection_leases_only_the_chosen_session() {
     wait_for(&console, |output| output.matches("Resume >").count() >= 2);
     console.input.write_all(b"0\r").unwrap();
     wait_for(&console, |output| output.contains("Choose a listed"));
-    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 3);
     console.input.write_all(b"1\r").unwrap();
     wait_for(&console, |_| home.0.join("selected").exists());
     println!(

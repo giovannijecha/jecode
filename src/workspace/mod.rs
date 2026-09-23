@@ -104,6 +104,9 @@ impl Workspace {
     pub fn path(&self) -> &Path {
         &self.display
     }
+    pub(crate) fn identity(&self) -> Result<(u64, u64), Error> {
+        platform::identity(&self.root).map_err(|_| Error::Unavailable)
+    }
     pub fn list(&self, path: &str, budget: &Budget<'_>) -> Result<Listing, Error> {
         budget.check()?;
         let path = self.resolve(path)?;

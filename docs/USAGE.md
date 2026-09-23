@@ -7,10 +7,20 @@ run displays an OpenAI device sign-in URL and code. Jecode saves the resulting
 account credentials and reuses them. Access refresh is serialized across local
 instances. If a refresh is interrupted with an uncertain result, sign in again;
 the old rotating token is not retried automatically.
+Credential checks and mutations use the local lease; model generation releases it
+before network I/O so separate instances can work concurrently. Once a request
+passes its final local credential check, it may still be sent or finish after
+another instance logs out. Local logout removes saved access but cannot revoke
+a remote provider session. New requests recheck the saved account and reject
+an obsolete client.
+An in-progress login or refresh can still require another instance to wait for
+the credential lease or retry after its deadline.
 
 `--model gpt-5.6-luna` or `--model gpt-5.6-terra` overrides the configured model
 for a new session. Both currently use medium effort. `--workspace PATH` selects
 another directory. `jecode chat` starts a conversation without file or command tools.
+It remains associated with its launch directory, including an explicit
+`jecode chat --workspace PATH` selection.
 The legacy `--account` entry still uses no file tools unless `--workspace` is supplied.
 
 With a workspace, new sessions use the `local` file-access profile: the selected
@@ -19,8 +29,20 @@ paths. Reads need no extra approval; each change and command still requires it.
 `--access workspace` selects bounded access for one new session. `--access local`
 explicitly selects the default. With bare `jecode`, the current directory is used.
 
-Run `jecode logout` to remove locally saved account access. This does not modify
-sessions, settings or credentials from other applications.
+Run `jecode login` to authenticate without creating an empty conversation.
+Esc or Ctrl+C cancels the device flow; a cancelled command exits with status 130.
+If an account is already available, the command reports that it is signed in.
+Authentication failures report how to retry. Run `jecode logout` to remove
+locally saved Jecode account access. Repeating logout leaves the account signed
+out. Logout does not revoke remote provider sessions, modify sessions or settings,
+or touch credentials from other applications.
+
+Inside a conversation, `/logout` cancels and joins active work before removing
+local account access. The transcript and current draft remain visible. `/login`
+signs in again in the same conversation. A draft submitted while signed out stays
+in the composer and is never sent automatically after login. Esc cancels sign-in;
+failures leave the conversation available for another `/login` attempt. Account
+codes and local commands are not model messages or saved conversation turns.
 
 ## User directory
 
@@ -66,7 +88,11 @@ sessions. See [tools](TOOLS.md) for the path exclusions and supported formats.
 
 ## Sessions
 
-`jecode sessions` shows up to 50 sessions, most recently active first. Each entry
+`jecode sessions` shows up to 50 sessions associated with the selected working
+directory, most recently active first. `--workspace PATH` selects another
+directory for `sessions` and both forms of `resume`; otherwise they use the
+current directory. A subdirectory is a separate scope, even inside one Git
+repository. Equivalent paths to the same directory share a scope. Each entry
 shows its first-message title, working directory, activity age, turn count and
 model. Long lines are shortened to fit the terminal; redirected output is plain
 text and also includes the full session IDs.
@@ -74,20 +100,33 @@ text and also includes the full session IDs.
 Run `jecode resume` to see the list and choose a session by number, then press
 Enter. Esc, Ctrl+C, Ctrl+Q or an empty Enter cancels. The number refers to that
 displayed list; no numeric alias is saved. `jecode resume SESSION_ID` opens
-a known session directly. Legacy `--sessions` and `--resume` also work;
-the saved model, workspace and access profile are restored automatically.
+a known session directly, but the ID must belong to the selected directory.
+An ID from another directory reports its saved location and how to select it;
+Jecode never switches directories during resume. Legacy `--sessions` and
+`--resume` use the same scope. The saved model and file-access profile are
+restored automatically.
 
-Inside a conversation, `/resume` opens a filterable menu of other readable sessions.
+Inside a conversation, `/resume` opens a filterable menu of other readable sessions
+in that conversation's directory.
 Type part of a title or folder, use arrows and Enter to choose, or Esc to return.
 The selected ID comes from that captured list. A missing folder or an already
 owned session leaves the current conversation open. `/new` starts in the same
 directory using saved defaults. Navigation waits for the current operation and
-queued guidance to finish. The previous worker is joined before another starts.
+queued guidance to finish. Jecode validates and opens the destination before
+releasing the current conversation; the current worker is then joined before
+the new conversation accepts input.
 
-Only one instance can own a saved session at a time. The workspace must still be
-available at its saved path. No historical tool or pending approval is replayed.
+Only one instance can own a saved session at a time. Its saved directory must
+still be available. No historical tool or pending approval is replayed.
 The session retains its file-access profile even if the user default changes.
 Older session JSON without `file_access` keeps the original `workspace` profile.
+Existing workspace sessions use their saved workspace as the directory association
+without changing their files just for listing. New conversation-only sessions save
+their launch directory separately and keep zero file tools. Older conversation-only
+files without a saved directory have no reliable origin; they remain untouched but
+cannot be listed or resumed within a directory scope. File tools using the `local`
+profile can still read supported external paths; directory scoping does not narrow
+that access.
 
 History is saved before model work, around tool effects, and when a turn ends.
 Normal cancellation retains partial output. An abrupt process or machine failure
@@ -112,15 +151,20 @@ scrollback remains available. Bracketed paste does not submit text automatically
 
 - `/new`: start a new conversation in the same directory.
 - `/resume`: find and reopen another saved conversation.
+- `/login`: sign in or report that this conversation is already signed in.
+- `/logout`: remove local account access and keep this conversation open.
 - `/model`: change the model for this conversation.
 - `/settings`: change saved defaults and animation.
 - `/help`: list local commands.
 - `/context`: measured request bytes and the latest available provider token counts.
 - `/compact`: summarize earlier turns while keeping the two most recent turns intact.
 
-Startup shows only the Jecode name above the conversation. The directory, active
+Startup adds no heading above the conversation. The directory, active
 model and effort share one footer row below the composer. Long paths and model
 names shorten to fit narrow windows; `/help` shows the directory in full.
+Account choices and local feedback stay in the composer; sign-in instructions,
+failures and signed-out state appear in the runtime status area above it. The
+footer does not gain a permanent authentication indicator.
 
 Type `/` to expand the composer with the command menu, then type to filter.
 Up/Down selects, Enter executes and Tab completes the selected command. The menu

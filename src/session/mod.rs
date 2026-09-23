@@ -6,6 +6,7 @@ mod generation;
 mod history;
 pub mod persistence;
 mod queue;
+pub mod scope;
 mod tool_loop;
 mod types;
 mod worker;
@@ -25,6 +26,8 @@ use std::{
 pub use types::*;
 
 enum Command {
+    Login,
+    Logout,
     Prompt(String),
     Inspect,
     Compact,
@@ -33,6 +36,8 @@ enum Command {
 #[derive(PartialEq)]
 enum Phase {
     Login,
+    SignedOut,
+    SigningOut,
     Ready,
     Generating,
     Updating,
@@ -60,15 +65,44 @@ impl Session {
         model: Model,
         workspace: Option<crate::workspace::Workspace>,
     ) -> io::Result<Self> {
-        let history =
-            persistence::create(&crate::state::Store::user()?, model, workspace.as_ref())?;
+        let selected = workspace
+            .as_ref()
+            .map_or(std::path::Path::new("."), crate::workspace::Workspace::path)
+            .to_owned();
+        Self::with_directory(model, &selected, workspace)
+    }
+    pub fn with_directory(
+        model: Model,
+        directory: &std::path::Path,
+        workspace: Option<crate::workspace::Workspace>,
+    ) -> io::Result<Self> {
+        let directory = scope::Directory::open(directory)?;
+        if workspace
+            .as_ref()
+            .is_some_and(|w| !directory.contains(w.path()))
+        {
+            return Err(io::Error::other(
+                "file-tool workspace differs from the selected directory",
+            ));
+        }
+        let history = persistence::create_in(
+            &crate::state::Store::user()?,
+            model,
+            Some(directory.path()),
+            workspace.as_ref(),
+        )?;
         Self::with_history(model, worker::Account::default(), workspace, history)
     }
     pub fn resume(
         saved: persistence::Saved,
+        directory: &scope::Directory,
         workspace: Option<crate::workspace::Workspace>,
     ) -> io::Result<Self> {
-        if workspace.as_ref().map(crate::workspace::Workspace::path) != saved.workspace.as_deref()
+        directory.require(saved.directory.as_deref())?;
+        if workspace.is_some() != saved.workspace.is_some()
+            || workspace
+                .as_ref()
+                .is_some_and(|w| !directory.contains(w.path()))
             || workspace.as_ref().map_or(
                 crate::workspace::Access::Workspace,
                 crate::workspace::Workspace::access,
@@ -103,7 +137,8 @@ impl Session {
         history.environment = workspace
             .as_ref()
             .map_or(String::new(), crate::workspace::Workspace::instructions);
-        let (command_tx, command_rx) = mpsc::sync_channel(1);
+        // A pending prompt and a logout must both fit while the worker is cancelling.
+        let (command_tx, command_rx) = mpsc::sync_channel(2);
         let (event_tx, event_rx) = mpsc::sync_channel(64);
         let (decision_tx, decision_rx) = mpsc::sync_channel(1);
         let (guidance_tx, guidance_rx) = mpsc::sync_channel(8);
@@ -158,6 +193,44 @@ impl Session {
     }
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+    }
+    pub fn login(&mut self) -> bool {
+        if self.phase != Phase::SignedOut {
+            return false;
+        }
+        self.cancelled.store(false, Ordering::Release);
+        if self
+            .commands
+            .as_ref()
+            .is_some_and(|tx| tx.try_send(Command::Login).is_ok())
+        {
+            self.phase = Phase::Login;
+            true
+        } else {
+            false
+        }
+    }
+    pub fn logout(&mut self) -> bool {
+        if matches!(self.phase, Phase::SigningOut | Phase::Closed) {
+            return false;
+        }
+        self.cancel();
+        if self
+            .commands
+            .as_ref()
+            .is_some_and(|tx| tx.try_send(Command::Logout).is_ok())
+        {
+            self.phase = Phase::SigningOut;
+            true
+        } else {
+            false
+        }
+    }
+    pub fn signed_out(&self) -> bool {
+        self.phase == Phase::SignedOut
+    }
+    pub fn signing_out(&self) -> bool {
+        self.phase == Phase::SigningOut
     }
     pub fn enqueue(&mut self, text: &str) -> bool {
         if self.phase != Phase::Generating
@@ -244,13 +317,21 @@ impl Session {
                     Event::EditFinished { .. }
                     | Event::CommandFinished { .. }
                     | Event::Finished(..)
-                    | Event::LoginFailed(_) => self.pending_approval = None,
+                    | Event::LoginFailed(_)
+                    | Event::LoggedOut
+                    | Event::LogoutFailed(..) => self.pending_approval = None,
                     _ => {}
                 }
                 self.phase = match &event {
+                    Event::LoggedOut => Phase::SignedOut,
+                    Event::LogoutFailed(_, true) => Phase::Ready,
+                    Event::LogoutFailed(_, false) => Phase::SignedOut,
                     Event::Finished(End::Failed(Failure::Storage), _) => Phase::Closed,
+                    Event::LoginFailed(Failure::Worker) => Phase::Closed,
+                    _ if self.phase == Phase::SigningOut => return Some(event),
+                    Event::Finished(end, _) if end.needs_login() => Phase::SignedOut,
                     Event::Ready | Event::ModelChanged(_) | Event::Finished(_, _) => Phase::Ready,
-                    Event::LoginFailed(_) => Phase::Closed,
+                    Event::LoginFailed(_) => Phase::SignedOut,
                     _ => return Some(event),
                 };
                 Some(event)
@@ -275,6 +356,8 @@ impl Drop for Session {
     }
 }
 
+#[cfg(test)]
+mod account_tests;
 #[cfg(test)]
 pub(crate) mod command_tests;
 #[cfg(test)]

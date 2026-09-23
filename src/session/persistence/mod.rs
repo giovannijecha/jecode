@@ -5,7 +5,7 @@ mod codec;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 mod transcript;
-use super::{Model, history::History};
+use super::{Model, history::History, scope::Directory};
 use crate::{
     json::{self, Value},
     state::{Lease, Store},
@@ -39,6 +39,7 @@ pub struct Saved {
     pub id: String,
     pub model: Model,
     pub workspace: Option<PathBuf>,
+    pub directory: Option<PathBuf>,
     pub access: Access,
     pub title: String,
     pub turns: usize,
@@ -49,6 +50,7 @@ pub(super) struct Record {
     id: String,
     model: Model,
     workspace: Option<String>,
+    directory: Option<String>,
     access: Access,
     created: u64,
     _lock: Lease,
@@ -58,7 +60,7 @@ impl Record {
         &self.id
     }
     pub(super) fn save(&self, history: &History) -> io::Result<()> {
-        let value = json::object([
+        let mut fields = vec![
             ("version", Value::Number("1".into())),
             ("id", text(&self.id)),
             ("model", text(self.model.id())),
@@ -85,14 +87,27 @@ impl Record {
                     ("failed", Value::Bool(history.projection.failed)),
                 ]),
             ),
-        ]);
+        ];
+        if let Some(directory) = &self.directory {
+            fields.push(("directory", text(directory)));
+        }
+        let value = json::object(fields);
         let contents = json::encode(&value, LIMIT).map_err(|_| invalid())?;
         self.store.replace(&format!("{}.json", self.id), &contents)
     }
 }
+#[cfg(test)]
 pub(super) fn create(
     store: &Store,
     model: Model,
+    workspace: Option<&Workspace>,
+) -> io::Result<History> {
+    create_in(store, model, workspace.map(Workspace::path), workspace)
+}
+pub(super) fn create_in(
+    store: &Store,
+    model: Model,
+    directory: Option<&Path>,
     workspace: Option<&Workspace>,
 ) -> io::Result<History> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -127,6 +142,9 @@ pub(super) fn create(
                     .ok_or_else(invalid)
             })
             .transpose()?,
+        directory: directory
+            .map(|path| path.to_str().map(str::to_owned).ok_or_else(invalid))
+            .transpose()?,
         access: workspace.map_or(Access::Workspace, Workspace::access),
     };
     let mut history = History {
@@ -137,8 +155,18 @@ pub(super) fn create(
     history.checkpoint().map_err(|_| invalid())?;
     Ok(history)
 }
-pub fn resume(id: &str) -> io::Result<Saved> {
-    load(&Store::user()?, id, true)
+pub fn resume_in(id: &str, directory: &Directory) -> io::Result<Saved> {
+    resume_in_store(&Store::user()?, id, directory)
+}
+fn resume_in_store(store: &Store, id: &str, directory: &Directory) -> io::Result<Saved> {
+    // Diagnose a foreign directory before attempting its single-owner lease.
+    let overview = load(store, id, false)?;
+    directory.require(overview.directory.as_deref())?;
+    drop(overview);
+    let saved = load(store, id, true)?;
+    // The leased snapshot is authoritative if the file changed since discovery.
+    directory.require(saved.directory.as_deref())?;
+    Ok(saved)
 }
 
 fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
@@ -183,6 +211,16 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
         }
         _ => return Err(invalid()),
     };
+    let directory = match value.get("directory") {
+        None => workspace.clone(), // Existing workspace sessions already have an association.
+        Some(Value::String(s)) if s.len() <= 32768 && Path::new(s).is_absolute() => {
+            Some(PathBuf::from(s))
+        }
+        _ => return Err(invalid()),
+    };
+    if workspace.is_some() && directory.is_none() {
+        return Err(invalid());
+    }
     let created = value
         .get("created")
         .and_then(Value::unsigned)
@@ -227,6 +265,11 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
             id: id.into(),
             model,
             workspace: workspace.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            // Do not rewrite older snapshots merely to add an inferred directory.
+            directory: value
+                .get("directory")
+                .and_then(Value::text)
+                .map(str::to_owned),
             created,
             access,
             _lock: lock,
@@ -236,6 +279,7 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
         id: id.into(),
         model,
         workspace,
+        directory,
         access,
         title: history
             .turns
@@ -251,10 +295,13 @@ pub struct Listed {
     pub title: String,
     pub turns: usize,
     pub workspace: Option<PathBuf>,
+    pub directory: Option<PathBuf>,
     pub modified: SystemTime,
 }
-pub fn list() -> io::Result<Vec<Listed>> {
-    let root = Store::user()?;
+pub fn list_in(directory: &Directory) -> io::Result<Vec<Listed>> {
+    list_in_store(&Store::user()?, directory)
+}
+fn list_in_store(root: &Store, directory: &Directory) -> io::Result<Vec<Listed>> {
     let store = root.directory("sessions")?;
     let mut names: Vec<_> = store
         .names()?
@@ -269,17 +316,18 @@ pub fn list() -> io::Result<Vec<Listed>> {
         .collect();
     names.sort_by(|a, b| b.cmp(a));
     let mut sessions = Vec::new();
-    for (modified, name) in names.into_iter().take(50) {
+    for (modified, name) in names {
         if let Some(id) = name.strip_suffix(".json")
             && valid_id(id)
         {
-            sessions.push(match load(&root, id, false) {
+            let saved = match load(root, id, false) {
                 Ok(saved) => Listed {
                     id: saved.id,
                     model: Some(saved.model),
                     title: saved.title,
                     turns: saved.turns,
                     workspace: saved.workspace,
+                    directory: saved.directory,
                     modified,
                 },
                 Err(_) => Listed {
@@ -288,9 +336,20 @@ pub fn list() -> io::Result<Vec<Listed>> {
                     title: "Unreadable session / file kept on disk".into(),
                     turns: 0,
                     workspace: None,
+                    directory: None,
                     modified,
                 },
-            });
+            };
+            if saved
+                .directory
+                .as_deref()
+                .is_some_and(|path| directory.contains(path))
+            {
+                sessions.push(saved);
+            }
+            if sessions.len() == 50 {
+                break;
+            }
         }
     }
     Ok(sessions)

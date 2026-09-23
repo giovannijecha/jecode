@@ -11,6 +11,7 @@ use crate::{
 pub use device::{DeviceLogin, PollOutcome};
 use std::fmt;
 pub use tokens::Tokens;
+pub(crate) use tokens::new_generation;
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const AUTH_HOST: &str = "auth.openai.com";
