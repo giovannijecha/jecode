@@ -3,8 +3,8 @@ use super::editor_visual::Visual;
 
 pub const MAX_INPUT_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
 
-// Editing can use finer stops than transcript wrapping. Join common extended
-// clusters and keep unknown combining runs intact instead of splitting a glyph.
+// Editing can use finer stops than transcript wrapping. This covers common
+// extended clusters, but is not a complete Unicode grapheme-break database.
 pub(super) fn boundaries(text: &str) -> Vec<usize> {
     let mut result = vec![0];
     let mut previous = '\0';
@@ -16,7 +16,8 @@ pub(super) fn boundaries(text: &str) -> Vec<usize> {
             || extending(current)
             || prepend(previous)
             || virama(previous)
-            || joined_regional_pair;
+            || joined_regional_pair
+            || conjoining_hangul(previous, current);
         let previous_base = previous.is_ascii()
             || previous.is_alphanumeric()
             || pictograph(previous)
@@ -47,6 +48,34 @@ pub(super) fn boundaries(text: &str) -> Vec<usize> {
 }
 fn regional(ch: char) -> bool {
     ('\u{1f1e6}'..='\u{1f1ff}').contains(&ch)
+}
+#[derive(Clone, Copy)]
+enum Hangul {
+    L,
+    V,
+    T,
+    Lv,
+    Lvt,
+    Other,
+}
+fn hangul(ch: char) -> Hangul {
+    match ch {
+        '\u{1100}'..='\u{115f}' | '\u{a960}'..='\u{a97c}' => Hangul::L,
+        '\u{1160}'..='\u{11a7}' | '\u{d7b0}'..='\u{d7c6}' => Hangul::V,
+        '\u{11a8}'..='\u{11ff}' | '\u{d7cb}'..='\u{d7fb}' => Hangul::T,
+        '\u{ac00}'..='\u{d7a3}' if (ch as u32 - 0xac00).is_multiple_of(28) => Hangul::Lv,
+        '\u{ac00}'..='\u{d7a3}' => Hangul::Lvt,
+        _ => Hangul::Other,
+    }
+}
+// Conjoining Jamo and precomposed syllables follow the three Hangul
+// continuation rules; every editor and visual stop uses this same boundary map.
+fn conjoining_hangul(previous: char, current: char) -> bool {
+    use Hangul::{L, Lv, Lvt, T, V};
+    matches!(
+        (hangul(previous), hangul(current)),
+        (L, L | V | Lv | Lvt) | (Lv | V, V | T) | (Lvt | T, T)
+    )
 }
 fn pictograph(ch: char) -> bool {
     matches!(ch, '\u{2600}'..='\u{27bf}' | '\u{1f000}'..='\u{1faff}')

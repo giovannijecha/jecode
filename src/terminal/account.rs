@@ -218,6 +218,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
             view.queued = view.queued.saturating_sub(1);
             if new_turn {
                 view.turns += 1;
+                model.prompt_history.record_new_turn(&text);
             }
             view.phase = Phase::Generating;
             view.partial_output = false;

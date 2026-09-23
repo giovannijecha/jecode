@@ -115,6 +115,68 @@ fn word_line_and_visual_row_editing_preserve_safe_boundaries() {
 }
 
 #[test]
+fn conjoining_hangul_is_one_editing_unit_across_cursor_word_and_visual_navigation() {
+    let syllable = "\u{1100}\u{1161}\u{11a8}";
+    let text = format!("a{syllable}b");
+    let start = 1;
+    let end = start + syllable.len();
+    let mut editor = editor::Editor::default();
+    editor.set_columns(2);
+    assert!(editor.insert(&text));
+    editor.left();
+    assert_eq!(editor.cursor, end);
+    editor.left();
+    assert_eq!(editor.cursor, start);
+    editor.right();
+    assert_eq!(editor.cursor, end);
+    editor.backspace();
+    assert_eq!(editor.text, "ab");
+    assert_eq!(editor.cursor, start);
+
+    editor.replace(&text);
+    editor.cursor = start;
+    editor.delete();
+    assert_eq!(editor.text, "ab");
+
+    editor.replace(&text);
+    editor.word_left();
+    assert!(editor::boundaries(&editor.text).contains(&editor.cursor));
+    editor.word_delete();
+    assert!(editor::boundaries(&editor.text).contains(&editor.cursor));
+    editor.replace(&format!("x {syllable} y"));
+    editor.cursor = "x ".len() + syllable.len();
+    editor.word_backspace();
+    assert_eq!(editor.text, "x  y");
+    let layout = editor_visual::Visual::new(&text, 2);
+    assert_eq!(
+        layout
+            .stops
+            .iter()
+            .map(|stop| stop.index)
+            .collect::<Vec<_>>(),
+        vec![0, start, end, text.len()]
+    );
+    editor.replace(&text);
+    assert!(editor.vertical(false));
+    assert!(editor::boundaries(&editor.text).contains(&editor.cursor));
+
+    for cluster in [
+        syllable,
+        "\u{1100}\u{1100}\u{1161}\u{1161}\u{11a8}\u{11a8}",
+        "\u{ac00}\u{11a8}",
+        "\u{ac01}\u{11a8}",
+        "e\u{301}",
+        "\u{1f469}\u{200d}\u{1f4bb}",
+        "\u{1f1fa}\u{1f1f8}",
+    ] {
+        let mut editor = editor::Editor::default();
+        assert!(editor.insert(cluster));
+        editor.backspace();
+        assert!(editor.text.is_empty(), "{cluster:?}");
+    }
+}
+
+#[test]
 fn history_restores_unsent_multiline_draft_and_does_not_mutate_recalled_prompt() {
     let mut model = model::Model::new(Instant::now());
     model
@@ -160,6 +222,72 @@ fn account_submission_and_local_commands_feed_only_user_prompt_history() {
     account::input(&mut model, Key::PageDown, &mut session);
     assert_eq!(model.editor.text, "unsent\n  draft");
     assert!(session.ready());
+}
+
+#[test]
+fn new_canonical_queue_turn_enters_live_recall_without_losing_a_browsed_draft() {
+    let (mut model, mut session) = ready();
+    model
+        .prompt_history
+        .load(vec!["older prompt".into(), "recent prompt".into()]);
+    model.editor.insert("unsent\n  draft");
+    model.editor.home();
+    let saved_cursor = model.editor.cursor;
+    account::input(&mut model, Key::HistoryPrevious, &mut session);
+    assert_eq!(model.editor.text, "recent prompt");
+    account::event(
+        &mut model,
+        Event::Guidance {
+            text: "queued new turn".into(),
+            new_turn: true,
+        },
+    );
+    assert_eq!(model.editor.text, "recent prompt");
+    account::input(&mut model, Key::HistoryNext, &mut session);
+    assert_eq!(model.editor.text, "queued new turn");
+    account::input(&mut model, Key::HistoryNext, &mut session);
+    assert_eq!(model.editor.text, "unsent\n  draft");
+    assert_eq!(model.editor.cursor, saved_cursor);
+
+    account::event(
+        &mut model,
+        Event::Guidance {
+            text: "intraturn guidance".into(),
+            new_turn: false,
+        },
+    );
+    account::event(&mut model, Event::GuidanceReturned("returned".into()));
+    account::input(&mut model, Key::HistoryPrevious, &mut session);
+    assert_eq!(model.editor.text, "queued new turn");
+    account::input(&mut model, Key::HistoryPrevious, &mut session);
+    assert_eq!(model.editor.text, "recent prompt");
+    assert!(session.ready());
+}
+
+#[test]
+fn live_history_stays_bounded_when_a_new_turn_evicts_the_viewed_entry() {
+    let mut history = prompt_history::PromptHistory::default();
+    history.load((0..64).map(|index| format!("prompt {index}")).collect());
+    let mut editor = editor::Editor::default();
+    editor.insert("draft\n  with cursor");
+    editor.home();
+    let saved_cursor = editor.cursor;
+    let mut literal = false;
+    for _ in 0..64 {
+        history.previous(&mut editor, &mut literal);
+    }
+    assert_eq!(editor.text, "prompt 0");
+    history.record_new_turn("prompt 64");
+    assert_eq!(editor.text, "prompt 0");
+    history.next(&mut editor, &mut literal);
+    assert_eq!(editor.text, "prompt 1");
+    for _ in 0..63 {
+        history.next(&mut editor, &mut literal);
+    }
+    assert_eq!(editor.text, "prompt 64");
+    history.next(&mut editor, &mut literal);
+    assert_eq!(editor.text, "draft\n  with cursor");
+    assert_eq!(editor.cursor, saved_cursor);
 }
 
 #[test]
