@@ -1,11 +1,14 @@
-//! Conservative display/edit units. This is not a complete Unicode table engine.
-//! Boundaries are only introduced between printable ASCII characters. Non-ASCII
-//! sequences and their adjacent bases stay together, possibly merging graphemes.
+//! Conservative display units. This is not a complete Unicode width database.
+//! Long non-ASCII runs remain together in transcript wrapping.
 pub fn boundaries(text: &str) -> Vec<usize> {
     let mut result = vec![0];
     let mut previous = '\0';
     for (index, current) in text.char_indices() {
-        if index != 0 && previous.is_ascii() && current.is_ascii() {
+        if index != 0
+            && (previous.is_ascii() && current.is_ascii()
+                || matches!(previous, '\n' | '\t')
+                || matches!(current, '\n' | '\t'))
+        {
             result.push(index);
         }
         previous = current;
@@ -85,53 +88,4 @@ pub fn wrap(text: &str, columns: usize) -> Vec<String> {
         rows.push(row);
     }
     rows
-}
-
-#[derive(Default)]
-pub struct Editor {
-    pub text: String,
-    pub cursor: usize,
-}
-impl Editor {
-    pub fn insert(&mut self, text: &str) {
-        let text = safe(&text.replace("\r\n", "\n")).replace('\n', " ");
-        if self.text.len() + text.len() > 8192 {
-            return;
-        }
-        self.text.insert_str(self.cursor, &text);
-        self.cursor += text.len();
-        // A new combining/ZWJ sequence may have swallowed the old boundary.
-        self.cursor = boundaries(&self.text)
-            .into_iter()
-            .find(|b| *b >= self.cursor)
-            .unwrap_or(self.text.len());
-    }
-    pub fn left(&mut self) {
-        self.cursor = boundaries(&self.text)
-            .into_iter()
-            .rev()
-            .find(|b| *b < self.cursor)
-            .unwrap_or(0);
-    }
-    pub fn right(&mut self) {
-        self.cursor = boundaries(&self.text)
-            .into_iter()
-            .find(|b| *b > self.cursor)
-            .unwrap_or(self.text.len());
-    }
-    pub fn backspace(&mut self) {
-        let end = self.cursor;
-        self.left();
-        self.text.drain(self.cursor..end);
-    }
-    pub fn delete(&mut self) {
-        let start = self.cursor;
-        self.right();
-        self.text.drain(start..self.cursor);
-        self.cursor = start;
-    }
-    pub fn take(&mut self) -> String {
-        self.cursor = 0;
-        std::mem::take(&mut self.text)
-    }
 }

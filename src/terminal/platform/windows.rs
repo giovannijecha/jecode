@@ -39,6 +39,24 @@ struct Record {
     character: u16,
     modifiers: u32,
 }
+fn control_key(virtual_key: u16) -> Option<Key> {
+    match virtual_key {
+        0x51 => Some(Key::Quit),
+        0x43 => Some(Key::Interrupt),
+        0x41 => Some(Key::Home),
+        0x45 => Some(Key::End),
+        0x4a | 0x4f | 0x0d => Some(Key::Newline),
+        0x50 => Some(Key::HistoryPrevious),
+        0x4e => Some(Key::HistoryNext),
+        0x57 | 0x08 => Some(Key::WordBackspace),
+        0x25 => Some(Key::WordLeft),
+        0x27 => Some(Key::WordRight),
+        0x2e => Some(Key::WordDelete),
+        0x24 => Some(Key::DraftStart),
+        0x23 => Some(Key::DraftEnd),
+        _ => None,
+    }
+}
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn GetStdHandle(id: u32) -> Handle;
@@ -122,14 +140,11 @@ impl Terminal {
         for _ in 0..record.repeat.min(32) {
             let control = record.modifiers & 12 != 0;
             let alt = record.modifiers & 3 != 0;
+            let shift = record.modifiers & 0x10 != 0;
             let key = if control && !alt {
-                match record.key {
-                    0x51 => Some(Key::Quit),
-                    0x43 => Some(Key::Interrupt),
-                    0x41 => Some(Key::Home),
-                    0x45 => Some(Key::End),
-                    _ => None,
-                }
+                control_key(record.key)
+            } else if shift && !alt && record.key == 0x0d {
+                Some(Key::Newline)
             } else {
                 match record.key {
                     0x0d => Some(Key::Enter),
@@ -213,4 +228,20 @@ fn windows_console_abi_layouts() {
     assert_eq!(std::mem::size_of::<Record>(), 20);
     assert_eq!(std::mem::align_of::<Record>(), 4);
     assert_eq!(std::mem::size_of::<Info>(), 22);
+}
+#[cfg(test)]
+#[test]
+fn native_control_records_distinguish_editor_actions_from_exit_and_submit() {
+    assert_eq!(control_key(0x51), Some(Key::Quit));
+    assert_eq!(control_key(0x43), Some(Key::Interrupt));
+    assert_eq!(control_key(0x4f), Some(Key::Newline));
+    assert_eq!(control_key(0x0d), Some(Key::Newline));
+    assert_eq!(control_key(0x50), Some(Key::HistoryPrevious));
+    assert_eq!(control_key(0x4e), Some(Key::HistoryNext));
+    assert_eq!(control_key(0x08), Some(Key::WordBackspace));
+    assert_eq!(control_key(0x2e), Some(Key::WordDelete));
+    assert_eq!(control_key(0x25), Some(Key::WordLeft));
+    assert_eq!(control_key(0x27), Some(Key::WordRight));
+    assert_eq!(control_key(0x24), Some(Key::DraftStart));
+    assert_eq!(control_key(0x23), Some(Key::DraftEnd));
 }

@@ -10,6 +10,8 @@ mod command_view;
 mod commands;
 mod composer;
 mod diagnostics;
+mod editor;
+mod editor_visual;
 #[cfg(any(test, windows, target_os = "linux"))]
 mod input;
 mod markdown;
@@ -17,6 +19,7 @@ mod menu;
 mod model;
 mod navigation;
 mod platform;
+mod prompt_history;
 mod reconcile;
 #[cfg(test)]
 mod reconciliation_tests;
@@ -41,23 +44,34 @@ const START_SEQUENCE: &[u8] = b"\r\x1b[?25l\x1b[?2004h";
 const NAVIGATION_SEQUENCE: &[u8] = b"\x1b[0m\x1b[?2004l\x1b[?25h";
 const EXIT_SEQUENCE: &[u8] = b"\x1b[0m\x1b[?2004l\x1b[?25h\r\n";
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum Key {
     Text(String),
+    Paste(String),
+    PasteRejected(&'static str),
     Enter,
+    Newline,
     Escape,
     Interrupt,
     Quit,
     Left,
     Right,
+    WordLeft,
+    WordRight,
     Up,
     Down,
     Home,
     End,
+    DraftStart,
+    DraftEnd,
     Backspace,
     Delete,
+    WordBackspace,
+    WordDelete,
     PageUp,
     PageDown,
+    HistoryPrevious,
+    HistoryNext,
     Tab,
 }
 
@@ -232,6 +246,9 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                 .transpose()?,
         }
     };
+    if let Some(session) = &mut session {
+        model.prompt_history.load(session.take_initial_prompts());
+    }
     let mut renderer = render::Renderer::default();
     let mut layout = view::Layout::default();
     let mut resize = resize::Resize::default();
@@ -241,6 +258,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     let mut previous_size = (0, 0);
     loop {
         let size = terminal.size()?;
+        model.editor.set_columns(size.0.saturating_sub(4).max(1));
         approval_view::displayed(&mut model, size, false);
         if size != previous_size {
             trace.changed();
@@ -373,6 +391,8 @@ mod action_tests;
 mod composer_tests;
 #[cfg(test)]
 mod consistency_tests;
+#[cfg(test)]
+mod editor_tests;
 #[cfg(test)]
 mod layout_tests;
 #[cfg(all(test, windows))]

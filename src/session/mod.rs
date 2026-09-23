@@ -24,6 +24,8 @@ use std::{
 };
 
 pub use types::*;
+pub(crate) const MAX_PROMPT_BYTES: usize = 8192;
+pub(crate) const MAX_RECALLED_PROMPTS: usize = 64;
 
 enum Command {
     Login,
@@ -59,6 +61,7 @@ pub struct Session {
     queued: usize,
     catalog: Option<crate::providers::openai_account::catalog::Catalog>,
     selected: Model,
+    initial_prompts: Vec<String>,
 }
 impl Session {
     pub fn start(model: Model) -> io::Result<Self> {
@@ -137,6 +140,16 @@ impl Session {
         mut history: history::History,
     ) -> io::Result<Self> {
         let turns = history.turns.len();
+        let initial_prompts = history
+            .turns
+            .iter()
+            .rev()
+            .take(MAX_RECALLED_PROMPTS)
+            .map(|turn| turn.prompt.clone())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         history.environment = workspace
             .as_ref()
             .map_or(String::new(), crate::workspace::Workspace::instructions);
@@ -172,7 +185,11 @@ impl Session {
             queued: 0,
             catalog: None,
             selected: model,
+            initial_prompts,
         })
+    }
+    pub(crate) fn take_initial_prompts(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.initial_prompts)
     }
     /// False leaves ownership of the draft with the caller; nothing was queued.
     pub fn submit(&mut self, prompt: &str) -> bool {
@@ -180,7 +197,7 @@ impl Session {
             || self.queued != 0
             || self.turns >= history::MAX_TURNS
             || prompt.trim().is_empty()
-            || prompt.len() > 8192
+            || prompt.len() > MAX_PROMPT_BYTES
             || self.selection_unavailable()
         {
             return false;
@@ -242,7 +259,7 @@ impl Session {
         if self.phase != Phase::Generating
             || self.cancelled.load(Ordering::Acquire)
             || text.trim().is_empty()
-            || text.len() > 8192
+            || text.len() > MAX_PROMPT_BYTES
             || self.queued >= 8
         {
             return false;

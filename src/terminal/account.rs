@@ -126,6 +126,11 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
     };
     match key {
         Key::Enter => {
+            if model.editor.text.len() > session::MAX_PROMPT_BYTES {
+                view.local_notice = "Prompt exceeds 8 KiB / draft kept".into();
+                view.local_failed = true;
+                return;
+            }
             if view.phase == Phase::SignedOut && !model.editor.text.trim().is_empty() {
                 view.notice = "Signed out / use /login to sign in; draft kept and will not send automatically".into();
                 return;
@@ -133,6 +138,7 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             if view.phase == Phase::Generating && !model.editor.text.trim().is_empty() {
                 if session.enqueue(&model.editor.text) {
                     model.editor.take();
+                    model.menu.pasted_literal = false;
                     view.queued += 1;
                     view.local_notice.clear();
                     view.local_failed = false;
@@ -161,9 +167,12 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
                 return;
             }
             view.turns += 1;
+            let prompt = model.editor.take();
+            model.prompt_history.record(&prompt);
+            model.menu.pasted_literal = false;
             model.blocks.push(Block {
                 speaker: "You",
-                text: model.editor.take(),
+                text: prompt,
             });
             model.blocks.push(Block {
                 speaker: "Assistant",

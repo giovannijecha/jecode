@@ -48,7 +48,7 @@ pub(super) struct History {
 }
 impl History {
     pub fn begin(&mut self, prompt: String) -> Result<(), Failure> {
-        if self.turns.len() >= MAX_TURNS || prompt.len() > 8192 {
+        if self.turns.len() >= MAX_TURNS || prompt.len() > super::MAX_PROMPT_BYTES {
             return Err(Failure::HistoryLimit);
         }
         self.turns.push(Turn {

@@ -50,10 +50,12 @@ pub(super) struct Menu {
     pub panel: Option<Panel>,
     pub selected: usize,
     pub hidden: bool,
+    pub pasted_literal: bool,
 }
 impl Menu {
     pub fn active(&self, text: &str) -> bool {
-        self.panel.is_some() || text.starts_with('/') && !self.hidden
+        self.panel.is_some()
+            || text.starts_with('/') && !text.contains('\n') && !self.hidden && !self.pasted_literal
     }
     pub fn entries(&self, text: &str) -> Vec<Entry> {
         let source = self.panel.as_ref().map_or_else(commands, |panel| {

@@ -11,7 +11,18 @@ use crate::{
 };
 
 pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool {
-    if matches!(key, Key::Text(_) | Key::Backspace | Key::Delete) {
+    if matches!(
+        key,
+        Key::Text(_)
+            | Key::Paste(_)
+            | Key::Backspace
+            | Key::Delete
+            | Key::WordBackspace
+            | Key::WordDelete
+    ) {
+        if model.editor.text.is_empty() {
+            model.menu.pasted_literal = false;
+        }
         if (model.menu.active(&model.editor.text)
             || matches!(key, Key::Text(text) if model.editor.text.is_empty() && text.starts_with('/')))
             && let Some(view) = model.account.as_mut()
@@ -56,6 +67,7 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
                 }
                 return true;
             }
+            Key::PageUp | Key::PageDown | Key::HistoryPrevious | Key::HistoryNext => return true,
             Key::Tab if model.menu.panel.is_none() => {
                 if let Some(entry) = entries.get(model.menu.selected.min(count.saturating_sub(1))) {
                     model.editor.text = entry.label.clone();
@@ -73,7 +85,11 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
             _ => {}
         }
     }
-    if *key == Key::Enter && model.editor.text.starts_with('/') {
+    if *key == Key::Enter
+        && model.editor.text.starts_with('/')
+        && !model.editor.text.contains('\n')
+        && !model.menu.pasted_literal
+    {
         let command = model.editor.text.trim();
         if let Some(entry) = menu::commands().into_iter().find(|e| e.label == command) {
             execute(model, session, entry.action);
@@ -331,6 +347,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
     };
     if done {
         model.editor.take();
+        model.menu.pasted_literal = false;
     }
 }
 fn notice(model: &mut Model, text: &str) {
