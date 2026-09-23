@@ -153,6 +153,26 @@ fn unavailable_saved_pair_blocks_send_until_an_idle_replacement_is_applied() {
 pub(crate) fn ready_fixture() -> Session {
     start(false, false).0
 }
+pub(crate) fn ready_fixture_with_catalog(
+    catalog: crate::providers::openai_account::catalog::Catalog,
+) -> Session {
+    let observed = Arc::new(Observed::default());
+    let mut session = Session::with_backend(
+        Model::Luna,
+        Fixture {
+            observed,
+            fail_first: false,
+            flood: false,
+            catalog: Some(catalog),
+        },
+        None,
+    )
+    .unwrap();
+    assert!(matches!(next(&mut session), Event::LoginCode(_)));
+    assert!(matches!(next(&mut session), Event::CatalogLoaded(_)));
+    assert!(matches!(next(&mut session), Event::Ready));
+    session
+}
 fn finish(session: &mut Session) -> (String, End, Metrics) {
     let mut text = String::new();
     loop {

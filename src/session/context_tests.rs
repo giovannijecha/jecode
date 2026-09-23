@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 struct Summarizer {
     requests: Arc<Mutex<Vec<String>>>,
     fail: bool,
+    catalog: Option<crate::providers::openai_account::catalog::Catalog>,
 }
 impl Backend for Summarizer {
     fn login(
@@ -15,6 +16,12 @@ impl Backend for Summarizer {
         _: &mut dyn FnMut(&str) -> ControlFlow<()>,
     ) -> Result<(), client::Error> {
         Ok(())
+    }
+    fn catalog(
+        &mut self,
+        _: &Budget<'_>,
+    ) -> Result<Option<crate::providers::openai_account::catalog::Catalog>, client::Error> {
+        Ok(self.catalog.clone())
     }
     fn generate(
         &mut self,
@@ -80,6 +87,7 @@ fn compaction_projects_a_summary_and_keeps_recent_turns_without_tools() {
         Summarizer {
             requests: observed.clone(),
             fail: false,
+            catalog: None,
         },
         None,
         history(),
@@ -124,6 +132,7 @@ fn automatic_compaction_and_followup_share_the_selected_pair() {
         Summarizer {
             requests: observed.clone(),
             fail: false,
+            catalog: None,
         },
         None,
         history(),
@@ -157,6 +166,7 @@ fn failed_compaction_is_not_automatically_retried_and_original_projection_remain
         Summarizer {
             requests: observed.clone(),
             fail: true,
+            catalog: None,
         },
         None,
         history(),
@@ -177,4 +187,92 @@ fn failed_compaction_is_not_automatically_retried_and_original_projection_remain
     };
     assert!(report.contains("5 canonical turns / 0 summarized"));
     assert!(report.contains("unknown input tokens"));
+}
+
+#[test]
+#[cfg(any(windows, target_os = "linux"))]
+fn fresh_unsupported_pair_rejects_manual_compaction_without_a_checkpoint() {
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"replacement","visibility":"list","supported_reasoning_levels":[{"effort":"high"}]}]}"#).unwrap();
+    for selected in [Model::Luna, Model::new("replacement", Some("low")).unwrap()] {
+        let fixture = crate::state::tests::Fixture::new();
+        let Some(store) = fixture.store() else { return };
+        let mut saved = crate::session::persistence::create(&store, selected, None).unwrap();
+        let mut prepared = history();
+        saved.turns = std::mem::take(&mut prepared.turns);
+        saved.projection = prepared.projection;
+        saved.checkpoint().unwrap();
+        let id = saved.record.as_ref().unwrap().id().to_owned();
+        let sessions = store.directory("sessions").unwrap();
+        let filename = format!("{id}.json");
+        let before = sessions.read(&filename, 2 * 1024 * 1024).unwrap().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let mut session = Session::with_history(
+            selected,
+            Summarizer {
+                requests: requests.clone(),
+                fail: false,
+                catalog: Some(catalog.clone()),
+            },
+            None,
+            saved,
+        )
+        .unwrap();
+        assert!(matches!(tests::next(&mut session), Event::Restored { .. }));
+        assert!(matches!(tests::next(&mut session), Event::CatalogLoaded(_)));
+        assert!(matches!(tests::next(&mut session), Event::Ready));
+        assert!(session.selection_unavailable());
+        assert!(!session.submit("keep this draft"));
+        assert!(!session.compact());
+        assert!(session.ready());
+        assert!(session.poll().is_none());
+        assert!(requests.lock().unwrap().is_empty());
+        assert_eq!(
+            sessions.read(&filename, 2 * 1024 * 1024).unwrap().unwrap(),
+            before
+        );
+        assert!(session.inspect_context());
+        let Event::ContextReport(report) = tests::next(&mut session) else {
+            panic!("missing context report")
+        };
+        assert!(
+            report.contains("4 canonical turns / 0 summarized"),
+            "{report}"
+        );
+
+        let replacement = Model::new("replacement", Some("high")).unwrap();
+        assert!(session.set_model(replacement));
+        assert!(
+            matches!(tests::next(&mut session), Event::ModelChanged(model) if model == replacement)
+        );
+        assert!(session.compact());
+        assert_eq!(finish(&mut session), End::Complete);
+        assert_eq!(requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn unknown_effort_capability_does_not_block_manual_compaction() {
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(
+        br#"{"models":[{"slug":"known-model","visibility":"list"}]}"#,
+    )
+    .unwrap();
+    let selected = Model::new("known-model", Some("high")).unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mut session = Session::with_history(
+        selected,
+        Summarizer {
+            requests: requests.clone(),
+            fail: false,
+            catalog: Some(catalog),
+        },
+        None,
+        history(),
+    )
+    .unwrap();
+    assert!(matches!(tests::next(&mut session), Event::CatalogLoaded(_)));
+    assert!(matches!(tests::next(&mut session), Event::Ready));
+    assert!(!session.selection_unavailable());
+    assert!(session.compact());
+    assert_eq!(finish(&mut session), End::Complete);
+    assert_eq!(requests.lock().unwrap().len(), 1);
 }

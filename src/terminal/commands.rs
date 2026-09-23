@@ -296,6 +296,10 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
         }
         Action::Compact => {
             if !session.compact() {
+                if session.selection_unavailable() {
+                    notice(model, super::account::UNAVAILABLE_SELECTION_NOTICE);
+                    model.account.as_mut().unwrap().local_failed = true;
+                }
                 return;
             }
             model.menu.close();
@@ -341,6 +345,36 @@ mod tests {
     use super::*;
     use crate::session::{self, Event};
     use crate::terminal::{account, style::Tone, view};
+
+    #[test]
+    fn rejected_compaction_keeps_draft_and_shows_local_model_notice() {
+        let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"replacement","visibility":"list","supported_reasoning_levels":[{"effort":"high"}]}]}"#).unwrap();
+        let mut session = session::tests::ready_fixture_with_catalog(catalog.clone());
+        let mut model = account::model(session::Model::Luna, None);
+        account::event(&mut model, Event::CatalogLoaded(catalog));
+        account::event(&mut model, Event::Ready);
+        model.editor.insert("unsent draft");
+        execute(&mut model, &mut session, Action::Compact);
+        let notice = &model.account.as_ref().unwrap().local_notice;
+        assert!(notice.contains("/model"), "{notice}");
+        assert!(model.account.as_ref().unwrap().local_failed);
+        assert_eq!(model.editor.text, "unsent draft");
+        assert!(model.blocks.is_empty());
+        assert!(session.ready());
+        assert!(session.poll().is_none());
+        let rows = view::chrome(&model, 80, 24);
+        let rules: Vec<_> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.text.starts_with('─'))
+            .map(|(index, _)| index)
+            .collect();
+        let notice_row = rows
+            .iter()
+            .position(|row| row.text.contains("/model"))
+            .unwrap();
+        assert!(rules[0] < notice_row && notice_row < rules[1]);
+    }
 
     #[test]
     fn local_account_commands_keep_draft_history_and_runtime_regions() {

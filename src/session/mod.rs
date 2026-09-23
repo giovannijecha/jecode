@@ -181,14 +181,7 @@ impl Session {
             || self.turns >= history::MAX_TURNS
             || prompt.trim().is_empty()
             || prompt.len() > 8192
-            || self
-                .catalog
-                .as_ref()
-                .filter(|catalog| catalog.fresh())
-                .is_some_and(|catalog| {
-                    catalog.support(self.selected)
-                        == crate::providers::openai_account::catalog::Support::Unsupported
-                })
+            || self.selection_unavailable()
         {
             return false;
         }
@@ -308,7 +301,7 @@ impl Session {
         }
     }
     pub fn compact(&mut self) -> bool {
-        if self.phase != Phase::Ready || self.queued != 0 {
+        if !self.ready() || self.selection_unavailable() {
             return false;
         }
         self.cancelled.store(false, Ordering::Release);

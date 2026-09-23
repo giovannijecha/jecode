@@ -24,6 +24,8 @@ enum LocalOperation {
     Context,
     Compact(String),
 }
+pub(super) const UNAVAILABLE_SELECTION_NOTICE: &str =
+    "Selected model or effort unavailable in this account catalog / use /model; draft kept";
 pub(super) struct View {
     phase: Phase,
     pub notice: String,
@@ -151,7 +153,7 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             }
             if !session.submit(&model.editor.text) {
                 view.local_notice = if session.selection_unavailable() {
-                    "Selected model or effort unavailable in this account catalog / use /model; draft kept".into()
+                    UNAVAILABLE_SELECTION_NOTICE.into()
                 } else {
                     "Message not sent / draft kept".into()
                 };
