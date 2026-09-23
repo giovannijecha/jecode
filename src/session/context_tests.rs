@@ -29,7 +29,11 @@ impl Backend for Summarizer {
         if request.instructions.starts_with("Summarize") {
             assert!(request.tools.is_empty());
             if self.fail {
-                return Err(NetworkError::Io.into());
+                return Err(NetworkError::io(
+                    crate::tls::IoOperation::ReadRecordHeader,
+                    &std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+                )
+                .into());
             }
             Ok(tests::response(
                 "Retain the user's original goal and completed change in settings.rs.",

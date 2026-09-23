@@ -33,6 +33,51 @@ pub struct Response {
     pub tool_calls: Vec<ToolCall>,
     pub usage: Usage,
 }
+impl Response {
+    /// Older v1 steps stored the unseparated projection. Keep those bytes
+    /// readable without changing the saved step or its canonical output items.
+    pub(crate) fn legacy_text(&self) -> Result<String, Error> {
+        Ok(text_parts(&self.output)?
+            .iter()
+            .map(|part| part.text)
+            .collect())
+    }
+}
+
+pub(super) struct TextPart<'a> {
+    pub output_index: usize,
+    pub content_index: usize,
+    pub item_id: Option<&'a str>,
+    pub text: &'a str,
+}
+
+pub(super) fn text_parts(output: &[Value]) -> Result<Vec<TextPart<'_>>, Error> {
+    let mut parts = Vec::new();
+    for (output_index, item) in output.iter().enumerate() {
+        if field(item, "type")? != "message" {
+            continue;
+        }
+        let content = item
+            .get("content")
+            .and_then(Value::array)
+            .ok_or(Error::InvalidEvent)?;
+        let item_id = item.get("id").and_then(Value::text);
+        for (content_index, part) in content.iter().enumerate() {
+            let text = match field(part, "type")? {
+                "output_text" => field(part, "text")?,
+                "refusal" => field(part, "refusal")?,
+                _ => continue,
+            };
+            parts.push(TextPart {
+                output_index,
+                content_index,
+                item_id,
+                text,
+            });
+        }
+    }
+    Ok(parts)
+}
 
 pub(super) fn assemble(
     data: &Value,
@@ -80,21 +125,20 @@ pub(super) fn assemble(
                 {
                     return Err(Error::ConflictingOutput);
                 }
-                let parts = item
-                    .get("content")
-                    .and_then(Value::array)
-                    .ok_or(Error::InvalidEvent)?;
-                for part in parts {
-                    match field(part, "type")? {
-                        "output_text" => result.text.push_str(field(part, "text")?),
-                        "refusal" => {
-                            result.text.push_str(field(part, "refusal")?);
-                            if completed {
-                                result.status = Status::Refused;
-                            }
-                        }
-                        _ => {}
-                    }
+                if item.get("content").and_then(Value::array).is_none() {
+                    return Err(Error::InvalidEvent);
+                }
+                if completed
+                    && item
+                        .get("content")
+                        .and_then(Value::array)
+                        .is_some_and(|parts| {
+                            parts.iter().any(|part| {
+                                part.get("type").and_then(Value::text) == Some("refusal")
+                            })
+                        })
+                {
+                    result.status = Status::Refused;
                 }
             }
             "function_call" if completed => {
@@ -120,6 +164,22 @@ pub(super) fn assemble(
                 });
             }
             _ => {} // Retain opaque reasoning and future items without executing them.
+        }
+    }
+    let mut previous = None;
+    for part in text_parts(&result.output)? {
+        if !result.text.is_empty() && !part.text.is_empty() {
+            result
+                .text
+                .push_str(if previous == Some(part.output_index) {
+                    "\n"
+                } else {
+                    "\n\n"
+                });
+        }
+        result.text.push_str(part.text);
+        if !part.text.is_empty() {
+            previous = Some(part.output_index);
         }
     }
     if result.status != Status::Completed {

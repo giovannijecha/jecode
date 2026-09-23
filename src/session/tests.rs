@@ -58,7 +58,11 @@ impl worker::Backend for Fixture {
             return Err(NetworkError::Cancelled.into());
         }
         if self.fail_first && self.observed.requests.lock().unwrap().len() == 1 {
-            return Err(NetworkError::Io.into());
+            return Err(NetworkError::io(
+                crate::tls::IoOperation::ReadRecordHeader,
+                &std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+            )
+            .into());
         }
         Ok(response("partial completed", Status::Completed))
     }
@@ -82,7 +86,7 @@ pub(super) fn response(text: &str, status: Status) -> Response {
         usage: Default::default(),
     }
 }
-pub(super) fn next(session: &mut Session) -> Event {
+pub(crate) fn next(session: &mut Session) -> Event {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(event) = session.poll() {
@@ -117,11 +121,63 @@ fn finish(session: &mut Session) -> (String, End, Metrics) {
     loop {
         match next(session) {
             Event::Text(delta) => text.push_str(&delta),
+            Event::TextReconciled(whole) => text = whole,
             Event::Thinking => {}
             Event::Finished(end, metrics) => return (text, end, metrics),
             _ => panic!("unexpected event during generation"),
         }
     }
+}
+
+struct Boundaries;
+impl worker::Backend for Boundaries {
+    fn login(
+        &mut self,
+        _: &Budget<'_>,
+        _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+    ) -> Result<(), client::Error> {
+        Ok(())
+    }
+    fn generate(
+        &mut self,
+        _: &Request,
+        _: &Budget<'_>,
+        progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+    ) -> Result<Response, client::Error> {
+        assert!(progress(Progress::Text("SameSame")).is_continue());
+        let crate::json::Value::Array(output) = crate::json::parse(
+            r#"[{"type":"message","id":"one","status":"completed","content":[{"type":"output_text","text":"Same"}]},{"type":"message","id":"two","status":"completed","content":[{"type":"output_text","text":"Same"}]}]"#,
+            Default::default(),
+        ).unwrap() else { unreachable!() };
+        Ok(Response {
+            id: "fixture".into(),
+            status: Status::Completed,
+            output,
+            text: "Same\n\nSame".into(),
+            tool_calls: Vec::new(),
+            usage: Default::default(),
+        })
+    }
+}
+
+pub(crate) fn boundaries_fixture() -> Session {
+    let mut session = Session::with_backend(Model::Luna, Boundaries, None).unwrap();
+    assert!(matches!(next(&mut session), Event::Ready));
+    session
+}
+
+#[test]
+fn terminal_reconciliation_replaces_only_the_current_provisional_request() {
+    let mut session = boundaries_fixture();
+    assert!(session.submit("first"));
+    assert!(matches!(next(&mut session), Event::Text(text) if text == "SameSame"));
+    assert!(matches!(next(&mut session), Event::TextReconciled(text) if text == "Same\n\nSame"));
+    assert!(matches!(
+        next(&mut session),
+        Event::Finished(End::Complete, _)
+    ));
+    assert!(session.submit("second"));
+    assert_eq!(finish(&mut session).0, "Same\n\nSame");
 }
 
 #[test]

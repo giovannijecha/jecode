@@ -28,6 +28,7 @@ pub(super) struct View {
     pub local_notice: String,
     pub local_failed: bool,
     pub failed: bool,
+    pub partial_output: bool,
     turns: usize,
     pub queued: usize,
     active_tool: Option<usize>,
@@ -70,6 +71,7 @@ pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path
         local_notice: String::new(),
         local_failed: false,
         failed: false,
+        partial_output: false,
         turns: 0,
         queued: 0,
         active_tool: None,
@@ -133,6 +135,7 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             });
             view.phase = Phase::Generating;
             view.failed = false;
+            view.partial_output = false;
             view.local_notice.clear();
             view.local_failed = false;
             view.notice = "Waiting for model / Esc stops".into();
@@ -165,6 +168,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
                 view.turns += 1;
             }
             view.phase = Phase::Generating;
+            view.partial_output = false;
             model.tools.close(&model.blocks, false, Instant::now());
             model.blocks.push(Block {
                 speaker: "You",
@@ -254,6 +258,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
             model.tools.waiting("Thinking");
         }
         Event::RequestStarted if view.phase == Phase::Generating => {
+            view.partial_output = false;
             model.blocks.push(Block {
                 speaker: "Assistant",
                 text: String::new(),
@@ -278,6 +283,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
         Event::Text(text) if view.phase == Phase::Generating => {
             if !text.is_empty() {
                 model.tools.close(&model.blocks, false, Instant::now());
+                view.partial_output = true;
             }
             if let Some(block) = model.blocks.last_mut()
                 && block.speaker == "Assistant"
@@ -285,6 +291,19 @@ pub(super) fn event(model: &mut Model, event: Event) {
                 block.text.push_str(&text);
             }
             view.notice = "Streaming / Esc stops".into();
+        }
+        Event::TextReconciled(text) if view.phase == Phase::Generating => {
+            if let Some(block) = model.blocks.last()
+                && block.speaker == "Assistant"
+            {
+                // Emitted rows may already be in immutable terminal scrollback.
+                // Keep that visible preview and append the corrected passage
+                // or the complete validated answer as one Markdown block.
+                model.blocks.push(Block {
+                    speaker: "Correction",
+                    text: super::reconcile::display(&block.text, &text),
+                });
+            }
         }
         Event::Finished(end, metrics) => {
             model.tools.close(
@@ -300,7 +319,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
                 Phase::Ready
             };
             view.failed = matches!(end, End::Failed(_));
-            view.notice = completion(end, metrics);
+            view.notice = completion(end, metrics, view.partial_output);
             if let Some(operation) = view.local_operation.take() {
                 let text = match operation {
                     LocalOperation::Compact(report)
@@ -340,6 +359,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
         | Event::EditProposed { .. }
         | Event::CommandProposed { .. }
         | Event::Text(_)
+        | Event::TextReconciled(_)
         | Event::RequestStarted
         | Event::ToolStarted { .. }
         | Event::ToolFinished { .. } => {}
@@ -352,13 +372,16 @@ pub(super) fn compacting(model: &mut Model) {
         view.notice = "Compacting context / Esc stops".into();
     }
 }
-fn completion(end: End, metrics: Metrics) -> String {
+fn completion(end: End, metrics: Metrics, partial_output: bool) -> String {
     let mut result = match end {
         End::Complete => "Complete".into(),
         End::Refused => "Response refused".into(),
         End::Incomplete => "Incomplete response / partial output retained".into(),
         End::Failed(failure) => failure.to_string(),
     };
+    if partial_output && matches!(end, End::Failed(session::Failure::Account(_))) {
+        result.push_str(" / partial output retained");
+    }
     result.push_str(&format!(" / {:.1}s", metrics.elapsed_ms as f64 / 1000.0));
     if metrics.approval_wait_ms >= 1000 {
         result.push_str(&format!(

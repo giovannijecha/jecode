@@ -14,6 +14,21 @@ use std::{
 
 struct Backend(Arc<Mutex<Vec<String>>>);
 
+fn repeated_messages_response() -> Response {
+    let crate::json::Value::Array(output) = crate::json::parse(
+        r#"[{"type":"message","id":"one","status":"completed","content":[{"type":"output_text","text":"Same"}]},{"type":"message","id":"two","status":"completed","content":[{"type":"output_text","text":"Same"}]}]"#,
+        Default::default(),
+    ).unwrap() else { unreachable!() };
+    Response {
+        id: "legacy_fixture".into(),
+        status: Status::Completed,
+        output,
+        text: "Same\n\nSame".into(),
+        tool_calls: Vec::new(),
+        usage: Default::default(),
+    }
+}
+
 #[test]
 fn changing_model_survives_resume_without_rewriting_canonical_turns() {
     let fixture = crate::state::tests::Fixture::new();
@@ -31,6 +46,36 @@ fn changing_model_survives_resume_without_rewriting_canonical_turns() {
         crate::json::encode(&codec::encode(&saved.history), LIMIT).unwrap(),
         canonical
     );
+}
+
+#[test]
+fn older_joined_text_resumes_without_rewriting_saved_message_items() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history = create(&store, Model::Luna, None).unwrap();
+    let id = history.record.as_ref().unwrap().id.clone();
+    history.begin("legacy display".into()).unwrap();
+    history.turns[0].steps.push(Step {
+        text: "SameSame".into(),
+        response: Some(repeated_messages_response()),
+        accepted: true,
+        ..Default::default()
+    });
+    history.turns[0].end = Some(End::Complete);
+    history.turns[0].outcome = "Complete".into();
+    history.checkpoint().unwrap();
+    let before = codec::encode(&history);
+    drop(history);
+    let saved = load(&store, &id, true).unwrap();
+    let step = &saved.history.turns[0].steps[0];
+    assert_eq!(step.text, "SameSame");
+    assert_eq!(step.response.as_ref().unwrap().text, "Same\n\nSame");
+    assert_eq!(step.response.as_ref().unwrap().output.len(), 2);
+    assert_eq!(codec::encode(&saved.history), before);
+    saved.history.checkpoint().unwrap();
+    drop(saved);
+    let saved_again = load(&store, &id, true).unwrap();
+    assert_eq!(codec::encode(&saved_again.history), before);
 }
 impl session::worker::Backend for Backend {
     fn login(
@@ -79,6 +124,12 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
         }],
         ..Default::default()
     });
+    history.turns[0].steps.push(Step {
+        text: "Same\n\nSame".into(),
+        response: Some(repeated_messages_response()),
+        accepted: true,
+        ..Default::default()
+    });
     history.turns[0].end = Some(End::Complete);
     history.turns[0].outcome = "Complete".into();
     history.checkpoint().unwrap();
@@ -92,10 +143,20 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
     let observed = Arc::new(Mutex::new(Vec::new()));
     let mut run =
         Session::with_history(Model::Luna, Backend(observed.clone()), None, saved.history).unwrap();
-    assert!(matches!(
-        session::tests::next(&mut run),
-        Event::Restored { turns: 1, .. }
-    ));
+    let Event::Restored {
+        turns: 1, items, ..
+    } = session::tests::next(&mut run)
+    else {
+        panic!("expected restored transcript");
+    };
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| item.text == "Same\n\nSame")
+            .count(),
+        1
+    );
+    assert!(!items.iter().any(|item| item.text == "SameSame"));
     assert!(matches!(session::tests::next(&mut run), Event::Ready));
     assert!(observed.lock().unwrap().is_empty());
     assert!(run.submit("continue now"));
@@ -110,6 +171,8 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
     assert_eq!(requests.len(), 1);
     assert!(requests[0].contains("applied"));
     assert!(requests[0].contains("opaque-owned-fixture"));
+    assert!(requests[0].contains("\"id\":\"one\""));
+    assert!(requests[0].contains("\"id\":\"two\""));
     drop(requests);
     drop(run);
     let mut saved = load(&store, &id, true).unwrap();

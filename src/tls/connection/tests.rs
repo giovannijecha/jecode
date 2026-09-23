@@ -236,13 +236,35 @@ fn tcp_eof_and_deadlines_are_not_authenticated_success() {
     socket::configure(&socket).unwrap();
     assert_eq!(
         socket::record(&mut socket, &budget),
-        Err(NetworkError::Tls(Error::Truncated))
+        Err(NetworkError::Eof(IoOperation::ReadRecordHeader))
     );
     budget.deadline = Instant::now();
     assert_eq!(
         socket::record(&mut socket, &budget),
         Err(NetworkError::Timeout)
     );
+}
+
+#[test]
+fn partial_tls_record_eof_identifies_the_record_body() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let sender = thread::spawn(move || {
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.write_all(&[23, 3, 3, 0, 4, 1, 2]).unwrap();
+    });
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket::configure(&socket).unwrap();
+    let cancelled = AtomicBool::new(false);
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(5),
+        cancelled: &cancelled,
+    };
+    assert_eq!(
+        socket::record(&mut socket, &budget),
+        Err(NetworkError::Eof(IoOperation::ReadRecordBody))
+    );
+    sender.join().unwrap();
 }
 #[test]
 fn rfc8448_application_secrets_and_client_finished_known_answers() {

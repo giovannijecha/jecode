@@ -5,7 +5,7 @@ use super::{
     worker::{Backend, Context, failure, millis},
 };
 use crate::{
-    providers::openai_account::{Progress, Request, client},
+    providers::openai_account::{Progress, Request},
     tls::Budget,
     tools::Output,
 };
@@ -98,19 +98,19 @@ pub(super) fn generate(
     {
         return Err(Failure::OutputLimit);
     }
-    let suffix = response
-        .text
-        .strip_prefix(&step.text)
-        .ok_or(Failure::Account(client::Error::Protocol(
-            crate::providers::openai_account::Error::ConflictingOutput,
-        )))?;
-    if !suffix.is_empty() {
+    let suffix = response.text.strip_prefix(&step.text);
+    if let Some(suffix) = suffix.filter(|suffix| !suffix.is_empty()) {
         if metrics.first_text_ms.is_none() {
             metrics.first_text_ms = Some(millis(started));
         }
         // A validated final answer survives a simultaneous late cancellation.
         // Tool execution and every following request still check cancellation.
         let _ = context.text(suffix, false);
+    } else if suffix.is_none() {
+        // Per-part terminal suffixes or unindexed deltas can make the visible
+        // stream differ internally. The provider has validated the terminal
+        // output against each indexed part (or the unindexed raw stream).
+        let _ = context.send(Event::TextReconciled(response.text.clone()), false);
     }
     step.text.clone_from(&response.text);
     step.accepted = true;

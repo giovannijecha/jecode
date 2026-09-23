@@ -5,7 +5,7 @@ mod persistent;
 mod reply;
 
 use super::{HttpResponseStream, Limits, Progress, Request, Response, auth, encode_http};
-use crate::tls::{Budget, Connection, NetworkError, trust::TrustStore};
+use crate::tls::{Budget, Connection, NetworkError, Plaintext, trust::TrustStore};
 use std::{
     fmt,
     ops::ControlFlow,
@@ -15,6 +15,10 @@ use std::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Network(NetworkError),
+    Transport {
+        stage: RequestStage,
+        error: NetworkError,
+    },
     Protocol(super::Error),
     Login(auth::Error),
     Http(crate::http::Error),
@@ -25,10 +29,26 @@ pub enum Error {
     Storage,
     AccountChanged,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestStage {
+    Connect,
+    RequestWrite,
+    ResponseRead,
+}
+impl fmt::Display for RequestStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Connect => "connection setup",
+            Self::RequestWrite => "request write",
+            Self::ResponseRead => "response read",
+        })
+    }
+}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Network(error) => error.fmt(f),
+            Self::Transport { stage, error } => write!(f, "{error} / {stage}"),
             Self::Protocol(super::Error::HttpStatus(status)) | Self::Status(status) => {
                 write!(f, "account endpoint returned HTTP {status}")
             }
@@ -109,31 +129,73 @@ impl Client {
                 .min(std::time::Instant::now() + Duration::from_secs(30)),
             cancelled: budget.cancelled,
         };
-        let mut connection = Connection::connect("chatgpt.com", &self.trust, &connect)?;
-        connection.write(&bytes, &connect)?;
-        let mut response = HttpResponseStream::new(Limits {
-            event_bytes: 1024 * 1024,
-            output_bytes: 1024 * 1024,
-            ..Limits::default()
-        });
-        let mut progress = progress;
-        while !response.is_finished() {
-            let Some(bytes) = connection.read(budget)? else {
-                break;
-            };
-            response.push(&bytes.bytes, &mut progress)?;
-        }
-        let result = response.finish()?;
-        // Completion is established by the model event. A best-effort close
-        // cannot turn a completed generation into a retryable failure.
-        let _ = connection.close(&Budget {
-            deadline: budget
-                .deadline
-                .min(std::time::Instant::now() + Duration::from_millis(100)),
-            cancelled: budget.cancelled,
-        });
-        Ok(result)
+        let mut connection =
+            Connection::connect("chatgpt.com", &self.trust, &connect).map_err(|error| {
+                Error::Transport {
+                    stage: RequestStage::Connect,
+                    error,
+                }
+            })?;
+        exchange(&mut connection, &bytes, budget, &connect, progress)
     }
+}
+
+trait ResponseChannel {
+    fn write(&mut self, bytes: &[u8], budget: &Budget<'_>) -> Result<(), NetworkError>;
+    fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError>;
+    fn close(&mut self, budget: &Budget<'_>) -> Result<(), NetworkError>;
+}
+impl ResponseChannel for Connection {
+    fn write(&mut self, bytes: &[u8], budget: &Budget<'_>) -> Result<(), NetworkError> {
+        Connection::write(self, bytes, budget)
+    }
+    fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
+        Connection::read(self, budget)
+    }
+    fn close(&mut self, budget: &Budget<'_>) -> Result<(), NetworkError> {
+        Connection::close(self, budget)
+    }
+}
+
+fn exchange(
+    connection: &mut impl ResponseChannel,
+    bytes: &[u8],
+    budget: &Budget<'_>,
+    write_budget: &Budget<'_>,
+    progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
+) -> Result<Response, Error> {
+    connection
+        .write(bytes, write_budget)
+        .map_err(|error| Error::Transport {
+            stage: RequestStage::RequestWrite,
+            error,
+        })?;
+    let mut response = HttpResponseStream::new(Limits {
+        event_bytes: 1024 * 1024,
+        output_bytes: 1024 * 1024,
+        ..Limits::default()
+    });
+    let mut progress = progress;
+    while !response.is_finished() {
+        let Some(bytes) = connection.read(budget).map_err(|error| Error::Transport {
+            stage: RequestStage::ResponseRead,
+            error,
+        })?
+        else {
+            break;
+        };
+        response.push(&bytes.bytes, &mut progress)?;
+    }
+    let result = response.finish()?;
+    // Completion is established by the model event. A best-effort close
+    // cannot turn a completed generation into a retryable failure.
+    let _ = connection.close(&Budget {
+        deadline: budget
+            .deadline
+            .min(std::time::Instant::now() + Duration::from_millis(100)),
+        cancelled: budget.cancelled,
+    });
+    Ok(result)
 }
 
 fn unix_seconds() -> Result<u64, Error> {
@@ -142,3 +204,7 @@ fn unix_seconds() -> Result<u64, Error> {
         .map(|v| v.as_secs())
         .map_err(|_| NetworkError::Clock.into())
 }
+
+#[cfg(test)]
+#[path = "client/tests.rs"]
+mod tests;

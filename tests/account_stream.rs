@@ -12,6 +12,14 @@ fn done(index: usize, item: &str) -> String {
         r#"{{"type":"response.output_item.done","output_index":{index},"item":{item}}}"#
     ))
 }
+fn delta(output: usize, content: usize, item_id: &str, text: &str, sequence: usize) -> String {
+    frame(&format!(
+        r#"{{"type":"response.output_text.delta","output_index":{output},"content_index":{content},"item_id":"{item_id}","delta":"{text}","sequence_number":{sequence}}}"#
+    ))
+}
+fn message(id: &str, content: &str) -> String {
+    format!(r#"{{"type":"message","id":"{id}","status":"completed","content":{content}}}"#)
+}
 fn terminal(status: &str, output: &str, extra: &str) -> String {
     frame(&format!(
         r#"{{"type":"response.{status}","response":{{"id":"resp_test","status":"{status}","output":{output}{extra}}}}}"#
@@ -301,4 +309,118 @@ fn successful_terminal_is_final_and_reasoning_is_separate_progress() {
         consume(&(done(0, MESSAGE) + &missing_output)).unwrap().text,
         "Hi 🚀"
     );
+}
+
+#[test]
+fn indexed_deltas_preserve_message_and_content_part_boundaries() {
+    let first = message(
+        "msg_first",
+        r#"[{"type":"output_text","text":"Hello world"},{"type":"output_text","text":"Next part"}]"#,
+    );
+    let second = message(
+        "msg_second",
+        r#"[{"type":"output_text","text":"Hello world"}]"#,
+    );
+    let wire = delta(0, 0, "msg_first", "Hello ", 1)
+        + &delta(0, 0, "msg_first", "world", 2)
+        + &delta(0, 1, "msg_first", "Next part", 3)
+        + &delta(1, 0, "msg_second", "Hello world", 4)
+        + &terminal("completed", &format!("[{first},{second}]"), "");
+    let mut stream = ResponseStream::default();
+    let mut shown = String::new();
+    stream
+        .push(wire.as_bytes(), |progress| {
+            if let Progress::Text(text) = progress {
+                shown.push_str(text);
+            }
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+    let response = stream.finish().unwrap();
+    assert_eq!(shown, "Hello world\nNext part\n\nHello world");
+    assert_eq!(response.text, shown);
+    assert_eq!(response.output.len(), 2);
+    assert_eq!(
+        response.output[0].get("id").unwrap().text(),
+        Some("msg_first")
+    );
+    assert_eq!(
+        response.output[1].get("id").unwrap().text(),
+        Some("msg_second")
+    );
+}
+
+#[test]
+fn unindexed_progress_reconciles_against_distinct_terminal_messages() {
+    let first = message("msg_first", r#"[{"type":"output_text","text":"Same"}]"#);
+    let second = message("msg_second", r#"[{"type":"output_text","text":"Same"}]"#);
+    let wire = frame(r#"{"type":"response.output_text.delta","delta":"SameSame"}"#)
+        + &terminal("completed", &format!("[{first},{second}]"), "");
+    let response = consume(&wire).unwrap();
+    assert_eq!(response.text, "Same\n\nSame");
+    assert_eq!(response.output.len(), 2);
+}
+
+#[test]
+fn indexed_terminal_suffix_and_conflicting_replays_are_distinguished() {
+    let item = message(
+        "msg_one",
+        r#"[{"type":"output_text","text":"prefix suffix"}]"#,
+    );
+    let prefix = delta(0, 0, "msg_one", "prefix", 1);
+    let result =
+        consume(&(prefix.clone() + &terminal("completed", &format!("[{item}]"), ""))).unwrap();
+    assert_eq!(result.text, "prefix suffix");
+    assert_eq!(
+        consume(&(prefix.clone() + &delta(0, 0, "msg_one", "prefix", 1))),
+        Err(Error::ConflictingOutput)
+    );
+    assert_eq!(
+        consume(&(prefix.clone() + &delta(0, 0, "other", " suffix", 2))),
+        Err(Error::ConflictingOutput)
+    );
+    let done_text = frame(
+        r#"{"type":"response.output_text.done","output_index":0,"content_index":0,"item_id":"msg_one","text":"prefix suffix"}"#,
+    );
+    let done_part = frame(
+        r#"{"type":"response.content_part.done","output_index":0,"content_index":0,"item_id":"msg_one","part":{"type":"output_text","text":"prefix suffix"}}"#,
+    );
+    let completed = terminal("completed", &format!("[{item}]"), "");
+    assert_eq!(
+        consume(&(prefix.clone() + &done_text + &done_part + &completed))
+            .unwrap()
+            .text,
+        "prefix suffix"
+    );
+    assert_eq!(
+        consume(&(prefix.clone() + &done_text + &done_text + &completed)),
+        Err(Error::ConflictingOutput)
+    );
+    assert_eq!(
+        consume(&(prefix + &done_text.replace("prefix suffix", "conflict") + &completed)),
+        Err(Error::ConflictingOutput)
+    );
+}
+
+#[test]
+fn terminal_can_supply_a_suffix_inside_an_earlier_content_part() {
+    let item = message(
+        "msg_one",
+        r#"[{"type":"output_text","text":"first suffix"},{"type":"output_text","text":"second"}]"#,
+    );
+    let wire = delta(0, 0, "msg_one", "first", 1)
+        + &delta(0, 1, "msg_one", "second", 2)
+        + &terminal("completed", &format!("[{item}]"), "");
+    let mut stream = ResponseStream::default();
+    let mut shown = String::new();
+    stream
+        .push(wire.as_bytes(), |progress| {
+            if let Progress::Text(text) = progress {
+                shown.push_str(text);
+            }
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+    assert_eq!(shown, "first\nsecond");
+    assert_eq!(stream.finish().unwrap().text, "first suffix\nsecond");
 }

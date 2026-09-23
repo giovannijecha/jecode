@@ -16,6 +16,9 @@ mod menu;
 mod model;
 mod navigation;
 mod platform;
+mod reconcile;
+#[cfg(test)]
+mod reconciliation_tests;
 mod render;
 mod resize;
 mod schedule;
