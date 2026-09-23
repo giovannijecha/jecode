@@ -280,7 +280,11 @@ fn terminal_reconciliation_and_transport_failure_keep_a_visible_correction() {
     event(&mut model, Event::Text("SameSame".into()));
     event(&mut model, Event::TextReconciled("Same\n\nSame".into()));
     assert_eq!(model.blocks[0].text, "SameSame");
-    assert!(model.blocks[1].text.contains("insert a paragraph break"));
+    assert_eq!(model.blocks[1].speaker, "Correction");
+    assert_eq!(
+        model.blocks[1].text,
+        "# Updated response (replaces earlier text)\n\nSame\n\nSame"
+    );
     let failure = Failure::Account(Error::Transport {
         stage: RequestStage::ResponseRead,
         error: NetworkError::io(

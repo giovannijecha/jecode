@@ -297,10 +297,11 @@ pub(super) fn event(model: &mut Model, event: Event) {
                 && block.speaker == "Assistant"
             {
                 // Emitted rows may already be in immutable terminal scrollback.
-                // Keep that visible preview and append the exact correction.
+                // Keep that visible preview and append the corrected passage
+                // or the complete validated answer as one Markdown block.
                 model.blocks.push(Block {
-                    speaker: "Status",
-                    text: super::reconcile::note(&block.text, &text),
+                    speaker: "Correction",
+                    text: super::reconcile::display(&block.text, &text),
                 });
             }
         }

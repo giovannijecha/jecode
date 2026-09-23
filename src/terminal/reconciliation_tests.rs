@@ -2,6 +2,7 @@ use super::{
     Key, account,
     model::Model,
     render::Renderer,
+    style::Tone,
     view::{self, Layout},
     vt,
 };
@@ -33,23 +34,24 @@ fn chrome_is_singular(shown: &str, draft: &str) {
     );
 }
 
-fn numbered_response_is_intact(shown: &str, count: usize, correction: &str) {
-    assert_eq!(shown.matches("first").count(), 1, "count={count}: {shown}");
-    let compact: String = shown.chars().filter(|ch| !ch.is_whitespace()).collect();
-    let correction: String = correction
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .collect();
+fn numbered_response_is_intact(shown: &str, count: usize) {
     assert_eq!(
-        compact.matches(&correction).count(),
+        shown.matches("first\nline-000").count(),
         1,
         "count={count}: {shown}"
     );
     assert_eq!(
-        shown.matches("Final response correction").count(),
+        shown.matches("first suffix").count(),
         1,
         "count={count}: {shown}"
     );
+    assert_eq!(
+        shown.matches("Updated response").count(),
+        1,
+        "count={count}: {shown}"
+    );
+    assert!(!shown.contains("replaces earlier text"), "{shown}");
+    assert!(!shown.contains("At line"), "{shown}");
     for n in 0..count {
         assert_eq!(
             shown.matches(&format!("line-{n:03}")).count(),
@@ -85,20 +87,23 @@ fn reconciliation_preserves_scrollback_before_and_after_resize_and_next_turn() {
             &mut model,
             Event::TextReconciled(format!("first{addition}{tail}")),
         );
+        assert_eq!(
+            model
+                .blocks
+                .iter()
+                .filter(|block| block.speaker == "Correction")
+                .count(),
+            1
+        );
         draw(&model, &mut layout, &mut renderer, &mut terminal, (63, 27));
-        let correction = if count == 3 {
-            "insert \" suffix\""
-        } else {
-            "insert \" suffix\" followed by a line break"
-        };
-        numbered_response_is_intact(&terminal.text(), count, correction);
+        numbered_response_is_intact(&terminal.text(), count);
         account::event(
             &mut model,
             Event::Finished(End::Complete, Metrics::default()),
         );
         draw(&model, &mut layout, &mut renderer, &mut terminal, (63, 27));
         draw(&model, &mut layout, &mut renderer, &mut terminal, (96, 30));
-        numbered_response_is_intact(&terminal.text(), count, correction);
+        numbered_response_is_intact(&terminal.text(), count);
 
         account::event(
             &mut model,
@@ -116,7 +121,7 @@ fn reconciliation_preserves_scrollback_before_and_after_resize_and_next_turn() {
         let shown = terminal.text();
         assert_eq!(shown.matches("Next turn").count(), 1, "{shown}");
         assert_eq!(shown.matches("Next answer.").count(), 1, "{shown}");
-        numbered_response_is_intact(&shown, count, correction);
+        numbered_response_is_intact(&shown, count);
     }
 }
 
@@ -150,8 +155,11 @@ fn unindexed_repeated_messages_show_a_paragraph_correction_without_erasing_draft
         if just_reconciled {
             let shown = terminal.text();
             assert_eq!(shown.matches("SameSame").count(), 1, "{shown}");
+            assert_eq!(shown.matches("Same\n\nSame").count(), 1, "{shown}");
             assert_eq!(
-                shown.matches("insert a paragraph break").count(),
+                shown
+                    .matches("Updated response (replaces earlier text)")
+                    .count(),
                 1,
                 "{shown}"
             );
@@ -167,18 +175,28 @@ fn unindexed_repeated_messages_show_a_paragraph_correction_without_erasing_draft
         let shown = terminal.text();
         assert_eq!(shown.matches("SameSame").count(), 1, "{size:?}: {shown}");
         assert_eq!(
-            shown.matches("insert a paragraph break").count(),
+            shown.matches("Same\n\nSame").count(),
             1,
             "{size:?}: {shown}"
         );
         assert_eq!(
-            shown.matches("Final response correction").count(),
+            shown
+                .matches("Updated response (replaces earlier text)")
+                .count(),
             1,
             "{size:?}: {shown}"
         );
         assert_eq!(shown.matches("/help").count(), 1, "{size:?}: {shown}");
         chrome_is_singular(&shown, "/he|");
     }
+    assert_eq!(
+        model
+            .blocks
+            .iter()
+            .filter(|block| block.speaker == "Correction")
+            .count(),
+        1
+    );
     let frame = view::chrome(&model, 80, 24);
     let upper = frame
         .iter()
@@ -204,4 +222,59 @@ fn unindexed_repeated_messages_show_a_paragraph_correction_without_erasing_draft
             .any(|row| row.text.contains("/help"))
     );
     assert_eq!(frame.len() - lower - 1, 1);
+}
+
+#[test]
+fn fenced_code_correction_renders_the_complete_validated_answer_as_markdown() {
+    let mut model = account::model(session::Model::Luna, None);
+    account::event(&mut model, Event::Ready);
+    let mut session = session::tests::ready_fixture();
+    account::input(&mut model, Key::Text("Inspect code".into()), &mut session);
+    account::input(&mut model, Key::Enter, &mut session);
+    model.editor.insert("draft-kept");
+    let streamed =
+        "Intro.\n\n```rust\nfn answer() {\n    println!(\"old\");\n}\n```\n\nSame\n\nSame";
+    let final_text =
+        "Intro.\n\n```rust\nfn answer() {\n    println!(\"updated\");\n}\n```\n\nSame\n\nSame";
+    let mut layout = Layout::default();
+    let mut renderer = Renderer::default();
+    let mut terminal = vt::Screen::new(80, 24);
+    account::event(&mut model, Event::Text(streamed.into()));
+    draw(&model, &mut layout, &mut renderer, &mut terminal, (80, 24));
+    account::event(&mut model, Event::TextReconciled(final_text.into()));
+    assert_eq!(
+        model
+            .blocks
+            .iter()
+            .filter(|block| block.speaker == "Correction")
+            .count(),
+        1
+    );
+    let rows = layout.frame(&model, 80, 24);
+    assert!(
+        rows.iter()
+            .any(|row| row.text == "Updated response (replaces earlier text)"
+                && row.tone == Tone::Heading)
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.text.contains("println!(\"updated\");") && row.tone == Tone::Code)
+    );
+    terminal.feed(&renderer.draw(rows, (80, 24), false));
+    let shown = terminal.text();
+    assert_eq!(shown.matches("println!(\"old\");").count(), 1, "{shown}");
+    assert_eq!(
+        shown.matches("println!(\"updated\");").count(),
+        1,
+        "{shown}"
+    );
+    assert_eq!(shown.matches("Same\n\nSame").count(), 2, "{shown}");
+    assert_eq!(
+        shown
+            .matches("Updated response (replaces earlier text)")
+            .count(),
+        1,
+        "{shown}"
+    );
+    chrome_is_singular(&shown, "draft-kept");
 }
