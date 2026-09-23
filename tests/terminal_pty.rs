@@ -109,7 +109,11 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
             .unwrap(),
     );
     let first = until(&mut master, "Local demo");
-    assert!(first.contains("jecode"));
+    assert!(first.contains("All activity is simulated"));
+    assert!(
+        !first.contains("jecode\r\n"),
+        "no interactive brand heading"
+    );
     assert!(!first.contains("1049"));
     assert!(!first.contains("\x1b[36m"));
     assert_ne!(attributes(&slave), before);
@@ -159,7 +163,7 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
     let denied = until(&mut master, "Denied");
     assert!(!denied.contains("running 2 tests"));
     master.write_all(b"/long\r").unwrap();
-    until(&mut master, "Streaming / Esc to stop");
+    until(&mut master, "⠿ Streaming");
     master.write_all(b"draft\x1b").unwrap();
     until(&mut master, "Interrupted / partial response kept");
     for (rows, columns) in [(12, 40), (24, 80), (16, 60), (24, 80)] {

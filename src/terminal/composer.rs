@@ -70,10 +70,13 @@ fn area(model: &Model, width: usize, height: usize) -> Area {
     let draft_height = available
         .saturating_sub(if panel { 2 } else { 0 })
         .clamp(1, 3);
-    let mut draft = input(&model.editor, width, draft_height);
-    if model.editor.text.is_empty() && model.menu.panel.is_some() {
-        draft[0].text = "›  Filter…".into();
-    }
+    let draft = input(
+        &model.editor,
+        width,
+        draft_height,
+        panel && model.account.is_some(),
+        model.menu.panel.is_some(),
+    );
     let capacity = available.saturating_sub(draft.len());
     Area {
         draft,
@@ -87,10 +90,7 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
         footer,
         capacity,
     } = area(model, width, height);
-    let available = capacity
-        .saturating_sub(usize::from(capacity > 2))
-        .min(height / 2)
-        .min(16);
+    let available = capacity.min(height / 2).min(16);
     let menu = model.menu.active(&model.editor.text) && model.account.is_some();
     let queued = model.account.as_ref().is_some_and(|view| view.queued > 0);
     let notice = model
@@ -128,9 +128,6 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
     let mut rows = vec![Row::new(&rule, Tone::Accent)];
     if !body.is_empty() {
         rows.append(&mut body);
-        if rows.len() <= capacity {
-            rows.push(Row::blank());
-        }
     }
     rows.extend(draft);
     rows.push(Row::new(rule, Tone::Accent));
@@ -138,7 +135,7 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
     rows
 }
 
-fn input(editor: &text::Editor, width: usize, height: usize) -> Vec<Row> {
+fn input(editor: &text::Editor, width: usize, height: usize, menu: bool, filter: bool) -> Vec<Row> {
     let available = width - 2;
     let mut parts = vec![String::new()];
     let mut used = 0;
@@ -181,14 +178,18 @@ fn input(editor: &text::Editor, width: usize, height: usize) -> Vec<Row> {
         .skip(start)
         .take(height)
         .map(|(index, text)| {
-            let prefix = if index == 0 { "› " } else { "  " };
+            let prefix = if index == 0 && !menu { "› " } else { "  " };
             let mut row = Row::new(format!("{prefix}{text}"), Tone::Text);
             if index == cursor.0 {
                 let position = prefix.len() + cursor.1;
                 row.spans.push((position..position + 1, Tone::Cursor));
             }
             if editor.text.is_empty() {
-                row.text.push_str("Ask anything…");
+                row.text.push_str(if filter {
+                    "Filter…"
+                } else {
+                    "Ask anything…"
+                });
                 row.tone = Tone::Muted;
             }
             row

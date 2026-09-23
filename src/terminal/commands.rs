@@ -87,7 +87,7 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
 
 fn execute(model: &mut Model, session: &mut Session, action: Action) {
     if !session.ready() || !model.account.as_ref().is_some_and(|v| v.ready()) {
-        notice(model, "Wait for the current operation · Esc stops");
+        notice(model, "Wait for the current operation");
         return;
     }
     let view = model.account.as_mut().unwrap();

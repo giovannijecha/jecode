@@ -5,7 +5,6 @@ use std::ops::Range;
 pub enum Tone {
     Text,
     Muted,
-    Brand,
     Accent,
     User,
     Code,
@@ -72,7 +71,7 @@ impl Tone {
         match self {
             Self::Text => "\x1b[0m",
             Self::Muted => "\x1b[0;38;2;154;164;178m",
-            Self::Brand | Self::Heading => "\x1b[0;1;38;2;220;228;240m",
+            Self::Heading => "\x1b[0;1;38;2;220;228;240m",
             Self::Accent => "\x1b[0;38;2;122;162;247m",
             Self::User => "\x1b[0;48;2;40;46;57;38;2;226;232;240m",
             Self::Code => "\x1b[0;48;2;32;37;44;38;2;201;209;217m",

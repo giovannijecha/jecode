@@ -1,4 +1,4 @@
-use super::{Key, text::Editor};
+use super::{Key, spinner::Spinner, text::Editor};
 use std::time::{Duration, Instant};
 
 pub struct Block {
@@ -12,6 +12,7 @@ pub struct Model {
     pub quit: bool,
     pub account: Option<super::account::View>,
     pub tools: super::tool_activity::Activity,
+    pub status_spinner: Spinner,
     pub action_demo: Option<super::action_demo::Demo>,
     pub menu: super::menu::Menu,
     pub navigation: Option<super::navigation::Request>,
@@ -22,6 +23,8 @@ pub struct Model {
 }
 impl Model {
     pub fn new(now: Instant) -> Self {
+        let mut status_spinner = Spinner::default();
+        status_spinner.reset(now);
         Self {
             editor: Editor::default(),
             blocks: vec![Block {
@@ -32,6 +35,7 @@ impl Model {
             quit: false,
             account: None,
             tools: super::tool_activity::Activity::default(),
+            status_spinner,
             action_demo: None,
             menu: super::menu::Menu::default(),
             navigation: None,
@@ -129,6 +133,7 @@ impl Model {
             text: String::new(),
         });
         self.pending = response;
+        self.status_spinner.reset(now);
         self.offset = 0;
         self.next = now + Duration::from_millis(120);
         self.status = "Streaming locally";
@@ -147,7 +152,11 @@ impl Model {
             .as_mut()
             .and_then(|v| v.command.as_mut())
             .is_some_and(|run| run.spinner.tick(now, self.tools.reduced_motion));
-        let animated = self.tools.tick(now) || command_animated;
+        let tool_animated = self.tools.tick(now);
+        let status_animated = super::activity_view::model_label(self).is_some()
+            && !self.tools.reduced_motion
+            && self.status_spinner.tick(now, false);
+        let animated = tool_animated || command_animated || status_animated;
         if let Some(mut demo) = self.tool_demo.take() {
             let changed = demo.tick(self, now);
             if !demo.done() {

@@ -61,15 +61,11 @@ pub fn active(demo: &Demo, width: usize, reduced_motion: bool) -> Vec<Row> {
     } else {
         "Running command"
     };
-    let mut header = clipped(&format!("{marker} {action}"), width, Tone::Heading);
-    header.spans.push((0..marker.len(), Tone::Accent));
+    let header = super::tool_view::indicator(marker, action, width);
     vec![
         header,
         clipped(
-            &format!(
-                "  {:.1}s · local preview · Esc stops",
-                demo.elapsed().as_secs_f64()
-            ),
+            &format!("  {:.1}s · local preview", demo.elapsed().as_secs_f64()),
             width,
             Tone::Muted,
         ),

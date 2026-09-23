@@ -168,7 +168,7 @@ fn native_scrollback_keeps_completed_prefix_out_of_tail_updates() {
     let mut renderer = render::Renderer::default();
     let mut layout = view::Layout::default();
     let first = renderer.draw(layout.frame(&model, 80, 24), (80, 24), false);
-    assert!(first.contains("jecode"));
+    assert!(!first.contains("jecode"));
     assert!(!first.contains("1049"));
     model
         .blocks
@@ -179,7 +179,6 @@ fn native_scrollback_keeps_completed_prefix_out_of_tail_updates() {
     let changed = renderer.draw(layout.frame(&model, 80, 24), (80, 24), false);
     assert!(changed.contains("new row"));
     assert!(!changed.contains("old row"));
-    assert!(!changed.contains("jecode"));
     assert!(!changed.contains("\x1b[2J"));
     let resized = renderer.draw(layout.frame(&model, 40, 12), (40, 12), false);
     assert!(

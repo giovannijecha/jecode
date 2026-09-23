@@ -138,7 +138,8 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             view.partial_output = false;
             view.local_notice.clear();
             view.local_failed = false;
-            view.notice = "Waiting for model / Esc stops".into();
+            view.notice = "Waiting for model".into();
+            model.status_spinner.reset(Instant::now());
         }
         Key::Escape | Key::Interrupt if matches!(view.phase, Phase::Login | Phase::Generating) => {
             session.cancel();
@@ -169,6 +170,8 @@ pub(super) fn event(model: &mut Model, event: Event) {
             }
             view.phase = Phase::Generating;
             view.partial_output = false;
+            view.notice = "Waiting for model".into();
+            model.status_spinner.reset(Instant::now());
             model.tools.close(&model.blocks, false, Instant::now());
             model.blocks.push(Block {
                 speaker: "You",
@@ -254,20 +257,21 @@ pub(super) fn event(model: &mut Model, event: Event) {
             view.notice.clear();
         }
         Event::Thinking if view.phase == Phase::Generating => {
-            view.notice = "Thinking / Esc stops".into();
+            view.notice = "Thinking".into();
             model.tools.waiting("Thinking");
         }
         Event::RequestStarted if view.phase == Phase::Generating => {
             view.partial_output = false;
+            model.status_spinner.reset(Instant::now());
             model.blocks.push(Block {
                 speaker: "Assistant",
                 text: String::new(),
             });
-            view.notice = "Waiting for model / Esc stops".into();
+            view.notice = "Waiting for model".into();
             model.tools.waiting("Waiting for model");
         }
         Event::ToolStarted { name, path } if view.phase == Phase::Generating => {
-            view.notice = "Reading workspace / Esc stops".into();
+            view.notice = "Reading workspace".into();
             let index = model.start_tool(name, path, Instant::now());
             model.account.as_mut().unwrap().active_tool = Some(index);
         }
@@ -290,7 +294,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
             {
                 block.text.push_str(&text);
             }
-            view.notice = "Streaming / Esc stops".into();
+            view.notice = "Streaming".into();
         }
         Event::TextReconciled(text) if view.phase == Phase::Generating => {
             if let Some(block) = model.blocks.last()
@@ -369,7 +373,8 @@ pub(super) fn compacting(model: &mut Model) {
     if let Some(view) = &mut model.account {
         view.phase = Phase::Generating;
         view.local_operation = Some(LocalOperation::Compact(String::new()));
-        view.notice = "Compacting context / Esc stops".into();
+        view.notice = "Compacting context".into();
+        model.status_spinner.reset(Instant::now());
     }
 }
 fn completion(end: End, metrics: Metrics, partial_output: bool) -> String {

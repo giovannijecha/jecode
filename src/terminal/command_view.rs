@@ -70,7 +70,7 @@ pub(super) fn started(model: &mut Model, id: u64) {
         line_open: false,
         stopping: false,
     });
-    view.notice = "Running command / Esc stops".into();
+    view.notice = "Running command".into();
 }
 pub(super) fn output(model: &mut Model, id: u64, channel: Channel, text: &str) {
     let Some(run) = model
@@ -111,7 +111,7 @@ pub(super) fn finished(model: &mut Model, id: u64, summary: String, success: boo
         block
             .text
             .push_str(&format!("{} {summary}", if success { "✓" } else { "!" }));
-        view.notice = "Processing command result / Esc stops".into();
+        view.notice = "Processing command result".into();
     } else {
         approval_view::finished(model, id, summary, success, failed);
     }
@@ -123,24 +123,14 @@ pub(super) fn active(run: &Run, width: usize, reduced: bool) -> Vec<Row> {
     } else {
         "Running command"
     };
-    let mut header = clipped(&format!("{marker} {state}"), width, Tone::Heading);
-    header.spans.push((0..marker.len(), Tone::Accent));
-    vec![
-        header,
-        clipped(
-            &format!(
-                "  {:.1}s · {}",
-                run.started.elapsed().as_secs_f64(),
-                if run.stopping {
-                    "waiting for cleanup"
-                } else {
-                    "Esc stops"
-                }
-            ),
-            width,
-            Tone::Muted,
-        ),
-    ]
+    let header = super::tool_view::indicator(marker, state, width);
+    let elapsed = format!("  {:.1}s", run.started.elapsed().as_secs_f64());
+    let detail = if run.stopping {
+        format!("{elapsed} · waiting for cleanup")
+    } else {
+        elapsed
+    };
+    vec![header, clipped(&detail, width, Tone::Muted)]
 }
 pub(super) fn stop(model: &mut Model) {
     if let Some(run) = model.account.as_mut().and_then(|v| v.command.take()) {
