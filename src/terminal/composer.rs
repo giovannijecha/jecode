@@ -1,7 +1,7 @@
-//! Expandable local controls within one pair of rules; metadata lives below them.
+//! Editable input and local controls within one pair of rules; metadata lives below.
 use super::{
     model::Model,
-    style::{Row, Tone, lines},
+    style::{Row, Tone},
     text,
     tool_view::clipped,
 };
@@ -91,10 +91,18 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
         .saturating_sub(usize::from(capacity > 2))
         .min(height / 2)
         .min(16);
-    let mut body = if model.menu.active(&model.editor.text) && model.account.is_some() {
-        super::menu::rows(model, width, available)
+    let menu = model.menu.active(&model.editor.text) && model.account.is_some();
+    let queued = model.account.as_ref().is_some_and(|view| view.queued > 0);
+    let notice = model
+        .account
+        .as_ref()
+        .is_some_and(|view| !view.local_notice.is_empty());
+    let feedback = usize::from(queued) + usize::from(notice);
+    let menu_height = available.saturating_sub(feedback.min(available.saturating_sub(1)));
+    let mut body = if menu {
+        super::menu::rows(model, width, menu_height)
     } else {
-        activity(model, width, available)
+        Vec::new()
     };
     if let Some(view) = &model.account {
         if view.queued > 0 && body.len() < available {
@@ -104,15 +112,11 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
                 Tone::Muted,
             ));
         }
-        // Local errors/confirmation remain visible when a menu is still open.
-        if !view.notice.is_empty()
-            && model.menu.active(&model.editor.text)
-            && body.len() < available
-        {
+        if !view.local_notice.is_empty() && body.len() < available {
             body.push(clipped(
-                &view.notice,
+                &view.local_notice,
                 width,
-                if view.failed {
+                if view.local_failed {
                     Tone::Error
                 } else {
                     Tone::Muted
@@ -131,49 +135,6 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
     rows.extend(draft);
     rows.push(Row::new(rule, Tone::Accent));
     rows.extend(footer);
-    rows
-}
-
-fn activity(model: &Model, width: usize, available: usize) -> Vec<Row> {
-    let mut rows = if let Some(run) = model.account.as_ref().and_then(|v| v.command.as_ref()) {
-        super::command_view::active(run, width, model.tools.reduced_motion)
-    } else if let Some(demo) = &model.action_demo {
-        super::action_view::active(demo, width, model.tools.reduced_motion)
-    } else if model.tools.active().is_some() {
-        super::tool_view::active(model, width)
-    } else if let Some(view) = &model.account {
-        if view.notice.is_empty() {
-            Vec::new()
-        } else {
-            lines(
-                &view.notice,
-                width,
-                if view.failed {
-                    Tone::Error
-                } else {
-                    Tone::Muted
-                },
-            )
-        }
-    } else {
-        let state = if model.streaming() {
-            "Streaming / Esc to stop"
-        } else if model.status.starts_with("Simulated") {
-            "Stream failed / partial response kept"
-        } else if model.status.starts_with("Interrupted") {
-            "Interrupted / partial response kept"
-        } else if model.status.starts_with("Preview history") {
-            "Preview full / restart to continue"
-        } else {
-            ""
-        };
-        if state.is_empty() {
-            Vec::new()
-        } else {
-            lines(state, width, Tone::Muted)
-        }
-    };
-    rows.truncate(available);
     rows
 }
 

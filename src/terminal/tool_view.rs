@@ -1,4 +1,4 @@
-//! Fixed-height active tools live with the transient composer, never in scrollback.
+//! Fixed-height active tools live in transient chrome, never in scrollback.
 use super::{
     model::Model,
     style::{Row, Tone},

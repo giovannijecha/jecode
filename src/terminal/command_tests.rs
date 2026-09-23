@@ -22,6 +22,25 @@ fn real_commands_share_the_decision_surface_stream_panel_and_keep_the_draft() {
         account::event(&mut model, fixture::next(&mut run.session));
         assert_eq!(model.blocks.last().unwrap().speaker, "Command");
         assert!(model.blocks.last().unwrap().text.contains("  shell:"));
+        let pending = view::chrome(&model, 100, 35);
+        let upper = pending
+            .iter()
+            .position(|row| row.text.starts_with('─'))
+            .unwrap();
+        let lower = pending
+            .iter()
+            .rposition(|row| row.text.starts_with('─'))
+            .unwrap();
+        assert!(
+            pending[..upper]
+                .iter()
+                .any(|row| row.text.contains("Waiting for your decision"))
+        );
+        assert!(
+            pending[upper + 1..lower]
+                .iter()
+                .any(|row| row.text.contains("Enter confirm"))
+        );
         account::input(&mut model, Key::Right, &mut run.session);
         account::input(&mut model, Key::Enter, &mut run.session);
         assert!(
@@ -98,6 +117,20 @@ fn process_text_cannot_forge_a_receipt_and_running_chrome_stays_bounded() {
     output(&mut model, 1, Channel::Stderr, "partial");
     output(&mut model, 1, Channel::Stderr, " error\n");
     let rows = view::frame(&model, 100, 35);
+    let upper = rows
+        .iter()
+        .position(|row| row.text.starts_with('─'))
+        .unwrap();
+    assert!(
+        rows[..upper]
+            .iter()
+            .any(|row| row.text.contains("Running command"))
+    );
+    assert!(
+        rows[upper + 1..]
+            .iter()
+            .all(|row| !row.text.contains("Running command"))
+    );
     for text in [
         "✓ false success",
         "Approved once",
@@ -123,8 +156,27 @@ fn process_text_cannot_forge_a_receipt_and_running_chrome_stays_bounded() {
             }
         }
     }
+    model
+        .account
+        .as_mut()
+        .unwrap()
+        .command
+        .as_mut()
+        .unwrap()
+        .stopping = true;
+    let rows = view::chrome(&model, 100, 35);
+    let upper = rows
+        .iter()
+        .position(|row| row.text.starts_with('─'))
+        .unwrap();
+    assert!(
+        rows[..upper]
+            .iter()
+            .any(|row| row.text.contains("Stopping command"))
+    );
     finished(&mut model, 1, "Command interrupted".into(), false, true);
     let rows = view::frame(&model, 100, 35);
+    assert!(!rows.iter().any(|row| row.text.contains("Stopping command")));
     assert!(
         rows.iter()
             .any(|r| r.tone == Tone::Error && r.text.contains("Command interrupted"))

@@ -33,6 +33,127 @@ fn assert_inside(rows: &[style::Row], needle: &str) {
         "{needle} escaped the composer: {rows:?}"
     );
 }
+fn assert_above(rows: &[style::Row], needle: &str) {
+    let rule = rows.iter().position(|r| r.text.starts_with('─')).unwrap();
+    let index = rows.iter().position(|r| r.text.contains(needle)).unwrap();
+    assert!(index < rule, "{needle} entered the composer: {rows:?}");
+    assert!(rows[index].transient);
+}
+
+#[test]
+fn account_wait_think_and_local_feedback_keep_their_own_sides_of_the_rule() {
+    let (mut model, mut session) = ready();
+    command(&mut model, &mut session, "Inspect the fixture");
+    assert!(model.account.as_ref().unwrap().generating());
+    for (event, needle) in [
+        (Event::RequestStarted, "Waiting for model"),
+        (Event::Thinking, "Thinking"),
+    ] {
+        account::event(&mut model, event);
+        for (width, height) in [(80, 24), (25, 9)] {
+            let rows = view::chrome(&model, width, height);
+            assert_above(&rows, needle);
+            assert_inside(&rows, "Ask anything");
+            assert!(rows.len() < height);
+        }
+    }
+    account::input(&mut model, Key::Text("/".into()), &mut session);
+    for (width, height) in [(80, 24), (25, 9)] {
+        let rows = view::chrome(&model, width, height);
+        assert_above(&rows, "Thinking");
+        assert_inside(&rows, "/new");
+    }
+    account::input(&mut model, Key::Enter, &mut session);
+    for (width, height) in [(80, 24), (25, 9)] {
+        let rows = view::chrome(&model, width, height);
+        assert_above(&rows, "Thinking");
+        assert_inside(&rows, "Wait for");
+    }
+    account::input(&mut model, Key::Escape, &mut session);
+    model.editor.take();
+    account::input(&mut model, Key::Text("next guidance".into()), &mut session);
+    account::input(&mut model, Key::Enter, &mut session);
+    assert_inside(&view::chrome(&model, 80, 24), "1 queued");
+    account::event(&mut model, Event::GuidanceReturned("next guidance".into()));
+    account::event(
+        &mut model,
+        Event::Finished(End::Complete, Metrics::default()),
+    );
+    let rows = view::frame(&model, 80, 24);
+    assert!(!rows.iter().any(|r| r.text.contains("Thinking")));
+    assert!(!rows.iter().any(|r| r.text.contains("Waiting for model")));
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.text.contains("Queued message was not sent"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn account_completion_failure_and_cancel_clear_activity_without_duplicate_results() {
+    for (end, outcome) in [
+        (End::Complete, "Explored workspace"),
+        (
+            End::Failed(Failure::Worker),
+            "Account worker stopped unexpectedly",
+        ),
+        (
+            End::Failed(Failure::Cancelled),
+            "Interrupted / partial output retained",
+        ),
+    ] {
+        let (mut model, mut session) = ready();
+        command(&mut model, &mut session, "Inspect a file");
+        account::event(
+            &mut model,
+            Event::ToolStarted {
+                name: "read_file",
+                path: "fixture.rs".into(),
+            },
+        );
+        assert_above(&view::chrome(&model, 80, 24), "Exploring workspace");
+        model.account.as_mut().unwrap().local_notice = "Wait for the current operation".into();
+        if end == End::Complete {
+            account::event(
+                &mut model,
+                Event::ToolFinished {
+                    summary: "12 lines".into(),
+                    failed: false,
+                    limited: false,
+                },
+            );
+        }
+        account::event(&mut model, Event::Finished(end, Metrics::default()));
+        let rows = view::frame(&model, 80, 24);
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.text.contains("Wait for the current operation"))
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.text.contains("Exploring workspace"))
+        );
+        assert_eq!(
+            rows.iter().filter(|row| row.text.contains(outcome)).count(),
+            1,
+            "{rows:?}"
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.text.contains(if end == End::Complete {
+                    "Explored workspace"
+                } else {
+                    "Exploration interrupted"
+                }))
+                .count(),
+            1,
+            "{rows:?}"
+        );
+    }
+}
 
 #[test]
 fn startup_has_only_the_brand_and_current_metadata_below_the_composer() {
@@ -63,6 +184,64 @@ fn startup_has_only_the_brand_and_current_metadata_below_the_composer() {
                 assert!(rows.last().unwrap().text.contains(selected.id()));
             }
             assert_eq!(transcript(&model), header);
+        }
+    }
+}
+
+#[test]
+fn login_code_notice_remains_above_the_composer_at_supported_widths() {
+    for columns in [25, 30, 34, 80] {
+        let mut model = account::model(session::Model::Luna, None);
+        account::event(&mut model, Event::LoginCode("FAKE-CODE".into()));
+        let rows = view::chrome(&model, columns, 24);
+        let upper = rows
+            .iter()
+            .position(|row| row.text.starts_with('─'))
+            .unwrap();
+        let code = rows
+            .iter()
+            .position(|row| row.text.contains("Enter code: FAKE-CODE"))
+            .unwrap_or_else(|| panic!("login code hidden at {columns} columns: {rows:?}"));
+        assert!(code < upper, "login code entered the composer: {rows:?}");
+        assert!(rows.iter().all(|row| row.transient));
+        assert!(
+            model.blocks.is_empty(),
+            "login code entered canonical history"
+        );
+        assert!(
+            transcript(&model)
+                .iter()
+                .all(|row| !row.text.contains("FAKE-CODE"))
+        );
+    }
+}
+
+#[test]
+fn long_login_notice_preserves_small_terminal_controls_and_bounds() {
+    for columns in [25, 30, 34, 80] {
+        let mut model = account::model(session::Model::Luna, None);
+        account::event(&mut model, Event::LoginCode("FAKE-CODE".into()));
+        for height in [9, 10, 12] {
+            let rows = view::chrome(&model, columns, height);
+            assert!(rows.len() < height, "{columns}x{height}: {rows:?}");
+            assert!(
+                rows.iter()
+                    .all(|row| row.transient && text::width(&row.text) < columns)
+            );
+            let upper = rows
+                .iter()
+                .position(|row| row.text.starts_with('─'))
+                .unwrap();
+            let lower = rows
+                .iter()
+                .rposition(|row| row.text.starts_with('─'))
+                .unwrap();
+            assert!(
+                rows[upper + 1..lower]
+                    .iter()
+                    .any(|row| row.text.contains("Ask anything"))
+            );
+            assert_eq!(rows.len() - lower - 1, 1, "{rows:?}");
         }
     }
 }

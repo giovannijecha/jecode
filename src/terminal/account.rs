@@ -25,6 +25,8 @@ enum LocalOperation {
 pub(super) struct View {
     phase: Phase,
     pub notice: String,
+    pub local_notice: String,
+    pub local_failed: bool,
     pub failed: bool,
     turns: usize,
     pub queued: usize,
@@ -65,6 +67,8 @@ pub(super) fn model(selected: session::Model, workspace: Option<&std::path::Path
     model.account = Some(View {
         phase: Phase::Login,
         notice: "Connecting for sign-in / Esc cancels".into(),
+        local_notice: String::new(),
+        local_failed: false,
         failed: false,
         turns: 0,
         queued: 0,
@@ -96,8 +100,11 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
                 if session.enqueue(&model.editor.text) {
                     model.editor.take();
                     view.queued += 1;
+                    view.local_notice.clear();
+                    view.local_failed = false;
                 } else {
-                    view.notice = "Queue full or stopping / draft kept".into();
+                    view.local_notice = "Queue full or stopping / draft kept".into();
+                    view.local_failed = false;
                 }
                 return;
             }
@@ -105,13 +112,14 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
                 return;
             }
             if view.turns >= 256 {
-                view.notice = "Session limit reached / draft kept; restart to continue".into();
-                view.failed = true;
+                view.local_notice =
+                    "Session limit reached / draft kept; restart to continue".into();
+                view.local_failed = true;
                 return;
             }
             if !session.submit(&model.editor.text) {
-                view.notice = "Message not sent / draft kept".into();
-                view.failed = true;
+                view.local_notice = "Message not sent / draft kept".into();
+                view.local_failed = true;
                 return;
             }
             view.turns += 1;
@@ -125,6 +133,8 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             });
             view.phase = Phase::Generating;
             view.failed = false;
+            view.local_notice.clear();
+            view.local_failed = false;
             view.notice = "Waiting for model / Esc stops".into();
         }
         Key::Escape | Key::Interrupt if matches!(view.phase, Phase::Login | Phase::Generating) => {
@@ -282,6 +292,8 @@ pub(super) fn event(model: &mut Model, event: Event) {
                 !matches!(end, End::Complete | End::Refused),
                 Instant::now(),
             );
+            view.local_notice.clear();
+            view.local_failed = false;
             view.phase = if end == End::Failed(session::Failure::Storage) {
                 Phase::Closed
             } else {

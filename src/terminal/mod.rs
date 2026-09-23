@@ -2,6 +2,7 @@
 mod account;
 mod action_demo;
 mod action_view;
+mod activity_view;
 mod approval_view;
 mod block;
 mod command_view;
@@ -235,7 +236,8 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                     }
                     Err(_) => {
                         if let Some(view) = &mut model.account {
-                            view.notice = "Cannot open that conversation · check its folder or another running owner · current session kept".into();
+                            view.local_notice = "Cannot open that conversation · check its folder or another running owner · current session kept".into();
+                            view.local_failed = false;
                         }
                     }
                 }
