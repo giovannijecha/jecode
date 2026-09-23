@@ -25,6 +25,7 @@ impl Decoder {
             Key::Quit => self.push(&[17], now),
             Key::Tab if self.paste.is_some() => self.push(b"\t", now),
             Key::Backspace if self.paste.is_some() => self.push(&[8], now),
+            Key::WordBackspace if self.paste.is_some() => self.push(&[8], now),
             key if self.paste.is_none() => vec![key],
             _ => Vec::new(),
         }

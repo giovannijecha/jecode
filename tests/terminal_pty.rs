@@ -120,8 +120,13 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
     master
         .write_all(b"\x1b[200~/code\n\x03\x11\x1b[201~")
         .unwrap();
-    let paste = until(&mut master, "??|");
+    let paste = until(&mut master, "??\x1b[7m");
     assert!(paste.contains("/code"));
+    assert!(
+        paste.contains("\x1b[7m"),
+        "NO_COLOR cursor must keep its block"
+    );
+    assert!(!paste.contains("??|"), "cursor must not replace input text");
     assert!(!paste.contains("Streaming locally"));
     // Ctrl+C clears the inert draft; no process termination in raw mode.
     master.write_all(b"\x03/code\r").unwrap();

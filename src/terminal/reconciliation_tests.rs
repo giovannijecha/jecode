@@ -22,7 +22,14 @@ fn draw(
 }
 
 fn chrome_is_singular(shown: &str, draft: &str) {
-    assert_eq!(shown.matches(draft).count(), 1, "{shown}");
+    assert_eq!(
+        shown
+            .lines()
+            .filter(|line| line.trim_end().ends_with(draft))
+            .count(),
+        1,
+        "{shown}"
+    );
     assert_eq!(shown.matches("Conversation only").count(), 1, "{shown}");
     assert_eq!(
         shown
@@ -163,7 +170,7 @@ fn unindexed_repeated_messages_show_a_paragraph_correction_without_erasing_draft
                 1,
                 "{shown}"
             );
-            chrome_is_singular(&shown, "/he|");
+            chrome_is_singular(&shown, "/he");
         }
         if finished {
             break;
@@ -187,7 +194,7 @@ fn unindexed_repeated_messages_show_a_paragraph_correction_without_erasing_draft
             "{size:?}: {shown}"
         );
         assert_eq!(shown.matches("/help").count(), 1, "{size:?}: {shown}");
-        chrome_is_singular(&shown, "/he|");
+        chrome_is_singular(&shown, "/he");
     }
     assert_eq!(
         model
