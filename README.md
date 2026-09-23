@@ -45,8 +45,10 @@ Linux:
 ```
 
 Follow the device sign-in instructions on first use. Subsequent runs reuse the
-saved account and refresh access when needed. GPT-5.6 Luna with medium effort is
-the default; `--model gpt-5.6-terra` selects Terra for that run.
+saved account and refresh access when needed. New conversations initially use
+GPT-5.6 Luna with medium reasoning effort. `/model` shows models and effort
+levels from the signed-in account; `--model MODEL --effort LEVEL` selects a pair
+for one new conversation without changing saved defaults.
 `jecode` uses your current directory; `--workspace PATH` selects another directory.
 Use `jecode chat` for a conversation without file or command tools.
 It still belongs to the directory where it was launched.

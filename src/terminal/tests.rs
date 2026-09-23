@@ -1,4 +1,31 @@
 use super::*;
+
+#[test]
+fn cli_selection_overrides_defaults_without_mutating_them() {
+    let saved = crate::session::Model::new("saved-model", Some("low")).unwrap();
+    let cli_model = crate::session::Model::new("cli-model", None).unwrap();
+    let explicit = Some("xhigh".to_owned());
+    assert_eq!(resolve_selection(None, None, saved).unwrap(), saved);
+    assert_eq!(
+        resolve_selection(Some(cli_model), None, saved).unwrap(),
+        cli_model
+    );
+    assert_eq!(
+        resolve_selection(None, Some(&explicit), saved).unwrap(),
+        saved.with_effort(Some("xhigh")).unwrap()
+    );
+    assert_eq!(
+        resolve_selection(Some(cli_model), Some(&explicit), saved).unwrap(),
+        cli_model.with_effort(Some("xhigh")).unwrap()
+    );
+    assert_eq!(
+        resolve_selection(None, Some(&None), saved)
+            .unwrap()
+            .effort(),
+        None
+    );
+    assert_eq!(saved.effort(), Some("low"));
+}
 use std::time::Duration;
 
 #[test]

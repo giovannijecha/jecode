@@ -5,6 +5,7 @@ use super::{
     tool_view::clipped,
 };
 use crate::{
+    providers::openai_account::catalog::{Catalog, Entry as CatalogEntry},
     session,
     state::settings::{Change, Settings},
 };
@@ -17,6 +18,8 @@ pub(super) enum Action {
     Browse,
     Resume(String),
     Models,
+    DefaultModels,
+    SelectModel(String, bool),
     Settings,
     Model(session::Model),
     Preference(Change),
@@ -116,38 +119,87 @@ pub(super) fn commands() -> Vec<Entry> {
     .collect()
 }
 
-pub(super) fn models(current: session::Model) -> Panel {
+pub(super) fn models(catalog: &Catalog, current: session::Model, defaults: bool) -> Panel {
     Panel {
-        title: "Model",
-        entries: [session::Model::Luna, session::Model::Terra]
-            .into_iter()
-            .map(|model| {
+        title: if defaults { "Default model" } else { "Model" },
+        entries: catalog
+            .entries
+            .iter()
+            .filter(|entry| entry.visible && entry.compatible)
+            .map(|entry| {
                 Entry::new(
                     &format!(
                         "{}{}",
-                        model.id(),
-                        if model == current { " · current" } else { "" }
+                        entry.id,
+                        if entry.id == current.id() {
+                            " · current"
+                        } else {
+                            ""
+                        }
                     ),
-                    "",
-                    Action::Model(model),
+                    if entry.name == entry.id {
+                        ""
+                    } else {
+                        &entry.name
+                    },
+                    Action::SelectModel(entry.id.clone(), defaults),
                 )
             })
             .collect(),
     }
 }
-pub(super) fn settings(settings: &Settings) -> Panel {
-    let next = if settings.model == session::Model::Luna {
-        session::Model::Terra
-    } else {
-        session::Model::Luna
+pub(super) fn efforts(entry: &CatalogEntry, current: session::Model, defaults: bool) -> Panel {
+    let mut entries = Vec::new();
+    let option = |effort: Option<&str>, label: String| {
+        let selection =
+            session::Model::new(&entry.id, effort).expect("catalog identifiers validated");
+        Entry::new(
+            &format!(
+                "{}{}",
+                label,
+                if selection == current {
+                    " · current"
+                } else {
+                    ""
+                }
+            ),
+            "",
+            if defaults {
+                Action::Preference(Change::Model(selection))
+            } else {
+                Action::Model(selection)
+            },
+        )
     };
+    let default = entry
+        .default_effort
+        .as_deref()
+        .map_or("unknown", |value| value);
+    entries.push(option(None, format!("Provider default · {default}")));
+    if let Some(efforts) = &entry.efforts {
+        entries.extend(
+            efforts
+                .iter()
+                .map(|effort| option(Some(effort), effort.clone())),
+        );
+    }
+    Panel {
+        title: "Reasoning effort",
+        entries,
+    }
+}
+pub(super) fn settings(settings: &Settings) -> Panel {
     Panel {
         title: "Settings",
         entries: vec![
             Entry::new(
-                &format!("Default model · {}", settings.model.id()),
+                &format!(
+                    "Default · {} · {}",
+                    settings.model.id(),
+                    settings.model.effort().unwrap_or("provider default")
+                ),
                 "Applies to new conversations",
-                Action::Preference(Change::Model(next)),
+                Action::DefaultModels,
             ),
             Entry::new(
                 &format!("File access · {}", settings.file_access.name()),

@@ -26,7 +26,7 @@ fn request() -> Request {
         instructions: "Answer briefly.".into(),
         input: vec![Input::User("Say hello".into())],
         tools: vec![],
-        effort: "low".into(),
+        effort: Some("low".into()),
     }
 }
 

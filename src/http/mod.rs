@@ -5,7 +5,7 @@ mod request;
 mod response;
 
 pub use head::Head;
-pub use request::{post_form, post_json};
+pub use request::{get, post_form, post_json};
 pub use response::{Decoder, Event, Limits};
 use std::fmt;
 

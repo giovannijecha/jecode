@@ -137,7 +137,7 @@ impl History {
         };
         let request = Request {
             model: model.id().into(),
-            effort: "medium".into(),
+            effort: model.effort().map(str::to_owned),
             input,
             tools: if workspace {
                 tools::definitions()

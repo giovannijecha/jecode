@@ -27,9 +27,24 @@ a supported terminal. Unknown CLI options return status 2 without echoing their
 contents.
 
 OpenAI Account is the current provider. Device sign-in must be enabled for the
-account, and model availability depends on that account. The connected choices
-are GPT-5.6 Luna and Terra, with medium effort. This is an experimental account
-protocol, not a guarantee of compatibility with every account or future server.
+account. Jecode requests a bounded model catalog from the signed-in account's
+Codex backend, then offers listed models and their advertised reasoning efforts.
+The account catalog is distinct from the public API-key `/v1/models` endpoint.
+Catalog entries do not guarantee that a subsequent generation request will be
+accepted for a particular account. If catalog retrieval fails, Jecode keeps the
+current selection and allows a retry through `/model`.
+
+The catalog route and response fields were checked against the official
+[OpenAI Codex source](https://github.com/openai/codex/tree/30fc6864cc1318121eca1843c217fe00ce1212f1/codex-rs)
+at revision `30fc6864cc1318121eca1843c217fe00ce1212f1` (2026-09-23):
+`GET https://chatgpt.com/backend-api/codex/models?client_version=0.156.1`,
+with account authentication; `slug`, `visibility`, `default_reasoning_level`
+and `supported_reasoning_levels` describe choices. The pinned client version is
+a compatibility query matching the official
+[0.156.1 release](https://github.com/openai/codex/releases/tag/rust-v0.156.1)
+published on 2026-09-23, not Jecode's version or a public contract for
+independent clients. Live account behavior and future server compatibility
+have not been validated for this change.
 
 Networking currently uses HTTP/1.1 over the owned TLS profile. There is no HTTP/2,
 proxy configuration, web browsing, external provider plugin system or stable

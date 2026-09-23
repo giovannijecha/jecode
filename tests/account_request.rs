@@ -9,7 +9,7 @@ fn request() -> Request {
         instructions: "Follow the workspace instructions.".into(),
         input: vec![Input::User("quoted \"text\"\n🚀".into())],
         tools: vec![],
-        effort: "high".into(),
+        effort: Some("high".into()),
     }
 }
 
@@ -77,4 +77,21 @@ fn malformed_requests_and_oversized_encoding_are_rejected() {
         });
     }
     assert_eq!(invalid.encode(8192), Err(Error::InvalidRequest));
+}
+
+#[test]
+fn omitted_effort_is_distinct_from_literal_none() {
+    let mut request = request();
+    request.effort = None;
+    let body = json::parse(&request.encode(8192).unwrap(), Default::default()).unwrap();
+    assert!(body.get("reasoning").unwrap().get("effort").is_none());
+    request.effort = Some("none".into());
+    let body = json::parse(&request.encode(8192).unwrap(), Default::default()).unwrap();
+    assert_eq!(
+        body.get("reasoning")
+            .unwrap()
+            .get("effort")
+            .and_then(Value::text),
+        Some("none")
+    );
 }

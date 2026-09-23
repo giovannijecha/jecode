@@ -184,6 +184,17 @@ fn startup_has_no_transcript_rows_and_one_current_metadata_footer() {
 }
 
 #[test]
+fn long_model_identifier_keeps_applied_effort_in_a_narrow_footer() {
+    let (mut model, _) = ready();
+    let selected = session::Model::new(&"a".repeat(100), Some("xhigh")).unwrap();
+    account::event(&mut model, Event::ModelChanged(selected));
+    let rows = view::chrome(&model, 25, 9);
+    let footer = rows.last().unwrap();
+    assert!(footer.text.contains("xhigh"), "{footer:?}");
+    assert!(text::width(&footer.text) < 25);
+}
+
+#[test]
 fn login_code_notice_remains_above_the_composer_at_supported_widths() {
     for columns in [25, 30, 34, 80] {
         let mut model = account::model(session::Model::Luna, None);
@@ -349,7 +360,8 @@ fn panels_remain_bounded_with_long_paths_drafts_and_untrusted_labels() {
     model.account.as_mut().unwrap().directory =
         Some(format!("{}project-中文", "parent/".repeat(60)));
     model.editor.insert(&"draft 👩‍💻 ".repeat(40));
-    let mut panel = menu::models(session::Model::Luna);
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"gpt-5.6-luna","visibility":"list"},{"slug":"gpt-5.6-terra","visibility":"list"}]}"#).unwrap();
+    let mut panel = menu::models(&catalog, session::Model::Luna, false);
     panel.entries[0].label = "line\x1b[2J\u{202e}\n".repeat(80);
     model.menu.open(panel);
     for columns in [1, 10, 25, 40, 80, 140] {

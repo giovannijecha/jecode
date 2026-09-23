@@ -45,6 +45,7 @@ impl Client {
             trust,
             tokens,
             store: Some(store),
+            catalog: None,
         })
     }
 

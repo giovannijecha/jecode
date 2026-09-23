@@ -6,6 +6,7 @@ use crate::{
     workspace::Access,
 };
 use std::{
+    collections::BTreeMap,
     io,
     sync::atomic::AtomicBool,
     time::{Duration, Instant},
@@ -17,6 +18,7 @@ pub struct Settings {
     pub reduced_motion: bool,
     pub context_limit_bytes: usize,
     pub file_access: Access,
+    extra: BTreeMap<String, Value>,
 }
 #[derive(Clone, Copy)]
 pub enum Change {
@@ -31,6 +33,7 @@ impl Default for Settings {
             reduced_motion: false,
             context_limit_bytes: 512 * 1024,
             file_access: Access::Local,
+            extra: BTreeMap::new(),
         }
     }
 }
@@ -57,13 +60,30 @@ impl Settings {
                 }
             }
         }
-        let body = format!(
-            "{{\n  \"version\": 1,\n  \"model\": \"{}\",\n  \"reduced_motion\": {},\n  \"context_limit_bytes\": {},\n  \"file_access\": \"{}\"\n}}\n",
-            settings.model.id(),
-            settings.reduced_motion,
-            settings.context_limit_bytes,
-            settings.file_access.name()
+        let mut fields = settings.extra.clone();
+        fields.insert("version".into(), Value::Number("1".into()));
+        fields.insert("model".into(), Value::String(settings.model.id().into()));
+        fields.insert(
+            "effort".into(),
+            settings
+                .model
+                .effort()
+                .map_or(Value::Null, |effort| Value::String(effort.into())),
         );
+        fields.insert(
+            "reduced_motion".into(),
+            Value::Bool(settings.reduced_motion),
+        );
+        fields.insert(
+            "context_limit_bytes".into(),
+            Value::Number(settings.context_limit_bytes.to_string()),
+        );
+        fields.insert(
+            "file_access".into(),
+            Value::String(settings.file_access.name().into()),
+        );
+        let body = json::encode(&Value::Object(fields), 8192)
+            .map_err(|_| io::Error::other("settings exceed size limit"))?;
         store.replace("settings.json", &body)?;
         Ok(settings)
     }
@@ -77,7 +97,7 @@ impl Settings {
             Instant::now() + Duration::from_secs(2),
         )?;
         let Some(body) = store.read("settings.json", 8192)? else {
-            store.replace("settings.json", "{\n  \"version\": 1,\n  \"model\": \"gpt-5.6-luna\",\n  \"reduced_motion\": false,\n  \"context_limit_bytes\": 524288,\n  \"file_access\": \"local\"\n}\n")?;
+            store.replace("settings.json", "{\n  \"version\": 1,\n  \"model\": \"gpt-5.6-luna\",\n  \"effort\": \"medium\",\n  \"reduced_motion\": false,\n  \"context_limit_bytes\": 524288,\n  \"file_access\": \"local\"\n}\n")?;
             return Ok(Self::default());
         };
         Self::parse(&body)
@@ -96,20 +116,20 @@ impl Settings {
         let Value::Object(fields) = &value else {
             return Err(invalid());
         };
-        if fields.keys().any(|key| {
-            !matches!(
-                key.as_str(),
-                "version" | "model" | "reduced_motion" | "context_limit_bytes" | "file_access"
-            )
-        }) || value.get("version").and_then(Value::unsigned) != Some(1)
-        {
+        if value.get("version").and_then(Value::unsigned) != Some(1) {
             return Err(invalid());
         }
-        let model = match value.get("model").and_then(Value::text) {
-            Some("gpt-5.6-luna") => Model::Luna,
-            Some("gpt-5.6-terra") => Model::Terra,
+        let effort = match value.get("effort") {
+            None => Some("medium"), // historical v1 effective request
+            Some(Value::Null) => None,
+            Some(Value::String(effort)) => Some(effort.as_str()),
             _ => return Err(invalid()),
         };
+        let model = value
+            .get("model")
+            .and_then(Value::text)
+            .and_then(|id| Model::new(id, effort))
+            .ok_or_else(invalid)?;
         let reduced_motion = match value.get("reduced_motion") {
             Some(Value::Bool(v)) => *v,
             _ => return Err(invalid()),
@@ -128,6 +148,21 @@ impl Settings {
             reduced_motion,
             context_limit_bytes,
             file_access,
+            extra: fields
+                .iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "version"
+                            | "model"
+                            | "effort"
+                            | "reduced_motion"
+                            | "context_limit_bytes"
+                            | "file_access"
+                    )
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
         })
     }
 }
@@ -174,5 +209,33 @@ mod tests {
             Access::Workspace
         );
         assert!(Settings::parse(&bounded.replace("workspace", "unknown")).is_err());
+    }
+    #[test]
+    #[cfg(any(windows, target_os = "linux"))]
+    fn legacy_effort_and_unrelated_fields_survive_explicit_update() {
+        let fixture = crate::state::tests::Fixture::new();
+        let Some(store) = fixture.store() else { return };
+        let legacy = r#"{"version":1,"model":"future-model","reduced_motion":false,"context_limit_bytes":131072,"file_access":"local","future_setting":{"enabled":true}}"#;
+        store.replace("settings.json", legacy).unwrap();
+        let settings = Settings::load(&store).unwrap();
+        assert_eq!(settings.model.id(), "future-model");
+        assert_eq!(settings.model.effort(), Some("medium"));
+        assert_eq!(store.read("settings.json", 8192).unwrap().unwrap(), legacy);
+        Settings::update(&store, Change::ToggleMotion).unwrap();
+        let updated = store.read("settings.json", 8192).unwrap().unwrap();
+        let value = json::parse(&updated, Default::default()).unwrap();
+        assert_eq!(
+            value
+                .get("future_setting")
+                .and_then(|value| value.get("enabled")),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(value.get("effort").and_then(Value::text), Some("medium"));
+        Settings::update(
+            &store,
+            Change::Model(Model::new("another-model", None).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(Settings::load(&store).unwrap().model.effort(), None);
     }
 }

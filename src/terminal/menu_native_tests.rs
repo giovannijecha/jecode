@@ -15,6 +15,8 @@ fn native_console_child() {
     let mut terminal = platform::Terminal::open().unwrap();
     let mut session = crate::session::tests::ready_fixture();
     let mut model = account::model(crate::session::Model::Luna, None);
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"gpt-5.6-luna","visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]},{"slug":"gpt-5.6-terra","visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]}]}"#).unwrap();
+    account::event(&mut model, crate::session::Event::CatalogLoaded(catalog));
     account::event(&mut model, crate::session::Event::Ready);
     model.blocks.push(model::Block {
         speaker: "Assistant",
@@ -104,6 +106,8 @@ fn native_menu_selects_with_arrows_and_preserves_transcript_across_resize() {
     console.input.write_all(b"\x1b[B\x1b[B\r").unwrap();
     wait_for(|| console.output().contains("· current"));
     console.resize(48, 24);
+    console.input.write_all(b"\x1b[B\r").unwrap();
+    wait_for(|| console.output().contains("Reasoning effort"));
     console.input.write_all(b"\x1b[B\r").unwrap();
     wait_for(|| console.output().contains("gpt-5.6-terra · medium"));
     let selected = snapshot(&fixture.0, "selected");

@@ -195,7 +195,10 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
     assert_eq!(shown.matches("/context").count(), 0, "{shown}");
 
     model.editor.take();
-    model.menu.open(super::menu::models(session::Model::Luna));
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"gpt-5.6-luna","visibility":"list"},{"slug":"gpt-5.6-terra","visibility":"list"}]}"#).unwrap();
+    model
+        .menu
+        .open(super::menu::models(&catalog, session::Model::Luna, false));
     surface.draw(&model);
     let shown = surface.text();
     let rows: Vec<_> = shown.lines().collect();

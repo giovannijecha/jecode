@@ -1,4 +1,5 @@
 //! Account access through Jecode's authenticated TLS, with optional user JSON storage.
+mod catalog;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod coordination_tests;
 mod credentials;
@@ -26,6 +27,7 @@ pub enum Error {
     Http(crate::http::Error),
     Status(u16),
     Content,
+    Catalog(super::catalog::Error),
     Trust,
     Expired,
     Storage,
@@ -57,7 +59,8 @@ impl fmt::Display for Error {
             Self::Protocol(error) => error.fmt(f),
             Self::Login(error) => error.fmt(f),
             Self::Http(error) => error.fmt(f),
-            Self::Content => f.write_str("login endpoint did not return valid JSON content"),
+            Self::Content => f.write_str("account endpoint did not return valid JSON content"),
+            Self::Catalog(_) => f.write_str("account model catalog is empty, malformed or oversized"),
             Self::Trust => f.write_str("native certificate trust data unavailable"),
             Self::Expired => f.write_str("account access expired; use /login or jecode login to sign in again"),
             Self::Storage => f.write_str("cannot read or update ~/.jecode/v1/credentials.json; check permissions, JSON format and other Jecode instances, then retry"),
@@ -91,6 +94,7 @@ pub struct Client {
     trust: TrustStore,
     tokens: auth::Tokens,
     store: Option<crate::state::Store>,
+    catalog: Option<(std::time::Instant, super::catalog::Catalog)>,
 }
 impl Client {
     /// Explicit device login. Does not discover, persist or refresh credentials.
@@ -105,6 +109,7 @@ impl Client {
             trust,
             tokens,
             store: None,
+            catalog: None,
         })
     }
 

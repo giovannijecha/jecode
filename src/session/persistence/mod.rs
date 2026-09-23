@@ -12,6 +12,7 @@ use crate::{
     workspace::{Access, Workspace},
 };
 use std::{
+    collections::BTreeMap,
     io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
@@ -53,6 +54,7 @@ pub(super) struct Record {
     directory: Option<String>,
     access: Access,
     created: u64,
+    extra: BTreeMap<String, Value>,
     _lock: Lease,
 }
 impl Record {
@@ -64,6 +66,7 @@ impl Record {
             ("version", Value::Number("1".into())),
             ("id", text(&self.id)),
             ("model", text(self.model.id())),
+            ("effort", self.model.effort().map_or(Value::Null, text)),
             (
                 "workspace",
                 self.workspace.as_deref().map_or(Value::Null, text),
@@ -91,6 +94,11 @@ impl Record {
         if let Some(directory) = &self.directory {
             fields.push(("directory", text(directory)));
         }
+        fields.extend(
+            self.extra
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        );
         let value = json::object(fields);
         let contents = json::encode(&value, LIMIT).map_err(|_| invalid())?;
         self.store.replace(&format!("{}.json", self.id), &contents)
@@ -132,6 +140,7 @@ pub(super) fn create_in(
         id,
         model,
         created,
+        extra: BTreeMap::new(),
         _lock: lock,
         workspace: workspace
             .map(|workspace| {
@@ -199,11 +208,13 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
     {
         return Err(invalid());
     }
-    let model = match string(&value, "model", 64)? {
-        "gpt-5.6-luna" => Model::Luna,
-        "gpt-5.6-terra" => Model::Terra,
+    let effort = match value.get("effort") {
+        None => Some("medium"),
+        Some(Value::Null) => None,
+        Some(Value::String(effort)) => Some(effort.as_str()),
         _ => return Err(invalid()),
     };
+    let model = Model::new(string(&value, "model", 128)?, effort).ok_or_else(invalid)?;
     let workspace = match value.get("workspace") {
         Some(Value::Null) => None,
         Some(Value::String(s)) if s.len() <= 32768 && Path::new(s).is_absolute() => {
@@ -271,6 +282,29 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
                 .and_then(Value::text)
                 .map(str::to_owned),
             created,
+            extra: match &value {
+                Value::Object(fields) => fields
+                    .iter()
+                    .filter(|(key, _)| {
+                        !matches!(
+                            key.as_str(),
+                            "version"
+                                | "id"
+                                | "model"
+                                | "effort"
+                                | "workspace"
+                                | "directory"
+                                | "created"
+                                | "file_access"
+                                | "updated"
+                                | "history"
+                                | "projection"
+                        )
+                    })
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+                _ => return Err(invalid()),
+            },
             access,
             _lock: lock,
         });

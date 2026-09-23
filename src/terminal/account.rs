@@ -24,6 +24,8 @@ enum LocalOperation {
     Context,
     Compact(String),
 }
+pub(super) const UNAVAILABLE_SELECTION_NOTICE: &str =
+    "Selected model or effort unavailable in this account catalog / use /model; draft kept";
 pub(super) struct View {
     phase: Phase,
     pub notice: String,
@@ -37,6 +39,8 @@ pub(super) struct View {
     pub approval: Option<super::approval_view::Approval>,
     pub command: Option<super::command_view::Run>,
     pub selected: session::Model,
+    pub catalog: Option<crate::providers::openai_account::catalog::Catalog>,
+    pub pending_catalog: Option<bool>, // true: selecting defaults
     pub id: Option<String>,
     pub directory: Option<String>,
     pub file_tools: bool,
@@ -73,6 +77,11 @@ impl View {
         self.local_operation = Some(LocalOperation::Model);
         self.notice = "Changing model…".into();
     }
+    pub fn loading_catalog(&mut self, defaults: bool) {
+        self.phase = Phase::Updating;
+        self.pending_catalog = Some(defaults);
+        self.notice = "Loading account models / Esc cancels".into();
+    }
 }
 pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path>) -> Model {
     let mut model = Model::new(Instant::now());
@@ -94,6 +103,8 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
         approval: None,
         command: None,
         selected,
+        catalog: None,
+        pending_catalog: None,
         id: None,
         directory,
         file_tools: false,
@@ -141,7 +152,11 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
                 return;
             }
             if !session.submit(&model.editor.text) {
-                view.local_notice = "Message not sent / draft kept".into();
+                view.local_notice = if session.selection_unavailable() {
+                    UNAVAILABLE_SELECTION_NOTICE.into()
+                } else {
+                    "Message not sent / draft kept".into()
+                };
                 view.local_failed = true;
                 return;
             }
@@ -162,7 +177,10 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             view.notice = "Waiting for model".into();
             model.status_spinner.reset(Instant::now());
         }
-        Key::Escape | Key::Interrupt if matches!(view.phase, Phase::Login | Phase::Generating) => {
+        Key::Escape | Key::Interrupt
+            if matches!(view.phase, Phase::Login | Phase::Generating)
+                || view.pending_catalog.is_some() =>
+        {
             session.cancel();
             view.notice = "Stopping...".into();
             if let Some(command) = &mut view.command {
@@ -274,6 +292,49 @@ pub(super) fn event(model: &mut Model, event: Event) {
             view.phase = Phase::Ready;
             view.failed = false;
             view.notice.clear();
+        }
+        Event::CatalogLoaded(catalog) => {
+            let unavailable = catalog.support(view.selected)
+                == crate::providers::openai_account::catalog::Support::Unsupported;
+            view.catalog = Some(catalog.clone());
+            if unavailable {
+                view.local_notice =
+                    "Selected model or effort unavailable in this account catalog / use /model"
+                        .into();
+                view.local_failed = true;
+            }
+            if let Some(defaults) = view.pending_catalog.take() {
+                let current = if defaults {
+                    crate::state::settings::Settings::user()
+                        .map(|settings| settings.model)
+                        .unwrap_or(view.selected)
+                } else {
+                    view.selected
+                };
+                model
+                    .menu
+                    .open(super::menu::models(&catalog, current, defaults));
+            }
+        }
+        Event::CatalogFailed(kind) => {
+            view.catalog = None;
+            view.pending_catalog = None;
+            view.local_notice = match kind {
+                session::CatalogFailure::Unavailable => {
+                    "Account model catalog unavailable / selection kept; /model retries"
+                }
+                session::CatalogFailure::Invalid => {
+                    "Account model catalog malformed or oversized / selection kept; /model retries"
+                }
+                session::CatalogFailure::Empty => {
+                    "Account model catalog has no usable choices / selection kept; /model retries"
+                }
+                session::CatalogFailure::Cancelled => {
+                    "Account model loading cancelled / selection kept; /model retries"
+                }
+            }
+            .into();
+            view.local_failed = true;
         }
         Event::ModelChanged(selected) => {
             view.selected = selected;
@@ -387,6 +448,8 @@ pub(super) fn event(model: &mut Model, event: Event) {
             }
         }
         Event::LoginFailed(failure) => {
+            view.catalog = None;
+            view.pending_catalog = None;
             model.tools.close(&model.blocks, true, Instant::now());
             let signing_out =
                 view.phase == Phase::SigningOut && failure != session::Failure::Worker;
@@ -409,6 +472,9 @@ pub(super) fn event(model: &mut Model, event: Event) {
             };
         }
         Event::LoggedOut => {
+            view.catalog = None;
+            view.pending_catalog = None;
+            model.menu.close();
             model.tools.close(&model.blocks, true, Instant::now());
             view.phase = Phase::SignedOut;
             view.queued = 0;

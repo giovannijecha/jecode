@@ -4,6 +4,8 @@ use std::time::SystemTime;
 
 fn ready() -> (model::Model, session::Session) {
     let mut model = account::model(session::Model::Luna, None);
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"gpt-5.6-luna","visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]},{"slug":"gpt-5.6-terra","visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]}]}"#).unwrap();
+    account::event(&mut model, Event::CatalogLoaded(catalog));
     account::event(&mut model, Event::Ready);
     (model, session::tests::ready_fixture())
 }
@@ -40,6 +42,13 @@ fn model_picker_filters_and_waits_for_acknowledgement() {
         model.account.as_ref().unwrap().selected,
         session::Model::Luna
     );
+    assert!(session.ready());
+    account::input(&mut model, Key::Down, &mut session);
+    account::input(&mut model, Key::Enter, &mut session);
+    assert_eq!(
+        model.account.as_ref().unwrap().selected,
+        session::Model::Luna
+    );
     assert!(!session.ready());
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     while !session.ready() {
@@ -55,6 +64,45 @@ fn model_picker_filters_and_waits_for_acknowledgement() {
     );
     assert!(model.menu.panel.is_none());
     assert!(model.editor.text.is_empty());
+}
+
+#[test]
+fn cancelling_effort_step_leaves_pair_and_draft_unchanged() {
+    let (mut model, mut session) = ready();
+    type_text(&mut model, &mut session, "/model");
+    account::input(&mut model, Key::Enter, &mut session);
+    type_text(&mut model, &mut session, "terra");
+    account::input(&mut model, Key::Enter, &mut session);
+    assert_eq!(model.menu.panel.as_ref().unwrap().title, "Reasoning effort");
+    account::input(&mut model, Key::Escape, &mut session);
+    assert_eq!(
+        model.account.as_ref().unwrap().selected,
+        session::Model::Luna
+    );
+    assert!(session.ready());
+    assert!(model.menu.panel.is_none());
+    assert!(model.editor.text.is_empty());
+}
+
+#[test]
+fn settings_model_and_effort_are_one_default_update_action() {
+    let settings = crate::state::settings::Settings::default();
+    let panel = menu::settings(&settings);
+    assert!(matches!(
+        panel.entries[0].action,
+        menu::Action::DefaultModels
+    ));
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"first","visibility":"list","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]},{"slug":"second","visibility":"list","supported_reasoning_levels":[{"effort":"medium"}]}]}"#).unwrap();
+    let models = menu::models(&catalog, settings.model, true);
+    assert_eq!(models.entries.len(), 2);
+    let effort_panel = menu::efforts(catalog.entry("first").unwrap(), settings.model, true);
+    assert_eq!(effort_panel.entries.len(), 3);
+    assert!(
+        matches!(effort_panel.entries[0].action, menu::Action::Preference(crate::state::settings::Change::Model(selection)) if selection.id() == "first" && selection.effort().is_none())
+    );
+    assert!(
+        matches!(effort_panel.entries[2].action, menu::Action::Preference(crate::state::settings::Change::Model(selection)) if selection.id() == "first" && selection.effort() == Some("high"))
+    );
 }
 
 #[test]

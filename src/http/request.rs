@@ -30,11 +30,33 @@ pub fn post_form(
     )
 }
 
+/// Prepare an authenticated GET for an existing TLS peer. The caller owns the
+/// credentials and must never log or persist the returned bytes.
+pub fn get(
+    host: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    max_bytes: usize,
+) -> Result<Vec<u8>, Error> {
+    request(host, path, headers, None, max_bytes, "")
+}
+
 fn post(
     host: &str,
     path: &str,
     headers: &[(&str, &str)],
     body: &str,
+    max_bytes: usize,
+    content_type: &str,
+) -> Result<Vec<u8>, Error> {
+    request(host, path, headers, Some(body), max_bytes, content_type)
+}
+
+fn request(
+    host: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
     max_bytes: usize,
     content_type: &str,
 ) -> Result<Vec<u8>, Error> {
@@ -86,14 +108,17 @@ fn post(
         }
     }
     let mut bytes = Vec::new();
-    append(
-        &mut bytes,
-        &format!(
+    let head = if let Some(body) = body {
+        format!(
             "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: {content_type}\r\nAccept-Encoding: identity\r\nConnection: close\r\nContent-Length: {}\r\n",
             body.len()
-        ),
-        max_bytes,
-    )?;
+        )
+    } else {
+        format!(
+            "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept-Encoding: identity\r\nConnection: close\r\n"
+        )
+    };
+    append(&mut bytes, &head, max_bytes)?;
     for (name, value) in headers {
         append(&mut bytes, name, max_bytes)?;
         append(&mut bytes, ": ", max_bytes)?;
@@ -104,7 +129,9 @@ fn post(
         return Err(Error::Limit);
     }
     append(&mut bytes, "\r\n", max_bytes)?;
-    append(&mut bytes, body, max_bytes)?;
+    if let Some(body) = body {
+        append(&mut bytes, body, max_bytes)?;
+    }
     Ok(bytes)
 }
 fn append(output: &mut Vec<u8>, value: &str, max: usize) -> Result<(), Error> {
