@@ -22,13 +22,7 @@ impl Client {
         let before = store
             .read("credentials.json", 32768)
             .map_err(|_| Error::Storage)?;
-        let credentials = Credentials::open(store.clone(), budget)?;
-        let after = store
-            .read("credentials.json", 32768)
-            .map_err(|_| Error::Storage)?;
-        if credentials::changed_to_signed_out(before.as_deref(), after.as_deref()) {
-            return Err(Error::AccountChanged);
-        }
+        let credentials = acquire_for_connect(store.clone(), budget, before.as_deref())?;
         let trust = TrustStore::native().map_err(|_| Error::Trust)?;
         let tokens = match credentials.load()? {
             Some(tokens) if fresh(&tokens)? => tokens,
@@ -55,15 +49,16 @@ impl Client {
     }
 
     pub fn logout(budget: &Budget<'_>) -> Result<(), Error> {
-        Credentials::open(Store::user().map_err(|_| Error::Storage)?, budget)?.logout()
+        Self::logout_in(Store::user().map_err(|_| Error::Storage)?, budget)
     }
 
-    pub(super) fn ensure_access(
-        &mut self,
-        budget: &Budget<'_>,
-    ) -> Result<Option<Credentials>, Error> {
+    pub(super) fn logout_in(store: Store, budget: &Budget<'_>) -> Result<(), Error> {
+        Credentials::open(store, budget)?.logout()
+    }
+
+    pub(super) fn ensure_access(&mut self, budget: &Budget<'_>) -> Result<(), Error> {
         let Some(store) = &self.store else {
-            return Ok(None);
+            return Ok(());
         };
         let credentials = Credentials::open(store.clone(), budget)?;
         let tokens = credentials.load()?.ok_or(Error::AccountChanged)?;
@@ -75,8 +70,23 @@ impl Client {
         } else {
             refresh(&tokens, &credentials, &self.trust, budget)?
         };
-        Ok(Some(credentials))
+        Ok(())
     }
+}
+
+pub(super) fn acquire_for_connect(
+    store: Store,
+    budget: &Budget<'_>,
+    before: Option<&str>,
+) -> Result<Credentials, Error> {
+    let credentials = Credentials::open(store.clone(), budget)?;
+    let after = store
+        .read("credentials.json", 32768)
+        .map_err(|_| Error::Storage)?;
+    if credentials::changed_to_signed_out(before, after.as_deref()) {
+        return Err(Error::AccountChanged);
+    }
+    Ok(credentials)
 }
 
 fn same_sign_in(first: &auth::Tokens, second: &auth::Tokens) -> bool {

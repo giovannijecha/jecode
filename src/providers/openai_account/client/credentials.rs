@@ -1,4 +1,4 @@
-//! One lease orders refresh, active requests and local logout across instances.
+//! The lease orders credential checks and mutations, not model responses.
 use super::{Error, auth};
 use crate::{
     state::{Lease, Store},
@@ -14,7 +14,13 @@ impl Credentials {
         budget.check()?;
         let lock = store
             .lock("credentials.lock", budget.cancelled, budget.deadline)
-            .map_err(|_| Error::Storage)?;
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::Interrupted => {
+                    Error::Network(crate::tls::NetworkError::Cancelled)
+                }
+                _ => Error::Storage,
+            })?;
+        budget.check()?;
         Ok(Self { store, _lock: lock })
     }
 

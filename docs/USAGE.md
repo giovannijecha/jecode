@@ -7,8 +7,14 @@ run displays an OpenAI device sign-in URL and code. Jecode saves the resulting
 account credentials and reuses them. Access refresh is serialized across local
 instances. If a refresh is interrupted with an uncertain result, sign in again;
 the old rotating token is not retried automatically.
-Active account requests also hold the local credential lease. A logout in another
-instance may ask you to stop active work there and retry after it finishes.
+Credential checks and mutations use the local lease; model generation releases it
+before network I/O so separate instances can work concurrently. Once a request
+passes its final local credential check, it may still be sent or finish after
+another instance logs out. Local logout removes saved access but cannot revoke
+a remote provider session. New requests recheck the saved account and reject
+an obsolete client.
+An in-progress login or refresh can still require another instance to wait for
+the credential lease or retry after its deadline.
 
 `--model gpt-5.6-luna` or `--model gpt-5.6-terra` overrides the configured model
 for a new session. Both currently use medium effort. `--workspace PATH` selects

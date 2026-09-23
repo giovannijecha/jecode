@@ -242,6 +242,9 @@ pub(super) fn run(
                 );
                 metrics.elapsed_ms = millis(started);
                 let end = result.map_or_else(End::Failed, |()| End::Complete);
+                if end.needs_login() {
+                    signed_in = false;
+                }
                 let _ = context.send(Event::Finished(end, metrics), false);
                 if end != End::Complete {
                     super::queue::return_pending(&context);

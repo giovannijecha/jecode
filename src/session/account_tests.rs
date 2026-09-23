@@ -298,3 +298,129 @@ fn account_codes_and_transitions_never_enter_request_or_saved_history() {
         assert!(!saved.contains(forbidden));
     }
 }
+
+#[test]
+fn compaction_auth_failures_require_real_relogin_before_explicit_work() {
+    struct Recovering {
+        observed: Arc<Observed>,
+        lost: client::Error,
+    }
+    impl worker::Backend for Recovering {
+        fn login(
+            &mut self,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        ) -> Result<(), client::Error> {
+            self.observed.logins.fetch_add(1, Ordering::AcqRel);
+            Ok(())
+        }
+        fn generate(
+            &mut self,
+            request: &Request,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+        ) -> Result<Response, client::Error> {
+            self.observed
+                .requests
+                .lock()
+                .unwrap()
+                .push(request.encode(2 * 1024 * 1024)?);
+            if self.observed.logins.load(Ordering::Acquire) == 1 {
+                Err(self.lost)
+            } else {
+                Ok(tests::response(
+                    "restored account answer",
+                    crate::providers::openai_account::Status::Completed,
+                ))
+            }
+        }
+    }
+    for lost in [
+        client::Error::AccountChanged,
+        client::Error::Expired,
+        client::Error::Login(crate::providers::openai_account::auth::Error::Denied),
+    ] {
+        let home = crate::state::tests::Fixture::new();
+        let Some(store) = home.store() else {
+            return;
+        };
+        let mut history = persistence::create_in(&store, Model::Luna, Some(&home.0), None).unwrap();
+        let id = history.record.as_ref().unwrap().id().to_owned();
+        for n in 0..3 {
+            history.begin(format!("completed prompt {n}")).unwrap();
+            let turn = history.turns.last_mut().unwrap();
+            turn.end = Some(End::Complete);
+            turn.outcome = "Complete".into();
+            history.checkpoint().unwrap();
+        }
+        let observed = Arc::new(Observed::default());
+        let mut run = Session::with_history(
+            Model::Luna,
+            Recovering {
+                observed: Arc::clone(&observed),
+                lost,
+            },
+            None,
+            history,
+        )
+        .unwrap();
+        assert!(matches!(next(&mut run), Event::Restored { turns: 3, .. }));
+        assert!(matches!(next(&mut run), Event::Ready));
+        assert!(run.compact());
+        loop {
+            if let Event::Finished(end, _) = next(&mut run) {
+                assert_eq!(end, End::Failed(Failure::Account(lost)));
+                break;
+            }
+        }
+        assert!(run.signed_out());
+        let snapshot = store
+            .directory("sessions")
+            .unwrap()
+            .read(&format!("{id}.json"), 16 * 1024 * 1024)
+            .unwrap()
+            .unwrap();
+        let snapshot = crate::json::parse(&snapshot, Default::default()).unwrap();
+        assert_eq!(snapshot.get("history").unwrap().array().unwrap().len(), 3);
+        assert_eq!(
+            snapshot.get("projection").unwrap().get("failed"),
+            Some(&crate::json::Value::Bool(true))
+        );
+        assert!(!run.submit("draft kept while signed out"));
+        assert_eq!(observed.requests.lock().unwrap().len(), 1);
+        assert!(run.login());
+        assert!(matches!(next(&mut run), Event::Ready));
+        assert_eq!(observed.logins.load(Ordering::Acquire), 2);
+        assert_eq!(
+            observed.requests.lock().unwrap().len(),
+            1,
+            "failed compaction and draft must not run after login"
+        );
+        assert!(run.submit("explicit work after login"));
+        loop {
+            if let Event::Finished(end, _) = next(&mut run) {
+                assert_eq!(end, End::Complete);
+                break;
+            }
+        }
+        let requests = observed.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].contains("explicit work after login"));
+        assert!(!requests[1].contains("draft kept while signed out"));
+        drop(requests);
+        drop(run);
+        let saved = store
+            .directory("sessions")
+            .unwrap()
+            .read(&format!("{id}.json"), 16 * 1024 * 1024)
+            .unwrap()
+            .unwrap();
+        let snapshot = crate::json::parse(&saved, Default::default()).unwrap();
+        assert_eq!(snapshot.get("history").unwrap().array().unwrap().len(), 4);
+        for n in 0..3 {
+            assert!(saved.contains(&format!("completed prompt {n}")));
+        }
+        assert!(saved.contains("explicit work after login"));
+        assert!(!saved.contains("draft kept while signed out"));
+    }
+}
