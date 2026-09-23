@@ -157,7 +157,33 @@ The current limits are 256 turns, 16 MiB per session snapshot and 8 KiB per mess
 
 ## Input and context
 
-Enter sends the draft. During generation it queues guidance; up to eight messages
+Enter sends the draft. Ctrl+O inserts a newline; Ctrl+J also works when the
+terminal delivers it separately from Enter. Windows console key records also
+distinguish Shift+Enter and Ctrl+Enter. Some terminals intercept modified keys or
+send the same code for two shortcuts; Ctrl+O is the newline fallback. Bracketed
+paste keeps line breaks, indentation, tabs and Unicode. CRLF and lone CR become LF.
+Pasted slash-prefixed text remains a prompt, not a local command. An insertion or
+paste that would exceed 8 KiB is rejected in full with a message inside the
+composer; the prior draft stays editable. A rejected submission also keeps the
+draft.
+
+Left/Right move by display-safe text units. Ctrl+Left/Right move by words when
+delivered; VT terminals can also use Alt+B/F. Ctrl+Backspace/Delete delete a word
+where distinguishable, and Ctrl+W deletes the previous word. In terminals that
+send ordinary Backspace for Ctrl+Backspace, use Ctrl+W or VT Alt+Backspace.
+Home/End move to the start/end of the current logical line; Ctrl+A/E do the same.
+Ctrl+Home/End move to the start/end of the whole draft where delivered. Up/Down
+move through visual rows of a multiline or wrapped draft. On a single visual row, Up recalls a user
+prompt and Down returns toward the current draft. With no menu open, Page Up/Down
+browse prompt history even with a multiline draft; Ctrl+P/N are alternatives if the
+terminal takes the Page keys. The unsent draft and its cursor are
+restored after the newest entry. Up to 64 recent user prompts are recalled from
+the current session's canonical turns on resume. Local commands, login codes,
+intraturn guidance and provider output are excluded. Guidance that starts a new
+canonical turn is available for recall. Recalled prompts remain
+editable and never send automatically.
+
+During generation Enter queues guidance; up to eight messages
 can wait for delivery. Guidance is inserted at a boundary between model/tool
 steps. If a turn has just finished, it starts the next turn. It never grants an
 approval. On cancellation, unsent queued messages are shown as not sent. A queue

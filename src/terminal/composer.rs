@@ -1,5 +1,7 @@
 //! Editable input and local controls within one pair of rules; metadata lives below.
 use super::{
+    editor::Editor,
+    editor_visual::Visual,
     model::Model,
     style::{Row, Tone},
     text,
@@ -102,10 +104,11 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
     let available = capacity.min(height / 2).min(16);
     let menu = model.menu.active(&model.editor.text) && model.account.is_some();
     let queued = model.account.as_ref().is_some_and(|view| view.queued > 0);
-    let notice = model
-        .account
-        .as_ref()
-        .is_some_and(|view| !view.local_notice.is_empty());
+    let notice = !model.edit_notice.is_empty()
+        || model
+            .account
+            .as_ref()
+            .is_some_and(|view| !view.local_notice.is_empty());
     let feedback = usize::from(queued) + usize::from(notice);
     let menu_height = available.saturating_sub(feedback.min(available.saturating_sub(1)));
     let mut body = if menu {
@@ -132,6 +135,8 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
                 },
             ));
         }
+    } else if !model.edit_notice.is_empty() && body.len() < available {
+        body.push(clipped(model.edit_notice, width, Tone::Error));
     }
     let rule = "─".repeat(width);
     let mut rows = vec![Row::new(&rule, Tone::Accent)];
@@ -144,54 +149,30 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
     rows
 }
 
-fn input(editor: &text::Editor, width: usize, height: usize, menu: bool, filter: bool) -> Vec<Row> {
-    let available = width - 2;
-    let mut parts = vec![String::new()];
-    let mut used = 0;
-    let mut cursor = (0, 0);
-    let boundaries = text::boundaries(&editor.text);
-    for (index, end) in boundaries
-        .iter()
-        .copied()
-        .zip(boundaries.iter().copied().skip(1).map(Some).chain([None]))
-    {
-        if index == editor.cursor {
-            if used == available {
-                parts.push(String::new());
-                used = 0;
-            }
-            cursor = (parts.len() - 1, parts.last().unwrap().len());
-            parts.last_mut().unwrap().push(' ');
-            used += 1;
-        }
-        if let Some(end) = end {
-            let unit = &editor.text[index..end];
-            let shown = if text::width(unit) > available {
-                "..."
-            } else {
-                unit
-            };
-            let size = text::width(shown);
-            if used + size > available {
-                parts.push(String::new());
-                used = 0;
-            }
-            parts.last_mut().unwrap().push_str(shown);
-            used += size;
-        }
-    }
-    let start = cursor.0.saturating_sub(height - 1);
-    parts
+fn input(editor: &Editor, width: usize, height: usize, menu: bool, filter: bool) -> Vec<Row> {
+    let available = width.saturating_sub(2).max(1);
+    // Reserve one cell for the insertion caret so moving it never changes wrapping.
+    let layout = Visual::new(&editor.text, available.saturating_sub(1).max(1));
+    let cursor = layout.stop(editor.cursor);
+    let start = cursor.row.saturating_sub(height - 1);
+    layout
+        .rows
         .into_iter()
         .enumerate()
         .skip(start)
         .take(height)
-        .map(|(index, text)| {
+        .map(|(index, mut shown)| {
             let prefix = if index == 0 && !menu { "› " } else { "  " };
-            let mut row = Row::new(format!("{prefix}{text}"), Tone::Text);
-            if index == cursor.0 {
-                let position = prefix.len() + cursor.1;
-                row.spans.push((position..position + 1, Tone::Cursor));
+            let cursor_span = if index == cursor.row {
+                let position = cursor.byte.min(shown.len());
+                shown.insert(position, ' ');
+                Some(prefix.len() + position..prefix.len() + position + 1)
+            } else {
+                None
+            };
+            let mut row = Row::new(format!("{prefix}{shown}"), Tone::Text);
+            if let Some(span) = cursor_span {
+                row.spans.push((span, Tone::Cursor));
             }
             if editor.text.is_empty() {
                 row.text.push_str(if filter {

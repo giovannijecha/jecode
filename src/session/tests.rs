@@ -153,6 +153,31 @@ fn unavailable_saved_pair_blocks_send_until_an_idle_replacement_is_applied() {
 pub(crate) fn ready_fixture() -> Session {
     start(false, false).0
 }
+
+#[test]
+fn prompt_recall_seeds_from_canonical_user_turns_only_and_stays_bounded() {
+    let mut history = history::History::default();
+    for index in 0..70 {
+        history.begin(format!("user {index}")).unwrap();
+    }
+    history.turns[69].guidance.push(queue::Guidance {
+        after_step: 0,
+        text: "queued guidance".into(),
+    });
+    let backend = Fixture {
+        observed: Arc::new(Observed::default()),
+        fail_first: false,
+        flood: false,
+        catalog: None,
+    };
+    let mut session = Session::with_history(Model::Luna, backend, None, history).unwrap();
+    let prompts = session.take_initial_prompts();
+    assert_eq!(prompts.len(), 64);
+    assert_eq!(prompts.first().unwrap(), "user 6");
+    assert_eq!(prompts.last().unwrap(), "user 69");
+    assert!(!prompts.iter().any(|prompt| prompt.contains("guidance")));
+    assert!(session.take_initial_prompts().is_empty());
+}
 pub(crate) fn ready_fixture_with_catalog(
     catalog: crate::providers::openai_account::catalog::Catalog,
 ) -> Session {

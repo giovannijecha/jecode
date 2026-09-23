@@ -320,3 +320,49 @@ fn real_windows_resize_keeps_one_composer() {
     );
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn real_windows_composer_preserves_bracketed_multiline_paste_and_newline_key() {
+    let root = std::env::current_dir().unwrap().join("target");
+    std::fs::create_dir_all(&root).unwrap();
+    let directory = root.join(format!("conpty-editor-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let mut console = conpty::Console::start(&directory);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !console.output().contains("Local demo") {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let mut counter = 0;
+    console
+        .input
+        .write_all("\x1b[200~alpha\r\n  beta\tcafé\x1b[201~".as_bytes())
+        .unwrap();
+    let screen = wait_for(&directory, &mut counter, "café");
+    assert!(screen.contains("› alpha"), "{screen}");
+    assert!(screen.contains("beta  café"), "{screen}");
+    assert!(!screen.contains("Streaming locally"), "{screen}");
+    console.input.write_all(b"\x0fmore").unwrap();
+    let screen = wait_for(&directory, &mut counter, "more");
+    assert!(!screen.contains("Streaming locally"), "{screen}");
+    console.resize(35, 12);
+    std::thread::sleep(Duration::from_millis(180));
+    let screen = snapshot(&directory, &mut counter);
+    assert_eq!(
+        screen.lines().filter(|row| row.contains('─')).count(),
+        2,
+        "{screen}"
+    );
+    console.input.write_all(b"\r").unwrap();
+    let screen = wait_for(&directory, &mut counter, "Your draft stays available");
+    assert!(screen.contains("Ask anything"), "{screen}");
+    console.input.write_all(&[17]).unwrap();
+    drop(console);
+    assert!(
+        directory
+            .canonicalize()
+            .unwrap()
+            .starts_with(root.canonicalize().unwrap())
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}

@@ -30,13 +30,17 @@ use std::time::Duration;
 
 #[test]
 fn editor_preserves_unicode_sequences_and_limits_input() {
-    let mut editor = text::Editor::default();
+    let mut editor = editor::Editor::default();
     for sample in ["e\u{301}", "👩‍💻", "🇮🇹", "क्‍ष", "中文", "\u{600}a"] {
         editor.insert(sample);
         assert_eq!(editor.text, sample);
-        editor.left();
+        while editor.cursor > 0 {
+            editor.left();
+        }
         assert_eq!(editor.cursor, 0);
-        editor.delete();
+        while !editor.text.is_empty() {
+            editor.delete();
+        }
         assert_eq!(editor.text, "");
     }
     editor.insert("one two");
@@ -49,7 +53,7 @@ fn editor_preserves_unicode_sequences_and_limits_input() {
     assert_eq!(editor.text, "one txo");
     editor.take();
     editor.insert("a\x1b[2J\r\n\u{202e}b");
-    assert!(!editor.text.contains(['\x1b', '\r', '\n', '\u{202e}']));
+    assert_eq!(editor.text, "a?[2J\n?b");
 }
 
 #[test]
@@ -141,7 +145,7 @@ fn vt_input_survives_utf8_escape_and_paste_fragmentation() {
             Key::Text("a".into()),
             Key::Text("é".into()),
             Key::Left,
-            Key::Text("paste\n\x03\x11👩‍💻".into()),
+            Key::Paste("paste\n\x03\x11👩‍💻".into()),
             Key::Enter
         ]
     );
@@ -165,14 +169,23 @@ fn paste_budget_and_control_bytes_cannot_submit_or_exit() {
     assert!(decoder.push(&vec![b'x'; 9000], now).is_empty());
     assert!(decoder.push(b"\r\n\x03\x11", now).is_empty());
     let keys = decoder.push(b"\x1b[201~", now);
-    assert_eq!(keys, vec![Key::Text("x".repeat(8192))]);
+    assert_eq!(
+        keys,
+        vec![Key::PasteRejected("Paste exceeds 8 KiB / draft kept")]
+    );
     let mut model = model::Model::new(now);
+    model.editor.insert("keep me");
     for key in keys {
         model.input(key, now);
     }
     assert!(!model.quit);
     assert!(!model.streaming());
-    assert_eq!(model.editor.text.len(), 8192);
+    assert_eq!(model.editor.text, "keep me");
+    assert!(
+        view::chrome(&model, 80, 24)
+            .iter()
+            .any(|row| row.text.contains("Paste exceeds 8 KiB"))
+    );
 }
 
 #[test]

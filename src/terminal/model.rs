@@ -1,4 +1,4 @@
-use super::{Key, spinner::Spinner, text::Editor};
+use super::{Key, editor::Editor, spinner::Spinner};
 use std::time::{Duration, Instant};
 
 pub struct Block {
@@ -9,12 +9,14 @@ pub struct Model {
     pub editor: Editor,
     pub blocks: Vec<Block>,
     pub status: &'static str,
+    pub edit_notice: &'static str,
     pub quit: bool,
     pub account: Option<super::account::View>,
     pub tools: super::tool_activity::Activity,
     pub status_spinner: Spinner,
     pub action_demo: Option<super::action_demo::Demo>,
     pub menu: super::menu::Menu,
+    pub prompt_history: super::prompt_history::PromptHistory,
     pub navigation: Option<super::navigation::Request>,
     tool_demo: Option<super::tool_demo::Demo>,
     pending: String,
@@ -32,12 +34,14 @@ impl Model {
                 text: "All activity is simulated; no files or commands are used.\nTry `/code`, `/long`, `/error`, `/tools`, `/tools-error`, `/edit`, `/command` or `/command-error`.".into(),
             }],
             status: "Ready",
+            edit_notice: "",
             quit: false,
             account: None,
             tools: super::tool_activity::Activity::default(),
             status_spinner,
             action_demo: None,
             menu: super::menu::Menu::default(),
+            prompt_history: super::prompt_history::PromptHistory::default(),
             navigation: None,
             tool_demo: None,
             pending: String::new(),
@@ -62,14 +66,49 @@ impl Model {
             return;
         }
         match key {
-            Key::Text(text) => self.editor.insert(&text),
+            Key::Text(text) => self.insert(&text),
+            Key::Paste(text) => {
+                let literal = self.editor.cursor == 0 && text.starts_with('/');
+                if self.editor.insert(&text) {
+                    self.menu.pasted_literal |= literal;
+                    self.edit_notice = "";
+                } else {
+                    self.edit_error("Input exceeds 8 KiB / draft kept");
+                }
+            }
+            Key::PasteRejected(message) => self.edit_error(message),
+            Key::Newline => self.insert("\n"),
             Key::Left => self.editor.left(),
             Key::Right => self.editor.right(),
-            Key::Home => self.editor.cursor = 0,
-            Key::End => self.editor.cursor = self.editor.text.len(),
+            Key::WordLeft => self.editor.word_left(),
+            Key::WordRight => self.editor.word_right(),
+            Key::Home => self.editor.home(),
+            Key::End => self.editor.end(),
+            Key::DraftStart => self.editor.draft_start(),
+            Key::DraftEnd => self.editor.draft_end(),
             Key::Backspace => self.editor.backspace(),
             Key::Delete => self.editor.delete(),
-            Key::PageUp | Key::PageDown | Key::Tab | Key::Up | Key::Down => {}
+            Key::WordBackspace => self.editor.word_backspace(),
+            Key::WordDelete => self.editor.word_delete(),
+            Key::Up => {
+                if !self.editor.vertical(false) && !self.editor.has_visual_lines() {
+                    self.prompt_history
+                        .previous(&mut self.editor, &mut self.menu.pasted_literal);
+                }
+            }
+            Key::Down => {
+                if !self.editor.vertical(true) && !self.editor.has_visual_lines() {
+                    self.prompt_history
+                        .next(&mut self.editor, &mut self.menu.pasted_literal);
+                }
+            }
+            Key::PageUp | Key::HistoryPrevious => self
+                .prompt_history
+                .previous(&mut self.editor, &mut self.menu.pasted_literal),
+            Key::PageDown | Key::HistoryNext => self
+                .prompt_history
+                .next(&mut self.editor, &mut self.menu.pasted_literal),
+            Key::Tab => {}
             Key::Quit => self.quit = true,
             Key::Escape | Key::Interrupt if self.streaming() => {
                 self.pending.clear();
@@ -80,10 +119,27 @@ impl Model {
             Key::Interrupt if self.editor.text.is_empty() => self.quit = true,
             Key::Interrupt => {
                 self.editor.take();
+                self.menu.pasted_literal = false;
+                self.edit_notice = "";
             }
             Key::Enter if self.streaming() => self.status = "Streaming - draft kept; Esc stops",
             Key::Enter => self.submit(now),
             Key::Escape => {}
+        }
+    }
+    fn insert(&mut self, text: &str) {
+        if !self.editor.insert(text) {
+            self.edit_error("Input exceeds 8 KiB / draft kept");
+        } else {
+            self.edit_notice = "";
+        }
+    }
+    fn edit_error(&mut self, message: &'static str) {
+        if let Some(view) = &mut self.account {
+            view.local_notice = message.into();
+            view.local_failed = true;
+        } else {
+            self.edit_notice = message;
         }
     }
     fn submit(&mut self, now: Instant) {
@@ -103,6 +159,9 @@ impl Model {
             return;
         }
         let prompt = self.editor.take();
+        self.edit_notice = "";
+        self.prompt_history.record(&prompt);
+        self.menu.pasted_literal = false;
         let response = match prompt.trim() {
             "/long" => (1..=28)
                 .map(|n| format!("{n:02}. A useful harness keeps the task visible, streams progress and makes every effect explicit. Resize the window or use the terminal scrollback while this text arrives.\n\n"))
