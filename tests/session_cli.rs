@@ -145,6 +145,7 @@ fn session_cards_are_ordered_readable_and_browsing_is_non_mutating() {
     };
     fields.insert("id".into(), jecode::json::Value::String(legacy_id.into()));
     fields.insert("workspace".into(), jecode::json::Value::Null);
+    fields.remove("directory");
     fields.insert(
         "file_access".into(),
         jecode::json::Value::String("workspace".into()),
