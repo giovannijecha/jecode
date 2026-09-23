@@ -157,7 +157,11 @@ impl Catalog {
     }
 
     pub fn fresh(&self) -> bool {
-        self.fetched_at.elapsed() < Duration::from_secs(300)
+        self.fresh_at(Instant::now())
+    }
+
+    fn fresh_at(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.fetched_at) < Duration::from_secs(300)
     }
 
     pub fn entry(&self, id: &str) -> Option<&Entry> {
@@ -226,9 +230,9 @@ mod tests {
 
     #[test]
     fn stale_catalog_is_not_fresh_capability_evidence() {
-        let mut catalog = Catalog::parse(br#"{"models":[{"slug":"model-a","visibility":"list","supported_reasoning_levels":[{"effort":"low"}]}]}"#).unwrap();
+        let catalog = Catalog::parse(br#"{"models":[{"slug":"model-a","visibility":"list","supported_reasoning_levels":[{"effort":"low"}]}]}"#).unwrap();
         assert!(catalog.fresh());
-        catalog.fetched_at = Instant::now() - Duration::from_secs(301);
-        assert!(!catalog.fresh());
+        assert!(catalog.fresh_at(catalog.fetched_at + Duration::from_secs(299)));
+        assert!(!catalog.fresh_at(catalog.fetched_at + Duration::from_secs(301)));
     }
 }
