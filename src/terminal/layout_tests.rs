@@ -198,7 +198,7 @@ fn command_denied_before_output_has_one_gap_before_its_outcome() {
 }
 
 #[test]
-fn status_and_approval_stay_inside_the_composer_without_losing_small_window_controls() {
+fn runtime_activity_is_above_the_composer_and_approval_stays_inside_at_small_sizes() {
     let now = Instant::now();
     for prompt in ["/edit", "/command", "/tools"] {
         let mut model = Model::new(now);
@@ -209,13 +209,32 @@ fn status_and_approval_stay_inside_the_composer_without_losing_small_window_cont
             let rows = super::view::chrome(&model, size.0, size.1);
             assert!(rows.len() < size.1);
             let rule = rows.iter().position(|r| r.text.starts_with('─')).unwrap();
-            assert_eq!(rule, 0, "all transient controls belong inside the composer");
-            assert!(!rows[rule + 1].text.is_empty(), "{prompt}: {rows:?}");
             let bottom = rows.iter().rposition(|r| r.text.starts_with('─')).unwrap();
             assert_eq!(rows.len() - bottom - 1, 1, "{rows:?}");
-            if prompt != "/tools" {
+            if prompt == "/tools" {
+                assert!(rule > 0, "activity missing above input: {rows:?}");
                 assert!(
-                    rows[..bottom]
+                    rows[..rule]
+                        .iter()
+                        .any(|r| r.text.contains("Exploring workspace"))
+                );
+                assert!(
+                    rows[rule + 1..bottom]
+                        .iter()
+                        .all(|r| !r.text.contains("Exploring workspace"))
+                );
+                assert!(
+                    rows[rule + 1..bottom]
+                        .iter()
+                        .any(|r| r.text.contains("Ask anything"))
+                );
+            } else {
+                assert_eq!(
+                    rule, 0,
+                    "pending approval has no running activity: {rows:?}"
+                );
+                assert!(
+                    rows[rule + 1..bottom]
                         .iter()
                         .any(|r| r.text.contains("Enter confirm"))
                 );

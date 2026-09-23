@@ -131,6 +131,97 @@ fn drag_updates_only_composer_then_flushes_source_once_after_settling() {
 }
 
 #[test]
+fn account_activity_updates_through_chrome_only_resizes_without_replaying_history() {
+    use super::{account, view};
+    use crate::session::{self, End, Event, Metrics};
+    let mut model = account::model(session::Model::Luna, None);
+    account::event(&mut model, Event::Ready);
+    let mut session = session::tests::ready_fixture();
+    account::input(
+        &mut model,
+        Key::Text("Inspect fixture".into()),
+        &mut session,
+    );
+    account::input(&mut model, Key::Enter, &mut session);
+    model.editor.insert("draft-kept");
+    let mut layout = Layout::default();
+    let mut renderer = Renderer::default();
+    let mut terminal = vt::Screen::new(100, 30);
+    terminal.feed(&renderer.draw(layout.frame(&model, 100, 30), (100, 30), false));
+    let events = [
+        (Event::RequestStarted, "Waiting for model", (80, 30)),
+        (Event::Thinking, "Thinking", (55, 24)),
+        (
+            Event::ToolStarted {
+                name: "read_file",
+                path: "src/main.rs".into(),
+            },
+            "Exploring workspace",
+            (100, 30),
+        ),
+        (
+            Event::ToolFinished {
+                summary: "12 lines".into(),
+                failed: false,
+                limited: false,
+            },
+            "Exploring workspace",
+            (60, 24),
+        ),
+        (Event::RequestStarted, "Exploring workspace", (90, 30)),
+        (Event::Thinking, "Exploring workspace", (55, 24)),
+    ];
+    for (event, activity, size) in events {
+        account::event(&mut model, event);
+        terminal.resize(size.0, size.1);
+        let frame = renderer.with_chrome(view::chrome(&model, size.0, size.1));
+        let upper = frame.iter().position(|r| r.text.starts_with('─')).unwrap();
+        assert!(frame[..upper].iter().any(|r| r.text.contains(activity)));
+        assert!(
+            frame[upper + 1..]
+                .iter()
+                .all(|r| !r.text.contains(activity))
+        );
+        let output = renderer.draw(frame, size, false);
+        assert!(
+            !output.contains("Inspect fixture"),
+            "transcript replayed: {output}"
+        );
+        terminal.feed(&output);
+        let shown = terminal.text();
+        assert_eq!(shown.matches("Inspect fixture").count(), 1, "{shown}");
+        assert_eq!(shown.matches(activity).count(), 1, "{shown}");
+        assert_eq!(shown.matches("draft-kept").count(), 1, "{shown}");
+    }
+    account::event(
+        &mut model,
+        Event::Text("The file has one entry point.".into()),
+    );
+    account::event(
+        &mut model,
+        Event::Finished(End::Complete, Metrics::default()),
+    );
+    for size in [(100, 30), (55, 24), (90, 30)] {
+        terminal.resize(size.0, size.1);
+        let frame = layout.frame(&model, size.0, size.1);
+        terminal.feed(&renderer.draw(frame, size, false));
+        let shown = terminal.text();
+        for text in ["Inspect fixture", "Explored workspace", "draft-kept"] {
+            assert_eq!(shown.matches(text).count(), 1, "{shown}");
+        }
+        assert!(!shown.contains("Exploring workspace"), "{shown}");
+        assert!(!shown.contains("Thinking"), "{shown}");
+        assert_eq!(shown.lines().filter(|line| line.contains('─')).count(), 2);
+    }
+    assert!(
+        model
+            .blocks
+            .iter()
+            .any(|block| block.text.contains("12 lines"))
+    );
+}
+
+#[test]
 fn streaming_continues_through_reflow_without_replaying_completed_text() {
     use std::time::{Duration, Instant};
     let now = Instant::now();

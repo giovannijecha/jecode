@@ -14,9 +14,13 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
     if matches!(key, Key::Text(_) | Key::Backspace | Key::Delete) {
         if (model.menu.active(&model.editor.text)
             || matches!(key, Key::Text(text) if model.editor.text.is_empty() && text.starts_with('/')))
-            && let Some(view) = model.account.as_mut().filter(|view| view.ready())
+            && let Some(view) = model.account.as_mut()
         {
-            view.notice.clear();
+            view.local_notice.clear();
+            view.local_failed = false;
+            if view.ready() {
+                view.notice.clear();
+            }
         }
         model.menu.selected = 0;
         model.menu.hidden = false;
@@ -32,7 +36,12 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
                 }
                 model.menu.close();
                 if session.ready() {
-                    model.account.as_mut().unwrap().notice.clear();
+                    let view = model.account.as_mut().unwrap();
+                    view.local_notice.clear();
+                    view.local_failed = false;
+                    if view.ready() {
+                        view.notice.clear();
+                    }
                 }
                 return true;
             }
@@ -81,7 +90,10 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
         notice(model, "Wait for the current operation · Esc stops");
         return;
     }
-    model.account.as_mut().unwrap().notice.clear();
+    let view = model.account.as_mut().unwrap();
+    view.notice.clear();
+    view.local_notice.clear();
+    view.local_failed = false;
     let done = match action {
         Action::New => {
             model.navigation = Some(Request::New);
@@ -193,6 +205,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
 }
 fn notice(model: &mut Model, text: &str) {
     if let Some(view) = &mut model.account {
-        view.notice = text.into();
+        view.local_notice = text.into();
+        view.local_failed = false;
     }
 }

@@ -75,6 +75,19 @@ fn wait_for(directory: &Path, counter: &mut usize, text: &str) -> String {
     }
 }
 
+fn above_composer(screen: &str, text: &str) {
+    let rows: Vec<_> = screen.lines().collect();
+    let rules: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.contains('─'))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(rules.len(), 2, "{screen}");
+    let at = rows.iter().position(|row| row.contains(text)).unwrap();
+    assert!(at < rules[0], "{text} entered the composer: {screen}");
+}
+
 fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mut usize) {
     console.input.write_all(b"/edit\r").unwrap();
     let screen = wait_for(directory, counter, "Apply this change?");
@@ -105,6 +118,7 @@ fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mu
     wait_for(directory, counter, "Run this command?");
     console.input.write_all(b"\x1b[C\r").unwrap();
     let screen = wait_for(directory, counter, "running 2 tests");
+    above_composer(&screen, "Running command");
     assert!(!screen.contains("Simulated command complete"), "{screen}");
     console.resize(55, 24);
     std::thread::sleep(Duration::from_millis(150));
@@ -183,6 +197,7 @@ fn real_windows_resize_keeps_one_composer() {
         std::thread::sleep(Duration::from_millis(150));
         let screen = snapshot(&directory, &mut counter);
         assert_eq!(screen.matches("Exploring workspace").count(), 1, "{screen}");
+        above_composer(&screen, "Exploring workspace");
         assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
         let header = screen
             .lines()
