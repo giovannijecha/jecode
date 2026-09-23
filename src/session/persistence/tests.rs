@@ -49,6 +49,83 @@ fn changing_model_survives_resume_without_rewriting_canonical_turns() {
 }
 
 #[test]
+fn legacy_unknown_model_opens_without_rewrite_and_preserves_extra_fields() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let history = create(&store, Model::Luna, None).unwrap();
+    let id = history.record.as_ref().unwrap().id.clone();
+    drop(history);
+    let sessions = store.directory("sessions").unwrap();
+    let name = format!("{id}.json");
+    let original = sessions.read(&name, LIMIT).unwrap().unwrap();
+    let mut value = json::parse(&original, Default::default()).unwrap();
+    let Value::Object(fields) = &mut value else {
+        unreachable!()
+    };
+    fields.remove("effort");
+    fields.insert("model".into(), Value::String("future-model".into()));
+    fields.insert(
+        "future_field".into(),
+        json::object([("keep", Value::Bool(true))]),
+    );
+    let legacy = json::encode(&value, LIMIT).unwrap();
+    sessions.replace(&name, &legacy).unwrap();
+    let mut saved = load(&store, &id, true).unwrap();
+    assert_eq!(saved.model.id(), "future-model");
+    assert_eq!(saved.model.effort(), Some("medium"));
+    assert_eq!(sessions.read(&name, LIMIT).unwrap().unwrap(), legacy);
+    let replacement = Model::new("new-model", Some("xhigh")).unwrap();
+    saved.history.set_model(replacement).unwrap();
+    drop(saved);
+    let value = json::parse(
+        &sessions.read(&name, LIMIT).unwrap().unwrap(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        value.get("future_field").and_then(|v| v.get("keep")),
+        Some(&Value::Bool(true))
+    );
+    let saved = load(&store, &id, true).unwrap();
+    assert_eq!(saved.model, replacement);
+}
+
+#[test]
+fn failed_pair_checkpoint_keeps_worker_footer_and_disk_on_prior_selection() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history = create(&store, Model::Luna, None).unwrap();
+    let id = history.record.as_ref().unwrap().id.clone();
+    let name = format!("{id}.json");
+    let sessions = store.directory("sessions").unwrap();
+    let before = sessions.read(&name, LIMIT).unwrap().unwrap();
+    // Encoding fails before replace; the worker must not acknowledge this pair.
+    history.projection.summary = "x".repeat(LIMIT);
+    let mut run = Session::with_history(
+        Model::Luna,
+        Backend(Arc::new(Mutex::new(Vec::new()))),
+        None,
+        history,
+    )
+    .unwrap();
+    assert!(matches!(
+        session::tests::next(&mut run),
+        Event::Restored { .. }
+    ));
+    assert!(matches!(session::tests::next(&mut run), Event::Ready));
+    let replacement = Model::new("other-model", Some("high")).unwrap();
+    assert!(run.set_model(replacement));
+    let event = session::tests::next(&mut run);
+    assert!(matches!(
+        event,
+        Event::Finished(End::Failed(Failure::Storage), _)
+    ));
+    assert_eq!(run.selected, Model::Luna);
+    assert_eq!(sessions.read(&name, LIMIT).unwrap().unwrap(), before);
+    assert!(!run.submit("must not send"));
+}
+
+#[test]
 fn older_joined_text_resumes_without_rewriting_saved_message_items() {
     let fixture = crate::state::tests::Fixture::new();
     let Some(store) = fixture.store() else { return };

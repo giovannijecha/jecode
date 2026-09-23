@@ -6,7 +6,7 @@ use std::{
     process::ExitCode,
 };
 
-const HELP: &str = "Jecode — owned coding harness\n\nUsage: jecode [--workspace PATH] [--model MODEL] [--access local|workspace]\n       jecode [--workspace PATH] resume [SESSION_ID]\n       jecode [--workspace PATH] sessions\n       jecode chat | login | logout\n\n  jecode        Start in the current directory with your saved account\n  login         Sign in without creating a conversation; Esc or Ctrl+C cancels\n  logout        Remove Jecode's locally saved account access\n  resume        Choose a saved conversation in this directory, or reopen SESSION_ID\n  sessions      List conversations in this directory\n  chat          Start a conversation without file tools, associated with this directory\n\n  --workspace PATH  Select another directory (also for chat, sessions and resume)\n  --model MODEL     gpt-5.6-luna (default) or gpt-5.6-terra; medium effort\n  --access PROFILE  local (default) or workspace, for file-tool sessions\n  --demo            Offline terminal preview\n  -h, --help        Show this help\n  -V, --version     Show the native version\n\nInside Jecode, type / for local commands including /login and /logout.\nFile changes and commands require approval. Commands run with your user permissions.\nCredentials, settings and sessions use ordinary JSON in ~/.jecode/v1/.\nResume never changes directories or replays historical tools.\nLegacy --account, --resume, --sessions and --logout remain supported.\n";
+const HELP: &str = "Jecode — owned coding harness\n\nUsage: jecode [--workspace PATH] [--model MODEL] [--effort LEVEL] [--access local|workspace]\n       jecode [--workspace PATH] resume [SESSION_ID]\n       jecode [--workspace PATH] sessions\n       jecode chat | login | logout\n\n  jecode        Start in the current directory with your saved account\n  login         Sign in without creating a conversation; Esc or Ctrl+C cancels\n  logout        Remove Jecode's locally saved account access\n  resume        Choose a saved conversation in this directory, or reopen SESSION_ID\n  sessions      List conversations in this directory\n  chat          Start a conversation without file tools, associated with this directory\n\n  --workspace PATH  Select another directory (also for chat, sessions and resume)\n  --model MODEL     Account model identifier for this new conversation\n  --effort LEVEL    Reasoning effort, or default to omit the provider field\n  --access PROFILE  local (default) or workspace, for file-tool sessions\n  --demo            Offline terminal preview\n  -h, --help        Show this help\n  -V, --version     Show the native version\n\nInside Jecode, type / for local commands including /login and /logout.\nFile changes and commands require approval. Commands run with your user permissions.\nCredentials, settings and sessions use ordinary JSON in ~/.jecode/v1/.\nResume never changes directories or replays historical tools.\nLegacy --account, --resume, --sessions and --logout remain supported.\n";
 
 enum Operation {
     Start,
@@ -24,12 +24,14 @@ struct Options {
     operation: Operation,
     workspace: Option<OsString>,
     model: Option<jecode::session::Model>,
+    effort: Option<Option<String>>,
     access: Option<jecode::workspace::Access>,
 }
 fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
     let mut operation = None;
     let mut workspace = None;
     let mut model = None;
+    let mut effort = None;
     let mut access = None;
     while let Some(argument) = args.next() {
         match argument.to_str()? {
@@ -41,10 +43,16 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
                 workspace = Some(value);
             }
             "--model" if model.is_none() => {
-                model = Some(match args.next()?.to_str()? {
-                    "gpt-5.6-luna" => jecode::session::Model::Luna,
-                    "gpt-5.6-terra" => jecode::session::Model::Terra,
-                    _ => return None,
+                model = Some(jecode::session::Model::new(args.next()?.to_str()?, None)?);
+            }
+            "--effort" if effort.is_none() => {
+                let value = args.next()?;
+                let value = value.to_str()?;
+                effort = Some(if value == "default" {
+                    None
+                } else {
+                    jecode::session::Model::new("probe", Some(value))?;
+                    Some(value.into())
                 });
             }
             "--access" if access.is_none() => {
@@ -71,10 +79,10 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
         }
     }
     let operation = operation.unwrap_or(Operation::Start);
-    if (model.is_some() || access.is_some())
+    if (model.is_some() || effort.is_some() || access.is_some())
         && !matches!(
             operation,
-            Operation::Start | Operation::Chat | Operation::LegacyAccount
+            Operation::Start | Operation::Chat | Operation::LegacyAccount | Operation::Resume(_)
         )
     {
         return None;
@@ -94,6 +102,9 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
     if access.is_some() && matches!(operation, Operation::Chat) {
         return None;
     }
+    if access.is_some() && matches!(operation, Operation::Resume(_)) {
+        return None;
+    }
     if access.is_some() && matches!(operation, Operation::LegacyAccount) && workspace.is_none() {
         return None;
     }
@@ -101,6 +112,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
         operation,
         workspace,
         model,
+        effort,
         access,
     })
 }
@@ -120,6 +132,7 @@ fn run(args: impl Iterator<Item = OsString>) -> io::Result<u8> {
         operation,
         workspace,
         model,
+        effort,
         access,
     } = options;
     match operation {
@@ -147,11 +160,16 @@ fn run(args: impl Iterator<Item = OsString>) -> io::Result<u8> {
                 None
             };
             terminal_result(
-                jecode::terminal::configured_account(model, directory, tools, access),
+                jecode::terminal::configured_account(model, effort, directory, tools, access),
                 "cannot start a session; check ~/.jecode/v1/settings.json and private user-directory permissions",
             )
         }
         Operation::Sessions | Operation::Resume(_) => {
+            if matches!(operation, Operation::Resume(_)) && (model.is_some() || effort.is_some()) {
+                return diagnostic(
+                    "resume uses its saved model and effort; omit --model and --effort",
+                );
+            }
             let directory = match selected_directory(workspace.as_deref()) {
                 Ok(directory) => directory,
                 Err(_) => {
@@ -294,5 +312,22 @@ mod tests {
         ));
         assert!(options(&["login", "--workspace", "folder"]).is_none());
         assert!(options(&["resume", "one", "two"]).is_none());
+    }
+    #[test]
+    fn model_and_effort_options_cover_chat_and_reject_resume_overrides() {
+        let selected = options(&["chat", "--model", "future-model", "--effort", "xhigh"]).unwrap();
+        assert!(matches!(selected.operation, Operation::Chat));
+        assert_eq!(selected.model.unwrap().id(), "future-model");
+        assert_eq!(selected.effort, Some(Some("xhigh".into())));
+        assert_eq!(
+            options(&["--effort", "default"]).unwrap().effort,
+            Some(None)
+        );
+        assert!(options(&["--model", "bad\nmodel"]).is_none());
+        assert!(options(&["--effort", ""]).is_none());
+        // Parsing retains the override long enough for `run` to issue a
+        // specific resume diagnostic instead of silently discarding it.
+        let resume = options(&["resume", "s-test", "--model", "future-model"]).unwrap();
+        assert!(matches!(resume.operation, Operation::Resume(_)));
     }
 }

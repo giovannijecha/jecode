@@ -32,6 +32,7 @@ enum Command {
     Inspect,
     Compact,
     Model(Model),
+    Catalog,
 }
 #[derive(PartialEq)]
 enum Phase {
@@ -56,6 +57,8 @@ pub struct Session {
     pending_approval: Option<u64>,
     guidance: SyncSender<String>,
     queued: usize,
+    catalog: Option<crate::providers::openai_account::catalog::Catalog>,
+    selected: Model,
 }
 impl Session {
     pub fn start(model: Model) -> io::Result<Self> {
@@ -167,6 +170,8 @@ impl Session {
             pending_approval: None,
             guidance: guidance_tx,
             queued: 0,
+            catalog: None,
+            selected: model,
         })
     }
     /// False leaves ownership of the draft with the caller; nothing was queued.
@@ -176,6 +181,14 @@ impl Session {
             || self.turns >= history::MAX_TURNS
             || prompt.trim().is_empty()
             || prompt.len() > 8192
+            || self
+                .catalog
+                .as_ref()
+                .filter(|catalog| catalog.fresh())
+                .is_some_and(|catalog| {
+                    catalog.support(self.selected)
+                        == crate::providers::openai_account::catalog::Support::Unsupported
+                })
         {
             return false;
         }
@@ -253,9 +266,41 @@ impl Session {
     pub fn ready(&self) -> bool {
         self.phase == Phase::Ready && self.queued == 0
     }
+    pub fn catalog(&self) -> Option<&crate::providers::openai_account::catalog::Catalog> {
+        self.catalog.as_ref()
+    }
+    pub fn selection_unavailable(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .filter(|catalog| catalog.fresh())
+            .is_some_and(|catalog| {
+                catalog.support(self.selected)
+                    == crate::providers::openai_account::catalog::Support::Unsupported
+            })
+    }
+    pub fn refresh_catalog(&mut self) -> bool {
+        if self.ready() {
+            self.cancelled.store(false, Ordering::Release);
+            if self.local_command(Command::Catalog) {
+                self.phase = Phase::Updating;
+                return true;
+            }
+        }
+        false
+    }
     /// Model changes are ordered between turns and acknowledged after persistence.
     pub fn set_model(&mut self, model: Model) -> bool {
-        if self.ready() && self.local_command(Command::Model(model)) {
+        if self.ready()
+            && self
+                .catalog
+                .as_ref()
+                .filter(|catalog| catalog.fresh())
+                .is_none_or(|catalog| {
+                    catalog.support(model)
+                        != crate::providers::openai_account::catalog::Support::Unsupported
+                })
+            && self.local_command(Command::Model(model))
+        {
             self.phase = Phase::Updating;
             true
         } else {
@@ -311,6 +356,13 @@ impl Session {
                     self.phase = Phase::Generating;
                 }
                 match &event {
+                    Event::CatalogLoaded(catalog) => self.catalog = Some(catalog.clone()),
+                    Event::CatalogFailed(_) => self.catalog = None,
+                    Event::ModelChanged(selected) => self.selected = *selected,
+                    Event::LoggedOut => {
+                        self.catalog = None;
+                        self.pending_approval = None;
+                    }
                     Event::EditProposed { id, .. } | Event::CommandProposed { id, .. } => {
                         self.pending_approval = Some(*id)
                     }
@@ -318,7 +370,6 @@ impl Session {
                     | Event::CommandFinished { .. }
                     | Event::Finished(..)
                     | Event::LoginFailed(_)
-                    | Event::LoggedOut
                     | Event::LogoutFailed(..) => self.pending_approval = None,
                     _ => {}
                 }

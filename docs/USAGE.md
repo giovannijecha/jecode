@@ -16,9 +16,14 @@ an obsolete client.
 An in-progress login or refresh can still require another instance to wait for
 the credential lease or retry after its deadline.
 
-`--model gpt-5.6-luna` or `--model gpt-5.6-terra` overrides the configured model
-for a new session. Both currently use medium effort. `--workspace PATH` selects
-another directory. `jecode chat` starts a conversation without file or command tools.
+`--model MODEL` and `--effort LEVEL` override saved defaults for one new
+conversation, including `jecode chat`. With `--model` alone, Jecode omits the
+effort field so the account provider chooses its default. `--effort default`
+also omits that field; it is distinct from an explicit `none` effort. With
+`--effort` alone, Jecode uses the saved default model. These options do not
+change saved defaults. Resume always uses the session's saved pair and rejects
+model or effort overrides. `--workspace PATH` selects another directory.
+`jecode chat` starts a conversation without file or command tools.
 It remains associated with its launch directory, including an explicit
 `jecode chat --workspace PATH` selection.
 The legacy `--account` entry still uses no file tools unless `--workspace` is supplied.
@@ -70,16 +75,26 @@ without Unix metadata permissions.
 {
   "version": 1,
   "model": "gpt-5.6-luna",
+  "effort": "medium",
   "reduced_motion": false,
   "context_limit_bytes": 524288,
   "file_access": "local"
 }
 ```
 
-Use `/settings` to change the default model, file-access profile and reduced motion.
-Model and access defaults apply to new conversations; existing sessions keep their
-saved access. Animation changes apply immediately. `/model` changes the current
-conversation's model after the turn finishes and saves that choice for resume.
+Use `/settings` to choose the default model and its reasoning effort, file-access
+profile and reduced motion. Model and access defaults apply to new conversations;
+existing sessions keep their saved choices. Animation changes apply immediately.
+`/model` opens a searchable account model list, then the supported effort choices.
+The pair changes only after the final choice is saved, at an idle boundary. Esc
+before then keeps the active pair. Neither command starts a new model request.
+An `"effort": null` setting selects the provider default. Older settings without
+an effort field retain their previous effective medium effort. Catalog metadata
+is kept in memory for five minutes and refreshed when needed. An unavailable or
+malformed catalog keeps the current choice. If a fresh catalog marks the saved
+pair unavailable, the conversation still opens, but Jecode keeps the draft until
+you choose a usable pair with `/model`. A missing capability field is treated as
+unknown rather than as evidence that an effort is unsupported.
 Other settings can be edited while Jecode is closed. The context threshold is between 65,536 and
 1,572,864 serialized request bytes. It is an application budget, not a model token
 window. `JECODE_REDUCED_MOTION=1` overrides animation; `NO_COLOR=1` disables colors.
@@ -103,8 +118,10 @@ displayed list; no numeric alias is saved. `jecode resume SESSION_ID` opens
 a known session directly, but the ID must belong to the selected directory.
 An ID from another directory reports its saved location and how to select it;
 Jecode never switches directories during resume. Legacy `--sessions` and
-`--resume` use the same scope. The saved model and file-access profile are
-restored automatically.
+`--resume` use the same scope. The saved model, effort and file-access profile are
+restored automatically. Older sessions without `effort` retain medium. Reading
+or listing a legacy file does not rewrite it; explicit updates preserve unrelated
+JSON fields.
 
 Inside a conversation, `/resume` opens a filterable menu of other readable sessions
 in that conversation's directory.

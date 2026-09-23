@@ -25,14 +25,18 @@ pub struct Request {
     pub instructions: String,
     pub input: Vec<Input>,
     pub tools: Vec<Tool>,
-    pub effort: String,
+    /// `None` omits reasoning.effort; it is distinct from the literal `none`.
+    pub effort: Option<String>,
 }
 
 impl Request {
     /// Serialize the experimental account contract. No credential enters this body.
     pub fn encode(&self, max_bytes: usize) -> Result<String, Error> {
         if !identifier(&self.model)
-            || !identifier(&self.effort)
+            || self
+                .effort
+                .as_deref()
+                .is_some_and(|effort| !identifier(effort))
             || self.input.len() > 4096
             || self.tools.len() > 128
         {
@@ -90,6 +94,10 @@ impl Request {
                 ("parameters", tool.parameters.clone()),
             ]));
         }
+        let mut reasoning = vec![("summary", string("auto"))];
+        if let Some(effort) = &self.effort {
+            reasoning.push(("effort", string(effort)));
+        }
         let body = json::object([
             ("model", string(&self.model)),
             ("instructions", string(&self.instructions)),
@@ -99,13 +107,7 @@ impl Request {
             ("tools", Value::Array(tools)),
             ("tool_choice", string("auto")),
             ("parallel_tool_calls", Value::Bool(true)),
-            (
-                "reasoning",
-                json::object([
-                    ("effort", string(&self.effort)),
-                    ("summary", string("auto")),
-                ]),
-            ),
+            ("reasoning", json::object(reasoning)),
             (
                 "include",
                 Value::Array(vec![string("reasoning.encrypted_content")]),

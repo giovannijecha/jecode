@@ -15,21 +15,25 @@ pub(super) fn metadata(model: &Model, width: usize) -> Vec<Row> {
         )];
     };
     let path = view.directory.as_deref().unwrap_or("Conversation only");
-    let full = format!("{} · medium", view.selected.id());
+    let effort = view.selected.effort().unwrap_or("provider default");
+    let full = format!("{} · {effort}", view.selected.id());
     let model = if text::width(&full) + 10 <= width {
         full
     } else {
-        format!(
-            "{} · medium",
-            match view.selected {
-                crate::session::Model::Luna => "Luna",
-                crate::session::Model::Terra => "Terra",
-            }
-        )
+        let suffix = view
+            .selected
+            .id()
+            .rsplit('-')
+            .next()
+            .unwrap_or(view.selected.id());
+        let id_budget = width.saturating_sub(effort.len() + 5);
+        let suffix = &suffix[suffix.len().saturating_sub(id_budget)..];
+        format!("…{suffix} · {effort}")
     };
+    let usable = width.saturating_sub(1); // renderer reserves the last column
     let model_width = text::width(&model);
-    let path = path_label(path, width.saturating_sub(model_width + 2));
-    let gap = width.saturating_sub(text::width(&path) + model_width);
+    let path = path_label(path, usable.saturating_sub(model_width + 1));
+    let gap = usable.saturating_sub(text::width(&path) + model_width);
     vec![clipped(
         &format!("{path}{}{model}", " ".repeat(gap)),
         width,
@@ -44,6 +48,11 @@ fn path_label(path: &str, width: usize) -> String {
     let path = text::safe(path).replace('\n', " ");
     if text::width(&path) <= width {
         return path;
+    }
+    if let Some(name) = path.rsplit(['/', '\\']).next()
+        && text::width(name) <= width
+    {
+        return name.into();
     }
     let mut start = path.len();
     let mut used = 1; // Ellipsis plus complete display units from the end.

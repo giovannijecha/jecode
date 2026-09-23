@@ -91,6 +91,7 @@ pub fn account_in(
 
 pub fn configured_account(
     model: Option<crate::session::Model>,
+    effort: Option<Option<String>>,
     directory: crate::session::scope::Directory,
     workspace: Option<crate::workspace::Workspace>,
     access: Option<crate::workspace::Access>,
@@ -99,12 +100,29 @@ pub fn configured_account(
         return Err(io::Error::other("Jecode needs an interactive terminal"));
     }
     let settings = crate::state::settings::Settings::user()?;
+    let selection = resolve_selection(model, effort.as_ref(), settings.model)?;
     run(
-        Some(model.unwrap_or(settings.model)),
+        Some(selection),
         Some(directory),
         workspace.map(|w| w.with_access(access.unwrap_or(settings.file_access))),
         None,
     )
+}
+
+fn resolve_selection(
+    model: Option<crate::session::Model>,
+    effort: Option<&Option<String>>,
+    saved: crate::session::Model,
+) -> io::Result<crate::session::Model> {
+    let selection = if let Some(model) = model {
+        model.with_effort(effort.and_then(|value| value.as_deref()))
+    } else if let Some(effort) = effort {
+        saved.with_effort(effort.as_deref())
+    } else {
+        Some(saved)
+    }
+    .ok_or_else(|| io::Error::other("invalid model and effort selection"))?;
+    Ok(selection)
 }
 
 pub fn resume(id: &str, directory: crate::session::scope::Directory) -> io::Result<()> {

@@ -28,12 +28,13 @@ fn client(store: &Store, body: &str) -> Client {
         trust: TrustStore::native().unwrap(),
         tokens: auth::Tokens::from_saved_json(body).unwrap().unwrap(),
         store: Some(store.clone()),
+        catalog: None,
     }
 }
 fn request() -> Request {
     Request {
         model: "gpt-5.6-luna".into(),
-        effort: "medium".into(),
+        effort: Some("medium".into()),
         instructions: "synthetic transport fixture".into(),
         input: vec![Input::User("hello".into())],
         tools: Vec::new(),

@@ -1,6 +1,7 @@
 //! Experimental account Responses codec and connected device-login client.
 
 pub mod auth;
+pub mod catalog;
 pub mod client;
 mod events;
 mod http;

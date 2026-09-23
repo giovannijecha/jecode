@@ -19,8 +19,15 @@ struct Fixture {
     observed: Arc<Observed>,
     fail_first: bool,
     flood: bool,
+    catalog: Option<crate::providers::openai_account::catalog::Catalog>,
 }
 impl worker::Backend for Fixture {
+    fn catalog(
+        &mut self,
+        _: &Budget<'_>,
+    ) -> Result<Option<crate::providers::openai_account::catalog::Catalog>, client::Error> {
+        Ok(self.catalog.clone())
+    }
     fn login(
         &mut self,
         budget: &Budget<'_>,
@@ -104,6 +111,7 @@ fn start(fail_first: bool, flood: bool) -> (Session, Arc<Observed>) {
             observed: Arc::clone(&observed),
             fail_first,
             flood,
+            catalog: None,
         },
         None,
     )
@@ -112,6 +120,35 @@ fn start(fail_first: bool, flood: bool) -> (Session, Arc<Observed>) {
     assert!(matches!(next(&mut session), Event::LoginCode(_)));
     assert!(matches!(next(&mut session), Event::Ready));
     (session, observed)
+}
+#[test]
+fn unavailable_saved_pair_blocks_send_until_an_idle_replacement_is_applied() {
+    let observed = Arc::new(Observed::default());
+    let catalog = crate::providers::openai_account::catalog::Catalog::parse(br#"{"models":[{"slug":"replacement","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}"#).unwrap();
+    let mut session = Session::with_backend(
+        Model::Luna,
+        Fixture {
+            observed: Arc::clone(&observed),
+            fail_first: false,
+            flood: false,
+            catalog: Some(catalog.clone()),
+        },
+        None,
+    )
+    .unwrap();
+    assert!(matches!(next(&mut session), Event::LoginCode(_)));
+    assert!(matches!(next(&mut session), Event::CatalogLoaded(_)));
+    assert!(matches!(next(&mut session), Event::Ready));
+    assert!(session.selection_unavailable());
+    assert!(!session.submit("draft kept"));
+    let unsupported = Model::new("replacement", Some("medium")).unwrap();
+    assert!(!session.set_model(unsupported));
+    let selected = Model::new("replacement", Some("high")).unwrap();
+    assert!(session.set_model(selected));
+    assert!(matches!(next(&mut session), Event::ModelChanged(value) if value == selected));
+    assert!(session.submit("explicit request"));
+    assert_eq!(finish(&mut session).1, End::Complete);
+    assert_eq!(observed.requests.lock().unwrap().len(), 1);
 }
 pub(crate) fn ready_fixture() -> Session {
     start(false, false).0
@@ -296,6 +333,6 @@ fn incomplete_items_and_partial_attempts_stay_canonical_but_out_of_completed_pro
     assert!(history.turns[0].steps[0].response.is_some());
     assert_eq!(request.model, "gpt-5.6-terra");
     assert!(request.tools.is_empty());
-    assert_eq!(request.effort, "medium");
+    assert_eq!(request.effort.as_deref(), Some("medium"));
     assert_eq!(account::auth::AUTH_HOST, "auth.openai.com");
 }

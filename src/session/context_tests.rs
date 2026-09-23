@@ -74,8 +74,9 @@ fn finish(session: &mut Session) -> End {
 #[test]
 fn compaction_projects_a_summary_and_keeps_recent_turns_without_tools() {
     let observed = Arc::new(Mutex::new(Vec::new()));
+    let selected = Model::new("account-model", Some("low")).unwrap();
     let mut session = Session::with_history(
-        Model::Luna,
+        selected,
         Summarizer {
             requests: observed.clone(),
             fail: false,
@@ -91,6 +92,20 @@ fn compaction_projects_a_summary_and_keeps_recent_turns_without_tools() {
     assert_eq!(finish(&mut session), End::Complete);
     let requests = observed.lock().unwrap();
     assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        let value = crate::json::parse(request, Default::default()).unwrap();
+        assert_eq!(
+            value.get("model").and_then(crate::json::Value::text),
+            Some("account-model")
+        );
+        assert_eq!(
+            value
+                .get("reasoning")
+                .and_then(|v| v.get("effort"))
+                .and_then(crate::json::Value::text),
+            Some("low")
+        );
+    }
     assert!(requests[0].contains("task-0") && requests[0].contains("task-1"));
     assert!(!requests[0].contains("task-2"));
     assert!(!requests[1].contains("task-0"));
@@ -99,6 +114,40 @@ fn compaction_projects_a_summary_and_keeps_recent_turns_without_tools() {
             && requests[1].contains("task-2")
             && requests[1].contains("task-3")
     );
+}
+#[test]
+fn automatic_compaction_and_followup_share_the_selected_pair() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let selected = Model::new("account-model", Some("high")).unwrap();
+    let mut session = Session::with_history(
+        selected,
+        Summarizer {
+            requests: observed.clone(),
+            fail: false,
+        },
+        None,
+        history(),
+    )
+    .unwrap();
+    assert!(matches!(tests::next(&mut session), Event::Ready));
+    assert!(session.submit("continue"));
+    assert_eq!(finish(&mut session), End::Complete);
+    let requests = observed.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        let value = crate::json::parse(request, Default::default()).unwrap();
+        assert_eq!(
+            value.get("model").and_then(crate::json::Value::text),
+            Some("account-model")
+        );
+        assert_eq!(
+            value
+                .get("reasoning")
+                .and_then(|v| v.get("effort"))
+                .and_then(crate::json::Value::text),
+            Some("high")
+        );
+    }
 }
 #[test]
 fn failed_compaction_is_not_automatically_retried_and_original_projection_remains() {

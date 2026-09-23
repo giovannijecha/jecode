@@ -123,7 +123,15 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
         return;
     }
     if session.signed_out()
-        && matches!(action, Action::Model(_) | Action::Context | Action::Compact)
+        && matches!(
+            action,
+            Action::Models
+                | Action::DefaultModels
+                | Action::SelectModel(..)
+                | Action::Model(_)
+                | Action::Context
+                | Action::Compact
+        )
     {
         notice(model, "Sign in with /login before using this command");
         return;
@@ -167,9 +175,78 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             }
         },
         Action::Models => {
-            let selected = model.account.as_ref().unwrap().selected;
-            model.menu.open(menu::models(selected));
-            true
+            if let Some(catalog) = model
+                .account
+                .as_ref()
+                .unwrap()
+                .catalog
+                .as_ref()
+                .filter(|catalog| catalog.fresh())
+            {
+                let selected = model.account.as_ref().unwrap().selected;
+                model.menu.open(menu::models(catalog, selected, false));
+                true
+            } else if session.refresh_catalog() {
+                model.account.as_mut().unwrap().loading_catalog(false);
+                model.menu.close();
+                true
+            } else {
+                false
+            }
+        }
+        Action::DefaultModels => {
+            if let Some(catalog) = model
+                .account
+                .as_ref()
+                .unwrap()
+                .catalog
+                .as_ref()
+                .filter(|catalog| catalog.fresh())
+            {
+                match Settings::user() {
+                    Ok(settings) => {
+                        model.menu.open(menu::models(catalog, settings.model, true));
+                        true
+                    }
+                    Err(_) => {
+                        notice(model, "Cannot read saved defaults / file kept");
+                        false
+                    }
+                }
+            } else if session.refresh_catalog() {
+                model.account.as_mut().unwrap().loading_catalog(true);
+                model.menu.close();
+                true
+            } else {
+                false
+            }
+        }
+        Action::SelectModel(id, defaults) => {
+            let entry = model
+                .account
+                .as_ref()
+                .unwrap()
+                .catalog
+                .as_ref()
+                .and_then(|catalog| catalog.entry(&id))
+                .cloned();
+            match entry {
+                Some(entry) if entry.visible && entry.compatible => {
+                    let current = if defaults {
+                        Settings::user()
+                            .map(|settings| settings.model)
+                            .unwrap_or(model.account.as_ref().unwrap().selected)
+                    } else {
+                        model.account.as_ref().unwrap().selected
+                    };
+                    model.menu.open(menu::efforts(&entry, current, defaults));
+                    true
+                }
+                _ => {
+                    notice(model, "Model no longer available / selection kept");
+                    false
+                }
+            }
         }
         Action::Settings => match Settings::user() {
             Ok(settings) => {

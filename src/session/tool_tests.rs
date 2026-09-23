@@ -121,6 +121,33 @@ fn start(mode: Mode, enabled: bool) -> (Session, Arc<Mutex<Vec<String>>>, suppor
     assert!(matches!(tests::next(&mut session), Event::Ready));
     (session, requests, files)
 }
+#[test]
+fn selected_pair_is_used_for_every_request_in_a_tool_loop() {
+    let (mut session, requests, _files) = start(Mode::Batch, true);
+    let selected = Model::new("account-model", Some("xhigh")).unwrap();
+    assert!(session.set_model(selected));
+    assert!(matches!(tests::next(&mut session), Event::ModelChanged(value) if value == selected));
+    assert!(session.submit("inspect the fixture"));
+    assert_eq!(finish(&mut session).0, End::Complete);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        let value = json::parse(request, Default::default()).unwrap();
+        assert_eq!(
+            value.get("model").and_then(Value::text),
+            Some("account-model")
+        );
+        assert_eq!(
+            value
+                .get("reasoning")
+                .and_then(|v| v.get("effort"))
+                .and_then(Value::text),
+            Some("xhigh")
+        );
+    }
+    drop(requests);
+    drop(session);
+}
 fn finish(session: &mut Session) -> (End, Metrics, Vec<String>) {
     let mut events = Vec::new();
     loop {

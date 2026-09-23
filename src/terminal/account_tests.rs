@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn catalog_failures_keep_the_pair_and_report_a_local_reason() {
+    for (kind, message) in [
+        (session::CatalogFailure::Unavailable, "unavailable"),
+        (session::CatalogFailure::Invalid, "malformed"),
+        (session::CatalogFailure::Empty, "no usable choices"),
+        (session::CatalogFailure::Cancelled, "cancelled"),
+    ] {
+        let mut model = model(session::Model::Terra, None);
+        event(&mut model, Event::CatalogFailed(kind));
+        let view = model.account.as_ref().unwrap();
+        assert_eq!(view.selected, session::Model::Terra);
+        assert!(view.local_notice.contains(message));
+        assert!(model.blocks.is_empty());
+    }
+}
+
+#[test]
 fn restored_history_and_context_notices_do_not_swallow_streamed_text() {
     let mut model = model(session::Model::Luna, None);
     event(

@@ -1,18 +1,83 @@
 use crate::providers::openai_account::{Usage, client};
 use std::fmt;
 
+/// One applied selection. Fixed storage keeps validated identifiers cheap to copy
+/// without retaining a catalog (or its account metadata) in a saved session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Model {
-    Luna,
-    Terra,
+pub struct Model {
+    id: [u8; 128],
+    id_len: u8,
+    effort: [u8; 32],
+    effort_len: u8,
 }
 impl Model {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Luna => "gpt-5.6-luna",
-            Self::Terra => "gpt-5.6-terra",
+    #[allow(non_upper_case_globals)]
+    pub const Luna: Self = Self::historical(b"gpt-5.6-luna");
+    #[allow(non_upper_case_globals)]
+    pub const Terra: Self = Self::historical(b"gpt-5.6-terra");
+
+    const fn historical(id: &[u8]) -> Self {
+        let mut value = Self {
+            id: [0; 128],
+            id_len: id.len() as u8,
+            effort: [0; 32],
+            effort_len: 6,
+        };
+        let mut index = 0;
+        while index < id.len() {
+            value.id[index] = id[index];
+            index += 1;
         }
+        value.effort[0] = b'm';
+        value.effort[1] = b'e';
+        value.effort[2] = b'd';
+        value.effort[3] = b'i';
+        value.effort[4] = b'u';
+        value.effort[5] = b'm';
+        value
     }
+
+    /// `None` means omit the effort field and let the account provider decide.
+    pub fn new(id: &str, effort: Option<&str>) -> Option<Self> {
+        if !valid_identifier(id, 128) || effort.is_some_and(|value| !valid_identifier(value, 32)) {
+            return None;
+        }
+        let mut value = Self {
+            id: [0; 128],
+            id_len: id.len() as u8,
+            effort: [0; 32],
+            effort_len: 0,
+        };
+        value.id[..id.len()].copy_from_slice(id.as_bytes());
+        if let Some(effort) = effort {
+            value.effort[..effort.len()].copy_from_slice(effort.as_bytes());
+            value.effort_len = effort.len() as u8;
+        }
+        Some(value)
+    }
+
+    pub fn id(&self) -> &str {
+        std::str::from_utf8(&self.id[..usize::from(self.id_len)]).expect("validated ASCII")
+    }
+
+    pub fn effort(&self) -> Option<&str> {
+        (self.effort_len != 0).then(|| {
+            std::str::from_utf8(&self.effort[..usize::from(self.effort_len)])
+                .expect("validated ASCII")
+        })
+    }
+
+    pub fn with_effort(self, effort: Option<&str>) -> Option<Self> {
+        Self::new(self.id(), effort)
+    }
+}
+
+fn valid_identifier(value: &str, max: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -113,6 +178,8 @@ pub enum Event {
     },
     LoginCode(String),
     Ready,
+    CatalogLoaded(crate::providers::openai_account::catalog::Catalog),
+    CatalogFailed(CatalogFailure),
     LoggedOut,
     LogoutFailed(Failure, bool),
     ModelChanged(Model),
@@ -159,6 +226,14 @@ pub enum Event {
     TextReconciled(String),
     Finished(End, Metrics),
     LoginFailed(Failure),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CatalogFailure {
+    Unavailable,
+    Invalid,
+    Empty,
+    Cancelled,
 }
 pub struct TranscriptItem {
     pub role: &'static str,

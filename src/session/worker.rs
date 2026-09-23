@@ -1,4 +1,4 @@
-use super::{Command, End, Event, Failure, Metrics, Model, history::History};
+use super::{CatalogFailure, Command, End, Event, Failure, Metrics, Model, history::History};
 use crate::{
     providers::openai_account::{Progress, Request, Response, client},
     tls::{Budget, NetworkError},
@@ -23,6 +23,12 @@ pub(crate) trait Backend: Send {
     fn logout(&mut self, _: &Budget<'_>) -> Result<(), client::Error> {
         Ok(())
     }
+    fn catalog(
+        &mut self,
+        _: &Budget<'_>,
+    ) -> Result<Option<crate::providers::openai_account::catalog::Catalog>, client::Error> {
+        Ok(None)
+    }
     fn generate(
         &mut self,
         request: &Request,
@@ -45,6 +51,16 @@ impl Backend for Account {
         client::Client::logout(budget)?;
         self.0 = None;
         Ok(())
+    }
+    fn catalog(
+        &mut self,
+        budget: &Budget<'_>,
+    ) -> Result<Option<crate::providers::openai_account::catalog::Catalog>, client::Error> {
+        self.0
+            .as_mut()
+            .ok_or(client::Error::Expired)?
+            .catalog(budget)
+            .map(Some)
     }
     fn generate(
         &mut self,
@@ -177,6 +193,13 @@ pub(super) fn run(
                 }
                 continue;
             }
+            Command::Catalog => {
+                signed_in = load_catalog(&mut backend, &context);
+                if signed_in {
+                    let _ = context.send(Event::Ready, false);
+                }
+                continue;
+            }
             Command::Logout => {
                 // Guidance accepted during the previous turn must be returned
                 // before sign-out completes, so a later login cannot send it.
@@ -205,7 +228,7 @@ pub(super) fn run(
         let started = Instant::now();
         let mut metrics = Metrics::default();
         let prompt = match command {
-            Command::Login | Command::Logout => unreachable!(),
+            Command::Login | Command::Logout | Command::Catalog => unreachable!(),
             Command::Prompt(prompt) => prompt,
             Command::Model(selected) => {
                 if history.set_model(selected).is_err() {
@@ -312,12 +335,54 @@ fn login(backend: &mut impl Backend, context: &Context) -> bool {
         &mut |code| context.send(Event::LoginCode(code.into()), true),
     );
     match result {
-        Ok(()) => context.send(Event::Ready, false).is_continue(),
+        Ok(()) => {
+            if load_catalog(backend, context) {
+                context.send(Event::Ready, false).is_continue()
+            } else {
+                false
+            }
+        }
         Err(error) => {
             let _ = context.send(Event::LoginFailed(failure(error, context)), false);
             false
         }
     }
+}
+
+fn load_catalog(backend: &mut impl Backend, context: &Context) -> bool {
+    let budget = Budget {
+        deadline: Instant::now() + Duration::from_secs(5),
+        cancelled: &context.cancelled,
+    };
+    match backend.catalog(&budget) {
+        Ok(Some(catalog)) => {
+            let _ = context.send(Event::CatalogLoaded(catalog), false);
+        }
+        Ok(None) => {}
+        Err(error)
+            if matches!(
+                error,
+                client::Error::Expired
+                    | client::Error::AccountChanged
+                    | client::Error::Login(crate::providers::openai_account::auth::Error::Denied)
+            ) =>
+        {
+            let _ = context.send(Event::LoginFailed(Failure::Account(error)), false);
+            return false;
+        }
+        Err(error) => {
+            let kind = match error {
+                client::Error::Catalog(crate::providers::openai_account::catalog::Error::Empty) => {
+                    CatalogFailure::Empty
+                }
+                client::Error::Catalog(_) => CatalogFailure::Invalid,
+                _ if context.cancelled.load(Ordering::Acquire) => CatalogFailure::Cancelled,
+                _ => CatalogFailure::Unavailable,
+            };
+            let _ = context.send(Event::CatalogFailed(kind), false);
+        }
+    }
+    true
 }
 
 pub(super) fn failure(error: client::Error, context: &Context) -> Failure {
