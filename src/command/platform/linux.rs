@@ -2,7 +2,7 @@
 //! ID until group termination; deliberately detached sessions are not contained.
 #![allow(unsafe_code)]
 use crate::{
-    command::{Channel, Exit},
+    command::{Channel, Exit, Shell},
     workspace::Directory,
 };
 use std::{
@@ -30,7 +30,7 @@ pub(in crate::command) struct Process {
     finished: Option<Exit>,
 }
 impl Process {
-    pub fn spawn(script: &str, directory: &Directory) -> io::Result<Self> {
+    pub fn spawn(script: &str, directory: &Directory, _: &Shell) -> io::Result<Self> {
         let fd = directory.file().as_raw_fd();
         // Complete fallible pipe setup before spawning any executable code.
         let (stdout, stdout_write) = pipe()?;

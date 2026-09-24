@@ -45,6 +45,7 @@ pub(super) struct History {
     pub projection: super::context::Projection,
     /// Derived from the active workspace; not a second canonical permissions store.
     pub environment: String,
+    pub shell: crate::command::Shell,
 }
 impl History {
     pub fn begin(&mut self, prompt: String) -> Result<(), Failure> {
@@ -140,7 +141,7 @@ impl History {
             effort: model.effort().map(str::to_owned),
             input,
             tools: if workspace {
-                tools::definitions()
+                tools::definitions_for(&self.shell)
             } else {
                 Vec::new()
             },

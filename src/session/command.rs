@@ -13,6 +13,7 @@ pub(super) fn execute(
     script: &str,
     path: &str,
     timeout: u64,
+    shell: &command::Shell,
     workspace: &Workspace,
     context: &Context,
     deadline: Instant,
@@ -21,7 +22,7 @@ pub(super) fn execute(
 ) -> Output {
     let id = context.next_approval.fetch_add(1, Ordering::Relaxed);
     let (output, success) = dispatch(
-        id, script, path, timeout, workspace, context, deadline, denied, metrics,
+        id, script, path, timeout, shell, workspace, context, deadline, denied, metrics,
     );
     let _ = context.send(
         Event::CommandFinished {
@@ -40,6 +41,7 @@ fn dispatch(
     script: &str,
     path: &str,
     timeout: u64,
+    shell: &command::Shell,
     workspace: &Workspace,
     context: &Context,
     deadline: Instant,
@@ -58,10 +60,11 @@ fn dispatch(
         cancelled: &context.cancelled,
         deadline,
     };
-    let proposal = match command::prepare(workspace, script, path, timeout, &budget) {
-        Ok(proposal) => proposal,
-        Err(error) => return (Output::error(error), false),
-    };
+    let proposal =
+        match command::prepare_with_shell(workspace, script, path, timeout, shell, &budget) {
+            Ok(proposal) => proposal,
+            Err(error) => return (Output::error(error), false),
+        };
     while context.decisions.try_recv().is_ok() {}
     if context
         .send(
@@ -156,13 +159,17 @@ fn dispatch(
         }
         Err(error) => {
             // OS errors are reported by kind/code, never echo an environment or credentials.
-            let message = format!(
-                "Command could not start · {:?}{}",
-                error.kind(),
-                error
-                    .raw_os_error()
-                    .map_or(String::new(), |code| format!(" (OS {code})"))
-            );
+            let message = if cfg!(windows) && error.kind() == std::io::ErrorKind::Unsupported {
+                format!("Command not executed · {error}")
+            } else {
+                format!(
+                    "Command could not start · {:?}{}",
+                    error.kind(),
+                    error
+                        .raw_os_error()
+                        .map_or(String::new(), |code| format!(" (OS {code})"))
+                )
+            };
             (Output::error(&message), false)
         }
     }

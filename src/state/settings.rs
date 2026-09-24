@@ -7,7 +7,7 @@ use crate::{
 };
 use std::{
     collections::BTreeMap,
-    io,
+    fmt, io,
     sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
@@ -18,7 +18,22 @@ pub struct Settings {
     pub reduced_motion: bool,
     pub context_limit_bytes: usize,
     pub file_access: Access,
+    pub windows_powershell_executable: Option<String>,
     extra: BTreeMap<String, Value>,
+}
+#[derive(Debug)]
+pub struct ShellConfigError(String);
+impl fmt::Display for ShellConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+impl std::error::Error for ShellConfigError {}
+pub(crate) fn shell_config_error(message: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        ShellConfigError(message.into()),
+    )
 }
 #[derive(Clone, Copy)]
 pub enum Change {
@@ -33,6 +48,7 @@ impl Default for Settings {
             reduced_motion: false,
             context_limit_bytes: 512 * 1024,
             file_access: Access::Local,
+            windows_powershell_executable: None,
             extra: BTreeMap::new(),
         }
     }
@@ -82,6 +98,14 @@ impl Settings {
             "file_access".into(),
             Value::String(settings.file_access.name().into()),
         );
+        if let Some(executable) = &settings.windows_powershell_executable {
+            fields.insert(
+                "windows_powershell_executable".into(),
+                Value::String(executable.clone()),
+            );
+        } else {
+            fields.remove("windows_powershell_executable");
+        }
         let body = json::encode(&Value::Object(fields), 8192)
             .map_err(|_| io::Error::other("settings exceed size limit"))?;
         store.replace("settings.json", &body)?;
@@ -143,11 +167,21 @@ impl Settings {
             None => Access::Local,
             Some(value) => value.text().and_then(Access::parse).ok_or_else(invalid)?,
         };
+        let windows_powershell_executable = match value.get("windows_powershell_executable") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(path)) if !path.is_empty() => Some(path.clone()),
+            _ => {
+                return Err(shell_config_error(
+                    "windows_powershell_executable in ~/.jecode/v1/settings.json must be a nonempty absolute path to pwsh.exe, or null",
+                ));
+            }
+        };
         Ok(Self {
             model,
             reduced_motion,
             context_limit_bytes,
             file_access,
+            windows_powershell_executable,
             extra: fields
                 .iter()
                 .filter(|(key, _)| {
@@ -159,6 +193,7 @@ impl Settings {
                             | "reduced_motion"
                             | "context_limit_bytes"
                             | "file_access"
+                            | "windows_powershell_executable"
                     )
                 })
                 .map(|(key, value)| (key.clone(), value.clone()))
@@ -237,5 +272,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(Settings::load(&store).unwrap().model.effort(), None);
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "linux"))]
+    fn windows_shell_selection_is_user_scoped_and_survives_other_updates() {
+        let fixture = crate::state::tests::Fixture::new();
+        let Some(store) = fixture.store() else { return };
+        store.replace("settings.json", r#"{"version":1,"model":"gpt-5.6-luna","reduced_motion":false,"context_limit_bytes":131072,"windows_powershell_executable":"C:\\Program Files\\PowerShell\\7\\pwsh.exe"}"#).unwrap();
+        let settings = Settings::load(&store).unwrap();
+        assert_eq!(
+            settings.windows_powershell_executable.as_deref(),
+            Some(r"C:\Program Files\PowerShell\7\pwsh.exe")
+        );
+        Settings::update(&store, Change::ToggleMotion).unwrap();
+        assert_eq!(
+            Settings::load(&store)
+                .unwrap()
+                .windows_powershell_executable,
+            settings.windows_powershell_executable
+        );
+        let body = store.read("settings.json", 8192).unwrap().unwrap();
+        let Value::Object(mut fields) = json::parse(&body, Default::default()).unwrap() else {
+            panic!("settings must be an object");
+        };
+        fields.insert(
+            "windows_powershell_executable".into(),
+            Value::Number("42".into()),
+        );
+        let invalid = json::encode(&Value::Object(fields), 8192).unwrap();
+        let error = Settings::parse(&invalid).err().unwrap();
+        assert!(error.to_string().contains("windows_powershell_executable"));
     }
 }

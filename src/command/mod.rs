@@ -2,31 +2,35 @@
 //! descendants and join the child; neither a workspace path nor a job is a sandbox.
 mod capture;
 mod platform;
+#[cfg(windows)]
+mod probe;
+mod selection;
 mod shell;
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(all(test, windows))]
+#[path = "windows_tests.rs"]
+mod windows_tests;
 
 use crate::workspace::{Budget, Directory, Workspace};
+pub(crate) use selection::Shell;
 use std::{
     io,
     ops::ControlFlow,
     thread,
     time::{Duration, Instant},
 };
-pub(crate) fn shell_name() -> &'static str {
-    shell::NAME
-}
-
 #[derive(Clone, Debug)]
 pub struct Preview {
     pub command: String,
     pub cwd: String,
-    pub shell: &'static str,
+    pub shell: String,
     pub timeout_seconds: u64,
 }
 pub(crate) struct Proposal {
     pub preview: Preview,
     directory: Directory,
+    shell: Shell,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Channel {
@@ -105,11 +109,29 @@ impl Outcome {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn prepare(
     workspace: &Workspace,
     command: &str,
     cwd: &str,
     timeout_seconds: u64,
+    budget: &Budget<'_>,
+) -> Result<Proposal, &'static str> {
+    prepare_with_shell(
+        workspace,
+        command,
+        cwd,
+        timeout_seconds,
+        &Shell::default(),
+        budget,
+    )
+}
+pub(crate) fn prepare_with_shell(
+    workspace: &Workspace,
+    command: &str,
+    cwd: &str,
+    timeout_seconds: u64,
+    shell: &Shell,
     budget: &Budget<'_>,
 ) -> Result<Proposal, &'static str> {
     if command.trim().is_empty()
@@ -129,6 +151,10 @@ pub(crate) fn prepare(
     let directory = workspace.directory(cwd, budget).map_err(
         |_| "starting directory unavailable or excluded by the session's file-access profile",
     )?;
+    #[cfg(windows)]
+    if let Some(error) = shell.cwd_error(&directory.path) {
+        return Err(error);
+    }
     let shown_cwd = if workspace.access() == crate::workspace::Access::Local {
         directory.path.to_string_lossy().replace('\\', "/")
     } else {
@@ -138,10 +164,11 @@ pub(crate) fn prepare(
         preview: Preview {
             command: command.into(),
             cwd: shown_cwd,
-            shell: shell::NAME,
+            shell: shell.label(),
             timeout_seconds,
         },
         directory,
+        shell: shell.clone(),
     })
 }
 
@@ -162,7 +189,11 @@ pub(crate) fn run(
     let deadline = budget
         .deadline
         .min(started + Duration::from_secs(proposal.preview.timeout_seconds));
-    let mut child = platform::Process::spawn(&proposal.preview.command, &proposal.directory)?;
+    let mut child = platform::Process::spawn(
+        &proposal.preview.command,
+        &proposal.directory,
+        &proposal.shell,
+    )?;
     let mut captures = [capture::Capture::default(), capture::Capture::default()];
     let mut bytes = 0u64;
     let mut displayed = 0usize;

@@ -4,7 +4,7 @@
 #[path = "windows_ffi.rs"]
 mod ffi;
 use crate::{
-    command::{Channel, Exit, shell},
+    command::{Channel, Exit, Shell, shell},
     workspace::Directory,
 };
 use ffi::*;
@@ -99,22 +99,33 @@ pub(in crate::command) struct Process {
     finished: Option<Exit>,
 }
 impl Process {
-    pub fn spawn(script: &str, directory: &Directory) -> io::Result<Self> {
+    pub fn spawn(script: &str, directory: &Directory, shell: &Shell) -> io::Result<Self> {
         if !directory.file().metadata()?.is_dir() {
             return Err(io::ErrorKind::InvalidInput.into());
         }
-        let mut system = vec![0u16; 32768];
-        // SAFETY: writable UTF-16 buffer. Use the OS directory, not a PATH search.
-        let len = unsafe { GetSystemDirectoryW(system.as_mut_ptr(), system.len() as u32) } as usize;
-        if len == 0 || len >= system.len() {
-            return Err(io::Error::last_os_error());
+        let process_path = directory.process_path()?;
+        if let Some(error) = shell.cwd_error(&process_path) {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, error));
         }
-        system.truncate(len);
-        system.extend("\\WindowsPowerShell\\v1.0\\powershell.exe".encode_utf16());
-        let app: Vec<u16> = system.iter().copied().chain([0]).collect();
+        let executable: Vec<u16> = match shell {
+            Shell::WindowsPowerShell => {
+                let mut system = vec![0u16; 32768];
+                // SAFETY: writable UTF-16 buffer. Use the OS directory, not a PATH search.
+                let len = unsafe { GetSystemDirectoryW(system.as_mut_ptr(), system.len() as u32) }
+                    as usize;
+                if len == 0 || len >= system.len() {
+                    return Err(io::Error::last_os_error());
+                }
+                system.truncate(len);
+                system.extend("\\WindowsPowerShell\\v1.0\\powershell.exe".encode_utf16());
+                system
+            }
+            Shell::PowerShell7 { executable, .. } => executable.as_os_str().encode_wide().collect(),
+        };
+        let app: Vec<u16> = executable.iter().copied().chain([0]).collect();
         let mut command: Vec<u16> = [34]
             .into_iter()
-            .chain(system)
+            .chain(executable)
             .chain([34])
             .chain(
                 format!(
@@ -125,12 +136,7 @@ impl Process {
             )
             .chain([0])
             .collect();
-        let cwd: Vec<u16> = directory
-            .path
-            .as_os_str()
-            .encode_wide()
-            .chain([0])
-            .collect();
+        let cwd: Vec<u16> = process_path.as_os_str().encode_wide().chain([0]).collect();
         let mut security = Security {
             size: size_of::<Security>() as u32,
             descriptor: null_mut(),

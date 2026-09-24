@@ -1,16 +1,34 @@
 #[cfg(windows)]
-pub(super) const NAME: &str = "Windows PowerShell / no profile";
-#[cfg(not(windows))]
-pub(super) const NAME: &str = "/bin/sh / non-interactive";
-
-#[cfg(windows)]
 pub(super) fn encoded(script: &str) -> String {
-    // The command is transported intact as UTF-16LE, never interpolated into
-    // another command's quoting rules. Stop non-terminating PowerShell errors.
+    // Parse the model's script inside try/catch. A parser error in the enclosing
+    // EncodedCommand would bypass the catch and leak PowerShell's CLIXML stderr.
+    // Base64 keeps the script literal without passing through shell quoting.
+    let literal = base64(script.as_bytes());
     let source = format!(
-        "$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;$global:LASTEXITCODE=0;try {{ & {{\n{script}\n}}; $jecodeSucceeded=$?;if($LASTEXITCODE -ne 0){{exit $LASTEXITCODE}};if(!$jecodeSucceeded){{exit 1}} }} catch {{[Console]::Error.WriteLine($_.ToString());exit 1}}"
+        concat!(
+            "$ProgressPreference='SilentlyContinue';",
+            "$ErrorActionPreference='Stop';",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);",
+            "$OutputEncoding=[Console]::OutputEncoding;",
+            "$global:LASTEXITCODE=0;try {{",
+            "$jecodeCwd=[Environment]::CurrentDirectory;",
+            "Set-Location -LiteralPath $jecodeCwd;",
+            "& ([scriptblock]::Create(",
+            "[Text.Encoding]::UTF8.GetString(",
+            "[Convert]::FromBase64String('{literal}'))));",
+            "$jecodeSucceeded=$?;",
+            "if($LASTEXITCODE -ne 0){{exit $LASTEXITCODE}};",
+            "if(!$jecodeSucceeded){{exit 1}}",
+            "}}catch{{[Console]::Error.WriteLine($_.ToString());exit 1}}"
+        ),
+        literal = literal
     );
     let bytes: Vec<u8> = source.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64(&bytes)
+}
+
+#[cfg(windows)]
+fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
     for chunk in bytes.chunks(3) {

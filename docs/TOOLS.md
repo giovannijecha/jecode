@@ -57,10 +57,25 @@ turn; reads may still complete. Cancellation does not grant approval.
 
 ## Commands
 
-Windows uses the system Windows PowerShell; Linux uses `/bin/sh`. The proposal
+Windows uses the system Windows PowerShell 5.1 by default, or an explicitly
+configured PowerShell 7 executable. Linux uses `/bin/sh`. The proposal
 shows the script, starting directory and timeout. Scripts are limited to 4,096
 UTF-8 bytes; timeouts are between 1 and 300 seconds. Output streams through bounded
 pipes, with an explicit exit code, truncation and cleanup status in the receipt.
+PowerShell parser and runtime errors appear as readable stderr with a failing exit
+code. Windows command starting directories must fit the Win32 `MAX_PATH` current
+directory limit; a longer directory fails before the script runs, even if file tools
+can access it. Windows PowerShell 5.1 cannot safely resolve relative literal
+paths from a starting directory containing `[` or `]`; Jecode rejects that
+command before approval and explains how to configure PowerShell 7. PowerShell
+7.6.6 is the version exercised in CI with physical working directories, parent
+traversal, relative cmdlets and native child processes. For any explicitly
+configured PowerShell 7, Jecode checks bracketed-directory behavior once when
+resolving the session shell, using an isolated temporary fixture. A successful
+check permits bracketed command starting directories. An incompatible or
+inconclusive check blocks commands starting there and reports the reason; ordinary
+starting directories remain available. No other PowerShell 7 release is claimed
+to be verified by CI. See [usage](USAGE.md) for the user-scoped shell setting.
 
 This is not an interactive PTY and not a sandbox. The approved shell has your user
 permissions, including access outside the selected starting directory. Process

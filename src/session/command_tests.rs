@@ -87,6 +87,89 @@ pub(crate) fn start(mode: &'static str, extra: bool) -> Run {
         requests,
     }
 }
+
+#[test]
+#[cfg(windows)]
+fn configured_powershell7_is_used_for_request_preview_and_execution() {
+    let Ok(path) = std::env::var("JECODE_TEST_PWSH") else {
+        return;
+    };
+    let state = crate::state::tests::Fixture::new();
+    let store = state.store().unwrap();
+    crate::state::settings::Settings::load(&store).unwrap();
+    let body = store.read("settings.json", 8192).unwrap().unwrap();
+    let Value::Object(mut fields) = json::parse(&body, Default::default()).unwrap() else {
+        panic!("settings must be an object");
+    };
+    fields.insert("windows_powershell_executable".into(), Value::String(path));
+    store
+        .replace(
+            "settings.json",
+            &json::encode(&Value::Object(fields), 8192).unwrap(),
+        )
+        .unwrap();
+    let settings = crate::state::settings::Settings::load(&store).unwrap();
+    let shell =
+        crate::command::Shell::configured(settings.windows_powershell_executable.as_deref(), None)
+            .unwrap();
+    let files = Files::new();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mut session = Session::with_history_shell(
+        Model::Luna,
+        Backend {
+            mode: "write",
+            extra: false,
+            requests: requests.clone(),
+        },
+        Some(crate::workspace::Workspace::open(&files.0).unwrap()),
+        history::History::default(),
+        shell,
+    )
+    .unwrap();
+    assert!(matches!(next(&mut session), Event::Ready));
+    assert!(session.submit("write the fixture"));
+    let id = match next(&mut session) {
+        Event::CommandProposed { id, preview } => {
+            assert!(
+                preview.shell.contains("PowerShell 7.6.6"),
+                "{}",
+                preview.shell
+            );
+            assert!(preview.shell.contains("pwsh.exe"), "{}", preview.shell);
+            assert!(
+                preview
+                    .shell
+                    .contains("bracketed cwd: supported by session probe")
+            );
+            id
+        }
+        _ => panic!("expected command proposal"),
+    };
+    let request = requests.lock().unwrap()[0].clone();
+    assert!(
+        request.contains("Command shell: PowerShell 7.6.6"),
+        "{request}"
+    );
+    assert!(request.contains("using PowerShell 7.6.6"), "{request}");
+    assert!(
+        request.contains("bracketed cwd: supported by session probe"),
+        "{request}"
+    );
+    assert!(session.decide(id, true));
+    let mut executed = false;
+    loop {
+        match next(&mut session) {
+            Event::CommandFinished { success, .. } => executed = success,
+            Event::Finished(_, _) => break,
+            _ => {}
+        }
+    }
+    assert!(executed);
+    assert_eq!(
+        std::fs::read_to_string(files.0.join("command-result.txt")).unwrap(),
+        "one execution\n"
+    );
+}
 pub(crate) fn next(session: &mut Session) -> Event {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {

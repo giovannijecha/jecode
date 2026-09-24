@@ -43,6 +43,10 @@ fn child_fixture() {
             std::fs::write("command-result.txt", "one execution\n").unwrap();
             println!("written");
         }
+        "read-marker" => {
+            println!("cwd={}", std::env::current_dir().unwrap().display());
+            println!("marker={}", std::fs::read_to_string("marker.txt").unwrap());
+        }
         "failure" => {
             eprintln!("expected failure");
             std::process::exit(7);
@@ -96,6 +100,14 @@ fn launch(
     seconds: u64,
     output: &mut dyn FnMut(Channel, &str) -> ControlFlow<()>,
 ) -> Outcome {
+    launch_with_shell(mode, seconds, &Shell::default(), output)
+}
+pub(crate) fn launch_with_shell(
+    mode: &str,
+    seconds: u64,
+    shell: &Shell,
+    output: &mut dyn FnMut(Channel, &str) -> ControlFlow<()>,
+) -> Outcome {
     let files = Fixture::new();
     let workspace = Workspace::open(&files.0).unwrap();
     let cancelled = AtomicBool::new(false);
@@ -103,7 +115,8 @@ fn launch(
         cancelled: &cancelled,
         deadline: Instant::now() + Duration::from_secs(40),
     };
-    let proposal = prepare(&workspace, &script(mode), ".", seconds, &budget).unwrap();
+    let proposal =
+        prepare_with_shell(&workspace, &script(mode), ".", seconds, shell, &budget).unwrap();
     run(proposal, &workspace, &budget, output).unwrap()
 }
 #[test]

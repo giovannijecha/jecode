@@ -274,7 +274,7 @@ fn model_tool_command_approval_and_completion_replace_one_status_in_place() {
         Preview {
             command: "echo fixture".into(),
             cwd: ".".into(),
-            shell: "fixture shell",
+            shell: "fixture shell".into(),
             timeout_seconds: 10,
         },
     );

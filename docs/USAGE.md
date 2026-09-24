@@ -101,6 +101,37 @@ window. `JECODE_REDUCED_MOTION=1` overrides animation; `NO_COLOR=1` disables col
 `file_access` accepts `local` or `workspace`; omitting it uses `local` for new
 sessions. See [tools](TOOLS.md) for the path exclusions and supported formats.
 
+On Windows, commands use system Windows PowerShell 5.1 unless you explicitly
+select a PowerShell 7 executable. To select one, add its absolute path to
+`~/.jecode/v1/settings.json` while Jecode is closed. For example:
+
+```json
+{
+  "version": 1,
+  "model": "gpt-5.6-luna",
+  "effort": "medium",
+  "reduced_motion": false,
+  "context_limit_bytes": 524288,
+  "file_access": "local",
+  "windows_powershell_executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+}
+```
+
+Jecode starts the configured executable when starting or resuming a session
+to identify its PowerShell version and runs one bounded bracketed-directory
+capability check through the command runner against an isolated temporary fixture.
+The selected version, executable and check result appear in command previews and
+model instructions. A missing, invalid or unavailable selection reports an error;
+Jecode does not fall back to 5.1. Remove
+the field or set it to `null` to use the system default. Changes to the setting
+take effect for the next started or resumed session. PowerShell 7 is supplied by
+the user and is not bundled with Jecode. PowerShell 7.6.6 is the CI-tested version;
+other 7.x versions are assessed at session start rather than accepted or rejected
+by version number. A failed semantic check or an inconclusive check (such as a
+temporary-fixture or probe launch failure) prevents commands from starting in a
+directory containing `[` or `]`, while commands from ordinary directories remain
+available. Start a new session to retry an inconclusive check.
+
 ## Sessions
 
 `jecode sessions` shows up to 50 sessions associated with the selected working

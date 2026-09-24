@@ -82,6 +82,7 @@ fn execute(
     denied: &mut bool,
 ) -> Result<(), Failure> {
     let count = current(history)?.results.len();
+    let shell = history.shell.clone();
     for index in 0..count {
         context.check()?;
         let call = &current(history)?
@@ -120,6 +121,7 @@ fn execute(
                 &command,
                 &path,
                 timeout_seconds,
+                &shell,
                 workspace,
                 context,
                 started + Duration::from_secs(600),
