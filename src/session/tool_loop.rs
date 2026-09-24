@@ -104,33 +104,49 @@ fn execute(
             receipt.summary = format!("{name} / outcome unknown after interruption");
             history.checkpoint()?;
         }
-        let output = match prepared {
+        let (output, completion) = match prepared {
             Ok(Prepared::Command {
                 command,
                 path,
                 timeout_seconds,
-            }) => super::command::execute(
-                &command,
-                &path,
-                timeout_seconds,
-                &shell,
-                workspace,
-                context,
+            }) => {
+                let (output, event) = super::command::execute(
+                    &command,
+                    &path,
+                    timeout_seconds,
+                    &shell,
+                    workspace,
+                    context,
+                );
+                (output, Some(event))
+            }
+            Ok(tool) if tool.changes_file() => {
+                let (output, event) = super::edit::execute(tool, workspace, context);
+                (output, Some(event))
+            }
+            Ok(tool) => (
+                tool.execute(
+                    workspace,
+                    &Budget {
+                        cancelled: &context.cancelled,
+                        deadline: operation_deadline(clock(), Duration::from_secs(10)),
+                    },
+                ),
+                None,
             ),
-            Ok(tool) if tool.changes_file() => super::edit::execute(tool, workspace, context),
-            Ok(tool) => tool.execute(
-                workspace,
-                &Budget {
-                    cancelled: &context.cancelled,
-                    deadline: operation_deadline(clock(), Duration::from_secs(10)),
-                },
-            ),
-            Err(error) => Output::error(error),
+            Err(error) => (Output::error(error), None),
         };
         let receipt = &mut current(history)?.results[index];
         receipt.summary = format!("{name} / {}", output.summary);
         receipt.output = output.text;
-        history.checkpoint()?;
+        // The exact effect receipt reaches storage before its final presentation.
+        // Waiting for channel capacity here cannot delay process supervision or
+        // cleanup, and keeps every completion ahead of the next operation.
+        let checkpoint = history.checkpoint();
+        if let Some(event) = completion {
+            let _ = context.send(event, false);
+        }
+        checkpoint?;
         if !effect {
             let _ = context.send(
                 Event::ToolFinished {

@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) -> Output {
+pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) -> (Output, Event) {
     let id = context.next_effect.fetch_add(1, Ordering::Relaxed);
     let budget = Budget {
         cancelled: &context.cancelled,
@@ -20,8 +20,8 @@ pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) 
         Ok(change) => change,
         Err(error) => {
             let output = Output::not_executed(&error.to_string());
-            finished(context, id, &output, false);
-            return output;
+            let finished = finished(id, &output, false);
+            return (output, finished);
         }
     };
     let preview = change.preview().clone();
@@ -79,15 +79,15 @@ pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) 
             Err(error) => (Output::failed_effect(&error.to_string()), false),
         }
     };
-    finished(context, id, &output, applied);
-    output
+    let finished = finished(id, &output, applied);
+    (output, finished)
 }
 
-fn finished(context: &Context, id: u64, output: &Output, applied: bool) {
-    let _ = context.notify(Event::EditFinished {
+fn finished(id: u64, output: &Output, applied: bool) -> Event {
+    Event::EditFinished {
         id,
         summary: output.summary.clone(),
         applied,
         failed: output.failed,
-    });
+    }
 }

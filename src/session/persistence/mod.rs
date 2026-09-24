@@ -364,7 +364,7 @@ fn resume_in_store(store: &Store, id: &str, directory: &Directory) -> io::Result
     Ok(saved)
 }
 
-fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
+pub(super) fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
     if v2::has_head(store, id)? {
         return v2::load(store, id, leased);
     }

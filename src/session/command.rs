@@ -18,16 +18,16 @@ pub(super) fn execute(
     shell: &command::Shell,
     workspace: &Workspace,
     context: &Context,
-) -> Output {
+) -> (Output, Event) {
     let id = context.next_effect.fetch_add(1, Ordering::Relaxed);
     let (output, success) = dispatch(id, script, path, timeout, shell, workspace, context);
-    let _ = context.notify(Event::CommandFinished {
+    let finished = Event::CommandFinished {
         id,
         summary: output.summary.clone(),
         success,
         failed: output.failed,
-    });
-    output
+    };
+    (output, finished)
 }
 
 fn dispatch(

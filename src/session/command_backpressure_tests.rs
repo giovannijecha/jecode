@@ -25,7 +25,7 @@ fn backpressured_start(cancel: bool) {
     };
     let (done, completed) = mpsc::sync_channel(1);
     let handle = std::thread::spawn(move || {
-        let output = super::super::command::execute(
+        let (output, _) = super::super::command::execute(
             &native::script("backpressure-tree"),
             ".",
             if cancel { 20 } else { 8 },

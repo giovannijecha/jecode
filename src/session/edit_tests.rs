@@ -139,7 +139,7 @@ fn completed_edit_receipt_does_not_wait_for_a_full_presentation_queue() {
     };
     let (done, completed) = mpsc::sync_channel(1);
     let handle = std::thread::spawn(move || {
-        let _ = done.send(super::edit::execute(tool, &workspace, &context));
+        let _ = done.send(super::edit::execute(tool, &workspace, &context).0);
     });
     let before_release = completed.recv_timeout(Duration::from_secs(3)).ok();
     let receipt_ready_before_release = before_release.is_some();

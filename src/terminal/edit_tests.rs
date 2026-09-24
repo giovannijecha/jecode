@@ -11,6 +11,107 @@ use crate::{
 };
 use std::{fs, time::Instant};
 
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn saturated_effect_completions_reconcile_into_the_active_tui() {
+    use crate::session::outcome_backpressure_tests::{self, Case};
+
+    for (case, expected) in [
+        (Case::Edit, "Edited notes.txt"),
+        (Case::Command, "Command finished"),
+        (Case::TwoEdits, "Created created.txt"),
+        (Case::FailedEdit, "changed since"),
+    ] {
+        let Some(events) = outcome_backpressure_tests::saturated_events(case) else {
+            return;
+        };
+        let mut model = account::model(Selected::Luna, None);
+        account::event(&mut model, Event::Ready);
+        account::event(
+            &mut model,
+            Event::Guidance {
+                text: "isolated effects".into(),
+                new_turn: true,
+            },
+        );
+        for event in events {
+            account::event(&mut model, event);
+        }
+        let text = model
+            .blocks
+            .iter()
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!text.contains("Turn stopped before"), "{text}");
+        assert!(text.contains(expected), "{text}");
+        if matches!(case, Case::TwoEdits) {
+            assert_eq!(text.matches("Edited notes.txt").count(), 1, "{text}");
+            assert_eq!(text.matches("Created created.txt").count(), 1, "{text}");
+        }
+        assert!(model.account.as_ref().unwrap().edit.is_none());
+        assert!(model.account.as_ref().unwrap().command.is_none());
+    }
+}
+
+#[test]
+fn storage_failure_keeps_known_effect_and_warns_only_for_missing_outcome() {
+    let preview = Preview {
+        path: "notes.txt".into(),
+        create: false,
+        diff: "- old\n+ new\n".into(),
+        added: 1,
+        removed: 1,
+        omitted_lines: 0,
+        omitted_bytes: 0,
+    };
+    for delivered in [true, false] {
+        let mut model = account::model(Selected::Luna, None);
+        account::event(&mut model, Event::Ready);
+        account::event(
+            &mut model,
+            Event::Guidance {
+                text: "edit".into(),
+                new_turn: true,
+            },
+        );
+        account::event(
+            &mut model,
+            Event::EditPlanned {
+                id: 1,
+                preview: preview.clone(),
+            },
+        );
+        if delivered {
+            account::event(
+                &mut model,
+                Event::EditFinished {
+                    id: 1,
+                    summary: "Edited notes.txt".into(),
+                    applied: true,
+                    failed: false,
+                },
+            );
+        }
+        account::event(
+            &mut model,
+            Event::Finished(
+                crate::session::End::Failed(crate::session::Failure::Storage),
+                Default::default(),
+            ),
+        );
+        let text = model
+            .blocks
+            .iter()
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text.contains("Turn stopped before"), !delivered, "{text}");
+        assert_eq!(text.contains("✓ Edited notes.txt"), delivered, "{text}");
+        assert!(text.contains("Session could not be saved"), "{text}");
+    }
+}
+
 #[test]
 fn real_direct_edit_shows_one_diff_and_result_while_preserving_draft() {
     let mut run = fixture::start();
