@@ -103,6 +103,7 @@ impl Process {
         if !directory.file().metadata()?.is_dir() {
             return Err(io::ErrorKind::InvalidInput.into());
         }
+        let process_path = directory.process_path()?;
         let mut system = vec![0u16; 32768];
         // SAFETY: writable UTF-16 buffer. Use the OS directory, not a PATH search.
         let len = unsafe { GetSystemDirectoryW(system.as_mut_ptr(), system.len() as u32) } as usize;
@@ -125,12 +126,7 @@ impl Process {
             )
             .chain([0])
             .collect();
-        let cwd: Vec<u16> = directory
-            .path
-            .as_os_str()
-            .encode_wide()
-            .chain([0])
-            .collect();
+        let cwd: Vec<u16> = process_path.as_os_str().encode_wide().chain([0]).collect();
         let mut security = Security {
             size: size_of::<Security>() as u32,
             descriptor: null_mut(),

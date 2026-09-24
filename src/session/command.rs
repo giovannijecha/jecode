@@ -156,13 +156,17 @@ fn dispatch(
         }
         Err(error) => {
             // OS errors are reported by kind/code, never echo an environment or credentials.
-            let message = format!(
-                "Command could not start · {:?}{}",
-                error.kind(),
-                error
-                    .raw_os_error()
-                    .map_or(String::new(), |code| format!(" (OS {code})"))
-            );
+            let message = if cfg!(windows) && error.kind() == std::io::ErrorKind::Unsupported {
+                "Command not executed · Windows PowerShell cannot use the selected starting directory (unsupported path or longer than MAX_PATH)".into()
+            } else {
+                format!(
+                    "Command could not start · {:?}{}",
+                    error.kind(),
+                    error
+                        .raw_os_error()
+                        .map_or(String::new(), |code| format!(" (OS {code})"))
+                )
+            };
             (Output::error(&message), false)
         }
     }

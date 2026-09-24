@@ -61,6 +61,13 @@ Windows uses the system Windows PowerShell; Linux uses `/bin/sh`. The proposal
 shows the script, starting directory and timeout. Scripts are limited to 4,096
 UTF-8 bytes; timeouts are between 1 and 300 seconds. Output streams through bounded
 pipes, with an explicit exit code, truncation and cleanup status in the receipt.
+PowerShell parser and runtime errors appear as readable stderr with a failing exit
+code. Windows command starting directories must fit the Win32 `MAX_PATH` current
+directory limit; a longer directory fails before the script runs, even if file tools
+can access it. For a directory containing `[` or `]`, PowerShell uses a temporary
+`JecodeCwd:` drive so relative cmdlets resolve literally. In that case,
+`(Get-Location).ProviderPath` gives the physical directory; native child processes
+also start there.
 
 This is not an interactive PTY and not a sandbox. The approved shell has your user
 permissions, including access outside the selected starting directory. Process

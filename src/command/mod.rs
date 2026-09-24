@@ -5,6 +5,9 @@ mod platform;
 mod shell;
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(all(test, windows))]
+#[path = "windows_tests.rs"]
+mod windows_tests;
 
 use crate::workspace::{Budget, Directory, Workspace};
 use std::{
