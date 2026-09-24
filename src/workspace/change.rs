@@ -1,7 +1,7 @@
 //! Prepared content is immutable; large originals use owned, disposable snapshots.
 use super::{
     Budget, Error, MAX_FILE_BYTES, Workspace, diff, platform,
-    snapshot::{Original, OwnedFile, Snapshot, scan_match, snapshot},
+    snapshot::{Original, OwnedFile, Snapshot, scan_match, snapshot, validate_replacement},
 };
 use std::{
     io,
@@ -143,6 +143,14 @@ impl Workspace {
             }
             Original::Staged(staged) => {
                 let at = scan_match(&mut staged.file, old, budget)?;
+                validate_replacement(
+                    &mut staged.file,
+                    before.len,
+                    at,
+                    old.len() as u64,
+                    new,
+                    budget,
+                )?;
                 let (preview, file) = diff::replacement_preview(
                     &path,
                     at,

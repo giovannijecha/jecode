@@ -184,6 +184,52 @@ pub(super) fn copy_replacement(
         budget,
     )
 }
+
+/// Validate the exact composed result without materializing it or publishing a file.
+pub(super) fn validate_replacement(
+    file: &mut File,
+    original_len: u64,
+    at: u64,
+    old_len: u64,
+    new: &str,
+    budget: &Budget<'_>,
+) -> Result<(), ChangeError> {
+    let end = at
+        .checked_add(old_len)
+        .filter(|end| *end <= original_len)
+        .ok_or(Error::Size)?;
+    let mut validator = TextValidator::default();
+    file.rewind()?;
+    validate_exact(file, at, &mut validator, budget)?;
+    for chunk in new.as_bytes().chunks(16 * 1024) {
+        budget.check()?;
+        validator.push(chunk)?;
+    }
+    file.seek(SeekFrom::Start(end))?;
+    validate_exact(file, original_len - end, &mut validator, budget)?;
+    validator.finish()
+}
+
+fn validate_exact(
+    file: &mut File,
+    mut remaining: u64,
+    validator: &mut TextValidator,
+    budget: &Budget<'_>,
+) -> Result<(), ChangeError> {
+    let mut buffer = [0; 16 * 1024];
+    while remaining != 0 {
+        budget.check()?;
+        let size = remaining.min(buffer.len() as u64) as usize;
+        let n = file.read(&mut buffer[..size])?;
+        if n == 0 {
+            return fail("staged original changed during validation");
+        }
+        validator.push(&buffer[..n])?;
+        remaining -= n as u64;
+    }
+    Ok(())
+}
+
 fn copy_exact(
     source: &mut File,
     target: &mut File,

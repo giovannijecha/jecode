@@ -14,6 +14,84 @@ fn budget(cancelled: &AtomicBool) -> Budget<'_> {
 }
 
 #[test]
+fn replacement_must_validate_composed_text_across_staging_threshold() {
+    let files = support::Fixture::new();
+    let ws = Workspace::open(&files.0).unwrap();
+    let cancelled = AtomicBool::new(false);
+    // The replacement contributes seven bytes to the staging decision.
+    // These adjacent lengths select opposite sides of that decision.
+    for padding in [10, MAX_FILE_BYTES - 15, MAX_FILE_BYTES - 14, 1_100_000] {
+        let source = format!("{}\r\nUNIQUE", "a".repeat(padding));
+        files.write("join.txt", &source);
+        let error = ws
+            .prepare_edit("join.txt", "\nUNIQUE", "changed", &budget(&cancelled))
+            .err()
+            .expect("a replacement leaving bare CR must be rejected before approval");
+        assert!(error.to_string().contains("text"));
+        assert_eq!(
+            fs::read(files.0.join("join.txt")).unwrap(),
+            source.as_bytes()
+        );
+        assert_eq!(fs::read_dir(&files.0).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn replacement_leaving_bare_cr_at_eof_is_rejected_without_artifacts() {
+    for padding in [10, 1_100_000] {
+        let files = support::Fixture::new();
+        let ws = Workspace::open(&files.0).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let source = format!("{}\r\n", "a".repeat(padding));
+        files.write("join.txt", &source);
+        assert!(
+            ws.prepare_edit("join.txt", "\n", "", &budget(&cancelled))
+                .is_err()
+        );
+        assert_eq!(
+            fs::read(files.0.join("join.txt")).unwrap(),
+            source.as_bytes()
+        );
+        assert_eq!(fs::read_dir(&files.0).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn valid_join_replacements_preserve_bytes_and_recovery_on_both_paths() {
+    for padding in [10, 1_100_000] {
+        for (old, new) in [
+            ("\nUNIQUE", "\nchanged"),
+            ("\r\nUNIQUE", "\nchanged"),
+            ("\r\nUNIQUE", ""),
+            ("UNIQUE", "✨\t"),
+        ] {
+            let files = support::Fixture::new();
+            let ws = Workspace::open(&files.0).unwrap();
+            let cancelled = AtomicBool::new(false);
+            let source = format!("{}\r\nUNIQUE\t世界", "a".repeat(padding));
+            files.write("join.txt", &source);
+            let change = ws
+                .prepare_edit("join.txt", old, new, &budget(&cancelled))
+                .unwrap();
+            let staged = matches!(
+                change.before.as_ref().unwrap().original,
+                Original::Staged(_)
+            );
+            assert_eq!(staged, padding > MAX_FILE_BYTES);
+            let applied = ws.apply(change, &budget(&cancelled)).unwrap();
+            assert_eq!(
+                fs::read(files.0.join("join.txt")).unwrap(),
+                source.replace(old, new).as_bytes()
+            );
+            assert_eq!(
+                fs::read(files.0.join(applied.recovery.unwrap())).unwrap(),
+                source.as_bytes()
+            );
+        }
+    }
+}
+
+#[test]
 fn original_401_line_create_is_accepted_with_bounded_inspectable_preview() {
     let files = support::Fixture::new();
     let ws = Workspace::open(&files.0).unwrap();
