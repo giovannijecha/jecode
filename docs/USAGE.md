@@ -200,6 +200,9 @@ explicitly discards that recovered edit and restores the previous draft; it
 does not requeue or send anything. Esc still cancels active work without clearing
 the editor. Logout keeps both drafts available while the conversation remains
 open.
+If you browse prompt history from a recovered edit, use Ctrl+N (or Page Down) to
+return to that edit before pressing Enter. Submitting a recalled entry is
+blocked while the withdrawn text is hidden, so neither draft is lost.
 
 Pending guidance and the saved draft exist only in this running process. On
 cancellation, logout or delivery failure, guidance that was never sent appears

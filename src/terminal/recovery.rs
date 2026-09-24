@@ -8,11 +8,11 @@ pub(super) struct SavedDraft {
     navigation: Navigation,
 }
 impl SavedDraft {
-    fn capture(model: &Model) -> Self {
+    fn capture(model: &mut Model) -> Self {
         Self {
             editor: model.editor.clone(),
             menu: model.menu.clone(),
-            navigation: model.prompt_history.navigation(),
+            navigation: model.prompt_history.suspend_navigation(),
         }
     }
     fn restore(self, model: &mut Model) {

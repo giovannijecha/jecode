@@ -146,6 +146,12 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
     };
     match key {
         Key::Enter => {
+            if view.recovery.is_some() && model.prompt_history.browsing() {
+                view.local_notice =
+                    "Return to the recovered edit with Ctrl+N before sending / drafts kept".into();
+                view.local_failed = false;
+                return;
+            }
             if model.editor.text.len() > session::MAX_PROMPT_BYTES {
                 view.local_notice = "Prompt exceeds 8 KiB / draft kept".into();
                 view.local_failed = true;

@@ -5,6 +5,8 @@ use crate::{
     tls::Budget,
 };
 use std::{ops::ControlFlow, sync::mpsc, time::Duration};
+#[path = "recovery_history_tests.rs"]
+mod history_tests;
 
 struct Gated {
     entered: mpsc::SyncSender<()>,
