@@ -20,7 +20,12 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
             | Key::WordBackspace
             | Key::WordDelete
     ) {
-        if model.editor.text.is_empty() {
+        if model.editor.text.is_empty()
+            && model
+                .account
+                .as_ref()
+                .is_none_or(|view| view.recovery.is_none())
+        {
             model.menu.pasted_literal = false;
         }
         if (model.menu.active(&model.editor.text)
@@ -338,7 +343,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             model.blocks.push(Block {
                 speaker: "Status",
                 text: format!(
-                    "{commands}\n\n↑↓ choose · Enter select · Tab complete\nEsc closes menus or stops work · Ctrl+Q saves and exits\nEnter queues guidance while a turn runs.\n\nDirectory: {location}\nAccess: {access}. Changes and commands require approval."
+                    "{commands}\n\n↑↓ choose · Enter select · Tab complete\nEsc closes menus or stops work · Ctrl+Q exits after cleanup\nEnter queues guidance while a turn runs. Alt+↑ edits the latest pending message; Alt+↓ discards a recovered edit and restores the prior draft.\n\nDirectory: {location}\nAccess: {access}. Changes and commands require approval."
                 ),
             });
             model.menu.close();

@@ -184,11 +184,31 @@ intraturn guidance and provider output are excluded. Guidance that starts a new
 canonical turn is available for recall. Recalled prompts remain
 editable and never send automatically.
 
-During generation Enter queues guidance; up to eight messages
-can wait for delivery. Guidance is inserted at a boundary between model/tool
-steps. If a turn has just finished, it starts the next turn. It never grants an
-approval. On cancellation, unsent queued messages are shown as not sent. A queue
-waiting for acceptance is in memory; do not rely on it surviving a forced exit.
+During generation Enter queues guidance; up to eight messages can wait for
+delivery. Short previews appear inside the composer. Guidance is inserted at a
+boundary between model/tool steps. If a turn has just finished, it starts the
+next turn. It never grants an approval.
+
+Alt+Up withdraws the newest message that is still pending and puts it in the
+editor. Edit it and press Enter to submit it through the normal path. A message
+already claimed for delivery cannot be withdrawn; the current draft stays put
+and the composer reports that nothing is pending. Recovered slash-prefixed text
+remains literal input. The previous draft, including its cursor, returns after
+the recovered edit is successfully submitted. If submission fails, both remain
+available. Alt+Up cannot replace an edit already being recovered. Alt+Down
+explicitly discards that recovered edit and restores the previous draft; it
+does not requeue or send anything. Esc still cancels active work without clearing
+the editor. Logout keeps both drafts available while the conversation remains
+open.
+If you browse prompt history from a recovered edit, use Ctrl+N (or Page Down) to
+return to that edit before pressing Enter. Submitting a recalled entry is
+blocked while the withdrawn text is hidden, so neither draft is lost.
+
+Pending guidance and the saved draft exist only in this running process. On
+cancellation, logout or delivery failure, guidance that was never sent appears
+in scrollback marked "Queued message was not sent" for manual copying; it is
+never resent automatically. Ctrl+Q joins active work and exits, but unsent
+composer and queue text is not stored for a later launch.
 
 Esc interrupts. Ctrl+Q exits after active work is cancelled and joined. Terminal
 scrollback remains available. Bracketed paste does not submit text automatically.

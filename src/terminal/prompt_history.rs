@@ -10,7 +10,26 @@ pub struct PromptHistory {
     position: Option<usize>,
     draft: Option<(Editor, bool)>,
 }
+pub(super) struct Navigation {
+    position: Option<usize>,
+    draft: Option<(Editor, bool)>,
+}
 impl PromptHistory {
+    pub(super) fn browsing(&self) -> bool {
+        self.position.is_some()
+    }
+    /// Move the current traversal out while another editor owns history keys.
+    /// Entries stay in this history so incoming turns and eviction remain live.
+    pub(super) fn suspend_navigation(&mut self) -> Navigation {
+        Navigation {
+            position: self.position.take(),
+            draft: self.draft.take(),
+        }
+    }
+    pub(super) fn restore_navigation(&mut self, saved: Navigation) {
+        self.position = saved.position;
+        self.draft = saved.draft;
+    }
     pub fn load(&mut self, prompts: Vec<String>) {
         self.entries = prompts.into_iter().rev().take(CAPACITY).collect();
         self.entries.reverse();

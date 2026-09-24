@@ -27,6 +27,7 @@ pub(super) enum Action {
     Compact,
     Help,
 }
+#[derive(Clone)]
 pub(super) struct Entry {
     pub label: String,
     pub description: String,
@@ -41,11 +42,12 @@ impl Entry {
         }
     }
 }
+#[derive(Clone)]
 pub(super) struct Panel {
     pub title: &'static str,
     pub entries: Vec<Entry>,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Menu {
     pub panel: Option<Panel>,
     pub selected: usize,

@@ -79,7 +79,7 @@ impl Drop for Fixture {
         self.observed.dropped.store(true, Ordering::Release);
     }
 }
-pub(super) fn response(text: &str, status: Status) -> Response {
+pub(crate) fn response(text: &str, status: Status) -> Response {
     let output = crate::json::parse(&format!(r#"[{{"type":"reasoning","encrypted_content":"opaque-owned-fixture"}},{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"{text}"}}]}}]"#), Default::default()).unwrap();
     let crate::json::Value::Array(output) = output else {
         unreachable!()

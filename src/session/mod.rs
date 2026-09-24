@@ -23,7 +23,10 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+pub(crate) use queue::Pending as PendingGuidance;
 pub use types::*;
+#[cfg(test)]
+pub(crate) use worker::Backend as TestBackend;
 pub(crate) const MAX_PROMPT_BYTES: usize = 8192;
 pub(crate) const MAX_RECALLED_PROMPTS: usize = 64;
 
@@ -57,7 +60,7 @@ pub struct Session {
     turns: usize,
     decisions: SyncSender<approval::Decision>,
     pending_approval: Option<u64>,
-    guidance: SyncSender<String>,
+    guidance: Arc<queue::Pending>,
     queued: usize,
     catalog: Option<crate::providers::openai_account::catalog::Catalog>,
     selected: Model,
@@ -157,7 +160,7 @@ impl Session {
         let (command_tx, command_rx) = mpsc::sync_channel(2);
         let (event_tx, event_rx) = mpsc::sync_channel(64);
         let (decision_tx, decision_rx) = mpsc::sync_channel(1);
-        let (guidance_tx, guidance_rx) = mpsc::sync_channel(8);
+        let guidance = Arc::new(queue::Pending::default());
         let cancelled = Arc::new(AtomicBool::new(false));
         let stopped = Arc::new(AtomicBool::new(false));
         let context = worker::Context {
@@ -165,7 +168,7 @@ impl Session {
             cancelled: Arc::clone(&cancelled),
             stopped: Arc::clone(&stopped),
             decisions: decision_rx,
-            guidance: guidance_rx,
+            guidance: Arc::clone(&guidance),
             next_approval: std::sync::atomic::AtomicU64::new(1),
         };
         let worker = thread::Builder::new()
@@ -181,7 +184,7 @@ impl Session {
             turns,
             decisions: decision_tx,
             pending_approval: None,
-            guidance: guidance_tx,
+            guidance,
             queued: 0,
             catalog: None,
             selected: model,
@@ -264,11 +267,21 @@ impl Session {
         {
             return false;
         }
-        if self.guidance.try_send(text.into()).is_err() {
+        if !self.guidance.push(text) {
             return false;
         }
         self.queued += 1;
         true
+    }
+    /// A successful withdrawal transfers ownership back to the editor. A worker
+    /// claim cannot be withdrawn, even if its UI event has not been polled yet.
+    pub fn withdraw_latest(&mut self) -> Option<String> {
+        let text = self.guidance.withdraw_latest()?;
+        self.queued = self.queued.saturating_sub(1);
+        Some(text)
+    }
+    pub(crate) fn pending_guidance(&self) -> Arc<queue::Pending> {
+        Arc::clone(&self.guidance)
     }
     pub fn inspect_context(&mut self) -> bool {
         self.local_command(Command::Inspect)
