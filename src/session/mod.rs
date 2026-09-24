@@ -94,13 +94,16 @@ impl Session {
                 "file-tool workspace differs from the selected directory",
             ));
         }
+        let settings = crate::state::settings::Settings::user()?;
+        let shell =
+            crate::command::Shell::configured(settings.windows_powershell_executable.as_deref())?;
         let history = persistence::create_in(
             &crate::state::Store::user()?,
             model,
             Some(directory.path()),
             workspace.as_ref(),
         )?;
-        Self::with_history(model, worker::Account::default(), workspace, history)
+        Self::with_history_shell(model, worker::Account::default(), workspace, history, shell)
     }
     pub fn resume(
         saved: persistence::Saved,
@@ -121,11 +124,15 @@ impl Session {
                 "saved workspace or file-access profile does not match the selected environment",
             ));
         }
-        Self::with_history(
+        let settings = crate::state::settings::Settings::user()?;
+        let shell =
+            crate::command::Shell::configured(settings.windows_powershell_executable.as_deref())?;
+        Self::with_history_shell(
             saved.model,
             worker::Account::default(),
             workspace,
             saved.history,
+            shell,
         )
     }
     #[cfg(test)]
@@ -136,11 +143,27 @@ impl Session {
     ) -> io::Result<Self> {
         Self::with_history(model, backend, workspace, history::History::default())
     }
+    #[cfg(test)]
     fn with_history(
         model: Model,
         backend: impl worker::Backend + 'static,
         workspace: Option<crate::workspace::Workspace>,
+        history: history::History,
+    ) -> io::Result<Self> {
+        Self::with_history_shell(
+            model,
+            backend,
+            workspace,
+            history,
+            crate::command::Shell::default(),
+        )
+    }
+    fn with_history_shell(
+        model: Model,
+        backend: impl worker::Backend + 'static,
+        workspace: Option<crate::workspace::Workspace>,
         mut history: history::History,
+        shell: crate::command::Shell,
     ) -> io::Result<Self> {
         let turns = history.turns.len();
         let initial_prompts = history
@@ -153,9 +176,15 @@ impl Session {
             .into_iter()
             .rev()
             .collect();
-        history.environment = workspace
-            .as_ref()
-            .map_or(String::new(), crate::workspace::Workspace::instructions);
+        history.environment = workspace.as_ref().map_or(String::new(), |workspace| {
+            format!(
+                "{} Command shell: {}. {}",
+                workspace.instructions(),
+                shell.label(),
+                shell.limitation()
+            )
+        });
+        history.shell = shell;
         // A pending prompt and a logout must both fit while the worker is cancelling.
         let (command_tx, command_rx) = mpsc::sync_channel(2);
         let (event_tx, event_rx) = mpsc::sync_channel(64);

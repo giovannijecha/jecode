@@ -103,7 +103,7 @@ fn process_text_cannot_forge_a_receipt_and_running_chrome_stays_bounded() {
         Preview {
             command: "echo sample".into(),
             cwd: ".".into(),
-            shell: "/bin/sh",
+            shell: "/bin/sh".into(),
             timeout_seconds: 60,
         },
     );
@@ -193,7 +193,7 @@ fn approval_distinguishes_literal_tabs_from_spaces_and_backslash_sequences() {
         Preview {
             command: "printf 'left\tright \\t'\nprintf 'second line'".into(),
             cwd: ".".into(),
-            shell: "/bin/sh",
+            shell: "/bin/sh".into(),
             timeout_seconds: 60,
         },
     );

@@ -10,6 +10,7 @@ use crate::{
 };
 pub use args::Prepared;
 pub use schema::definitions;
+pub(crate) use schema::definitions_for;
 
 pub const MAX_OUTPUT: usize = 32 * 1024;
 pub struct Output {

@@ -45,25 +45,25 @@ impl Directory {
                 _ => return Err(unsupported()),
             }
         }
-        // Windows PowerShell's provider does not resolve relative paths from a
+        // PowerShell's filesystem provider does not resolve relative paths from a
         // verbatim cwd. CreateProcessW cannot use a cwd beyond MAX_PATH either.
         // Leave long directory access to file tools; never run in another cwd.
         if ordinary.as_os_str().encode_wide().count() > 258 {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "Windows PowerShell cannot use a starting directory longer than MAX_PATH",
+                "Windows shell cannot use a starting directory longer than MAX_PATH",
             ));
         }
         let reopened = platform::root(&ordinary).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
-                "Windows PowerShell cannot use the selected starting directory",
+                "Windows shell cannot use the selected starting directory",
             )
         })?;
         if platform::identity(&reopened)? != self.identity {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "Windows PowerShell starting directory does not match the selected directory",
+                "Windows shell starting directory does not match the selected directory",
             ));
         }
         Ok(ordinary)

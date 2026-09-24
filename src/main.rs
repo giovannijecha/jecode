@@ -264,8 +264,14 @@ fn diagnostic(message: &str) -> io::Result<u8> {
 fn terminal_result(result: io::Result<()>, context: &str) -> io::Result<u8> {
     match result {
         Ok(()) => Ok(0),
-        Err(_) => {
+        Err(error) => {
             use io::IsTerminal;
+            if error
+                .get_ref()
+                .is_some_and(|source| source.is::<jecode::state::settings::ShellConfigError>())
+            {
+                return diagnostic(&error.to_string());
+            }
             diagnostic(
                 if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
                     "requires a supported interactive terminal"

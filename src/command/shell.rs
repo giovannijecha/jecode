@@ -1,9 +1,4 @@
 #[cfg(windows)]
-pub(super) const NAME: &str = "Windows PowerShell / no profile";
-#[cfg(not(windows))]
-pub(super) const NAME: &str = "/bin/sh / non-interactive";
-
-#[cfg(windows)]
 pub(super) fn encoded(script: &str) -> String {
     // Parse the model's script inside try/catch. A parser error in the enclosing
     // EncodedCommand would bypass the catch and leak PowerShell's CLIXML stderr.
@@ -17,10 +12,7 @@ pub(super) fn encoded(script: &str) -> String {
             "$OutputEncoding=[Console]::OutputEncoding;",
             "$global:LASTEXITCODE=0;try {{",
             "$jecodeCwd=[Environment]::CurrentDirectory;",
-            "if($jecodeCwd.IndexOfAny([char[]]@('[',']')) -ge 0){{",
-            "New-PSDrive -Name JecodeCwd -PSProvider FileSystem -Root $jecodeCwd -Scope Global | Out-Null;",
-            "Set-Location -LiteralPath 'JecodeCwd:\\'",
-            "}}else{{Set-Location -LiteralPath $jecodeCwd}};",
+            "Set-Location -LiteralPath $jecodeCwd;",
             "& ([scriptblock]::Create(",
             "[Text.Encoding]::UTF8.GetString(",
             "[Convert]::FromBase64String('{literal}'))));",

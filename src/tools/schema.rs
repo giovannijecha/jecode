@@ -1,6 +1,9 @@
 use crate::{json, providers::openai_account::Tool};
 
 pub fn definitions() -> Vec<Tool> {
+    definitions_for(&crate::command::Shell::default())
+}
+pub(crate) fn definitions_for(shell: &crate::command::Shell) -> Vec<Tool> {
     let mut tools: Vec<_> = [
         ("list_files", "List a local directory allowed by the session profile, sorted by name. path defaults to '.', limit defaults to 200 (1..500). Excludes dot paths, build/vendor directories, credential names, links and unsupported entries; reports omissions and truncation. Paths may be relative to the working directory or absolute when the session profile allows it.",
         r#"{"type":"object","properties":{"path":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":500}},"additionalProperties":false}"#),
@@ -18,7 +21,7 @@ pub fn definitions() -> Vec<Tool> {
     }).collect();
     tools.push(Tool {
         name: "run_command".into(),
-        description: format!("Run one non-interactive command using {} after explicit user approval. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. The shell can access files/network beyond the workspace: approval is not a sandbox. Never read or print credentials. Respect denial; no further commands or edits until a new user request.", crate::command::shell_name()),
+        description: format!("Run one non-interactive command using {} after explicit user approval. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. The shell can access files/network beyond the workspace: approval is not a sandbox. Never read or print credentials. Respect denial; no further commands or edits until a new user request.", shell.label()),
         parameters: json::parse(r#"{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":4096},"path":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":300}},"required":["command"],"additionalProperties":false}"#, Default::default()).expect("owned command schema"),
     });
     tools
