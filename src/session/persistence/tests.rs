@@ -655,3 +655,44 @@ fn controller_checkpoints_large_create_and_resume_never_replays_it() {
         content.as_bytes()
     );
 }
+#[test]
+fn active_step_projection_resumes_without_replaying_canonical_receipts() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history = create(&store, Model::Luna, None).unwrap();
+    let id = history.record.as_ref().unwrap().id.clone();
+    history.begin("Finish the original task".into()).unwrap();
+    for index in 0..2 {
+        let call_id = format!("read-{index}");
+        history.turns[0].steps.push(Step {
+            response: Some(session::tool_tests::calls_response(vec![
+                session::tool_tests::call(&call_id, "read_file", r#"{"path":"notes.txt"}"#),
+            ])),
+            accepted: true,
+            results: vec![Receipt {
+                call_id,
+                output: format!(r#"{{"text":"receipt-{index}"}}"#),
+                summary: format!("Read notes.txt / receipt-{index}"),
+            }],
+            ..Default::default()
+        });
+    }
+    history.projection.step = 1;
+    history.projection.summary = "The first read completed; finish the original task.".into();
+    history.checkpoint().unwrap();
+    drop(history);
+    let saved = load(&store, &id, true).unwrap();
+    assert_eq!(saved.history.projection.step, 1);
+    assert_eq!(saved.history.turns[0].steps.len(), 2);
+    assert_eq!(saved.history.turns[0].steps[0].results[0].call_id, "read-0");
+    let request = saved
+        .history
+        .request(Model::Luna, false)
+        .unwrap()
+        .encode(LIMIT)
+        .unwrap();
+    assert!(request.contains("Finish the original task"));
+    assert!(request.contains("read-1"));
+    assert!(!request.contains("receipt-0"));
+    assert!(request.contains("receipt-1"));
+}

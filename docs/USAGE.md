@@ -184,7 +184,9 @@ reported rather than overwritten with an empty session.
 
 The resumed transcript shows messages, tool summaries and outcomes. Full provider
 items, tool arguments, results and recorded turn metrics remain in the session JSON.
-The current limits are 256 turns, 16 MiB per session snapshot and 8 KiB per message.
+The current limits are 256 turns and 16 MiB per session snapshot. A submitted
+user message is limited to 8 KiB. Reaching a snapshot or turn limit stops new
+work with an error; canonical history is not discarded to make room.
 
 ## Input and context
 
@@ -252,7 +254,7 @@ scrollback remains available. Bracketed paste does not submit text automatically
 - `/settings`: change saved defaults and animation.
 - `/help`: list local commands.
 - `/context`: measured request bytes and the latest available provider token counts.
-- `/compact`: summarize earlier turns while keeping the two most recent turns intact.
+- `/compact`: summarize completed context, including completed steps of the active turn.
 
 Startup adds no heading above the conversation. The directory, active
 model and effort share one footer row below the composer. Long paths and model
@@ -269,13 +271,21 @@ leaving the composer ready for the next input; they are not saved as conversatio
 messages or sent to the model. Model changes update the footer after being saved.
 Use Ctrl+Q to save and exit.
 
-Local commands run between turns and do not become model tools. Automatic
-compaction runs before a new turn when the configured byte
-threshold is exceeded and older turns can be summarized. It uses the selected
-model and consumes tokens. A failed or interrupted summary is not automatically
-retried; `/compact` requests a new explicit attempt.
+Local commands run between turns and do not become model tools. Before every
+generation request, Jecode measures the serialized model request and compacts
+completed turns or completed active-turn steps when the configured byte threshold
+is exceeded. Each summary uses a bounded slice and the selected model and effort;
+it consumes tokens. A failed or interrupted summary is not automatically retried
+within that task; `/compact` requests a new explicit attempt.
 
-Compaction changes only the model-facing projection. Canonical turns and tool
-receipts stay saved. A summary can lose detail; retain critical current requirements
-in recent messages. If recent content alone exceeds the hard 2 MiB request limit,
-start a smaller task or a new session.
+Compaction checkpoints only the model-facing projection. Canonical turns, tool
+arguments and exact receipts stay saved and are not replayed on resume. A summary
+can lose detail; restate critical requirements if needed. The account request
+encoder accepts at most 2 MiB of JSON and 4,096 input items. A large completed
+step can be summarized in ordered reference-data slices. If one call and its
+receipt cannot fit together in a bounded summary request, or current input
+cannot fit, Jecode stops with a context error. These are byte and item bounds,
+not a claimed model token capacity. Provider token counts are reported
+separately when available. The 16 MiB session snapshot and 256-turn limits
+remain separate storage boundaries;
+larger canonical storage needs a separate format and migration workstream.

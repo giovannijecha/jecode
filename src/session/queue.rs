@@ -47,10 +47,6 @@ pub(super) fn take(history: &mut History, context: &Context) -> Result<bool, Fai
     let mut received = Vec::new();
     while let Some(text) = context.guidance.claim() {
         let turn = history.turns.last_mut().ok_or(Failure::Worker)?;
-        if turn.guidance.len() >= 64 {
-            let _ = context.send(Event::GuidanceReturned(text), false);
-            continue;
-        }
         turn.guidance.push(Guidance {
             after_step: turn.steps.len(),
             text: text.clone(),
@@ -61,6 +57,9 @@ pub(super) fn take(history: &mut History, context: &Context) -> Result<bool, Fai
         return Ok(false);
     }
     if let Err(error) = history.checkpoint() {
+        if let Some(turn) = history.turns.last_mut() {
+            turn.guidance.truncate(turn.guidance.len() - received.len());
+        }
         for text in received {
             let _ = context.send(Event::GuidanceReturned(text), false);
         }

@@ -231,3 +231,27 @@ fn guidance_waits_for_a_model_boundary_and_cancel_returns_unsent_messages() {
         drop(run);
     }
 }
+#[test]
+fn failed_guidance_checkpoint_returns_claim_without_persisting_it() {
+    let mut history = crate::session::history::History::default();
+    history.begin("active objective".into()).unwrap();
+    history.fail_next_checkpoint.store(true, Ordering::Release);
+    let pending = Arc::new(super::Pending::default());
+    assert!(pending.push("keep this guidance"));
+    let (events, received) = mpsc::sync_channel(8);
+    let (_decisions, decisions) = mpsc::sync_channel(1);
+    let context = crate::session::worker::Context {
+        events,
+        cancelled: Arc::new(AtomicBool::new(false)),
+        stopped: Arc::new(AtomicBool::new(false)),
+        decisions,
+        guidance: pending.clone(),
+        next_approval: std::sync::atomic::AtomicU64::new(1),
+    };
+    assert_eq!(super::take(&mut history, &context), Err(Failure::Storage));
+    assert!(
+        matches!(received.try_recv(), Ok(Event::GuidanceReturned(text)) if text == "keep this guidance")
+    );
+    assert!(history.turns[0].guidance.is_empty());
+    assert!(pending.snapshot().is_empty());
+}

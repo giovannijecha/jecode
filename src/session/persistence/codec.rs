@@ -107,7 +107,7 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
         for value in value
             .get("steps")
             .and_then(Value::array)
-            .filter(|steps| steps.len() <= 8)
+            .filter(|steps| steps.len() <= LIMIT)
             .ok_or_else(invalid)?
         {
             let response = match value.get("response") {
@@ -128,7 +128,7 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
             for value in value
                 .get("results")
                 .and_then(Value::array)
-                .filter(|r| r.len() <= 32)
+                .filter(|r| r.len() <= 128)
                 .ok_or_else(invalid)?
             {
                 step.results.push(Receipt {
@@ -158,7 +158,7 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
         for item in value
             .get("guidance")
             .and_then(Value::array)
-            .filter(|items| items.len() <= 64)
+            .filter(|items| items.len() <= LIMIT)
             .ok_or_else(invalid)?
         {
             let after_step = item
@@ -177,9 +177,6 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
                 after_step,
                 text: string(item, "text", 8192)?.into(),
             });
-        }
-        if turn.displayed_bytes() > super::super::history::MAX_TEXT {
-            return Err(invalid());
         }
         history.turns.push(turn);
     }

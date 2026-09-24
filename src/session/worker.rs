@@ -261,6 +261,7 @@ pub(super) fn run(
                     &mut history,
                     &context,
                     model,
+                    workspace.is_some(),
                     &mut metrics,
                 );
                 metrics.elapsed_ms = millis(started);
@@ -290,6 +291,7 @@ pub(super) fn run(
                     model,
                     workspace.as_ref(),
                     started,
+                    Instant::now,
                     &mut metrics,
                 )
             });
@@ -403,4 +405,9 @@ pub(super) fn failure(error: client::Error, context: &Context) -> Failure {
 }
 pub(super) fn millis(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Start an I/O deadline at the operation boundary, independently of task age.
+pub(super) fn operation_deadline(now: Instant, timeout: Duration) -> Instant {
+    now + timeout
 }

@@ -2,7 +2,7 @@
 use super::{
     Event, Failure, Metrics,
     history::{MAX_TEXT, Receipt, Step, Turn},
-    worker::{Backend, Context, failure, millis},
+    worker::{Backend, Context, failure, millis, operation_deadline},
 };
 use crate::{
     providers::openai_account::{Progress, Request},
@@ -20,19 +20,19 @@ pub(super) fn generate(
     turn: &mut Turn,
     context: &Context,
     started: Instant,
+    clock: &impl Fn() -> Instant,
     metrics: &mut Metrics,
 ) -> Result<(), Failure> {
     context.check()?;
-    let previous_bytes = turn.displayed_bytes();
     turn.steps.push(Step::default());
     let step = turn.steps.last_mut().ok_or(Failure::Worker)?;
     let mut limit = false;
     let mut thinking = false;
-    metrics.requests += 1;
+    metrics.requests = metrics.requests.saturating_add(1);
     let result = backend.generate(
         request,
         &Budget {
-            deadline: started + Duration::from_secs(600),
+            deadline: operation_deadline(clock(), Duration::from_secs(600)),
             cancelled: &context.cancelled,
         },
         &mut |progress| {
@@ -42,9 +42,7 @@ pub(super) fn generate(
             let text = match progress {
                 Progress::Text(text) | Progress::Reasoning(text) => text,
             };
-            if text.len()
-                > MAX_TEXT.saturating_sub(previous_bytes + step.text.len() + step.reasoning.len())
-            {
+            if text.len() > MAX_TEXT.saturating_sub(step.text.len() + step.reasoning.len()) {
                 limit = true;
                 return ControlFlow::Break(());
             }
@@ -94,8 +92,7 @@ pub(super) fn generate(
     // Keep validated terminal facts even if presentation cannot accept them.
     step.response = Some(response);
     let response = step.response.as_ref().ok_or(Failure::Worker)?;
-    if limit || response.text.len() > MAX_TEXT.saturating_sub(previous_bytes + step.reasoning.len())
-    {
+    if limit || response.text.len() > MAX_TEXT.saturating_sub(step.reasoning.len()) {
         return Err(Failure::OutputLimit);
     }
     let suffix = response.text.strip_prefix(&step.text);

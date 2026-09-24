@@ -18,7 +18,6 @@ pub(super) fn execute(
     tool: Prepared,
     workspace: &Workspace,
     context: &Context,
-    deadline: Instant,
     denied: &mut bool,
     metrics: &mut Metrics,
 ) -> Output {
@@ -40,7 +39,7 @@ pub(super) fn execute(
     }
     let budget = Budget {
         cancelled: &context.cancelled,
-        deadline: deadline.min(Instant::now() + Duration::from_secs(10)),
+        deadline: Instant::now() + Duration::from_secs(10),
     };
     let change = match tool.propose(workspace, &budget) {
         Ok(change) => change,
@@ -70,14 +69,12 @@ pub(super) fn execute(
             true,
         )
         .is_continue();
-    let decision = sent
-        .then(|| wait(context, id, deadline, metrics))
-        .transpose();
+    let decision = sent.then(|| wait(context, id, metrics)).transpose();
     let (output, applied) = match decision {
         Ok(Some(true)) => {
             let budget = Budget {
                 cancelled: &context.cancelled,
-                deadline: deadline.min(Instant::now() + Duration::from_secs(10)),
+                deadline: Instant::now() + Duration::from_secs(10),
             };
             match workspace.apply(change, &budget) {
                 Ok(result) => {
@@ -130,7 +127,7 @@ pub(super) fn execute(
             )
         }
         _ => (
-            Output::error("approval cancelled or expired; no file changed"),
+            Output::error("approval cancelled or decision channel closed; no file changed"),
             false,
         ),
     };
@@ -145,20 +142,15 @@ pub(super) fn execute(
     );
     output
 }
-pub(super) fn wait(
-    context: &Context,
-    id: u64,
-    deadline: Instant,
-    metrics: &mut Metrics,
-) -> Result<bool, ()> {
+pub(super) fn wait(context: &Context, id: u64, metrics: &mut Metrics) -> Result<bool, ()> {
     let started = Instant::now();
-    let result = decision(context, id, deadline);
+    let result = decision(context, id);
     metrics.approval_wait_ms += super::worker::millis(started);
     result
 }
-fn decision(context: &Context, id: u64, deadline: Instant) -> Result<bool, ()> {
+fn decision(context: &Context, id: u64) -> Result<bool, ()> {
     loop {
-        if context.check().is_err() || Instant::now() >= deadline {
+        if context.check().is_err() {
             return Err(());
         }
         match context.decisions.recv_timeout(Duration::from_millis(20)) {
