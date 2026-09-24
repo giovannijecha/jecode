@@ -53,6 +53,28 @@ pub struct Saved {
     pub turns: usize,
     pub(super) history: History,
 }
+/// Snapshot-bound position within one committed version of a v2 turn. The fields can
+/// be saved by a caller and are checked against the current head on reuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanonicalCursor {
+    pub turn: usize,
+    pub committed: u64,
+    pub rolling: u64,
+    pub offset: u64,
+}
+/// Exact bytes from one ordered canonical event. Reassemble all slices of an
+/// event before decoding its UTF-8 JSON; a slice may end inside a code point.
+pub struct CanonicalSlice {
+    pub event: usize,
+    pub offset: usize,
+    pub total: usize,
+    pub bytes: Vec<u8>,
+}
+pub struct CanonicalPage {
+    pub slices: Vec<CanonicalSlice>,
+    pub next: Option<CanonicalCursor>,
+    pub total_bytes: u64,
+}
 impl Saved {
     /// Read an older transcript page without loading the complete session.
     /// A page is at most 16 turns and 80 MiB of encoded canonical events.
@@ -76,6 +98,24 @@ impl Saved {
             .get(start..end)
             .ok_or(io::ErrorKind::InvalidInput)?;
         Ok(transcript::turn_items(turns))
+    }
+    /// Traverse an old v2 turn even when its complete transcript exceeds the
+    /// turn-page budget. Each call returns at most 8 MiB and 64 event slices.
+    pub fn canonical_turn_slices(
+        &self,
+        turn: usize,
+        cursor: Option<CanonicalCursor>,
+        max_bytes: usize,
+    ) -> io::Result<CanonicalPage> {
+        let record = self
+            .history
+            .record
+            .as_ref()
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        if record.legacy() || turn >= self.turns {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        v2::turn_slices(record, turn, cursor, max_bytes)
     }
 }
 pub(super) struct Record {

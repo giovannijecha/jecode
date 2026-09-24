@@ -86,12 +86,39 @@ impl History {
     pub fn turn_count(&self) -> usize {
         self.base_turn + self.turns.len()
     }
+    /// The cursor that will exist after releasing the newly projected prefix.
+    /// Guidance exactly at the step boundary remains resident.
+    pub fn projected_cursor(&self) -> (usize, usize, usize) {
+        let through = self.base_turn + self.projection.through;
+        let step_base = if self.projection.through == 0 {
+            self.base_step
+        } else {
+            0
+        };
+        let guidance_base = if self.projection.through == 0 {
+            self.base_guidance
+        } else {
+            0
+        };
+        let covered_guidance = self.turns.get(self.projection.through).map_or(0, |turn| {
+            turn.guidance
+                .iter()
+                .filter(|guidance| guidance.after_step < self.projection.step)
+                .count()
+        });
+        (
+            through,
+            step_base + self.projection.step,
+            guidance_base + covered_guidance,
+        )
+    }
     /// Release canonical turns already covered by a durable projection. Their
     /// bytes remain in the log and can be visited in bounded pages.
     pub fn release_projected(&mut self) {
         if self.record.as_ref().is_none_or(|record| record.legacy()) {
             return;
         }
+        let (_, _, projected_guidance_base) = self.projected_cursor();
         let count = self.projection.through.min(self.turns.len());
         self.turns.drain(..count);
         self.base_turn += count;
@@ -103,9 +130,8 @@ impl History {
         if let Some(turn) = self.turns.first_mut() {
             let steps = self.projection.step.min(turn.steps.len());
             turn.steps.drain(..steps);
-            let prior_guidance = turn.guidance.len();
             turn.guidance.retain(|g| g.after_step >= steps);
-            self.base_guidance += prior_guidance - turn.guidance.len();
+            self.base_guidance = projected_guidance_base;
             for guidance in &mut turn.guidance {
                 guidance.after_step -= steps;
             }

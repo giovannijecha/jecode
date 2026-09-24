@@ -15,8 +15,13 @@ summary, cursor and partial-compaction checkpoint. The controller can release
 completed turns and steps from memory after a projection checkpoint; the log
 keeps them. Listing reads bounded heads. Resume checks the committed log with a
 fixed-size I/O buffer and rebuilds only the working suffix. Older turns can be
-traversed in pages of at most 16 turns and 80 MiB of encoded events. The terminal restores the working suffix and indicates when
-earlier canonical history is on disk.
+traversed in pages of at most 16 turns and 80 MiB of encoded events. If a single
+turn exceeds that page budget, `Saved::canonical_turn_slices` returns its exact
+ordered log-event JSON in resumable pages of at most 8 MiB and 64 slices. Each
+slice identifies its event and byte range; callers reassemble an event before
+decoding UTF-8 JSON. The cursor is tied to the committed head and rejects a
+changed log snapshot. The terminal restores the working suffix and indicates
+when earlier canonical history is on disk.
 
 One log event is bounded by 80 MiB of encoded JSON, derived from the existing
 bounded provider response and receipt sizes. The reader handles its bytes in
@@ -31,13 +36,18 @@ replaces the small head with the committed byte offset and rolling checksum.
 The head replacement is the logical commit boundary. A checkpoint failure stops
 the worker before any subsequent effect that needed that record. If replacement
 may have happened but its final sync reports an error, that owner refuses more
-writes until the session is closed and its committed head is inspected on resume. On resume,
-Jecode validates every frame and checksum inside the committed boundary. A
-short or malformed tail *after* that boundary is uncommitted and ignored; the
-next leased writer truncates it before appending. Damage inside the committed
-prefix or a damaged head is reported as corruption, never treated as an empty
-session. The rolling checksum detects accidental damage; it is not an
+writes until the session is closed and its committed head is inspected on resume.
+On resume, Jecode validates every frame and checksum inside the committed
+boundary. A short or malformed tail *after* that boundary is uncommitted and
+ignored; the next leased writer truncates it before appending. Damage inside
+the committed prefix or a damaged head is reported as corruption, never as an
+empty session. The rolling checksum detects accidental damage; it is not an
 authentication mechanism against a writer with access to the user files.
+
+A leased resume that finds an active last turn commits its interrupted outcome
+before accepting a new turn. The exact recorded receipts remain in that turn;
+no historical tool is executed. Compaction checkpoints commit absolute step and
+guidance cursors together, including guidance at the next-step boundary.
 
 The ordering of pre-effect unknown-outcome and post-effect exact-receipt
 checkpoints remains unchanged. If execution was interrupted between them,

@@ -139,3 +139,118 @@ pub(super) fn corrupt() -> io::Error {
         "committed session log is corrupt",
     )
 }
+
+pub(super) struct Chunk {
+    pub event: usize,
+    pub offset: usize,
+    pub total: usize,
+    pub bytes: Vec<u8>,
+}
+pub(super) struct ChunkPage {
+    pub slices: Vec<Chunk>,
+    pub next_offset: Option<u64>,
+    pub total_bytes: u64,
+}
+
+/// Validate the whole committed prefix while copying a bounded range of one
+/// turn's ordered event payloads. The logical byte cursor spans event payloads,
+/// not framing bytes, so it can stop inside an individual large event.
+pub(super) fn chunks(
+    store: &Store,
+    id: &str,
+    committed: u64,
+    expected_hash: u64,
+    target_turn: usize,
+    start: u64,
+    max_bytes: usize,
+) -> io::Result<ChunkPage> {
+    if !(1..=8 * 1024 * 1024).contains(&max_bytes) {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let mut file = store.read_file(&format!("{id}.log"))?;
+    if file.metadata()?.len() < committed {
+        return Err(corrupt());
+    }
+    let mut position = 0u64;
+    let mut rolling = HASH_START;
+    let mut logical = 0u64;
+    let mut event = 0usize;
+    let mut remaining = max_bytes;
+    let mut next_offset = start;
+    let mut slices = Vec::new();
+    let mut buffer = [0u8; CHUNK];
+    while position < committed {
+        if committed - position < HEADER as u64 {
+            return Err(corrupt());
+        }
+        let mut header = [0u8; HEADER];
+        file.read_exact(&mut header).map_err(|_| corrupt())?;
+        let length = u32::from_le_bytes(header[..4].try_into().unwrap()) as usize;
+        let turn = u64::from_le_bytes(header[4..12].try_into().unwrap());
+        let checksum = u64::from_le_bytes(header[12..20].try_into().unwrap());
+        if length > EVENT_LIMIT || committed - position - (HEADER as u64) < length as u64 {
+            return Err(corrupt());
+        }
+        let selected = turn == target_turn as u64;
+        let begin = logical;
+        if selected {
+            logical = logical.checked_add(length as u64).ok_or_else(corrupt)?;
+        }
+        let offset = if selected && start < logical && slices.len() < 64 && remaining != 0 {
+            Some(start.saturating_sub(begin) as usize)
+        } else {
+            None
+        };
+        let take = offset.map_or(0, |offset| (length - offset).min(remaining));
+        let mut capture = Vec::with_capacity(take);
+        let mut read = 0usize;
+        let mut digest = HASH_START;
+        rolling = hash(rolling, &header);
+        while read < length {
+            let count = (length - read).min(CHUNK);
+            file.read_exact(&mut buffer[..count])
+                .map_err(|_| corrupt())?;
+            digest = hash(digest, &buffer[..count]);
+            rolling = hash(rolling, &buffer[..count]);
+            if let Some(offset) = offset {
+                let from = read.max(offset);
+                let to = (read + count).min(offset + take);
+                if from < to {
+                    capture.extend_from_slice(&buffer[from - read..to - read]);
+                }
+            }
+            read += count;
+        }
+        if digest != checksum {
+            return Err(corrupt());
+        }
+        if let Some(offset) = offset {
+            if capture.len() != take || take == 0 {
+                return Err(corrupt());
+            }
+            slices.push(Chunk {
+                event,
+                offset,
+                total: length,
+                bytes: capture,
+            });
+            remaining -= take;
+            next_offset = begin + (offset + take) as u64;
+        }
+        if selected {
+            event = event.checked_add(1).ok_or_else(corrupt)?;
+        }
+        position += HEADER as u64 + length as u64;
+    }
+    if rolling != expected_hash || event == 0 {
+        return Err(corrupt());
+    }
+    if start > logical {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    Ok(ChunkPage {
+        slices,
+        next_offset: (next_offset < logical).then_some(next_offset),
+        total_bytes: logical,
+    })
+}

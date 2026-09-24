@@ -6,6 +6,10 @@
   import for long-running conversations.
 - Ordered reference slices cover a single call and receipt larger than a bounded
   compaction request without replaying tools.
+- Preserve current-turn outcomes across compaction, commit interrupted outcomes
+  on resume, and keep guidance cursors consistent at compaction checkpoints.
+- Traverse old turns beyond the transcript page budget through bounded,
+  resumable canonical event slices.
 
 ## 0.1.0-alpha.2 - 2026-09-22
 

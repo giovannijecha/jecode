@@ -6,9 +6,16 @@ mod head;
 mod log;
 mod replay;
 #[cfg(test)]
+mod review_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod traversal_tests;
 
-use super::{Listed, Model, Record, Saved, Store, codec, invalid, now, text, valid_id};
+use super::{
+    CanonicalCursor, CanonicalPage, CanonicalSlice, Listed, Model, Record, Saved, Store, codec,
+    invalid, now, text, valid_id,
+};
 use crate::{
     json::{self, Value},
     session::history::{History, Turn},
@@ -456,11 +463,13 @@ fn load_inner(root: &Store, id: &str, leased: bool, allow_unverified: bool) -> i
         tracker.end = Some(log::fingerprint(&codec::end(turn))?);
     }
     if let Some(lock) = lock {
+        let mut recovered_interruption = false;
         if let Some(turn) = history.turns.last_mut()
             && turn.end.is_none()
         {
             turn.end = Some(super::super::End::Failed(super::super::Failure::Worker));
             turn.outcome = "Interrupted session / no operation was replayed. Verify any unknown tool outcome before continuing.".into();
+            recovered_interruption = true;
         }
         history.record = Some(Record {
             store,
@@ -480,6 +489,13 @@ fn load_inner(root: &Store, id: &str, leased: bool, allow_unverified: bool) -> i
             incremental: Some(Mutex::new(tracker)),
             _lock: lock,
         });
+        // Commit the recovered outcome before a later prompt can append a new
+        // turn. Replay requires every earlier turn to have an ended state.
+        if recovered_interruption {
+            history.checkpoint().map_err(|_| {
+                io::Error::other("cannot commit interrupted session outcome on resume")
+            })?;
+        }
     }
     Ok(Saved {
         id: id.into(),
@@ -645,4 +661,51 @@ pub(super) fn page(record: &Record, start: usize, count: usize) -> io::Result<Ve
         return Err(log::corrupt());
     }
     Ok(turns)
+}
+
+pub(super) fn turn_slices(
+    record: &Record,
+    turn: usize,
+    cursor: Option<CanonicalCursor>,
+    max_bytes: usize,
+) -> io::Result<CanonicalPage> {
+    let info = checked_head(&record.store, &record.id)?;
+    if turn >= info.turns
+        || cursor.is_some_and(|cursor| {
+            cursor.turn != turn
+                || cursor.committed != info.committed
+                || cursor.rolling != info.rolling
+        })
+    {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let offset = cursor.map_or(0, |cursor| cursor.offset);
+    let page = log::chunks(
+        &record.store,
+        &record.id,
+        info.committed,
+        info.rolling,
+        turn,
+        offset,
+        max_bytes,
+    )?;
+    Ok(CanonicalPage {
+        slices: page
+            .slices
+            .into_iter()
+            .map(|slice| CanonicalSlice {
+                event: slice.event,
+                offset: slice.offset,
+                total: slice.total,
+                bytes: slice.bytes,
+            })
+            .collect(),
+        next: page.next_offset.map(|offset| CanonicalCursor {
+            turn,
+            committed: info.committed,
+            rolling: info.rolling,
+            offset,
+        }),
+        total_bytes: page.total_bytes,
+    })
 }

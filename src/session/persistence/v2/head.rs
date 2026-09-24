@@ -59,24 +59,11 @@ fn path(value: &Value, key: &str) -> io::Result<Option<PathBuf>> {
 
 pub(super) fn projection(history: &History) -> Value {
     let p = &history.projection;
+    let (through, step, guidance_base) = history.projected_cursor();
     json::object([
-        ("through", number(history.base_turn + p.through)),
-        (
-            "step",
-            number(if p.through == 0 {
-                history.base_step + p.step
-            } else {
-                p.step
-            }),
-        ),
-        (
-            "guidance_base",
-            number(if p.through == 0 {
-                history.base_guidance
-            } else {
-                0
-            }),
-        ),
+        ("through", number(through)),
+        ("step", number(step)),
+        ("guidance_base", number(guidance_base)),
         ("summary", text(&p.summary)),
         ("limit_bytes", number(p.limit_bytes)),
         ("failed", Value::Bool(p.failed)),
