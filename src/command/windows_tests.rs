@@ -35,9 +35,16 @@ fn execute_with_shell(
 
 fn configured_pwsh_for_tests() -> Option<Shell> {
     std::env::var("JECODE_TEST_PWSH").ok().map(|path| {
-        let shell = Shell::configured(Some(&path)).unwrap();
+        let shell = Shell::configured(Some(&path), None).unwrap();
         assert!(
             shell.label().contains("PowerShell 7.6.6"),
+            "{}",
+            shell.label()
+        );
+        assert!(
+            shell
+                .label()
+                .contains("bracketed cwd: supported by session probe"),
             "{}",
             shell.label()
         );
@@ -351,7 +358,7 @@ fn default_powershell_rejects_bracketed_cwd_before_running() {
 }
 
 #[test]
-fn unverified_powershell7_version_rejects_bracketed_cwd() {
+fn bracket_cwd_uses_cached_capability_not_synthetic_version_metadata() {
     let files = Fixture::new();
     files.write("child [1]/marker.txt", "CHILD");
     let workspace = Workspace::open(&files.0).unwrap();
@@ -359,7 +366,26 @@ fn unverified_powershell7_version_rejects_bracketed_cwd() {
     let budget = budget(&cancelled);
     let shell = Shell::PowerShell7 {
         executable: files.0.join("unused-pwsh.exe"),
+        // Synthetic metadata exercises policy only; this does not validate 7.5.7.
         version: "7.5.7".into(),
+        bracket_cwd: super::selection::BracketCwd::Supported,
+    };
+    let accepted = prepare_with_shell(
+        &workspace,
+        "Write-Output safe",
+        "child [1]",
+        20,
+        &shell,
+        &budget,
+    );
+    assert!(
+        accepted.is_ok(),
+        "a cached semantic success should permit preparation"
+    );
+    let shell = Shell::PowerShell7 {
+        executable: files.0.join("unused-pwsh.exe"),
+        version: "7.6.6".into(),
+        bracket_cwd: super::selection::BracketCwd::Incompatible,
     };
     let error = prepare_with_shell(
         &workspace,
@@ -370,21 +396,25 @@ fn unverified_powershell7_version_rejects_bracketed_cwd() {
         &budget,
     )
     .err()
-    .expect("unverified shell must not run from bracketed cwd");
-    assert!(error.contains("7.6.6"), "{error}");
+    .expect("a semantic failure must reject even a CI-tested version");
+    assert!(
+        error.contains("failed the bracketed-directory capability probe"),
+        "{error}"
+    );
+    assert!(shell.label().contains("incompatible with session probe"));
 }
 
 #[test]
 fn configured_shell_rejects_missing_invalid_and_non_powershell7_executables() {
-    let invalid = Shell::configured(Some("pwsh.exe")).unwrap_err();
+    let invalid = Shell::configured(Some("pwsh.exe"), None).unwrap_err();
     assert!(invalid.to_string().contains("absolute local"), "{invalid}");
     let files = Fixture::new();
     let missing = files.0.join("missing/pwsh.exe");
-    let missing = Shell::configured(Some(missing.to_str().unwrap())).unwrap_err();
+    let missing = Shell::configured(Some(missing.to_str().unwrap()), None).unwrap_err();
     assert!(missing.to_string().contains("unavailable"), "{missing}");
     let system = Path::new(&std::env::var_os("WINDIR").unwrap())
         .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-    let wrong_version = Shell::configured(Some(system.to_str().unwrap())).unwrap_err();
+    let wrong_version = Shell::configured(Some(system.to_str().unwrap()), None).unwrap_err();
     assert!(
         wrong_version
             .to_string()

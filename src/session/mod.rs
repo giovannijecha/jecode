@@ -95,8 +95,10 @@ impl Session {
             ));
         }
         let settings = crate::state::settings::Settings::user()?;
-        let shell =
-            crate::command::Shell::configured(settings.windows_powershell_executable.as_deref())?;
+        let shell = crate::command::Shell::configured(
+            settings.windows_powershell_executable.as_deref(),
+            Some(directory.path()),
+        )?;
         let history = persistence::create_in(
             &crate::state::Store::user()?,
             model,
@@ -125,8 +127,10 @@ impl Session {
             ));
         }
         let settings = crate::state::settings::Settings::user()?;
-        let shell =
-            crate::command::Shell::configured(settings.windows_powershell_executable.as_deref())?;
+        let shell = crate::command::Shell::configured(
+            settings.windows_powershell_executable.as_deref(),
+            Some(directory.path()),
+        )?;
         Self::with_history_shell(
             saved.model,
             worker::Account::default(),

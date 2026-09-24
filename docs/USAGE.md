@@ -117,15 +117,20 @@ select a PowerShell 7 executable. To select one, add its absolute path to
 }
 ```
 
-Jecode starts the configured executable once when starting or resuming a session
-to read its PowerShell version. The selected version and executable
-appear in command previews and model instructions. A missing, invalid or
-unavailable selection reports an error; Jecode does not fall back to 5.1. Remove
+Jecode starts the configured executable when starting or resuming a session
+to identify its PowerShell version and runs one bounded bracketed-directory
+capability check through the command runner against an isolated temporary fixture.
+The selected version, executable and check result appear in command previews and
+model instructions. A missing, invalid or unavailable selection reports an error;
+Jecode does not fall back to 5.1. Remove
 the field or set it to `null` to use the system default. Changes to the setting
 take effect for the next started or resumed session. PowerShell 7 is supplied by
-the user and is not bundled with Jecode; the bracketed-directory behavior has
-been verified with PowerShell 7.6.6. Bracketed command starting directories
-remain unsupported with other unverified PowerShell 7 versions.
+the user and is not bundled with Jecode. PowerShell 7.6.6 is the CI-tested version;
+other 7.x versions are assessed at session start rather than accepted or rejected
+by version number. A failed semantic check or an inconclusive check (such as a
+temporary-fixture or probe launch failure) prevents commands from starting in a
+directory containing `[` or `]`, while commands from ordinary directories remain
+available. Start a new session to retry an inconclusive check.
 
 ## Sessions
 

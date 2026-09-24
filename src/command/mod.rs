@@ -2,6 +2,8 @@
 //! descendants and join the child; neither a workspace path nor a job is a sandbox.
 mod capture;
 mod platform;
+#[cfg(windows)]
+mod probe;
 mod selection;
 mod shell;
 #[cfg(test)]

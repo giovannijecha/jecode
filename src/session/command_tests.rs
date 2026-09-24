@@ -110,7 +110,7 @@ fn configured_powershell7_is_used_for_request_preview_and_execution() {
         .unwrap();
     let settings = crate::state::settings::Settings::load(&store).unwrap();
     let shell =
-        crate::command::Shell::configured(settings.windows_powershell_executable.as_deref())
+        crate::command::Shell::configured(settings.windows_powershell_executable.as_deref(), None)
             .unwrap();
     let files = Files::new();
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -136,6 +136,11 @@ fn configured_powershell7_is_used_for_request_preview_and_execution() {
                 preview.shell
             );
             assert!(preview.shell.contains("pwsh.exe"), "{}", preview.shell);
+            assert!(
+                preview
+                    .shell
+                    .contains("bracketed cwd: supported by session probe")
+            );
             id
         }
         _ => panic!("expected command proposal"),
@@ -146,6 +151,10 @@ fn configured_powershell7_is_used_for_request_preview_and_execution() {
         "{request}"
     );
     assert!(request.contains("using PowerShell 7.6.6"), "{request}");
+    assert!(
+        request.contains("bracketed cwd: supported by session probe"),
+        "{request}"
+    );
     assert!(session.decide(id, true));
     let mut executed = false;
     loop {

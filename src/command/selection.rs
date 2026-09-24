@@ -18,16 +18,52 @@ pub(crate) enum Shell {
     PowerShell7 {
         executable: PathBuf,
         version: String,
+        bracket_cwd: BracketCwd,
     },
     #[cfg(not(windows))]
     #[default]
     Sh,
 }
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BracketCwd {
+    // This state exists only while the fixed probe runs through the real runner.
+    Probing,
+    Supported,
+    Incompatible,
+    Inconclusive(ProbeIssue),
+}
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProbeIssue {
+    Fixture,
+    Launch,
+    Timeout,
+    Output,
+    Malformed,
+    Cleanup,
+}
+#[cfg(windows)]
+impl ProbeIssue {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Fixture => "temporary fixture unavailable",
+            Self::Launch => "probe command could not start or finish",
+            Self::Timeout => "probe command timed out",
+            Self::Output => "probe output exceeded its limit or failed",
+            Self::Malformed => "probe output was incomplete or malformed",
+            Self::Cleanup => "probe cleanup could not be confirmed",
+        }
+    }
+}
 impl Shell {
-    pub(crate) fn configured(setting: Option<&str>) -> io::Result<Self> {
+    pub(crate) fn configured(
+        setting: Option<&str>,
+        selected_directory: Option<&std::path::Path>,
+    ) -> io::Result<Self> {
         #[cfg(not(windows))]
         {
-            let _ = setting;
+            let _ = (setting, selected_directory);
             Ok(Self::Sh)
         }
         #[cfg(windows)]
@@ -63,10 +99,16 @@ impl Shell {
                 return Err(invalid());
             }
             let version = probe_version(&executable)?;
-            Ok(Self::PowerShell7 {
+            let mut shell = Self::PowerShell7 {
                 executable,
                 version,
-            })
+                bracket_cwd: BracketCwd::Probing,
+            };
+            let result = super::probe::check(&shell, selected_directory);
+            if let Self::PowerShell7 { bracket_cwd, .. } = &mut shell {
+                *bracket_cwd = result;
+            }
+            Ok(shell)
         }
     }
     pub(crate) fn label(&self) -> String {
@@ -77,10 +119,18 @@ impl Shell {
             Self::PowerShell7 {
                 executable,
                 version,
+                bracket_cwd,
             } => {
                 format!(
-                    "PowerShell {version} / no profile / {}",
-                    executable.display()
+                    "PowerShell {version} / no profile / {} / bracketed cwd: {}",
+                    executable.display(),
+                    match bracket_cwd {
+                        BracketCwd::Probing => "checking".into(),
+                        BracketCwd::Supported => "supported by session probe".into(),
+                        BracketCwd::Incompatible => "incompatible with session probe".into(),
+                        BracketCwd::Inconclusive(issue) =>
+                            format!("unverified ({})", issue.label()),
+                    }
                 )
             }
             #[cfg(not(windows))]
@@ -94,8 +144,18 @@ impl Shell {
                 "Commands cannot start in directories containing [ or ] with this shell."
             }
             #[cfg(windows)]
-            Self::PowerShell7 { version, .. } if version != "7.6.6" => {
-                "Commands cannot start in directories containing [ or ] with this unverified PowerShell 7 version."
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Incompatible,
+                ..
+            } => {
+                "The configured PowerShell 7 failed the bracketed-directory capability check. Commands cannot start in directories containing [ or ] with this shell."
+            }
+            #[cfg(windows)]
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Inconclusive(_),
+                ..
+            } => {
+                "Bracketed-directory capability could not be verified for the configured PowerShell 7; commands cannot start in directories containing [ or ] until a new session verifies it."
             }
             _ => "",
         }
@@ -113,10 +173,56 @@ impl Shell {
             Self::WindowsPowerShell => Some(
                 "Windows PowerShell 5.1 cannot safely run commands from a directory containing [ or ]; set windows_powershell_executable to a verified PowerShell 7 pwsh.exe in ~/.jecode/v1/settings.json and start a new session",
             ),
-            Self::PowerShell7 { version, .. } if version != "7.6.6" => Some(
-                "this PowerShell 7 version has not been verified for a starting directory containing [ or ]; PowerShell 7.6.6 is verified",
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Incompatible,
+                ..
+            } => Some(
+                "configured PowerShell 7 failed the bracketed-directory capability probe; select a compatible PowerShell 7 executable in ~/.jecode/v1/settings.json and start a new session",
             ),
-            Self::PowerShell7 { .. } => None,
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Inconclusive(ProbeIssue::Fixture),
+                ..
+            } => Some(
+                "bracketed-directory capability could not be checked because the isolated temporary fixture was unavailable; check the temporary directory and start a new session",
+            ),
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Inconclusive(ProbeIssue::Launch),
+                ..
+            } => Some(
+                "bracketed-directory capability could not be checked because the configured PowerShell 7 probe could not start or finish; check the executable and start a new session",
+            ),
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Inconclusive(ProbeIssue::Timeout),
+                ..
+            } => Some(
+                "bracketed-directory capability could not be checked because the configured PowerShell 7 probe timed out; start a new session to retry",
+            ),
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Inconclusive(ProbeIssue::Output),
+                ..
+            } => Some(
+                "bracketed-directory capability could not be checked because probe output failed or exceeded its limit; start a new session to retry",
+            ),
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Inconclusive(ProbeIssue::Malformed),
+                ..
+            } => Some(
+                "bracketed-directory capability could not be checked because the configured PowerShell 7 probe returned malformed output; start a new session to retry",
+            ),
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Inconclusive(ProbeIssue::Cleanup),
+                ..
+            } => Some(
+                "bracketed-directory capability could not be checked because probe cleanup could not be confirmed; inspect the temporary directory before retrying",
+            ),
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Probing,
+                ..
+            } => None,
+            Self::PowerShell7 {
+                bracket_cwd: BracketCwd::Supported,
+                ..
+            } => None,
         }
     }
 }
