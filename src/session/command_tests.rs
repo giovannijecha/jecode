@@ -10,6 +10,9 @@ use crate::{
 };
 use std::{ops::ControlFlow, sync::Mutex};
 
+#[path = "command_backpressure_tests.rs"]
+mod backpressure;
+
 struct Backend {
     mode: &'static str,
     extra: bool,
@@ -179,6 +182,7 @@ fn direct_command_runs_once_and_followup_reads_see_its_result() {
     );
     let mut output = String::new();
     let mut planned = 0;
+    let mut started = false;
     let mut completed = false;
     loop {
         match next(&mut run.session) {
@@ -188,10 +192,18 @@ fn direct_command_runs_once_and_followup_reads_see_its_result() {
                 assert_eq!(preview.timeout_seconds, 30);
                 assert!(preview.command.contains("child_fixture"));
             }
-            Event::CommandOutput { text, .. } => output.push_str(&text),
+            Event::CommandStarted { .. } => {
+                assert_eq!(planned, 1);
+                started = true;
+            }
+            Event::CommandOutput { text, .. } => {
+                assert!(started, "output arrived before launch notification");
+                output.push_str(&text);
+            }
             Event::CommandFinished {
                 success, failed, ..
             } => {
+                assert!(started, "result arrived before launch notification");
                 assert!(success && !failed);
                 completed = true;
             }
@@ -205,7 +217,7 @@ fn direct_command_runs_once_and_followup_reads_see_its_result() {
         }
     }
     assert_eq!(planned, 1);
-    assert!(completed && output.contains("written"));
+    assert!(started && completed && output.contains("written"));
     let receipts = outputs(&run.requests.lock().unwrap()[1]);
     assert_eq!(
         receipts[0].1.get("exit_code").and_then(Value::unsigned),

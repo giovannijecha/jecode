@@ -84,6 +84,8 @@ configured PowerShell 7 executable. Linux uses `/bin/sh`. The activity display
 shows the script, starting directory and timeout. Scripts are limited to 4,096
 UTF-8 bytes; timeouts are between 1 and 300 seconds. Output streams through bounded
 pipes, with an explicit exit code, truncation and cleanup status in the receipt.
+If the terminal falls behind, live output chunks can be omitted without pausing
+process supervision; the receipt marks truncation and retains bounded stream tails.
 PowerShell parser and runtime errors appear as readable stderr with a failing exit
 code. Windows command starting directories must fit the Win32 `MAX_PATH` current
 directory limit; a longer directory fails before the script runs, even if file tools

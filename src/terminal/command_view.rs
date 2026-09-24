@@ -72,6 +72,15 @@ pub(super) fn started(model: &mut Model, id: u64) {
     view.notice = "Running command".into();
 }
 pub(super) fn output(model: &mut Model, id: u64, channel: Channel, text: &str) {
+    if model
+        .account
+        .as_ref()
+        .and_then(|v| v.command.as_ref())
+        .is_some_and(|run| run.id == id && !run.running)
+    {
+        // An output event proves launch even if the transient start event was full.
+        started(model, id);
+    }
     let Some(run) = model
         .account
         .as_mut()

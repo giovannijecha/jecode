@@ -88,21 +88,16 @@ pub(super) struct Context {
 }
 impl Context {
     pub(super) fn send(&self, event: Event, cancellable: bool) -> ControlFlow<()> {
-        self.deliver(event, cancellable, None)
+        self.deliver(event, cancellable)
     }
-    pub(super) fn send_until(&self, event: Event, deadline: Instant) -> ControlFlow<()> {
-        self.deliver(event, true, Some(deadline))
+    /// Transient presentation must not stall a completed effect or a live process.
+    pub(super) fn notify(&self, event: Event) -> bool {
+        !self.stopped.load(Ordering::Acquire) && self.events.try_send(event).is_ok()
     }
-    fn deliver(
-        &self,
-        mut event: Event,
-        cancellable: bool,
-        deadline: Option<Instant>,
-    ) -> ControlFlow<()> {
+    fn deliver(&self, mut event: Event, cancellable: bool) -> ControlFlow<()> {
         loop {
             if self.stopped.load(Ordering::Acquire)
                 || cancellable && self.cancelled.load(Ordering::Acquire)
-                || deadline.is_some_and(|deadline| Instant::now() >= deadline)
             {
                 return ControlFlow::Break(());
             }

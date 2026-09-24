@@ -21,15 +21,12 @@ pub(super) fn execute(
 ) -> Output {
     let id = context.next_effect.fetch_add(1, Ordering::Relaxed);
     let (output, success) = dispatch(id, script, path, timeout, shell, workspace, context);
-    let _ = context.send(
-        Event::CommandFinished {
-            id,
-            summary: output.summary.clone(),
-            success,
-            failed: output.failed,
-        },
-        false,
-    );
+    let _ = context.notify(Event::CommandFinished {
+        id,
+        summary: output.summary.clone(),
+        success,
+        failed: output.failed,
+    });
     output
 }
 
@@ -73,26 +70,28 @@ fn dispatch(
         cancelled: &context.cancelled,
         deadline: output_deadline,
     };
+    let mut live_output_omitted = false;
     let result = command::run_with_start(
         proposal,
         workspace,
         &budget,
         &mut || {
-            let _ = context.send(Event::CommandStarted { id }, false);
+            let _ = context.notify(Event::CommandStarted { id });
         },
         &mut |channel, text| {
-            context.send_until(
-                Event::CommandOutput {
-                    id,
-                    channel,
-                    text: text.into(),
-                },
-                output_deadline,
-            )
+            if !context.notify(Event::CommandOutput {
+                id,
+                channel,
+                text: text.into(),
+            }) {
+                live_output_omitted = true;
+            }
+            std::ops::ControlFlow::Continue(())
         },
     );
     match result {
-        Ok(result) => {
+        Ok(mut result) => {
+            result.truncated |= live_output_omitted;
             let success = result.success();
             let summary = result.summary();
             let exit = result.exit;

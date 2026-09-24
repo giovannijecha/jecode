@@ -112,6 +112,52 @@ fn finish(session: &mut Session) -> (End, Vec<String>, usize, usize) {
 }
 
 #[test]
+fn completed_edit_receipt_does_not_wait_for_a_full_presentation_queue() {
+    use std::{sync::mpsc, time::Duration};
+
+    let files = support::Fixture::new();
+    files.write("notes.txt", "old\n");
+    let workspace = crate::workspace::Workspace::open(&files.0).unwrap();
+    let args = crate::json::parse(
+        r#"{"path":"notes.txt","old_text":"old","new_text":"new"}"#,
+        Default::default(),
+    )
+    .unwrap();
+    let tool = crate::tools::Prepared::parse("edit_file", &args).unwrap();
+    let (events, received) = mpsc::sync_channel(64);
+    for _ in 0..63 {
+        events.send(Event::Thinking).unwrap();
+    }
+    let stopped = Arc::new(AtomicBool::new(false));
+    let context = worker::Context {
+        events,
+        cancelled: Arc::new(AtomicBool::new(false)),
+        stopped: stopped.clone(),
+        guidance: Arc::new(queue::Pending::default()),
+        next_effect: std::sync::atomic::AtomicU64::new(1),
+        effect_gate: None,
+    };
+    let (done, completed) = mpsc::sync_channel(1);
+    let handle = std::thread::spawn(move || {
+        let _ = done.send(super::edit::execute(tool, &workspace, &context));
+    });
+    let before_release = completed.recv_timeout(Duration::from_secs(3)).ok();
+    let receipt_ready_before_release = before_release.is_some();
+    stopped.store(true, Ordering::Release);
+    drop(received);
+    let outcome = before_release.or_else(|| completed.recv_timeout(Duration::from_secs(10)).ok());
+    handle.join().unwrap();
+    let output = outcome.expect("edit did not finish after presentation was released");
+    assert!(receipt_ready_before_release);
+    assert_eq!(
+        fs::read_to_string(files.0.join("notes.txt")).unwrap(),
+        "new\n"
+    );
+    let receipt = crate::json::parse(&output.text, Default::default()).unwrap();
+    assert_eq!(receipt.get("status").and_then(Value::text), Some("applied"));
+}
+
+#[test]
 fn direct_edits_and_create_follow_order_and_reads_observe_the_result() {
     let mut run = start();
     assert!(run.session.submit("edit and inspect"));

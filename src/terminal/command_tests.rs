@@ -131,6 +131,26 @@ fn process_text_cannot_forge_a_receipt_and_running_chrome_stays_bounded() {
 }
 
 #[test]
+fn output_without_a_delivered_start_event_still_marks_the_command_running() {
+    let mut model = account::model(Selected::Luna, None);
+    planned(
+        &mut model,
+        1,
+        Preview {
+            command: "echo sample".into(),
+            cwd: ".".into(),
+            shell: "/bin/sh".into(),
+            timeout_seconds: 60,
+        },
+    );
+    output(&mut model, 1, Channel::Stdout, "sample\n");
+    let rows = view::chrome(&model, 80, 20);
+    assert!(rows.iter().any(|row| row.text.contains("Running command")));
+    finished(&mut model, 1, "Command finished".into(), true, false);
+    assert!(model.account.as_ref().unwrap().command.is_none());
+}
+
+#[test]
 fn command_display_distinguishes_tabs_from_spaces_and_backslash_sequences() {
     let mut model = account::model(Selected::Luna, None);
     planned(

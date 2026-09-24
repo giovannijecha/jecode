@@ -92,6 +92,36 @@ fn child_fixture() {
             std::io::stdout().flush().unwrap();
             thread::sleep(Duration::from_secs(30));
         }
+        "backpressure-tree" => {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    "command::tests::child_fixture",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env("JECODE_COMMAND_FIXTURE", "backpressure-writer")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                child.creation_flags(0x08000000);
+            }
+            let mut child = child.spawn().unwrap();
+            std::fs::write("backpressure-parent", std::process::id().to_string()).unwrap();
+            std::fs::write("backpressure-descendant", child.id().to_string()).unwrap();
+            let _ = child.wait();
+        }
+        "backpressure-writer" => {
+            std::fs::write("backpressure-started", "ready").unwrap();
+            for tick in 0..400 {
+                std::fs::write("backpressure-tick", tick.to_string()).unwrap();
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
         _ => panic!("unexpected fixture mode"),
     }
 }
@@ -101,6 +131,62 @@ fn launch(
     output: &mut dyn FnMut(Channel, &str) -> ControlFlow<()>,
 ) -> Outcome {
     launch_with_shell(mode, seconds, &Shell::default(), output)
+}
+
+#[test]
+fn cancelled_prelaunch_validation_never_reports_started() {
+    let files = Fixture::new();
+    let workspace = Workspace::open(&files.0).unwrap();
+    let cancelled = AtomicBool::new(false);
+    let budget = Budget {
+        cancelled: &cancelled,
+        deadline: Instant::now() + Duration::from_secs(5),
+    };
+    let proposal = prepare(&workspace, "echo ready", ".", 5, &budget).unwrap();
+    cancelled.store(true, Ordering::Release);
+    let mut started = false;
+    assert!(
+        run_with_start(
+            proposal,
+            &workspace,
+            &budget,
+            &mut || started = true,
+            &mut |_, _| ControlFlow::Continue(()),
+        )
+        .is_err()
+    );
+    assert!(!started);
+}
+
+#[cfg(windows)]
+#[test]
+fn failed_os_launch_never_reports_started() {
+    let files = Fixture::new();
+    let workspace = Workspace::open(&files.0).unwrap();
+    let cancelled = AtomicBool::new(false);
+    let budget = Budget {
+        cancelled: &cancelled,
+        deadline: Instant::now() + Duration::from_secs(5),
+    };
+    let shell = Shell::PowerShell7 {
+        executable: files.0.join("missing-pwsh.exe"),
+        version: "7.6.6".into(),
+        bracket_cwd: selection::BracketCwd::Supported,
+    };
+    let proposal =
+        prepare_with_shell(&workspace, "Write-Output ready", ".", 5, &shell, &budget).unwrap();
+    let mut started = false;
+    assert!(
+        run_with_start(
+            proposal,
+            &workspace,
+            &budget,
+            &mut || started = true,
+            &mut |_, _| ControlFlow::Continue(()),
+        )
+        .is_err()
+    );
+    assert!(!started);
 }
 pub(crate) fn launch_with_shell(
     mode: &str,
@@ -173,6 +259,13 @@ fn streaming_cancellation_and_normal_exit_clean_up_ordinary_descendants() {
     }
 }
 pub(crate) fn assert_stopped(pid: u32) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !stopped(pid) {
+        assert!(Instant::now() < deadline, "descendant {pid} still running");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+pub(crate) fn stopped(pid: u32) -> bool {
     #[cfg(windows)]
     {
         #[allow(unsafe_code)]
@@ -194,24 +287,16 @@ pub(crate) fn assert_stopped(pid: u32) {
                 running
             }
         }
-        assert!(!active(pid), "descendant {pid} still active");
+        !active(pid)
     }
     #[cfg(target_os = "linux")]
     {
         // Non-child descendants are reaped by their adopter, not by this worker.
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
-            if stat.is_empty()
-                || stat
-                    .split_once(") ")
-                    .is_some_and(|(_, state)| state.starts_with(['Z', 'X']))
-            {
-                break;
-            }
-            assert!(Instant::now() < deadline, "descendant {pid} still running");
-            thread::sleep(Duration::from_millis(10));
-        }
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        stat.is_empty()
+            || stat
+                .split_once(") ")
+                .is_some_and(|(_, state)| state.starts_with(['Z', 'X']))
     }
 }
 #[test]

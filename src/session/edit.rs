@@ -84,13 +84,10 @@ pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) 
 }
 
 fn finished(context: &Context, id: u64, output: &Output, applied: bool) {
-    let _ = context.send(
-        Event::EditFinished {
-            id,
-            summary: output.summary.clone(),
-            applied,
-            failed: output.failed,
-        },
-        false,
-    );
+    let _ = context.notify(Event::EditFinished {
+        id,
+        summary: output.summary.clone(),
+        applied,
+        failed: output.failed,
+    });
 }
