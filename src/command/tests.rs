@@ -116,9 +116,14 @@ fn child_fixture() {
             let _ = child.wait();
         }
         "backpressure-writer" => {
+            let mut ticks = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open("backpressure-tick")
+                .unwrap();
             std::fs::write("backpressure-started", "ready").unwrap();
-            for tick in 0..400 {
-                std::fs::write("backpressure-tick", tick.to_string()).unwrap();
+            for _ in 0..400 {
+                ticks.write_all(b"x").unwrap();
                 thread::sleep(Duration::from_millis(50));
             }
         }
