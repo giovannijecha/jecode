@@ -18,20 +18,42 @@ pub(super) fn configure(stream: &TcpStream) -> Result<(), NetworkError> {
 }
 pub(super) fn write(
     stream: &mut TcpStream,
+    bytes: &[u8],
+    budget: &Budget<'_>,
+) -> Result<(), NetworkError> {
+    write_counted(stream, bytes, budget, &mut 0)
+}
+/// Counts only bytes of this TLS record accepted by the local socket. The
+/// caller decides whether this record carries application data or handshake.
+pub(super) fn write_counted(
+    stream: &mut TcpStream,
+    bytes: &[u8],
+    budget: &Budget<'_>,
+    accepted: &mut usize,
+) -> Result<(), NetworkError> {
+    write_counted_to(stream, bytes, budget, accepted)
+}
+fn write_counted_to(
+    stream: &mut impl Write,
     mut bytes: &[u8],
     budget: &Budget<'_>,
+    accepted: &mut usize,
 ) -> Result<(), NetworkError> {
     while !bytes.is_empty() {
         budget.check()?;
         match stream.write(bytes) {
             Ok(0) => return Err(NetworkError::Eof(IoOperation::WriteRecord)),
-            Ok(count) => bytes = &bytes[count..],
+            Ok(count) => {
+                *accepted = accepted.saturating_add(count);
+                bytes = &bytes[count..];
+            }
             Err(error) if retryable(&error) => {}
             Err(error) => return Err(NetworkError::io(IoOperation::WriteRecord, &error)),
         }
     }
     budget.check()
 }
+
 fn read(
     stream: &mut TcpStream,
     mut bytes: &mut [u8],
@@ -73,4 +95,43 @@ fn retryable(error: &std::io::Error) -> bool {
             | std::io::ErrorKind::WouldBlock
             | std::io::ErrorKind::Interrupted
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{collections::VecDeque, io, sync::atomic::AtomicBool, time::Instant};
+    struct Script(VecDeque<Result<usize, io::ErrorKind>>);
+    impl Write for Script {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0
+                .pop_front()
+                .unwrap()
+                .map(|n| n.min(bytes.len()))
+                .map_err(Into::into)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn counted_write_separates_zero_and_partial_socket_acceptance() {
+        let cancelled = AtomicBool::new(false);
+        let budget = Budget {
+            cancelled: &cancelled,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        for (script, expected) in [
+            (vec![Err(io::ErrorKind::ConnectionReset)], 0),
+            (vec![Ok(0)], 0),
+            (vec![Ok(3), Err(io::ErrorKind::ConnectionReset)], 3),
+            (vec![Ok(3), Ok(4)], 7),
+        ] {
+            let mut writer = Script(script.into());
+            let mut accepted = 0;
+            let result = write_counted_to(&mut writer, b"request", &budget, &mut accepted);
+            assert_eq!(accepted, expected);
+            assert_eq!(result.is_ok(), expected == 7);
+        }
+    }
 }

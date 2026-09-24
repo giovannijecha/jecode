@@ -139,6 +139,8 @@ impl End {
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Metrics {
     pub requests: u32,
+    pub connection_attempts: u32,
+    pub submissions: u32,
     pub tool_calls: u32,
     pub elapsed_ms: u64,
     pub approval_wait_ms: u64,
@@ -149,6 +151,12 @@ pub struct Metrics {
     pub reasoning_tokens: Option<u64>,
 }
 impl Metrics {
+    pub(super) fn observe(&mut self, attempt: &client::Attempt) {
+        self.connection_attempts = self.connection_attempts.saturating_add(1);
+        if attempt.delivery != client::Delivery::NotSubmitted {
+            self.submissions = self.submissions.saturating_add(1);
+        }
+    }
     pub(super) fn usage(&mut self, usage: &Usage) {
         let add = |old: Option<u64>, new: Option<u64>| {
             if self.requests == 1 {
@@ -185,6 +193,7 @@ pub enum Event {
     ModelChanged(Model),
     Thinking,
     RequestStarted,
+    Retrying,
     ToolStarted {
         name: &'static str,
         path: String,

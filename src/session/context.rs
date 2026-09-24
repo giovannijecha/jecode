@@ -5,7 +5,7 @@ use super::{
     worker::{Backend, Context, failure},
 };
 use crate::{
-    providers::openai_account::{Input, Request, Status},
+    providers::openai_account::{Input, Progress, Request, Status, client::Attempt},
     tls::Budget,
 };
 use std::{
@@ -22,6 +22,8 @@ pub(super) struct Projection {
     pub failed: bool,
     pub failed_reason: Option<Failure>,
     pub pending: Option<partial::Pending>,
+    pub failed_attempts: Vec<Attempt>,
+    pub failed_partial: String,
 }
 impl Default for Projection {
     fn default() -> Self {
@@ -33,6 +35,8 @@ impl Default for Projection {
             failed: false,
             failed_reason: None,
             pending: None,
+            failed_attempts: Vec::new(),
+            failed_partial: String::new(),
         }
     }
 }
@@ -110,7 +114,69 @@ pub(super) fn report(history: &History, model: Model, workspace: bool) -> String
         ));
     }
     message.push_str("\nBytes are measured locally; token counts are reported by the provider. Canonical history is retained.");
+    if history.projection.failed {
+        if let Some(last) = history.projection.failed_attempts.last() {
+            message.push_str(&format!(
+                "\nLast compaction attempt: {} / {}",
+                last.delivery,
+                last.diagnostic
+                    .as_deref()
+                    .unwrap_or("no validated completion")
+            ));
+        }
+        if !history.projection.failed_partial.is_empty() {
+            let excerpt = history
+                .projection
+                .failed_partial
+                .chars()
+                .take(4096)
+                .collect::<String>();
+            message.push_str(&format!(
+                "\nUnvalidated partial summary (reference only): {excerpt}"
+            ));
+        }
+    }
     message
+}
+
+pub(super) fn observe_compaction(
+    progress: Progress<'_>,
+    attempts: &mut Vec<Attempt>,
+    partial: &mut String,
+    metrics: &mut Metrics,
+    context: &Context,
+) -> ControlFlow<()> {
+    match progress {
+        Progress::Attempt(attempt) => {
+            metrics.observe(&attempt);
+            if attempt.retrying {
+                let _ = context.send(Event::Retrying, true);
+            }
+            attempts.push(attempt);
+            ControlFlow::Continue(())
+        }
+        Progress::Text(text) | Progress::Reasoning(text) => {
+            if text.len() <= 32768usize.saturating_sub(partial.len()) {
+                partial.push_str(text);
+            }
+            if context.check().is_err() {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        }
+    }
+}
+
+pub(super) fn failed_attempt(
+    history: &mut History,
+    cause: Failure,
+    attempts: Vec<Attempt>,
+    partial: String,
+) -> Failure {
+    history.projection.failed_attempts = attempts;
+    history.projection.failed_partial = partial;
+    failed(history, cause)
 }
 
 pub(super) fn ensure(
@@ -238,15 +304,15 @@ fn segment(history: &History, to: (usize, usize)) -> Vec<Input> {
             }
             input.extend(part);
             let step = &turn.steps[index];
-            if !step.accepted
-                || step
+            if step.accepted
+                && (step
                     .response
                     .as_ref()
                     .is_some_and(|r| matches!(r.status, Status::Incomplete | Status::Refused))
-                || step
-                    .results
-                    .iter()
-                    .any(|r| r.summary == "Not executed" || r.summary.contains("unknown"))
+                    || step
+                        .results
+                        .iter()
+                        .any(|r| r.summary == "Not executed" || r.summary.contains("unknown")))
             {
                 let observed = step
                     .response
@@ -359,26 +425,22 @@ pub(super) fn compact(
         true,
     );
     metrics.requests = metrics.requests.saturating_add(1);
+    let mut attempts = Vec::new();
+    let mut partial = String::new();
     let result = backend.generate(
         &request,
         &Budget {
             deadline: Instant::now() + Duration::from_secs(180),
             cancelled: &context.cancelled,
         },
-        &mut |_| {
-            if context.check().is_err() {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        },
+        &mut |progress| observe_compaction(progress, &mut attempts, &mut partial, metrics, context),
     );
     let response = match result {
         Ok(response) => response,
         Err(error) => {
             metrics.usage(&Default::default());
             let cause = failure(error, context);
-            return Err(failed(history, cause));
+            return Err(failed_attempt(history, cause, attempts, partial));
         }
     };
     metrics.usage(&response.usage);
@@ -402,6 +464,8 @@ pub(super) fn compact(
             failed: false,
             failed_reason: None,
             pending: None,
+            failed_attempts: Vec::new(),
+            failed_partial: String::new(),
         },
     );
     let reduced = match (original, measured_bytes(history, model, workspace)) {

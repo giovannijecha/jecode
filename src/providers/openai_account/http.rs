@@ -39,6 +39,7 @@ pub struct HttpResponseStream {
     model: ResponseStream,
     error: Option<Error>,
     completed: bool,
+    stream_started: bool,
 }
 impl Default for HttpResponseStream {
     fn default() -> Self {
@@ -55,10 +56,14 @@ impl HttpResponseStream {
             model: ResponseStream::new(limits),
             error: None,
             completed: false,
+            stream_started: false,
         }
     }
     pub fn is_finished(&self) -> bool {
         self.completed || self.error.is_some()
+    }
+    pub fn stream_started(&self) -> bool {
+        self.stream_started
     }
     pub fn push(
         &mut self,
@@ -69,6 +74,7 @@ impl HttpResponseStream {
             return Err(Error::Closed);
         }
         let model = &mut self.model;
+        let stream_started = &mut self.stream_started;
         let mut failure = None;
         let mut completed = false;
         let result = self.http.push(bytes, |event| {
@@ -99,7 +105,10 @@ impl HttpResponseStream {
                         _ => Err(Error::ContentType(ContentKind::Other)),
                     }
                 }
-                http::Event::Data(data) => model.push(data, &mut progress),
+                http::Event::Data(data) => {
+                    *stream_started = true;
+                    model.push(data, &mut progress)
+                }
                 http::Event::End => Err(Error::MissingTerminal),
             };
             if let Err(error) = result {

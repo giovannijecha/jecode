@@ -389,7 +389,15 @@ fn load_catalog(backend: &mut impl Backend, context: &Context) -> bool {
 
 pub(super) fn failure(error: client::Error, context: &Context) -> Failure {
     if context.cancelled.load(Ordering::Acquire)
+        || context.stopped.load(Ordering::Acquire)
         || error == client::Error::Network(NetworkError::Cancelled)
+        || matches!(
+            error,
+            client::Error::Response {
+                error: crate::providers::openai_account::Error::Cancelled,
+                ..
+            }
+        )
         || matches!(
             error,
             client::Error::Transport {

@@ -396,6 +396,10 @@ pub(super) fn event(model: &mut Model, event: Event) {
             view.notice = "Waiting for model".into();
             model.tools.waiting("Waiting for model");
         }
+        Event::Retrying if view.phase == Phase::Generating => {
+            view.notice = "Connection failed before request submission / retrying".into();
+            model.tools.waiting("Retrying connection");
+        }
         Event::ToolStarted { name, path } if view.phase == Phase::Generating => {
             view.notice = "Reading workspace".into();
             let index = model.start_tool(name, path, Instant::now());
@@ -538,6 +542,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
         | Event::Text(_)
         | Event::TextReconciled(_)
         | Event::RequestStarted
+        | Event::Retrying
         | Event::ToolStarted { .. }
         | Event::ToolFinished { .. } => {}
     }
@@ -571,6 +576,12 @@ fn completion(end: End, metrics: Metrics, partial_output: bool) -> String {
         result.push_str(&format!(
             " / {} tools / {} requests",
             metrics.tool_calls, metrics.requests
+        ));
+    }
+    if metrics.connection_attempts != 0 {
+        result.push_str(&format!(
+            " / {} connections / {} submitted",
+            metrics.connection_attempts, metrics.submissions
         ));
     }
     if let (Some(input), Some(output)) = (metrics.input_tokens, metrics.output_tokens) {

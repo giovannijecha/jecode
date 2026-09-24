@@ -128,6 +128,12 @@ impl Drop for State {
     }
 }
 pub struct Connection(Option<State>);
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplicationWrite {
+    /// TLS application-record bytes accepted by the local socket. This does
+    /// not establish remote receipt, processing, or generation completion.
+    pub accepted_wire_bytes: usize,
+}
 impl Connection {
     /// Verify the host before sending a Finished or permitting application bytes.
     /// Standard-library DNS is synchronous: cancellation is checked before/after
@@ -203,6 +209,14 @@ impl Connection {
     }
     /// A failure consumes this connection, even after a partial request write.
     pub fn write(&mut self, bytes: &[u8], budget: &Budget<'_>) -> Result<(), NetworkError> {
+        self.write_observed(bytes, budget, &mut ApplicationWrite::default())
+    }
+    pub fn write_observed(
+        &mut self,
+        bytes: &[u8],
+        budget: &Budget<'_>,
+        progress: &mut ApplicationWrite,
+    ) -> Result<(), NetworkError> {
         let mut state = self.0.take().ok_or(NetworkError::Closed)?;
         budget.check()?;
         if bytes.len() > 16 * 1024 * 1024 {
@@ -210,7 +224,12 @@ impl Connection {
         }
         for chunk in bytes.chunks(16_384) {
             let record = state.application.send(chunk)?;
-            socket::write(&mut state.socket, &record, budget)?;
+            socket::write_counted(
+                &mut state.socket,
+                &record,
+                budget,
+                &mut progress.accepted_wire_bytes,
+            )?;
         }
         self.0 = Some(state);
         Ok(())

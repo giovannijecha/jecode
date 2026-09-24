@@ -311,7 +311,7 @@ fn two_turns_preserve_order_opaque_output_and_final_only_suffix_without_duplicat
 }
 
 #[test]
-fn failure_is_not_retried_and_partial_text_is_not_fabricated_as_completed_context() {
+fn failed_attempt_requires_explicit_continuation_with_partial_text_as_reference() {
     let (mut session, observed) = start(true, false);
     assert!(session.submit("first prompt"));
     let (text, end, _) = finish(&mut session);
@@ -324,7 +324,72 @@ fn failure_is_not_retried_and_partial_text_is_not_fabricated_as_completed_contex
     assert_eq!(requests.len(), 2);
     assert!(requests[1].contains("first prompt"));
     assert!(requests[1].contains("explicit continuation"));
-    assert!(!requests[1].contains("partial"));
+    assert!(requests[1].contains("Recorded unfinished generation"));
+    assert!(requests[1].contains("partial"));
+    assert!(!requests[1].contains("function_call_output"));
+}
+
+#[test]
+fn retry_activity_and_metrics_count_connections_separately_from_requests() {
+    struct Recovered;
+    impl worker::Backend for Recovered {
+        fn login(
+            &mut self,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        ) -> Result<(), client::Error> {
+            Ok(())
+        }
+        fn generate(
+            &mut self,
+            _: &Request,
+            _: &Budget<'_>,
+            progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+        ) -> Result<Response, client::Error> {
+            assert!(
+                progress(Progress::Attempt(client::Attempt {
+                    delivery: client::Delivery::NotSubmitted,
+                    retrying: true,
+                    ..Default::default()
+                }))
+                .is_continue()
+            );
+            assert!(
+                progress(Progress::Attempt(client::Attempt {
+                    delivery: client::Delivery::Completed,
+                    accepted_wire_bytes: 100,
+                    ..Default::default()
+                }))
+                .is_continue()
+            );
+            Ok(response("recovered", Status::Completed))
+        }
+    }
+    let mut session = Session::with_backend(Model::Luna, Recovered, None).unwrap();
+    assert!(matches!(next(&mut session), Event::Ready));
+    assert!(session.submit("do the work"));
+    let mut retries = 0;
+    loop {
+        match next(&mut session) {
+            Event::Retrying => retries += 1,
+            Event::Finished(End::Complete, metrics) => {
+                assert_eq!(
+                    (
+                        metrics.requests,
+                        metrics.connection_attempts,
+                        metrics.submissions
+                    ),
+                    (1, 2, 1)
+                );
+                assert_eq!(metrics.input_tokens, None);
+                assert_eq!(metrics.tool_calls, 0);
+                break;
+            }
+            Event::Text(_) => {}
+            _ => panic!("unexpected event"),
+        }
+    }
+    assert_eq!(retries, 1);
 }
 
 #[test]
@@ -367,7 +432,10 @@ fn incomplete_items_and_partial_attempts_stay_canonical_but_out_of_completed_pro
     history.turns[0].end = Some(End::Incomplete);
     history.begin("second".into()).unwrap();
     let request = history.request(Model::Terra, false).unwrap();
-    assert_eq!(request.input.len(), 2);
+    assert_eq!(request.input.len(), 3);
+    assert!(
+        matches!(&request.input[1], Input::User(text) if text.contains("not a completed assistant response") && text.contains("not finished"))
+    );
     assert!(
         request
             .input

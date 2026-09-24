@@ -26,6 +26,7 @@ impl Default for Limits {
 pub enum Progress<'a> {
     Text(&'a str),
     Reasoning(&'a str),
+    Attempt(super::client::Attempt),
 }
 
 /// A tool call is available only through `finish`, after a validated terminal event.

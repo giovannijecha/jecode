@@ -1,5 +1,6 @@
 use super::*;
 use crate::providers::openai_account::Response;
+use crate::providers::openai_account::client::{Attempt, Delivery, RequestStage};
 use crate::session::{
     End, Failure, Metrics,
     history::{History, Receipt, Step, Turn},
@@ -49,6 +50,12 @@ pub(super) fn encode(history: &History) -> Value {
                                         ("text", text(&step.text)),
                                         ("reasoning", text(&step.reasoning)),
                                         ("accepted", Value::Bool(step.accepted)),
+                                        (
+                                            "attempts",
+                                            Value::Array(
+                                                step.attempts.iter().map(attempt).collect(),
+                                            ),
+                                        ),
                                         (
                                             "response",
                                             step.response
@@ -124,6 +131,14 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
                 },
                 response,
                 results: Vec::new(),
+                attempts: match value.get("attempts") {
+                    None => Vec::new(),
+                    Some(Value::Array(items)) if items.len() <= 256 => items
+                        .iter()
+                        .map(read_attempt)
+                        .collect::<io::Result<Vec<_>>>()?,
+                    _ => return Err(invalid()),
+                },
             };
             for value in value
                 .get("results")
@@ -187,6 +202,11 @@ fn metrics(m: &Metrics) -> Value {
     let number = |n: Option<u64>| n.map_or(Value::Null, |n| Value::Number(n.to_string()));
     json::object([
         ("requests", number(Some(m.requests.into()))),
+        (
+            "connection_attempts",
+            number(Some(m.connection_attempts.into())),
+        ),
+        ("submissions", number(Some(m.submissions.into()))),
         ("tool_calls", number(Some(m.tool_calls.into()))),
         ("elapsed_ms", number(Some(m.elapsed_ms))),
         ("approval_wait_ms", number(Some(m.approval_wait_ms))),
@@ -207,6 +227,8 @@ fn read_metrics(value: &Value) -> io::Result<Metrics> {
         requests: n("requests")?
             .and_then(|n| n.try_into().ok())
             .ok_or_else(invalid)?,
+        connection_attempts: optional_count(value, "connection_attempts")?,
+        submissions: optional_count(value, "submissions")?,
         tool_calls: n("tool_calls")?
             .and_then(|n| n.try_into().ok())
             .ok_or_else(invalid)?,
@@ -217,5 +239,73 @@ fn read_metrics(value: &Value) -> io::Result<Metrics> {
         output_tokens: n("output_tokens")?,
         cached_tokens: n("cached_tokens")?,
         reasoning_tokens: n("reasoning_tokens")?,
+    })
+}
+fn optional_count(value: &Value, key: &str) -> io::Result<u32> {
+    match value.get(key) {
+        None => Ok(0),
+        Some(value) => value
+            .unsigned()
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(invalid),
+    }
+}
+pub(super) fn attempt(attempt: &Attempt) -> Value {
+    let optional = |value: &Option<String>| value.as_deref().map_or(Value::Null, text);
+    json::object([
+        ("delivery", text(attempt.delivery.name())),
+        (
+            "stage",
+            attempt
+                .stage
+                .map_or(Value::Null, |stage| text(stage.name())),
+        ),
+        ("operation", optional(&attempt.operation)),
+        ("category", optional(&attempt.category)),
+        (
+            "os_code",
+            attempt
+                .os_code
+                .map_or(Value::Null, |code| Value::Number(code.to_string())),
+        ),
+        (
+            "accepted_wire_bytes",
+            Value::Number(attempt.accepted_wire_bytes.to_string()),
+        ),
+        ("diagnostic", optional(&attempt.diagnostic)),
+        ("retrying", Value::Bool(attempt.retrying)),
+    ])
+}
+pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
+    let optional = |key, max| match value.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if text.len() <= max && !text.chars().any(char::is_control) => {
+            Ok(Some(text.clone()))
+        }
+        _ => Err(invalid()),
+    };
+    let stage = optional("stage", 32)?
+        .map(|name| RequestStage::parse(&name).ok_or_else(invalid))
+        .transpose()?;
+    Ok(Attempt {
+        delivery: Delivery::parse(string(value, "delivery", 32)?).ok_or_else(invalid)?,
+        stage,
+        operation: optional("operation", 64)?,
+        category: optional("category", 64)?,
+        os_code: match value.get("os_code") {
+            None | Some(Value::Null) => None,
+            Some(Value::Number(n)) => Some(n.parse().map_err(|_| invalid())?),
+            _ => return Err(invalid()),
+        },
+        accepted_wire_bytes: value
+            .get("accepted_wire_bytes")
+            .and_then(Value::unsigned)
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(invalid)?,
+        diagnostic: optional("diagnostic", 1024)?,
+        retrying: match value.get("retrying") {
+            Some(Value::Bool(value)) => *value,
+            _ => return Err(invalid()),
+        },
     })
 }

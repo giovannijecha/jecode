@@ -277,6 +277,9 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
     assert!(!projection.contains("edit-1"));
 }
 
+#[path = "recovery_tests.rs"]
+mod recovery_tests;
+
 #[test]
 fn interrupted_effect_stays_unknown_and_invalid_snapshot_is_not_repaired() {
     let fixture = crate::state::tests::Fixture::new();
