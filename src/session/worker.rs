@@ -145,7 +145,7 @@ pub(super) fn run(
                 Event::Restored {
                     id: record.id().into(),
                     items: history.transcript(),
-                    turns: history.turns.len(),
+                    turns: history.turn_count(),
                 },
                 false,
             )
@@ -279,7 +279,8 @@ pub(super) fn run(
                 continue;
             }
         };
-        let index = history.turns.len();
+        // Compaction may release earlier resident turns while this one runs.
+        let turn_number = history.turn_count();
         let result = history
             .begin(prompt)
             .and_then(|()| history.checkpoint())
@@ -297,7 +298,14 @@ pub(super) fn run(
             });
         let mut end = result.unwrap_or_else(End::Failed);
         metrics.elapsed_ms = millis(started);
-        if let Some(turn) = history.turns.get_mut(index) {
+        let current = if history.turn_count() == turn_number + 1 {
+            turn_number
+                .checked_sub(history.base_turn)
+                .and_then(|index| history.turns.get_mut(index))
+        } else {
+            None
+        };
+        if let Some(turn) = current {
             turn.end = Some(end);
             turn.outcome = match end {
                 End::Complete => "Complete".into(),
@@ -306,6 +314,8 @@ pub(super) fn run(
                 End::Failed(f) => f.to_string(),
             };
             turn.metrics = metrics;
+        } else if history.turn_count() != turn_number {
+            end = End::Failed(Failure::Storage);
         }
         if history.checkpoint().is_err() {
             end = End::Failed(Failure::Storage);

@@ -169,17 +169,23 @@ impl Session {
         mut history: history::History,
         shell: crate::command::Shell,
     ) -> io::Result<Self> {
-        let turns = history.turns.len();
+        let turns = history.turn_count();
         let initial_prompts = history
-            .turns
-            .iter()
-            .rev()
-            .take(MAX_RECALLED_PROMPTS)
-            .map(|turn| turn.prompt.clone())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+            .record
+            .as_ref()
+            .and_then(|record| record.recent_prompts())
+            .unwrap_or_else(|| {
+                history
+                    .turns
+                    .iter()
+                    .rev()
+                    .take(MAX_RECALLED_PROMPTS)
+                    .map(|turn| turn.prompt.clone())
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect()
+            });
         history.environment = workspace.as_ref().map_or(String::new(), |workspace| {
             format!(
                 "{} Command shell: {}. {}",
@@ -231,7 +237,6 @@ impl Session {
     pub fn submit(&mut self, prompt: &str) -> bool {
         if self.phase != Phase::Ready
             || self.queued != 0
-            || self.turns >= history::MAX_TURNS
             || prompt.trim().is_empty()
             || prompt.len() > MAX_PROMPT_BYTES
             || self.selection_unavailable()

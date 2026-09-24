@@ -287,12 +287,17 @@ fn account_codes_and_transitions_never_enter_request_or_saved_history() {
     }
     drop(requests);
     drop(run);
-    let saved = store
-        .directory("sessions")
-        .unwrap()
-        .read(&format!("{id}.json"), 16 * 1024 * 1024)
-        .unwrap()
-        .unwrap();
+    let saved = String::from_utf8_lossy(
+        &std::fs::read(
+            store
+                .directory("sessions-v2")
+                .unwrap()
+                .root()
+                .join(format!("{id}.log")),
+        )
+        .unwrap(),
+    )
+    .into_owned();
     assert!(saved.contains("actual request"));
     for forbidden in ["FAKE-ACCOUNT-CODE", "/login", "/logout"] {
         assert!(!saved.contains(forbidden));
@@ -375,13 +380,16 @@ fn compaction_auth_failures_require_real_relogin_before_explicit_work() {
         }
         assert!(run.signed_out());
         let snapshot = store
-            .directory("sessions")
+            .directory("sessions-v2")
             .unwrap()
-            .read(&format!("{id}.json"), 16 * 1024 * 1024)
+            .read(&format!("{id}.head"), 1024 * 1024)
             .unwrap()
             .unwrap();
         let snapshot = crate::json::parse(&snapshot, Default::default()).unwrap();
-        assert_eq!(snapshot.get("history").unwrap().array().unwrap().len(), 3);
+        assert_eq!(
+            snapshot.get("turns").and_then(crate::json::Value::unsigned),
+            Some(3)
+        );
         assert_eq!(
             snapshot.get("projection").unwrap().get("failed"),
             Some(&crate::json::Value::Bool(true))
@@ -410,13 +418,27 @@ fn compaction_auth_failures_require_real_relogin_before_explicit_work() {
         drop(requests);
         drop(run);
         let saved = store
-            .directory("sessions")
+            .directory("sessions-v2")
             .unwrap()
-            .read(&format!("{id}.json"), 16 * 1024 * 1024)
+            .read(&format!("{id}.head"), 1024 * 1024)
             .unwrap()
             .unwrap();
         let snapshot = crate::json::parse(&saved, Default::default()).unwrap();
-        assert_eq!(snapshot.get("history").unwrap().array().unwrap().len(), 4);
+        assert_eq!(
+            snapshot.get("turns").and_then(crate::json::Value::unsigned),
+            Some(4)
+        );
+        let saved = String::from_utf8_lossy(
+            &std::fs::read(
+                store
+                    .directory("sessions-v2")
+                    .unwrap()
+                    .root()
+                    .join(format!("{id}.log")),
+            )
+            .unwrap(),
+        )
+        .into_owned();
         for n in 0..3 {
             assert!(saved.contains(&format!("completed prompt {n}")));
         }

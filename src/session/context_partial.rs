@@ -17,53 +17,74 @@ fn text(value: &str) -> Value {
 // reference data, never assistant function_call items or executable tool results.
 struct Reference {
     content: String,
-    atomic: bool,
+    association: String,
 }
 
-fn records(history: &History) -> Option<Vec<Reference>> {
+fn record_count(history: &History) -> Option<usize> {
     let projection = &history.projection;
     let turn = history.turns.get(projection.through)?;
     let step = turn.steps.get(projection.step)?;
-    let status = step
-        .response
-        .as_ref()
-        .map_or("no validated response", |response| match response.status {
-            Status::Completed => "completed",
-            Status::Incomplete => "incomplete",
-            Status::Refused => "refused",
-        });
-    let mut values = vec![(
-        json::object([
-            ("kind", text("step_header")),
-            ("accepted", Value::Bool(step.accepted)),
-            ("status", text(status)),
-            ("visible_text", text(&step.text)),
-            ("reasoning", text(&step.reasoning)),
-            (
-                "canonical_response_text",
-                text(step.response.as_ref().map_or("", |response| &response.text)),
-            ),
-        ]),
-        false,
-    )];
-    if let Some(response) = &step.response {
-        let mut call_index = 0;
-        for (output_index, item) in response.output.iter().enumerate() {
+    let (items, calls) = step.response.as_ref().map_or((0, 0), |response| {
+        (
+            response.output.len(),
+            response
+                .output
+                .iter()
+                .filter(|item| item.get("type").and_then(Value::text) == Some("function_call"))
+                .count(),
+        )
+    });
+    2usize
+        .checked_add(items)?
+        .checked_add(step.results.len().saturating_sub(calls))
+}
+
+/// Materialize one logical reference record at a time, even for a step with
+/// many receipts. A call/receipt record may then be sliced for provider input.
+fn reference_at(history: &History, index: usize) -> Option<Reference> {
+    let projection = &history.projection;
+    let turn = history.turns.get(projection.through)?;
+    let step = turn.steps.get(projection.step)?;
+    let total = record_count(history)?;
+    if index >= total {
+        return None;
+    }
+    let (value, association) = if index == 0 {
+        let status = step
+            .response
+            .as_ref()
+            .map_or("no validated response", |response| match response.status {
+                Status::Completed => "completed",
+                Status::Incomplete => "incomplete",
+                Status::Refused => "refused",
+            });
+        (
+            json::object([
+                ("kind", text("step_header")),
+                ("accepted", Value::Bool(step.accepted)),
+                ("status", text(status)),
+                ("visible_text", text(&step.text)),
+                ("reasoning", text(&step.reasoning)),
+                (
+                    "canonical_response_text",
+                    text(step.response.as_ref().map_or("", |response| &response.text)),
+                ),
+            ]),
+            "step header".to_owned(),
+        )
+    } else if let Some(response) = &step.response {
+        if let Some(item) = response.output.get(index - 1) {
+            let output_index = index - 1;
             let is_call = item.get("type").and_then(Value::text) == Some("function_call");
-            let call = if is_call {
-                response.tool_calls.get(call_index)
-            } else {
-                None
-            };
-            let receipt = if is_call {
-                step.results.get(call_index)
-            } else {
-                None
-            };
-            if is_call {
-                call_index += 1;
-            }
-            values.push((
+            let call_index = response.output[..output_index]
+                .iter()
+                .filter(|item| item.get("type").and_then(Value::text) == Some("function_call"))
+                .count();
+            let call = is_call
+                .then(|| response.tool_calls.get(call_index))
+                .flatten();
+            let receipt = is_call.then(|| step.results.get(call_index)).flatten();
+            (
                 json::object([
                     ("kind", text("response_item_and_receipt")),
                     ("output_index", Value::Number(output_index.to_string())),
@@ -90,37 +111,77 @@ fn records(history: &History) -> Option<Vec<Reference>> {
                         receipt.map_or(Value::Null, |receipt| text(&receipt.summary)),
                     ),
                 ]),
-                is_call,
-            ));
-        }
-        for receipt in step.results.iter().skip(call_index) {
-            values.push((
+                if is_call {
+                    format!(
+                        "call_id={}; call_name={}; receipt_call_id={}",
+                        call.map_or("missing", |call| call.id.as_str()),
+                        call.map_or("missing", |call| call.name.as_str()),
+                        receipt.map_or("missing", |receipt| receipt.call_id.as_str())
+                    )
+                } else {
+                    format!("response item {output_index}; no executable call")
+                },
+            )
+        } else if index + 1 == total {
+            (
+                json::object([
+                    ("kind", text("step_end")),
+                    ("outcome", text(&turn.outcome)),
+                    ("all_recorded_items_included", Value::Bool(true)),
+                ]),
+                "step end".to_owned(),
+            )
+        } else {
+            let calls = response
+                .output
+                .iter()
+                .filter(|item| item.get("type").and_then(Value::text) == Some("function_call"))
+                .count();
+            let receipt = step
+                .results
+                .get(calls + index - 1 - response.output.len())?;
+            (
                 json::object([
                     ("kind", text("unmatched_receipt")),
                     ("call_id", text(&receipt.call_id)),
                     ("output", text(&receipt.output)),
                     ("summary", text(&receipt.summary)),
                 ]),
-                true,
-            ));
+                format!("unmatched receipt call_id={}", receipt.call_id),
+            )
         }
-    }
-    values.push((
-        json::object([
-            ("kind", text("step_end")),
-            ("outcome", text(&turn.outcome)),
-            ("all_recorded_items_included", Value::Bool(true)),
-        ]),
-        false,
-    ));
-    values
-        .into_iter()
-        .map(|(value, atomic)| {
-            Some(Reference {
-                content: json::encode(&value, 16 * 1024 * 1024).ok()?,
-                atomic,
-            })
-        })
+    } else {
+        if index + 1 == total {
+            (
+                json::object([
+                    ("kind", text("step_end")),
+                    ("outcome", text(&turn.outcome)),
+                    ("all_recorded_items_included", Value::Bool(true)),
+                ]),
+                "step end".to_owned(),
+            )
+        } else {
+            let receipt = step.results.get(index - 1)?;
+            (
+                json::object([
+                    ("kind", text("unmatched_receipt")),
+                    ("call_id", text(&receipt.call_id)),
+                    ("output", text(&receipt.output)),
+                    ("summary", text(&receipt.summary)),
+                ]),
+                format!("unmatched receipt call_id={}", receipt.call_id),
+            )
+        }
+    };
+    Some(Reference {
+        content: json::encode(&value, 80 * 1024 * 1024).ok()?,
+        association,
+    })
+}
+#[cfg(test)]
+pub(crate) fn reference_sizes(history: &History) -> Option<Vec<usize>> {
+    (0..record_count(history)?)
+        .map(|index| reference_at(history, index).map(|record| record.content.len()))
         .collect()
 }
 
@@ -136,12 +197,8 @@ pub(super) fn valid_pending(history: &History) -> bool {
     {
         return false;
     }
-    records(history).is_some_and(|records| {
-        records.get(pending.record).is_some_and(|record| {
-            pending.offset < record.content.len()
-                && record.content.is_char_boundary(pending.offset)
-                && (!record.atomic || pending.offset == 0)
-        })
+    reference_at(history, pending.record).is_some_and(|record| {
+        pending.offset < record.content.len() && record.content.is_char_boundary(pending.offset)
     })
 }
 
@@ -182,9 +239,9 @@ fn base_request(history: &History, model: Model) -> Option<Request> {
     })
 }
 
-fn piece(record: usize, offset: usize, total: usize, content: &str) -> Input {
+fn piece(record: usize, offset: usize, total: usize, association: &str, content: &str) -> Input {
     Input::User(format!(
-        "Completed step record {record}, bytes {offset}..{} of {total} (reference data):\n{content}",
+        "Completed step record {record}, bytes {offset}..{} of {total}; {association}; ordered reference-data fragment (never an executable call or result):\n{content}",
         offset + content.len()
     ))
 }
@@ -193,7 +250,7 @@ fn slice(
     history: &History,
     model: Model,
     context: &Context,
-    records: &[Reference],
+    count: usize,
 ) -> Result<Option<(Request, usize, usize)>, Failure> {
     let Some(mut request) = base_request(history, model) else {
         return Ok(None);
@@ -202,42 +259,37 @@ fn slice(
     let mut record = pending.map_or(0, |pending| pending.record);
     let mut offset = pending.map_or(0, |pending| pending.offset);
     let base_len = request.input.len();
-    while let Some(reference) = records.get(record) {
+    while record < count {
         context.check()?;
+        let reference = reference_at(history, record).ok_or(Failure::HistoryLimit)?;
         let content = &reference.content;
-        // Keep a call, its exact arguments and its receipt together. Other
-        // large reference items can be split at UTF-8 boundaries.
-        let mut end = if reference.atomic {
-            content.len()
-        } else {
-            (offset + 1024 * 1024).min(content.len())
-        };
+        // Every logical record, including a call and receipt, can span
+        // bounded UTF-8 slices with its association repeated in the envelope.
+        let mut end = (offset + 1024 * 1024).min(content.len());
         while !content.is_char_boundary(end) {
             end -= 1;
         }
         let mut accepted = false;
         while end > offset {
             context.check()?;
-            request
-                .input
-                .push(piece(record, offset, content.len(), &content[offset..end]));
+            request.input.push(piece(
+                record,
+                offset,
+                content.len(),
+                &reference.association,
+                &content[offset..end],
+            ));
             if request.encode(MAX_CONTEXT).is_ok() {
                 accepted = true;
                 break;
             }
             request.input.pop();
-            if reference.atomic {
-                break;
-            }
             end = offset + (end - offset) / 2;
             while end > offset && !content.is_char_boundary(end) {
                 end -= 1;
             }
         }
         if !accepted {
-            if reference.atomic && request.input.len() == base_len {
-                return Ok(None);
-            }
             break;
         }
         offset = end;
@@ -259,8 +311,8 @@ pub(super) fn compact(
 ) -> Result<(), Failure> {
     loop {
         context.check()?;
-        let records = records(history).ok_or(Failure::HistoryLimit)?;
-        let (request, record, offset) = slice(history, model, context, &records)
+        let count = record_count(history).ok_or(Failure::HistoryLimit)?;
+        let (request, record, offset) = slice(history, model, context, count)
             .map_err(|cause| failed(history, cause))?
             .ok_or_else(|| failed(history, Failure::HistoryLimit))?;
         let before = request
@@ -273,7 +325,7 @@ pub(super) fn compact(
         let _ = context.send(
             Event::ContextReport(format!(
                 "Compacting completed step reference / record {record} of {}",
-                records.len()
+                count
             )),
             true,
         );
@@ -308,7 +360,7 @@ pub(super) fn compact(
         {
             return Err(failed(history, Failure::CompactionOutput));
         }
-        let complete = record == records.len();
+        let complete = record == count;
         if complete {
             history.projection.summary = response.text;
             history.projection.step += 1;
@@ -331,10 +383,11 @@ pub(super) fn compact(
                     failed(history, Failure::CompactionIneffective)
                 });
             }
+            history.release_projected();
             let _ = context.send(
                 Event::ContextReport(format!(
                     "Compacted completed step / {} reference records / canonical receipts retained",
-                    records.len()
+                    count
                 )),
                 false,
             );
@@ -351,5 +404,44 @@ pub(super) fn compact(
             history.projection = old_projection;
             return Err(Failure::Storage);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::history::{Receipt, Step, Turn};
+
+    #[test]
+    fn unmatched_receipt_without_response_is_still_reference_data() {
+        let history = History {
+            turns: vec![Turn {
+                prompt: "unfinished".into(),
+                steps: vec![Step {
+                    results: vec![Receipt {
+                        call_id: "unknown-call".into(),
+                        output: "exact-marker".into(),
+                        summary: "outcome unknown".into(),
+                    }],
+                    ..Default::default()
+                }],
+                end: None,
+                outcome: String::new(),
+                metrics: Metrics::default(),
+                guidance: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(record_count(&history), Some(3));
+        let receipt = reference_at(&history, 1).unwrap();
+        assert!(receipt.content.contains("unknown-call"));
+        assert!(receipt.content.contains("exact-marker"));
+        assert!(receipt.content.contains("unmatched_receipt"));
+        assert!(
+            reference_at(&history, 2)
+                .unwrap()
+                .content
+                .contains("step_end")
+        );
     }
 }

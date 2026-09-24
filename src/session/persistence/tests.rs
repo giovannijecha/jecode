@@ -372,9 +372,9 @@ fn failed_checkpoint_stops_before_an_approved_effect_can_be_requested() {
         return;
     };
     let workspace = crate::workspace::Workspace::open(&fixture.0).unwrap();
-    let history = create(&store, Model::Luna, Some(&workspace)).unwrap();
+    let history = create_in(&store, Model::Luna, Some(&fixture.0), Some(&workspace)).unwrap();
     let record = history.record.as_ref().unwrap();
-    let file = record.store.root().join(format!("{}.json", record.id));
+    let file = record.store.root().join(format!("{}.head", record.id));
     let mut run =
         Session::with_history(Model::Luna, Broken { file }, Some(workspace), history).unwrap();
     assert!(matches!(
@@ -572,7 +572,7 @@ fn controller_checkpoints_large_create_and_resume_never_replays_it() {
     let home = crate::state::tests::Fixture::new();
     let Some(store) = home.store() else { return };
     let workspace = Workspace::open(&home.0).unwrap();
-    let history = create(&store, Model::Luna, Some(&workspace)).unwrap();
+    let history = create_in(&store, Model::Luna, Some(&home.0), Some(&workspace)).unwrap();
     let id = history.record.as_ref().unwrap().id.clone();
     let content: String = (0..4000)
         .map(|n| format!("    <main data-id=\"{n:05}\">visible source</main>\n"))

@@ -299,3 +299,313 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
     assert!(!request.contains("function_call_output"));
     assert!(!request.contains("read-000"));
 }
+
+#[test]
+fn one_oversized_call_and_receipt_resume_across_encoded_reference_slices() {
+    struct Sliced {
+        calls: usize,
+        fail_at: Option<(usize, Failure)>,
+        seen: Arc<Mutex<Vec<String>>>,
+    }
+    impl session::worker::Backend for Sliced {
+        fn login(
+            &mut self,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        ) -> Result<(), client::Error> {
+            Ok(())
+        }
+        fn generate(
+            &mut self,
+            request: &Request,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+        ) -> Result<Response, client::Error> {
+            assert!(request.tools.is_empty());
+            let encoded = request.encode(session::history::MAX_CONTEXT)?;
+            self.seen.lock().unwrap().push(encoded);
+            self.calls += 1;
+            if let Some((at, cause)) = self.fail_at
+                && at == self.calls
+            {
+                return match cause {
+                    Failure::Cancelled => Err(crate::tls::NetworkError::Cancelled.into()),
+                    Failure::Account(client::Error::Expired) => Err(client::Error::Expired),
+                    Failure::CompactionOutput => {
+                        Ok(session::tests::response("", Status::Completed))
+                    }
+                    _ => unreachable!(),
+                };
+            }
+            Ok(session::tests::response(
+                &format!(
+                    "Covered ordered reference slice {} with exact call and receipt association.",
+                    self.calls
+                ),
+                Status::Completed,
+            ))
+        }
+    }
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history = create_in(&store, Model::Luna, None, None).unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
+    history
+        .begin("Finish the task after the large read".into())
+        .unwrap();
+    let call = session::tool_tests::call("oversized-call", "read_file", "{\"path\":\"big.txt\"}");
+    let output = format!(
+        "FIRST-MARKER{}MIDDLE-MARKER{}LAST-MARKER",
+        "\u{0001}".repeat(320_000),
+        "\u{0001}".repeat(320_000)
+    );
+    assert!(output.len() < 1024 * 1024);
+    history.turns[0].steps.push(Step {
+        response: Some(session::tool_tests::calls_response(vec![call])),
+        accepted: true,
+        results: vec![Receipt {
+            call_id: "oversized-call".into(),
+            output: output.clone(),
+            summary: "Read big.txt".into(),
+        }],
+        ..Default::default()
+    });
+    history.turns[0].end = Some(End::Complete);
+    history.turns[0].outcome = "Complete".into();
+    history.checkpoint().unwrap();
+    let encoded_receipt_bytes = crate::json::encode(
+        &crate::json::Value::String(output.clone()),
+        80 * 1024 * 1024,
+    )
+    .unwrap()
+    .len();
+    assert!(encoded_receipt_bytes > 1024 * 1024);
+    let sizes = session::context::partial::reference_sizes(&history).unwrap();
+    let record_bytes = *sizes.iter().max().unwrap();
+    let call_record = sizes.iter().position(|size| *size == record_bytes).unwrap();
+    assert!(record_bytes > session::history::MAX_CONTEXT);
+    let (events, _received) = std::sync::mpsc::sync_channel(64);
+    let (_decisions, decisions) = std::sync::mpsc::sync_channel(1);
+    let context = session::worker::Context {
+        events,
+        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        decisions,
+        guidance: Arc::new(session::queue::Pending::default()),
+        next_approval: std::sync::atomic::AtomicU64::new(1),
+    };
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut first = Sliced {
+        calls: 0,
+        fail_at: Some((2, Failure::Cancelled)),
+        seen: seen.clone(),
+    };
+    let mut metrics = session::Metrics::default();
+    assert_eq!(
+        session::context::compact(
+            &mut first,
+            &mut history,
+            &context,
+            Model::Luna,
+            false,
+            &mut metrics
+        ),
+        Err(Failure::Cancelled)
+    );
+    assert_eq!(history.projection.through, 0);
+    assert_eq!(history.projection.step, 0);
+    assert!(history.projection.pending.is_some());
+    drop(history);
+    let mut saved = load(&store, &id, true).unwrap();
+    assert!(saved.history.projection.pending.is_some());
+    let prior = saved
+        .history
+        .projection
+        .pending
+        .as_ref()
+        .unwrap()
+        .summary
+        .clone();
+    for cause in [
+        Failure::CompactionOutput,
+        Failure::Account(client::Error::Expired),
+    ] {
+        let mut invalid = Sliced {
+            calls: 0,
+            fail_at: Some((1, cause)),
+            seen: seen.clone(),
+        };
+        assert_eq!(
+            session::context::compact(
+                &mut invalid,
+                &mut saved.history,
+                &context,
+                Model::Luna,
+                false,
+                &mut metrics
+            ),
+            Err(cause)
+        );
+        assert_eq!(
+            saved.history.projection.pending.as_ref().unwrap().summary,
+            prior
+        );
+        assert_eq!(saved.history.projection.step, 0);
+    }
+    saved
+        .history
+        .fail_next_checkpoint
+        .store(true, std::sync::atomic::Ordering::Release);
+    let mut storage = Sliced {
+        calls: 0,
+        fail_at: None,
+        seen: seen.clone(),
+    };
+    assert_eq!(
+        session::context::compact(
+            &mut storage,
+            &mut saved.history,
+            &context,
+            Model::Luna,
+            false,
+            &mut metrics
+        ),
+        Err(Failure::Storage)
+    );
+    assert_eq!(
+        saved.history.projection.pending.as_ref().unwrap().summary,
+        prior
+    );
+    let mut resumed = Sliced {
+        calls: 0,
+        fail_at: None,
+        seen: seen.clone(),
+    };
+    assert_eq!(
+        session::context::compact(
+            &mut resumed,
+            &mut saved.history,
+            &context,
+            Model::Luna,
+            false,
+            &mut metrics
+        ),
+        Ok(())
+    );
+    assert!(saved.history.projection.pending.is_none());
+    assert_eq!(saved.history.projection.step, 0); // Completed turn was released from memory.
+    assert_eq!(saved.history.turn_count(), 1);
+    let requests = seen.lock().unwrap();
+    let max_encoded = requests.iter().map(String::len).max().unwrap();
+    eprintln!(
+        "oversized reference: record_bytes={record_bytes} encoded_receipt_bytes={encoded_receipt_bytes} requests={} max_encoded_request_bytes={max_encoded}",
+        requests.len()
+    );
+    assert!(requests.len() >= 3);
+    assert!(max_encoded <= session::history::MAX_CONTEXT);
+    // Cancelled, invalid, unauthenticated and uncheckpointed requests cannot
+    // advance validated coverage; their reference bytes must be sent again.
+    for marker in ["FIRST-MARKER", "MIDDLE-MARKER", "LAST-MARKER"] {
+        assert_eq!(
+            requests
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index == 0 || *index >= 5)
+                .map(|(_, request)| request.matches(marker).count())
+                .sum::<usize>(),
+            1,
+            "{marker} was repeated or omitted in validated coverage"
+        );
+    }
+    let mut reconstructed = String::new();
+    let mut slices = 0;
+    for (_, request) in requests
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index == 0 || *index >= 5)
+    {
+        let value = crate::json::parse(
+            request,
+            crate::json::Limits {
+                bytes: session::history::MAX_CONTEXT,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for item in value
+            .get("input")
+            .and_then(crate::json::Value::array)
+            .unwrap()
+        {
+            let Some(data) = item
+                .get("content")
+                .and_then(crate::json::Value::array)
+                .and_then(|parts| parts.first())
+                .and_then(|part| part.get("text"))
+                .and_then(crate::json::Value::text)
+            else {
+                continue;
+            };
+            let Some((header, fragment)) = data.split_once('\n') else {
+                continue;
+            };
+            if !header.starts_with(&format!("Completed step record {call_record},")) {
+                continue;
+            }
+            assert!(header.contains("call_id=oversized-call"));
+            assert!(header.contains("receipt_call_id=oversized-call"));
+            let range = header
+                .split("bytes ")
+                .nth(1)
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap();
+            let (start, rest) = range.split_once("..").unwrap();
+            let (end, total) = rest.split_once(" of ").unwrap();
+            assert_eq!(start.parse::<usize>().unwrap(), reconstructed.len());
+            assert_eq!(total.parse::<usize>().unwrap(), record_bytes);
+            reconstructed.push_str(fragment);
+            assert_eq!(end.parse::<usize>().unwrap(), reconstructed.len());
+            slices += 1;
+        }
+    }
+    assert!(slices >= 2);
+    assert_eq!(reconstructed.len(), record_bytes);
+    let covered = crate::json::parse(
+        &reconstructed,
+        crate::json::Limits {
+            bytes: 80 * 1024 * 1024,
+            nodes: 500_000,
+            depth: 64,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        covered.get("call_id").and_then(crate::json::Value::text),
+        Some("oversized-call")
+    );
+    assert_eq!(
+        covered
+            .get("receipt_call_id")
+            .and_then(crate::json::Value::text),
+        Some("oversized-call")
+    );
+    assert_eq!(
+        covered
+            .get("parsed_arguments")
+            .and_then(|v| v.get("path"))
+            .and_then(crate::json::Value::text),
+        Some("big.txt")
+    );
+    assert_eq!(
+        covered
+            .get("receipt_output")
+            .and_then(crate::json::Value::text),
+        Some(output.as_str())
+    );
+    drop(requests);
+    let exact = super::v2::page(saved.history.record.as_ref().unwrap(), 0, 1).unwrap();
+    assert_eq!(exact[0].steps[0].results[0].output, output);
+    assert_eq!(exact[0].steps[0].results[0].call_id, "oversized-call");
+}

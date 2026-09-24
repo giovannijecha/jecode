@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Incremental canonical session logs, bounded recovery and explicit verified v1
+  import for long-running conversations.
+- Ordered reference slices cover a single call and receipt larger than a bounded
+  compaction request without replaying tools.
+- Preserve current-turn outcomes across compaction, commit interrupted outcomes
+  on resume, and keep guidance cursors consistent at compaction checkpoints.
+- Traverse old turns beyond the transcript page budget through bounded,
+  resumable canonical event slices.
+- Bound recent-prompt recall by encoded head size while preserving every
+  canonical prompt and the exact order of retained recall entries.
+
 ## 0.1.0-alpha.2 - 2026-09-22
 
 - Minimal startup with directory, active model and effort in a single footer row.

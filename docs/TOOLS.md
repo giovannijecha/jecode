@@ -69,9 +69,9 @@ the target or serve as a recovery copy.
 The old 32 KiB proposal and 1 MiB edit-file caps are gone. Account responses
 still have a 1 MiB decoded event and output budget, so the encoded tool call,
 including JSON escaping and other response items, must fit those protocol
-resource bounds. Request context has a 2 MiB budget and a saved session JSON
-snapshot has a 16 MiB budget. These are whole-message limits, not file-size
-targets. A response that exceeds the provider budget is rejected before any
+resource bounds. Request context has a 2 MiB budget; new canonical sessions
+append bounded log records instead of one whole-session snapshot. A response
+that exceeds the provider budget is rejected before any
 tool is offered for approval. If a session checkpoint cannot be saved, Jecode
 stops before starting a new effect; an interrupted effect without a durable
 receipt stays uncertain and requires workspace inspection before repeating it.
