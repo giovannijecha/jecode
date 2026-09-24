@@ -1,20 +1,25 @@
-//! Prepared content is immutable. Preparing a proposal never creates a file.
-use super::{Budget, Error, MAX_FILE_BYTES, Workspace, diff, platform};
+//! Prepared content is immutable; large originals use owned, disposable snapshots.
+use super::{
+    Budget, Error, MAX_FILE_BYTES, Workspace, diff, platform,
+    snapshot::{Original, OwnedFile, Snapshot, scan_match, snapshot, validate_replacement},
+};
 use std::{
-    fs::File,
-    io::{self, Read, Seek},
-    time::SystemTime,
+    io,
+    path::{Path, PathBuf},
 };
 
-pub const MAX_CHANGE_BYTES: usize = 32 * 1024;
 #[derive(Clone, Debug)]
 pub struct Preview {
     pub path: String,
     pub create: bool,
-    /// Complete bounded change, with unchanged context on either side.
+    /// Bounded leading lines of the change. Omission counts describe the rest.
     pub diff: String,
     pub added: usize,
     pub removed: usize,
+    pub omitted_lines: usize,
+    pub omitted_bytes: usize,
+    /// An informational copy, available while this proposal awaits a decision.
+    pub full_diff_path: Option<String>,
 }
 #[derive(Debug)]
 pub struct ChangeError(pub String);
@@ -44,16 +49,16 @@ impl From<io::Error> for ChangeError {
     }
 }
 pub(super) type Identity = (u64, u64);
-pub(super) struct Snapshot {
-    pub id: Identity,
-    pub modified: SystemTime,
-    pub text: String,
+pub(super) enum After {
+    Complete(String),
+    Replacement { at: u64, old_len: u64, new: String },
 }
 pub struct Change {
     pub(super) parent: Identity,
     pub(super) before: Option<Snapshot>,
-    pub(super) after: String,
+    pub(super) after: After,
     pub(super) preview: Preview,
+    pub(super) _preview_file: Option<OwnedFile>,
 }
 impl Change {
     pub fn preview(&self) -> &Preview {
@@ -68,9 +73,6 @@ impl Workspace {
         budget: &Budget<'_>,
     ) -> Result<Change, ChangeError> {
         validate_text(content)?;
-        if content.len() > MAX_CHANGE_BYTES {
-            return fail("new content exceeds the 32 KiB proposal limit");
-        }
         let (path, parent, name) = self.change_parent(path, budget)?;
         match platform::edit_open(&parent.file, &name) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -80,13 +82,24 @@ impl Workspace {
                 );
             }
         }
-        let preview = diff::preview(&path, None, content)?;
+        let directory = self.artifact_dir(&path);
+        let (preview, preview_file) = diff::preview(
+            &path,
+            None,
+            content,
+            diff::Destination {
+                parent: &parent.file,
+                directory: &directory,
+                security_source: None,
+            },
+        )?;
         budget.check()?;
         Ok(Change {
             parent: platform::identity(&parent.file)?,
             before: None,
-            after: content.into(),
+            after: After::Complete(content.into()),
             preview,
+            _preview_file: preview_file,
         })
     }
     pub fn prepare_edit(
@@ -96,44 +109,87 @@ impl Workspace {
         new: &str,
         budget: &Budget<'_>,
     ) -> Result<Change, ChangeError> {
-        if old.len() + new.len() > MAX_CHANGE_BYTES {
-            return fail("old_text plus new_text must fit 32 KiB");
-        }
         validate_text(new)?;
         let (path, parent, name) = self.change_parent(path, budget)?;
         let mut file = platform::edit_open(&parent.file, &name)?;
         platform::editable(&file)?;
-        let before = snapshot(&mut file, budget)?;
-        if old.is_empty() && !before.text.is_empty() {
+        let directory = self.artifact_dir(&path);
+        let stage_result =
+            file.metadata()?.len().saturating_add(new.len() as u64) > MAX_FILE_BYTES as u64;
+        let mut before = snapshot(&mut file, &parent.file, &directory, stage_result, budget)?;
+        if old.is_empty() && before.len != 0 {
             return fail("empty old_text is only valid for an empty file");
         }
-        let Some(at) = before.text.find(old) else {
-            return fail("old_text does not match; read the file and propose an exact replacement");
-        };
-        if !old.is_empty()
-            && before.text[at + old.chars().next().unwrap().len_utf8()..].contains(old)
-        {
-            return fail(
-                "old_text is ambiguous; include enough context to identify one occurrence",
-            );
-        }
-        let mut after = before.text.clone();
-        after.replace_range(at..at + old.len(), new);
-        if after == before.text {
+        if old == new {
             return fail("replacement makes no change");
         }
-        if after.len() > MAX_FILE_BYTES {
-            return fail("result exceeds the 1 MiB text file limit");
-        }
-        validate_text(&after)?;
-        let preview = diff::preview(&path, Some(&before.text), &after)?;
+        let (after, preview, preview_file) = match &mut before.original {
+            Original::Memory(text) => {
+                let at = unique_match(text, old)?;
+                let mut after = text.clone();
+                after.replace_range(at..at + old.len(), new);
+                validate_text(&after)?;
+                let (preview, file) = diff::preview(
+                    &path,
+                    Some(text),
+                    &after,
+                    diff::Destination {
+                        parent: &parent.file,
+                        directory: &directory,
+                        security_source: Some(&file),
+                    },
+                )?;
+                (After::Complete(after), preview, file)
+            }
+            Original::Staged(staged) => {
+                let at = scan_match(&mut staged.file, old, budget)?;
+                validate_replacement(
+                    &mut staged.file,
+                    before.len,
+                    at,
+                    old.len() as u64,
+                    new,
+                    budget,
+                )?;
+                let (preview, file) = diff::replacement_preview(
+                    &path,
+                    at,
+                    old,
+                    new,
+                    diff::Destination {
+                        parent: &parent.file,
+                        directory: &directory,
+                        security_source: Some(&file),
+                    },
+                )?;
+                (
+                    After::Replacement {
+                        at,
+                        old_len: old.len() as u64,
+                        new: new.into(),
+                    },
+                    preview,
+                    file,
+                )
+            }
+        };
         budget.check()?;
         Ok(Change {
             parent: platform::identity(&parent.file)?,
             before: Some(before),
             after,
             preview,
+            _preview_file: preview_file,
         })
+    }
+    fn artifact_dir(&self, path: &str) -> PathBuf {
+        let target = Path::new(path);
+        let absolute = if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            self.display.join(target)
+        };
+        absolute.parent().unwrap_or(&self.display).to_path_buf()
     }
     pub(super) fn change_parent(
         &self,
@@ -160,52 +216,14 @@ impl Workspace {
         Ok((path, opened, name))
     }
 }
-pub(super) fn snapshot(file: &mut File, budget: &Budget<'_>) -> Result<Snapshot, ChangeError> {
-    budget.check()?;
-    let before = file.metadata()?;
-    if !before.is_file() || before.len() > MAX_FILE_BYTES as u64 {
-        return Err(Error::Size.into());
+fn unique_match(text: &str, old: &str) -> Result<usize, ChangeError> {
+    let Some(at) = text.find(old) else {
+        return fail("old_text does not match; read the file and propose an exact replacement");
+    };
+    if !old.is_empty() && text[at + old.chars().next().unwrap().len_utf8()..].contains(old) {
+        return fail("old_text is ambiguous; include enough context to identify one occurrence");
     }
-    let modified = before.modified()?;
-    file.rewind()?;
-    let mut bytes = Vec::new();
-    let mut buffer = [0; 16 * 1024];
-    loop {
-        budget.check()?;
-        let n = file.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        if bytes.len() + n > MAX_FILE_BYTES {
-            return Err(Error::Size.into());
-        }
-        bytes.extend_from_slice(&buffer[..n]);
-    }
-    let after = file.metadata()?;
-    if before.len() != after.len() || modified != after.modified()? {
-        return fail("file changed during validation; prepare a new proposal");
-    }
-    let text = String::from_utf8(bytes).map_err(|_| ChangeError(Error::Text.to_string()))?;
-    validate_text(&text)?;
-    Ok(Snapshot {
-        id: platform::identity(file)?,
-        modified,
-        text,
-    })
-}
-pub(super) fn matches(
-    file: &mut File,
-    expected: &Snapshot,
-    budget: &Budget<'_>,
-) -> Result<(), ChangeError> {
-    let current = snapshot(file, budget)?;
-    if current.id != expected.id
-        || current.modified != expected.modified
-        || current.text != expected.text
-    {
-        return fail("file changed since the preview; prepare a new proposal");
-    }
-    Ok(())
+    Ok(at)
 }
 fn validate_text(text: &str) -> Result<(), ChangeError> {
     if text
@@ -217,9 +235,13 @@ fn validate_text(text: &str) -> Result<(), ChangeError> {
     }
     Ok(())
 }
-fn bidi(c: char) -> bool {
+pub(super) fn bidi(c: char) -> bool {
     matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 pub(super) fn fail<T>(text: &str) -> Result<T, ChangeError> {
     Err(ChangeError(text.into()))
 }
+
+#[cfg(test)]
+#[path = "change_tests.rs"]
+mod tests;

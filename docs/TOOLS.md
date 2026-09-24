@@ -16,7 +16,11 @@ to the model schema.
 Known files can be read directly. Directory exploration is for discovering unknown
 paths. Tool results report omissions and truncation so a partial result is not
 mistaken for a complete search. Tool output is bounded to 32 KiB of encoded JSON.
-Reads operate on supported ordinary text files up to 1 MiB.
+`read_file` scans an ordinary UTF-8 file with bounded memory and returns complete
+lines in an 8 KiB page, at most 400 lines. It can read files larger than 1 MiB;
+the scan checks the whole file and is subject to cancellation and the operation
+time limit. `search_text` still scans only files up to 1 MiB within its separate
+directory-wide budget.
 
 ## Working directory and access
 
@@ -44,13 +48,33 @@ or summarize them.
 
 ## File changes
 
-Jecode prepares the complete change and displays its diff before approval. Creation
-does not overwrite an existing file. Editing requires one exact occurrence of the
-old text and rejects changes made after the preview. The model is instructed to
-read before editing. The proposal text budget is 32 KiB; resulting files stay
-within the 1 MiB limit. Existing originals have an adjacent `.jecode-recovery-*`
-copy, referenced in the receipt. Do not remove recovery copies until they are no
-longer needed.
+Jecode prepares the exact change before approval. Creation does not overwrite an
+existing file. Editing requires one exact occurrence of the old text and rejects
+changes made after the preview. The model is instructed to read before editing.
+Large existing files use a temporary, owned snapshot so preparation and stale
+checks do not keep multiple full copies in memory. Existing originals have an
+adjacent `.jecode-recovery-*` copy after publication, referenced in the receipt.
+Do not remove recovery copies until they are no longer needed.
+
+The approval preview shows at most 48 KiB and 400 diff lines. When shortened, it
+reports exactly how many rendered lines and bytes were omitted and names an
+adjacent `.jecode-preview-*` file containing the full diff. Inspect that copy
+while approval waits; it is removed when the proposal ends and is never the
+content applied. For a large existing file, the diff shows the exact replacement
+and byte offset while omitting unchanged surrounding file context. Temporary
+`.jecode-snapshot-*` files are also removed on normal completion or cancellation.
+An abrupt process exit can leave a temporary file behind; it does not replace
+the target or serve as a recovery copy.
+
+The old 32 KiB proposal and 1 MiB edit-file caps are gone. Account responses
+still have a 1 MiB decoded event and output budget, so the encoded tool call,
+including JSON escaping and other response items, must fit those protocol
+resource bounds. Request context has a 2 MiB budget and a saved session JSON
+snapshot has a 16 MiB budget. These are whole-message limits, not file-size
+targets. A response that exceeds the provider budget is rejected before any
+tool is offered for approval. If a session checkpoint cannot be saved, Jecode
+stops before starting a new effect; an interrupted effect without a durable
+receipt stays uncertain and requires workspace inspection before repeating it.
 
 Approval is tied to the exact proposal. Denial disables further effects for that
 turn; reads may still complete. Cancellation does not grant approval.

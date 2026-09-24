@@ -444,3 +444,51 @@ impl State {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[test]
+fn account_stream_decodes_formatted_file_payload_above_old_tool_cap() {
+    let content: String = (0..4000)
+        .map(|n| format!("    <p id=\"line-{n:05}\">readable</p>\n"))
+        .collect();
+    assert!((64 * 1024..=256 * 1024).contains(&content.len()));
+    let arguments = json::object([
+        ("path", Value::String("page.html".into())),
+        ("content", Value::String(content.clone())),
+    ]);
+    let call = json::object([
+        ("type", Value::String("function_call".into())),
+        ("call_id", Value::String("create-1".into())),
+        ("name", Value::String("create_file".into())),
+        (
+            "arguments",
+            Value::String(json::encode(&arguments, 1024 * 1024).unwrap()),
+        ),
+    ]);
+    let response = json::object([
+        ("id", Value::String("response-1".into())),
+        ("status", Value::String("completed".into())),
+        ("output", Value::Array(vec![call])),
+    ]);
+    let event = json::object([
+        ("type", Value::String("response.completed".into())),
+        ("response", response),
+    ]);
+    let wire = format!("data: {}\n\n", json::encode(&event, 1024 * 1024).unwrap());
+    let mut stream = ResponseStream::new(Limits {
+        event_bytes: 1024 * 1024,
+        output_bytes: 1024 * 1024,
+        ..Limits::default()
+    });
+    for bytes in wire.as_bytes().chunks(4093) {
+        stream.push(bytes, |_| ControlFlow::Continue(())).unwrap();
+    }
+    let decoded = stream.finish().unwrap();
+    assert_eq!(
+        decoded.tool_calls[0]
+            .arguments
+            .get("content")
+            .and_then(Value::text),
+        Some(content.as_str())
+    );
+}

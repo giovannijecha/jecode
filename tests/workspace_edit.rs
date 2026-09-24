@@ -175,7 +175,7 @@ fn stale_content_identity_creation_and_cancellation_preserve_disk() {
     assert_eq!(fs::read_dir(&files.0).unwrap().count(), 3);
 }
 #[test]
-fn ambiguous_binary_hidden_and_unreviewable_changes_fail_before_approval() {
+fn ambiguous_binary_and_hidden_changes_fail_while_long_valid_changes_prepare() {
     let files = support::Fixture::new();
     files.write("file", "aaa");
     files.write("binary", b"a\0b");
@@ -201,14 +201,17 @@ fn ambiguous_binary_hidden_and_unreviewable_changes_fail_before_approval() {
     ] {
         assert!(ws.prepare_create(path, "x", &budget(&cancel)).is_err());
     }
-    assert!(
-        ws.prepare_create("large", &"x".repeat(32769), &budget(&cancel))
-            .is_err()
-    );
-    assert!(
-        ws.prepare_create("lines", &"x\n".repeat(401), &budget(&cancel))
-            .is_err()
-    );
+    let large = ws
+        .prepare_create("large", &"x".repeat(32769), &budget(&cancel))
+        .unwrap();
+    assert_eq!(large.preview().added, 1);
+    drop(large);
+    let lines = ws
+        .prepare_create("lines", &"x\n".repeat(401), &budget(&cancel))
+        .unwrap();
+    assert_eq!(lines.preview().added, 401);
+    assert!(lines.preview().omitted_lines > 0);
+    drop(lines);
     let change = ws
         .prepare_edit("file", "aaa", "b\n", &budget(&cancel))
         .unwrap();
