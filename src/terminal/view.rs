@@ -124,13 +124,16 @@ pub fn chrome(model: &Model, columns: usize, height: usize) -> Vec<Row> {
         // Reserve the rules, draft, footer and any local controls before adding
         // runtime state. All rows share the same transient suffix on resize.
         let menu = model.account.is_some() && model.menu.active(&model.editor.text);
-        let queued = model.account.as_ref().is_some_and(|view| view.queued > 0);
+        let queued = model
+            .account
+            .as_ref()
+            .is_some_and(|view| !view.pending_messages().is_empty());
         let notice = !model.edit_notice.is_empty()
             || model
                 .account
                 .as_ref()
                 .is_some_and(|view| !view.local_notice.is_empty());
-        let minimum = 4 + usize::from(menu) + usize::from(queued) + usize::from(notice);
+        let minimum = 4 + usize::from(menu) + if queued { 3 } else { 0 } + usize::from(notice);
         let mut rows = activity_prefix(model, width, height, minimum);
         rows.extend(super::composer::rows(model, width, height - rows.len()));
         rows

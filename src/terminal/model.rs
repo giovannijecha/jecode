@@ -108,7 +108,7 @@ impl Model {
             Key::PageDown | Key::HistoryNext => self
                 .prompt_history
                 .next(&mut self.editor, &mut self.menu.pasted_literal),
-            Key::Tab => {}
+            Key::Tab | Key::RetrieveQueued | Key::AbandonRecovered => {}
             Key::Quit => self.quit = true,
             Key::Escape | Key::Interrupt if self.streaming() => {
                 self.pending.clear();

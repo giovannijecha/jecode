@@ -80,7 +80,7 @@ pub(super) struct Context {
     pub cancelled: Arc<AtomicBool>,
     pub stopped: Arc<AtomicBool>,
     pub decisions: Receiver<super::approval::Decision>,
-    pub guidance: Receiver<String>,
+    pub guidance: Arc<super::queue::Pending>,
     pub next_approval: std::sync::atomic::AtomicU64,
 }
 impl Context {
@@ -159,7 +159,7 @@ pub(super) fn run(
             Ok(command) => command,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                let Ok(text) = context.guidance.try_recv() else {
+                let Some(text) = context.guidance.claim() else {
                     continue;
                 };
                 if context.cancelled.load(Ordering::Acquire) {

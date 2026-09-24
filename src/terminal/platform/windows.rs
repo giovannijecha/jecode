@@ -63,6 +63,16 @@ fn modified_backspace(record: &Record, control_down: bool) -> bool {
         && record.character == 8
         && (record.modifiers & 12 != 0 || control_down)
 }
+fn alt_navigation(record: &Record) -> Option<Key> {
+    if record.modifiers & 3 == 0 || record.modifiers & 12 != 0 {
+        return None;
+    }
+    match record.key {
+        0x26 => Some(Key::RetrieveQueued),
+        0x28 => Some(Key::AbandonRecovered),
+        _ => None,
+    }
+}
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn GetStdHandle(id: u32) -> Handle;
@@ -160,6 +170,8 @@ impl Terminal {
             let shift = record.modifiers & 0x10 != 0;
             let key = if modified_backspace(&record, self.control_down) {
                 Some(Key::WordBackspace)
+            } else if let Some(key) = alt_navigation(&record) {
+                Some(key)
             } else if control && !alt && record.key != 0 {
                 control_key(record.key)
             } else if shift && !alt && record.key == 0x0d {
@@ -287,4 +299,24 @@ fn synthesized_ctrl_backspace_requires_a_distinguishable_ctrl_record() {
     record.character = 8;
     record.key = 0x57;
     assert!(!modified_backspace(&record, true));
+}
+
+#[cfg(test)]
+#[test]
+fn native_alt_arrows_are_distinct_from_plain_and_control_arrows() {
+    let mut record = Record {
+        kind: 1,
+        down: 1,
+        key: 0x26,
+        ..Record::default()
+    };
+    assert_eq!(alt_navigation(&record), None);
+    record.modifiers = 2;
+    assert_eq!(alt_navigation(&record), Some(Key::RetrieveQueued));
+    record.key = 0x28;
+    assert_eq!(alt_navigation(&record), Some(Key::AbandonRecovered));
+    record.modifiers = 10;
+    assert_eq!(alt_navigation(&record), None);
+    record.modifiers = 8;
+    assert_eq!(alt_navigation(&record), None);
 }

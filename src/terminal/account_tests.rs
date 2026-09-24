@@ -38,7 +38,6 @@ fn restored_history_and_context_notices_do_not_swallow_streamed_text() {
     event(&mut model, Event::Text("Following response".into()));
     assert_eq!(model.blocks.last().unwrap().text, "Following response");
     assert!(model.blocks.iter().any(|b| b.text == "Saved answer"));
-    model.account.as_mut().unwrap().queued = 1;
     event(
         &mut model,
         Event::Guidance {
@@ -47,7 +46,6 @@ fn restored_history_and_context_notices_do_not_swallow_streamed_text() {
         },
     );
     event(&mut model, Event::Text("Guided response".into()));
-    assert_eq!(model.account.as_ref().unwrap().queued, 0);
     assert_eq!(model.blocks.last().unwrap().text, "Guided response");
 }
 use crate::session::Failure;

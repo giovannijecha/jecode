@@ -103,13 +103,16 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
     } = area(model, width, height);
     let available = capacity.min(height / 2).min(16);
     let menu = model.menu.active(&model.editor.text) && model.account.is_some();
-    let queued = model.account.as_ref().is_some_and(|view| view.queued > 0);
+    let pending = model
+        .account
+        .as_ref()
+        .map_or_else(Vec::new, |view| view.pending_messages());
     let notice = !model.edit_notice.is_empty()
         || model
             .account
             .as_ref()
             .is_some_and(|view| !view.local_notice.is_empty());
-    let feedback = usize::from(queued) + usize::from(notice);
+    let feedback = if pending.is_empty() { 0 } else { 2 } + usize::from(notice);
     let menu_height = available.saturating_sub(feedback.min(available.saturating_sub(1)));
     let mut body = if menu {
         super::menu::rows(model, width, menu_height)
@@ -117,13 +120,15 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
         Vec::new()
     };
     if let Some(view) = &model.account {
-        if view.queued > 0 && body.len() < available {
-            body.push(clipped(
-                &format!("{} queued · next model step", view.queued),
-                width,
-                Tone::Muted,
-            ));
-        }
+        let queue_space = available
+            .saturating_sub(body.len() + usize::from(!view.local_notice.is_empty()))
+            .min(4);
+        body.extend(queue_rows(
+            &pending,
+            width,
+            queue_space,
+            view.recovery.is_none() && !menu,
+        ));
         if !view.local_notice.is_empty() && body.len() < available {
             body.push(clipped(
                 &view.local_notice,
@@ -146,6 +151,45 @@ pub(super) fn rows(model: &Model, width: usize, height: usize) -> Vec<Row> {
     rows.extend(draft);
     rows.push(Row::new(rule, Tone::Accent));
     rows.extend(footer);
+    rows
+}
+
+fn queue_rows(pending: &[String], width: usize, capacity: usize, recoverable: bool) -> Vec<Row> {
+    if pending.is_empty() || capacity == 0 {
+        return Vec::new();
+    }
+    let count = pending.len();
+    let mut rows = Vec::new();
+    if capacity > 1 {
+        let label = if recoverable {
+            format!("{count} queued · Alt+↑ edit")
+        } else {
+            format!("{count} queued")
+        };
+        rows.push(clipped(&label, width, Tone::Muted));
+    }
+    let slots = capacity - rows.len();
+    let shown = if count > slots && slots > 1 {
+        slots - 1
+    } else {
+        slots
+    };
+    for text in pending.iter().skip(count.saturating_sub(shown)) {
+        let preview = text::safe(text)
+            .split_whitespace()
+            .take(18)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let prefix = if capacity == 1 { "Queued: " } else { "  › " };
+        rows.push(clipped(&format!("{prefix}{preview}"), width, Tone::Muted));
+    }
+    if count > shown && rows.len() < capacity {
+        rows.push(clipped(
+            &format!("  +{} more", count - shown),
+            width,
+            Tone::Muted,
+        ));
+    }
     rows
 }
 

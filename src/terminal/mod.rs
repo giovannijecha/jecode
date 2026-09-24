@@ -23,6 +23,9 @@ mod prompt_history;
 mod reconcile;
 #[cfg(test)]
 mod reconciliation_tests;
+mod recovery;
+#[cfg(test)]
+mod recovery_tests;
 mod render;
 mod resize;
 mod schedule;
@@ -60,6 +63,8 @@ enum Key {
     WordRight,
     Up,
     Down,
+    RetrieveQueued,
+    AbandonRecovered,
     Home,
     End,
     DraftStart,
@@ -248,6 +253,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     };
     if let Some(session) = &mut session {
         model.prompt_history.load(session.take_initial_prompts());
+        account::attach_queue(&mut model, session);
     }
     let mut renderer = render::Renderer::default();
     let mut layout = view::Layout::default();

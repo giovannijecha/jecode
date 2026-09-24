@@ -7,6 +7,7 @@ use crate::{
     providers::openai_account::auth,
     session::{self, End, Event, Metrics, Session},
 };
+use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(PartialEq)]
@@ -34,7 +35,8 @@ pub(super) struct View {
     pub failed: bool,
     pub partial_output: bool,
     turns: usize,
-    pub queued: usize,
+    pub pending: Option<Arc<session::PendingGuidance>>,
+    pub recovery: Option<super::recovery::SavedDraft>,
     active_tool: Option<usize>,
     pub approval: Option<super::approval_view::Approval>,
     pub command: Option<super::command_view::Run>,
@@ -77,6 +79,11 @@ impl View {
         self.local_operation = Some(LocalOperation::Model);
         self.notice = "Changing model…".into();
     }
+    pub fn pending_messages(&self) -> Vec<String> {
+        self.pending
+            .as_ref()
+            .map_or_else(Vec::new, |queue| queue.snapshot())
+    }
     pub fn loading_catalog(&mut self, defaults: bool) {
         self.phase = Phase::Updating;
         self.pending_catalog = Some(defaults);
@@ -98,7 +105,8 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
         failed: false,
         partial_output: false,
         turns: 0,
-        queued: 0,
+        pending: None,
+        recovery: None,
         active_tool: None,
         approval: None,
         command: None,
@@ -115,11 +123,23 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
 }
 
 pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
+    attach_queue(model, session);
     if super::approval_view::input(model, &key, session) {
         return;
     }
     if super::commands::input(model, &key, session) {
         return;
+    }
+    match &key {
+        Key::RetrieveQueued => {
+            super::recovery::retrieve(model, session);
+            return;
+        }
+        Key::AbandonRecovered => {
+            super::recovery::abandon(model);
+            return;
+        }
+        _ => {}
     }
     let Some(view) = &mut model.account else {
         return;
@@ -137,11 +157,10 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             }
             if view.phase == Phase::Generating && !model.editor.text.trim().is_empty() {
                 if session.enqueue(&model.editor.text) {
-                    model.editor.take();
-                    model.menu.pasted_literal = false;
-                    view.queued += 1;
+                    let prompt = model.editor.take();
                     view.local_notice.clear();
                     view.local_failed = false;
+                    super::recovery::submitted(model, &prompt, false);
                 } else {
                     view.local_notice = "Queue full or stopping / draft kept".into();
                     view.local_failed = false;
@@ -168,8 +187,14 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             }
             view.turns += 1;
             let prompt = model.editor.take();
-            model.prompt_history.record(&prompt);
-            model.menu.pasted_literal = false;
+            view.phase = Phase::Generating;
+            view.failed = false;
+            view.partial_output = false;
+            view.local_notice.clear();
+            view.local_failed = false;
+            view.notice = "Waiting for model".into();
+            model.status_spinner.reset(Instant::now());
+            super::recovery::submitted(model, &prompt, true);
             model.blocks.push(Block {
                 speaker: "You",
                 text: prompt,
@@ -178,13 +203,6 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
                 speaker: "Assistant",
                 text: String::new(),
             });
-            view.phase = Phase::Generating;
-            view.failed = false;
-            view.partial_output = false;
-            view.local_notice.clear();
-            view.local_failed = false;
-            view.notice = "Waiting for model".into();
-            model.status_spinner.reset(Instant::now());
         }
         Key::Escape | Key::Interrupt
             if matches!(view.phase, Phase::Login | Phase::Generating)
@@ -202,6 +220,14 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
     }
 }
 
+pub(super) fn attach_queue(model: &mut Model, session: &Session) {
+    if let Some(view) = &mut model.account
+        && view.pending.is_none()
+    {
+        view.pending = Some(session.pending_guidance());
+    }
+}
+
 pub(super) fn event(model: &mut Model, event: Event) {
     if matches!(
         event,
@@ -215,7 +241,6 @@ pub(super) fn event(model: &mut Model, event: Event) {
     };
     match event {
         Event::Guidance { text, new_turn } => {
-            view.queued = view.queued.saturating_sub(1);
             if new_turn {
                 view.turns += 1;
                 model.prompt_history.record_new_turn(&text);
@@ -235,7 +260,6 @@ pub(super) fn event(model: &mut Model, event: Event) {
             });
         }
         Event::GuidanceReturned(text) => {
-            view.queued = view.queued.saturating_sub(1);
             model.blocks.push(Block {
                 speaker: "Status",
                 text: format!("Queued message was not sent:\n{text}"),
@@ -487,7 +511,6 @@ pub(super) fn event(model: &mut Model, event: Event) {
             model.menu.close();
             model.tools.close(&model.blocks, true, Instant::now());
             view.phase = Phase::SignedOut;
-            view.queued = 0;
             view.failed = false;
             view.notice =
                 "Signed out locally / use /login to sign in; session and draft kept".into();
