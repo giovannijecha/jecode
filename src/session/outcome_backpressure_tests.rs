@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Case {
     Edit,
     Command,
@@ -51,7 +51,7 @@ impl worker::Backend for Backend {
                 let arguments = json::encode(
                     &json::object([
                         ("command", Value::String(native::script("write"))),
-                        ("timeout_seconds", Value::Number("20".into())),
+                        ("timeout_seconds", Value::Number("90".into())),
                     ]),
                     8192,
                 )
@@ -134,16 +134,28 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
     } else {
         "applied"
     };
-    let deadline = Instant::now() + Duration::from_secs(15);
+    // PowerShell startup can queue behind other native process tests on CI.
+    // Its command deadline is longer than this observation window.
+    let deadline = Instant::now()
+        + Duration::from_secs(if matches!(case, Case::Command) {
+            60
+        } else {
+            15
+        });
+    let mut unexpected = None;
     let before_release = loop {
-        if let Some(receipts) = saved_receipts(&store, &id)
-            && receipts
+        if let Some(receipts) = saved_receipts(&store, &id) {
+            let status = receipts
                 .first()
                 .and_then(|value| value.get("status"))
-                .and_then(Value::text)
-                == Some(expected)
-        {
-            break Some(receipts);
+                .and_then(Value::text);
+            if status == Some(expected) {
+                break Some(receipts);
+            }
+            if !matches!(status, None | Some("uncertain") | Some("not_executed")) {
+                unexpected = Some(receipts);
+                break None;
+            }
         }
         if Instant::now() >= deadline {
             break None;
@@ -169,7 +181,7 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
     let final_receipts = saved_receipts(&store, &id);
     assert!(
         before_release.is_some(),
-        "exact receipt waited for presentation capacity"
+        "{case:?} receipt did not reach storage before presentation drained; unexpected={unexpected:?}, final={final_receipts:?}"
     );
     assert!(matches!(
         events.last(),
