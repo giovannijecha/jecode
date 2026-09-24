@@ -23,7 +23,8 @@ pub(super) fn proposal(model: &mut Model, id: u64, preview: Preview) {
         .tools
         .close(&model.blocks, false, std::time::Instant::now());
     let block = model.blocks.len();
-    let legend = if preview.diff.contains("\\\\")
+    let legend = if preview.full_diff_path.is_some()
+        || preview.diff.contains("\\\\")
         || preview.diff.contains("\\t")
         || preview.diff.contains("\\r")
     {
@@ -31,10 +32,18 @@ pub(super) fn proposal(model: &mut Model, id: u64, preview: Preview) {
     } else {
         ""
     };
+    let omitted = if let Some(path) = &preview.full_diff_path {
+        format!(
+            "\n  ... {} diff lines / {} bytes omitted. Full diff while approval waits: {}",
+            preview.omitted_lines, preview.omitted_bytes, path
+        )
+    } else {
+        String::new()
+    };
     model.blocks.push(Block {
         speaker: "Edit",
         text: format!(
-            "  {} {} · +{} -{}\n{legend}{}",
+            "  {} {} · +{} -{}\n{legend}{}{omitted}",
             if preview.create { "Create" } else { "Edit" },
             preview.path,
             preview.added,

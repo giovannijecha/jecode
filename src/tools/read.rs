@@ -54,26 +54,15 @@ pub(super) fn read(
     limit: usize,
     budget: &Budget<'_>,
 ) -> Result<Output, Error> {
-    let source = workspace.read(path, budget)?;
-    let mut lines = source.split_inclusive('\n').skip(start - 1).peekable();
-    let mut text = String::new();
-    let mut count = 0;
-    while count < limit {
-        let Some(line) = lines.peek() else { break };
-        if text.len() + line.len() > 8192 {
-            break;
-        }
-        text.push_str(line);
-        count += 1;
-        lines.next();
-    }
-    let truncated = lines.peek().is_some();
-    if count == 0 && truncated {
+    let page = workspace.read_page(path, start, limit, budget)?;
+    if page.long_line {
         return Ok(Output::error(
             "requested line exceeds the 8 KiB output limit; no partial line returned",
         ));
     }
     budget.check()?;
+    let count = page.count;
+    let truncated = page.truncated;
     Ok(Output::success(
         json::object([
             ("ok", Value::Bool(true)),
@@ -87,7 +76,7 @@ pub(super) fn read(
                     number(start + count - 1)
                 },
             ),
-            ("text", string(&text)),
+            ("text", string(&page.text)),
             ("truncated", Value::Bool(truncated)),
             (
                 "next_line",

@@ -61,7 +61,7 @@ impl Prepared {
         Ok(match name {
             "run_command" => Self::Command {
                 path,
-                command: text(args, "command")?,
+                command: bounded_text(args, "command", 4096)?,
                 timeout_seconds: integer(args, "timeout_seconds", 60, 300)? as u64,
             },
             "create_file" => Self::Create {
@@ -79,7 +79,7 @@ impl Prepared {
             },
             "read_file" => Self::Read {
                 path,
-                start: integer(args, "start_line", 1, 1_048_577)?,
+                start: integer(args, "start_line", 1, usize::MAX)?,
                 lines: integer(args, "max_lines", 200, 400)?,
             },
             _ => {
@@ -134,9 +134,15 @@ impl Prepared {
 fn text(args: &Value, key: &str) -> Result<String, &'static str> {
     args.get(key)
         .and_then(Value::text)
-        .filter(|s| s.len() <= 32768)
         .map(String::from)
-        .ok_or("text arguments must be strings of at most 32 KiB")
+        .ok_or("text argument must be a string")
+}
+fn bounded_text(args: &Value, key: &str, maximum: usize) -> Result<String, &'static str> {
+    args.get(key)
+        .and_then(Value::text)
+        .filter(|s| s.len() <= maximum)
+        .map(String::from)
+        .ok_or("command must be a string of at most 4096 bytes")
 }
 fn integer(args: &Value, key: &str, default: usize, maximum: usize) -> Result<usize, &'static str> {
     match args.get(key) {

@@ -3,8 +3,10 @@ mod access;
 mod change;
 mod diff;
 mod directory;
+mod page;
 mod path;
 mod platform;
+mod snapshot;
 mod transaction;
 
 pub use access::Access;
@@ -43,7 +45,7 @@ impl std::fmt::Display for Error {
                 "entry unavailable, unsupported or not an ordinary workspace file/directory"
             }
             Self::Text => "only UTF-8 text without binary control bytes is supported",
-            Self::Size => "file exceeds the 1 MiB read limit",
+            Self::Size => "file exceeds this operation's bounded full-read limit",
             Self::Changed => "file changed while being read; no content returned",
             Self::Cancelled => "workspace operation cancelled",
             Self::Timeout => "workspace operation reached its time limit",

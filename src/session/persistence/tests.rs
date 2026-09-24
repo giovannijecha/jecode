@@ -513,3 +513,145 @@ fn directory_scope_separates_file_tools_from_association_without_rewriting_legac
         io::ErrorKind::NotFound
     );
 }
+
+struct LargeCreateBackend {
+    content: Option<String>,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+impl session::worker::Backend for LargeCreateBackend {
+    fn login(
+        &mut self,
+        _: &Budget<'_>,
+        _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+    ) -> Result<(), client::Error> {
+        Ok(())
+    }
+    fn generate(
+        &mut self,
+        request: &Request,
+        _: &Budget<'_>,
+        _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+    ) -> Result<Response, client::Error> {
+        self.requests
+            .lock()
+            .unwrap()
+            .push(request.encode(2 * 1024 * 1024)?);
+        let Some(content) = self.content.take() else {
+            return Ok(session::tests::response(
+                "Saved change observed.",
+                Status::Completed,
+            ));
+        };
+        let arguments = json::object([
+            ("path", Value::String("large.html".into())),
+            ("content", Value::String(content)),
+        ]);
+        let serialized = json::encode(&arguments, 1024 * 1024).unwrap();
+        let mut response = session::tests::response("", Status::Completed);
+        response.output.push(json::object([
+            ("type", Value::String("function_call".into())),
+            ("call_id", Value::String("large-create".into())),
+            ("name", Value::String("create_file".into())),
+            ("arguments", Value::String(serialized)),
+        ]));
+        response
+            .tool_calls
+            .push(crate::providers::openai_account::ToolCall {
+                id: "large-create".into(),
+                name: "create_file".into(),
+                arguments,
+            });
+        Ok(response)
+    }
+}
+#[test]
+fn controller_checkpoints_large_create_and_resume_never_replays_it() {
+    let home = crate::state::tests::Fixture::new();
+    let Some(store) = home.store() else { return };
+    let workspace = Workspace::open(&home.0).unwrap();
+    let history = create(&store, Model::Luna, Some(&workspace)).unwrap();
+    let id = history.record.as_ref().unwrap().id.clone();
+    let content: String = (0..4000)
+        .map(|n| format!("    <main data-id=\"{n:05}\">visible source</main>\n"))
+        .collect();
+    assert!((64 * 1024..=256 * 1024).contains(&content.len()));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mut run = Session::with_history(
+        Model::Luna,
+        LargeCreateBackend {
+            content: Some(content.clone()),
+            requests: requests.clone(),
+        },
+        Some(workspace),
+        history,
+    )
+    .unwrap();
+    assert!(matches!(
+        session::tests::next(&mut run),
+        Event::Restored { .. }
+    ));
+    assert!(matches!(session::tests::next(&mut run), Event::Ready));
+    assert!(run.submit("create formatted source"));
+    let mut applied = false;
+    loop {
+        match session::tests::next(&mut run) {
+            Event::EditProposed { id, preview } => {
+                assert!(preview.omitted_lines > 0);
+                assert!(std::path::Path::new(preview.full_diff_path.as_ref().unwrap()).exists());
+                assert!(run.decide(id, true));
+            }
+            Event::EditFinished { applied: yes, .. } => applied = yes,
+            Event::Finished(End::Complete, _) => break,
+            Event::RequestStarted | Event::Text(_) => {}
+            _ => panic!("unexpected controller event"),
+        }
+    }
+    assert!(applied);
+    assert_eq!(
+        std::fs::read(home.0.join("large.html")).unwrap(),
+        content.as_bytes()
+    );
+    assert!(requests.lock().unwrap().len() == 2);
+    drop(run);
+    let saved = load(&store, &id, true).unwrap();
+    let first = &saved.history.turns[0].steps[0];
+    assert_eq!(
+        first.response.as_ref().unwrap().tool_calls[0]
+            .arguments
+            .get("content")
+            .and_then(Value::text),
+        Some(content.as_str())
+    );
+    assert!(first.results[0].output.contains("applied"));
+    let resumed_requests = Arc::new(Mutex::new(Vec::new()));
+    let mut resumed = Session::with_history(
+        Model::Luna,
+        LargeCreateBackend {
+            content: None,
+            requests: resumed_requests.clone(),
+        },
+        Some(Workspace::open(&home.0).unwrap()),
+        saved.history,
+    )
+    .unwrap();
+    assert!(matches!(
+        session::tests::next(&mut resumed),
+        Event::Restored { .. }
+    ));
+    assert!(matches!(session::tests::next(&mut resumed), Event::Ready));
+    assert!(resumed_requests.lock().unwrap().is_empty());
+    assert!(resumed.submit("continue"));
+    loop {
+        match session::tests::next(&mut resumed) {
+            Event::Finished(End::Complete, _) => break,
+            Event::Text(_) => {}
+            _ => panic!("historical tool replayed during resume"),
+        }
+    }
+    assert_eq!(resumed_requests.lock().unwrap().len(), 1);
+    assert!(resumed_requests.lock().unwrap()[0].contains("visible source"));
+    assert_eq!(
+        std::fs::read(home.0.join("large.html")).unwrap(),
+        content.as_bytes()
+    );
+}

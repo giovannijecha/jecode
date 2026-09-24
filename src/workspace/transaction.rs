@@ -1,8 +1,9 @@
 //! Recoverable, ordered publication with no-overwrite renames and retained originals.
 use super::{
     Budget, Change, ChangeError, Workspace,
-    change::{fail, matches},
+    change::{After, fail},
     platform,
+    snapshot::{Snapshot, copy_replacement, matches},
 };
 use std::{
     fs::File,
@@ -43,7 +44,7 @@ impl Workspace {
     }
     fn apply_with(
         &self,
-        change: Change,
+        mut change: Change,
         budget: &Budget<'_>,
         after_stash: impl FnOnce(),
     ) -> Result<Applied, ChangeError> {
@@ -51,7 +52,7 @@ impl Workspace {
         if platform::identity(&parent.file)? != change.parent {
             return fail("parent directory changed since the preview; nothing published");
         }
-        let mut original = if let Some(before) = &change.before {
+        let mut original = if let Some(before) = &mut change.before {
             let mut file = platform::edit_open(&parent.file, &name)?;
             platform::editable(&file)?;
             matches(&mut file, before, budget)?;
@@ -74,9 +75,23 @@ impl Workspace {
         if let Some(original) = &original {
             platform::metadata_to(original, &staging.file)?;
         }
-        for chunk in change.after.as_bytes().chunks(16384) {
-            budget.check()?;
-            staging.file.write_all(chunk)?;
+        match &change.after {
+            After::Complete(after) => {
+                for chunk in after.as_bytes().chunks(16384) {
+                    budget.check()?;
+                    staging.file.write_all(chunk)?;
+                }
+            }
+            After::Replacement { at, old_len, new } => {
+                copy_replacement(
+                    change.before.as_mut().unwrap(),
+                    &mut staging.file,
+                    *at,
+                    *old_len,
+                    new,
+                    budget,
+                )?;
+            }
         }
         staging.file.sync_all()?;
         budget.check()?;
@@ -85,7 +100,7 @@ impl Workspace {
             return fail("parent directory changed during preparation; nothing published");
         }
         drop(current_parent);
-        let recovery = if let (Some(original), Some(before)) = (&mut original, &change.before) {
+        let recovery = if let (Some(original), Some(before)) = (&mut original, &mut change.before) {
             matches(original, before, budget)?;
             let backup = unique("recovery");
             // There is a short absent-name interval, not an atomic replacement.
@@ -133,7 +148,7 @@ fn validate_stash(
     parent: &File,
     original: &mut File,
     backup: &str,
-    before: &super::change::Snapshot,
+    before: &mut Snapshot,
     budget: &Budget<'_>,
 ) -> Result<(), ChangeError> {
     #[cfg(not(windows))]

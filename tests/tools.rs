@@ -61,6 +61,36 @@ fn read_lines_are_exact_and_paginate_without_losing_content() {
 }
 
 #[test]
+fn read_file_pages_an_existing_file_beyond_one_mib() {
+    let fixture = Fixture::new();
+    let mut content = "plain\n".repeat(200_000);
+    content.push_str("\tselected 世界\r\nnext line");
+    assert!(content.len() > 1024 * 1024);
+    fixture.write("large.txt", &content);
+    let workspace = Workspace::open(&fixture.0).unwrap();
+    let result = execute(
+        &workspace,
+        "read_file",
+        r#"{"path":"large.txt","start_line":200001,"max_lines":1}"#,
+    );
+    assert_eq!(
+        result.get("text").and_then(Value::text),
+        Some("\tselected 世界\r\n")
+    );
+    assert_eq!(
+        result.get("next_line").and_then(Value::unsigned),
+        Some(200_002)
+    );
+    let result = execute(
+        &workspace,
+        "read_file",
+        r#"{"path":"large.txt","start_line":200002,"max_lines":1}"#,
+    );
+    assert_eq!(result.get("text").and_then(Value::text), Some("next line"));
+    assert_eq!(result.get("next_line"), Some(&Value::Null));
+}
+
+#[test]
 fn directory_and_search_results_are_truthful_when_limited() {
     let fixture = Fixture::new();
     fixture.write("a.txt", "needle first\nneedle again\n");

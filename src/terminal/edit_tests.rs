@@ -157,3 +157,40 @@ fn hidden_approval_cannot_be_confirmed_and_small_chrome_stays_bounded() {
     );
     assert_eq!(fs::read_dir(&run.files.0).unwrap().count(), 1);
 }
+
+#[test]
+fn shortened_preview_resize_keeps_one_transcript_and_composer() {
+    let files = crate::workspace_fixture::Fixture::new();
+    let workspace = crate::workspace::Workspace::open(&files.0).unwrap();
+    let cancelled = std::sync::atomic::AtomicBool::new(false);
+    let budget = crate::workspace::Budget {
+        cancelled: &cancelled,
+        deadline: Instant::now() + std::time::Duration::from_secs(10),
+    };
+    let content: String = (0..401).map(|n| format!("line {n:03} abc\n")).collect();
+    let change = workspace
+        .prepare_create("large.html", &content, &budget)
+        .unwrap();
+    assert!(change.preview().omitted_lines > 0);
+    let mut model = account::model(Selected::Luna, Some(&files.0));
+    account::event(&mut model, Event::Ready);
+    model.editor.insert("retained composer");
+    proposal(&mut model, 71, change.preview().clone());
+    let mut layout = Layout::default();
+    let mut renderer = Renderer::default();
+    let mut terminal = vt::Screen::new(120, 35);
+    for size in [(120, 35), (40, 18), (120, 35)] {
+        terminal.resize(size.0, size.1);
+        terminal.feed(&renderer.draw(layout.frame(&model, size.0, size.1), size, false));
+    }
+    let text = terminal.text();
+    assert_eq!(text.matches("Create large.html").count(), 1);
+    assert!(text.contains("omitted"));
+    assert_eq!(model.editor.text, "retained composer");
+    finished(&mut model, 71, "Denied".into(), false, false);
+    terminal.feed(&renderer.draw(layout.frame(&model, 120, 35), (120, 35), false));
+    let text = terminal.text();
+    assert_eq!(text.matches("Create large.html").count(), 1);
+    assert_eq!(text.matches("retained composer").count(), 1);
+    assert!(!files.0.join("large.html").exists());
+}
