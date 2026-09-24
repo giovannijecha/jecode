@@ -259,3 +259,119 @@ fn cancel_or_drop_while_approval_waits_has_no_effect_and_joins_worker() {
         );
     }
 }
+#[test]
+fn forty_approved_effects_keep_exact_order_and_run_once() {
+    struct EffectChain {
+        round: usize,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+    impl worker::Backend for EffectChain {
+        fn login(
+            &mut self,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        ) -> Result<(), client::Error> {
+            Ok(())
+        }
+        fn generate(
+            &mut self,
+            request: &Request,
+            budget: &Budget<'_>,
+            _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+        ) -> Result<Response, client::Error> {
+            budget.check()?;
+            let encoded = request.encode(2 * 1024 * 1024)?;
+            if self.round > 0 {
+                let receipts = outputs(&encoded);
+                assert_eq!(receipts.len(), self.round);
+                assert_eq!(
+                    receipts.last().unwrap().0,
+                    format!("edit-{}", self.round - 1)
+                );
+                assert_eq!(
+                    receipts
+                        .last()
+                        .unwrap()
+                        .1
+                        .get("status")
+                        .and_then(Value::text),
+                    Some("applied")
+                );
+            }
+            self.requests.lock().unwrap().push(encoded);
+            if self.round == 40 {
+                return Ok(tests::response(
+                    "Verified all ordered edits.",
+                    Status::Completed,
+                ));
+            }
+            let old = (0..self.round).fold("start".to_owned(), |mut text, n| {
+                text.push_str(&format!(" {n}"));
+                text
+            });
+            let new = format!("{old} {}", self.round);
+            let id = format!("edit-{}", self.round);
+            self.round += 1;
+            Ok(calls_response(vec![call(
+                &id,
+                "edit_file",
+                &format!(r#"{{"path":"notes.txt","old_text":"{old}","new_text":"{new}"}}"#),
+            )]))
+        }
+    }
+    let files = support::Fixture::new();
+    files.write("notes.txt", "start");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mut session = Session::with_backend(
+        Model::Luna,
+        EffectChain {
+            round: 0,
+            requests: requests.clone(),
+        },
+        Some(crate::workspace::Workspace::open(&files.0).unwrap()),
+    )
+    .unwrap();
+    assert!(matches!(tests::next(&mut session), Event::Ready));
+    assert!(session.submit("Apply forty ordered edits and verify the result"));
+    let mut proposals = 0;
+    let (end, metrics) = loop {
+        match tests::next(&mut session) {
+            Event::EditProposed { id, .. } => {
+                proposals += 1;
+                assert!(session.decide(id, true));
+            }
+            Event::Finished(end, metrics) => break (end, metrics),
+            Event::EditFinished { failed, .. } => assert!(!failed),
+            Event::RequestStarted | Event::Text(_) => {}
+            _ => panic!("unexpected effect-chain event"),
+        }
+    };
+    assert_eq!(end, End::Complete);
+    assert_eq!(
+        (metrics.requests, metrics.tool_calls, proposals),
+        (41, 40, 40)
+    );
+    let expected = (0..40).fold("start".to_owned(), |mut text, n| {
+        text.push_str(&format!(" {n}"));
+        text
+    });
+    assert_eq!(
+        fs::read_to_string(files.0.join("notes.txt")).unwrap(),
+        expected
+    );
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 41);
+    assert!(
+        requests
+            .iter()
+            .all(|r| !r.contains("Summarize this bounded portion"))
+    );
+    eprintln!(
+        "effect fixture: requests={} tools={} compactions=0 max_projected_bytes={}",
+        metrics.requests,
+        metrics.tool_calls,
+        requests.iter().map(|r| r.len()).max().unwrap()
+    );
+    drop(requests);
+    drop(session);
+}

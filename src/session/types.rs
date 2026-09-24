@@ -84,9 +84,10 @@ pub enum Failure {
     Account(client::Error),
     Cancelled,
     HistoryLimit,
+    CompactionOutput,
+    CompactionIneffective,
     OutputLimit,
     UnexpectedTools,
-    StepLimit,
     Worker,
     Storage,
 }
@@ -95,14 +96,13 @@ impl fmt::Display for Failure {
         match self {
             Self::Account(error) => error.fmt(f),
             Self::Cancelled => f.write_str("Interrupted / partial output retained"),
-            Self::HistoryLimit => f.write_str(
-                "Context limit reached / use /compact explicitly or start a new session",
-            ),
+            Self::HistoryLimit => f.write_str("Context cannot be reduced at a completed boundary within the request budget / use /compact explicitly after reducing the input"),
+            Self::CompactionOutput => f.write_str("Compaction returned an incomplete, empty or invalid summary / prior context retained"),
+            Self::CompactionIneffective => f.write_str("Compaction did not reduce the projected request / prior context retained"),
             Self::OutputLimit => {
                 f.write_str("Response display limit reached / partial output retained")
             }
             Self::UnexpectedTools => f.write_str("Unexpected tool request / no tool was executed"),
-            Self::StepLimit => f.write_str("Turn limit reached / completed results retained"),
             Self::Worker => f.write_str("Account worker stopped unexpectedly"),
             Self::Storage => {
                 f.write_str("Session could not be saved / stopped before further work")

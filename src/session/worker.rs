@@ -261,6 +261,7 @@ pub(super) fn run(
                     &mut history,
                     &context,
                     model,
+                    workspace.is_some(),
                     &mut metrics,
                 );
                 metrics.elapsed_ms = millis(started);

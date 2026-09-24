@@ -82,6 +82,7 @@ impl Record {
                         "through",
                         Value::Number(history.projection.through.to_string()),
                     ),
+                    ("step", Value::Number(history.projection.step.to_string())),
                     ("summary", text(&history.projection.summary)),
                     (
                         "limit_bytes",
@@ -249,10 +250,36 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
     history.projection.through = projection
         .get("through")
         .and_then(Value::unsigned)
-        .filter(|n| *n <= history.turns.len().saturating_sub(2) as u64)
+        .filter(|n| {
+            *n <= if projection.get("step").is_some() {
+                history.turns.len()
+            } else {
+                history.turns.len().saturating_sub(2)
+            } as u64
+        })
         .ok_or_else(invalid)? as usize;
+    history.projection.step = match projection.get("step") {
+        None => 0,
+        Some(value) => value
+            .unsigned()
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(invalid)?,
+    };
+    if history.projection.step
+        > history
+            .turns
+            .get(history.projection.through)
+            .map_or(0, |t| t.steps.len())
+    {
+        return Err(invalid());
+    }
+    if projection.get("step").is_some() && !super::context::valid_cursor(&history) {
+        return Err(invalid());
+    }
     history.projection.summary = string(projection, "summary", 32768)?.into();
-    if (history.projection.through == 0) != history.projection.summary.is_empty() {
+    if (history.projection.through == 0 && history.projection.step == 0)
+        != history.projection.summary.is_empty()
+    {
         return Err(invalid());
     }
     history.projection.limit_bytes = projection

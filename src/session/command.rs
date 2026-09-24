@@ -16,13 +16,12 @@ pub(super) fn execute(
     shell: &command::Shell,
     workspace: &Workspace,
     context: &Context,
-    deadline: Instant,
     denied: &mut bool,
     metrics: &mut Metrics,
 ) -> Output {
     let id = context.next_approval.fetch_add(1, Ordering::Relaxed);
     let (output, success) = dispatch(
-        id, script, path, timeout, shell, workspace, context, deadline, denied, metrics,
+        id, script, path, timeout, shell, workspace, context, denied, metrics,
     );
     let _ = context.send(
         Event::CommandFinished {
@@ -44,7 +43,6 @@ fn dispatch(
     shell: &command::Shell,
     workspace: &Workspace,
     context: &Context,
-    deadline: Instant,
     denied: &mut bool,
     metrics: &mut Metrics,
 ) -> (Output, bool) {
@@ -58,7 +56,7 @@ fn dispatch(
     }
     let budget = Budget {
         cancelled: &context.cancelled,
-        deadline,
+        deadline: Instant::now() + std::time::Duration::from_secs(10),
     };
     let proposal =
         match command::prepare_with_shell(workspace, script, path, timeout, shell, &budget) {
@@ -81,7 +79,7 @@ fn dispatch(
             false,
         );
     }
-    match approval::wait(context, id, deadline, metrics) {
+    match approval::wait(context, id, metrics) {
         Ok(true) => {}
         Ok(false) => {
             *denied = true;
@@ -101,7 +99,9 @@ fn dispatch(
         }
         Err(()) => {
             return (
-                Output::error("approval cancelled or expired; command not executed"),
+                Output::error(
+                    "approval cancelled or decision channel closed; command not executed",
+                ),
                 false,
             );
         }
@@ -112,7 +112,11 @@ fn dispatch(
             false,
         );
     }
-    let output_deadline = deadline.min(Instant::now() + std::time::Duration::from_secs(timeout));
+    let output_deadline = Instant::now() + std::time::Duration::from_secs(timeout);
+    let budget = Budget {
+        cancelled: &context.cancelled,
+        deadline: output_deadline,
+    };
     let result = command::run(proposal, workspace, &budget, &mut |channel, text| {
         context.send_until(
             Event::CommandOutput {

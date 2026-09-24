@@ -11,9 +11,6 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
-const MAX_REQUESTS: u32 = 8;
-const MAX_TOOLS: u32 = 32;
-
 pub(super) fn run(
     backend: &mut impl Backend,
     history: &mut History,
@@ -26,20 +23,15 @@ pub(super) fn run(
     let mut denied = false;
     loop {
         context.check()?;
-        if metrics.requests >= MAX_REQUESTS {
-            return Err(Failure::StepLimit);
-        }
         super::queue::take(history, context)?;
-        if metrics.requests == 0 {
-            super::context::ensure(
-                backend,
-                history,
-                context,
-                model,
-                workspace.is_some(),
-                metrics,
-            )?;
-        }
+        super::context::ensure(
+            backend,
+            history,
+            context,
+            model,
+            workspace.is_some(),
+            metrics,
+        )?;
         let request = history.request(model, workspace.is_some())?;
         if metrics.requests != 0 && context.send(Event::RequestStarted, true).is_break() {
             return Err(Failure::Cancelled);
@@ -55,7 +47,7 @@ pub(super) fn run(
             Status::Incomplete => return Ok(End::Incomplete),
             Status::Refused => return Ok(End::Refused),
             Status::Completed if response.tool_calls.is_empty() => {
-                if metrics.requests < MAX_REQUESTS && super::queue::take(history, context)? {
+                if super::queue::take(history, context)? {
                     continue;
                 }
                 return Ok(End::Complete);
@@ -64,12 +56,7 @@ pub(super) fn run(
         }
         context.check()?;
         let workspace = workspace.ok_or(Failure::UnexpectedTools)?;
-        if metrics.requests >= MAX_REQUESTS
-            || response.tool_calls.len() > (MAX_TOOLS - metrics.tool_calls) as usize
-        {
-            return Err(Failure::StepLimit);
-        }
-        execute(history, workspace, context, started, metrics, &mut denied)?;
+        execute(history, workspace, context, metrics, &mut denied)?;
     }
 }
 
@@ -77,7 +64,6 @@ fn execute(
     history: &mut History,
     workspace: &Workspace,
     context: &Context,
-    started: Instant,
     metrics: &mut Metrics,
     denied: &mut bool,
 ) -> Result<(), Failure> {
@@ -105,7 +91,7 @@ fn execute(
         {
             return Err(Failure::Cancelled);
         }
-        metrics.tool_calls += 1;
+        metrics.tool_calls = metrics.tool_calls.saturating_add(1);
         if effect {
             let receipt = &mut current(history)?.results[index];
             receipt.output = Output::error("tool outcome is unknown after interruption; inspect the workspace before repeating any effect").text;
@@ -124,24 +110,17 @@ fn execute(
                 &shell,
                 workspace,
                 context,
-                started + Duration::from_secs(600),
                 denied,
                 metrics,
             ),
-            Ok(tool) if tool.changes_file() => super::approval::execute(
-                tool,
-                workspace,
-                context,
-                started + Duration::from_secs(600),
-                denied,
-                metrics,
-            ),
+            Ok(tool) if tool.changes_file() => {
+                super::approval::execute(tool, workspace, context, denied, metrics)
+            }
             Ok(tool) => tool.execute(
                 workspace,
                 &Budget {
                     cancelled: &context.cancelled,
-                    deadline: (Instant::now() + Duration::from_secs(10))
-                        .min(started + Duration::from_secs(600)),
+                    deadline: Instant::now() + Duration::from_secs(10),
                 },
             ),
             Err(error) => Output::error(error),
