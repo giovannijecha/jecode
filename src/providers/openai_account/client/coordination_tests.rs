@@ -1,8 +1,8 @@
-use super::{Client, Error, NetworkError, Plaintext, Request, ResponseChannel, auth, persistent};
+use super::{Client, Error, NetworkError, Request, ResponseChannel, auth, persistent};
 use crate::{
     providers::openai_account::Input,
     state::Store,
-    tls::{Budget, ContentType, trust::TrustStore},
+    tls::{Budget, ContentType, Plaintext, trust::TrustStore},
 };
 use std::{
     ops::ControlFlow,
@@ -70,8 +70,15 @@ impl Channel {
     }
 }
 impl ResponseChannel for Channel {
-    fn write(&mut self, _: &[u8], _: &Budget<'_>) -> Result<(), NetworkError> {
+    fn write(
+        &mut self,
+        bytes: &[u8],
+        budget: &Budget<'_>,
+        progress: &mut crate::tls::ApplicationWrite,
+    ) -> Result<(), NetworkError> {
+        budget.check()?;
         self.writes.fetch_add(1, Ordering::AcqRel);
+        progress.accepted_wire_bytes += bytes.len();
         Ok(())
     }
     fn read(&mut self, _: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
@@ -94,6 +101,99 @@ impl ResponseChannel for Channel {
 }
 
 #[test]
+fn account_replacement_or_logout_before_retry_prevents_another_send() {
+    for logout in [false, true] {
+        let fixture = crate::state::tests::Fixture::new();
+        let Some(store) = fixture.store() else { return };
+        let original = saved("a1");
+        store.replace("credentials.json", &original).unwrap();
+        let mut worker = client(&store, &original);
+        let cancelled = AtomicBool::new(false);
+        let mut connections = 0;
+        let mut attempts = 0;
+        let error = worker
+            .generate_with::<Channel>(
+                &request(),
+                &budget(&cancelled, Duration::from_secs(2)),
+                |progress| {
+                    if let crate::providers::openai_account::Progress::Attempt(attempt) = progress {
+                        attempts += 1;
+                        assert!(attempt.retrying);
+                        if logout {
+                            Client::logout_in(
+                                store.clone(),
+                                &budget(&cancelled, Duration::from_secs(1)),
+                            )
+                            .unwrap();
+                        } else {
+                            let replacement = auth::Tokens::from_saved_json(&saved("b2"))
+                                .unwrap()
+                                .unwrap();
+                            super::credentials::Credentials::open(
+                                store.clone(),
+                                &budget(&cancelled, Duration::from_secs(1)),
+                            )
+                            .unwrap()
+                            .save(&replacement)
+                            .unwrap();
+                        }
+                    }
+                    ControlFlow::Continue(())
+                },
+                |_, _| {
+                    connections += 1;
+                    Err(NetworkError::io(
+                        crate::tls::IoOperation::Connect,
+                        &std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+                    ))
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error, Error::AccountChanged);
+        assert_eq!((connections, attempts), (1, 1));
+    }
+}
+
+#[test]
+fn slow_post_connect_account_check_does_not_consume_write_allowance() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let original = saved("a1");
+    store.replace("credentials.json", &original).unwrap();
+    let mut worker = client(&store, &original);
+    let cancelled = AtomicBool::new(false);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let mut lock_worker = None;
+    let response = worker
+        .generate_with_timing(
+            &request(),
+            &budget(&cancelled, Duration::from_secs(2)),
+            |_| ControlFlow::Continue(()),
+            |_, _| {
+                let locked_store = store.clone();
+                let (entered, acquired) = mpsc::channel();
+                lock_worker = Some(thread::spawn(move || {
+                    let local_cancelled = AtomicBool::new(false);
+                    let _lock = super::credentials::Credentials::open(
+                        locked_store,
+                        &budget(&local_cancelled, Duration::from_secs(1)),
+                    )
+                    .unwrap();
+                    entered.send(()).unwrap();
+                    thread::sleep(Duration::from_millis(100));
+                }));
+                acquired.recv_timeout(Duration::from_secs(1)).unwrap();
+                Ok(Channel::complete(Arc::clone(&writes)))
+            },
+            Duration::from_millis(40),
+        )
+        .unwrap();
+    lock_worker.unwrap().join().unwrap();
+    assert_eq!(response.text, "synthetic answer");
+    assert_eq!(writes.load(Ordering::Acquire), 1);
+}
+
+#[test]
 fn fresh_clients_generate_independently_and_logout_does_not_revoke_an_in_flight_request() {
     let fixture = crate::state::tests::Fixture::new();
     let Some(store) = fixture.store() else {
@@ -109,13 +209,14 @@ fn fresh_clients_generate_independently_and_logout_does_not_revoke_an_in_flight_
     let mut channel = Channel::complete(Arc::clone(&first_writes));
     channel.entered_read = Some(entered);
     channel.release_read = Some(released);
+    let mut channel = Some(channel);
     let first_request = thread::spawn(move || {
         let cancelled = AtomicBool::new(false);
         first.generate_with(
             &request(),
             &budget(&cancelled, Duration::from_secs(10)),
             |_| ControlFlow::Continue(()),
-            |_, _| Ok(channel),
+            |_, _| Ok(channel.take().unwrap()),
         )
     });
     in_read.recv_timeout(Duration::from_secs(3)).unwrap();
@@ -186,7 +287,7 @@ fn logout_during_connection_setup_prevents_a_stale_request_from_being_sent() {
     let writes = Arc::new(AtomicUsize::new(0));
     let (connecting, connected) = mpsc::channel();
     let (release, released) = mpsc::channel();
-    let channel = Channel::complete(Arc::clone(&writes));
+    let mut channel = Some(Channel::complete(Arc::clone(&writes)));
     let request = thread::spawn(move || {
         let cancelled = AtomicBool::new(false);
         worker.generate_with(
@@ -196,7 +297,7 @@ fn logout_during_connection_setup_prevents_a_stale_request_from_being_sent() {
             |_, _| {
                 connecting.send(()).unwrap();
                 released.recv_timeout(Duration::from_secs(4)).unwrap();
-                Ok(channel)
+                Ok(channel.take().unwrap())
             },
         )
     });

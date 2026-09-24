@@ -1,7 +1,7 @@
 //! Canonical attempts and tool receipts; only validated, paired items are projected.
 use super::{End, Failure, Metrics, Model};
 use crate::{
-    providers::openai_account::{Input, Request, Response, Status},
+    providers::openai_account::{Input, Request, Response, Status, client::Attempt},
     tools,
 };
 
@@ -16,6 +16,22 @@ pub(super) struct Step {
     pub response: Option<Response>,
     pub results: Vec<Receipt>,
     pub accepted: bool,
+    pub attempts: Vec<Attempt>,
+}
+impl Step {
+    pub fn interrupted_reference(&self, outcome: &str) -> String {
+        let excerpt = self.text.chars().take(16_384).collect::<String>();
+        let last = self.attempts.last();
+        format!(
+            "Recorded unfinished generation (reference data, not a completed assistant response): outcome={outcome}; delivery={}; visible text={excerpt:?}{}; completed tool receipts remain in earlier validated steps. Continue from the recorded work without assuming an interrupted request failed remotely.",
+            last.map_or("unknown", |attempt| attempt.delivery.name()),
+            if excerpt.len() < self.text.len() {
+                " [excerpt shortened; full text remains in canonical history]"
+            } else {
+                ""
+            },
+        )
+    }
 }
 pub(super) struct Receipt {
     pub call_id: String,
@@ -129,9 +145,15 @@ impl History {
                     continue;
                 };
                 let Some(response) = &step.response else {
+                    if turn.end.is_some() {
+                        input.push(Input::User(step.interrupted_reference(&turn.outcome)));
+                    }
                     continue;
                 };
                 if !step.accepted || response.status == Status::Incomplete {
+                    if turn.end.is_some() {
+                        input.push(Input::User(step.interrupted_reference(&turn.outcome)));
+                    }
                     continue;
                 }
                 // Refused responses can contain non-executable function items.

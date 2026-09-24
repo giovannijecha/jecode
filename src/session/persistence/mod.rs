@@ -92,6 +92,18 @@ impl Record {
                     ),
                     ("failed", Value::Bool(history.projection.failed)),
                     (
+                        "failed_attempts",
+                        Value::Array(
+                            history
+                                .projection
+                                .failed_attempts
+                                .iter()
+                                .map(codec::attempt)
+                                .collect(),
+                        ),
+                    ),
+                    ("failed_partial", text(&history.projection.failed_partial)),
+                    (
                         "pending",
                         history
                             .projection
@@ -303,6 +315,18 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
     history.projection.failed = match projection.get("failed") {
         Some(Value::Bool(failed)) => *failed,
         _ => return Err(invalid()),
+    };
+    history.projection.failed_attempts = match projection.get("failed_attempts") {
+        None => Vec::new(),
+        Some(Value::Array(items)) if items.len() <= 256 => items
+            .iter()
+            .map(codec::read_attempt)
+            .collect::<io::Result<Vec<_>>>()?,
+        _ => return Err(invalid()),
+    };
+    history.projection.failed_partial = match projection.get("failed_partial") {
+        None => String::new(),
+        Some(_) => string(projection, "failed_partial", 32768)?.into(),
     };
     history.projection.pending = match projection.get("pending") {
         None | Some(Value::Null) => None,

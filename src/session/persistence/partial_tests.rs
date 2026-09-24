@@ -32,7 +32,7 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
             &mut self,
             request: &Request,
             _: &Budget<'_>,
-            _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+            progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
         ) -> Result<Response, client::Error> {
             assert!(request.instructions.starts_with("Summarize"));
             assert!(request.tools.is_empty());
@@ -44,6 +44,18 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
             if self.calls == self.fail_at {
                 match self.fail_with {
                     Some(Failure::Cancelled) => {
+                        assert!(
+                            progress(Progress::Text("unvalidated partial summary")).is_continue()
+                        );
+                        assert!(
+                            progress(Progress::Attempt(client::Attempt {
+                                delivery: client::Delivery::Streaming,
+                                stage: Some(client::RequestStage::ResponseRead),
+                                diagnostic: Some("synthetic interrupted compaction".into()),
+                                ..Default::default()
+                            }))
+                            .is_continue()
+                        );
                         return Err(crate::tls::NetworkError::Cancelled.into());
                     }
                     Some(Failure::Account(client::Error::Expired)) => {
@@ -137,6 +149,23 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
         (0, 0)
     );
     assert!(history.projection.pending.is_some());
+    assert_eq!(
+        history.projection.failed_partial,
+        "unvalidated partial summary"
+    );
+    assert_eq!(history.projection.failed_attempts.len(), 1);
+    assert_eq!(
+        history.projection.failed_attempts[0].delivery,
+        client::Delivery::Streaming
+    );
+    let disk = store
+        .directory("sessions")
+        .unwrap()
+        .read(&format!("{id}.json"), 16 * 1024 * 1024)
+        .unwrap()
+        .unwrap();
+    assert!(disk.contains("unvalidated partial summary"));
+    assert!(disk.contains("streaming_unvalidated"));
     for failure in [
         Failure::CompactionOutput,
         Failure::Account(client::Error::Expired),

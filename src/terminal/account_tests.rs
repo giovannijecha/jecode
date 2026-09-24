@@ -349,6 +349,8 @@ fn terminal_reconciliation_and_transport_failure_keep_a_visible_correction() {
     );
     let failure = Failure::Account(Error::Transport {
         stage: RequestStage::ResponseRead,
+        delivery: crate::providers::openai_account::client::Delivery::Streaming,
+        accepted_wire_bytes: 42,
         error: NetworkError::io(
             IoOperation::ReadRecordBody,
             &std::io::Error::from(std::io::ErrorKind::ConnectionReset),

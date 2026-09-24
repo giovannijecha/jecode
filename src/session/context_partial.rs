@@ -278,18 +278,16 @@ pub(super) fn compact(
             true,
         );
         metrics.requests = metrics.requests.saturating_add(1);
+        let mut attempts = Vec::new();
+        let mut partial = String::new();
         let result = backend.generate(
             &request,
             &Budget {
                 deadline: Instant::now() + Duration::from_secs(180),
                 cancelled: &context.cancelled,
             },
-            &mut |_| {
-                if context.check().is_err() {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
+            &mut |progress| {
+                observe_compaction(progress, &mut attempts, &mut partial, metrics, context)
             },
         );
         let response = match result {
@@ -297,7 +295,7 @@ pub(super) fn compact(
             Err(error) => {
                 metrics.usage(&Default::default());
                 let cause = failure(error, context);
-                return Err(failed(history, cause));
+                return Err(failed_attempt(history, cause, attempts, partial));
             }
         };
         metrics.usage(&response.usage);
@@ -317,6 +315,8 @@ pub(super) fn compact(
             history.projection.pending = None;
             history.projection.failed = false;
             history.projection.failed_reason = None;
+            history.projection.failed_attempts.clear();
+            history.projection.failed_partial.clear();
             let reduced = match (original, measured_bytes(history, model, workspace)) {
                 (Some(before), Some(after)) => after < before,
                 _ => original_weight
@@ -345,6 +345,8 @@ pub(super) fn compact(
             offset,
             summary: response.text,
         });
+        history.projection.failed_attempts.clear();
+        history.projection.failed_partial.clear();
         if history.checkpoint().is_err() {
             history.projection = old_projection;
             return Err(Failure::Storage);

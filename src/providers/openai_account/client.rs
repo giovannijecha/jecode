@@ -3,12 +3,15 @@ mod catalog;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod coordination_tests;
 mod credentials;
+mod exchange;
 mod login;
 mod persistent;
+mod recovery;
 mod reply;
 
-use super::{HttpResponseStream, Limits, Progress, Request, Response, auth, encode_http};
-use crate::tls::{Budget, Connection, NetworkError, Plaintext, trust::TrustStore};
+use super::{Progress, Request, Response, auth, encode_http};
+use crate::tls::{ApplicationWrite, Budget, Connection, NetworkError, trust::TrustStore};
+use exchange::{ResponseChannel, exchange};
 use std::{
     fmt,
     ops::ControlFlow,
@@ -21,8 +24,14 @@ pub enum Error {
     Transport {
         stage: RequestStage,
         error: NetworkError,
+        delivery: Delivery,
+        accepted_wire_bytes: usize,
     },
     Protocol(super::Error),
+    Response {
+        error: super::Error,
+        delivery: Delivery,
+    },
     Login(auth::Error),
     Http(crate::http::Error),
     Status(u16),
@@ -39,6 +48,7 @@ pub enum RequestStage {
     RequestWrite,
     ResponseRead,
 }
+pub use recovery::{Attempt, Delivery};
 impl fmt::Display for RequestStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -48,13 +58,51 @@ impl fmt::Display for RequestStage {
         })
     }
 }
+impl RequestStage {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Connect => "connect",
+            Self::RequestWrite => "request_write",
+            Self::ResponseRead => "response_read",
+        }
+    }
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "connect" => Self::Connect,
+            "request_write" => Self::RequestWrite,
+            "response_read" => Self::ResponseRead,
+            _ => return None,
+        })
+    }
+}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Network(error) => error.fmt(f),
-            Self::Transport { stage, error } => write!(f, "{error} / {stage}"),
+            Self::Transport { stage, error, delivery, accepted_wire_bytes } => {
+                write!(f, "{error} / {stage} / {delivery}")?;
+                if *accepted_wire_bytes != 0 {
+                    write!(f, " / {accepted_wire_bytes} TLS application wire bytes accepted locally")?;
+                }
+                if matches!(delivery, Delivery::PossiblySubmitted | Delivery::Streaming) {
+                    f.write_str(" / remote outcome uncertain; send an explicit continuation to proceed from the recorded state")?;
+                }
+                Ok(())
+            }
             Self::Protocol(super::Error::HttpStatus(status)) | Self::Status(status) => {
                 write!(f, "account endpoint returned HTTP {status}")
+            }
+            Self::Response { error: super::Error::HttpStatus(status), .. } => {
+                write!(f, "account endpoint returned HTTP {status}")?;
+                if *status == 401 { f.write_str("; use /logout then /login to sign in again")?; }
+                Ok(())
+            }
+            Self::Response { error, delivery } => {
+                write!(f, "{error} / {delivery}")?;
+                if !matches!(error, super::Error::RemoteFailure | super::Error::Cancelled) {
+                    f.write_str(" / completion is unvalidated; send an explicit continuation to use the recorded state")?;
+                }
+                Ok(())
             }
             Self::Protocol(error) => error.fmt(f),
             Self::Login(error) => error.fmt(f),
@@ -113,7 +161,8 @@ impl Client {
         })
     }
 
-    /// Exactly one request; even a pre-output failure is never replayed here.
+    /// A fresh connection may be retried only if application submission is
+    /// known not to have occurred. Ambiguous sends and streams are never replayed.
     pub fn generate(
         &mut self,
         request: &Request,
@@ -130,94 +179,104 @@ impl Client {
         request: &Request,
         budget: &Budget<'_>,
         progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
-        connect_channel: impl FnOnce(&TrustStore, &Budget<'_>) -> Result<C, NetworkError>,
+        connect_channel: impl FnMut(&TrustStore, &Budget<'_>) -> Result<C, NetworkError>,
+    ) -> Result<Response, Error> {
+        self.generate_with_timing(
+            request,
+            budget,
+            progress,
+            connect_channel,
+            Duration::from_secs(30),
+        )
+    }
+
+    fn generate_with_timing<C: ResponseChannel>(
+        &mut self,
+        request: &Request,
+        budget: &Budget<'_>,
+        progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
+        mut connect_channel: impl FnMut(&TrustStore, &Budget<'_>) -> Result<C, NetworkError>,
+        attempt_timeout: Duration,
     ) -> Result<Response, Error> {
         budget.check()?;
-        self.ensure_access(budget)?;
-        let connect = Budget {
-            deadline: budget
-                .deadline
-                .min(std::time::Instant::now() + Duration::from_secs(30)),
-            cancelled: budget.cancelled,
-        };
-        let mut connection =
-            connect_channel(&self.trust, &connect).map_err(|error| Error::Transport {
-                stage: RequestStage::Connect,
-                error,
-            })?;
-        // The connection may have taken time while another instance signed out
-        // or replaced the account. This is the last local authorization before
-        // sending. Once it passes, another instance's logout cannot revoke the
-        // remote request; it may still be sent or finish after local sign-out.
-        self.ensure_access(budget)?;
-        if unix_seconds()? >= self.tokens.expires_at().saturating_sub(30) {
-            return Err(Error::Expired);
+        let mut progress = progress;
+        for attempt in 1..=recovery::MAX_CONNECTION_ATTEMPTS {
+            budget.check()?;
+            self.ensure_access(budget)?;
+            let connect = Budget {
+                deadline: budget
+                    .deadline
+                    .min(std::time::Instant::now() + attempt_timeout),
+                cancelled: budget.cancelled,
+            };
+            let mut delivery = Delivery::NotSubmitted;
+            let mut write = ApplicationWrite::default();
+            let result = (|| {
+                let mut connection =
+                    connect_channel(&self.trust, &connect).map_err(|error| Error::Transport {
+                        stage: RequestStage::Connect,
+                        error,
+                        delivery,
+                        accepted_wire_bytes: 0,
+                    })?;
+                // The connection may have taken time while another instance
+                // signed out or replaced the account. This is the last local
+                // authorization before sending. It holds no response lease.
+                self.ensure_access(budget)?;
+                if unix_seconds()? >= self.tokens.expires_at().saturating_sub(30) {
+                    return Err(Error::Expired);
+                }
+                let bytes = encode_http(
+                    request,
+                    self.tokens.access_token(),
+                    self.tokens.account_id(),
+                )?;
+                // The setup budget has served its purpose. A later account
+                // check cannot consume the write's fresh 30-second allowance.
+                let write_budget = Budget {
+                    deadline: budget
+                        .deadline
+                        .min(std::time::Instant::now() + attempt_timeout),
+                    cancelled: budget.cancelled,
+                };
+                exchange(
+                    &mut connection,
+                    &bytes,
+                    budget,
+                    &write_budget,
+                    &mut delivery,
+                    &mut write,
+                    &mut progress,
+                )
+            })();
+            match result {
+                Ok(response) => {
+                    let _ = progress(Progress::Attempt(Attempt::completed(
+                        write.accepted_wire_bytes,
+                    )));
+                    return Ok(response);
+                }
+                Err(error) => {
+                    let retrying = recovery::can_retry(error, attempt, budget);
+                    if progress(Progress::Attempt(Attempt::failed(
+                        error,
+                        delivery,
+                        write.accepted_wire_bytes,
+                        retrying,
+                    )))
+                    .is_break()
+                    {
+                        return Err(NetworkError::Cancelled.into());
+                    }
+                    if !retrying {
+                        return Err(error);
+                    }
+                    recovery::backoff(attempt, budget)?;
+                }
+            }
         }
-        let bytes = encode_http(
-            request,
-            self.tokens.access_token(),
-            self.tokens.account_id(),
-        )?;
-        exchange(&mut connection, &bytes, budget, &connect, progress)
+        unreachable!("bounded connection attempts return a result")
     }
-}
-
-trait ResponseChannel {
-    fn write(&mut self, bytes: &[u8], budget: &Budget<'_>) -> Result<(), NetworkError>;
-    fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError>;
-    fn close(&mut self, budget: &Budget<'_>) -> Result<(), NetworkError>;
-}
-impl ResponseChannel for Connection {
-    fn write(&mut self, bytes: &[u8], budget: &Budget<'_>) -> Result<(), NetworkError> {
-        Connection::write(self, bytes, budget)
-    }
-    fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
-        Connection::read(self, budget)
-    }
-    fn close(&mut self, budget: &Budget<'_>) -> Result<(), NetworkError> {
-        Connection::close(self, budget)
-    }
-}
-
-fn exchange(
-    connection: &mut impl ResponseChannel,
-    bytes: &[u8],
-    budget: &Budget<'_>,
-    write_budget: &Budget<'_>,
-    progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
-) -> Result<Response, Error> {
-    connection
-        .write(bytes, write_budget)
-        .map_err(|error| Error::Transport {
-            stage: RequestStage::RequestWrite,
-            error,
-        })?;
-    let mut response = HttpResponseStream::new(Limits {
-        event_bytes: 1024 * 1024,
-        output_bytes: 1024 * 1024,
-        ..Limits::default()
-    });
-    let mut progress = progress;
-    while !response.is_finished() {
-        let Some(bytes) = connection.read(budget).map_err(|error| Error::Transport {
-            stage: RequestStage::ResponseRead,
-            error,
-        })?
-        else {
-            break;
-        };
-        response.push(&bytes.bytes, &mut progress)?;
-    }
-    let result = response.finish()?;
-    // Completion is established by the model event. A best-effort close
-    // cannot turn a completed generation into a retryable failure.
-    let _ = connection.close(&Budget {
-        deadline: budget
-            .deadline
-            .min(std::time::Instant::now() + Duration::from_millis(100)),
-        cancelled: budget.cancelled,
-    });
-    Ok(result)
 }
 
 fn unix_seconds() -> Result<u64, Error> {

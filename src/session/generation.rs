@@ -36,11 +36,20 @@ pub(super) fn generate(
             cancelled: &context.cancelled,
         },
         &mut |progress| {
+            if let Progress::Attempt(attempt) = progress {
+                metrics.observe(&attempt);
+                if attempt.retrying {
+                    let _ = context.send(Event::Retrying, true);
+                }
+                step.attempts.push(attempt);
+                return ControlFlow::Continue(());
+            }
             if context.check().is_err() {
                 return ControlFlow::Break(());
             }
             let text = match progress {
                 Progress::Text(text) | Progress::Reasoning(text) => text,
+                Progress::Attempt(_) => unreachable!(),
             };
             if text.len() > MAX_TEXT.saturating_sub(step.text.len() + step.reasoning.len()) {
                 limit = true;
@@ -63,6 +72,7 @@ pub(super) fn generate(
                         ControlFlow::Continue(())
                     }
                 }
+                Progress::Attempt(_) => unreachable!(),
             }
         },
     );

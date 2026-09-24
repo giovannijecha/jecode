@@ -1,6 +1,11 @@
 use super::*;
-use crate::tls::{ContentType, IoOperation};
-use std::{collections::VecDeque, io, sync::atomic::AtomicBool, time::Instant};
+use crate::tls::{ContentType, IoOperation, Plaintext};
+use std::{
+    collections::VecDeque,
+    io,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
 
 struct Fixture {
     reads: VecDeque<Result<Vec<u8>, NetworkError>>,
@@ -8,6 +13,7 @@ struct Fixture {
     close_error: Option<NetworkError>,
     writes: usize,
     closes: usize,
+    write_accepted: Option<usize>,
 }
 impl Fixture {
     fn new() -> Self {
@@ -17,12 +23,25 @@ impl Fixture {
             close_error: None,
             writes: 0,
             closes: 0,
+            write_accepted: None,
         }
     }
 }
 impl ResponseChannel for Fixture {
-    fn write(&mut self, _: &[u8], _: &Budget<'_>) -> Result<(), NetworkError> {
+    fn write(
+        &mut self,
+        bytes: &[u8],
+        _: &Budget<'_>,
+        progress: &mut ApplicationWrite,
+    ) -> Result<(), NetworkError> {
         self.writes += 1;
+        progress.accepted_wire_bytes =
+            self.write_accepted
+                .unwrap_or(if self.write_error.is_some() {
+                    0
+                } else {
+                    bytes.len()
+                });
         self.write_error.map_or(Ok(()), Err)
     }
     fn read(&mut self, _: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
@@ -51,6 +70,32 @@ fn http(body: &str) -> Vec<u8> {
     )
     .into_bytes()
 }
+fn client() -> Client {
+    let saved = r#"{"version":1,"state":"ready","provider":"openai-account","access_token":"e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjb3VudC10ZXN0In19.c2ln","refresh_token":"synthetic","account_id":"account-test","expires_at":9999999999,"generation":"a1"}"#;
+    Client {
+        trust: TrustStore::native().unwrap(),
+        tokens: auth::Tokens::from_saved_json(saved).unwrap().unwrap(),
+        store: None,
+        catalog: None,
+    }
+}
+fn request() -> Request {
+    Request {
+        model: "fixture-model".into(),
+        effort: None,
+        instructions: "synthetic fixture".into(),
+        input: vec![super::super::Input::User("hello".into())],
+        tools: Vec::new(),
+    }
+}
+fn complete() -> Fixture {
+    let mut channel = Fixture::new();
+    channel.reads.push_back(Ok(http("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[]}}\n\n")));
+    channel
+}
+fn reset(operation: IoOperation) -> NetworkError {
+    NetworkError::io(operation, &io::Error::from(io::ErrorKind::ConnectionReset))
+}
 
 #[test]
 fn response_read_failure_keeps_delivered_text_and_safe_error_classification() {
@@ -69,11 +114,15 @@ fn response_read_failure_keeps_delivered_text_and_safe_error_classification() {
     let cancelled = AtomicBool::new(false);
     let budget = budget(&cancelled);
     let mut shown = String::new();
+    let mut delivery = Delivery::NotSubmitted;
+    let mut write = ApplicationWrite::default();
     let error = exchange(
         &mut channel,
         b"fixture request",
         &budget,
         &budget,
+        &mut delivery,
+        &mut write,
         |progress| {
             if let Progress::Text(text) = progress {
                 shown.push_str(text);
@@ -89,7 +138,9 @@ fn response_read_failure_keeps_delivered_text_and_safe_error_classification() {
         error,
         Error::Transport {
             stage: RequestStage::ResponseRead,
-            error: failure
+            error: failure,
+            delivery: Delivery::Streaming,
+            accepted_wire_bytes: b"fixture request".len(),
         }
     );
     let display = error.to_string();
@@ -109,15 +160,25 @@ fn request_write_failure_is_identified_and_never_replayed() {
     channel.write_error = Some(failure);
     let cancelled = AtomicBool::new(false);
     let budget = budget(&cancelled);
-    let error = exchange(&mut channel, b"fixture request", &budget, &budget, |_| {
-        panic!("no progress after failed write")
-    })
+    let mut delivery = Delivery::NotSubmitted;
+    let mut write = ApplicationWrite::default();
+    let error = exchange(
+        &mut channel,
+        b"fixture request",
+        &budget,
+        &budget,
+        &mut delivery,
+        &mut write,
+        |_| panic!("no progress after failed write"),
+    )
     .unwrap_err();
     assert_eq!(
         error,
         Error::Transport {
             stage: RequestStage::RequestWrite,
-            error: failure
+            error: failure,
+            delivery: Delivery::NotSubmitted,
+            accepted_wire_bytes: 0,
         }
     );
     assert_eq!(channel.writes, 1);
@@ -136,11 +197,15 @@ fn validated_completion_survives_close_failure_without_another_read() {
     let cancelled = AtomicBool::new(false);
     let budget = budget(&cancelled);
     let mut shown = String::new();
+    let mut delivery = Delivery::NotSubmitted;
+    let mut write = ApplicationWrite::default();
     let response = exchange(
         &mut channel,
         b"fixture request",
         &budget,
         &budget,
+        &mut delivery,
+        &mut write,
         |progress| {
             if let Progress::Text(text) = progress {
                 shown.push_str(text);
@@ -154,6 +219,7 @@ fn validated_completion_survives_close_failure_without_another_read() {
     assert_eq!(response.usage.input, None);
     assert_eq!(channel.writes, 1);
     assert_eq!(channel.closes, 1);
+    assert_eq!(delivery, Delivery::Completed);
 }
 
 #[test]
@@ -168,3 +234,6 @@ fn os_code_is_structured_without_exposing_io_message() {
     assert!(display.contains("ConnectionRefused"));
     assert!(display.contains("OS 12345"));
 }
+
+#[path = "recovery_tests.rs"]
+mod recovery_tests;

@@ -1,8 +1,8 @@
-use super::{Client, Error, RequestStage, ResponseChannel, unix_seconds};
+use super::{Client, Delivery, Error, RequestStage, ResponseChannel, unix_seconds};
 use crate::{
     http,
     providers::openai_account::catalog::Catalog,
-    tls::{Budget, Connection, NetworkError, trust::TrustStore},
+    tls::{ApplicationWrite, Budget, Connection, NetworkError, trust::TrustStore},
 };
 use std::{
     ops::ControlFlow,
@@ -38,6 +38,8 @@ impl Client {
             connect_channel(&self.trust, &short).map_err(|error| Error::Transport {
                 stage: RequestStage::Connect,
                 error,
+                delivery: Delivery::NotSubmitted,
+                accepted_wire_bytes: 0,
             })?;
         self.ensure_access(&short)?;
         if unix_seconds()? >= self.tokens.expires_at().saturating_sub(30) {
@@ -72,11 +74,18 @@ fn exchange(
     request: &[u8],
     budget: &Budget<'_>,
 ) -> Result<Catalog, Error> {
+    let mut write = ApplicationWrite::default();
     channel
-        .write(request, budget)
+        .write(request, budget, &mut write)
         .map_err(|error| Error::Transport {
             stage: RequestStage::RequestWrite,
             error,
+            delivery: if write.accepted_wire_bytes == 0 {
+                Delivery::NotSubmitted
+            } else {
+                Delivery::PossiblySubmitted
+            },
+            accepted_wire_bytes: write.accepted_wire_bytes,
         })?;
     let mut decoder = http::Decoder::new(http::Limits {
         header_bytes: 16 * 1024,
@@ -89,6 +98,8 @@ fn exchange(
         let Some(bytes) = channel.read(budget).map_err(|error| Error::Transport {
             stage: RequestStage::ResponseRead,
             error,
+            delivery: Delivery::PossiblySubmitted,
+            accepted_wire_bytes: write.accepted_wire_bytes,
         })?
         else {
             break;
@@ -167,8 +178,14 @@ mod tests {
         cancel_on_read: bool,
     }
     impl ResponseChannel for Channel {
-        fn write(&mut self, bytes: &[u8], _: &Budget<'_>) -> Result<(), NetworkError> {
+        fn write(
+            &mut self,
+            bytes: &[u8],
+            _: &Budget<'_>,
+            progress: &mut ApplicationWrite,
+        ) -> Result<(), NetworkError> {
             self.sent.lock().unwrap().extend_from_slice(bytes);
+            progress.accepted_wire_bytes += bytes.len();
             Ok(())
         }
         fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
@@ -260,13 +277,15 @@ mod tests {
                 cancel_on_read: true,
             })
         });
-        assert_eq!(
+        assert!(matches!(
             result,
             Err(Error::Transport {
                 stage: RequestStage::ResponseRead,
-                error: NetworkError::Cancelled
+                error: NetworkError::Cancelled,
+                delivery: Delivery::PossiblySubmitted,
+                accepted_wire_bytes: 1..,
             })
-        );
+        ));
         assert!(client.catalog.is_none());
     }
 
@@ -287,7 +306,13 @@ mod tests {
             response: Option<Vec<u8>>,
         }
         impl ResponseChannel for Blocked {
-            fn write(&mut self, _: &[u8], _: &Budget<'_>) -> Result<(), NetworkError> {
+            fn write(
+                &mut self,
+                bytes: &[u8],
+                _: &Budget<'_>,
+                progress: &mut ApplicationWrite,
+            ) -> Result<(), NetworkError> {
+                progress.accepted_wire_bytes += bytes.len();
                 Ok(())
             }
             fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
