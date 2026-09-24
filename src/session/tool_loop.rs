@@ -1,4 +1,4 @@
-//! The only model-facing loop: ordered reads and approved edits with exact receipts.
+//! The only model-facing loop: ordered reads and effects with exact receipts.
 use super::{
     End, Event, Failure, Metrics, Model, generation,
     history::{History, Step},
@@ -22,7 +22,6 @@ pub(super) fn run(
     clock: impl Fn() -> Instant,
     metrics: &mut Metrics,
 ) -> Result<End, Failure> {
-    let mut denied = false;
     loop {
         context.check()?;
         super::queue::take(history, context)?;
@@ -59,7 +58,7 @@ pub(super) fn run(
         }
         context.check()?;
         let workspace = workspace.ok_or(Failure::UnexpectedTools)?;
-        execute(history, workspace, context, &clock, metrics, &mut denied)?;
+        execute(history, workspace, context, &clock, metrics)?;
     }
 }
 
@@ -69,7 +68,6 @@ fn execute(
     context: &Context,
     clock: &impl Fn() -> Instant,
     metrics: &mut Metrics,
-    denied: &mut bool,
 ) -> Result<(), Failure> {
     let count = current(history)?.results.len();
     let shell = history.shell.clone();
@@ -98,7 +96,11 @@ fn execute(
         metrics.tool_calls = metrics.tool_calls.saturating_add(1);
         if effect {
             let receipt = &mut current(history)?.results[index];
-            receipt.output = Output::error("tool outcome is unknown after interruption; inspect the workspace before repeating any effect").text;
+            receipt.output = crate::json::encode(&crate::json::object([
+                ("ok", crate::json::Value::Bool(false)),
+                ("status", crate::json::Value::String("uncertain".into())),
+                ("error", crate::json::Value::String("tool outcome is unknown after interruption; inspect the workspace before repeating any effect".into())),
+            ]), crate::tools::MAX_OUTPUT).expect("bounded uncertainty receipt");
             receipt.summary = format!("{name} / outcome unknown after interruption");
             history.checkpoint()?;
         }
@@ -114,12 +116,8 @@ fn execute(
                 &shell,
                 workspace,
                 context,
-                denied,
-                metrics,
             ),
-            Ok(tool) if tool.changes_file() => {
-                super::approval::execute(tool, workspace, context, denied, metrics)
-            }
+            Ok(tool) if tool.changes_file() => super::edit::execute(tool, workspace, context),
             Ok(tool) => tool.execute(
                 workspace,
                 &Budget {

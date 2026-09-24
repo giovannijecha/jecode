@@ -370,9 +370,8 @@ fn failed_pre_and_post_effect_commits_stop_later_effects_and_resume_as_unknown()
         let mut proposals = 0;
         loop {
             match session::tests::next(&mut run) {
-                Event::EditProposed { id, .. } => {
+                Event::EditPlanned { .. } => {
                     proposals += 1;
-                    assert!(run.decide(id, true));
                 }
                 Event::Finished(End::Failed(Failure::Storage), _) => break,
                 Event::EditFinished { .. } | Event::Text(_) => {}

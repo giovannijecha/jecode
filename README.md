@@ -2,8 +2,8 @@
 
 An owned coding harness for your terminal, written in Rust.
 
-Jecode streams model responses, reads local project files, proposes file changes,
-and runs commands after approval. Conversations live in the terminal's natural
+Jecode streams model responses, reads local project files, changes files and
+runs commands directly. Conversations live in the terminal's natural
 scrollback. Sessions, settings and account credentials belong to your user profile.
 
 The application uses the Rust standard library and original code, with no external
@@ -53,7 +53,7 @@ for one new conversation without changing saved defaults.
 Use `jecode chat` for a conversation without file or command tools.
 It still belongs to the directory where it was launched.
 The workspace is the starting directory for relative paths. The default `local`
-profile also accepts paths outside it; changes and commands still require approval.
+profile also accepts paths outside it; changes and commands execute directly.
 Use `--access workspace` to restrict file tools to the selected directory.
 
 ```text
@@ -91,8 +91,8 @@ Account; Cargo's `--offline` flag only controls build dependency resolution.
 See [usage and configuration](docs/USAGE.md), [session recovery](docs/SESSIONS.md), [tools](docs/TOOLS.md),
 [architecture](docs/ARCHITECTURE.md), and [platform support](docs/COMPATIBILITY.md).
 
-Commands run with your user permissions: approval is not an operating-system
-sandbox. Selected file contents and command output may be sent to the model.
+Commands run with your user permissions and are not sandboxed. Selected file
+contents and command output may be sent to the model.
 Credentials are ordinary private JSON files; see [security](SECURITY.md) and the
 [TLS profile](docs/TLS.md) for the exact boundaries and limitations.
 

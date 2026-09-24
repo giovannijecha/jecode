@@ -5,13 +5,6 @@ use super::{
 };
 
 pub(super) fn rows(model: &Model, width: usize, available: usize) -> Vec<Row> {
-    if model
-        .action_demo
-        .as_ref()
-        .is_some_and(|demo| demo.pending())
-    {
-        return Vec::new();
-    }
     let mut rows = if let Some(run) = model.account.as_ref().and_then(|v| v.command.as_ref()) {
         super::command_view::active(run, width, model.tools.reduced_motion)
     } else if let Some(demo) = &model.action_demo {
@@ -66,18 +59,15 @@ pub(super) fn rows(model: &Model, width: usize, available: usize) -> Vec<Row> {
     rows
 }
 
-/// Only ordinary model generation gets a generic marker. A tool, command or
-/// decision owns the same status position while it is active.
+/// Only ordinary model generation gets a generic marker. A tool or command
+/// owns the same status position while it is active.
 pub(super) fn model_label(model: &Model) -> Option<&str> {
     if model.action_demo.is_some()
         || model.tools.active().is_some()
-        || model.account.as_ref().is_some_and(|view| {
-            view.command.is_some()
-                || view
-                    .approval
-                    .as_ref()
-                    .is_some_and(|approval| !approval.submitted)
-        })
+        || model
+            .account
+            .as_ref()
+            .is_some_and(|view| view.command.is_some() || view.edit.is_some())
     {
         return None;
     }

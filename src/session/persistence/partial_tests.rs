@@ -114,14 +114,13 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
     history.checkpoint().unwrap();
     let canonical = codec::encode(&history);
     let (events, _received) = std::sync::mpsc::sync_channel(64);
-    let (_decisions, decisions) = std::sync::mpsc::sync_channel(1);
     let context = session::worker::Context {
         events,
         cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        decisions,
         guidance: Arc::new(session::queue::Pending::default()),
-        next_approval: std::sync::atomic::AtomicU64::new(1),
+        next_effect: std::sync::atomic::AtomicU64::new(1),
+        effect_gate: None,
     };
     let first = Arc::new(Mutex::new(Vec::new()));
     let mut backend = Slices {
@@ -385,14 +384,13 @@ fn one_oversized_call_and_receipt_resume_across_encoded_reference_slices() {
     let call_record = sizes.iter().position(|size| *size == record_bytes).unwrap();
     assert!(record_bytes > session::history::MAX_CONTEXT);
     let (events, _received) = std::sync::mpsc::sync_channel(64);
-    let (_decisions, decisions) = std::sync::mpsc::sync_channel(1);
     let context = session::worker::Context {
         events,
         cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        decisions,
         guidance: Arc::new(session::queue::Pending::default()),
-        next_approval: std::sync::atomic::AtomicU64::new(1),
+        next_effect: std::sync::atomic::AtomicU64::new(1),
+        effect_gate: None,
     };
     let seen = Arc::new(Mutex::new(Vec::new()));
     let mut first = Sliced {

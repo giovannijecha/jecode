@@ -38,7 +38,7 @@ pub(super) struct View {
     pub pending: Option<Arc<session::PendingGuidance>>,
     pub recovery: Option<super::recovery::SavedDraft>,
     active_tool: Option<usize>,
-    pub approval: Option<super::approval_view::Approval>,
+    pub edit: Option<super::edit_view::Edit>,
     pub command: Option<super::command_view::Run>,
     pub selected: session::Model,
     pub catalog: Option<crate::providers::openai_account::catalog::Catalog>,
@@ -108,7 +108,7 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
         pending: None,
         recovery: None,
         active_tool: None,
-        approval: None,
+        edit: None,
         command: None,
         selected,
         catalog: None,
@@ -124,9 +124,6 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
 
 pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
     attach_queue(model, session);
-    if super::approval_view::input(model, &key, session) {
-        return;
-    }
     if super::commands::input(model, &key, session) {
         return;
     }
@@ -239,7 +236,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
         event,
         Event::Finished(..) | Event::LoginFailed(_) | Event::LoggedOut
     ) {
-        super::approval_view::stop(model);
+        super::edit_view::stop(model);
         super::command_view::stop(model);
     }
     let Some(view) = &mut model.account else {
@@ -300,17 +297,17 @@ pub(super) fn event(model: &mut Model, event: Event) {
                 text: item.text,
             }));
         }
-        Event::EditProposed { id, preview } if view.phase == Phase::Generating => {
-            super::approval_view::proposal(model, id, preview)
+        Event::EditPlanned { id, preview } if view.phase == Phase::Generating => {
+            super::edit_view::planned(model, id, preview)
         }
         Event::EditFinished {
             id,
             summary,
             applied,
             failed,
-        } => super::approval_view::finished(model, id, summary, applied, failed),
-        Event::CommandProposed { id, preview } if view.phase == Phase::Generating => {
-            super::command_view::proposal(model, id, preview)
+        } => super::edit_view::finished(model, id, summary, applied, failed),
+        Event::CommandPlanned { id, preview } if view.phase == Phase::Generating => {
+            super::command_view::planned(model, id, preview)
         }
         Event::CommandStarted { id } => super::command_view::started(model, id),
         Event::CommandOutput { id, channel, text } => {
@@ -537,8 +534,8 @@ pub(super) fn event(model: &mut Model, event: Event) {
             );
         }
         Event::Thinking
-        | Event::EditProposed { .. }
-        | Event::CommandProposed { .. }
+        | Event::EditPlanned { .. }
+        | Event::CommandPlanned { .. }
         | Event::Text(_)
         | Event::TextReconciled(_)
         | Event::RequestStarted
@@ -566,12 +563,6 @@ fn completion(end: End, metrics: Metrics, partial_output: bool) -> String {
         result.push_str(" / partial output retained");
     }
     result.push_str(&format!(" / {:.1}s", metrics.elapsed_ms as f64 / 1000.0));
-    if metrics.approval_wait_ms >= 1000 {
-        result.push_str(&format!(
-            " ({:.1}s awaiting approval)",
-            metrics.approval_wait_ms as f64 / 1000.0
-        ));
-    }
     if metrics.tool_calls != 0 {
         result.push_str(&format!(
             " / {} tools / {} requests",

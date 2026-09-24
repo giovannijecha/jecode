@@ -1,25 +1,9 @@
-//! Bounded preview of an exact change; full diff is an owned informational copy.
-use super::{
-    change::{ChangeError, Preview},
-    platform,
-    snapshot::OwnedFile,
-};
-use std::{fs::File, io::Write, path::Path};
+//! Bounded display of an exact change; the display never gates execution.
+use super::change::Preview;
 
 const PREVIEW_BYTES: usize = 48 * 1024;
 const PREVIEW_LINES: usize = 400;
-pub(super) struct Destination<'a> {
-    pub parent: &'a File,
-    pub directory: &'a Path,
-    pub security_source: Option<&'a File>,
-}
-
-pub(super) fn preview(
-    path: &str,
-    before: Option<&str>,
-    after: &str,
-    destination: Destination<'_>,
-) -> Result<(Preview, Option<OwnedFile>), ChangeError> {
+pub(super) fn preview(path: &str, before: Option<&str>, after: &str) -> Preview {
     let a: Vec<_> = before.unwrap_or("").split_inclusive('\n').collect();
     let b: Vec<_> = after.split_inclusive('\n').collect();
     let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
@@ -58,19 +42,12 @@ pub(super) fn preview(
         full,
         new_end - prefix,
         old_end - prefix,
-        destination,
     )
 }
 
 /// For a staged large original, the exact old/new arguments are the changed
 /// content. Surrounding file bytes are deliberately omitted from this hunk.
-pub(super) fn replacement_preview(
-    path: &str,
-    offset: u64,
-    old: &str,
-    new: &str,
-    destination: Destination<'_>,
-) -> Result<(Preview, Option<OwnedFile>), ChangeError> {
+pub(super) fn replacement_preview(path: &str, offset: u64, old: &str, new: &str) -> Preview {
     let mut full =
         format!("  @@ byte {offset}: exact replacement; unchanged file context omitted @@\n");
     for line in old.split_inclusive('\n') {
@@ -98,18 +75,10 @@ pub(super) fn replacement_preview(
         full,
         new_lines.len() - prefix - suffix,
         old_lines.len() - prefix - suffix,
-        destination,
     )
 }
 
-fn finish(
-    path: &str,
-    create: bool,
-    full: String,
-    added: usize,
-    removed: usize,
-    destination: Destination<'_>,
-) -> Result<(Preview, Option<OwnedFile>), ChangeError> {
+fn finish(path: &str, create: bool, full: String, added: usize, removed: usize) -> Preview {
     let mut shown = 0;
     let mut lines = 0;
     for line in full.split_inclusive('\n') {
@@ -121,18 +90,7 @@ fn finish(
     }
     let omitted_bytes = full.len() - shown;
     let omitted_lines = full.lines().count() - lines;
-    let artifact = if omitted_bytes > 0 {
-        let mut file = OwnedFile::create(destination.parent, destination.directory, "preview")?;
-        if let Some(source) = destination.security_source {
-            platform::metadata_to(source, &file.file)?;
-        }
-        file.file.write_all(full.as_bytes())?;
-        file.file.sync_all()?;
-        Some(file)
-    } else {
-        None
-    };
-    let result = Preview {
+    Preview {
         path: path.into(),
         create,
         diff: full[..shown].into(),
@@ -140,11 +98,7 @@ fn finish(
         removed,
         omitted_lines,
         omitted_bytes,
-        full_diff_path: artifact
-            .as_ref()
-            .map(|file| file.path.to_string_lossy().into_owned()),
-    };
-    Ok((result, artifact))
+    }
 }
 fn append(out: &mut String, sign: &str, line: &str) {
     out.push_str(sign);

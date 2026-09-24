@@ -7,25 +7,28 @@ have separate responsibilities.
 | Boundary | Responsibility |
 | --- | --- |
 | `src/main.rs` | CLI parsing and selected workspace |
-| `src/terminal/` | Input, inline layout, streamed rendering and approval presentation |
+| `src/terminal/` | Input, inline layout and streamed rendering |
 | `src/session/` | Ordered conversation, tool loop, queued guidance, metrics and context |
 | `src/session/persistence/` | Versioned canonical history and resume |
 | `src/state/` | User-scoped files, settings, permissions and file locks |
 | `src/providers/openai_account/` | Authentication, credential refresh and Responses protocol |
 | `src/tools/` | Small model-facing schema and validated dispatch |
 | `src/workspace/` | Bounded reads, search and recoverable file changes |
-| `src/command/` | Approved shell execution, output and process cleanup |
+| `src/command/` | Shell execution, output and joined process cleanup |
 | `src/http/`, `src/stream/`, `src/json/`, `src/tls/` | Owned protocol implementations |
 | `tests/`, `checks/`, `.github/` | Reproducible verification and CI |
 
-The terminal sends intent to the controller and presents events. It does not
-execute tool effects. Exact proposals stay with the worker; approval messages
-contain an operation ID and a decision. Effects are ordered. Cancellation reaches
+The terminal sends task input to the controller and presents events. It does not
+execute tool effects. The worker owns prepared operations and executes valid model
+calls in order. It checkpoints an uncertain receipt before each effect and the
+exact outcome afterward. A failed required checkpoint stops later effects.
+Cancellation reaches
 the provider, tools and process owner, and closing the UI joins its worker.
 
 The workspace owns a starting directory and a separate file-access profile.
 Path resolution and native opens enforce that profile; changing a command's
-directory does not grant an effect. The controller still owns each approval.
+directory does not change the file-access profile. Commands run with the user's
+permissions and are not sandboxed.
 Sessions store the profile, while model instructions derive from the active
 workspace so request-size measurements include the same environment description.
 
@@ -44,7 +47,7 @@ The refresh lease covers loading and replacement, not model generation. Concurre
 instances reload account state before each model request.
 
 The renderer keeps stable output in native scrollback and redraws a bounded
-transient area for activity, approvals and the composer. It supports no-color and
+transient area for activity and the composer. It supports no-color and
 reduced-motion modes. Rendering has no authority to read files or run commands.
 
 The compiler, Cargo, linker, OS and CI runner are infrastructure. Native APIs are

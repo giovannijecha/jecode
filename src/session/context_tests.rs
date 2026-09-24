@@ -78,14 +78,13 @@ fn uncompactable_empty_turn_does_not_loop() {
     history.turns[0].outcome = "Complete".into();
     history.begin("next action".into()).unwrap();
     let (events, _received) = std::sync::mpsc::sync_channel(8);
-    let (_decisions, decisions) = std::sync::mpsc::sync_channel(1);
     let context = Context {
         events,
         cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        decisions,
         guidance: Arc::new(crate::session::queue::Pending::default()),
-        next_approval: std::sync::atomic::AtomicU64::new(1),
+        next_effect: std::sync::atomic::AtomicU64::new(1),
+        effect_gate: None,
     };
     let observed = Arc::new(Mutex::new(Vec::new()));
     let mut backend = Summarizer {

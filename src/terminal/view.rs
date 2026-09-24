@@ -86,40 +86,6 @@ pub fn chrome(model: &Model, columns: usize, height: usize) -> Vec<Row> {
             .into_iter()
             .take(height.saturating_sub(1))
             .collect()
-    } else if let Some(demo) = model.action_demo.as_ref().filter(|demo| demo.pending()) {
-        let controls = decision_footer(
-            super::action_view::approval(demo, width, !model.editor.text.is_empty()),
-            model,
-            width,
-            height,
-        );
-        let mut rows = activity_prefix(model, width, height, controls.len());
-        rows.extend(controls);
-        rows
-    } else if let Some(edit) = model
-        .account
-        .as_ref()
-        .and_then(|v| v.approval.as_ref())
-        .filter(|e| !e.submitted)
-    {
-        let controls = decision_footer(
-            super::action_view::decision(
-                if edit.kind == super::approval_view::Kind::Command {
-                    "? Run this command with your user permissions?"
-                } else {
-                    "? Apply this file change?"
-                },
-                edit.allow,
-                width,
-                !model.editor.text.is_empty(),
-            ),
-            model,
-            width,
-            height,
-        );
-        let mut rows = activity_prefix(model, width, height, controls.len());
-        rows.extend(controls);
-        rows
     } else {
         // Reserve the rules, draft, footer and any local controls before adding
         // runtime state. All rows share the same transient suffix on resize.
@@ -151,15 +117,6 @@ fn activity_prefix(model: &Model, width: usize, height: usize, controls: usize) 
     let mut rows = super::activity_view::rows(model, width, capacity);
     if !rows.is_empty() && rows.len() + controls + 1 < height {
         rows.push(Row::blank());
-    }
-    rows
-}
-
-fn decision_footer(mut rows: Vec<Row>, model: &Model, width: usize, height: usize) -> Vec<Row> {
-    let footer = super::composer::metadata(model, width);
-    if rows.len() + footer.len() < height {
-        let after = rows.iter().rposition(|r| r.text.starts_with('─')).unwrap() + 1;
-        rows.splice(after..after, footer);
     }
     rows
 }

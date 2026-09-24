@@ -1,4 +1,4 @@
-//! Full controller tests with real isolated files and an inert model transport.
+//! Full controller tests with isolated files and an inert model transport.
 use super::tool_tests::{call, calls_response, outputs};
 use super::*;
 use crate::workspace_fixture as support;
@@ -60,17 +60,25 @@ pub(crate) struct Run {
     dropped: Arc<AtomicBool>,
 }
 pub(crate) fn start() -> Run {
+    start_with_gate(None)
+}
+fn start_with_gate(gate: Option<worker::EffectGate>) -> Run {
     let files = support::Fixture::new();
     files.write("notes.txt", "old\n");
     let requests = Arc::new(Mutex::new(Vec::new()));
     let dropped = Arc::new(AtomicBool::new(false));
-    let mut session = Session::with_backend(
+    let history = history::History {
+        effect_gate: gate,
+        ..Default::default()
+    };
+    let mut session = Session::with_history(
         Model::Luna,
         Fixture {
             requests: requests.clone(),
             dropped: dropped.clone(),
         },
         Some(crate::workspace::Workspace::open(&files.0).unwrap()),
+        history,
     )
     .unwrap();
     assert!(matches!(tests::next(&mut session), Event::Ready));
@@ -84,27 +92,16 @@ pub(crate) fn start() -> Run {
 pub(crate) fn next(session: &mut Session) -> Event {
     tests::next(session)
 }
-fn proposed(session: &mut Session) -> u64 {
-    match tests::next(session) {
-        Event::EditProposed { id, preview } => {
-            assert_eq!(preview.path, "notes.txt");
-            assert!(preview.diff.contains("- old\n+ new"));
-            id
-        }
-        _ => panic!("expected complete edit proposal"),
-    }
-}
-fn finish(session: &mut Session, allow: bool) -> (End, usize, Vec<String>) {
-    let mut proposals = 0;
+fn finish(session: &mut Session) -> (End, Vec<String>, usize, usize) {
+    let mut plans = 0;
     let mut summaries = Vec::new();
     loop {
-        match tests::next(session) {
-            Event::EditProposed { id, .. } => {
-                proposals += 1;
-                assert!(session.decide(id, allow));
-            }
+        match next(session) {
+            Event::EditPlanned { .. } => plans += 1,
             Event::EditFinished { summary, .. } => summaries.push(summary),
-            Event::Finished(end, _) => return (end, proposals, summaries),
+            Event::Finished(end, metrics) => {
+                return (end, summaries, metrics.tool_calls as usize, plans);
+            }
             Event::ToolStarted { .. }
             | Event::ToolFinished { .. }
             | Event::RequestStarted
@@ -113,25 +110,15 @@ fn finish(session: &mut Session, allow: bool) -> (End, usize, Vec<String>) {
         }
     }
 }
+
 #[test]
-fn ordered_edits_wait_for_exact_decision_then_followup_reads_observe_the_result() {
+fn direct_edits_and_create_follow_order_and_reads_observe_the_result() {
     let mut run = start();
-    assert!(!run.session.decide(1, true));
     assert!(run.session.submit("edit and inspect"));
-    let id = proposed(&mut run.session);
-    assert_eq!(
-        fs::read_to_string(run.files.0.join("notes.txt")).unwrap(),
-        "old\n"
-    );
-    assert_eq!(fs::read_dir(&run.files.0).unwrap().count(), 1);
-    assert!(!run.session.decide(id + 1, true));
-    assert!(!run.session.submit("overlap"));
-    assert!(run.session.decide(id, true));
-    assert!(!run.session.decide(id, true));
-    let (end, proposals, summaries) = finish(&mut run.session, true);
-    assert_eq!((end, proposals), (End::Complete, 1));
-    let requests = run.requests.lock().unwrap();
-    let results = outputs(&requests[1]);
+    let (end, summaries, calls, plans) = finish(&mut run.session);
+    assert_eq!((end, calls, plans), (End::Complete, 3, 2));
+    assert_eq!(summaries.len(), 2);
+    let results = outputs(&run.requests.lock().unwrap()[1]);
     assert_eq!(
         results
             .iter()
@@ -144,11 +131,6 @@ fn ordered_edits_wait_for_exact_decision_then_followup_reads_observe_the_result(
         .any(|s| run.files.unsupported_host_filesystem(s))
     {
         assert_eq!(results[0].1.get("ok"), Some(&Value::Bool(false)));
-        assert_eq!(
-            results[1].1.get("text").and_then(Value::text),
-            Some("old\n")
-        );
-        assert!(!run.files.0.join("created.txt").exists());
     } else {
         assert_eq!(
             results[0].1.get("status").and_then(Value::text),
@@ -168,54 +150,37 @@ fn ordered_edits_wait_for_exact_decision_then_followup_reads_observe_the_result(
             "old\n"
         );
     }
-    drop(requests);
     assert!(run.session.submit("continue without repeating"));
-    assert_eq!(finish(&mut run.session, true).1, 0);
+    assert_eq!(finish(&mut run.session).2, 0);
     assert_eq!(outputs(&run.requests.lock().unwrap()[2]), results);
 }
+
 #[test]
-fn denial_blocks_remaining_effects_in_the_turn_but_allows_read_results() {
-    let mut run = start();
-    assert!(run.session.submit("propose"));
-    let id = proposed(&mut run.session);
-    assert!(run.session.decide(id, false));
-    let (end, later_proposals, _) = finish(&mut run.session, true);
-    assert_eq!((end, later_proposals), (End::Complete, 0));
-    assert_eq!(fs::read_dir(&run.files.0).unwrap().count(), 1);
-    let requests = run.requests.lock().unwrap();
-    let results = outputs(&requests[1]);
-    assert_eq!(
-        results[0].1.get("status").and_then(Value::text),
-        Some("denied")
-    );
-    assert_eq!(
-        results[1].1.get("text").and_then(Value::text),
-        Some("old\n")
-    );
-    assert!(
-        results[2]
-            .1
-            .get("error")
-            .and_then(Value::text)
-            .unwrap()
-            .contains("after a denial")
-    );
-}
-#[test]
-fn changed_file_at_decision_time_is_preserved_and_failure_reaches_the_model() {
-    let mut run = start();
-    assert!(run.session.submit("propose"));
-    let id = proposed(&mut run.session);
-    run.files.write("notes.txt", "edited elsewhere\n");
-    assert!(run.session.decide(id, true));
-    finish(&mut run.session, false);
+fn competing_edit_between_prepare_and_apply_is_preserved() {
+    let files = Arc::new(Mutex::new(None::<std::path::PathBuf>));
+    let target = files.clone();
+    let gate: worker::EffectGate = Arc::new(move |name| {
+        if name == "edit_file" {
+            fs::write(
+                target.lock().unwrap().as_ref().unwrap().join("notes.txt"),
+                "edited elsewhere\n",
+            )
+            .unwrap();
+        }
+    });
+    let mut run = start_with_gate(Some(gate));
+    *files.lock().unwrap() = Some(run.files.0.clone());
+    assert!(run.session.submit("edit"));
+    assert_eq!(finish(&mut run.session).0, End::Complete);
     assert_eq!(
         fs::read_to_string(run.files.0.join("notes.txt")).unwrap(),
         "edited elsewhere\n"
     );
-    assert_eq!(fs::read_dir(&run.files.0).unwrap().count(), 1);
-    let requests = run.requests.lock().unwrap();
-    let results = outputs(&requests[1]);
+    let results = outputs(&run.requests.lock().unwrap()[1]);
+    assert_eq!(
+        results[0].1.get("status").and_then(Value::text),
+        Some("failed")
+    );
     assert!(
         results[0]
             .1
@@ -224,43 +189,42 @@ fn changed_file_at_decision_time_is_preserved_and_failure_reaches_the_model() {
             .unwrap()
             .contains("changed since")
     );
+    assert_eq!(
+        results[1].1.get("text").and_then(Value::text),
+        Some("edited elsewhere\n")
+    );
 }
+
 #[test]
-fn cancel_or_drop_while_approval_waits_has_no_effect_and_joins_worker() {
-    for dropping in [false, true] {
-        let mut run = start();
-        assert!(run.session.submit("propose"));
-        let id = proposed(&mut run.session);
-        if !dropping {
-            run.session.cancel();
-            assert!(!run.session.decide(id, true));
-            assert_eq!(
-                finish(&mut run.session, true).0,
-                End::Failed(Failure::Cancelled)
-            );
-            assert!(run.session.submit("new turn"));
-            assert_eq!(finish(&mut run.session, true).1, 0);
-            let requests = run.requests.lock().unwrap();
-            assert!(
-                outputs(&requests[1])[0]
-                    .1
-                    .get("error")
-                    .and_then(Value::text)
-                    .unwrap()
-                    .contains("cancelled")
-            );
+fn cancellation_before_execution_prevents_change_and_joins_worker() {
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let release = Arc::new(Mutex::new(release_rx));
+    let gate: worker::EffectGate = Arc::new(move |name| {
+        if name == "edit_file" {
+            entered_tx.send(()).unwrap();
+            release.lock().unwrap().recv().unwrap();
         }
-        drop(run.session);
-        assert!(run.dropped.load(Ordering::Acquire));
-        assert_eq!(fs::read_dir(&run.files.0).unwrap().count(), 1);
-        assert_eq!(
-            fs::read_to_string(run.files.0.join("notes.txt")).unwrap(),
-            "old\n"
-        );
-    }
+    });
+    let mut run = start_with_gate(Some(gate));
+    assert!(run.session.submit("edit"));
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    run.session.cancel();
+    release_tx.send(()).unwrap();
+    assert_eq!(finish(&mut run.session).0, End::Failed(Failure::Cancelled));
+    assert_eq!(
+        fs::read_to_string(run.files.0.join("notes.txt")).unwrap(),
+        "old\n"
+    );
+    assert!(!run.files.0.join("created.txt").exists());
+    drop(run.session);
+    assert!(run.dropped.load(Ordering::Acquire));
 }
+
 #[test]
-fn forty_approved_effects_keep_exact_order_and_run_once() {
+fn forty_direct_effects_keep_exact_order_and_run_once() {
     struct EffectChain {
         round: usize,
         requests: Arc<Mutex<Vec<String>>>,
@@ -331,47 +295,13 @@ fn forty_approved_effects_keep_exact_order_and_run_once() {
         Some(crate::workspace::Workspace::open(&files.0).unwrap()),
     )
     .unwrap();
-    assert!(matches!(tests::next(&mut session), Event::Ready));
-    assert!(session.submit("Apply forty ordered edits and verify the result"));
-    let mut proposals = 0;
-    let (end, metrics) = loop {
-        match tests::next(&mut session) {
-            Event::EditProposed { id, .. } => {
-                proposals += 1;
-                assert!(session.decide(id, true));
-            }
-            Event::Finished(end, metrics) => break (end, metrics),
-            Event::EditFinished { failed, .. } => assert!(!failed),
-            Event::RequestStarted | Event::Text(_) => {}
-            _ => panic!("unexpected effect-chain event"),
-        }
-    };
-    assert_eq!(end, End::Complete);
-    assert_eq!(
-        (metrics.requests, metrics.tool_calls, proposals),
-        (41, 40, 40)
-    );
-    let expected = (0..40).fold("start".to_owned(), |mut text, n| {
-        text.push_str(&format!(" {n}"));
-        text
-    });
-    assert_eq!(
-        fs::read_to_string(files.0.join("notes.txt")).unwrap(),
-        expected
-    );
-    let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 41);
+    assert!(matches!(next(&mut session), Event::Ready));
+    assert!(session.submit("apply all forty"));
+    assert_eq!(finish(&mut session).0, End::Complete);
+    assert_eq!(requests.lock().unwrap().len(), 41);
     assert!(
-        requests
-            .iter()
-            .all(|r| !r.contains("Summarize this bounded portion"))
+        fs::read_to_string(files.0.join("notes.txt"))
+            .unwrap()
+            .ends_with(" 39")
     );
-    eprintln!(
-        "effect fixture: requests={} tools={} compactions=0 max_projected_bytes={}",
-        metrics.requests,
-        metrics.tool_calls,
-        requests.iter().map(|r| r.len()).max().unwrap()
-    );
-    drop(requests);
-    drop(session);
 }

@@ -210,7 +210,7 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
 }
 
 #[test]
-fn model_tool_command_approval_and_completion_replace_one_status_in_place() {
+fn model_tool_command_execution_and_completion_replace_one_status_in_place() {
     let (mut model, mut session) = ready();
     let mut surface = Surface::new((80, 24));
     surface.draw(&model);
@@ -268,7 +268,7 @@ fn model_tool_command_approval_and_completion_replace_one_status_in_place() {
         },
     );
 
-    command_view::proposal(
+    command_view::planned(
         &mut model,
         7,
         Preview {
@@ -280,11 +280,11 @@ fn model_tool_command_approval_and_completion_replace_one_status_in_place() {
     );
     surface.draw(&model);
     let shown = surface.text();
-    assert!(shown.contains("? Run this command"), "{shown}");
-    assert!(shown.contains("Enter confirm"), "{shown}");
+    assert!(shown.contains("Starting command"), "{shown}");
+    assert!(!shown.contains("Enter confirm"), "{shown}");
     assert!(!shown.contains("Exploring workspace"), "{shown}");
     assert!(!shown.contains("Waiting for model"), "{shown}");
-    assert!(!model.tick(Instant::now() + Duration::from_secs(1)));
+    model.tick(Instant::now() + Duration::from_secs(1));
     rules(&shown);
 
     command_view::started(&mut model, 7);

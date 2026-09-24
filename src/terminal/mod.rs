@@ -4,12 +4,12 @@ mod account_login;
 mod action_demo;
 mod action_view;
 mod activity_view;
-mod approval_view;
 mod block;
 mod command_view;
 mod commands;
 mod composer;
 mod diagnostics;
+mod edit_view;
 mod editor;
 mod editor_visual;
 #[cfg(any(test, windows, target_os = "linux"))]
@@ -95,7 +95,7 @@ pub fn account(model: crate::session::Model) -> io::Result<()> {
     account_in(model, None)
 }
 
-/// The selected workspace carries its file-access policy; effects require approval.
+/// The selected workspace carries its file-access policy.
 pub fn account_in(
     model: crate::session::Model,
     workspace: Option<crate::workspace::Workspace>,
@@ -265,7 +265,6 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     loop {
         let size = terminal.size()?;
         model.editor.set_columns(size.0.saturating_sub(4).max(1));
-        approval_view::displayed(&mut model, size, false);
         if size != previous_size {
             trace.changed();
             paint.request();
@@ -300,7 +299,6 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                 output.write_all(changed.as_bytes())?;
                 output.flush()?;
             }
-            approval_view::displayed(&mut model, size, region == resize::Region::Transcript);
             if trace.active() {
                 trace.record(
                     "after",

@@ -8,6 +8,23 @@ use crate::{
 };
 use std::{ops::ControlFlow, sync::Mutex};
 
+#[test]
+fn model_contract_describes_direct_effects_and_clarification_only_for_missing_information() {
+    let request = history::History::default().projected_request(Model::Luna, true);
+    assert!(request.instructions.contains("execute directly"));
+    assert!(
+        request
+            .instructions
+            .contains("task information is genuinely missing")
+    );
+    assert!(!request.instructions.contains("waits for approval"));
+    for name in ["create_file", "edit_file", "run_command"] {
+        let tool = request.tools.iter().find(|tool| tool.name == name).unwrap();
+        assert!(tool.description.contains("directly"), "{name}");
+        assert!(!tool.description.contains("approval"), "{name}");
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Mode {
     Batch,
@@ -421,14 +438,13 @@ fn old_task_age_does_not_expire_later_operation_deadlines() {
     files.write("notes.txt", "The fixture answer is 42.\n");
     let workspace = Workspace::open(&files.0).unwrap();
     let (events, _received) = std::sync::mpsc::sync_channel(64);
-    let (_decision, decisions) = std::sync::mpsc::sync_channel(1);
     let context = worker::Context {
         events,
         cancelled: Arc::new(AtomicBool::new(false)),
         stopped: Arc::new(AtomicBool::new(false)),
-        decisions,
         guidance: Arc::new(queue::Pending::default()),
-        next_approval: std::sync::atomic::AtomicU64::new(1),
+        next_effect: std::sync::atomic::AtomicU64::new(1),
+        effect_gate: None,
     };
     let mut history = history::History::default();
     history.begin("Task older than ten minutes".into()).unwrap();

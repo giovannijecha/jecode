@@ -1,4 +1,4 @@
-//! Actual approved processes behind an inert provider; no account credentials.
+//! Actual processes behind an inert provider; all files belong to isolated fixtures.
 use super::tool_tests::{call, calls_response, outputs};
 use super::*;
 use crate::{
@@ -52,7 +52,7 @@ impl worker::Backend for Backend {
                 calls.push(call(
                     "create",
                     "create_file",
-                    r#"{"path":"denied.txt","content":"must not run"}"#,
+                    r#"{"path":"created.txt","content":"created"}"#,
                 ));
                 calls.push(call("again", "run_command", &args));
             }
@@ -87,6 +87,19 @@ pub(crate) fn start(mode: &'static str, extra: bool) -> Run {
         requests,
     }
 }
+pub(crate) fn next(session: &mut Session) -> Event {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if let Some(event) = session.poll() {
+            return event;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "command worker did not produce an event"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
 
 #[test]
 #[cfg(windows)]
@@ -99,7 +112,7 @@ fn configured_powershell7_is_used_for_request_preview_and_execution() {
     crate::state::settings::Settings::load(&store).unwrap();
     let body = store.read("settings.json", 8192).unwrap().unwrap();
     let Value::Object(mut fields) = json::parse(&body, Default::default()).unwrap() else {
-        panic!("settings must be an object");
+        panic!()
     };
     fields.insert("windows_powershell_executable".into(), Value::String(path));
     store
@@ -128,89 +141,53 @@ fn configured_powershell7_is_used_for_request_preview_and_execution() {
     .unwrap();
     assert!(matches!(next(&mut session), Event::Ready));
     assert!(session.submit("write the fixture"));
-    let id = match next(&mut session) {
-        Event::CommandProposed { id, preview } => {
-            assert!(
-                preview.shell.contains("PowerShell 7.6.6"),
-                "{}",
-                preview.shell
-            );
-            assert!(preview.shell.contains("pwsh.exe"), "{}", preview.shell);
-            assert!(
-                preview
-                    .shell
-                    .contains("bracketed cwd: supported by session probe")
-            );
-            id
-        }
-        _ => panic!("expected command proposal"),
-    };
-    let request = requests.lock().unwrap()[0].clone();
-    assert!(
-        request.contains("Command shell: PowerShell 7.6.6"),
-        "{request}"
-    );
-    assert!(request.contains("using PowerShell 7.6.6"), "{request}");
-    assert!(
-        request.contains("bracketed cwd: supported by session probe"),
-        "{request}"
-    );
-    assert!(session.decide(id, true));
+    let mut planned = false;
     let mut executed = false;
     loop {
         match next(&mut session) {
+            Event::CommandPlanned { preview, .. } => {
+                planned = true;
+                assert!(preview.shell.contains("PowerShell 7.6.6"));
+                assert!(preview.shell.contains("pwsh.exe"));
+                assert!(
+                    preview
+                        .shell
+                        .contains("bracketed cwd: supported by session probe")
+                );
+            }
             Event::CommandFinished { success, .. } => executed = success,
             Event::Finished(_, _) => break,
             _ => {}
         }
     }
-    assert!(executed);
+    assert!(planned && executed);
+    let request = requests.lock().unwrap()[0].clone();
+    assert!(request.contains("Command shell: PowerShell 7.6.6"));
+    assert!(request.contains("using PowerShell 7.6.6"));
     assert_eq!(
         std::fs::read_to_string(files.0.join("command-result.txt")).unwrap(),
         "one execution\n"
     );
 }
-pub(crate) fn next(session: &mut Session) -> Event {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        if let Some(event) = session.poll() {
-            return event;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "command worker did not produce an event"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-}
-fn proposal(session: &mut Session) -> u64 {
-    match next(session) {
-        Event::CommandProposed { id, preview } => {
-            assert_eq!(preview.cwd, ".");
-            assert_eq!(preview.timeout_seconds, 30);
-            assert!(preview.command.contains("child_fixture"));
-            id
-        }
-        _ => panic!("expected command proposal"),
-    }
-}
+
 #[test]
-fn approval_runs_once_and_followup_reads_see_its_result_without_replay() {
+fn direct_command_runs_once_and_followup_reads_see_its_result() {
     let mut run = start("write", false);
-    assert!(!run.session.decide(1, true));
     assert!(
         run.session
             .submit("write fixture through a command and read it")
     );
-    let id = proposal(&mut run.session);
-    assert!(!run.files.0.join("command-result.txt").exists());
-    assert!(!run.session.decide(id + 1, true));
-    assert!(run.session.decide(id, true));
-    assert!(!run.session.decide(id, true));
     let mut output = String::new();
+    let mut planned = 0;
     let mut completed = false;
     loop {
         match next(&mut run.session) {
+            Event::CommandPlanned { preview, .. } => {
+                planned += 1;
+                assert_eq!(preview.cwd, ".");
+                assert_eq!(preview.timeout_seconds, 30);
+                assert!(preview.command.contains("child_fixture"));
+            }
             Event::CommandOutput { text, .. } => output.push_str(&text),
             Event::CommandFinished {
                 success, failed, ..
@@ -221,17 +198,15 @@ fn approval_runs_once_and_followup_reads_see_its_result_without_replay() {
             Event::Finished(end, metrics) => {
                 assert_eq!(end, End::Complete);
                 assert_eq!(metrics.tool_calls, 2);
+                assert_eq!(metrics.approval_wait_ms, 0);
                 break;
-            }
-            Event::EditProposed { .. } | Event::CommandProposed { .. } => {
-                panic!("unexpected repeated approval")
             }
             _ => {}
         }
     }
+    assert_eq!(planned, 1);
     assert!(completed && output.contains("written"));
     let receipts = outputs(&run.requests.lock().unwrap()[1]);
-    assert_eq!(receipts[0].0, "command");
     assert_eq!(
         receipts[0].1.get("exit_code").and_then(Value::unsigned),
         Some(0)
@@ -245,12 +220,8 @@ fn approval_runs_once_and_followup_reads_see_its_result_without_replay() {
         .write("command-result.txt", "preserved after the turn");
     assert!(run.session.submit("continue without tools"));
     loop {
-        match next(&mut run.session) {
-            Event::Finished(End::Complete, _) => break,
-            Event::CommandProposed { .. } | Event::EditProposed { .. } => {
-                panic!("historical effect replayed")
-            }
-            _ => {}
+        if let Event::Finished(End::Complete, _) = next(&mut run.session) {
+            break;
         }
     }
     assert_eq!(
@@ -259,75 +230,116 @@ fn approval_runs_once_and_followup_reads_see_its_result_without_replay() {
     );
     assert_eq!(outputs(&run.requests.lock().unwrap()[2]), receipts);
 }
+
 #[test]
-fn denial_blocks_both_later_commands_and_edits_and_keeps_exact_receipts() {
+fn multiple_commands_and_file_effects_execute_in_order() {
     let mut run = start("write", true);
-    assert!(run.session.submit("propose"));
-    let id = proposal(&mut run.session);
-    assert!(run.session.decide(id, false));
+    assert!(run.session.submit("do all four operations"));
     loop {
-        match next(&mut run.session) {
-            Event::Finished(End::Complete, _) => break,
-            Event::CommandStarted { .. }
-            | Event::CommandProposed { .. }
-            | Event::EditProposed { .. } => panic!("effect after denial"),
-            _ => {}
+        if let Event::Finished(End::Complete, metrics) = next(&mut run.session) {
+            assert_eq!(metrics.tool_calls, 4);
+            break;
         }
     }
-    assert_eq!(std::fs::read_dir(&run.files.0).unwrap().count(), 0);
     let receipts = outputs(&run.requests.lock().unwrap()[1]);
-    assert_eq!(receipts.len(), 4);
     assert_eq!(
-        receipts[0].1.get("status").and_then(Value::text),
-        Some("denied")
-    );
-    assert_eq!(receipts[0].1.get("executed"), Some(&Value::Bool(false)));
-    assert!(
         receipts
             .iter()
-            .all(|(_, r)| r.get("ok") == Some(&Value::Bool(false)))
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        ["command", "read", "create", "again"]
     );
-}
-#[test]
-fn closing_pending_approval_or_a_running_tree_joins_the_worker() {
-    for active in [false, true] {
-        let mut run = start(if active { "tree" } else { "write" }, false);
-        assert!(run.session.submit("fixture"));
-        let id = proposal(&mut run.session);
-        let mut output = String::new();
-        if active {
-            assert!(run.session.decide(id, true));
-            while !output.contains("stream-ready") {
-                match next(&mut run.session) {
-                    Event::CommandOutput { text, .. } => output.push_str(&text),
-                    Event::Finished(..) => panic!("command ended before interruption"),
-                    _ => {}
-                }
-            }
-        }
-        drop(run.session);
-        assert_eq!(run.requests.lock().unwrap().len(), 1);
-        assert!(!run.files.0.join("command-result.txt").exists());
-        if active {
-            let start = output.find("descendant=").unwrap() + "descendant=".len();
-            native::assert_stopped(
-                output[start..]
-                    .split_whitespace()
-                    .next()
-                    .unwrap()
-                    .parse()
-                    .unwrap(),
-            );
-        }
-    }
+    assert_eq!(
+        receipts[1].1.get("text").and_then(Value::text),
+        Some("one execution\n")
+    );
+    assert_eq!(
+        receipts[2].1.get("status").and_then(Value::text),
+        Some("applied")
+    );
+    assert_eq!(receipts[3].1.get("executed"), Some(&Value::Bool(true)));
+    assert_eq!(
+        std::fs::read_to_string(run.files.0.join("created.txt")).unwrap(),
+        "created"
+    );
 }
 
 #[test]
-fn cancellation_retains_the_executed_command_receipt_for_the_next_explicit_turn() {
+fn cancellation_before_command_launch_does_not_run_it() {
+    let files = Files::new();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let release = Arc::new(Mutex::new(release_rx));
+    let gate: worker::EffectGate = Arc::new(move |name| {
+        if name == "run_command" {
+            entered_tx.send(()).unwrap();
+            release.lock().unwrap().recv().unwrap();
+        }
+    });
+    let history = history::History {
+        effect_gate: Some(gate),
+        ..Default::default()
+    };
+    let mut session = Session::with_history(
+        Model::Luna,
+        Backend {
+            mode: "write",
+            extra: false,
+            requests,
+        },
+        Some(crate::workspace::Workspace::open(&files.0).unwrap()),
+        history,
+    )
+    .unwrap();
+    assert!(matches!(next(&mut session), Event::Ready));
+    assert!(session.submit("run"));
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    session.cancel();
+    release_tx.send(()).unwrap();
+    let mut started = false;
+    loop {
+        match next(&mut session) {
+            Event::CommandStarted { .. } => started = true,
+            Event::Finished(End::Failed(Failure::Cancelled), _) => break,
+            _ => {}
+        }
+    }
+    assert!(!started);
+    assert!(!files.0.join("command-result.txt").exists());
+}
+
+#[test]
+fn closing_a_running_tree_joins_the_worker() {
+    let mut run = start("tree", false);
+    assert!(run.session.submit("fixture"));
+    let mut output = String::new();
+    while !output.contains("stream-ready") {
+        match next(&mut run.session) {
+            Event::CommandOutput { text, .. } => output.push_str(&text),
+            Event::Finished(..) => panic!("command ended before interruption"),
+            _ => {}
+        }
+    }
+    drop(run.session);
+    assert_eq!(run.requests.lock().unwrap().len(), 1);
+    let start = output.find("descendant=").unwrap() + "descendant=".len();
+    native::assert_stopped(
+        output[start..]
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+}
+
+#[test]
+fn cancellation_retains_executed_command_receipt_for_next_turn() {
     let mut run = start("stream", false);
     assert!(run.session.submit("run until interrupted"));
-    let id = proposal(&mut run.session);
-    assert!(run.session.decide(id, true));
     loop {
         if let Event::CommandOutput { text, .. } = next(&mut run.session)
             && text.contains("stream-ready")
@@ -357,15 +369,10 @@ fn cancellation_retains_the_executed_command_receipt_for_the_next_explicit_turn(
         }
     }
     assert!(receipt);
-    assert_eq!(run.requests.lock().unwrap().len(), 1);
     assert!(run.session.submit("report only"));
     loop {
-        match next(&mut run.session) {
-            Event::Finished(End::Complete, _) => break,
-            Event::CommandProposed { .. } | Event::CommandStarted { .. } => {
-                panic!("cancelled command replayed")
-            }
-            _ => {}
+        if let Event::Finished(End::Complete, _) = next(&mut run.session) {
+            break;
         }
     }
     let receipts = outputs(&run.requests.lock().unwrap()[1]);

@@ -1,4 +1,4 @@
-//! Approved, non-interactive shell execution. Platform owners contain ordinary
+//! Non-interactive shell execution. Platform owners contain ordinary
 //! descendants and join the child; neither a workspace path nor a job is a sandbox.
 mod capture;
 mod platform;
@@ -172,12 +172,22 @@ pub(crate) fn prepare_with_shell(
     })
 }
 
-/// Consumes the proposal after the controller's one-use decision. The callback is
-/// bounded preview output, not a raw terminal byte stream. No detached readers.
+/// Consumes the prepared command after the controller's pre-effect checkpoint.
+/// The callback is bounded display output, not a raw terminal byte stream.
 pub(crate) fn run(
     proposal: Proposal,
     workspace: &Workspace,
     budget: &Budget<'_>,
+    output: &mut dyn FnMut(Channel, &str) -> ControlFlow<()>,
+) -> io::Result<Outcome> {
+    run_with_start(proposal, workspace, budget, &mut || {}, output)
+}
+
+pub(crate) fn run_with_start(
+    proposal: Proposal,
+    workspace: &Workspace,
+    budget: &Budget<'_>,
+    on_start: &mut dyn FnMut(),
     output: &mut dyn FnMut(Channel, &str) -> ControlFlow<()>,
 ) -> io::Result<Outcome> {
     workspace
@@ -189,11 +199,15 @@ pub(crate) fn run(
     let deadline = budget
         .deadline
         .min(started + Duration::from_secs(proposal.preview.timeout_seconds));
+    budget
+        .check()
+        .map_err(|_| io::Error::other("command cancelled before launch"))?;
     let mut child = platform::Process::spawn(
         &proposal.preview.command,
         &proposal.directory,
         &proposal.shell,
     )?;
+    on_start();
     let mut captures = [capture::Capture::default(), capture::Capture::default()];
     let mut bytes = 0u64;
     let mut displayed = 0usize;

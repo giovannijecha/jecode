@@ -1,4 +1,4 @@
-//! Bounded workspace tools. Changes require the controller's explicit approval path.
+//! Bounded workspace tools. The controller alone orders and executes effects.
 mod args;
 mod read;
 mod schema;
@@ -44,19 +44,42 @@ impl Output {
             Err(_) => Self::error("tool result exceeded its output limit; narrow the request"),
         }
     }
+    pub(crate) fn not_executed(message: &str) -> Self {
+        let mut output = Self::success(
+            json::object([
+                ("ok", Value::Bool(false)),
+                ("status", string("not_executed")),
+                ("executed", Value::Bool(false)),
+                ("error", string(message)),
+            ]),
+            message.into(),
+            false,
+        );
+        output.failed = true;
+        output
+    }
+    pub(crate) fn failed_effect(message: &str) -> Self {
+        let mut output = Self::success(
+            json::object([
+                ("ok", Value::Bool(false)),
+                ("status", string("failed")),
+                ("error", string(message)),
+            ]),
+            message.into(),
+            false,
+        );
+        output.failed = true;
+        output
+    }
 }
 impl Prepared {
     pub fn execute(&self, workspace: &Workspace, budget: &Budget<'_>) -> Output {
         let result = match self {
             Self::Command { .. } => {
-                return Output::error(
-                    "commands require a prepared preview and an explicit controller approval",
-                );
+                return Output::error("commands must execute through the session controller");
             }
             Self::Create { .. } | Self::Edit { .. } => {
-                return Output::error(
-                    "file changes require a prepared diff and an explicit controller approval",
-                );
+                return Output::error("file changes must execute through the session controller");
             }
             Self::List { path, limit } => read::list(workspace, path, *limit, budget),
             Self::Read { path, start, lines } => {

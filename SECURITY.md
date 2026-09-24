@@ -13,7 +13,7 @@ running as your user, backups and disk access remain outside these protections.
 
 Authentication tokens never enter model requests, canonical transcripts or login
 error messages. A session can still contain sensitive text that you type, read or
-approve a command to produce. Keep this directory out of version control and do
+ask a command to produce. Keep this directory out of version control and do
 not share it as a diagnostic bundle.
 
 `--logout` removes Jecode's locally saved account access. It does not revoke the
@@ -22,20 +22,20 @@ can finish; later requests from another Jecode instance check saved account stat
 
 ## Tools
 
-Workspace tools validate arguments, paths and bounds. File changes require a
-preview and a matching approval; stale files are rejected and existing originals
-have a recovery copy. Historical tool calls are never executed on resume.
+Workspace tools validate arguments, paths and bounds. Valid model file changes
+and commands execute directly. File changes reject stale files and retain existing
+originals at a recovery path. Historical tool calls are never executed on resume.
 
 New workspace sessions default to the `local` file-access profile, which permits
 reads outside the starting directory. Dot paths, known credential names and links
 remain excluded; these checks do not detect secrets saved under arbitrary names.
 Choose `--access workspace` for bounded file tools. Neither profile sandboxes an
-approved shell. Resume retains the session's saved profile; older records retain
+shell. Resume retains the session's saved profile; older records retain
 their original workspace boundary.
 
-An approved shell runs with your user permissions. Its starting directory is not
-a sandbox: it can access other files or the network. Review the command before
-approving it. Cancellation stops owned processes and waits for cleanup, but cannot
+The shell runs with your user permissions. Its starting directory is not
+a sandbox: it can access other files or the network. Commands and their outcomes
+are visible in the terminal. Cancellation stops owned processes and waits for cleanup, but cannot
 undo effects that have already happened.
 
 A crash between an effect and its saved receipt leaves an unknown outcome. Inspect

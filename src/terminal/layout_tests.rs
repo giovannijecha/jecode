@@ -198,7 +198,7 @@ fn command_denied_before_output_has_one_gap_before_its_outcome() {
 }
 
 #[test]
-fn runtime_activity_is_above_the_composer_and_approval_stays_inside_at_small_sizes() {
+fn runtime_activity_is_above_the_composer_without_a_decision_surface() {
     let now = Instant::now();
     for prompt in ["/edit", "/command", "/tools"] {
         let mut model = Model::new(now);
@@ -211,8 +211,8 @@ fn runtime_activity_is_above_the_composer_and_approval_stays_inside_at_small_siz
             let rule = rows.iter().position(|r| r.text.starts_with('─')).unwrap();
             let bottom = rows.iter().rposition(|r| r.text.starts_with('─')).unwrap();
             assert_eq!(rows.len() - bottom - 1, 1, "{rows:?}");
+            assert!(rule > 0, "activity missing above input: {rows:?}");
             if prompt == "/tools" {
-                assert!(rule > 0, "activity missing above input: {rows:?}");
                 assert!(
                     rows[..rule]
                         .iter()
@@ -229,15 +229,21 @@ fn runtime_activity_is_above_the_composer_and_approval_stays_inside_at_small_siz
                         .any(|r| r.text.contains("Ask anything"))
                 );
             } else {
-                assert_eq!(
-                    rule, 0,
-                    "pending approval has no running activity: {rows:?}"
+                assert!(
+                    rows[..rule]
+                        .iter()
+                        .any(|r| r.text.contains(if prompt == "/edit" {
+                            "Updating file"
+                        } else {
+                            "Running command"
+                        }))
                 );
                 assert!(
                     rows[rule + 1..bottom]
                         .iter()
-                        .any(|r| r.text.contains("Enter confirm"))
+                        .any(|r| r.text.contains("Ask anything"))
                 );
+                assert!(!rows.iter().any(|r| r.text.contains("Enter confirm")));
             }
         }
     }
@@ -257,8 +263,6 @@ fn streaming_action_spacing_only_appends_content_before_the_boundary_gap() {
         rows
     };
     let mut previous = committed(layout.frame(&model, 100, 24));
-    model.input(super::Key::Right, now);
-    model.input(super::Key::Enter, now);
     for step in 0..=4 {
         model.tick(now + std::time::Duration::from_millis(650 * step));
         let next = committed(layout.frame(&model, 100, 24));

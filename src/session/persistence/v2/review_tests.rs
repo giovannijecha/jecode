@@ -178,7 +178,7 @@ fn controller_resume_commits_interruption_and_never_replays_old_receipts() {
     let finished = loop {
         match session::tests::next(&mut run) {
             Event::Finished(end, metrics) => break (end, metrics),
-            Event::EditProposed { .. } | Event::ToolStarted { .. } => {
+            Event::EditPlanned { .. } | Event::ToolStarted { .. } => {
                 panic!("historical tool was replayed")
             }
             _ => {}

@@ -38,6 +38,8 @@ pub(crate) trait Backend: Send {
 }
 #[derive(Default)]
 pub(super) struct Account(Option<client::Client>);
+#[cfg(test)]
+pub(crate) type EffectGate = Arc<dyn Fn(&str) + Send + Sync>;
 impl Backend for Account {
     fn login(
         &mut self,
@@ -79,9 +81,10 @@ pub(super) struct Context {
     pub events: SyncSender<Event>,
     pub cancelled: Arc<AtomicBool>,
     pub stopped: Arc<AtomicBool>,
-    pub decisions: Receiver<super::approval::Decision>,
     pub guidance: Arc<super::queue::Pending>,
-    pub next_approval: std::sync::atomic::AtomicU64,
+    pub next_effect: std::sync::atomic::AtomicU64,
+    #[cfg(test)]
+    pub effect_gate: Option<EffectGate>,
 }
 impl Context {
     pub(super) fn send(&self, event: Event, cancellable: bool) -> ControlFlow<()> {
@@ -127,6 +130,12 @@ impl Context {
             Err(Failure::Cancelled)
         } else {
             Ok(())
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn before_effect(&self, name: &str) {
+        if let Some(gate) = &self.effect_gate {
+            gate(name);
         }
     }
 }

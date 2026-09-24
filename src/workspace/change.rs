@@ -1,12 +1,9 @@
 //! Prepared content is immutable; large originals use owned, disposable snapshots.
 use super::{
     Budget, Error, MAX_FILE_BYTES, Workspace, diff, platform,
-    snapshot::{Original, OwnedFile, Snapshot, scan_match, snapshot, validate_replacement},
+    snapshot::{Original, Snapshot, scan_match, snapshot, validate_replacement},
 };
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::io;
 
 #[derive(Clone, Debug)]
 pub struct Preview {
@@ -18,8 +15,6 @@ pub struct Preview {
     pub removed: usize,
     pub omitted_lines: usize,
     pub omitted_bytes: usize,
-    /// An informational copy, available while this proposal awaits a decision.
-    pub full_diff_path: Option<String>,
 }
 #[derive(Debug)]
 pub struct ChangeError(pub String);
@@ -58,7 +53,6 @@ pub struct Change {
     pub(super) before: Option<Snapshot>,
     pub(super) after: After,
     pub(super) preview: Preview,
-    pub(super) _preview_file: Option<OwnedFile>,
 }
 impl Change {
     pub fn preview(&self) -> &Preview {
@@ -82,24 +76,13 @@ impl Workspace {
                 );
             }
         }
-        let directory = self.artifact_dir(&path);
-        let (preview, preview_file) = diff::preview(
-            &path,
-            None,
-            content,
-            diff::Destination {
-                parent: &parent.file,
-                directory: &directory,
-                security_source: None,
-            },
-        )?;
+        let preview = diff::preview(&path, None, content);
         budget.check()?;
         Ok(Change {
             parent: platform::identity(&parent.file)?,
             before: None,
             after: After::Complete(content.into()),
             preview,
-            _preview_file: preview_file,
         })
     }
     pub fn prepare_edit(
@@ -113,33 +96,23 @@ impl Workspace {
         let (path, parent, name) = self.change_parent(path, budget)?;
         let mut file = platform::edit_open(&parent.file, &name)?;
         platform::editable(&file)?;
-        let directory = self.artifact_dir(&path);
         let stage_result =
             file.metadata()?.len().saturating_add(new.len() as u64) > MAX_FILE_BYTES as u64;
-        let mut before = snapshot(&mut file, &parent.file, &directory, stage_result, budget)?;
+        let mut before = snapshot(&mut file, &parent.file, stage_result, budget)?;
         if old.is_empty() && before.len != 0 {
             return fail("empty old_text is only valid for an empty file");
         }
         if old == new {
             return fail("replacement makes no change");
         }
-        let (after, preview, preview_file) = match &mut before.original {
+        let (after, preview) = match &mut before.original {
             Original::Memory(text) => {
                 let at = unique_match(text, old)?;
                 let mut after = text.clone();
                 after.replace_range(at..at + old.len(), new);
                 validate_text(&after)?;
-                let (preview, file) = diff::preview(
-                    &path,
-                    Some(text),
-                    &after,
-                    diff::Destination {
-                        parent: &parent.file,
-                        directory: &directory,
-                        security_source: Some(&file),
-                    },
-                )?;
-                (After::Complete(after), preview, file)
+                let preview = diff::preview(&path, Some(text), &after);
+                (After::Complete(after), preview)
             }
             Original::Staged(staged) => {
                 let at = scan_match(&mut staged.file, old, budget)?;
@@ -151,17 +124,7 @@ impl Workspace {
                     new,
                     budget,
                 )?;
-                let (preview, file) = diff::replacement_preview(
-                    &path,
-                    at,
-                    old,
-                    new,
-                    diff::Destination {
-                        parent: &parent.file,
-                        directory: &directory,
-                        security_source: Some(&file),
-                    },
-                )?;
+                let preview = diff::replacement_preview(&path, at, old, new);
                 (
                     After::Replacement {
                         at,
@@ -169,7 +132,6 @@ impl Workspace {
                         new: new.into(),
                     },
                     preview,
-                    file,
                 )
             }
         };
@@ -179,17 +141,7 @@ impl Workspace {
             before: Some(before),
             after,
             preview,
-            _preview_file: preview_file,
         })
-    }
-    fn artifact_dir(&self, path: &str) -> PathBuf {
-        let target = Path::new(path);
-        let absolute = if target.is_absolute() {
-            target.to_path_buf()
-        } else {
-            self.display.join(target)
-        };
-        absolute.parent().unwrap_or(&self.display).to_path_buf()
     }
     pub(super) fn change_parent(
         &self,

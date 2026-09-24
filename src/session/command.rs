@@ -1,14 +1,16 @@
-//! One-use command approval, streamed observations and an exact canonical receipt.
-use super::{Event, Metrics, approval, worker::Context};
+//! Direct command execution, streamed observations and an exact canonical receipt.
+use super::{Event, worker::Context};
 use crate::{
     command,
     json::{self, Value},
     tools::Output,
     workspace::{Budget, Workspace},
 };
-use std::{sync::atomic::Ordering, time::Instant};
+use std::{
+    sync::atomic::Ordering,
+    time::{Duration, Instant},
+};
 
-#[allow(clippy::too_many_arguments)] // Mirrors one tool call, its scope and the turn owner.
 pub(super) fn execute(
     script: &str,
     path: &str,
@@ -16,13 +18,9 @@ pub(super) fn execute(
     shell: &command::Shell,
     workspace: &Workspace,
     context: &Context,
-    denied: &mut bool,
-    metrics: &mut Metrics,
 ) -> Output {
-    let id = context.next_approval.fetch_add(1, Ordering::Relaxed);
-    let (output, success) = dispatch(
-        id, script, path, timeout, shell, workspace, context, denied, metrics,
-    );
+    let id = context.next_effect.fetch_add(1, Ordering::Relaxed);
+    let (output, success) = dispatch(id, script, path, timeout, shell, workspace, context);
     let _ = context.send(
         Event::CommandFinished {
             id,
@@ -34,7 +32,7 @@ pub(super) fn execute(
     );
     output
 }
-#[allow(clippy::too_many_arguments)]
+
 fn dispatch(
     id: u64,
     script: &str,
@@ -43,90 +41,56 @@ fn dispatch(
     shell: &command::Shell,
     workspace: &Workspace,
     context: &Context,
-    denied: &mut bool,
-    metrics: &mut Metrics,
 ) -> (Output, bool) {
-    if *denied {
-        return (
-            Output::error(
-                "further effects are disabled after a denial; wait for a new user request",
-            ),
-            false,
-        );
-    }
     let budget = Budget {
         cancelled: &context.cancelled,
-        deadline: Instant::now() + std::time::Duration::from_secs(10),
+        deadline: Instant::now() + Duration::from_secs(10),
     };
     let proposal =
         match command::prepare_with_shell(workspace, script, path, timeout, shell, &budget) {
             Ok(proposal) => proposal,
-            Err(error) => return (Output::error(error), false),
+            Err(error) => return (Output::not_executed(error), false),
         };
-    while context.decisions.try_recv().is_ok() {}
-    if context
-        .send(
-            Event::CommandProposed {
-                id,
-                preview: proposal.preview.clone(),
-            },
-            true,
-        )
-        .is_break()
-    {
+    let planned = context.send(
+        Event::CommandPlanned {
+            id,
+            preview: proposal.preview.clone(),
+        },
+        true,
+    );
+    #[cfg(test)]
+    if planned.is_continue() {
+        context.before_effect("run_command");
+    }
+    if planned.is_break() || context.check().is_err() {
         return (
-            Output::error("command cancelled before approval; not executed"),
+            Output::not_executed("command cancelled before launch; not executed"),
             false,
         );
     }
-    match approval::wait(context, id, metrics) {
-        Ok(true) => {}
-        Ok(false) => {
-            *denied = true;
-            return (
-                Output::success(
-                    json::object([
-                        ("ok", Value::Bool(false)),
-                        ("status", Value::String("denied".into())),
-                        ("approved", Value::Bool(false)),
-                        ("executed", Value::Bool(false)),
-                    ]),
-                    "Denied · command not executed".into(),
-                    false,
-                ),
-                false,
-            );
-        }
-        Err(()) => {
-            return (
-                Output::error(
-                    "approval cancelled or decision channel closed; command not executed",
-                ),
-                false,
-            );
-        }
-    }
-    if context.send(Event::CommandStarted { id }, true).is_break() {
-        return (
-            Output::error("command cancelled before launch; not executed"),
-            false,
-        );
-    }
-    let output_deadline = Instant::now() + std::time::Duration::from_secs(timeout);
+    let output_deadline = Instant::now() + Duration::from_secs(timeout);
     let budget = Budget {
         cancelled: &context.cancelled,
         deadline: output_deadline,
     };
-    let result = command::run(proposal, workspace, &budget, &mut |channel, text| {
-        context.send_until(
-            Event::CommandOutput {
-                id,
-                channel,
-                text: text.into(),
-            },
-            output_deadline,
-        )
-    });
+    let result = command::run_with_start(
+        proposal,
+        workspace,
+        &budget,
+        &mut || {
+            let _ = context.send(Event::CommandStarted { id }, false);
+        },
+        &mut |channel, text| {
+            context.send_until(
+                Event::CommandOutput {
+                    id,
+                    channel,
+                    text: text.into(),
+                },
+                output_deadline,
+            )
+        },
+    );
     match result {
         Ok(result) => {
             let success = result.success();
@@ -136,7 +100,6 @@ fn dispatch(
                 json::object([
                     ("ok", Value::Bool(success)),
                     ("status", Value::String(result.stop.name().into())),
-                    ("approved", Value::Bool(true)),
                     ("executed", Value::Bool(true)),
                     (
                         "exit_code",
@@ -174,7 +137,7 @@ fn dispatch(
                         .map_or(String::new(), |code| format!(" (OS {code})"))
                 )
             };
-            (Output::error(&message), false)
+            (Output::not_executed(&message), false)
         }
     }
 }

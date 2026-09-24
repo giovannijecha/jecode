@@ -4,7 +4,6 @@ use super::{Budget, Error, MAX_FILE_BYTES, platform};
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::SystemTime,
 };
@@ -13,10 +12,9 @@ pub(super) struct OwnedFile {
     pub file: File,
     parent: File,
     name: String,
-    pub path: PathBuf,
 }
 impl OwnedFile {
-    pub fn create(parent: &File, directory: &Path, kind: &str) -> io::Result<Self> {
+    pub fn create(parent: &File, kind: &str) -> io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let owned_parent = parent.try_clone()?;
         for _ in 0..100 {
@@ -30,7 +28,6 @@ impl OwnedFile {
                     return Ok(Self {
                         file,
                         parent: owned_parent,
-                        path: directory.join(&name),
                         name,
                     });
                 }
@@ -59,7 +56,6 @@ pub(super) struct Snapshot {
 pub(super) fn snapshot(
     file: &mut File,
     parent: &File,
-    directory: &Path,
     stage_result: bool,
     budget: &Budget<'_>,
 ) -> Result<Snapshot, ChangeError> {
@@ -72,7 +68,7 @@ pub(super) fn snapshot(
     file.rewind()?;
     let staged = stage_result || before.len() > MAX_FILE_BYTES as u64;
     let mut original = if staged {
-        let staged = OwnedFile::create(parent, directory, "snapshot")?;
+        let staged = OwnedFile::create(parent, "snapshot")?;
         platform::metadata_to(file, &staged.file)?;
         Original::Staged(staged)
     } else {

@@ -143,6 +143,7 @@ pub struct Metrics {
     pub submissions: u32,
     pub tool_calls: u32,
     pub elapsed_ms: u64,
+    /// Retained for v1/v2 metric compatibility; direct execution leaves it zero.
     pub approval_wait_ms: u64,
     pub first_text_ms: Option<u64>,
     pub input_tokens: Option<u64>,
@@ -203,7 +204,7 @@ pub enum Event {
         failed: bool,
         limited: bool,
     },
-    EditProposed {
+    EditPlanned {
         id: u64,
         preview: crate::workspace::Preview,
     },
@@ -213,7 +214,7 @@ pub enum Event {
         applied: bool,
         failed: bool,
     },
-    CommandProposed {
+    CommandPlanned {
         id: u64,
         preview: crate::command::Preview,
     },
