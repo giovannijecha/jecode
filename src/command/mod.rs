@@ -174,6 +174,7 @@ pub(crate) fn prepare_with_shell(
 
 /// Consumes the prepared command after the controller's pre-effect checkpoint.
 /// The callback is bounded display output, not a raw terminal byte stream.
+#[cfg(any(test, windows))]
 pub(crate) fn run(
     proposal: Proposal,
     workspace: &Workspace,
