@@ -176,9 +176,15 @@ fn selected_pair_is_used_for_every_request_in_a_tool_loop() {
     drop(session);
 }
 fn finish(session: &mut Session) -> (End, Metrics, Vec<String>) {
+    finish_with(session, tests::next)
+}
+fn finish_with(
+    session: &mut Session,
+    mut next: impl FnMut(&mut Session) -> Event,
+) -> (End, Metrics, Vec<String>) {
     let mut events = Vec::new();
     loop {
-        match tests::next(session) {
+        match next(session) {
             Event::Text(text) => events.push(format!("text:{text}")),
             Event::Thinking => {}
             Event::RequestStarted => events.push("request".into()),
@@ -188,6 +194,21 @@ fn finish(session: &mut Session) -> (End, Metrics, Vec<String>) {
             Event::Finished(end, metrics) => return (end, metrics, events),
             _ => panic!("unexpected event"),
         }
+    }
+}
+fn next_large_batch(session: &mut Session) -> Event {
+    // This fixture serializes and checks several near-2-MiB requests in a
+    // debug build. Bound its wait independently of the small fixture helper.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        if let Some(event) = session.poll() {
+            return event;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "large batch worker did not produce an event"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 pub(super) fn outputs(request: &str) -> Vec<(String, Value)> {
@@ -624,7 +645,7 @@ fn large_completed_batch_is_compacted_as_bounded_reference_data() {
     .unwrap();
     assert!(matches!(tests::next(&mut session), Event::Ready));
     assert!(session.submit("Read every distinct part and verify all 100 markers"));
-    let (end, metrics, _) = finish(&mut session);
+    let (end, metrics, _) = finish_with(&mut session, next_large_batch);
     assert_eq!(end, End::Complete);
     assert_eq!(metrics.tool_calls, 100);
     let requests = requests.lock().unwrap();
