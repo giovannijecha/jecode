@@ -10,6 +10,8 @@
   on resume, and keep guidance cursors consistent at compaction checkpoints.
 - Traverse old turns beyond the transcript page budget through bounded,
   resumable canonical event slices.
+- Bound recent-prompt recall by encoded head size while preserving every
+  canonical prompt and the exact order of retained recall entries.
 
 ## 0.1.0-alpha.2 - 2026-09-22
 

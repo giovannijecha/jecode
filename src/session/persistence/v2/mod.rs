@@ -4,6 +4,8 @@
 //! Frame I/O, head encoding and replay have separate bounded modules.
 mod head;
 mod log;
+#[cfg(test)]
+mod recall_tests;
 mod replay;
 #[cfg(test)]
 mod review_tests;
@@ -349,7 +351,7 @@ pub(super) fn save(record: &Record, history: &History) -> io::Result<()> {
         )?;
     }
     file.sync_all()?;
-    let head_result = head::write(record, history, &next);
+    let head_result = head::write(record, history, &mut next);
     #[cfg(test)]
     let head_result = if next.fail_after_head_replace && head_result.is_ok() {
         Err(io::Error::other("injected failure after head replacement"))

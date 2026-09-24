@@ -23,6 +23,13 @@ decoding UTF-8 JSON. The cursor is tied to the committed head and rejects a
 changed log snapshot. The terminal restores the working suffix and indicates
 when earlier canonical history is on disk.
 
+The head also caches recent prompts for composer recall. It retains at most 64,
+then evicts the oldest as needed to fit the **encoded** 1 MiB head, including the
+title, projection and integrity field. Recall entries keep their exact text and
+order. Eviction changes only this cache; every submitted prompt remains in the
+canonical log and can be read through older-history traversal. Existing v2 heads
+use the same format and remain readable without conversion.
+
 One log event is bounded by 80 MiB of encoded JSON, derived from the existing
 bounded provider response and receipt sizes. The reader handles its bytes in
 64 KiB I/O chunks; it never loads a complete session snapshot. A submitted

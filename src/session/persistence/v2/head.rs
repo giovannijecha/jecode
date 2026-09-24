@@ -90,7 +90,7 @@ pub(super) fn projection(history: &History) -> Value {
     ])
 }
 
-pub(super) fn write(record: &Record, history: &History, tracker: &Tracker) -> io::Result<()> {
+pub(super) fn write(record: &Record, history: &History, tracker: &mut Tracker) -> io::Result<()> {
     let mut head = json::object([
         ("version", number(2)),
         ("verified", Value::Bool(tracker.verified)),
@@ -118,14 +118,33 @@ pub(super) fn write(record: &Record, history: &History, tracker: &Tracker) -> io
         ),
         ("projection", projection(history)),
     ]);
-    let integrity = super::log::fingerprint(&head)?;
-    if let Value::Object(fields) = &mut head {
-        fields.insert("integrity".into(), number(integrity));
+    loop {
+        // The actual encoded head includes the title, projection, paths and
+        // integrity field. A count bound alone cannot account for JSON escaping.
+        let integrity = super::log::fingerprint(&head)?;
+        let mut candidate = head.clone();
+        if let Value::Object(fields) = &mut candidate {
+            fields.insert("integrity".into(), number(integrity));
+        }
+        match json::encode(&candidate, HEAD_LIMIT) {
+            Ok(contents) => {
+                return record
+                    .store
+                    .replace(&format!("{}.head", record.id), &contents);
+            }
+            Err(json::Error::Limit) if !tracker.recent.is_empty() => {
+                tracker.recent.remove(0);
+                let Value::Object(fields) = &mut head else {
+                    return Err(invalid());
+                };
+                let Some(Value::Array(recent)) = fields.get_mut("recent") else {
+                    return Err(invalid());
+                };
+                recent.remove(0);
+            }
+            Err(_) => return Err(invalid()),
+        }
     }
-    let contents = json::encode(&head, HEAD_LIMIT).map_err(|_| invalid())?;
-    record
-        .store
-        .replace(&format!("{}.head", record.id), &contents)
 }
 
 pub(super) fn read(store: &Store, id: &str) -> io::Result<Info> {
