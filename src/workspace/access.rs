@@ -48,7 +48,7 @@ impl Workspace {
                 "Only forward-slash paths relative to this workspace are available; parent traversal and absolute paths are not allowed."
             }
             Access::Local => {
-                "Paths may be absolute or relative to this working directory, including parent directories. Ordinary local files outside it can be read directly. Each file change and command still requires approval. Dot paths and known credential names are excluded. Links and network paths are not supported. Generated directories are omitted from discovery; known files can be addressed directly."
+                "Paths may be absolute or relative to this working directory, including parent directories. Ordinary local files outside it can be addressed directly. File changes and commands execute directly. Dot paths and known credential names are excluded from file tools. Links and network paths are not supported. Generated directories are omitted from discovery; known files can be addressed directly."
             }
         };
         format!(

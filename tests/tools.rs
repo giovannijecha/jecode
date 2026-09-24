@@ -197,7 +197,7 @@ fn strict_arguments_and_schemas_cover_the_advertised_tools() {
 }
 
 #[test]
-fn direct_dispatch_cannot_bypass_preparation_and_approval() {
+fn direct_dispatch_cannot_bypass_the_ordered_session_controller() {
     let fixture = Fixture::new();
     fixture.write("file", "old");
     let workspace = Workspace::open(&fixture.0).unwrap();

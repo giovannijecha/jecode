@@ -351,7 +351,7 @@ fn default_powershell_rejects_bracketed_cwd_before_running() {
         );
         let error = result
             .err()
-            .expect("unsafe cwd must be rejected before approval");
+            .expect("unsafe cwd must be rejected before launch");
         assert!(error.contains("windows_powershell_executable"), "{error}");
         assert!(!files.0.join("child [1]/ran.txt").exists());
     }

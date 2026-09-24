@@ -37,8 +37,8 @@ fn unique(kind: &str) -> String {
     )
 }
 impl Workspace {
-    /// The controller calls this only after an explicit decision for this exact
-    /// owned Change. Consuming it prevents accidental double application.
+    /// The controller consumes this exact prepared Change once after its durable
+    /// pre-effect checkpoint. Consuming it prevents accidental double application.
     pub fn apply(&self, change: Change, budget: &Budget<'_>) -> Result<Applied, ChangeError> {
         self.apply_with(change, budget, || {})
     }

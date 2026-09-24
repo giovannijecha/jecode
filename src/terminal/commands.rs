@@ -343,7 +343,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             model.blocks.push(Block {
                 speaker: "Status",
                 text: format!(
-                    "{commands}\n\n↑↓ choose · Enter select · Tab complete\nEsc closes menus or stops work · Ctrl+Q exits after cleanup\nEnter queues guidance while a turn runs. Alt+↑ edits the latest pending message; Alt+↓ discards a recovered edit and restores the prior draft.\n\nDirectory: {location}\nAccess: {access}. Changes and commands require approval."
+                    "{commands}\n\n↑↓ choose · Enter select · Tab complete\nEsc closes menus or stops work · Ctrl+Q exits after cleanup\nEnter queues guidance while a turn runs. Alt+↑ edits the latest pending message; Alt+↓ discards a recovered edit and restores the prior draft.\n\nDirectory: {location}\nAccess: {access}. Changes and commands execute directly."
                 ),
             });
             model.menu.close();
@@ -367,6 +367,17 @@ mod tests {
     use super::*;
     use crate::session::{self, Event};
     use crate::terminal::{account, style::Tone, view};
+
+    #[test]
+    fn local_help_describes_the_same_direct_execution_as_cli() {
+        let mut session = session::tests::ready_fixture();
+        let mut model = account::model(session::Model::Luna, None);
+        account::event(&mut model, Event::Ready);
+        execute(&mut model, &mut session, Action::Help);
+        let help = &model.blocks.last().unwrap().text;
+        assert!(help.contains("Changes and commands execute directly"));
+        assert!(!help.contains("require approval"));
+    }
 
     #[test]
     fn rejected_compaction_keeps_draft_and_shows_local_model_notice() {

@@ -64,8 +64,8 @@ impl session::worker::Backend for Backend {
 }
 
 #[test]
-fn approved_external_work_survives_resume_and_denial_prevents_later_effects() {
-    for allow in [false, true] {
+fn direct_external_work_survives_resume_without_replay() {
+    {
         let home = crate::state::tests::Fixture::new();
         let Some(store) = home.store() else {
             return;
@@ -99,24 +99,16 @@ fn approved_external_work_survives_resume_and_denial_prevents_later_effects() {
         let mut commands = 0;
         loop {
             match session::command_tests::next(&mut run) {
-                Event::EditProposed { id, preview } => {
+                Event::EditPlanned { preview, .. } => {
                     edits += 1;
                     assert!(Path::new(&preview.path).is_absolute());
-                    assert_eq!(
-                        std::fs::read_to_string(files.0.join("b/file")).unwrap(),
-                        "old\n"
-                    );
-                    assert!(run.decide(id, allow));
                 }
-                Event::CommandProposed { id, preview } => {
-                    assert!(allow);
+                Event::CommandPlanned { preview, .. } => {
                     commands += 1;
                     assert_eq!(
                         Path::new(&preview.cwd).canonicalize().unwrap(),
                         files.0.join("b").canonicalize().unwrap()
                     );
-                    assert!(!files.0.join("b/command-result.txt").exists());
-                    assert!(run.decide(id, true));
                 }
                 Event::Finished(end, metrics) => {
                     assert_eq!(end, End::Complete);
@@ -127,12 +119,12 @@ fn approved_external_work_survives_resume_and_denial_prevents_later_effects() {
             }
         }
         assert_eq!(edits, 1);
-        assert_eq!(commands, usize::from(allow));
+        assert_eq!(commands, 1);
         assert_eq!(
             std::fs::read_to_string(files.0.join("b/file")).unwrap(),
-            if allow { "new\n" } else { "old\n" }
+            "new\n"
         );
-        assert_eq!(files.0.join("b/command-result.txt").exists(), allow);
+        assert!(files.0.join("b/command-result.txt").exists());
         assert!(!files.0.join("a/command-result.txt").exists());
         assert!(requests.lock().unwrap()[0].contains("File access: local"));
         drop(run);
@@ -162,7 +154,7 @@ fn approved_external_work_survives_resume_and_denial_prevents_later_effects() {
         loop {
             match session::tests::next(&mut run) {
                 Event::Finished(End::Complete, _) => break,
-                Event::EditProposed { .. } | Event::CommandProposed { .. } => {
+                Event::EditPlanned { .. } | Event::CommandPlanned { .. } => {
                     panic!("historical effect replayed")
                 }
                 _ => {}

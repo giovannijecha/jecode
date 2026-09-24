@@ -38,6 +38,8 @@ pub(crate) trait Backend: Send {
 }
 #[derive(Default)]
 pub(super) struct Account(Option<client::Client>);
+#[cfg(test)]
+pub(crate) type EffectGate = Arc<dyn Fn(&str) + Send + Sync>;
 impl Backend for Account {
     fn login(
         &mut self,
@@ -79,27 +81,23 @@ pub(super) struct Context {
     pub events: SyncSender<Event>,
     pub cancelled: Arc<AtomicBool>,
     pub stopped: Arc<AtomicBool>,
-    pub decisions: Receiver<super::approval::Decision>,
     pub guidance: Arc<super::queue::Pending>,
-    pub next_approval: std::sync::atomic::AtomicU64,
+    pub next_effect: std::sync::atomic::AtomicU64,
+    #[cfg(test)]
+    pub effect_gate: Option<EffectGate>,
 }
 impl Context {
     pub(super) fn send(&self, event: Event, cancellable: bool) -> ControlFlow<()> {
-        self.deliver(event, cancellable, None)
+        self.deliver(event, cancellable)
     }
-    pub(super) fn send_until(&self, event: Event, deadline: Instant) -> ControlFlow<()> {
-        self.deliver(event, true, Some(deadline))
+    /// Transient presentation must not stall a completed effect or a live process.
+    pub(super) fn notify(&self, event: Event) -> bool {
+        !self.stopped.load(Ordering::Acquire) && self.events.try_send(event).is_ok()
     }
-    fn deliver(
-        &self,
-        mut event: Event,
-        cancellable: bool,
-        deadline: Option<Instant>,
-    ) -> ControlFlow<()> {
+    fn deliver(&self, mut event: Event, cancellable: bool) -> ControlFlow<()> {
         loop {
             if self.stopped.load(Ordering::Acquire)
                 || cancellable && self.cancelled.load(Ordering::Acquire)
-                || deadline.is_some_and(|deadline| Instant::now() >= deadline)
             {
                 return ControlFlow::Break(());
             }
@@ -127,6 +125,12 @@ impl Context {
             Err(Failure::Cancelled)
         } else {
             Ok(())
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn before_effect(&self, name: &str) {
+        if let Some(gate) = &self.effect_gate {
+            gate(name);
         }
     }
 }

@@ -1,6 +1,5 @@
 //! A live command panel; output is data and can never become UI control sequences.
 use super::{
-    approval_view::{self, Kind},
     model::{Block, Model},
     spinner::Spinner,
     style::{Row, Tone},
@@ -17,8 +16,9 @@ pub(super) struct Run {
     line_open: bool,
     pub spinner: Spinner,
     pub stopping: bool,
+    running: bool,
 }
-pub(super) fn proposal(model: &mut Model, id: u64, preview: Preview) {
+pub(super) fn planned(model: &mut Model, id: u64, preview: Preview) {
     model.tools.close(&model.blocks, false, Instant::now());
     let block = model.blocks.len();
     let escaped = preview.command.contains('\t');
@@ -44,35 +44,43 @@ pub(super) fn proposal(model: &mut Model, id: u64, preview: Preview) {
             preview.cwd, preview.shell, preview.timeout_seconds
         ),
     });
-    approval_view::open(model, id, block, Kind::Command);
+    if let Some(view) = &mut model.account {
+        view.command = Some(Run {
+            id,
+            block,
+            started: Instant::now(),
+            spinner: Spinner::default(),
+            channel: None,
+            line_open: false,
+            stopping: false,
+            running: false,
+        });
+        view.notice = "Starting command".into();
+    }
 }
 pub(super) fn started(model: &mut Model, id: u64) {
     let Some(view) = &mut model.account else {
         return;
     };
-    if !view
-        .approval
-        .as_ref()
-        .is_some_and(|a| a.id == id && a.kind == Kind::Command)
-    {
+    let Some(run) = view.command.as_mut().filter(|run| run.id == id) else {
         return;
-    }
-    let approval = view.approval.take().unwrap();
+    };
     let started = Instant::now();
-    let mut spinner = Spinner::default();
-    spinner.reset(started);
-    view.command = Some(Run {
-        id,
-        block: approval.block,
-        started,
-        spinner,
-        channel: None,
-        line_open: false,
-        stopping: false,
-    });
+    run.started = started;
+    run.spinner.reset(started);
+    run.running = true;
     view.notice = "Running command".into();
 }
 pub(super) fn output(model: &mut Model, id: u64, channel: Channel, text: &str) {
+    if model
+        .account
+        .as_ref()
+        .and_then(|v| v.command.as_ref())
+        .is_some_and(|run| run.id == id && !run.running)
+    {
+        // An output event proves launch even if the transient start event was full.
+        started(model, id);
+    }
     let Some(run) = model
         .account
         .as_mut()
@@ -99,6 +107,7 @@ pub(super) fn output(model: &mut Model, id: u64, channel: Channel, text: &str) {
     }
 }
 pub(super) fn finished(model: &mut Model, id: u64, summary: String, success: bool, failed: bool) {
+    model.tools.close(&model.blocks, false, Instant::now());
     let Some(view) = &mut model.account else {
         return;
     };
@@ -113,13 +122,19 @@ pub(super) fn finished(model: &mut Model, id: u64, summary: String, success: boo
             .push_str(&format!("{} {summary}", if success { "✓" } else { "!" }));
         view.notice = "Processing command result".into();
     } else {
-        approval_view::finished(model, id, summary, success, failed);
+        model.blocks.push(Block {
+            speaker: if failed { "Error" } else { "Status" },
+            text: format!("{} {summary}", if success { "✓" } else { "!" }),
+        });
+        view.notice = "Processing command result".into();
     }
 }
 pub(super) fn active(run: &Run, width: usize, reduced: bool) -> Vec<Row> {
     let marker = run.spinner.marker(reduced);
     let state = if run.stopping {
         "Stopping command"
+    } else if !run.running {
+        "Starting command"
     } else {
         "Running command"
     };
@@ -134,9 +149,7 @@ pub(super) fn active(run: &Run, width: usize, reduced: bool) -> Vec<Row> {
 }
 pub(super) fn stop(model: &mut Model) {
     if let Some(run) = model.account.as_mut().and_then(|v| v.command.take()) {
-        model.blocks[run.block]
-            .text
-            .push_str("\n! Turn stopped before the command result was received");
+        model.blocks[run.block].text.push_str("\n! Turn stopped before the command result was received; inspect effects before repeating it");
     }
 }
 

@@ -5,7 +5,7 @@ the application, tests and build code use only the standard library and original
 code. Do not copy or vendor third-party implementations.
 
 Keep changes focused and modular. Separate rendering from effects. Preserve
-explicit approvals, cancellation, cleanup, workspace boundaries and canonical
+durable effect checkpoints, cancellation, cleanup, workspace boundaries and canonical
 history. Changes to persistence must not replay tools or silently reinterpret
 existing user data.
 

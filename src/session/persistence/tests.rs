@@ -277,6 +277,82 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
     assert!(!projection.contains("edit-1"));
 }
 
+#[test]
+fn historical_approval_and_denial_receipts_remain_exact_in_v1_and_v2() {
+    for legacy in [true, false] {
+        let fixture = crate::state::tests::Fixture::new();
+        let Some(store) = fixture.store() else { return };
+        let mut history = if legacy {
+            create(&store, Model::Luna, None).unwrap()
+        } else {
+            create_in(&store, Model::Luna, Some(&fixture.0), None).unwrap()
+        };
+        let id = history.record.as_ref().unwrap().id().to_owned();
+        history.begin("historical task".into()).unwrap();
+        let response = session::tool_tests::calls_response(vec![
+            session::tool_tests::call(
+                "old-approved",
+                "create_file",
+                r#"{"path":"approved.txt","content":"old"}"#,
+            ),
+            session::tool_tests::call(
+                "old-denied",
+                "edit_file",
+                r#"{"path":"denied.txt","old_text":"old","new_text":"new"}"#,
+            ),
+        ]);
+        let approved = r#"{"ok":true,"status":"applied","approved":true,"path":"approved.txt"}"#;
+        let denied = r#"{"ok":false,"status":"denied","approved":false,"path":"denied.txt"}"#;
+        history.turns[0].steps.push(Step {
+            response: Some(response),
+            accepted: true,
+            results: vec![
+                Receipt {
+                    call_id: "old-approved".into(),
+                    output: approved.into(),
+                    summary: "Created approved.txt".into(),
+                },
+                Receipt {
+                    call_id: "old-denied".into(),
+                    output: denied.into(),
+                    summary: "Denied · no file changed".into(),
+                },
+            ],
+            ..Default::default()
+        });
+        history.turns[0].end = Some(End::Complete);
+        history.turns[0].outcome = "Complete".into();
+        history.checkpoint().unwrap();
+        drop(history);
+        let saved = load(&store, &id, true).unwrap();
+        assert_eq!(saved.history.turns[0].steps[0].results[0].output, approved);
+        assert_eq!(saved.history.turns[0].steps[0].results[1].output, denied);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut run =
+            Session::with_history(Model::Luna, Backend(seen.clone()), None, saved.history).unwrap();
+        assert!(matches!(
+            session::tests::next(&mut run),
+            Event::Restored { .. }
+        ));
+        assert!(matches!(session::tests::next(&mut run), Event::Ready));
+        assert!(seen.lock().unwrap().is_empty());
+        assert!(run.submit("report the recorded result"));
+        loop {
+            match session::tests::next(&mut run) {
+                Event::Finished(End::Complete, _) => break,
+                Event::EditPlanned { .. }
+                | Event::CommandPlanned { .. }
+                | Event::CommandStarted { .. } => panic!("historical effect replayed"),
+                _ => {}
+            }
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(seen.lock().unwrap()[0].contains("denied"));
+        assert!(!fixture.0.join("approved.txt").exists());
+        assert!(!fixture.0.join("denied.txt").exists());
+    }
+}
+
 #[path = "recovery_tests.rs"]
 mod recovery_tests;
 
@@ -338,7 +414,7 @@ fn interrupted_effect_stays_unknown_and_invalid_snapshot_is_not_repaired() {
 }
 
 #[test]
-fn failed_checkpoint_stops_before_an_approved_effect_can_be_requested() {
+fn failed_checkpoint_stops_before_an_effect_can_execute() {
     struct Broken {
         file: PathBuf,
     }
@@ -598,10 +674,8 @@ fn controller_checkpoints_large_create_and_resume_never_replays_it() {
     let mut applied = false;
     loop {
         match session::tests::next(&mut run) {
-            Event::EditProposed { id, preview } => {
+            Event::EditPlanned { preview, .. } => {
                 assert!(preview.omitted_lines > 0);
-                assert!(std::path::Path::new(preview.full_diff_path.as_ref().unwrap()).exists());
-                assert!(run.decide(id, true));
             }
             Event::EditFinished { applied: yes, .. } => applied = yes,
             Event::Finished(End::Complete, _) => break,

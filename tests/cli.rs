@@ -15,11 +15,10 @@ fn public_information_works_without_a_terminal() {
     let help = command(&["--help"]);
     assert!(help.status.success());
     assert!(help.stderr.is_empty());
-    assert!(
-        String::from_utf8(help.stdout)
-            .unwrap()
-            .contains("~/.jecode/v1/")
-    );
+    let help = String::from_utf8(help.stdout).unwrap();
+    assert!(help.contains("~/.jecode/v1/"));
+    assert!(help.contains("File changes and commands execute directly"));
+    assert!(!help.contains("require approval"));
     let version = command(&["--version"]);
     assert!(version.status.success());
     assert_eq!(

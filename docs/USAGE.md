@@ -30,7 +30,7 @@ The legacy `--account` entry still uses no file tools unless `--workspace` is su
 
 With a workspace, new sessions use the `local` file-access profile: the selected
 directory is the base for relative paths, and tools may also address external local
-paths. Reads need no extra approval; each change and command still requires it.
+paths. Valid file changes and commands execute directly, with visible outcomes.
 `--access workspace` selects bounded access for one new session. `--access local`
 explicitly selects the default. With bare `jecode`, the current directory is used.
 
@@ -172,7 +172,7 @@ releasing the current conversation; the current worker is then joined before
 the new conversation accepts input.
 
 Only one instance can own a saved session at a time. Its saved directory must
-still be available. No historical tool or pending approval is replayed.
+still be available. No historical tool is replayed.
 The session retains its file-access profile even if the user default changes.
 Older session JSON without `file_access` keeps the original `workspace` profile.
 Existing workspace sessions use their saved workspace as the directory association
@@ -228,7 +228,7 @@ editable and never send automatically.
 During generation Enter queues guidance; up to eight messages can wait for
 delivery. Short previews appear inside the composer. Guidance is inserted at a
 boundary between model/tool steps. If a turn has just finished, it starts the
-next turn. It never grants an approval.
+next turn. It does not interrupt the ordered execution of a current effect.
 
 Alt+Up withdraws the newest message that is still pending and puts it in the
 editor. Edit it and press Enter to submit it through the normal path. A message

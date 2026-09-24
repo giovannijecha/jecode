@@ -368,18 +368,29 @@ fn failed_pre_and_post_effect_commits_stop_later_effects_and_resume_as_unknown()
         assert!(matches!(session::tests::next(&mut run), Event::Ready));
         assert!(run.submit("make two files"));
         let mut proposals = 0;
+        let mut completions = Vec::new();
         loop {
             match session::tests::next(&mut run) {
-                Event::EditProposed { id, .. } => {
+                Event::EditPlanned { .. } => {
                     proposals += 1;
-                    assert!(run.decide(id, true));
                 }
+                Event::EditFinished {
+                    applied, failed, ..
+                } => completions.push((applied, failed)),
                 Event::Finished(End::Failed(Failure::Storage), _) => break,
-                Event::EditFinished { .. } | Event::Text(_) => {}
+                Event::Text(_) => {}
                 _ => panic!("unexpected event before storage failure"),
             }
         }
         assert_eq!(proposals, expected_proposals);
+        assert_eq!(
+            completions,
+            if expected_proposals == 1 {
+                vec![(true, false)]
+            } else {
+                Vec::new()
+            }
+        );
         assert!(!run.submit("later work"));
         drop(run);
         assert_eq!(

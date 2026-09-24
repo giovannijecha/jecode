@@ -90,24 +90,27 @@ fn above_composer(screen: &str, text: &str) {
 
 fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mut usize) {
     console.input.write_all(b"/edit\r").unwrap();
-    let screen = wait_for(directory, counter, "Apply this change?");
+    let screen = wait_for(directory, counter, "Simulated edit complete");
     assert!(screen.contains("-       2"), "{screen}");
     assert!(screen.contains("+       3"), "{screen}");
-    assert!(screen.contains("› Deny"), "{screen}");
+    assert!(!screen.contains("Enter confirm"), "{screen}");
     gap_before(&screen, "pub fn retry_limit");
     for width in [50, 100, 60, 120] {
         console.resize(width, 36);
         std::thread::sleep(Duration::from_millis(150));
         let screen = snapshot(directory, counter);
-        assert_eq!(screen.matches("Apply this change?").count(), 1, "{screen}");
+        assert_eq!(
+            screen.matches("Simulated edit complete").count(),
+            1,
+            "{screen}"
+        );
         assert_eq!(
             screen.matches("Edit src/settings.rs").count(),
             1,
             "{screen}"
         );
     }
-    console.input.write_all(b"\x1b[C\r").unwrap();
-    let screen = wait_for(directory, counter, "Simulated edit complete");
+    let screen = snapshot(directory, counter);
     assert_eq!(
         screen.matches("Edit src/settings.rs").count(),
         1,
@@ -115,8 +118,6 @@ fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mu
     );
     assert!(!screen.contains("Enter confirm"), "{screen}");
     console.input.write_all(b"/command-error\r").unwrap();
-    wait_for(directory, counter, "Run this command?");
-    console.input.write_all(b"\x1b[C\r").unwrap();
     let screen = wait_for(directory, counter, "running 2 tests");
     above_composer(&screen, "Running command");
     assert!(!screen.contains("Simulated command complete"), "{screen}");
@@ -136,9 +137,7 @@ fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mu
     gap_before(&screen, "! Simulated command complete");
     assert!(!screen.contains("Running command"), "{screen}");
     console.input.write_all(b"/command\r").unwrap();
-    wait_for(directory, counter, "Run this command?");
-    console.input.write_all(b"\r").unwrap();
-    let screen = wait_for(directory, counter, "Denied");
+    let screen = wait_for(directory, counter, "exit 0 · 2 passed");
     assert!(!screen.contains("Enter confirm"), "{screen}");
     assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
 }

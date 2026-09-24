@@ -1,7 +1,7 @@
 //! One ordered conversation owner with durable local history. Presentation never owns effects.
-mod approval;
 mod command;
 mod context;
+mod edit;
 mod generation;
 mod history;
 pub mod persistence;
@@ -58,8 +58,6 @@ pub struct Session {
     worker: Option<JoinHandle<()>>,
     phase: Phase,
     turns: usize,
-    decisions: SyncSender<approval::Decision>,
-    pending_approval: Option<u64>,
     guidance: Arc<queue::Pending>,
     queued: usize,
     catalog: Option<crate::providers::openai_account::catalog::Catalog>,
@@ -198,7 +196,6 @@ impl Session {
         // A pending prompt and a logout must both fit while the worker is cancelling.
         let (command_tx, command_rx) = mpsc::sync_channel(2);
         let (event_tx, event_rx) = mpsc::sync_channel(64);
-        let (decision_tx, decision_rx) = mpsc::sync_channel(1);
         let guidance = Arc::new(queue::Pending::default());
         let cancelled = Arc::new(AtomicBool::new(false));
         let stopped = Arc::new(AtomicBool::new(false));
@@ -206,9 +203,10 @@ impl Session {
             events: event_tx,
             cancelled: Arc::clone(&cancelled),
             stopped: Arc::clone(&stopped),
-            decisions: decision_rx,
             guidance: Arc::clone(&guidance),
-            next_approval: std::sync::atomic::AtomicU64::new(1),
+            next_effect: std::sync::atomic::AtomicU64::new(1),
+            #[cfg(test)]
+            effect_gate: history.effect_gate.clone(),
         };
         let worker = thread::Builder::new()
             .name("jecode-account".into())
@@ -221,8 +219,6 @@ impl Session {
             worker: Some(worker),
             phase: Phase::Login,
             turns,
-            decisions: decision_tx,
-            pending_approval: None,
             guidance,
             queued: 0,
             catalog: None,
@@ -387,25 +383,6 @@ impl Session {
                 .as_ref()
                 .is_some_and(|tx| tx.try_send(command).is_ok())
     }
-    /// A decision applies to exactly one proposal received from this session.
-    /// Stale, duplicated, unsolicited and cancelled decisions are rejected.
-    pub fn decide(&mut self, id: u64, allow: bool) -> bool {
-        if self.phase != Phase::Generating
-            || self.pending_approval != Some(id)
-            || self.cancelled.load(Ordering::Acquire)
-        {
-            return false;
-        }
-        if self
-            .decisions
-            .try_send(approval::Decision { id, allow })
-            .is_err()
-        {
-            return false;
-        }
-        self.pending_approval = None;
-        true
-    }
     pub fn poll(&mut self) -> Option<Event> {
         match self.events.try_recv() {
             Ok(event) => {
@@ -420,18 +397,7 @@ impl Session {
                     Event::CatalogLoaded(catalog) => self.catalog = Some(catalog.clone()),
                     Event::CatalogFailed(_) => self.catalog = None,
                     Event::ModelChanged(selected) => self.selected = *selected,
-                    Event::LoggedOut => {
-                        self.catalog = None;
-                        self.pending_approval = None;
-                    }
-                    Event::EditProposed { id, .. } | Event::CommandProposed { id, .. } => {
-                        self.pending_approval = Some(*id)
-                    }
-                    Event::EditFinished { .. }
-                    | Event::CommandFinished { .. }
-                    | Event::Finished(..)
-                    | Event::LoginFailed(_)
-                    | Event::LogoutFailed(..) => self.pending_approval = None,
+                    Event::LoggedOut => self.catalog = None,
                     _ => {}
                 }
                 self.phase = match &event {
@@ -474,6 +440,8 @@ mod account_tests;
 pub(crate) mod command_tests;
 #[cfg(test)]
 pub(crate) mod edit_tests;
+#[cfg(all(test, any(windows, target_os = "linux")))]
+pub(crate) mod outcome_backpressure_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

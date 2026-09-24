@@ -1,5 +1,4 @@
-//! Inert edit/command presentations. Decisions only advance this local script.
-//! This module owns no filesystem, process, provider or real approval capability.
+//! Inert direct edit/command presentations with no filesystem or process effects.
 use super::{Key, model::Block, spinner::Spinner};
 use std::time::{Duration, Instant};
 
@@ -11,13 +10,11 @@ pub enum Kind {
 }
 #[derive(PartialEq)]
 enum Phase {
-    Approval,
     Running,
     Done,
 }
 pub struct Demo {
     pub kind: Kind,
-    pub allow: bool,
     pub spinner: Spinner,
     phase: Phase,
     block: usize,
@@ -46,20 +43,18 @@ impl Demo {
                 text: "  Run command\n  $ cargo test --lib\n  cwd: demo-project".into(),
             }
         });
+        let mut spinner = Spinner::default();
+        spinner.reset(now);
         Some(Self {
             kind,
-            allow: false,
-            spinner: Spinner::default(),
-            phase: Phase::Approval,
+            spinner,
+            phase: Phase::Running,
             block,
             started: now,
             observed: now,
-            next: now,
+            next: now + Duration::from_millis(650),
             step: 0,
         })
-    }
-    pub fn pending(&self) -> bool {
-        self.phase == Phase::Approval
     }
     pub fn done(&self) -> bool {
         self.phase == Phase::Done
@@ -67,32 +62,10 @@ impl Demo {
     pub fn elapsed(&self) -> Duration {
         self.observed.saturating_duration_since(self.started)
     }
-    /// Approval takes focus; text/paste cannot choose or authorize anything.
     /// During the simulated run normal editor keys remain available to the draft.
-    pub fn input(&mut self, key: &Key, blocks: &mut [Block], now: Instant) -> bool {
+    pub fn input(&mut self, key: &Key, blocks: &mut [Block], _now: Instant) -> bool {
         if matches!(key, Key::Quit) {
             return false;
-        }
-        if self.pending() {
-            match key {
-                Key::Left => self.allow = false,
-                Key::Right => self.allow = true,
-                Key::Enter if self.allow => {
-                    self.phase = Phase::Running;
-                    self.started = now;
-                    self.observed = now;
-                    self.next = now + Duration::from_millis(650);
-                    self.spinner.reset(now);
-                    blocks[self.block]
-                        .text
-                        .push_str("\n  Approved once · local preview");
-                }
-                Key::Enter | Key::Escape | Key::Interrupt => {
-                    self.end(blocks, "· Denied · nothing executed or changed");
-                }
-                _ => {}
-            }
-            return true;
         }
         if matches!(key, Key::Escape | Key::Interrupt) {
             self.end(blocks, "! Preview interrupted · partial output retained");

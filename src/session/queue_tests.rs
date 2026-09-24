@@ -239,14 +239,13 @@ fn failed_guidance_checkpoint_returns_claim_without_persisting_it() {
     let pending = Arc::new(super::Pending::default());
     assert!(pending.push("keep this guidance"));
     let (events, received) = mpsc::sync_channel(8);
-    let (_decisions, decisions) = mpsc::sync_channel(1);
     let context = crate::session::worker::Context {
         events,
         cancelled: Arc::new(AtomicBool::new(false)),
         stopped: Arc::new(AtomicBool::new(false)),
-        decisions,
         guidance: pending.clone(),
-        next_approval: std::sync::atomic::AtomicU64::new(1),
+        next_effect: std::sync::atomic::AtomicU64::new(1),
+        effect_gate: None,
     };
     assert_eq!(super::take(&mut history, &context), Err(Failure::Storage));
     assert!(
