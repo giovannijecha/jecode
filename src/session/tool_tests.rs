@@ -488,3 +488,166 @@ fn refused_or_orphaned_tool_items_never_enter_the_projection() {
             .all(|item| matches!(item, Input::User(_)))
     );
 }
+#[test]
+fn large_completed_batch_is_compacted_as_bounded_reference_data() {
+    use std::collections::BTreeSet;
+    struct LargeBatch {
+        requests: Arc<Mutex<Vec<(bool, String)>>>,
+        seen: BTreeSet<String>,
+        generation: usize,
+    }
+    impl worker::Backend for LargeBatch {
+        fn login(
+            &mut self,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        ) -> Result<(), client::Error> {
+            Ok(())
+        }
+        fn generate(
+            &mut self,
+            request: &Request,
+            budget: &Budget<'_>,
+            _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+        ) -> Result<Response, client::Error> {
+            budget.check()?;
+            let encoded = request.encode(history::MAX_CONTEXT)?;
+            let summary = request.instructions.starts_with("Summarize");
+            self.requests
+                .lock()
+                .unwrap()
+                .push((summary, encoded.clone()));
+            if summary {
+                assert!(request.tools.is_empty());
+                let value = json::parse(&encoded, Default::default()).unwrap();
+                let input = value.get("input").and_then(Value::array).unwrap();
+                assert!(input.iter().all(|item| item.get("type").and_then(Value::text) != Some("function_call")));
+                assert!(
+                    input
+                        .iter()
+                        .all(|item| item.get("type").and_then(Value::text)
+                            != Some("function_call_output"))
+                );
+                for item in &request.input {
+                    if let Input::User(data) = item
+                        && data.starts_with("Completed step record ")
+                    {
+                        let record =
+                            json::parse(data.split_once('\n').unwrap().1, Default::default())
+                                .unwrap();
+                        if record.get("kind").and_then(Value::text)
+                            == Some("response_item_and_receipt")
+                            && record.get("call_id").and_then(Value::text).is_some()
+                        {
+                            let call_id = record.get("call_id").and_then(Value::text).unwrap();
+                            let n: usize = call_id.strip_prefix("read-").unwrap().parse().unwrap();
+                            assert!(n < 100);
+                            assert_eq!(
+                                record.get("call_name").and_then(Value::text),
+                                Some("read_file")
+                            );
+                            assert_eq!(
+                                record.get("receipt_call_id").and_then(Value::text),
+                                Some(call_id)
+                            );
+                            assert_eq!(
+                                record
+                                    .get("parsed_arguments")
+                                    .and_then(|v| v.get("path"))
+                                    .and_then(Value::text),
+                                Some(format!("part-{n:03}.txt").as_str())
+                            );
+                            let marker = format!("MARKER-{n:03}");
+                            assert!(
+                                record
+                                    .get("receipt_output")
+                                    .and_then(Value::text)
+                                    .unwrap()
+                                    .contains(&marker)
+                            );
+                            assert!(
+                                self.seen.insert(marker),
+                                "duplicate canonical result in summary slices"
+                            );
+                        }
+                    }
+                }
+                return Ok(tests::response(
+                    &format!(
+                        "Completed read results: {}",
+                        self.seen.iter().cloned().collect::<Vec<_>>().join(" ")
+                    ),
+                    Status::Completed,
+                ));
+            }
+            self.generation += 1;
+            if self.generation == 1 {
+                let calls = (0..100)
+                    .map(|n| {
+                        call(
+                            &format!("read-{n:03}"),
+                            "read_file",
+                            &format!(r#"{{"path":"part-{n:03}.txt"}}"#),
+                        )
+                    })
+                    .collect();
+                return Ok(calls_response(calls));
+            }
+            assert_eq!(self.seen.len(), 100, "summary omitted completed results");
+            for n in 0..100 {
+                assert!(encoded.contains(&format!("MARKER-{n:03}")));
+            }
+            Ok(tests::response(
+                "Verified all 100 completed reads.",
+                Status::Completed,
+            ))
+        }
+    }
+    let files = support::Fixture::new();
+    for n in 0..100 {
+        files.write(
+            &format!("part-{n:03}.txt"),
+            format!("MARKER-{n:03}{}\n", "\t".repeat(8000)),
+        );
+    }
+    let workspace = Workspace::open(&files.0).unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mut session = Session::with_backend(
+        Model::Luna,
+        LargeBatch {
+            requests: requests.clone(),
+            seen: BTreeSet::new(),
+            generation: 0,
+        },
+        Some(workspace),
+    )
+    .unwrap();
+    assert!(matches!(tests::next(&mut session), Event::Ready));
+    assert!(session.submit("Read every distinct part and verify all 100 markers"));
+    let (end, metrics, _) = finish(&mut session);
+    assert_eq!(end, End::Complete);
+    assert_eq!(metrics.tool_calls, 100);
+    let requests = requests.lock().unwrap();
+    let compactions = requests.iter().filter(|(summary, _)| *summary).count();
+    assert!(compactions >= 2);
+    assert_eq!(metrics.requests as usize, requests.len());
+    assert_eq!(requests.iter().filter(|(summary, _)| !summary).count(), 2);
+    assert!(
+        requests
+            .iter()
+            .all(|(_, encoded)| encoded.len() <= history::MAX_CONTEXT)
+    );
+    eprintln!(
+        "large batch fixture: requests={} tools={} compactions={} max_projected_bytes={}",
+        metrics.requests,
+        metrics.tool_calls,
+        compactions,
+        requests
+            .iter()
+            .map(|(_, encoded)| encoded.len())
+            .max()
+            .unwrap()
+    );
+    drop(requests);
+    drop(session);
+}

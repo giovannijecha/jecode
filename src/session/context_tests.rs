@@ -69,6 +69,43 @@ fn history() -> History {
     }
     history
 }
+#[test]
+fn uncompactable_empty_turn_does_not_loop() {
+    let mut history = History::default();
+    history.begin("original".into()).unwrap();
+    history.turns[0].prompt = "x".repeat(MAX_CONTEXT);
+    history.turns[0].end = Some(End::Complete);
+    history.turns[0].outcome = "Complete".into();
+    history.begin("next action".into()).unwrap();
+    let (events, _received) = std::sync::mpsc::sync_channel(8);
+    let (_decisions, decisions) = std::sync::mpsc::sync_channel(1);
+    let context = Context {
+        events,
+        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        decisions,
+        guidance: Arc::new(crate::session::queue::Pending::default()),
+        next_approval: std::sync::atomic::AtomicU64::new(1),
+    };
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mut backend = Summarizer {
+        requests: observed.clone(),
+        fail: false,
+        catalog: None,
+    };
+    assert_eq!(
+        ensure(
+            &mut backend,
+            &mut history,
+            &context,
+            Model::Luna,
+            false,
+            &mut Metrics::default()
+        ),
+        Err(Failure::HistoryLimit)
+    );
+    assert!(observed.lock().unwrap().is_empty());
+}
 fn finish(session: &mut Session) -> End {
     loop {
         match tests::next(session) {

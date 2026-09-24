@@ -281,9 +281,11 @@ within that task; `/compact` requests a new explicit attempt.
 Compaction checkpoints only the model-facing projection. Canonical turns, tool
 arguments and exact receipts stay saved and are not replayed on resume. A summary
 can lose detail; restate critical requirements if needed. The account request
-encoder accepts at most 2 MiB of JSON and 4,096 input items. A single indivisible
-completed step or current input that cannot fit a bounded summary request may stop
-with a context error. These are byte and item bounds, not a claimed model token
-capacity. Provider token counts are reported separately when available. The
-16 MiB session snapshot and 256-turn limits remain separate storage boundaries;
+encoder accepts at most 2 MiB of JSON and 4,096 input items. A large completed
+step can be summarized in ordered reference-data slices. If one call and its
+receipt cannot fit together in a bounded summary request, or current input
+cannot fit, Jecode stops with a context error. These are byte and item bounds,
+not a claimed model token capacity. Provider token counts are reported
+separately when available. The 16 MiB session snapshot and 256-turn limits
+remain separate storage boundaries;
 larger canonical storage needs a separate format and migration workstream.

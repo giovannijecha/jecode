@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[derive(Clone)]
 pub(super) struct Projection {
     pub through: usize,
     pub step: usize,
@@ -20,6 +21,7 @@ pub(super) struct Projection {
     pub limit_bytes: usize,
     pub failed: bool,
     pub failed_reason: Option<Failure>,
+    pub pending: Option<partial::Pending>,
 }
 impl Default for Projection {
     fn default() -> Self {
@@ -30,9 +32,12 @@ impl Default for Projection {
             limit_bytes: 512 * 1024,
             failed: false,
             failed_reason: None,
+            pending: None,
         }
     }
 }
+#[path = "context_partial.rs"]
+pub(super) mod partial;
 #[cfg(test)]
 #[path = "context_tests.rs"]
 mod tests;
@@ -118,7 +123,9 @@ pub(super) fn ensure(
 ) -> Result<(), Failure> {
     loop {
         let size = request_bytes(history, model, workspace);
-        if size.is_some_and(|n| n <= history.projection.limit_bytes) {
+        if history.projection.pending.is_none()
+            && size.is_some_and(|n| n <= history.projection.limit_bytes)
+        {
             return Ok(());
         }
         if history.projection.failed {
@@ -133,14 +140,26 @@ pub(super) fn ensure(
             );
         }
         let candidate = next(history, history.projection.through, history.projection.step);
-        if candidate.is_none_or(|cursor| {
-            summary_request(history, model, cursor)
-                .encode(MAX_CONTEXT)
-                .is_err()
-        }) {
+        if history.projection.pending.is_none() && candidate.is_none() {
             return size.map_or(Err(Failure::HistoryLimit), |_| Ok(()));
         }
+        let before = (
+            history.projection.through,
+            history.projection.step,
+            history.projection.summary.clone(),
+            history.projection.pending.is_some(),
+        );
         compact(backend, history, context, model, workspace, metrics)?;
+        if before
+            == (
+                history.projection.through,
+                history.projection.step,
+                history.projection.summary.clone(),
+                history.projection.pending.is_some(),
+            )
+        {
+            return size.map_or(Err(Failure::HistoryLimit), |_| Ok(()));
+        }
     }
 }
 
@@ -181,7 +200,7 @@ pub(super) fn valid_cursor(history: &History) -> bool {
         };
         cursor = candidate;
     }
-    cursor == target
+    cursor == target && partial::valid_pending(history)
 }
 
 fn segment(history: &History, to: (usize, usize)) -> Vec<Input> {
@@ -291,6 +310,9 @@ pub(super) fn compact(
     metrics: &mut Metrics,
 ) -> Result<(), Failure> {
     context.check()?;
+    if history.projection.pending.is_some() {
+        return partial::compact(backend, history, context, model, workspace, metrics);
+    }
     let start = (history.projection.through, history.projection.step);
     // The encoder's 2 MiB wire bound is not a claimed model token capacity.
     let budget = MAX_CONTEXT;
@@ -305,6 +327,15 @@ pub(super) fn compact(
         cursor = candidate;
     }
     if cursor == start {
+        if history
+            .turns
+            .get(start.0)
+            .and_then(|turn| turn.steps.get(start.1))
+            .is_some()
+            && next(history, start.0, start.1) == Some((start.0, start.1 + 1))
+        {
+            return partial::compact(backend, history, context, model, workspace, metrics);
+        }
         if request_bytes(history, model, workspace).is_some() {
             let _ = context.send(
                 Event::ContextReport("No completed context fits a bounded summary request".into()),
@@ -370,6 +401,7 @@ pub(super) fn compact(
             limit_bytes,
             failed: false,
             failed_reason: None,
+            pending: None,
         },
     );
     let reduced = match (original, measured_bytes(history, model, workspace)) {

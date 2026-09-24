@@ -3,6 +3,8 @@
 mod access_tests;
 mod codec;
 #[cfg(all(test, any(windows, target_os = "linux")))]
+mod partial_tests;
+#[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 mod transcript;
 use super::{Model, history::History, scope::Directory};
@@ -89,6 +91,20 @@ impl Record {
                         Value::Number(history.projection.limit_bytes.to_string()),
                     ),
                     ("failed", Value::Bool(history.projection.failed)),
+                    (
+                        "pending",
+                        history
+                            .projection
+                            .pending
+                            .as_ref()
+                            .map_or(Value::Null, |pending| {
+                                json::object([
+                                    ("record", Value::Number(pending.record.to_string())),
+                                    ("offset", Value::Number(pending.offset.to_string())),
+                                    ("summary", text(&pending.summary)),
+                                ])
+                            }),
+                    ),
                 ]),
             ),
         ];
@@ -273,9 +289,6 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
     {
         return Err(invalid());
     }
-    if projection.get("step").is_some() && !super::context::valid_cursor(&history) {
-        return Err(invalid());
-    }
     history.projection.summary = string(projection, "summary", 32768)?.into();
     if (history.projection.through == 0 && history.projection.step == 0)
         != history.projection.summary.is_empty()
@@ -291,6 +304,25 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
         Some(Value::Bool(failed)) => *failed,
         _ => return Err(invalid()),
     };
+    history.projection.pending = match projection.get("pending") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(super::context::partial::Pending {
+            record: value
+                .get("record")
+                .and_then(Value::unsigned)
+                .and_then(|n| n.try_into().ok())
+                .ok_or_else(invalid)?,
+            offset: value
+                .get("offset")
+                .and_then(Value::unsigned)
+                .and_then(|n| n.try_into().ok())
+                .ok_or_else(invalid)?,
+            summary: string(value, "summary", 32768)?.into(),
+        }),
+    };
+    if projection.get("step").is_some() && !super::context::valid_cursor(&history) {
+        return Err(invalid());
+    }
     if let Some(lock) = lock {
         if let Some(turn) = history.turns.last_mut()
             && turn.end.is_none()
