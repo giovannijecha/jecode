@@ -22,6 +22,7 @@ struct Fixture {
     mode: Mode,
     requests: Arc<Mutex<Vec<String>>>,
     round: usize,
+    deadline_min: Option<std::time::Instant>,
 }
 impl worker::Backend for Fixture {
     fn login(
@@ -37,6 +38,12 @@ impl worker::Backend for Fixture {
         budget: &Budget<'_>,
         progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, client::Error> {
+        if let Some(minimum) = self.deadline_min {
+            assert!(
+                budget.deadline >= minimum,
+                "generation inherited the old task deadline"
+            );
+        }
         budget.check()?;
         let mut requests = self.requests.lock().unwrap();
         requests.push(request.encode(2 * 1024 * 1024)?);
@@ -133,6 +140,7 @@ fn start(mode: Mode, enabled: bool) -> (Session, Arc<Mutex<Vec<String>>>, suppor
             mode,
             requests: Arc::clone(&requests),
             round: 0,
+            deadline_min: None,
         },
         workspace,
     )
@@ -332,6 +340,7 @@ fn first_turn_compacts_repeatedly_after_former_accumulated_text_limit() {
             mode: Mode::Pressure,
             requests: Arc::clone(&requests),
             round: 0,
+            deadline_min: None,
         },
         Some(workspace),
         history,
@@ -402,19 +411,16 @@ fn old_task_age_does_not_expire_later_operation_deadlines() {
     };
     let mut history = history::History::default();
     history.begin("Task older than ten minutes".into()).unwrap();
+    let started = std::time::Instant::now();
+    let later = started + std::time::Duration::from_secs(700);
     let mut backend = Fixture {
         mode: Mode::Batch,
         requests: Arc::new(Mutex::new(Vec::new())),
         round: 0,
+        deadline_min: Some(later + std::time::Duration::from_secs(600)),
     };
     let mut metrics = Metrics::default();
-    let started = std::time::Instant::now();
-    let later = started + std::time::Duration::from_secs(700);
-    assert!(
-        worker::operation_deadline(later, std::time::Duration::from_secs(600))
-            > started + std::time::Duration::from_secs(600)
-    );
-    assert!(worker::operation_deadline(later, std::time::Duration::from_secs(10)) > later);
+    let clock_calls = std::cell::Cell::new(0);
     assert_eq!(
         tool_loop::run(
             &mut backend,
@@ -423,11 +429,16 @@ fn old_task_age_does_not_expire_later_operation_deadlines() {
             Model::Luna,
             Some(&workspace),
             started,
+            || {
+                clock_calls.set(clock_calls.get() + 1);
+                later
+            },
             &mut metrics
         ),
         Ok(End::Complete)
     );
     assert_eq!((metrics.requests, metrics.tool_calls), (2, 4));
+    assert_eq!(clock_calls.get(), 6); // Two generations and four reads.
     drop(workspace);
 }
 

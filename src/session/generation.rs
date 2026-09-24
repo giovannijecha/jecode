@@ -20,6 +20,7 @@ pub(super) fn generate(
     turn: &mut Turn,
     context: &Context,
     started: Instant,
+    clock: &impl Fn() -> Instant,
     metrics: &mut Metrics,
 ) -> Result<(), Failure> {
     context.check()?;
@@ -31,7 +32,7 @@ pub(super) fn generate(
     let result = backend.generate(
         request,
         &Budget {
-            deadline: operation_deadline(Instant::now(), Duration::from_secs(600)),
+            deadline: operation_deadline(clock(), Duration::from_secs(600)),
             cancelled: &context.cancelled,
         },
         &mut |progress| {

@@ -291,6 +291,7 @@ pub(super) fn run(
                     model,
                     workspace.as_ref(),
                     started,
+                    Instant::now,
                     &mut metrics,
                 )
             });

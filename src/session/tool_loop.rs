@@ -11,6 +11,7 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
+#[allow(clippy::too_many_arguments)] // One task loop; the injected clock keeps deadline tests deterministic.
 pub(super) fn run(
     backend: &mut impl Backend,
     history: &mut History,
@@ -18,6 +19,7 @@ pub(super) fn run(
     model: Model,
     workspace: Option<&Workspace>,
     started: Instant,
+    clock: impl Fn() -> Instant,
     metrics: &mut Metrics,
 ) -> Result<End, Failure> {
     let mut denied = false;
@@ -37,7 +39,8 @@ pub(super) fn run(
             return Err(Failure::Cancelled);
         }
         let turn = history.turns.last_mut().ok_or(Failure::Worker)?;
-        let result = generation::generate(backend, &request, turn, context, started, metrics);
+        let result =
+            generation::generate(backend, &request, turn, context, started, &clock, metrics);
         history.checkpoint()?;
         result?;
         let turn = history.turns.last_mut().ok_or(Failure::Worker)?;
@@ -56,7 +59,7 @@ pub(super) fn run(
         }
         context.check()?;
         let workspace = workspace.ok_or(Failure::UnexpectedTools)?;
-        execute(history, workspace, context, metrics, &mut denied)?;
+        execute(history, workspace, context, &clock, metrics, &mut denied)?;
     }
 }
 
@@ -64,6 +67,7 @@ fn execute(
     history: &mut History,
     workspace: &Workspace,
     context: &Context,
+    clock: &impl Fn() -> Instant,
     metrics: &mut Metrics,
     denied: &mut bool,
 ) -> Result<(), Failure> {
@@ -120,7 +124,7 @@ fn execute(
                 workspace,
                 &Budget {
                     cancelled: &context.cancelled,
-                    deadline: operation_deadline(Instant::now(), Duration::from_secs(10)),
+                    deadline: operation_deadline(clock(), Duration::from_secs(10)),
                 },
             ),
             Err(error) => Output::error(error),
