@@ -2,7 +2,7 @@
 use super::{
     Event, Failure, Metrics,
     history::{MAX_TEXT, Receipt, Step, Turn},
-    worker::{Backend, Context, failure, millis},
+    worker::{Backend, Context, failure, millis, operation_deadline},
 };
 use crate::{
     providers::openai_account::{Progress, Request},
@@ -31,7 +31,7 @@ pub(super) fn generate(
     let result = backend.generate(
         request,
         &Budget {
-            deadline: Instant::now() + Duration::from_secs(600),
+            deadline: operation_deadline(Instant::now(), Duration::from_secs(600)),
             cancelled: &context.cancelled,
         },
         &mut |progress| {

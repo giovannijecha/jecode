@@ -408,7 +408,13 @@ fn old_task_age_does_not_expire_later_operation_deadlines() {
         round: 0,
     };
     let mut metrics = Metrics::default();
-    let started = std::time::Instant::now() - std::time::Duration::from_secs(700);
+    let started = std::time::Instant::now();
+    let later = started + std::time::Duration::from_secs(700);
+    assert!(
+        worker::operation_deadline(later, std::time::Duration::from_secs(600))
+            > started + std::time::Duration::from_secs(600)
+    );
+    assert!(worker::operation_deadline(later, std::time::Duration::from_secs(10)) > later);
     assert_eq!(
         tool_loop::run(
             &mut backend,

@@ -2,7 +2,7 @@
 use super::{
     End, Event, Failure, Metrics, Model, generation,
     history::{History, Step},
-    worker::{Backend, Context},
+    worker::{Backend, Context, operation_deadline},
 };
 use crate::{
     providers::openai_account::Status,
@@ -120,7 +120,7 @@ fn execute(
                 workspace,
                 &Budget {
                     cancelled: &context.cancelled,
-                    deadline: Instant::now() + Duration::from_secs(10),
+                    deadline: operation_deadline(Instant::now(), Duration::from_secs(10)),
                 },
             ),
             Err(error) => Output::error(error),
