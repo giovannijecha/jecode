@@ -100,6 +100,10 @@ fn large_old_turn_traverses_exact_ordered_event_slices_with_a_resumable_cursor()
         if cursor.is_none() {
             break;
         }
+        if pages == 1 {
+            drop(saved);
+            saved = super::super::load(&store, &id, true).unwrap();
+        }
     }
     eprintln!(
         "large turn traversal: events={} bytes={covered} pages={pages}",
