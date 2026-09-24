@@ -35,8 +35,11 @@ paired tool results. Partial output is not invented as a completed model respons
 Resume loads facts and waits for new user input. Context compaction stores a
 separate summary and cutoff without removing canonical turns.
 
-Persistence is ordinary JSON, bounded and versioned, with atomic replacement and
-OS file leases. Credentials use a separate file and never enter session encoding.
+Persistence uses bounded versioned records and OS file leases. New sessions append
+canonical events to a log and atomically replace a small committed head. v1 JSON
+snapshots remain readable and require explicit verified import for v2 continuation.
+See [session recovery](SESSIONS.md) for commit and native durability boundaries.
+Credentials use a separate file and never enter session encoding.
 The refresh lease covers loading and replacement, not model generation. Concurrent
 instances reload account state before each model request.
 

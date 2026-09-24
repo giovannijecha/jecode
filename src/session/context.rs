@@ -56,7 +56,7 @@ fn request_bytes(history: &History, model: Model, workspace: bool) -> Option<usi
 fn measured_bytes(history: &History, model: Model, workspace: bool) -> Option<usize> {
     history
         .projected_request(model, workspace)
-        .encode(16 * 1024 * 1024)
+        .encode(80 * 1024 * 1024)
         .ok()
         .map(|s| s.len())
 }
@@ -79,7 +79,7 @@ fn projected_weight(history: &History) -> Option<(usize, usize)> {
             Input::Assistant(output) => {
                 items = items.checked_add(output.len())?;
                 bytes = bytes.checked_add(
-                    crate::json::encode(&crate::json::Value::Array(output), 16 * 1024 * 1024)
+                    crate::json::encode(&crate::json::Value::Array(output), 80 * 1024 * 1024)
                         .ok()?
                         .len(),
                 )?;
@@ -92,9 +92,13 @@ pub(super) fn report(history: &History, model: Model, workspace: bool) -> String
     let bytes = request_bytes(history, model, workspace);
     let mut message = format!(
         "Context / {} canonical turns / {} turns and {} steps summarized\nRequest JSON: {} bytes / compaction threshold: {} bytes",
-        history.turns.len(),
-        history.projection.through,
-        history.projection.step,
+        history.turn_count(),
+        history.base_turn + history.projection.through,
+        if history.projection.through == 0 {
+            history.base_step + history.projection.step
+        } else {
+            history.projection.step
+        },
         bytes.map_or("over limit".into(), |n| n.to_string()),
         history.projection.limit_bytes
     );
@@ -482,6 +486,7 @@ pub(super) fn compact(
         history.projection = old;
         return Err(Failure::Storage);
     }
+    history.release_projected();
     let _ = context.send(
         Event::ContextReport(format!(
             "Compacted through turn {} step {} / summary {} bytes / canonical history retained",

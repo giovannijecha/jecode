@@ -1,4 +1,6 @@
-//! Plain versioned session snapshots. A lease prevents two owners of one conversation.
+//! Versioned user-scoped session storage. A lease prevents two owners.
+//! The v1 snapshot reader/writer stays here to preserve its exact existing
+//! contract; v2's incremental transactions live in their own module.
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod access_tests;
 mod codec;
@@ -7,17 +9,20 @@ mod partial_tests;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 mod transcript;
+mod v2;
 use super::{Model, history::History, scope::Directory};
 use crate::{
     json::{self, Value},
     state::{Lease, Store},
     workspace::{Access, Workspace},
 };
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::BTreeMap,
     io,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::{Mutex, atomic::AtomicBool},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 const LIMIT: usize = 16 * 1024 * 1024;
@@ -48,6 +53,31 @@ pub struct Saved {
     pub turns: usize,
     pub(super) history: History,
 }
+impl Saved {
+    /// Read an older transcript page without loading the complete session.
+    /// A page is at most 16 turns and 80 MiB of encoded canonical events.
+    pub fn transcript_page(
+        &self,
+        start: usize,
+        count: usize,
+    ) -> io::Result<Vec<super::TranscriptItem>> {
+        let end = start
+            .checked_add(count)
+            .filter(|end| *end <= self.turns && count <= 16)
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        if let Some(record) = &self.history.record
+            && !record.legacy()
+        {
+            return Ok(transcript::turn_items(&v2::page(record, start, count)?));
+        }
+        let turns = self
+            .history
+            .turns
+            .get(start..end)
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        Ok(transcript::turn_items(turns))
+    }
+}
 pub(super) struct Record {
     store: Store,
     id: String,
@@ -57,13 +87,25 @@ pub(super) struct Record {
     access: Access,
     created: u64,
     extra: BTreeMap<String, Value>,
+    incremental: Option<Mutex<v2::Tracker>>,
     _lock: Lease,
 }
 impl Record {
     pub(super) fn id(&self) -> &str {
         &self.id
     }
+    pub(super) fn legacy(&self) -> bool {
+        self.incremental.is_none()
+    }
+    pub(super) fn recent_prompts(&self) -> Option<Vec<String>> {
+        self.incremental
+            .as_ref()
+            .and_then(|tracker| tracker.lock().ok().map(|state| state.recent.clone()))
+    }
     pub(super) fn save(&self, history: &History) -> io::Result<()> {
+        if self.incremental.is_some() {
+            return v2::save(self, history);
+        }
         let mut fields = vec![
             ("version", Value::Number("1".into())),
             ("id", text(&self.id)),
@@ -139,9 +181,18 @@ pub(super) fn create(
     model: Model,
     workspace: Option<&Workspace>,
 ) -> io::Result<History> {
-    create_in(store, model, workspace.map(Workspace::path), workspace)
+    create_legacy_in(store, model, workspace.map(Workspace::path), workspace)
 }
 pub(super) fn create_in(
+    store: &Store,
+    model: Model,
+    directory: Option<&Path>,
+    workspace: Option<&Workspace>,
+) -> io::Result<History> {
+    v2::create(store, model, directory, workspace)
+}
+#[cfg(test)]
+fn create_legacy_in(
     store: &Store,
     model: Model,
     directory: Option<&Path>,
@@ -170,6 +221,7 @@ pub(super) fn create_in(
         model,
         created,
         extra: BTreeMap::new(),
+        incremental: None,
         _lock: lock,
         workspace: workspace
             .map(|workspace| {
@@ -196,6 +248,71 @@ pub(super) fn create_in(
 pub fn resume_in(id: &str, directory: &Directory) -> io::Result<Saved> {
     resume_in_store(&Store::user()?, id, directory)
 }
+/// Explicit v1 to v2 conversion. The source remains byte-for-byte unchanged.
+pub fn import_session_in(id: &str, directory: &Directory) -> io::Result<String> {
+    import_in_store(&Store::user()?, id, directory)
+}
+fn import_in_store(root: &Store, id: &str, directory: &Directory) -> io::Result<String> {
+    if !valid_id(id) {
+        return Err(invalid());
+    }
+    let legacy_store = root.directory("sessions")?;
+    let _lease = legacy_store.lock(
+        &format!("{id}.lock"),
+        &AtomicBool::new(false),
+        Instant::now(),
+    )?;
+    let name = format!("{id}.json");
+    let before = legacy_store
+        .read(&name, LIMIT)?
+        .ok_or(io::ErrorKind::NotFound)?;
+    let source = load_legacy(root, id, false)?;
+    directory.require(source.directory.as_deref())?;
+    let workspace = source
+        .workspace
+        .as_deref()
+        .map(Workspace::open)
+        .transpose()
+        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "saved workspace is unavailable"))?
+        .map(|workspace| workspace.with_access(source.access));
+    if workspace
+        .as_ref()
+        .is_some_and(|w| !directory.contains(w.path()))
+    {
+        return Err(invalid());
+    }
+    let canonical = codec::encode(&source.history);
+    let mut imported = v2::create_unverified(
+        root,
+        source.model,
+        Some(directory.path()),
+        workspace.as_ref(),
+    )?;
+    let new_id = imported
+        .record
+        .as_ref()
+        .ok_or_else(invalid)?
+        .id()
+        .to_owned();
+    imported.turns = codec::decode(&canonical)?.turns;
+    imported.projection = source.history.projection.clone();
+    imported
+        .checkpoint()
+        .map_err(|_| io::Error::other("cannot commit imported canonical history"))?;
+    v2::verify_import(
+        root,
+        &new_id,
+        &source,
+        &canonical,
+        directory.path(),
+        workspace.as_ref().map(Workspace::path),
+    )?;
+    if legacy_store.read(&name, LIMIT)?.as_deref() != Some(before.as_str()) {
+        return Err(io::Error::other("v1 source changed during import"));
+    }
+    v2::mark_verified(&imported)?;
+    Ok(new_id)
+}
 fn resume_in_store(store: &Store, id: &str, directory: &Directory) -> io::Result<Saved> {
     // Diagnose a foreign directory before attempting its single-owner lease.
     let overview = load(store, id, false)?;
@@ -208,6 +325,12 @@ fn resume_in_store(store: &Store, id: &str, directory: &Directory) -> io::Result
 }
 
 fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
+    if v2::has_head(store, id)? {
+        return v2::load(store, id, leased);
+    }
+    load_legacy(store, id, leased)
+}
+fn load_legacy(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
     if !valid_id(id) {
         return Err(invalid());
     }
@@ -388,6 +511,7 @@ fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
                     .collect(),
                 _ => return Err(invalid()),
             },
+            incremental: None,
             access,
             _lock: lock,
         });
@@ -428,17 +552,22 @@ fn list_in_store(root: &Store, directory: &Directory) -> io::Result<Vec<Listed>>
             let modified = std::fs::symlink_metadata(store.root().join(&name))
                 .and_then(|m| m.modified())
                 .unwrap_or(UNIX_EPOCH);
-            (modified, name)
+            (modified, name.trim_end_matches(".json").to_owned(), false)
         })
         .collect();
+    names.extend(
+        v2::listed(root)?
+            .into_iter()
+            .map(|(modified, id)| (modified, id, true)),
+    );
     names.sort_by(|a, b| b.cmp(a));
     let mut sessions = Vec::new();
-    for (modified, name) in names {
-        if let Some(id) = name.strip_suffix(".json")
-            && valid_id(id)
-        {
-            let saved = match load(root, id, false) {
-                Ok(saved) => Listed {
+    for (modified, id, incremental) in names {
+        if valid_id(&id) {
+            let overview = if incremental {
+                v2::overview(root, &id, modified)
+            } else {
+                load_legacy(root, &id, false).map(|saved| Listed {
                     id: saved.id,
                     model: Some(saved.model),
                     title: saved.title,
@@ -446,9 +575,20 @@ fn list_in_store(root: &Store, directory: &Directory) -> io::Result<Vec<Listed>>
                     workspace: saved.workspace,
                     directory: saved.directory,
                     modified,
+                })
+            };
+            let saved = match overview {
+                Ok(saved) => Listed {
+                    id: saved.id,
+                    model: saved.model,
+                    title: saved.title,
+                    turns: saved.turns,
+                    workspace: saved.workspace,
+                    directory: saved.directory,
+                    modified,
                 },
                 Err(_) => Listed {
-                    id: id.into(),
+                    id: id.clone(),
                     model: None,
                     title: "Unreadable session / file kept on disk".into(),
                     turns: 0,

@@ -5,7 +5,6 @@ use crate::{
     tools,
 };
 
-pub(super) const MAX_TURNS: usize = 256;
 pub(super) const MAX_TEXT: usize = 1024 * 1024;
 pub(super) const MAX_CONTEXT: usize = 2 * 1024 * 1024;
 
@@ -49,6 +48,11 @@ pub(super) struct Turn {
 #[derive(Default)]
 pub(super) struct History {
     pub turns: Vec<Turn>,
+    /// Number of canonical turns kept only in the incremental log.
+    pub base_turn: usize,
+    /// Completed steps of the first resident turn retained only in the log.
+    pub base_step: usize,
+    pub base_guidance: usize,
     pub record: Option<super::persistence::Record>,
     pub projection: super::context::Projection,
     /// Derived from the active workspace; not a second canonical permissions store.
@@ -56,10 +60,17 @@ pub(super) struct History {
     pub shell: crate::command::Shell,
     #[cfg(test)]
     pub fail_next_checkpoint: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub checkpoint_calls: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub fail_checkpoint_from: std::sync::atomic::AtomicUsize,
 }
 impl History {
     pub fn begin(&mut self, prompt: String) -> Result<(), Failure> {
-        if self.turns.len() >= MAX_TURNS || prompt.len() > super::MAX_PROMPT_BYTES {
+        if prompt.len() > super::MAX_PROMPT_BYTES
+            || self.record.as_ref().is_some_and(|record| record.legacy())
+                && self.turn_count() >= 256
+        {
             return Err(Failure::HistoryLimit);
         }
         self.turns.push(Turn {
@@ -72,13 +83,53 @@ impl History {
         });
         Ok(())
     }
+    pub fn turn_count(&self) -> usize {
+        self.base_turn + self.turns.len()
+    }
+    /// Release canonical turns already covered by a durable projection. Their
+    /// bytes remain in the log and can be visited in bounded pages.
+    pub fn release_projected(&mut self) {
+        if self.record.as_ref().is_none_or(|record| record.legacy()) {
+            return;
+        }
+        let count = self.projection.through.min(self.turns.len());
+        self.turns.drain(..count);
+        self.base_turn += count;
+        self.projection.through -= count;
+        if count != 0 {
+            self.base_step = 0;
+            self.base_guidance = 0;
+        }
+        if let Some(turn) = self.turns.first_mut() {
+            let steps = self.projection.step.min(turn.steps.len());
+            turn.steps.drain(..steps);
+            let prior_guidance = turn.guidance.len();
+            turn.guidance.retain(|g| g.after_step >= steps);
+            self.base_guidance += prior_guidance - turn.guidance.len();
+            for guidance in &mut turn.guidance {
+                guidance.after_step -= steps;
+            }
+            self.base_step += steps;
+            self.projection.step -= steps;
+        }
+    }
     pub fn checkpoint(&self) -> Result<(), Failure> {
         #[cfg(test)]
-        if self
-            .fail_next_checkpoint
-            .swap(false, std::sync::atomic::Ordering::AcqRel)
         {
-            return Err(Failure::Storage);
+            let number = self
+                .checkpoint_calls
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+                + 1;
+            let from = self
+                .fail_checkpoint_from
+                .load(std::sync::atomic::Ordering::Acquire);
+            if self
+                .fail_next_checkpoint
+                .swap(false, std::sync::atomic::Ordering::AcqRel)
+                || from != 0 && number >= from
+            {
+                return Err(Failure::Storage);
+            }
         }
         if let Some(record) = &self.record {
             record.save(self).map_err(|_| Failure::Storage)?;

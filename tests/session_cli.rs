@@ -179,3 +179,56 @@ fn session_cards_are_ordered_readable_and_browsing_is_non_mutating() {
     );
     assert_eq!(std::fs::read(legacy_path).unwrap(), legacy_before);
 }
+
+#[test]
+fn explicit_import_command_preserves_v1_file_and_lists_verified_copy() {
+    let home = fixture::Fixture::new();
+    if let Err(error) = sessions::populate(&home.0) {
+        assert!(
+            cfg!(target_os = "linux")
+                && home.0.starts_with("/mnt/c/")
+                && error.kind() == std::io::ErrorKind::Unsupported
+        );
+        return;
+    }
+    let path = home
+        .0
+        .join(".jecode/v1/sessions")
+        .join(format!("{}.json", sessions::NEWER));
+    let before = std::fs::read(&path).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jecode"))
+        .arg("--workspace")
+        .arg(&home.0)
+        .arg("import-session")
+        .arg(sessions::NEWER)
+        .env("USERPROFILE", &home.0)
+        .env("HOME", &home.0)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let message = String::from_utf8(output.stdout).unwrap();
+    let id = message
+        .trim()
+        .strip_prefix("Verified incremental session: ")
+        .unwrap();
+    assert!(id.starts_with("s-") && id != sessions::NEWER);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let listing = Command::new(env!("CARGO_BIN_EXE_jecode"))
+        .arg("--workspace")
+        .arg(&home.0)
+        .arg("sessions")
+        .env("USERPROFILE", &home.0)
+        .env("HOME", &home.0)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(listing.status.success());
+    let listing = String::from_utf8(listing.stdout).unwrap();
+    assert!(listing.contains(id));
+    assert!(listing.contains(sessions::NEWER));
+}

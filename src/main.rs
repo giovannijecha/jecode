@@ -6,13 +6,14 @@ use std::{
     process::ExitCode,
 };
 
-const HELP: &str = "Jecode — owned coding harness\n\nUsage: jecode [--workspace PATH] [--model MODEL] [--effort LEVEL] [--access local|workspace]\n       jecode [--workspace PATH] resume [SESSION_ID]\n       jecode [--workspace PATH] sessions\n       jecode chat | login | logout\n\n  jecode        Start in the current directory with your saved account\n  login         Sign in without creating a conversation; Esc or Ctrl+C cancels\n  logout        Remove Jecode's locally saved account access\n  resume        Choose a saved conversation in this directory, or reopen SESSION_ID\n  sessions      List conversations in this directory\n  chat          Start a conversation without file tools, associated with this directory\n\n  --workspace PATH  Select another directory (also for chat, sessions and resume)\n  --model MODEL     Account model identifier for this new conversation\n  --effort LEVEL    Reasoning effort, or default to omit the provider field\n  --access PROFILE  local (default) or workspace, for file-tool sessions\n  --demo            Offline terminal preview\n  -h, --help        Show this help\n  -V, --version     Show the native version\n\nInside Jecode, type / for local commands including /login and /logout.\nFile changes and commands require approval. Commands run with your user permissions.\nCredentials, settings and sessions use ordinary JSON in ~/.jecode/v1/.\nResume never changes directories or replays historical tools.\nLegacy --account, --resume, --sessions and --logout remain supported.\n";
+const HELP: &str = "Jecode — owned coding harness\n\nUsage: jecode [--workspace PATH] [--model MODEL] [--effort LEVEL] [--access local|workspace]\n       jecode [--workspace PATH] resume [SESSION_ID]\n       jecode [--workspace PATH] sessions\n       jecode [--workspace PATH] import-session V1_SESSION_ID\n       jecode chat | login | logout\n\n  jecode        Start in the current directory with your saved account\n  login         Sign in without creating a conversation; Esc or Ctrl+C cancels\n  logout        Remove Jecode's locally saved account access\n  resume        Choose a saved conversation in this directory, or reopen SESSION_ID\n  sessions      List conversations in this directory\n  import-session  Verify a separate incremental copy of a v1 session in this directory\n  chat          Start a conversation without file tools, associated with this directory\n\n  --workspace PATH  Select another directory (also for chat, sessions, resume and import)\n  --model MODEL     Account model identifier for this new conversation\n  --effort LEVEL    Reasoning effort, or default to omit the provider field\n  --access PROFILE  local (default) or workspace, for file-tool sessions\n  --demo            Offline terminal preview\n  -h, --help        Show this help\n  -V, --version     Show the native version\n\nInside Jecode, type / for local commands including /login and /logout.\nFile changes and commands require approval. Commands run with your user permissions.\nCredentials and settings use ordinary JSON in ~/.jecode/v1/. Sessions use versioned storage there.\nResume never changes directories or replays historical tools.\nLegacy --account, --resume, --sessions and --logout remain supported.\n";
 
 enum Operation {
     Start,
     Chat,
     LegacyAccount,
     Resume(Option<String>),
+    Import(Option<String>),
     Sessions,
     Login,
     Logout,
@@ -61,6 +62,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
             "resume" | "--resume" if operation.is_none() => {
                 operation = Some(Operation::Resume(None))
             }
+            "import-session" if operation.is_none() => operation = Some(Operation::Import(None)),
             "sessions" | "--sessions" if operation.is_none() => {
                 operation = Some(Operation::Sessions)
             }
@@ -73,6 +75,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
             "--version" | "-V" if operation.is_none() => operation = Some(Operation::Version),
             value if !value.starts_with('-') => match &mut operation {
                 Some(Operation::Resume(id @ None)) => *id = Some(value.into()),
+                Some(Operation::Import(id @ None)) => *id = Some(value.into()),
                 _ => return None,
             },
             _ => return None,
@@ -163,6 +166,33 @@ fn run(args: impl Iterator<Item = OsString>) -> io::Result<u8> {
                 jecode::terminal::configured_account(model, effort, directory, tools, access),
                 "cannot start a session; check ~/.jecode/v1/settings.json and private user-directory permissions",
             )
+        }
+        Operation::Import(id) => {
+            if model.is_some() || effort.is_some() || access.is_some() {
+                return diagnostic(
+                    "import-session uses the saved model, effort and access profile",
+                );
+            }
+            let Some(id) = id else {
+                return diagnostic("import-session requires a v1 session ID");
+            };
+            let directory = match selected_directory(workspace.as_deref()) {
+                Ok(directory) => directory,
+                Err(_) => return diagnostic("cannot open the selected working directory"),
+            };
+            match jecode::session::persistence::import_session_in(&id, &directory) {
+                Ok(new_id) => {
+                    writeln!(
+                        io::stdout().lock(),
+                        "Verified incremental session: {new_id}"
+                    )?;
+                    Ok(0)
+                }
+                Err(error) => {
+                    writeln!(io::stderr().lock(), "jecode: {error}")?;
+                    Ok(2)
+                }
+            }
         }
         Operation::Sessions | Operation::Resume(_) => {
             if matches!(operation, Operation::Resume(_)) && (model.is_some() || effort.is_some()) {

@@ -7,91 +7,85 @@ use crate::session::{
 };
 
 pub(super) fn encode(history: &History) -> Value {
-    Value::Array(
-        history
-            .turns
-            .iter()
-            .map(|turn| {
-                json::object([
-                    ("prompt", text(&turn.prompt)),
-                    ("outcome", text(&turn.outcome)),
-                    (
-                        "end",
-                        text(match turn.end {
-                            None => "active",
-                            Some(End::Complete) => "complete",
-                            Some(End::Incomplete) => "incomplete",
-                            Some(End::Refused) => "refused",
-                            Some(End::Failed(_)) => "failed",
-                        }),
-                    ),
-                    ("metrics", metrics(&turn.metrics)),
-                    (
-                        "guidance",
-                        Value::Array(
-                            turn.guidance
-                                .iter()
-                                .map(|g| {
-                                    json::object([
-                                        ("after_step", Value::Number(g.after_step.to_string())),
-                                        ("text", text(&g.text)),
-                                    ])
-                                })
-                                .collect(),
-                        ),
-                    ),
-                    (
-                        "steps",
-                        Value::Array(
-                            turn.steps
-                                .iter()
-                                .map(|step| {
-                                    json::object([
-                                        ("text", text(&step.text)),
-                                        ("reasoning", text(&step.reasoning)),
-                                        ("accepted", Value::Bool(step.accepted)),
-                                        (
-                                            "attempts",
-                                            Value::Array(
-                                                step.attempts.iter().map(attempt).collect(),
-                                            ),
-                                        ),
-                                        (
-                                            "response",
-                                            step.response
-                                                .as_ref()
-                                                .map_or(Value::Null, Response::snapshot),
-                                        ),
-                                        (
-                                            "results",
-                                            Value::Array(
-                                                step.results
-                                                    .iter()
-                                                    .map(|receipt| {
-                                                        json::object([
-                                                            ("call_id", text(&receipt.call_id)),
-                                                            ("output", text(&receipt.output)),
-                                                            ("summary", text(&receipt.summary)),
-                                                        ])
-                                                    })
-                                                    .collect(),
-                                            ),
-                                        ),
-                                    ])
-                                })
-                                .collect(),
-                        ),
-                    ),
-                ])
-            })
-            .collect(),
-    )
+    Value::Array(history.turns.iter().map(encode_turn).collect())
+}
+
+pub(super) fn encode_turn(turn: &Turn) -> Value {
+    json::object([
+        ("prompt", text(&turn.prompt)),
+        ("outcome", text(&turn.outcome)),
+        (
+            "end",
+            text(match turn.end {
+                None => "active",
+                Some(End::Complete) => "complete",
+                Some(End::Incomplete) => "incomplete",
+                Some(End::Refused) => "refused",
+                Some(End::Failed(_)) => "failed",
+            }),
+        ),
+        ("metrics", metrics(&turn.metrics)),
+        (
+            "guidance",
+            Value::Array(
+                turn.guidance
+                    .iter()
+                    .map(|g| {
+                        json::object([
+                            ("after_step", Value::Number(g.after_step.to_string())),
+                            ("text", text(&g.text)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "steps",
+            Value::Array(
+                turn.steps
+                    .iter()
+                    .map(|step| {
+                        json::object([
+                            ("text", text(&step.text)),
+                            ("reasoning", text(&step.reasoning)),
+                            ("accepted", Value::Bool(step.accepted)),
+                            (
+                                "attempts",
+                                Value::Array(step.attempts.iter().map(attempt).collect()),
+                            ),
+                            (
+                                "response",
+                                step.response
+                                    .as_ref()
+                                    .map_or(Value::Null, Response::snapshot),
+                            ),
+                            (
+                                "results",
+                                Value::Array(
+                                    step.results
+                                        .iter()
+                                        .map(|receipt| {
+                                            json::object([
+                                                ("call_id", text(&receipt.call_id)),
+                                                ("output", text(&receipt.output)),
+                                                ("summary", text(&receipt.summary)),
+                                            ])
+                                        })
+                                        .collect(),
+                                ),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+    ])
 }
 
 pub(super) fn decode(value: &Value) -> io::Result<History> {
     let turns = value
         .array()
-        .filter(|turns| turns.len() <= super::super::history::MAX_TURNS)
+        .filter(|turns| turns.len() <= 256)
         .ok_or_else(invalid)?;
     let mut history = History::default();
     for (index, value) in turns.iter().enumerate() {
@@ -198,7 +192,7 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
     Ok(history)
 }
 
-fn metrics(m: &Metrics) -> Value {
+pub(super) fn metrics(m: &Metrics) -> Value {
     let number = |n: Option<u64>| n.map_or(Value::Null, |n| Value::Number(n.to_string()));
     json::object([
         ("requests", number(Some(m.requests.into()))),
@@ -215,6 +209,54 @@ fn metrics(m: &Metrics) -> Value {
         ("output_tokens", number(m.output_tokens)),
         ("cached_tokens", number(m.cached_tokens)),
         ("reasoning_tokens", number(m.reasoning_tokens)),
+    ])
+}
+
+pub(super) fn step_core(step: &Step) -> Value {
+    json::object([
+        ("text", text(&step.text)),
+        ("reasoning", text(&step.reasoning)),
+        ("accepted", Value::Bool(step.accepted)),
+        (
+            "attempts",
+            Value::Array(step.attempts.iter().map(attempt).collect()),
+        ),
+        (
+            "response",
+            step.response
+                .as_ref()
+                .map_or(Value::Null, Response::snapshot),
+        ),
+        ("results", Value::Array(Vec::new())),
+    ])
+}
+pub(super) fn receipt(receipt: &Receipt) -> Value {
+    json::object([
+        ("call_id", text(&receipt.call_id)),
+        ("output", text(&receipt.output)),
+        ("summary", text(&receipt.summary)),
+    ])
+}
+pub(super) fn guidance(guidance: &super::super::queue::Guidance) -> Value {
+    json::object([
+        ("after_step", Value::Number(guidance.after_step.to_string())),
+        ("text", text(&guidance.text)),
+    ])
+}
+pub(super) fn end(turn: &Turn) -> Value {
+    json::object([
+        ("outcome", text(&turn.outcome)),
+        (
+            "end",
+            text(match turn.end {
+                None => "active",
+                Some(End::Complete) => "complete",
+                Some(End::Incomplete) => "incomplete",
+                Some(End::Refused) => "refused",
+                Some(End::Failed(_)) => "failed",
+            }),
+        ),
+        ("metrics", metrics(&turn.metrics)),
     ])
 }
 fn read_metrics(value: &Value) -> io::Result<Metrics> {

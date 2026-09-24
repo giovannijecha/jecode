@@ -60,6 +60,7 @@ Use `--access workspace` to restrict file tools to the selected directory.
 jecode login
 jecode resume
 jecode sessions
+jecode --workspace PATH import-session V1_SESSION_ID
 jecode logout
 jecode --demo
 ```
@@ -69,6 +70,8 @@ jecode --demo
 remote provider sessions. `sessions` and `resume` use the current directory, or
 `--workspace PATH` when supplied. A session from another directory cannot be
 resumed until you select its saved directory.
+`import-session` creates a verified incremental copy of an older v1 session
+without changing its source file.
 
 `--demo` is an offline interface preview. Normal conversations connect to OpenAI
 Account; Cargo's `--offline` flag only controls build dependency resolution.
@@ -85,7 +88,7 @@ Account; Cargo's `--offline` flag only controls build dependency resolution.
 - `/new`, `/resume`, `/model` and `/settings` manage conversations and preferences.
 - `NO_COLOR` and reduced motion are supported.
 
-See [usage and configuration](docs/USAGE.md), [tools](docs/TOOLS.md),
+See [usage and configuration](docs/USAGE.md), [session recovery](docs/SESSIONS.md), [tools](docs/TOOLS.md),
 [architecture](docs/ARCHITECTURE.md), and [platform support](docs/COMPATIBILITY.md).
 
 Commands run with your user permissions: approval is not an operating-system

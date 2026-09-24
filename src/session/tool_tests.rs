@@ -511,10 +511,11 @@ fn refused_or_orphaned_tool_items_never_enter_the_projection() {
 }
 #[test]
 fn large_completed_batch_is_compacted_as_bounded_reference_data() {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     struct LargeBatch {
         requests: Arc<Mutex<Vec<(bool, String)>>>,
         seen: BTreeSet<String>,
+        fragments: BTreeMap<usize, (usize, String)>,
         generation: usize,
     }
     impl worker::Backend for LargeBatch {
@@ -553,9 +554,42 @@ fn large_completed_batch_is_compacted_as_bounded_reference_data() {
                     if let Input::User(data) = item
                         && data.starts_with("Completed step record ")
                     {
-                        let record =
-                            json::parse(data.split_once('\n').unwrap().1, Default::default())
-                                .unwrap();
+                        let (header, fragment) = data.split_once('\n').unwrap();
+                        let record_index: usize = header
+                            .strip_prefix("Completed step record ")
+                            .unwrap()
+                            .split(',')
+                            .next()
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                        let range = header
+                            .split("bytes ")
+                            .nth(1)
+                            .unwrap()
+                            .split(';')
+                            .next()
+                            .unwrap();
+                        let (start, rest) = range.split_once("..").unwrap();
+                        let (end, total) = rest.split_once(" of ").unwrap();
+                        let (start, end, total): (usize, usize, usize) = (
+                            start.parse().unwrap(),
+                            end.parse().unwrap(),
+                            total.parse().unwrap(),
+                        );
+                        let entry = self
+                            .fragments
+                            .entry(record_index)
+                            .or_insert_with(|| (total, String::new()));
+                        assert_eq!(entry.0, total);
+                        assert_eq!(entry.1.len(), start);
+                        entry.1.push_str(fragment);
+                        assert_eq!(entry.1.len(), end);
+                        if end != total {
+                            continue;
+                        }
+                        let (_, complete) = self.fragments.remove(&record_index).unwrap();
+                        let record = json::parse(&complete, Default::default()).unwrap();
                         if record.get("kind").and_then(Value::text)
                             == Some("response_item_and_receipt")
                             && record.get("call_id").and_then(Value::text).is_some()
@@ -615,6 +649,7 @@ fn large_completed_batch_is_compacted_as_bounded_reference_data() {
                 return Ok(calls_response(calls));
             }
             assert_eq!(self.seen.len(), 100, "summary omitted completed results");
+            assert!(self.fragments.is_empty());
             for n in 0..100 {
                 assert!(encoded.contains(&format!("MARKER-{n:03}")));
             }
@@ -638,6 +673,7 @@ fn large_completed_batch_is_compacted_as_bounded_reference_data() {
         LargeBatch {
             requests: requests.clone(),
             seen: BTreeSet::new(),
+            fragments: BTreeMap::new(),
             generation: 0,
         },
         Some(workspace),

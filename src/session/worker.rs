@@ -145,7 +145,7 @@ pub(super) fn run(
                 Event::Restored {
                     id: record.id().into(),
                     items: history.transcript(),
-                    turns: history.turns.len(),
+                    turns: history.turn_count(),
                 },
                 false,
             )

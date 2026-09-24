@@ -60,10 +60,14 @@ Windows, `HOME` on Linux):
   settings.json
   sessions/
     s-...json
+  sessions-v2/
+    s-...head
+    s-...log
 ```
 
-Small lock files coordinate instances and remain after shutdown. Temporary JSON
-files are atomically replaced; no database or separate service is required.
+Small lock files coordinate instances and remain after shutdown. v1 JSON and
+v2 committed heads are atomically replaced; v2 canonical logs append. No
+database or separate service is required.
 Existing files outside this versioned directory are neither imported nor modified.
 Keep user data on a local filesystem that supports private permissions and file
 locking. Under WSL use the Linux home directory rather than a DrvFS directory
@@ -153,6 +157,9 @@ Jecode never switches directories during resume. Legacy `--sessions` and
 restored automatically. Older sessions without `effort` retain medium. Reading
 or listing a legacy file does not rewrite it; explicit updates preserve unrelated
 JSON fields.
+Use `jecode --workspace PATH import-session V1_SESSION_ID` to make a separate,
+verified v2 copy when continuing a v1 session beyond its original bounds.
+The v1 source stays unchanged. See [session storage and recovery](SESSIONS.md).
 
 Inside a conversation, `/resume` opens a filterable menu of other readable sessions
 in that conversation's directory.
@@ -179,14 +186,15 @@ that access.
 History is saved before model work, around tool effects, and when a turn ends.
 Normal cancellation retains partial output. An abrupt process or machine failure
 may lose the in-flight streamed portion since the last checkpoint; an effect with
-no durable receipt remains explicitly uncertain. Corrupt or unsupported JSON is
+no durable receipt remains explicitly uncertain. Corrupt committed data is
 reported rather than overwritten with an empty session.
 
-The resumed transcript shows messages, tool summaries and outcomes. Full provider
-items, tool arguments, results and recorded turn metrics remain in the session JSON.
-The current limits are 256 turns and 16 MiB per session snapshot. A submitted
-user message is limited to 8 KiB. Reaching a snapshot or turn limit stops new
-work with an error; canonical history is not discarded to make room.
+The resumed transcript shows the working suffix and notes when earlier history
+is on disk. Full provider items, tool arguments, results and recorded turn metrics
+remain in the canonical log. New v2 sessions have no 256-turn or 16 MiB
+whole-session snapshot limit. A submitted user message is limited to 8 KiB.
+Existing v1 files retain their original format and limits until explicitly
+imported.
 
 ## Input and context
 
@@ -282,10 +290,7 @@ Compaction checkpoints only the model-facing projection. Canonical turns, tool
 arguments and exact receipts stay saved and are not replayed on resume. A summary
 can lose detail; restate critical requirements if needed. The account request
 encoder accepts at most 2 MiB of JSON and 4,096 input items. A large completed
-step can be summarized in ordered reference-data slices. If one call and its
-receipt cannot fit together in a bounded summary request, or current input
-cannot fit, Jecode stops with a context error. These are byte and item bounds,
-not a claimed model token capacity. Provider token counts are reported
-separately when available. The 16 MiB session snapshot and 256-turn limits
-remain separate storage boundaries;
-larger canonical storage needs a separate format and migration workstream.
+step, including one call and its receipt, can be summarized in ordered
+reference-data slices. If current uncompleted input cannot fit, Jecode stops
+with a context error. These are byte and item bounds, not a claimed model token
+capacity. Provider token counts are reported separately when available.

@@ -101,6 +101,24 @@ impl Store {
         Ok(Some(text))
     }
 
+    /// Open a private owned data file for bounded incremental I/O. Callers
+    /// hold a session lease; this does not establish transaction boundaries.
+    pub(crate) fn data_file(&self, name: &str, existing: bool) -> io::Result<File> {
+        let file = platform::create(&self.path(name)?, existing)?;
+        platform::check_file(&file)?;
+        Ok(file)
+    }
+
+    pub(crate) fn read_file(&self, name: &str) -> io::Result<File> {
+        let file = platform::read(&self.path(name)?)?;
+        platform::check_file(&file)?;
+        Ok(file)
+    }
+
+    pub(crate) fn sync_root(&self) -> io::Result<()> {
+        platform::sync_directory(&self.root)
+    }
+
     /// Callers hold the corresponding lock across load/modify/replace sequences.
     pub fn replace(&self, name: &str, contents: &str) -> io::Result<()> {
         let destination = self.path(name)?;
