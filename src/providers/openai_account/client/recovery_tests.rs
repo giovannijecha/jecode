@@ -111,6 +111,42 @@ fn cancellation_during_backoff_does_not_open_a_second_connection() {
 }
 
 #[test]
+fn cancellation_during_connection_setup_never_sends_a_request() {
+    let cancelled = AtomicBool::new(false);
+    let mut client = client();
+    let mut connections = 0;
+    let mut attempts = Vec::new();
+    let result = client.generate_with::<Fixture>(
+        &request(),
+        &budget(&cancelled),
+        |progress| {
+            if let Progress::Attempt(attempt) = progress {
+                attempts.push(attempt);
+            }
+            ControlFlow::Continue(())
+        },
+        |_, _| {
+            connections += 1;
+            cancelled.store(true, Ordering::Release);
+            Err(NetworkError::Cancelled)
+        },
+    );
+    assert_eq!(
+        result,
+        Err(Error::Transport {
+            stage: RequestStage::Connect,
+            error: NetworkError::Cancelled,
+            delivery: Delivery::NotSubmitted,
+            accepted_wire_bytes: 0,
+        })
+    );
+    assert_eq!(connections, 1);
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].connection_attempt, 1);
+    assert!(!attempts[0].retrying);
+}
+
+#[test]
 fn zero_progress_write_retries_but_partial_write_does_not() {
     for accepted in [0, 3] {
         let cancelled = AtomicBool::new(false);

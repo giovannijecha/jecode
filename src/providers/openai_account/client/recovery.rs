@@ -47,14 +47,36 @@ impl fmt::Display for Delivery {
 /// Safe diagnostics only. No request or response material enters this record.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Attempt {
+    /// One-based request number within the current turn; zero in older records.
+    pub request_sequence: u32,
+    /// One-based connection attempt for this request; zero in older records.
+    pub connection_attempt: u8,
     pub delivery: Delivery,
     pub stage: Option<RequestStage>,
+    /// Time in the failed stage; zero when there was no failed stage.
+    pub stage_elapsed_ms: u64,
     pub operation: Option<String>,
     pub category: Option<String>,
     pub os_code: Option<i32>,
     pub accepted_wire_bytes: usize,
+    /// TLS bytes returned by local TCP reads after the request write, even if
+    /// the final record was incomplete. This does not prove provider completion.
+    pub received_wire_bytes: usize,
+    /// Decrypted application bytes handed to HTTP framing.
+    pub response_plaintext_bytes: usize,
+    pub response_status: Option<u16>,
+    /// Complete SSE data events delivered to the model decoder.
+    pub stream_events: u32,
     pub diagnostic: Option<String>,
     pub retrying: bool,
+}
+#[derive(Clone, Copy, Default)]
+pub(super) struct Trace {
+    pub stage_elapsed_ms: u64,
+    pub received_wire_bytes: usize,
+    pub response_plaintext_bytes: usize,
+    pub response_status: Option<u16>,
+    pub stream_events: u32,
 }
 impl Attempt {
     pub(super) fn failed(
@@ -62,10 +84,18 @@ impl Attempt {
         delivery: Delivery,
         accepted_wire_bytes: usize,
         retrying: bool,
+        connection_attempt: u8,
+        trace: Trace,
     ) -> Self {
         let mut attempt = Self {
+            connection_attempt,
             delivery,
             accepted_wire_bytes,
+            stage_elapsed_ms: trace.stage_elapsed_ms,
+            received_wire_bytes: trace.received_wire_bytes,
+            response_plaintext_bytes: trace.response_plaintext_bytes,
+            response_status: trace.response_status,
+            stream_events: trace.stream_events,
             diagnostic: Some(error.to_string()),
             retrying,
             ..Self::default()
@@ -85,10 +115,19 @@ impl Attempt {
         }
         attempt
     }
-    pub(super) fn completed(accepted_wire_bytes: usize) -> Self {
+    pub(super) fn completed(
+        accepted_wire_bytes: usize,
+        connection_attempt: u8,
+        trace: Trace,
+    ) -> Self {
         Self {
+            connection_attempt,
             delivery: Delivery::Completed,
             accepted_wire_bytes,
+            received_wire_bytes: trace.received_wire_bytes,
+            response_plaintext_bytes: trace.response_plaintext_bytes,
+            response_status: trace.response_status,
+            stream_events: trace.stream_events,
             ..Self::default()
         }
     }

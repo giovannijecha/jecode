@@ -4,6 +4,7 @@
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod access_tests;
 mod codec;
+mod diagnostics;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod partial_tests;
 #[cfg(all(test, any(windows, target_os = "linux")))]
@@ -16,6 +17,9 @@ use crate::{
     state::{Lease, Store},
     workspace::{Access, Workspace},
 };
+pub use diagnostics::recent_network_attempts_in;
+#[cfg(test)]
+use diagnostics::recent_network_attempts_in_store;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{

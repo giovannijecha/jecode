@@ -1,4 +1,5 @@
 //! Development commands use only the Rust standard library and installed tools.
+mod network;
 mod package;
 
 use std::{
@@ -152,10 +153,13 @@ fn entry() -> Result<(), String> {
     match args.as_slice() {
         [command] if command == "check" => check(),
         [command] if command == "ownership" => ownership(),
+        [command, id, directory] if command == "account-attempts" => {
+            network::run(id, Path::new(directory))
+        }
         [command, tag] if command == "release-check" => release_check(tag),
         [command, destination] if command == "package-windows" => package::windows(Path::new(destination)),
         _ => {
-            Err("usage: cargo run --bin jecode-check -- <check|ownership|release-check TAG|package-windows target/DEST>".into())
+            Err("usage: cargo run --bin jecode-check -- <check|ownership|account-attempts SESSION_ID DIRECTORY|release-check TAG|package-windows target/DEST>".into())
         }
     }
 }

@@ -35,6 +35,7 @@ pub struct ResponseStream {
     state: State,
     error: Option<Error>,
     wire_bytes: usize,
+    events_seen: u32,
 }
 struct State {
     limits: Limits,
@@ -90,10 +91,14 @@ impl ResponseStream {
             },
             error: None,
             wire_bytes: 0,
+            events_seen: 0,
         }
     }
     pub fn is_finished(&self) -> bool {
         self.error.is_some() || self.state.result.is_some()
+    }
+    pub fn events_seen(&self) -> u32 {
+        self.events_seen
     }
     pub fn push(
         &mut self,
@@ -113,6 +118,7 @@ impl ResponseStream {
         let state = &mut self.state;
         let mut error = None;
         let framed = self.framing.push(bytes, |event| {
+            self.events_seen = self.events_seen.saturating_add(1);
             if let Err(failure) = state.event(event, &mut progress) {
                 error = Some(failure);
             }

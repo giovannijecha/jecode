@@ -41,6 +41,27 @@ Parsing, records, certificate bodies and path search have explicit bounds.
 Connections are single-use. A model terminal event can establish completion before
 transport closure; the connection is then disposed rather than pooled.
 
+## Interrupted request diagnostics
+
+After closing Jecode, a source checkout can print the latest turn's last 32
+network attempts without exporting a session log:
+
+```text
+cargo run --locked --offline --bin jecode-check -- account-attempts SESSION_ID DIRECTORY
+```
+
+`DIRECTORY` must be the session's selected working directory. The report contains
+only fixed labels, numeric counters and a validated HTTP status. Request sequence
+is within the turn; connection attempt is within that request. Stage time is
+wall time in the failed connect, write or response-read stage, including local
+decoding and progress delivery. Accepted TLS write bytes are bytes accepted by
+the local socket, including TLS framing. Received TLS wire bytes are bytes
+returned by local TCP reads after the request write, including incomplete records.
+Decrypted HTTP bytes were handed to the HTTP decoder; SSE events reached the
+model event decoder. None of these byte counts proves remote processing.
+The report omits credentials, prompts, response text, tool arguments and raw
+session contents.
+
 Cancellation and deadlines are checked during connect, reads and writes. The
 standard-library DNS resolver is synchronous and cannot be interrupted inside its
 OS call. Cleanup remains joined. Bounded CPU verification is not interruptible at

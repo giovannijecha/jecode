@@ -151,7 +151,8 @@ pub(super) fn observe_compaction(
     context: &Context,
 ) -> ControlFlow<()> {
     match progress {
-        Progress::Attempt(attempt) => {
+        Progress::Attempt(mut attempt) => {
+            attempt.request_sequence = metrics.requests;
             metrics.observe(&attempt);
             if attempt.retrying {
                 let _ = context.send(Event::Retrying, true);

@@ -236,9 +236,17 @@ impl Connection {
     }
     /// None is an authenticated close_notify. TCP EOF is always truncation.
     pub fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
+        self.read_observed(budget, &mut 0)
+    }
+    /// The count includes local TCP bytes from incomplete response records.
+    pub fn read_observed(
+        &mut self,
+        budget: &Budget<'_>,
+        received_wire_bytes: &mut usize,
+    ) -> Result<Option<Plaintext>, NetworkError> {
         let mut state = self.0.take().ok_or(NetworkError::Closed)?;
         for _ in 0..1024 {
-            let record = socket::record(&mut state.socket, budget)?;
+            let record = socket::record_counted(&mut state.socket, budget, received_wire_bytes)?;
             state.bytes += record.len();
             if state.bytes > 128 * 1024 * 1024 {
                 return Err(Error::Limit.into());
