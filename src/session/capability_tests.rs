@@ -92,6 +92,7 @@ fn assert_workspace_contract(request: &Value, profile: Access, shell: &crate::co
         [
             "list_files",
             "read_file",
+            "recall_receipts",
             "search_text",
             "create_file",
             "edit_file",

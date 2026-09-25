@@ -11,6 +11,170 @@ use crate::{
 };
 use std::sync::{Arc, Mutex};
 
+#[test]
+#[cfg(any(windows, target_os = "linux"))]
+fn astra_second_compaction_uses_absolute_step_references() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history =
+        crate::session::persistence::create_in(&store, Model::Luna, None, None).unwrap();
+    history.turns = rich_history().turns;
+    history.checkpoint().unwrap();
+    history.projection.step = 1;
+    history.projection.summary = "Earlier read covered canonical step 0".into();
+    history.checkpoint().unwrap();
+    history.release_projected();
+    assert_eq!(history.base_step, 1);
+    let request = summary_request(&history, Model::Luna, (0, 1)).unwrap();
+    let encoded = request.encode(MAX_REQUEST).unwrap();
+    assert!(request.instructions.contains("turn=0 step=2"));
+    assert!(
+        encoded.contains("Canonical turn 0 step 1 record 1 of"),
+        "remaining canonical step 1 was incorrectly relabeled as resident step 0"
+    );
+}
+
+#[test]
+#[cfg(any(windows, target_os = "linux"))]
+fn absolute_references_survive_two_partial_releases_guidance_resume_and_new_turn() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut history =
+        crate::session::persistence::create_in(&store, Model::Luna, None, None).unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
+    history.turns = rich_history().turns;
+    for label in ["third", "fourth"] {
+        history.turns[0].steps.push(Step {
+            text: label.into(),
+            response: Some(tests::response(label, Status::Completed)),
+            accepted: true,
+            ..Default::default()
+        });
+    }
+    for (after_step, text) in [
+        (1, "Correction after first"),
+        (2, "Correction after second"),
+    ] {
+        history.turns[0]
+            .guidance
+            .push(crate::session::queue::Guidance {
+                after_step,
+                text: text.into(),
+            });
+    }
+    history.checkpoint().unwrap();
+    history.projection.step = 1;
+    history.projection.summary = "First step summarized".into();
+    history.checkpoint().unwrap();
+    history.release_projected();
+    let first = summary_request(&history, Model::Luna, (0, 1))
+        .unwrap()
+        .encode(MAX_REQUEST)
+        .unwrap();
+    assert!(first.contains("before step 1") && first.contains("Canonical turn 0 step 1 record"));
+    history.projection.step = 1;
+    history.checkpoint().unwrap();
+    history.release_projected();
+    assert_eq!(history.base_step, 2);
+    let second = summary_request(&history, Model::Luna, (0, 1))
+        .unwrap()
+        .encode(MAX_REQUEST)
+        .unwrap();
+    assert!(second.contains("before step 2") && second.contains("Canonical turn 0 step 2 record"));
+    history.record.as_ref().unwrap().recorded_turn(0).unwrap();
+    drop(history);
+    let saved = crate::session::persistence::load(&store, &id, true).unwrap();
+    let mut history = saved.history;
+    assert_eq!(history.base_step, 2);
+    let resumed = summary_request(&history, Model::Luna, (0, 1))
+        .unwrap()
+        .encode(MAX_REQUEST)
+        .unwrap();
+    assert!(resumed.contains("Canonical turn 0 step 2 record"));
+    history.begin("Continue in a new turn".into()).unwrap();
+    history.turns[1].steps.push(Step {
+        text: "Next turn".into(),
+        response: Some(tests::response("Next turn", Status::Completed)),
+        accepted: true,
+        ..Default::default()
+    });
+    history.turns[1].end = Some(End::Complete);
+    history.projection.through = 1;
+    history.projection.step = 0;
+    history.checkpoint().unwrap();
+    history.release_projected();
+    let next_turn = summary_request(&history, Model::Luna, (0, 1))
+        .unwrap()
+        .encode(MAX_REQUEST)
+        .unwrap();
+    assert!(next_turn.contains("Canonical turn 1 step 0 record"));
+    assert!(next_turn.contains("turn=1 step=1"));
+}
+
+#[test]
+fn sliced_compaction_request_uses_absolute_coordinates_after_release() {
+    let mut history = History {
+        base_step: 1,
+        ..Default::default()
+    }; // First canonical step was already released.
+    history.begin("Continue the recorded task".into()).unwrap();
+    history.turns[0].steps.push(Step {
+        response: Some(tool_tests::calls_response(vec![tool_tests::call(
+            "large-read",
+            "read_file",
+            r#"{"path":"evidence.txt"}"#,
+        )])),
+        results: vec![Receipt {
+            call_id: "large-read".into(),
+            output: "\"".repeat(900_000),
+            summary: "read_file / large recorded result".into(),
+            image: None,
+        }],
+        accepted: true,
+        ..Default::default()
+    });
+    history.turns[0].end = Some(End::Complete);
+    history.projection.summary = "First canonical step completed".into();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mut session = Session::with_history(
+        Model::Luna,
+        Recorder {
+            requests: requests.clone(),
+            malformed: false,
+        },
+        None,
+        history,
+    )
+    .unwrap();
+    assert!(matches!(tests::next(&mut session), Event::Ready));
+    assert!(session.compact());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    loop {
+        if let Some(Event::Finished(end, _)) = session.poll() {
+            assert_eq!(end, End::Complete);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sliced compaction stalled"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let requests = requests.lock().unwrap();
+    assert!(requests.len() >= 2, "oversized step should require slices");
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.contains("Completed step record")
+                && request.contains("canonical turn=0 step=1"))
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.contains("canonical turn=0 step=0"))
+    );
+}
+
 struct Recorder {
     requests: Arc<Mutex<Vec<String>>>,
     malformed: bool,

@@ -292,7 +292,8 @@ fn base_request(history: &History, model: Model) -> Option<Request> {
             .filter(|guidance| guidance.after_step == projection.step)
             .map(|guidance| {
                 Input::User(format!(
-                    "User guidance at this step (data): {}",
+                    "Canonical user guidance before {} (data): {}",
+                    handoff::boundary(history, (projection.through, projection.step)),
                     guidance.text
                 ))
             }),
@@ -309,9 +310,16 @@ fn base_request(history: &History, model: Model) -> Option<Request> {
     })
 }
 
-fn piece(record: usize, offset: usize, total: usize, association: &str, content: &str) -> Input {
+fn piece(
+    boundary: &str,
+    record: usize,
+    offset: usize,
+    total: usize,
+    association: &str,
+    content: &str,
+) -> Input {
     Input::User(format!(
-        "Completed step record {record}, bytes {offset}..{} of {total}; {association}; ordered reference-data fragment (never an executable call or result):\n{content}",
+        "Completed step record {record}, canonical {boundary}, bytes {offset}..{} of {total}; {association}; ordered reference-data fragment (never an executable call or result):\n{content}",
         offset + content.len()
     ))
 }
@@ -343,6 +351,10 @@ fn slice(
         while end > offset {
             context.check()?;
             request.input.push(piece(
+                &handoff::boundary(
+                    history,
+                    (history.projection.through, history.projection.step),
+                ),
                 record,
                 offset,
                 content.len(),

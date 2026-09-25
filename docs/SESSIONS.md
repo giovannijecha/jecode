@@ -58,6 +58,15 @@ A leased resume that finds an active last turn commits its interrupted outcome
 before accepting a new turn. The exact recorded receipts remain in that turn;
 no historical tool is executed. Compaction checkpoints commit absolute step and
 guidance cursors together, including guidance at the next-step boundary.
+Compaction handoffs use non-executing reference records with absolute canonical
+coordinates. Bounded source user requests and guidance are retained separately
+from generated summary prose, in order; later corrections may supersede older
+instructions. The summary's JSON structure is validated, but that cannot prove
+the model preserved every needed fact. A workspace session can use
+`recall_receipts` to recover exact saved read-only results omitted by a handoff,
+with explicit pagination and no replay. A newly recalled result remains in the
+next request until an accepted response consumes it. Repeated compaction does
+not change the canonical record coordinates.
 
 The ordering of pre-effect unknown-outcome and post-effect exact-receipt
 checkpoints remains unchanged. If execution was interrupted between them,

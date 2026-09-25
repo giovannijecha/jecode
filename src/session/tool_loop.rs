@@ -108,6 +108,25 @@ fn execute(
             history.checkpoint()?;
         }
         let (mut output, completion, mut image) = match prepared {
+            Ok(Prepared::Recall {
+                turn,
+                step,
+                receipt,
+                offset,
+            }) => {
+                let output = super::receipt_recall::execute(
+                    history,
+                    turn,
+                    step,
+                    receipt,
+                    offset,
+                    &Budget {
+                        cancelled: &context.cancelled,
+                        deadline: operation_deadline(clock(), Duration::from_secs(10)),
+                    },
+                );
+                (output, None, None)
+            }
             Ok(Prepared::Image { path, image_id }) => {
                 let (output, image) = super::image_tool::execute(
                     history,

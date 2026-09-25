@@ -107,6 +107,36 @@ impl History {
     pub fn pending_image(&self) -> bool {
         self.pending_image_step().is_some()
     }
+    /// A recalled receipt stays in the next model request until one accepted
+    /// response has consumed it, including across a close and resume.
+    pub fn pending_recall_step(&self) -> Option<(usize, usize)> {
+        let mut pending = None;
+        for (turn_index, turn) in self.turns.iter().enumerate() {
+            for (step_index, step) in turn.steps.iter().enumerate() {
+                let Some(response) = step
+                    .response
+                    .as_ref()
+                    .filter(|response| step.accepted && response.status == Status::Completed)
+                else {
+                    continue;
+                };
+                pending = None;
+                if response
+                    .tool_calls
+                    .iter()
+                    .zip(&step.results)
+                    .any(|(call, result)| {
+                        call.name == "recall_receipts"
+                            && call.id == result.call_id
+                            && result.summary != "Not executed"
+                    })
+                {
+                    pending = Some((turn_index, step_index));
+                }
+            }
+        }
+        pending
+    }
     /// Earliest receipt whose pixels have not reached a validated visual response.
     /// An accepted visual response consumes earlier receipts; its own tool results
     /// occur afterward and therefore remain pending.

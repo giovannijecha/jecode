@@ -247,7 +247,11 @@ pub(super) fn ensure(
         // A captured image remains pending across failed requests, ended turns
         // and resume. Send its pixels before applying the text threshold.
         let visual_pending = history.pending_image() && history.can_view_images();
-        if visual_pending && history.projection.pending.is_none() && size.is_some() {
+        let recalled_pending = history.pending_recall_step().is_some();
+        if (visual_pending || recalled_pending)
+            && history.projection.pending.is_none()
+            && size.is_some()
+        {
             return Ok(());
         }
         let limit = if visual_pending {
@@ -276,7 +280,11 @@ pub(super) fn ensure(
             history,
             history.projection.through,
             history.projection.step,
-            history.pending_image_step(),
+            history
+                .pending_image_step()
+                .into_iter()
+                .chain(history.pending_recall_step())
+                .min(),
         );
         if history.projection.pending.is_none() && candidate.is_none() {
             return bounded_text_size.map_or(Err(limit), |_| Ok(()));
@@ -410,11 +418,16 @@ fn segment(history: &History, to: (usize, usize)) -> Result<Vec<Input>, Failure>
             )));
         }
         for index in first..last {
+            let absolute_step = if turn_index == 0 {
+                history.base_step + index
+            } else {
+                index
+            };
             for guidance in turn.guidance.iter().filter(|g| g.after_step == index) {
                 input.push(Input::User(format!(
                     "Canonical user guidance, turn {} before step {} (reference data): {:?}",
                     history.base_turn + turn_index,
-                    index,
+                    absolute_step,
                     guidance.text
                 )));
             }
@@ -425,7 +438,7 @@ fn segment(history: &History, to: (usize, usize)) -> Result<Vec<Input>, Failure>
                     .ok_or(Failure::HistoryLimit)?;
                 input.push(Input::User(format!(
                     "Canonical turn {} step {} record {} of {} / {} / ordered non-executing reference data:\n{}",
-                    history.base_turn + turn_index, index, record + 1, count,
+                    history.base_turn + turn_index, absolute_step, record + 1, count,
                     reference.association, reference.content
                 )));
             }
@@ -437,8 +450,13 @@ fn segment(history: &History, to: (usize, usize)) -> Result<Vec<Input>, Failure>
                 .filter(|g| g.after_step == turn.steps.len())
             {
                 input.push(Input::User(format!(
-                    "Canonical user guidance, turn {} after final step (reference data): {:?}",
+                    "Canonical user guidance, turn {} after step {} (reference data): {:?}",
                     history.base_turn + turn_index,
+                    if turn_index == 0 {
+                        history.base_step + turn.steps.len()
+                    } else {
+                        turn.steps.len()
+                    },
                     guidance.text
                 )));
             }
@@ -491,12 +509,27 @@ pub(super) fn compact(
 ) -> Result<(), Failure> {
     context.check()?;
     let start = (history.projection.through, history.projection.step);
-    let protected = history.pending_image_step();
+    let protected = history
+        .pending_image_step()
+        .into_iter()
+        .chain(history.pending_recall_step())
+        .min();
     if protected.is_some_and(|position| start >= position) {
-        if history.can_view_images() && request_bytes(history, model, workspace)?.is_none() {
-            return Err(Failure::ImageRequestLimit);
+        if request_bytes(history, model, workspace)?.is_none() {
+            return Err(
+                if history.pending_image_step() == protected && history.can_view_images() {
+                    Failure::ImageRequestLimit
+                } else {
+                    Failure::HistoryLimit
+                },
+            );
         }
-        let _ = context.send(Event::ContextReport("Pending image pixels are retained until a validated visual response; no earlier context is eligible for compaction".into()), false);
+        let message = if history.pending_image_step() == protected {
+            "Pending image pixels are retained until a validated visual response; no earlier context is eligible for compaction"
+        } else {
+            "Recalled canonical receipts are retained until a following validated response; no earlier context is eligible for compaction"
+        };
+        let _ = context.send(Event::ContextReport(message.into()), false);
         return Ok(());
     }
     if history.projection.pending.is_some() {

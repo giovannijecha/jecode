@@ -135,6 +135,14 @@ pub(super) struct Record {
     _lock: Lease,
 }
 impl Record {
+    pub(super) fn recorded_turn(&self, turn: usize) -> io::Result<super::history::Turn> {
+        if self.legacy() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        v2::page(self, turn, 1)?
+            .pop()
+            .ok_or(io::ErrorKind::NotFound.into())
+    }
     pub(super) fn user_store(&self) -> io::Result<Store> {
         self.store.parent()
     }
