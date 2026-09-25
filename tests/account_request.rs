@@ -30,6 +30,7 @@ fn request_escapes_text_and_preserves_continuation_order() {
         name: "read_file".into(),
         description: "Read a file".into(),
         parameters: json::object([("type", Value::String("object".into()))]),
+        strict: None,
     });
     let body = json::parse(&request.encode(8192).unwrap(), Default::default()).unwrap();
     assert_eq!(body.get("stream"), Some(&Value::Bool(true)));
@@ -74,6 +75,7 @@ fn malformed_requests_and_oversized_encoding_are_rejected() {
             name: "same".into(),
             description: "".into(),
             parameters: json::object([]),
+            strict: None,
         });
     }
     assert_eq!(invalid.encode(8192), Err(Error::InvalidRequest));

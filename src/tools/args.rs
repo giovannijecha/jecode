@@ -55,8 +55,8 @@ impl Prepared {
             return Err("unknown tool argument");
         }
         if name == "view_image" {
-            let path = args.get("path").and_then(Value::text);
-            let image_id = args.get("image_id").and_then(Value::text);
+            let path = image_selector(args, "path")?;
+            let image_id = image_selector(args, "image_id")?;
             if path.is_some() == image_id.is_some() {
                 return Err("view_image requires exactly one of path or image_id");
             }
@@ -171,6 +171,16 @@ impl Prepared {
                 None,
             )),
         }
+    }
+}
+fn image_selector<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>, &'static str> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if value.trim().is_empty() => {
+            Err("view_image selectors must be nonempty strings or null")
+        }
+        Some(Value::String(value)) => Ok(Some(value)),
+        _ => Err("view_image selectors must be strings or null"),
     }
 }
 fn text(args: &Value, key: &str) -> Result<String, &'static str> {
