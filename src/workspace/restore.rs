@@ -3,7 +3,7 @@
 //! target validation and no-overwrite boundary, so they stay together here.
 use super::{
     Budget, RecoveryStore, Workspace, platform,
-    recovery::{Version, same},
+    recovery::{Version, digest, same},
     transaction::unique,
 };
 use std::{
@@ -17,6 +17,8 @@ pub struct Inspection {
     pub version: Version,
     pub target: &'static str,
     pub adjacent: &'static str,
+    pub before_integrity: &'static str,
+    pub after_integrity: &'static str,
 }
 pub struct Restored {
     pub warning: Option<String>,
@@ -43,13 +45,26 @@ impl RecoveryStore {
         id: &str,
         budget: &Budget<'_>,
     ) -> io::Result<String> {
+        self.repair_with(workspace, id, budget, (|| {}, || {}, || {}))
+    }
+    fn repair_with(
+        &self,
+        workspace: &Workspace,
+        id: &str,
+        budget: &Budget<'_>,
+        hooks: (impl FnOnce(), impl FnOnce(), impl FnOnce()),
+    ) -> io::Result<String> {
         let mut version = self.get(id)?;
         require_workspace(workspace, &version)?;
-        if !matches!(version.state.as_str(), "captured" | "restoring" | "applied") {
+        if !matches!(
+            version.state.as_str(),
+            "captured" | "restoring" | "applied" | "restored"
+        ) {
             return Err(io::Error::other(
                 "version has no incomplete transaction to repair",
             ));
         }
+        self.verify_pair(&version, budget)?;
         let (_, parent, name) = workspace
             .change_parent(&version.target, budget)
             .map_err(|_| io::Error::other("recorded target is unavailable"))?;
@@ -63,6 +78,24 @@ impl RecoveryStore {
                 budget,
             )?;
             return Ok(adjacent.into());
+        }
+        if version.state == "restored" {
+            let mut current = platform::edit_open(&parent.file, &name)?;
+            let identity = platform::identity(&current)?;
+            if version.published_identity != Some(identity)
+                || version.restore_identity != Some(identity)
+                || !matches_content(self, &version, &mut current, "before", budget)?
+            {
+                return Err(io::Error::other(
+                    "restored target changed; adjacent cleanup refused",
+                ));
+            }
+            let previous = version
+                .replaced_identity
+                .ok_or_else(|| io::Error::other("previous result identity was not recorded"))?;
+            cleanup_restore_stage(self, &version, &parent.file, &name, budget)?;
+            return cleanup_adjacent(self, &version, &parent.file, "after", previous, budget)
+                .map(str::to_owned);
         }
         match platform::edit_open(&parent.file, &name) {
             Ok(mut current) => {
@@ -95,8 +128,10 @@ impl RecoveryStore {
                     && version.restore_identity == Some(identity)
                     && matches_content(self, &version, &mut current, "before", budget)?
                 {
+                    cleanup_restore_stage(self, &version, &parent.file, &name, budget)?;
                     let previous_identity = version
-                        .published_identity
+                        .replaced_identity
+                        .or(version.published_identity)
                         .ok_or(io::ErrorKind::InvalidData)?;
                     self.record(&mut version, "restored", Some(identity))?;
                     let adjacent = cleanup_adjacent(
@@ -122,6 +157,8 @@ impl RecoveryStore {
                         budget,
                     )?
                 {
+                    cleanup_restore_stage(self, &version, &parent.file, &name, budget)?;
+                    version.restore_stage = None;
                     self.record(&mut version, "applied", Some(identity))?;
                     return Ok("Restoration had not published; result remains in place.".into());
                 }
@@ -200,6 +237,7 @@ impl RecoveryStore {
                         "adjacent published result changed; repair refused",
                     ));
                 }
+                cleanup_restore_stage(self, &version, &parent.file, &name, budget)?;
                 let stage_name = unique("staging");
                 let mut stage = Stage {
                     parent: &parent.file,
@@ -208,38 +246,49 @@ impl RecoveryStore {
                     published: false,
                 };
                 platform::apply_policy(&stage.file, &version.policy)?;
-                let mut before = self.file(id, "before")?;
-                if before.metadata()?.len() != version.before_bytes {
-                    return Err(io::Error::other(
-                        "retained original changed; repair refused",
-                    ));
-                }
+                let mut before = self.verified_file(&version, "before", budget)?;
                 copy(&mut before, &mut stage.file, budget)?;
                 stage
                     .file
                     .set_times(FileTimes::new().set_modified(version.before_modified))?;
                 stage.file.sync_all()?;
+                if digest(&mut stage.file, budget)? != version.expected("before")? {
+                    return Err(io::Error::other(
+                        "repair stage differs from the captured original",
+                    ));
+                }
+                let previous_identity = version
+                    .published_identity
+                    .ok_or(io::ErrorKind::InvalidData)?;
+                version.restore_identity = Some(platform::identity(&stage.file)?);
+                version.restore_stage = Some(stage.name.clone());
+                version.replaced_identity = Some(previous_identity);
+                // A retry must know this stage's identity before its name is published.
+                self.record(&mut version, "restoring", Some(previous_identity))?;
+                (hooks.0)();
                 platform::move_new(&parent.file, &stage.file, &stage.name, &name)?;
                 stage.published = true;
+                (hooks.1)();
                 platform::sync_parent(&parent.file).map_err(|error| {
                     io::Error::other(format!(
                         "original restored at target but directory sync failed: {error}"
                     ))
                 })?;
-                let identity = platform::identity(&stage.file)?;
+                let identity = version.restore_identity.ok_or(io::ErrorKind::InvalidData)?;
                 self.record(&mut version, "restored", Some(identity))
                     .map_err(|error| {
                         io::Error::other(format!(
                             "original restored at target but checkpoint failed: {error}"
                         ))
                     })?;
-                platform::remove_owned(&parent.file, &previous, &adjacent_name).map_err(
-                    |error| {
+                (hooks.2)();
+                platform::remove_owned(&parent.file, &previous, &adjacent_name)
+                    .and_then(|()| platform::sync_parent(&parent.file))
+                    .map_err(|error| {
                         io::Error::other(format!(
-                            "original restored at target but adjacent cleanup failed: {error}"
+                            "original restored at target but adjacent cleanup or directory sync failed: {error}"
                         ))
-                    },
-                )?;
+                    })?;
                 Ok("Original restored to absent target; published result remains in private recovery.".into())
             }
             Err(error) => Err(error),
@@ -253,6 +302,8 @@ impl RecoveryStore {
     ) -> io::Result<Inspection> {
         let version = self.get(id)?;
         require_workspace(workspace, &version)?;
+        let before_integrity = self.integrity_status(&version, "before", budget)?;
+        let after_integrity = self.integrity_status(&version, "after", budget)?;
         let (_, parent, name) = workspace
             .change_parent(&version.target, budget)
             .map_err(|_| io::ErrorKind::InvalidInput)?;
@@ -263,14 +314,28 @@ impl RecoveryStore {
                         version,
                         target: "capture incomplete; target present",
                         adjacent: "not inspected",
+                        before_integrity,
+                        after_integrity,
                     });
                 }
-                let mut before = self.file(id, "before")?;
-                let mut after = self.file(id, "after")?;
-                if same(&mut file, &mut after, budget)? {
+                if after_integrity == "verified"
+                    && same(
+                        &mut file,
+                        &mut self.verified_file(&version, "after", budget)?,
+                        budget,
+                    )?
+                {
                     "published result"
-                } else if same(&mut file, &mut before, budget)? {
+                } else if before_integrity == "verified"
+                    && same(
+                        &mut file,
+                        &mut self.verified_file(&version, "before", budget)?,
+                        budget,
+                    )?
+                {
                     "retained original"
+                } else if before_integrity != "verified" || after_integrity != "verified" {
+                    "private recovery unverified"
                 } else {
                     "conflict"
                 }
@@ -286,7 +351,28 @@ impl RecoveryStore {
             version,
             target,
             adjacent,
+            before_integrity,
+            after_integrity,
         })
+    }
+
+    fn integrity_status(
+        &self,
+        version: &Version,
+        suffix: &str,
+        budget: &Budget<'_>,
+    ) -> io::Result<&'static str> {
+        if version.state == "capturing" {
+            return Ok("capture incomplete");
+        }
+        if version.schema == 1 {
+            return Ok("unverified legacy");
+        }
+        match self.verified_file(version, suffix, budget) {
+            Ok(_) => Ok("verified"),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => Err(error),
+            Err(_) => Ok("failed or unavailable"),
+        }
     }
 
     pub fn restore(
@@ -334,20 +420,13 @@ impl RecoveryStore {
                 "target changed since this version was published; restoration refused",
             ));
         }
-        let mut after = self.file(id, "after")?;
-        if after.metadata()?.len() != version.after_bytes
-            || !same(&mut current, &mut after, budget)?
-        {
+        let mut after = self.verified_file(&version, "after", budget)?;
+        if !same(&mut current, &mut after, budget)? {
             return Err(io::Error::other(
                 "target or retained result changed; restoration refused",
             ));
         }
-        let mut before = self.file(id, "before")?;
-        if before.metadata()?.len() != version.before_bytes {
-            return Err(io::Error::other(
-                "retained original has changed; restoration refused",
-            ));
-        }
+        let mut before = self.verified_file(&version, "before", budget)?;
         let stage_name = unique("staging");
         if Path::new(&version.adjacent).try_exists()? {
             return Err(io::Error::other(
@@ -367,16 +446,18 @@ impl RecoveryStore {
             .set_times(FileTimes::new().set_modified(version.before_modified))?;
         stage.file.sync_all()?;
         budget.check().map_err(|_| io::ErrorKind::Interrupted)?;
-        let mut verify = self.file(id, "before")?;
-        if !same(&mut stage.file, &mut verify, budget)? {
+        if digest(&mut stage.file, budget)? != version.expected("before")? {
             return Err(io::Error::other(
                 "retained original or staging file changed; restoration refused",
             ));
         }
+        self.verify_pair(&version, budget)?;
         // This checkpoint is durable before the first filesystem effect.
         let published_identity = Some(current_identity);
         let adjacent = unique("staging");
         version.restore_identity = Some(platform::identity(&stage.file)?);
+        version.restore_stage = Some(stage.name.clone());
+        version.replaced_identity = published_identity;
         version.adjacent = Path::new(&version.target)
             .with_file_name(&adjacent)
             .to_str()
@@ -386,6 +467,7 @@ impl RecoveryStore {
         platform::move_new(&parent.file, &current, &name, &adjacent)?;
         after_stash();
         let published = (|| {
+            after = self.verified_file(&version, "after", budget)?;
             #[cfg(not(windows))]
             {
                 let mut moved = platform::edit_open(&parent.file, &adjacent)?;
@@ -455,6 +537,54 @@ fn adjacent_name(version: &Version) -> io::Result<&str> {
         })
         .ok_or_else(|| io::Error::other("recorded adjacent name is invalid"))
 }
+fn cleanup_restore_stage(
+    store: &RecoveryStore,
+    version: &Version,
+    parent: &File,
+    target_name: &str,
+    budget: &Budget<'_>,
+) -> io::Result<()> {
+    let Some(name) = version.restore_stage.as_deref() else {
+        return Ok(());
+    };
+    if !name.starts_with(".jecode-staging-")
+        || !name[".jecode-staging-".len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(io::Error::other(
+            "recorded restoration stage name is invalid",
+        ));
+    }
+    let mut stage = match platform::edit_open(parent, name) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if Some(platform::identity(&stage)?) != version.restore_identity
+        || stage.metadata()?.modified()? != version.before_modified
+        || !matches_content(store, version, &mut stage, "before", budget)?
+    {
+        return Err(io::Error::other(
+            "restoration stage changed; cleanup refused",
+        ));
+    }
+    match platform::edit_open(parent, target_name) {
+        Ok(target) if platform::identity(&target)? == platform::identity(&stage)? => {
+            return Err(io::Error::other(
+                "restoration stage shares the restored target identity; cleanup refused",
+            ));
+        }
+        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    platform::remove_owned(parent, &stage, name)?;
+    platform::sync_parent(parent).map_err(|error| {
+        io::Error::other(format!(
+            "restoration stage removed but directory sync failed: {error}"
+        ))
+    })
+}
 fn cleanup_adjacent(
     store: &RecoveryStore,
     version: &Version,
@@ -516,13 +646,8 @@ fn matches_content(
     suffix: &str,
     budget: &Budget<'_>,
 ) -> io::Result<bool> {
-    let mut saved = store.file(&version.id, suffix)?;
-    let expected = if suffix == "before" {
-        version.before_bytes
-    } else {
-        version.after_bytes
-    };
-    Ok(saved.metadata()?.len() == expected && same(current, &mut saved, budget)?)
+    let mut saved = store.verified_file(version, suffix, budget)?;
+    same(current, &mut saved, budget)
 }
 fn require_workspace(workspace: &Workspace, version: &Version) -> io::Result<()> {
     if workspace.path().to_str() != Some(&version.workspace)

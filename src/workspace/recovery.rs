@@ -3,6 +3,7 @@ use super::{Budget, platform};
 use crate::{
     json::{self, Value},
     state::Store,
+    tls::crypto::sha256::Sha256,
 };
 use std::{
     fs::File,
@@ -45,7 +46,7 @@ impl From<io::ErrorKind> for CaptureError {
 pub struct RecoveryStore {
     files: Store,
     #[cfg(test)]
-    fail_record: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    fail_record_in: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     fail_capture: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
@@ -61,6 +62,9 @@ pub struct Version {
     pub before_bytes: u64,
     pub after_bytes: u64,
     pub adjacent: String,
+    pub(crate) schema: u64,
+    pub(crate) before_sha256: Option<[u8; 32]>,
+    pub(crate) after_sha256: Option<[u8; 32]>,
     pub(crate) policy: Vec<u8>,
     pub(crate) after_policy: Vec<u8>,
     pub(crate) before_modified: SystemTime,
@@ -68,7 +72,9 @@ pub struct Version {
     pub(crate) original_identity: (u64, u64),
     pub(crate) staged_identity: (u64, u64),
     pub(crate) restore_identity: Option<(u64, u64)>,
+    pub(crate) restore_stage: Option<String>,
     pub(crate) published_identity: Option<(u64, u64)>,
+    pub(crate) replaced_identity: Option<(u64, u64)>,
 }
 
 impl RecoveryStore {
@@ -79,7 +85,7 @@ impl RecoveryStore {
         Ok(Self {
             files: store.directory("recoveries")?,
             #[cfg(test)]
-            fail_record: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            fail_record_in: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
             fail_capture: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
@@ -122,6 +128,10 @@ impl RecoveryStore {
                 .and_then(Value::unsigned)
                 .ok_or(io::ErrorKind::InvalidData)
         };
+        let schema = number("version")?;
+        if !matches!(schema, 1 | 2) {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
         let identity = |key| -> io::Result<Option<(u64, u64)>> {
             match value.get(key) {
                 Some(Value::Array(parts)) if parts.len() == 2 => Ok(Some((
@@ -135,6 +145,28 @@ impl RecoveryStore {
         if field("id")? != id {
             return Err(io::ErrorKind::InvalidData.into());
         }
+        let digest = |key| -> io::Result<Option<[u8; 32]>> {
+            if schema == 1 {
+                return Ok(None);
+            }
+            match value.get(key) {
+                Some(Value::String(text)) => decode_hex(text)?
+                    .try_into()
+                    .map(Some)
+                    .map_err(|_| io::ErrorKind::InvalidData.into()),
+                Some(Value::Null) => Ok(None),
+                _ => Err(io::ErrorKind::InvalidData.into()),
+            }
+        };
+        let before_sha256 = digest("before_sha256")?;
+        let after_sha256 = digest("after_sha256")?;
+        let state = field("state")?;
+        if schema == 2
+            && state != "capturing"
+            && (before_sha256.is_none() || after_sha256.is_none())
+        {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
         Ok(Version {
             id: id.into(),
             workspace: field("workspace")?,
@@ -144,10 +176,13 @@ impl RecoveryStore {
                 .and_then(Value::text)
                 .map(str::to_owned),
             operation: field("operation")?,
-            state: field("state")?,
+            state,
             before_bytes: number("before_bytes")?,
             after_bytes: number("after_bytes")?,
             adjacent: field("adjacent")?,
+            schema,
+            before_sha256,
+            after_sha256,
             policy: decode_hex(&field("policy")?)?,
             after_policy: decode_hex(&field("after_policy")?)?,
             before_modified: decode_time(&field("before_modified")?)?,
@@ -155,7 +190,21 @@ impl RecoveryStore {
             original_identity: identity("original_identity")?.ok_or(io::ErrorKind::InvalidData)?,
             staged_identity: identity("staged_identity")?.ok_or(io::ErrorKind::InvalidData)?,
             restore_identity: identity("restore_identity")?,
+            restore_stage: if schema == 2 {
+                match value.get("restore_stage") {
+                    Some(Value::String(name)) => Some(name.to_owned()),
+                    Some(Value::Null) => None,
+                    _ => return Err(io::ErrorKind::InvalidData.into()),
+                }
+            } else {
+                None
+            },
             published_identity: identity("published_identity")?,
+            replaced_identity: if schema == 2 {
+                identity("replaced_identity")?
+            } else {
+                None
+            },
         })
     }
     pub fn original(&self, id: &str) -> io::Result<File> {
@@ -201,6 +250,9 @@ impl RecoveryStore {
             before_bytes: original.metadata()?.len(),
             after_bytes: staged.metadata()?.len(),
             adjacent,
+            schema: 2,
+            before_sha256: None,
+            after_sha256: None,
             policy,
             after_policy,
             before_modified,
@@ -208,7 +260,9 @@ impl RecoveryStore {
             original_identity: platform::identity(original)?,
             staged_identity: platform::identity(staged)?,
             restore_identity: None,
+            restore_stage: None,
             published_identity: None,
+            replaced_identity: None,
         };
         // The association is durable before any potentially partial private copy.
         // A capturing record never authorizes a workspace publication.
@@ -223,8 +277,8 @@ impl RecoveryStore {
         (|| -> io::Result<Version> {
             let mut before = self.files.data_file(&format!("{id}.before"), false)?;
             let mut after = self.files.data_file(&format!("{id}.after"), false)?;
-            let before_bytes = copy(original, &mut before, budget)?;
-            let after_bytes = copy(staged, &mut after, budget)?;
+            let (before_bytes, before_sha256) = copy(original, &mut before, budget)?;
+            let (after_bytes, after_sha256) = copy(staged, &mut after, budget)?;
             if before_bytes != version.before_bytes || after_bytes != version.after_bytes {
                 return Err(io::Error::other(
                     "source changed while private recovery was captured",
@@ -238,6 +292,8 @@ impl RecoveryStore {
                     "private recovery copy differs from the prepared file",
                 ));
             }
+            version.before_sha256 = Some(before_sha256);
+            version.after_sha256 = Some(after_sha256);
             version.state = "captured".into();
             self.write(&version)?;
             Ok(version)
@@ -254,7 +310,12 @@ impl RecoveryStore {
         identity: Option<(u64, u64)>,
     ) -> io::Result<()> {
         #[cfg(test)]
-        if self.fail_record.swap(false, Ordering::AcqRel) {
+        if self
+            .fail_record_in
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1))
+            .ok()
+            == Some(1)
+        {
             return Err(io::Error::other("injected recovery checkpoint failure"));
         }
         let mut updated = version.clone();
@@ -266,7 +327,12 @@ impl RecoveryStore {
     }
     #[cfg(test)]
     pub(crate) fn fail_next_record(&self) {
-        self.fail_record.store(true, Ordering::Release);
+        self.fail_record_in.store(1, Ordering::Release);
+    }
+    #[cfg(test)]
+    pub(crate) fn fail_record_after(&self, successful_records: usize) {
+        self.fail_record_in
+            .store(successful_records + 1, Ordering::Release);
     }
     #[cfg(test)]
     pub(crate) fn fail_next_capture(&self) {
@@ -288,6 +354,42 @@ impl RecoveryStore {
         valid_id(id)?;
         self.files.read_file(&format!("{id}.{suffix}"))
     }
+    pub(crate) fn verified_file(
+        &self,
+        version: &Version,
+        suffix: &str,
+        budget: &Budget<'_>,
+    ) -> io::Result<File> {
+        let (length, expected) = version.expected(suffix)?;
+        let mut file = self.file(&version.id, suffix)?;
+        let (actual_length, actual) = digest(&mut file, budget)?;
+        if actual_length != length || actual != expected {
+            return Err(io::Error::other(format!(
+                "retained {suffix} content failed capture-time integrity check"
+            )));
+        }
+        file.rewind()?;
+        Ok(file)
+    }
+    pub(crate) fn verify_pair(&self, version: &Version, budget: &Budget<'_>) -> io::Result<()> {
+        self.verified_file(version, "before", budget)?;
+        self.verified_file(version, "after", budget)?;
+        Ok(())
+    }
+}
+impl Version {
+    pub(crate) fn expected(&self, suffix: &str) -> io::Result<(u64, [u8; 32])> {
+        let value = match suffix {
+            "before" => (self.before_bytes, self.before_sha256),
+            "after" => (self.after_bytes, self.after_sha256),
+            _ => return Err(io::ErrorKind::InvalidInput.into()),
+        };
+        value.1.map(|hash| (value.0, hash)).ok_or_else(|| {
+            io::Error::other(
+                "recovery predates capture-time integrity metadata; automatic restore and repair are unavailable",
+            )
+        })
+    }
 }
 fn encode_manifest(version: &Version) -> io::Result<String> {
     let text = |value: &str| Value::String(value.into());
@@ -298,7 +400,7 @@ fn encode_manifest(version: &Version) -> io::Result<String> {
         })
     };
     let value = json::object([
-        ("version", number(1)),
+        ("version", number(version.schema)),
         ("id", text(&version.id)),
         ("workspace", text(&version.workspace)),
         ("target", text(&version.target)),
@@ -310,6 +412,18 @@ fn encode_manifest(version: &Version) -> io::Result<String> {
         ("state", text(&version.state)),
         ("before_bytes", number(version.before_bytes)),
         ("after_bytes", number(version.after_bytes)),
+        (
+            "before_sha256",
+            version
+                .before_sha256
+                .map_or(Value::Null, |hash| text(&encode_hex(&hash))),
+        ),
+        (
+            "after_sha256",
+            version
+                .after_sha256
+                .map_or(Value::Null, |hash| text(&encode_hex(&hash))),
+        ),
         ("adjacent", text(&version.adjacent)),
         ("policy", text(&encode_hex(&version.policy))),
         ("after_policy", text(&encode_hex(&version.after_policy))),
@@ -327,7 +441,12 @@ fn encode_manifest(version: &Version) -> io::Result<String> {
         ),
         ("staged_identity", identity(Some(version.staged_identity))),
         ("restore_identity", identity(version.restore_identity)),
+        (
+            "restore_stage",
+            version.restore_stage.as_deref().map_or(Value::Null, text),
+        ),
         ("published_identity", identity(version.published_identity)),
+        ("replaced_identity", identity(version.replaced_identity)),
     ]);
     let encoded = json::encode(&value, MANIFEST_LIMIT).map_err(|_| io::ErrorKind::InvalidData)?;
     Ok(encoded)
@@ -354,9 +473,10 @@ fn unique_id() -> String {
         NEXT.fetch_add(1, Ordering::Relaxed)
     )
 }
-fn copy(source: &mut File, target: &mut File, budget: &Budget<'_>) -> io::Result<u64> {
+fn copy(source: &mut File, target: &mut File, budget: &Budget<'_>) -> io::Result<(u64, [u8; 32])> {
     source.rewind()?;
     let mut bytes = 0;
+    let mut hash = Sha256::new();
     let mut buffer = [0; 16 * 1024];
     loop {
         budget.check().map_err(|_| io::ErrorKind::Interrupted)?;
@@ -365,9 +485,26 @@ fn copy(source: &mut File, target: &mut File, budget: &Budget<'_>) -> io::Result
             break;
         }
         target.write_all(&buffer[..count])?;
+        hash.update(&buffer[..count]);
         bytes += count as u64;
     }
-    Ok(bytes)
+    Ok((bytes, hash.finish()))
+}
+pub(crate) fn digest(source: &mut File, budget: &Budget<'_>) -> io::Result<(u64, [u8; 32])> {
+    source.rewind()?;
+    let mut bytes = 0;
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 16 * 1024];
+    loop {
+        budget.check().map_err(|_| io::ErrorKind::Interrupted)?;
+        let count = source.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+        bytes += count as u64;
+    }
+    Ok((bytes, hash.finish()))
 }
 pub(crate) fn same(
     source: &mut File,

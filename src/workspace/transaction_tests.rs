@@ -263,6 +263,53 @@ fn repair_cleans_verified_adjacent_original_after_applied_checkpoint() {
 }
 
 #[test]
+fn corrupted_private_copy_cannot_authorize_crash_cleanup() {
+    for suffix in ["before", "after"] {
+        let files = support::Fixture::new();
+        files.write("notes", "before\n");
+        let ws = Workspace::open(&files.0)
+            .unwrap()
+            .with_access(super::super::Access::Local);
+        let recoveries = recoveries(&files);
+        let cancelled = AtomicBool::new(false);
+        let budget = Budget {
+            cancelled: &cancelled,
+            deadline: Instant::now() + Duration::from_secs(10),
+        };
+        let change = ws
+            .prepare_edit("notes", "before", "after", &budget)
+            .unwrap();
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ws.apply_with(
+                change,
+                &budget,
+                &recoveries,
+                Some("s"),
+                "edit",
+                (|| {}, || panic!("after publication")),
+            );
+        }));
+        assert!(interrupted.is_err());
+        let version = recoveries.list().unwrap().pop().unwrap();
+        assert_eq!(version.state, "captured");
+        assert!(std::path::Path::new(&version.adjacent).exists());
+        fs::write(
+            recoveries.root().join(format!("{}.{}", version.id, suffix)),
+            if suffix == "before" {
+                b"BROKEN\n".as_slice()
+            } else {
+                b"WRONG\n".as_slice()
+            },
+        )
+        .unwrap();
+        assert!(recoveries.repair(&ws, &version.id, &budget).is_err());
+        assert_eq!(recoveries.get(&version.id).unwrap().state, "captured");
+        assert_eq!(fs::read(files.0.join("notes")).unwrap(), b"after\n");
+        assert_eq!(fs::read(&version.adjacent).unwrap(), b"before\n");
+    }
+}
+
+#[test]
 fn capture_failure_does_not_publish_and_result_checkpoint_failure_reports_applied() {
     let files = support::Fixture::new();
     files.write("notes", "original\n");

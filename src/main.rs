@@ -240,7 +240,7 @@ fn run(args: impl Iterator<Item = OsString>) -> io::Result<u8> {
                         let v = view.version;
                         writeln!(
                             io::stdout().lock(),
-                            "Recovery: {}\nWorkspace: {}\nTarget: {}\nSession: {}\nOperation: {}\nState: {}\nOriginal bytes: {}\nResult bytes: {}\nCurrent target: {}\nAdjacent transient: {}",
+                            "Recovery: {}\nWorkspace: {}\nTarget: {}\nSession: {}\nOperation: {}\nState: {}\nOriginal bytes: {}\nResult bytes: {}\nOriginal integrity: {}\nResult integrity: {}\nCurrent target: {}\nAdjacent transient: {}",
                             v.id,
                             v.workspace,
                             v.target,
@@ -249,13 +249,22 @@ fn run(args: impl Iterator<Item = OsString>) -> io::Result<u8> {
                             v.state,
                             v.before_bytes,
                             v.after_bytes,
+                            view.before_integrity,
+                            view.after_integrity,
                             view.target,
                             view.adjacent
                         )?;
                         Ok(0)
                     }
                     (Some("cat"), Some(id)) => {
-                        recoveries.inspect(&selected, id, &budget)?;
+                        let view = recoveries.inspect(&selected, id, &budget)?;
+                        if view.before_integrity != "verified" {
+                            writeln!(
+                                io::stderr().lock(),
+                                "jecode: original integrity is {}; output is for manual inspection only",
+                                view.before_integrity
+                            )?;
+                        }
                         io::copy(&mut recoveries.original(id)?, &mut io::stdout().lock())?;
                         Ok(0)
                     }

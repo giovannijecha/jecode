@@ -153,8 +153,11 @@ impl Workspace {
                 })?;
             matches(original, before, budget)
                 .map_err(|error| ChangeError(error.0, Some(version.id.clone())))?;
+            recoveries
+                .verify_pair(&version, budget)
+                .map_err(|error| ChangeError(error.to_string(), Some(version.id.clone())))?;
             let mut expected_after = recoveries
-                .file(&version.id, "after")
+                .verified_file(&version, "after", budget)
                 .map_err(|error| ChangeError(error.to_string(), Some(version.id.clone())))?;
             let stage_matches = same(&mut staging.file, &mut expected_after, budget)
                 .map_err(|error| ChangeError(error.to_string(), Some(version.id.clone())))?;

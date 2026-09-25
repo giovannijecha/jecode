@@ -56,7 +56,10 @@ Large existing files use a temporary, owned snapshot so preparation and stale
 checks do not keep multiple full copies in memory. Before publishing an edit,
 Jecode streams the exact original and proposed result into private files under
 `~/.jecode/v1/recoveries/`, syncs them and records their workspace, absolute
-target, session and tool call. The receipt's `recovery` value is a stable ID,
+target, session and tool call. The manifest also records SHA-256 digests computed
+from both source streams before publication. Restore and repair recheck those
+digests in bounded chunks before using either retained copy or removing an
+adjacent original. The receipt's `recovery` value is a stable ID,
 not a project path. Each edit retains two full versions; Jecode does not purge
 them by age or count. The user owns this state and decides when it is no longer
 needed. Creation has no previous version to retain.
@@ -94,12 +97,15 @@ jecode --workspace PATH recover repair ID
 ```
 
 `list` identifies versions by ID, target, session and operation. `show` reports
-the recorded state, sizes, whether the current target matches a retained
-version, and any adjacent transient.
+the recorded state, sizes, integrity status of both private copies, whether the
+current target matches a verified version, and any adjacent transient.
 `cat` streams the retained original to stdout for inspection or redirection;
-it can contain sensitive project content. `restore` installs that original only
+it can contain sensitive project content. It warns when integrity is unverified;
+its output is then for manual inspection only. `restore` installs that original only
 when the current target is the exact recorded result with its expected file
-identity, metadata and bytes. A conflict leaves the target untouched. To walk
+identity, metadata and bytes, and both private copies pass their capture-time
+integrity checks. A conflict or failed integrity check leaves the target
+untouched. To walk
 back several Jecode edits, restore the newest version first, then the preceding
 one. Restoration preserves the original file's ordinary Unix mode or Windows
 DACL access entries and protection mode, and its modification time. Windows
@@ -109,7 +115,11 @@ reconciles a captured edit or interrupted restoration after inspecting the
 target and adjacent file. It also removes a verified adjacent transient left
 by an applied edit. Recorded file identities help distinguish Jecode's files
 from competing files with identical contents. Repair refuses conflicts and
-never replaces an occupied name.
+never replaces an occupied name. An interrupted repair records its intended
+stage name and identity before publication; a retry verifies and removes its
+own unpublished stage, or confirms its published result and finishes cleanup.
+A recorded restored result with a remaining adjacent
+transient can also be reconciled without publishing again.
 
 The private state records `capturing` before copying either private file,
 then `captured` before an edit can move the target,
@@ -120,6 +130,17 @@ If publication fails after moving the original aside, Jecode tries a
 no-overwrite move back. A competing target wins; the original remains adjacent
 and in private state. An interrupted transaction may need `show` and `repair`
 before restoration. No recovery copy rolls back arbitrary shell effects.
+The digests detect changes to the retained content; they are stored beside the
+copies and do not authenticate against someone who can rewrite both copies and
+their manifest.
+
+Recovery manifests written before capture-time digests were added remain
+inspectable. `show` labels them `unverified legacy`, and `cat` can stream their
+original for manual inspection with a warning. Automatic `restore` and `repair`
+refuse them, including a same-length file that appears unchanged. Jecode does
+not hash their current contents and treat that as evidence of what was captured.
+Leave these records and any adjacent original in place until you have compared
+them manually and resolved any conflict.
 
 Older receipts that contain an adjacent `.jecode-recovery-*` path remain valid
 historical references. Those files are user data and are never imported,

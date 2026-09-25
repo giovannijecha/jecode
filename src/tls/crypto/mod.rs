@@ -1,5 +1,5 @@
 //! Selected owned primitives, adapted from Jecode's archived implementation.
-//! These are private to the TLS boundary; no general crypto API is offered.
+//! SHA-256 is also reused by private file recovery; no public crypto API is offered.
 
 mod aes;
 pub(super) mod aes_gcm;
@@ -9,7 +9,7 @@ mod ghash;
 pub(super) mod nist;
 pub(super) mod rsa;
 pub(super) mod secret;
-pub(super) mod sha256;
+pub(crate) mod sha256;
 pub(super) mod sha384;
 mod sha384_compress;
 pub(super) mod signature;

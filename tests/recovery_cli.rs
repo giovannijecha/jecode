@@ -60,6 +60,8 @@ fn cli_inspects_exact_original_and_restores_after_reopening_state() {
     let shown = String::from_utf8(show.stdout).unwrap();
     assert!(shown.contains("Session: s-cli"));
     assert!(shown.contains("Operation: edit-1"));
+    assert!(shown.contains("Original integrity: verified"));
+    assert!(shown.contains("Result integrity: verified"));
     assert!(shown.contains("Current target: published result"));
     let cat = command(&files, &["recover", "cat", &id, "--workspace", workspace]);
     assert!(cat.status.success());
