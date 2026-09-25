@@ -1,6 +1,12 @@
 use crate::{json::Value, workspace};
 
 pub enum Prepared {
+    Recall {
+        turn: usize,
+        step: usize,
+        receipt: usize,
+        offset: usize,
+    },
     Image {
         path: Option<String>,
         image_id: Option<String>,
@@ -44,6 +50,7 @@ impl Prepared {
             "edit_file" => &["path", "old_text", "new_text"],
             "run_command" => &["command", "path", "timeout_seconds"],
             "view_image" => &["path", "image_id"],
+            "recall_receipts" => &["turn", "step", "receipt", "offset"],
             _ => {
                 return Err("unknown tool; use only the advertised workspace tools");
             }
@@ -53,6 +60,14 @@ impl Prepared {
         };
         if fields.keys().any(|key| !keys.contains(&key.as_str())) {
             return Err("unknown tool argument");
+        }
+        if name == "recall_receipts" {
+            return Ok(Self::Recall {
+                turn: required_nonnegative(args, "turn")?,
+                step: required_nonnegative(args, "step")?,
+                receipt: optional_nonnegative(args, "receipt")?,
+                offset: optional_nonnegative(args, "offset")?,
+            });
         }
         if name == "view_image" {
             let path = image_selector(args, "path")?;
@@ -125,6 +140,7 @@ impl Prepared {
     }
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Recall { .. } => "recall_receipts",
             Self::Image { .. } => "view_image",
             Self::List { .. } => "list_files",
             Self::Read { .. } => "read_file",
@@ -136,6 +152,7 @@ impl Prepared {
     }
     pub fn path(&self) -> &str {
         match self {
+            Self::Recall { .. } => "canonical session receipts",
             Self::Image {
                 path: Some(path), ..
             } => path,
@@ -160,6 +177,10 @@ impl Prepared {
         budget: &workspace::Budget<'_>,
     ) -> Result<workspace::Change, workspace::ChangeError> {
         match self {
+            Self::Recall { .. } => Err(workspace::ChangeError(
+                "receipt recall cannot propose a change".into(),
+                None,
+            )),
             Self::Image { .. } => Err(workspace::ChangeError(
                 "image reads cannot propose a change".into(),
                 None,
@@ -171,6 +192,21 @@ impl Prepared {
                 None,
             )),
         }
+    }
+}
+fn required_nonnegative(args: &Value, key: &str) -> Result<usize, &'static str> {
+    args.get(key)
+        .and_then(Value::unsigned)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or("canonical turn and step must be nonnegative integers")
+}
+fn optional_nonnegative(args: &Value, key: &str) -> Result<usize, &'static str> {
+    match args.get(key) {
+        None => Ok(0),
+        Some(value) => value
+            .unsigned()
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or("receipt and offset must be nonnegative integers"),
     }
 }
 fn image_selector<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>, &'static str> {

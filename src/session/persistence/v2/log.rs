@@ -6,6 +6,11 @@ use std::{
 };
 
 pub(super) const EVENT_LIMIT: usize = 80 * 1024 * 1024;
+const FRAME_LIMITS: json::Limits = json::Limits {
+    bytes: EVENT_LIMIT,
+    nodes: 500_000,
+    depth: 64,
+};
 const HEADER: usize = 20;
 const CHUNK: usize = 64 * 1024;
 pub(super) const HASH_START: u64 = 0xcbf29ce484222325;
@@ -36,6 +41,8 @@ pub(super) fn append(
     rolling: &mut u64,
 ) -> io::Result<()> {
     let bytes = json::encode(value, EVENT_LIMIT)
+        .map_err(|_| io::Error::other("one canonical log event exceeds its bounded parser"))?;
+    json::parse(&bytes, FRAME_LIMITS)
         .map_err(|_| io::Error::other("one canonical log event exceeds its bounded parser"))?;
     let length = u32::try_from(bytes.len()).map_err(|_| io::ErrorKind::InvalidInput)?;
     let turn = u64::try_from(turn).map_err(|_| io::ErrorKind::InvalidInput)?;
@@ -114,15 +121,7 @@ pub(super) fn visit(
         }
         if let Some(bytes) = bytes {
             let source = std::str::from_utf8(&bytes).map_err(|_| corrupt())?;
-            let value = json::parse(
-                source,
-                json::Limits {
-                    bytes: EVENT_LIMIT,
-                    nodes: 500_000,
-                    depth: 64,
-                },
-            )
-            .map_err(|_| corrupt())?;
+            let value = json::parse(source, FRAME_LIMITS).map_err(|_| corrupt())?;
             event(usize::try_from(turn).map_err(|_| corrupt())?, value)?;
         }
         position += HEADER as u64 + length as u64;

@@ -165,6 +165,12 @@ fn strict_arguments_and_schemas_cover_the_advertised_tools() {
         ("read_file", r#"{}"#),
         ("read_file", r#"{"path":"text","start_line":0}"#),
         ("read_file", r#"{"path":"text","max_lines":401}"#),
+        ("recall_receipts", r#"{"turn":0}"#),
+        ("recall_receipts", r#"{"turn":0,"step":-1}"#),
+        (
+            "recall_receipts",
+            r#"{"turn":0,"step":0,"session_id":"other"}"#,
+        ),
         ("list_files", r#"{"path":null}"#),
         ("list_files", r#"{"limit":1.0}"#),
         ("list_files", r#"{"follow_links":true}"#),
@@ -188,6 +194,7 @@ fn strict_arguments_and_schemas_cover_the_advertised_tools() {
         [
             "list_files",
             "read_file",
+            "recall_receipts",
             "search_text",
             "create_file",
             "edit_file",

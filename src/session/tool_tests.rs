@@ -69,9 +69,9 @@ impl worker::Backend for Fixture {
         let summary = request.instructions.starts_with("Summarize");
         drop(requests);
         if summary {
-            return Ok(tests::response(
+            return Ok(tests::handoff_response(
+                request,
                 "Keep the user's original task, guidance and completed read receipts.",
-                Status::Completed,
             ));
         }
         self.round += 1;
@@ -394,11 +394,11 @@ fn first_turn_compacts_repeatedly_after_former_accumulated_text_limit() {
     let requests = requests.lock().unwrap();
     let summaries = requests
         .iter()
-        .filter(|r| r.contains("Summarize this bounded portion"))
+        .filter(|r| r.contains("Summarize the ordered reference data"))
         .count();
     let generations: Vec<_> = requests
         .iter()
-        .filter(|r| !r.contains("Summarize this bounded portion"))
+        .filter(|r| !r.contains("Summarize the ordered reference data"))
         .collect();
     assert!(summaries >= 2, "compactions={summaries}");
     assert_eq!(generations.len(), 41);
@@ -645,12 +645,12 @@ fn large_completed_batch_is_compacted_as_bounded_reference_data() {
                         }
                     }
                 }
-                return Ok(tests::response(
+                return Ok(tests::handoff_response(
+                    request,
                     &format!(
                         "Completed read results: {}",
                         self.seen.iter().cloned().collect::<Vec<_>>().join(" ")
                     ),
-                    Status::Completed,
                 ));
             }
             self.generation += 1;

@@ -1,6 +1,6 @@
 # Tools
 
-Jecode exposes six base tools when started with a workspace. It also exposes
+Jecode exposes seven base tools when started with a workspace. It also exposes
 `view_image` when the selected account model explicitly lists image input in its
 catalog metadata and the session uses v2 storage. With no workspace, the model
 receives no tools. Local UI commands and context management do not add tools.
@@ -9,6 +9,7 @@ receives no tools. Local UI commands and context management do not add tools.
 | --- | --- |
 | `list_files` | Discover entries in a selected directory |
 | `read_file` | Read a bounded range of UTF-8 text with line numbers |
+| `recall_receipts` | Retrieve a saved workspace-read result from this session |
 | `search_text` | Find literal text in supported local files |
 | `create_file` | Create one new UTF-8 file directly |
 | `edit_file` | Apply an exact text replacement directly |
@@ -83,6 +84,43 @@ lines in an 8 KiB page, at most 400 lines. It can read files larger than 1 MiB;
 the scan checks the whole file and is subject to cancellation and the operation
 time limit. `search_text` still scans only files up to 1 MiB within its separate
 directory-wide budget.
+
+## Recorded receipt recall
+
+`recall_receipts` reads an original, committed `list_files`, `read_file` or
+`search_text` result from the current session. It never reruns the historical
+tool or opens the original source path. Supply the absolute canonical `turn`
+and `step` from a compaction handoff, plus the zero-based `receipt` position in
+that step's call order. The response includes the original call ID, tool name,
+summary, exact output bytes as UTF-8 text, total byte count and a `next`
+position. Follow `next` when it is present; its `offset` is a UTF-8 byte offset,
+not a line number. The cursor skips effects and unexecuted or uncertain
+receipts, while retaining the original receipt indices. A completed read in an
+interrupted batch remains available even if a later sibling did not execute.
+A response carries at most 8 KiB of original result text and
+must also fit the 32 KiB encoded tool-output bound. Heavily escaped text may
+therefore use smaller pages.
+
+Absolute turn/step/receipt coordinates remain stable after compaction and
+resume. The controller reads released v2 turns from the current session's
+committed log in bounded turn pages; resident turns use the same coordinates.
+Conversation-only sessions have no tool access. Command, edit, image and opaque
+provider records are outside this retrieval tool. Each newly admitted recall
+result remains in the next generation request until an accepted response
+consumes it, even when the ordinary compaction threshold is exceeded. The
+controller measures the encoded batch before admitting each recalled page and
+reserves paired error results for remaining calls. When the batch reaches the
+8 MiB request limit, it reports the unadmitted page and marks later calls as
+not executed; request those pages again after consuming the delivered results.
+For an older saved batch that already exceeds the limit, the next projection
+delivers a fitting prefix and explicit paired deferred notices. The exact
+canonical results remain saved; reissue the paired recall arguments to recover
+deferred pages. If even the notices and other context cannot fit, the request
+still fails with a history limit. Recall is evidence of an earlier observation;
+use a separate deliberate read when the current state of a changed source
+matters. A single old turn that
+exceeds the existing 80 MiB turn-page budget cannot be recalled through this
+tool, and a handoff may still omit or misstate a reference.
 
 ## Working directory and access
 

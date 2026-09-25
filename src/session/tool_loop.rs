@@ -73,6 +73,16 @@ fn execute(
 ) -> Result<(), Failure> {
     let count = current(history)?.results.len();
     let shell = history.shell.clone();
+    let mut admission = current(history)?
+        .response
+        .as_ref()
+        .ok_or(Failure::Worker)?
+        .tool_calls
+        .iter()
+        .any(|call| call.name == "recall_receipts")
+        .then(|| RecallAdmission::new(history, model))
+        .transpose()?;
+    let mut defer_tail = false;
     for index in 0..count {
         context.check()?;
         let call = &current(history)?
@@ -82,13 +92,15 @@ fn execute(
             .tool_calls[index];
         let call_id = call.id.clone();
         let prepared = Prepared::parse(&call.name, &call.arguments);
+        let recall = matches!(&prepared, Ok(Prepared::Recall { .. }));
         let (name, path) = match &prepared {
             Ok(tool) => (tool.name(), tool.path().to_owned()),
             Err(_) => ("rejected tool", String::new()),
         };
-        let effect = prepared
-            .as_ref()
-            .is_ok_and(|tool| tool.changes_file() || matches!(tool, Prepared::Command { .. }));
+        let effect = !defer_tail
+            && prepared
+                .as_ref()
+                .is_ok_and(|tool| tool.changes_file() || matches!(tool, Prepared::Command { .. }));
         if !effect
             && context
                 .send(Event::ToolStarted { name, path }, true)
@@ -107,59 +119,92 @@ fn execute(
             receipt.summary = format!("{name} / outcome unknown after interruption");
             history.checkpoint()?;
         }
-        let (mut output, completion, mut image) = match prepared {
-            Ok(Prepared::Image { path, image_id }) => {
-                let (output, image) = super::image_tool::execute(
-                    history,
-                    workspace,
-                    path.as_deref(),
-                    image_id.as_deref(),
-                    context,
-                )?;
-                (output, None, image)
-            }
-            Ok(Prepared::Command {
-                command,
-                path,
-                timeout_seconds,
-            }) => {
-                let (output, event) = super::command::execute(
-                    &command,
-                    &path,
+        let (mut output, completion, mut image) = if defer_tail {
+            (Output::not_executed(BATCH_DELIVERY_LIMIT), None, None)
+        } else {
+            match prepared {
+                Ok(Prepared::Recall {
+                    turn,
+                    step,
+                    receipt,
+                    offset,
+                }) => {
+                    let output = super::receipt_recall::execute(
+                        history,
+                        turn,
+                        step,
+                        receipt,
+                        offset,
+                        &Budget {
+                            cancelled: &context.cancelled,
+                            deadline: operation_deadline(clock(), Duration::from_secs(10)),
+                        },
+                    );
+                    (output, None, None)
+                }
+                Ok(Prepared::Image { path, image_id }) => {
+                    let (output, image) = super::image_tool::execute(
+                        history,
+                        workspace,
+                        path.as_deref(),
+                        image_id.as_deref(),
+                        context,
+                    )?;
+                    (output, None, image)
+                }
+                Ok(Prepared::Command {
+                    command,
+                    path,
                     timeout_seconds,
-                    &shell,
-                    workspace,
-                    context,
-                );
-                (output, Some(event), None)
-            }
-            Ok(tool) if tool.changes_file() => {
-                let recoveries = history.recovery_store().map_err(|_| Failure::Storage)?;
-                let session_id = history.record.as_ref().map(|record| record.id().to_owned());
-                let (output, event) = super::edit::execute(
-                    tool,
-                    workspace,
-                    context,
-                    &recoveries,
-                    session_id.as_deref(),
-                    &call_id,
-                );
-                (output, Some(event), None)
-            }
-            Ok(tool) => (
-                tool.execute(
-                    workspace,
-                    &Budget {
-                        cancelled: &context.cancelled,
-                        deadline: operation_deadline(clock(), Duration::from_secs(10)),
-                    },
+                }) => {
+                    let (output, event) = super::command::execute(
+                        &command,
+                        &path,
+                        timeout_seconds,
+                        &shell,
+                        workspace,
+                        context,
+                    );
+                    (output, Some(event), None)
+                }
+                Ok(tool) if tool.changes_file() => {
+                    let recoveries = history.recovery_store().map_err(|_| Failure::Storage)?;
+                    let session_id = history.record.as_ref().map(|record| record.id().to_owned());
+                    let (output, event) = super::edit::execute(
+                        tool,
+                        workspace,
+                        context,
+                        &recoveries,
+                        session_id.as_deref(),
+                        &call_id,
+                    );
+                    (output, Some(event), None)
+                }
+                Ok(tool) => (
+                    tool.execute(
+                        workspace,
+                        &Budget {
+                            cancelled: &context.cancelled,
+                            deadline: operation_deadline(clock(), Duration::from_secs(10)),
+                        },
+                    ),
+                    None,
+                    None,
                 ),
-                None,
-                None,
-            ),
-            Err(error) => (Output::error(error), None, None),
+                Err(error) => (Output::error(error), None, None),
+            }
         };
-        if image.is_some() {
+        if recall
+            && !defer_tail
+            && !admission
+                .as_ref()
+                .is_some_and(|budget| budget.fits(index, &output))
+        {
+            output = Output::error(RECALL_NOT_ADMITTED);
+            defer_tail = true;
+        }
+        let attempted_image = image.is_some();
+        if attempted_image {
             context.check()?;
             if !admit_image(
                 backend,
@@ -178,6 +223,9 @@ fn execute(
             }
         }
         let stop_after = output.stop_after;
+        if let Some(budget) = &mut admission {
+            budget.record(index, &output);
+        }
         let receipt = &mut current(history)?.results[index];
         receipt.summary = format!("{name} / {}", output.summary);
         receipt.output = output.text;
@@ -196,6 +244,11 @@ fn execute(
             let _ = context.send(event, false);
         }
         checkpoint?;
+        if attempted_image && admission.is_some() {
+            // An image can change the projection and may compact earlier text.
+            // Rebase the ledger on the exact post-checkpoint request.
+            admission = Some(RecallAdmission::new(history, model)?);
+        }
         if stop_after {
             return Err(Failure::Storage);
         }
@@ -212,6 +265,71 @@ fn execute(
         context.check()?;
     }
     Ok(())
+}
+
+const BATCH_DELIVERY_LIMIT: &str = "tool was not executed because the aggregate result delivery reached the 8 MiB request limit; consume earlier results and issue a new call";
+const RECALL_NOT_ADMITTED: &str = "recall result was not admitted to this batch because the aggregate delivery reached the 8 MiB request limit; the original recorded source remains available through recall_receipts after this response";
+
+/// A function_call_output changes only its JSON-quoted output field. Measure
+/// the provider request once, then account for that field's exact encoded delta
+/// as each receipt is committed. The suffix reserves paired errors for recall
+/// calls and the maximum text output for any other remaining call.
+struct RecallAdmission {
+    bytes: Option<usize>,
+    placeholder_wire: Vec<usize>,
+    suffix_reserve: Vec<usize>,
+}
+impl RecallAdmission {
+    fn new(history: &mut History, model: Model) -> Result<Self, Failure> {
+        let bytes = history
+            .unabridged_projected_request(model, true)?
+            .encode(MAX_REQUEST)
+            .ok()
+            .map(|body| body.len());
+        let step = current(history)?;
+        let calls = &step.response.as_ref().ok_or(Failure::Worker)?.tool_calls;
+        let placeholder_wire = step
+            .results
+            .iter()
+            .map(|result| wire_len(&result.output))
+            .collect::<Vec<_>>();
+        let tail_wire = wire_len(&Output::not_executed(BATCH_DELIVERY_LIMIT).text)
+            .max(wire_len(&Output::error(RECALL_NOT_ADMITTED).text));
+        let mut suffix_reserve = vec![0usize; calls.len() + 1];
+        for index in (0..calls.len()).rev() {
+            let additional = if calls[index].name == "recall_receipts" {
+                tail_wire.saturating_sub(placeholder_wire[index])
+            } else {
+                // Owned tool outputs are JSON text bounded by MAX_OUTPUT. A
+                // second JSON string layer can at most double their bytes.
+                (2 * crate::tools::MAX_OUTPUT + 2).saturating_sub(placeholder_wire[index])
+            };
+            suffix_reserve[index] = suffix_reserve[index + 1].saturating_add(additional);
+        }
+        Ok(Self {
+            bytes,
+            placeholder_wire,
+            suffix_reserve,
+        })
+    }
+    fn fits(&self, index: usize, output: &Output) -> bool {
+        self.bytes
+            .and_then(|bytes| bytes.checked_add(wire_len(&output.text)))
+            .and_then(|bytes| bytes.checked_sub(self.placeholder_wire[index]))
+            .and_then(|bytes| bytes.checked_add(self.suffix_reserve[index + 1]))
+            .is_some_and(|bytes| bytes <= MAX_REQUEST)
+    }
+    fn record(&mut self, index: usize, output: &Output) {
+        self.bytes = self
+            .bytes
+            .and_then(|bytes| bytes.checked_add(wire_len(&output.text)))
+            .and_then(|bytes| bytes.checked_sub(self.placeholder_wire[index]));
+    }
+}
+fn wire_len(text: &str) -> usize {
+    crate::json::encode(&crate::json::Value::String(text.to_owned()), usize::MAX)
+        .expect("owned tool output can be JSON quoted")
+        .len()
 }
 
 /// Stage only the proposed receipt in memory, then measure the exact provider
@@ -282,3 +400,10 @@ fn current(history: &mut History) -> Result<&mut Step, Failure> {
         .and_then(|turn| turn.steps.last_mut())
         .ok_or(Failure::Worker)
 }
+
+#[cfg(test)]
+#[path = "tool_loop_persistence_tests.rs"]
+mod persistence_tests;
+#[cfg(test)]
+#[path = "tool_loop_recall_tests.rs"]
+mod recall_tests;

@@ -3,6 +3,8 @@
 //! contract; v2's incremental transactions live in their own module.
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod access_tests;
+#[cfg(test)]
+mod batch_compat_tests;
 mod codec;
 mod diagnostics;
 #[cfg(all(test, any(windows, target_os = "linux")))]
@@ -135,6 +137,14 @@ pub(super) struct Record {
     _lock: Lease,
 }
 impl Record {
+    pub(super) fn recorded_turn(&self, turn: usize) -> io::Result<super::history::Turn> {
+        if self.legacy() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        v2::page(self, turn, 1)?
+            .pop()
+            .ok_or(io::ErrorKind::NotFound.into())
+    }
     pub(super) fn user_store(&self) -> io::Result<Store> {
         self.store.parent()
     }
@@ -153,6 +163,8 @@ impl Record {
         if self.incremental.is_some() {
             return v2::save(self, history);
         }
+        let canonical = codec::encode(history);
+        codec::decode(&canonical)?;
         let mut fields = vec![
             ("version", Value::Number("1".into())),
             ("id", text(&self.id)),
@@ -165,7 +177,7 @@ impl Record {
             ("created", Value::Number(self.created.to_string())),
             ("file_access", text(self.access.name())),
             ("updated", Value::Number(now()?.to_string())),
-            ("history", codec::encode(history)),
+            ("history", canonical),
             (
                 "projection",
                 json::object([
@@ -175,6 +187,14 @@ impl Record {
                     ),
                     ("step", Value::Number(history.projection.step.to_string())),
                     ("summary", text(&history.projection.summary)),
+                    (
+                        "source",
+                        super::context::handoff::source_value(&history.projection.source),
+                    ),
+                    (
+                        "source_omitted",
+                        Value::Number(history.projection.source_omitted.to_string()),
+                    ),
                     (
                         "limit_bytes",
                         Value::Number(history.projection.limit_bytes.to_string()),
@@ -226,6 +246,15 @@ impl Record {
         );
         let value = json::object(fields);
         let contents = json::encode(&value, LIMIT).map_err(|_| invalid())?;
+        json::parse(
+            &contents,
+            json::Limits {
+                bytes: LIMIT,
+                nodes: 500_000,
+                depth: 64,
+            },
+        )
+        .map_err(|_| invalid())?;
         self.store.replace(&format!("{}.json", self.id), &contents)
     }
 }
@@ -484,6 +513,14 @@ fn load_legacy(
         return Err(invalid());
     }
     history.projection.summary = string(projection, "summary", 32768)?.into();
+    history.projection.source = super::context::handoff::read_source(projection.get("source"))?;
+    history.projection.source_omitted = match projection.get("source_omitted") {
+        None => 0,
+        Some(value) => value
+            .unsigned()
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(invalid)?,
+    };
     if (history.projection.through == 0 && history.projection.step == 0)
         != history.projection.summary.is_empty()
     {

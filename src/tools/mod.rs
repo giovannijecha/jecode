@@ -80,6 +80,9 @@ impl Output {
 impl Prepared {
     pub fn execute(&self, workspace: &Workspace, budget: &Budget<'_>) -> Output {
         let result = match self {
+            Self::Recall { .. } => {
+                return Output::error("receipt recall must execute through the session controller");
+            }
             Self::Command { .. } => {
                 return Output::error("commands must execute through the session controller");
             }

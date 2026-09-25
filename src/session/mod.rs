@@ -14,6 +14,7 @@ mod image_tests;
 mod image_tool;
 pub mod persistence;
 mod queue;
+mod receipt_recall;
 pub mod scope;
 mod tool_loop;
 mod types;

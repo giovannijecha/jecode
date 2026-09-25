@@ -55,9 +55,9 @@ impl worker::Backend for InterruptedImageBackend {
         let images = request_images(request);
         self.requests.push((summary, images.clone()));
         if summary {
-            return Ok(tests::response(
+            return Ok(tests::handoff_response(
+                request,
                 "The task is unfinished. Inspect the saved PNG before describing it.",
-                Status::Completed,
             ));
         }
         self.calls += 1;
@@ -216,6 +216,9 @@ impl worker::Backend for ScriptBackend {
             .pop_front()
             .expect("unexpected provider request")
         {
+            Reply::Complete(text) if request.instructions.starts_with("Summarize") => {
+                Ok(tests::handoff_response(request, text))
+            }
             Reply::Complete(text) => Ok(tests::response(text, Status::Completed)),
             Reply::Incomplete => Ok(tests::response(
                 "Unfinished visual response",

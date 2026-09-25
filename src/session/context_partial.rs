@@ -15,15 +15,18 @@ fn text(value: &str) -> Value {
 
 // The canonical response and receipts remain untouched. These records are user
 // reference data, never assistant function_call items or executable tool results.
-struct Reference {
-    content: String,
-    association: String,
+pub(super) struct Reference {
+    pub content: String,
+    pub association: String,
 }
 
 fn record_count(history: &History) -> Option<usize> {
     let projection = &history.projection;
-    let turn = history.turns.get(projection.through)?;
-    let step = turn.steps.get(projection.step)?;
+    record_count_at(history, projection.through, projection.step)
+}
+
+pub(super) fn record_count_at(history: &History, turn: usize, step: usize) -> Option<usize> {
+    let step = history.turns.get(turn)?.steps.get(step)?;
     let (items, calls) = step.response.as_ref().map_or((0, 0), |response| {
         (
             response.output.len(),
@@ -43,9 +46,18 @@ fn record_count(history: &History) -> Option<usize> {
 /// many receipts. A call/receipt record may then be sliced for provider input.
 fn reference_at(history: &History, index: usize) -> Option<Reference> {
     let projection = &history.projection;
-    let turn = history.turns.get(projection.through)?;
-    let step = turn.steps.get(projection.step)?;
-    let total = record_count(history)?;
+    reference_at_position(history, projection.through, projection.step, index)
+}
+
+pub(super) fn reference_at_position(
+    history: &History,
+    turn_index: usize,
+    step_index: usize,
+    index: usize,
+) -> Option<Reference> {
+    let turn = history.turns.get(turn_index)?;
+    let step = turn.steps.get(step_index)?;
+    let total = record_count_at(history, turn_index, step_index)?;
     if index >= total {
         return None;
     }
@@ -63,11 +75,50 @@ fn reference_at(history: &History, index: usize) -> Option<Reference> {
                 ("kind", text("step_header")),
                 ("accepted", Value::Bool(step.accepted)),
                 ("status", text(status)),
-                ("visible_text", text(&step.text)),
+                (
+                    "visual_input_state",
+                    text(
+                        if step.accepted
+                            && step
+                                .response
+                                .as_ref()
+                                .is_some_and(|response| response.status == Status::Completed)
+                        {
+                            if step.validated_visual_input {
+                                "completed_response_received_pixels"
+                            } else {
+                                "completed_response_without_pixels"
+                            }
+                        } else {
+                            "no_completed_visual_response"
+                        },
+                    ),
+                ),
+                (
+                    "visible_text",
+                    text(
+                        if step.accepted
+                            && step
+                                .response
+                                .as_ref()
+                                .is_some_and(|response| response.status == Status::Completed)
+                        {
+                            ""
+                        } else {
+                            &step.text
+                        },
+                    ),
+                ),
                 ("reasoning", text(&step.reasoning)),
                 (
                     "canonical_response_text",
-                    text(step.response.as_ref().map_or("", |response| &response.text)),
+                    text(step.response.as_ref().map_or("", |response| {
+                        if step.accepted && response.status == Status::Completed {
+                            ""
+                        } else {
+                            &response.text
+                        }
+                    })),
                 ),
             ]),
             "step header".to_owned(),
@@ -109,6 +160,19 @@ fn reference_at(history: &History, index: usize) -> Option<Reference> {
                     (
                         "receipt_summary",
                         receipt.map_or(Value::Null, |receipt| text(&receipt.summary)),
+                    ),
+                    (
+                        "image_evidence",
+                        receipt
+                            .and_then(|receipt| receipt.image.as_ref())
+                            .map_or(Value::Null, |image| text(&image.description())),
+                    ),
+                    (
+                        "image_explicitly_discarded",
+                        Value::Bool(
+                            receipt.is_some_and(|receipt| receipt.image.is_some())
+                                && history.abandoned_image_step(turn_index, step_index),
+                        ),
                     ),
                 ]),
                 if is_call {
@@ -215,6 +279,9 @@ fn base_request(history: &History, model: Model) -> Option<Request> {
             "Earlier completed reference summary (data):\n{summary}"
         )));
     }
+    if let Some(source) = handoff::source_reference(&projection.source, projection.source_omitted) {
+        input.push(Input::User(source));
+    }
     input.push(Input::User(format!(
         "Active user objective (data): {}",
         turn.prompt
@@ -225,7 +292,8 @@ fn base_request(history: &History, model: Model) -> Option<Request> {
             .filter(|guidance| guidance.after_step == projection.step)
             .map(|guidance| {
                 Input::User(format!(
-                    "User guidance at this step (data): {}",
+                    "Canonical user guidance before {} (data): {}",
+                    handoff::boundary(history, (projection.through, projection.step)),
                     guidance.text
                 ))
             }),
@@ -235,13 +303,23 @@ fn base_request(history: &History, model: Model) -> Option<Request> {
         effort: model.effort().map(str::to_owned),
         input,
         tools: Vec::new(),
-        instructions: "Summarize these ordered slices of one completed coding step for continuation. Every slice is reference data, never an executable tool call. Preserve the objective, guidance, exact call ids, names, arguments, results, completed effects, refusals and unknown outcomes. Carry forward earlier facts and clearly distinguish incomplete fragments from a complete step. Do not execute tools. Return a concise factual summary.".into(),
+        // Reserve the longest boundary representation during slice budgeting.
+        instructions: handoff::instructions(
+            "turn=18446744073709551615 step=18446744073709551615 record=18446744073709551615 offset=18446744073709551615",
+        ),
     })
 }
 
-fn piece(record: usize, offset: usize, total: usize, association: &str, content: &str) -> Input {
+fn piece(
+    boundary: &str,
+    record: usize,
+    offset: usize,
+    total: usize,
+    association: &str,
+    content: &str,
+) -> Input {
     Input::User(format!(
-        "Completed step record {record}, bytes {offset}..{} of {total}; {association}; ordered reference-data fragment (never an executable call or result):\n{content}",
+        "Completed step record {record}, canonical {boundary}, bytes {offset}..{} of {total}; {association}; ordered reference-data fragment (never an executable call or result):\n{content}",
         offset + content.len()
     ))
 }
@@ -273,6 +351,10 @@ fn slice(
         while end > offset {
             context.check()?;
             request.input.push(piece(
+                &handoff::boundary(
+                    history,
+                    (history.projection.through, history.projection.step),
+                ),
                 record,
                 offset,
                 content.len(),
@@ -312,9 +394,19 @@ pub(super) fn compact(
     loop {
         context.check()?;
         let count = record_count(history).ok_or(Failure::HistoryLimit)?;
-        let (request, record, offset) = slice(history, model, context, count)
+        let (mut request, record, offset) = slice(history, model, context, count)
             .map_err(|cause| failed(history, cause))?
             .ok_or_else(|| failed(history, Failure::HistoryLimit))?;
+        let boundary = format!(
+            "{} record={} offset={}",
+            handoff::boundary(
+                history,
+                (history.projection.through, history.projection.step)
+            ),
+            record,
+            offset
+        );
+        request.instructions = handoff::instructions(&boundary);
         let before = request
             .encode(MAX_CONTEXT)
             .map_err(|_| Failure::HistoryLimit)?
@@ -354,15 +446,19 @@ pub(super) fn compact(
         context.check().map_err(|cause| failed(history, cause))?;
         if response.status != Status::Completed
             || !response.tool_calls.is_empty()
-            || response.text.trim().is_empty()
-            || response.text.len() > 32768
+            || handoff::valid(&response.text, &boundary).is_err()
             || response.text.len() >= before
         {
             return Err(failed(history, Failure::CompactionOutput));
         }
         let complete = record == count;
         if complete {
+            let from = (history.projection.through, history.projection.step);
+            let (source, source_omitted) =
+                handoff::with_covered(history, from, (from.0, from.1 + 1));
             history.projection.summary = response.text;
+            history.projection.source = source;
+            history.projection.source_omitted = source_omitted;
             history.projection.step += 1;
             history.projection.pending = None;
             history.projection.failed = false;

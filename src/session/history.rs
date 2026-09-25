@@ -107,6 +107,32 @@ impl History {
     pub fn pending_image(&self) -> bool {
         self.pending_image_step().is_some()
     }
+    /// A recalled receipt stays in the next model request until one accepted
+    /// response has consumed it, including across a close and resume.
+    pub fn pending_recall_step(&self) -> Option<(usize, usize)> {
+        let mut pending = None;
+        for (turn_index, turn) in self.turns.iter().enumerate() {
+            for (step_index, step) in turn.steps.iter().enumerate() {
+                let Some(response) = step
+                    .response
+                    .as_ref()
+                    .filter(|response| step.accepted && response.status == Status::Completed)
+                else {
+                    continue;
+                };
+                pending = None;
+                if response
+                    .tool_calls
+                    .iter()
+                    .zip(&step.results)
+                    .any(|(call, result)| super::receipt_recall::admitted(call, result))
+                {
+                    pending = Some((turn_index, step_index));
+                }
+            }
+        }
+        pending
+    }
     /// Earliest receipt whose pixels have not reached a validated visual response.
     /// An accepted visual response consumes earlier receipts; its own tool results
     /// occur afterward and therefore remain pending.
@@ -134,7 +160,7 @@ impl History {
         }
         pending
     }
-    fn abandoned_image_step(&self, turn: usize, step: usize) -> bool {
+    pub(super) fn abandoned_image_step(&self, turn: usize, step: usize) -> bool {
         let absolute = (
             self.base_turn + turn,
             if turn == 0 {
@@ -307,9 +333,69 @@ impl History {
         Ok(request)
     }
     pub fn projected_request(&self, model: Model, workspace: bool) -> Result<Request, Failure> {
+        let exact = self.unabridged_projected_request(model, workspace)?;
+        let Some((turn, step)) = self.pending_recall_step() else {
+            return Ok(exact);
+        };
+        if !matches!(
+            exact.encode(MAX_REQUEST),
+            Err(crate::providers::openai_account::Error::Json(
+                crate::json::Error::Limit
+            ))
+        ) {
+            return Ok(exact);
+        }
+        let count = self.turns[turn].steps[step].results.len();
+        // Older checkpoints can already contain more recalled pages than one
+        // provider request can carry. Keep the canonical outputs untouched and
+        // replace only the excess projected pages with explicit paired notices.
+        // The following accepted response consumes this pending delivery; the
+        // model can reissue the original recall call for a deferred page.
+        let deferred = |from| -> Result<Request, Failure> {
+            Ok(self.make_request(
+                model,
+                workspace,
+                self.input_with_recall(Some((turn, step, from)))?,
+            ))
+        };
+        let mut best = deferred(0)?;
+        if best.encode(MAX_REQUEST).is_err() {
+            return Ok(exact);
+        }
+        let (mut low, mut high) = (0, count);
+        while low < high {
+            let middle = low + (high - low).div_ceil(2);
+            let candidate = deferred(middle)?;
+            if candidate.encode(MAX_REQUEST).is_ok() {
+                low = middle;
+                best = candidate;
+            } else {
+                high = middle - 1;
+            }
+        }
+        Ok(best)
+    }
+    pub(super) fn unabridged_projected_request(
+        &self,
+        model: Model,
+        workspace: bool,
+    ) -> Result<Request, Failure> {
         Ok(self.make_request(model, workspace, self.input(self.turns.len())?))
     }
     pub fn input(&self, end: usize) -> Result<Vec<Input>, Failure> {
+        self.input_with_recall_at(end, None)
+    }
+    fn input_with_recall(
+        &self,
+        deferred: Option<(usize, usize, usize)>,
+    ) -> Result<Vec<Input>, Failure> {
+        self.input_with_recall_at(self.turns.len(), deferred)
+    }
+    fn input_with_recall_at(
+        &self,
+        end: usize,
+        deferred: Option<(usize, usize, usize)>,
+    ) -> Result<Vec<Input>, Failure> {
         let mut input = Vec::new();
         if !self.projection.summary.is_empty() {
             input.push(Input::User(format!(
@@ -317,25 +403,33 @@ impl History {
                 self.projection.summary
             )));
         }
+        if let Some(source) = super::context::handoff::source_reference(
+            &self.projection.source,
+            self.projection.source_omitted,
+        ) {
+            input.push(Input::User(source));
+        }
         if !self.projection.abandoned_visual.is_empty() {
             input.push(Input::User("Pending visual input from earlier saved views was explicitly discarded without a validated visual inspection. Their historical receipts and bytes remain saved; use view_image with image_id to request a new visual inspection when it fits the request budget.".into()));
         }
-        input.extend(self.input_range(
+        input.extend(self.input_range_with_recall(
             self.projection.through,
             self.projection.step,
             end,
             usize::MAX,
             self.can_view_images(),
+            deferred,
         )?);
         Ok(input)
     }
-    pub fn input_range(
+    fn input_range_with_recall(
         &self,
         start: usize,
         start_step: usize,
         end: usize,
         end_step: usize,
         visual: bool,
+        deferred: Option<(usize, usize, usize)>,
     ) -> Result<Vec<Input>, Failure> {
         let mut input = Vec::new();
         for (turn_index, turn) in self.turns.iter().enumerate().take(end).skip(start) {
@@ -394,7 +488,24 @@ impl History {
                     continue;
                 }
                 input.push(Input::Assistant(response.output.clone()));
-                for result in &step.results {
+                for (receipt_index, result) in step.results.iter().enumerate() {
+                    if deferred.is_some_and(|(turn, step, from)| {
+                        (turn_index, index) == (turn, step) && receipt_index >= from
+                    }) && response.tool_calls.get(receipt_index).is_some_and(|call| {
+                        call.id == result.call_id && call.name == "recall_receipts"
+                    }) {
+                        input.push(Input::ToolResult {
+                            call_id: result.call_id.clone(),
+                            output: format!(
+                                "Saved recall result deferred from this request by the 8 MiB aggregate delivery limit. Canonical turn {} step {} receipt {} call_id {:?} retains the exact output. Its paired assistant call contains the original recall_receipts arguments. Reissue that read-only recall call after consuming the delivered pages; do not rerun the original workspace tool.",
+                                self.base_turn + turn_index,
+                                if turn_index == 0 { self.base_step + index } else { index },
+                                receipt_index,
+                                result.call_id,
+                            ),
+                        });
+                        continue;
+                    }
                     if let Some(image) = &result.image {
                         if self.abandoned_image_step(turn_index, index) {
                             input.push(Input::ToolResult {
