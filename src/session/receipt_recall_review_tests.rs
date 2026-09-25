@@ -19,6 +19,79 @@ fn budget(cancelled: &AtomicBool) -> Budget<'_> {
     }
 }
 
+fn persisted_batch_probe(compacted: bool, count: usize) {
+    let fixture = crate::state::tests::Fixture::new();
+    let store = fixture.store().unwrap();
+    let mut history =
+        crate::session::persistence::create_in(&store, Model::Luna, None, None).unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
+    history.begin("Read a batch".into()).unwrap();
+    let calls = (0..count)
+        .map(|n| {
+            tool_tests::call(
+                &format!("read-{n}"),
+                "read_file",
+                r#"{"path":"source.txt"}"#,
+            )
+        })
+        .collect::<Vec<_>>();
+    let results = calls
+        .iter()
+        .enumerate()
+        .map(|(n, call)| Receipt {
+            call_id: call.id.clone(),
+            output: format!("EXACT-{n}"),
+            summary: "read_file / source.txt".into(),
+            image: None,
+        })
+        .collect();
+    history.turns[0].steps.push(Step {
+        response: Some(tool_tests::calls_response(calls)),
+        results,
+        accepted: true,
+        ..Default::default()
+    });
+    history.turns[0].end = Some(End::Complete);
+    history.checkpoint().unwrap();
+    eprintln!("{count} receipt checkpoint succeeded; compacted={compacted}");
+    if compacted {
+        history.projection.through = 1;
+        history.projection.summary =
+            "The reads completed; exact evidence remains in receipts.".into();
+        history.checkpoint().unwrap();
+        history.release_projected();
+    }
+    drop(history);
+    let loaded = crate::session::persistence::load(&store, &id, true);
+    let saved = match loaded {
+        Ok(saved) => saved,
+        Err(error) => panic!("successfully committed legal batch must resume: {error}"),
+    };
+    let cancelled = AtomicBool::new(false);
+    let page = execute(&saved.history, 0, 0, count - 1, 0, &budget(&cancelled));
+    assert!(
+        !page.failed,
+        "committed receipt must remain retrievable: {}",
+        page.text
+    );
+    assert!(page.text.contains(&format!("EXACT-{}", count - 1)));
+    eprintln!("{count} receipts resume and recall passed; compacted={compacted}");
+}
+
+#[test]
+fn astra_committed_129_receipts_resume() {
+    for count in [128, 129] {
+        persisted_batch_probe(false, count);
+    }
+}
+
+#[test]
+fn astra_compacted_129_receipts_remain_recallable() {
+    for count in [128, 129] {
+        persisted_batch_probe(true, count);
+    }
+}
+
 struct MixedLargeBatch {
     round: usize,
     with_recall: bool,

@@ -2,6 +2,8 @@
 //! This coordinator keeps creation, append tracking, recovery and verified
 //! import together because they share one commit cursor and lease invariant.
 //! Frame I/O, head encoding and replay have separate bounded modules.
+#[cfg(test)]
+mod batch_tests;
 mod head;
 mod log;
 #[cfg(test)]
@@ -196,6 +198,9 @@ fn sync_turn(
     turn: &Turn,
 ) -> io::Result<()> {
     for (index, step) in turn.steps.iter().enumerate() {
+        if !codec::valid_incremental_step(step) {
+            return Err(invalid());
+        }
         let core = codec::step_core(step);
         let digest = log::fingerprint(&core)?;
         if tracker.steps.len() == index {

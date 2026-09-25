@@ -75,6 +75,9 @@ pub(super) fn encode_turn(turn: &Turn) -> Value {
     ])
 }
 
+/// Both formats bound encoded input (v1's snapshot, v2's individual log
+/// frames). A step's validated response supplies the receipt count and order;
+/// no separate item-count ceiling may reject an already committed batch.
 pub(super) fn decode(value: &Value) -> io::Result<History> {
     let turns = value
         .array()
@@ -132,12 +135,14 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
                     _ => return Err(invalid()),
                 },
             };
-            for value in value
+            let results = value
                 .get("results")
                 .and_then(Value::array)
-                .filter(|r| r.len() <= 128)
-                .ok_or_else(invalid)?
-            {
+                .ok_or_else(invalid)?;
+            if results.len() != step.response.as_ref().map_or(0, |r| r.tool_calls.len()) {
+                return Err(invalid());
+            }
+            for value in results {
                 step.results.push(Receipt {
                     call_id: string(value, "call_id", 256)?.into(),
                     output: string(value, "output", 1024 * 1024)?.into(),
@@ -241,6 +246,39 @@ pub(super) fn step_core(step: &Step) -> Value {
         fields.push(("validated_visual_input", Value::Bool(true)));
     }
     json::object(fields)
+}
+/// Check the fields that v2 writes as separate frames before advancing its
+/// durable head. The decoder applies the same per-field bounds and pairing.
+pub(super) fn valid_incremental_step(step: &Step) -> bool {
+    if step.text.len() > super::super::history::MAX_TEXT
+        || step.reasoning.len() > super::super::history::MAX_TEXT
+        || step.attempts.len() > 256
+        || step.results.iter().any(|receipt| {
+            receipt.call_id.len() > 256
+                || receipt.output.len() > super::super::history::MAX_TEXT
+                || receipt.summary.len() > 8192
+        })
+    {
+        return false;
+    }
+    match &step.response {
+        Some(response) => {
+            Response::restore(&response.snapshot()).is_ok_and(|saved| saved == *response)
+                && response.tool_calls.len() == step.results.len()
+                && response
+                    .tool_calls
+                    .iter()
+                    .zip(&step.results)
+                    .all(|(call, receipt)| call.id == receipt.call_id)
+                && (!step.accepted
+                    || response.text == step.text
+                    || response.legacy_text().is_ok_and(|text| text == step.text))
+                && (!step.validated_visual_input
+                    || step.accepted
+                        && response.status == crate::providers::openai_account::Status::Completed)
+        }
+        None => !step.accepted && step.results.is_empty() && !step.validated_visual_input,
+    }
 }
 pub(super) fn receipt(receipt: &Receipt) -> Value {
     let mut fields = vec![

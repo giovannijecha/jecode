@@ -3,6 +3,8 @@
 //! contract; v2's incremental transactions live in their own module.
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod access_tests;
+#[cfg(test)]
+mod batch_compat_tests;
 mod codec;
 mod diagnostics;
 #[cfg(all(test, any(windows, target_os = "linux")))]
@@ -161,6 +163,8 @@ impl Record {
         if self.incremental.is_some() {
             return v2::save(self, history);
         }
+        let canonical = codec::encode(history);
+        codec::decode(&canonical)?;
         let mut fields = vec![
             ("version", Value::Number("1".into())),
             ("id", text(&self.id)),
@@ -173,7 +177,7 @@ impl Record {
             ("created", Value::Number(self.created.to_string())),
             ("file_access", text(self.access.name())),
             ("updated", Value::Number(now()?.to_string())),
-            ("history", codec::encode(history)),
+            ("history", canonical),
             (
                 "projection",
                 json::object([
@@ -242,6 +246,15 @@ impl Record {
         );
         let value = json::object(fields);
         let contents = json::encode(&value, LIMIT).map_err(|_| invalid())?;
+        json::parse(
+            &contents,
+            json::Limits {
+                bytes: LIMIT,
+                nodes: 500_000,
+                depth: 64,
+            },
+        )
+        .map_err(|_| invalid())?;
         self.store.replace(&format!("{}.json", self.id), &contents)
     }
 }

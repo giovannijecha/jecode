@@ -402,5 +402,8 @@ fn current(history: &mut History) -> Result<&mut Step, Failure> {
 }
 
 #[cfg(test)]
+#[path = "tool_loop_persistence_tests.rs"]
+mod persistence_tests;
+#[cfg(test)]
 #[path = "tool_loop_recall_tests.rs"]
 mod recall_tests;
