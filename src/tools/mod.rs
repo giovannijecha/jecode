@@ -9,6 +9,7 @@ use crate::{
     workspace::{Budget, Workspace},
 };
 pub use args::Prepared;
+pub(crate) use schema::COMMAND_REACH;
 pub use schema::definitions;
 pub(crate) use schema::definitions_for;
 
