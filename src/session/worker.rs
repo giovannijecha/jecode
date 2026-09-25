@@ -39,7 +39,7 @@ pub(crate) trait Backend: Send {
 #[derive(Default)]
 pub(super) struct Account(Option<client::Client>);
 #[cfg(test)]
-pub(crate) type EffectGate = Arc<dyn Fn(&str) + Send + Sync>;
+pub(crate) type EffectGate = Arc<dyn Fn(&str, &SyncSender<Event>) + Send + Sync>;
 impl Backend for Account {
     fn login(
         &mut self,
@@ -130,7 +130,7 @@ impl Context {
     #[cfg(test)]
     pub(super) fn before_effect(&self, name: &str) {
         if let Some(gate) = &self.effect_gate {
-            gate(name);
+            gate(name, &self.events);
         }
     }
 }

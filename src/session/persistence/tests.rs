@@ -196,7 +196,7 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
         accepted: true,
         results: vec![Receipt {
             call_id: "edit-1".into(),
-            output: r#"{"ok":true,"status":"applied"}"#.into(),
+            output: r#"{"ok":true,"status":"applied","recovery":".jecode-recovery-123-4"}"#.into(),
             summary: "Edited settings.rs".into(),
         }],
         ..Default::default()
@@ -247,6 +247,7 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
     let requests = observed.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert!(requests[0].contains("applied"));
+    assert!(requests[0].contains(".jecode-recovery-123-4"));
     assert!(requests[0].contains("opaque-owned-fixture"));
     assert!(requests[0].contains("\"id\":\"one\""));
     assert!(requests[0].contains("\"id\":\"two\""));

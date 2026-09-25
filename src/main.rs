@@ -6,7 +6,7 @@ use std::{
     process::ExitCode,
 };
 
-const HELP: &str = "Jecode — owned coding harness\n\nUsage: jecode [--workspace PATH] [--model MODEL] [--effort LEVEL] [--access local|workspace]\n       jecode [--workspace PATH] resume [SESSION_ID]\n       jecode [--workspace PATH] sessions\n       jecode [--workspace PATH] import-session V1_SESSION_ID\n       jecode chat | login | logout\n\n  jecode        Start in the current directory with your saved account\n  login         Sign in without creating a conversation; Esc or Ctrl+C cancels\n  logout        Remove Jecode's locally saved account access\n  resume        Choose a saved conversation in this directory, or reopen SESSION_ID\n  sessions      List conversations in this directory\n  import-session  Verify a separate incremental copy of a v1 session in this directory\n  chat          Start a conversation without file tools, associated with this directory\n\n  --workspace PATH  Select another directory (also for chat, sessions, resume and import)\n  --model MODEL     Account model identifier for this new conversation\n  --effort LEVEL    Reasoning effort, or default to omit the provider field\n  --access PROFILE  local (default) or workspace, for file-tool sessions\n  --demo            Offline terminal preview\n  -h, --help        Show this help\n  -V, --version     Show the native version\n\nInside Jecode, type / for local commands including /login and /logout.\nFile changes and commands execute directly with your user permissions.\nCredentials and settings use ordinary JSON in ~/.jecode/v1/. Sessions use versioned storage there.\nResume never changes directories or replays historical tools.\nLegacy --account, --resume, --sessions and --logout remain supported.\n";
+const HELP: &str = "Jecode — owned coding harness\n\nUsage: jecode [--workspace PATH] [--model MODEL] [--effort LEVEL] [--access local|workspace]\n       jecode [--workspace PATH] resume [SESSION_ID]\n       jecode [--workspace PATH] sessions\n       jecode [--workspace PATH] import-session V1_SESSION_ID\n       jecode [--workspace PATH] recover list|show ID|cat ID|restore ID|repair ID\n       jecode chat | login | logout\n\n  jecode        Start in the current directory with your saved account\n  login         Sign in without creating a conversation; Esc or Ctrl+C cancels\n  logout        Remove Jecode's locally saved account access\n  resume        Choose a saved conversation in this directory, or reopen SESSION_ID\n  sessions      List conversations in this directory\n  import-session  Verify a separate incremental copy of a v1 session in this directory\n  recover       Inspect or restore a retained file version in this directory\n  chat          Start a conversation without file tools, associated with this directory\n\n  --workspace PATH  Select another directory (also for chat, sessions, resume and recovery)\n  --model MODEL     Account model identifier for this new conversation\n  --effort LEVEL    Reasoning effort, or default to omit the provider field\n  --access PROFILE  local (default) or workspace, for file-tool sessions\n  --demo            Offline terminal preview\n  -h, --help        Show this help\n  -V, --version     Show the native version\n\nInside Jecode, type / for local commands including /login and /logout.\nFile changes and commands execute directly with your user permissions.\nCredentials and settings use ordinary JSON in ~/.jecode/v1/. Sessions and recovery use versioned storage there.\nResume never changes directories or replays historical tools.\nLegacy --account, --resume, --sessions and --logout remain supported.\n";
 
 enum Operation {
     Start,
@@ -15,6 +15,7 @@ enum Operation {
     Resume(Option<String>),
     Import(Option<String>),
     Sessions,
+    Recover(Option<String>, Option<String>),
     Login,
     Logout,
     Demo,
@@ -66,6 +67,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
             "sessions" | "--sessions" if operation.is_none() => {
                 operation = Some(Operation::Sessions)
             }
+            "recover" if operation.is_none() => operation = Some(Operation::Recover(None, None)),
             "login" if operation.is_none() => operation = Some(Operation::Login),
             "logout" | "--logout" if operation.is_none() => operation = Some(Operation::Logout),
             "chat" if operation.is_none() => operation = Some(Operation::Chat),
@@ -76,12 +78,22 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Option<Options> {
             value if !value.starts_with('-') => match &mut operation {
                 Some(Operation::Resume(id @ None)) => *id = Some(value.into()),
                 Some(Operation::Import(id @ None)) => *id = Some(value.into()),
+                Some(Operation::Recover(action @ None, _)) => *action = Some(value.into()),
+                Some(Operation::Recover(_, id @ None)) => *id = Some(value.into()),
                 _ => return None,
             },
             _ => return None,
         }
     }
     let operation = operation.unwrap_or(Operation::Start);
+    if let Operation::Recover(action, id) = &operation
+        && !matches!(
+            (action.as_deref(), id.as_deref()),
+            (Some("list"), None) | (Some("show" | "cat" | "restore" | "repair"), Some(_))
+        )
+    {
+        return None;
+    }
     if (model.is_some() || effort.is_some() || access.is_some())
         && !matches!(
             operation,
@@ -192,6 +204,102 @@ fn run(args: impl Iterator<Item = OsString>) -> io::Result<u8> {
                     writeln!(io::stderr().lock(), "jecode: {error}")?;
                     Ok(2)
                 }
+            }
+        }
+        Operation::Recover(action, id) => {
+            let result = (|| -> io::Result<u8> {
+                let directory = selected_directory(workspace.as_deref())?;
+                let selected = jecode::workspace::Workspace::open(directory.path())
+                    .map_err(|_| io::Error::other("selected workspace is unavailable"))?
+                    .with_access(jecode::workspace::Access::Local);
+                let recoveries = jecode::workspace::RecoveryStore::user()?;
+                let cancelled = std::sync::atomic::AtomicBool::new(false);
+                let budget = jecode::workspace::Budget {
+                    cancelled: &cancelled,
+                    deadline: std::time::Instant::now() + std::time::Duration::from_secs(300),
+                };
+                match (action.as_deref(), id.as_deref()) {
+                    (Some("list"), None) => {
+                        for version in recoveries.list()? {
+                            if version.workspace == selected.path().to_string_lossy() {
+                                writeln!(
+                                    io::stdout().lock(),
+                                    "{}\t{}\t{}\t{}\t{}",
+                                    version.id,
+                                    version.state,
+                                    version.target,
+                                    version.session.as_deref().unwrap_or("-"),
+                                    version.operation
+                                )?;
+                            }
+                        }
+                        Ok(0)
+                    }
+                    (Some("show"), Some(id)) => {
+                        let view = recoveries.inspect(&selected, id, &budget)?;
+                        let v = view.version;
+                        writeln!(
+                            io::stdout().lock(),
+                            "Recovery: {}\nWorkspace: {}\nTarget: {}\nSession: {}\nOperation: {}\nState: {}\nOriginal bytes: {}\nResult bytes: {}\nOriginal integrity: {}\nResult integrity: {}\nCurrent target: {}\nAdjacent transient: {}",
+                            v.id,
+                            v.workspace,
+                            v.target,
+                            v.session.as_deref().unwrap_or("-"),
+                            v.operation,
+                            v.state,
+                            v.before_bytes,
+                            v.after_bytes,
+                            view.before_integrity,
+                            view.after_integrity,
+                            view.target,
+                            view.adjacent
+                        )?;
+                        Ok(0)
+                    }
+                    (Some("cat"), Some(id)) => {
+                        let view = recoveries.inspect(&selected, id, &budget)?;
+                        if view.before_integrity != "verified" {
+                            writeln!(
+                                io::stderr().lock(),
+                                "jecode: original integrity is {}; output is for manual inspection only",
+                                view.before_integrity
+                            )?;
+                        }
+                        io::copy(&mut recoveries.original(id)?, &mut io::stdout().lock())?;
+                        Ok(0)
+                    }
+                    (Some("restore"), Some(id)) => {
+                        match recoveries.restore(&selected, id, &budget) {
+                            Ok(result) => {
+                                writeln!(
+                                    io::stdout().lock(),
+                                    "Restored {id} to its recorded target."
+                                )?;
+                                if let Some(warning) = result.warning {
+                                    writeln!(io::stderr().lock(), "jecode: {warning}")?;
+                                    Ok(2)
+                                } else {
+                                    Ok(0)
+                                }
+                            }
+                            Err(error) => {
+                                diagnostic(&format!("restoration refused or failed: {error}"))
+                            }
+                        }
+                    }
+                    (Some("repair"), Some(id)) => match recoveries.repair(&selected, id, &budget) {
+                        Ok(message) => {
+                            writeln!(io::stdout().lock(), "{message}")?;
+                            Ok(0)
+                        }
+                        Err(error) => diagnostic(&format!("repair refused or failed: {error}")),
+                    },
+                    _ => unreachable!(),
+                }
+            })();
+            match result {
+                Ok(code) => Ok(code),
+                Err(error) => diagnostic(&format!("recovery unavailable: {error}")),
             }
         }
         Operation::Sessions | Operation::Resume(_) => {

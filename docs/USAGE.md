@@ -63,12 +63,19 @@ Windows, `HOME` on Linux):
   sessions-v2/
     s-...head
     s-...log
+  recoveries/
+    r-...json
+    r-...before
+    r-...after
 ```
 
 Small lock files coordinate instances and remain after shutdown. v1 JSON and
 v2 committed heads are atomically replaced; v2 canonical logs append. No
 database or separate service is required.
 Existing files outside this versioned directory are neither imported nor modified.
+File recovery versions are retained there until the user explicitly removes
+them; there is no automatic retention purge. See [file recovery](TOOLS.md#inspecting-and-restoring-files)
+before managing these files.
 Keep user data on a local filesystem that supports private permissions and file
 locking. Under WSL use the Linux home directory rather than a DrvFS directory
 without Unix metadata permissions.

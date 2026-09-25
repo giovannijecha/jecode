@@ -63,6 +63,14 @@ impl Store {
     pub fn root(&self) -> &Path {
         &self.root
     }
+    pub(crate) fn parent(&self) -> io::Result<Self> {
+        Self::open(
+            self.root
+                .parent()
+                .ok_or(io::ErrorKind::InvalidInput)?
+                .to_owned(),
+        )
+    }
 
     pub fn names(&self) -> io::Result<Vec<String>> {
         let mut names = Vec::new();

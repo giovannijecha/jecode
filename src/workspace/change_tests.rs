@@ -5,6 +5,10 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
+fn recoveries(files: &support::Fixture) -> crate::workspace::RecoveryStore {
+    crate::workspace::RecoveryStore::in_store(&crate::state::Store::in_home(&files.home()).unwrap())
+        .unwrap()
+}
 
 fn budget(cancelled: &AtomicBool) -> Budget<'_> {
     Budget {
@@ -78,13 +82,26 @@ fn valid_join_replacements_preserve_bytes_and_recovery_on_both_paths() {
                 Original::Staged(_)
             );
             assert_eq!(staged, padding > MAX_FILE_BYTES);
-            let applied = ws.apply(change, &budget(&cancelled)).unwrap();
+            let applied = ws
+                .apply(
+                    change,
+                    &budget(&cancelled),
+                    &recoveries(&files),
+                    None,
+                    "test",
+                )
+                .unwrap();
             assert_eq!(
                 fs::read(files.0.join("join.txt")).unwrap(),
                 source.replace(old, new).as_bytes()
             );
             assert_eq!(
-                fs::read(files.0.join(applied.recovery.unwrap())).unwrap(),
+                fs::read(
+                    recoveries(&files)
+                        .root()
+                        .join(format!("{}.before", applied.recovery.unwrap()))
+                )
+                .unwrap(),
                 source.as_bytes()
             );
         }
@@ -110,7 +127,14 @@ fn original_401_line_create_is_accepted_with_bounded_preview() {
     assert!(!preview.diff.contains("+ line 400 abc"));
     assert!(preview.omitted_bytes > 0);
     assert!(fs::read_to_string(files.0.join("page.html")).is_err());
-    ws.apply(change, &budget(&cancelled)).unwrap();
+    ws.apply(
+        change,
+        &budget(&cancelled),
+        &recoveries(&files),
+        None,
+        "test",
+    )
+    .unwrap();
     assert_eq!(
         fs::read(files.0.join("page.html")).unwrap(),
         content.as_bytes()
@@ -138,7 +162,14 @@ fn formatted_large_create_and_replacement_preserve_exact_bytes_and_recovery() {
     );
     assert!(change.preview().omitted_lines > 0);
     assert!(started.elapsed() < Duration::from_secs(8));
-    ws.apply(change, &budget(&cancelled)).unwrap();
+    ws.apply(
+        change,
+        &budget(&cancelled),
+        &recoveries(&files),
+        None,
+        "test",
+    )
+    .unwrap();
     assert_eq!(
         fs::read(files.0.join("formatted.html")).unwrap(),
         source.as_bytes()
@@ -152,13 +183,26 @@ fn formatted_large_create_and_replacement_preserve_exact_bytes_and_recovery() {
         .prepare_edit("replace.txt", &old, &new, &budget(&cancelled))
         .unwrap();
     assert!(change.preview().omitted_bytes > 0);
-    let applied = ws.apply(change, &budget(&cancelled)).unwrap();
+    let applied = ws
+        .apply(
+            change,
+            &budget(&cancelled),
+            &recoveries(&files),
+            None,
+            "test",
+        )
+        .unwrap();
     assert_eq!(
         fs::read(files.0.join("replace.txt")).unwrap(),
         new.as_bytes()
     );
     assert_eq!(
-        fs::read(files.0.join(applied.recovery.unwrap())).unwrap(),
+        fs::read(
+            recoveries(&files)
+                .root()
+                .join(format!("{}.before", applied.recovery.unwrap()))
+        )
+        .unwrap(),
         old.as_bytes()
     );
 }
@@ -202,14 +246,27 @@ fn staged_large_edit_and_paginated_read_preserve_unicode_crlf_tabs_and_no_final_
     assert!(started.elapsed() < Duration::from_secs(8));
     let preview = change.preview();
     assert_eq!((preview.added, preview.removed), (1, 1));
-    let applied = ws.apply(change, &budget(&cancelled)).unwrap();
+    let applied = ws
+        .apply(
+            change,
+            &budget(&cancelled),
+            &recoveries(&files),
+            None,
+            "test",
+        )
+        .unwrap();
     let expected = source.replace("UNIQUE target", "changed\t世界");
     assert_eq!(
         fs::read(files.0.join("large.txt")).unwrap(),
         expected.as_bytes()
     );
     assert_eq!(
-        fs::read(files.0.join(applied.recovery.unwrap())).unwrap(),
+        fs::read(
+            recoveries(&files)
+                .root()
+                .join(format!("{}.before", applied.recovery.unwrap()))
+        )
+        .unwrap(),
         source.as_bytes()
     );
 }
@@ -229,7 +286,16 @@ fn staged_large_deletion_has_bounded_diff_and_stale_or_cancelled_changes_do_not_
     assert_eq!(change.preview().removed, 3000);
     assert!(change.preview().diff.contains("remove this line"));
     cancelled.store(true, Ordering::Release);
-    assert!(ws.apply(change, &budget(&cancelled)).is_err());
+    assert!(
+        ws.apply(
+            change,
+            &budget(&cancelled),
+            &recoveries(&files),
+            None,
+            "test"
+        )
+        .is_err()
+    );
     assert_eq!(
         fs::read(files.0.join("large.txt")).unwrap(),
         source.as_bytes()
@@ -240,11 +306,17 @@ fn staged_large_deletion_has_bounded_diff_and_stale_or_cancelled_changes_do_not_
         .unwrap();
     files.write("large.txt", &(source.clone() + "changed"));
     assert!(
-        ws.apply(change, &budget(&cancelled))
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("changed since")
+        ws.apply(
+            change,
+            &budget(&cancelled),
+            &recoveries(&files),
+            None,
+            "test"
+        )
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("changed since")
     );
     assert_eq!(
         fs::read_to_string(files.0.join("large.txt")).unwrap(),
@@ -263,11 +335,17 @@ fn competing_create_and_ambiguous_large_edit_leave_targets_untouched() {
         .unwrap();
     files.write("new.txt", "competing\n");
     assert!(
-        ws.apply(change, &budget(&cancelled))
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("appeared")
+        ws.apply(
+            change,
+            &budget(&cancelled),
+            &recoveries(&files),
+            None,
+            "test"
+        )
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("appeared")
     );
     assert_eq!(
         fs::read_to_string(files.0.join("new.txt")).unwrap(),

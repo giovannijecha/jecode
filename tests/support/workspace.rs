@@ -6,6 +6,12 @@ use std::{
 
 pub struct Fixture(pub PathBuf);
 impl Fixture {
+    #[allow(dead_code)]
+    pub fn home(&self) -> PathBuf {
+        let home = self.0.with_extension("home");
+        fs::create_dir_all(&home).unwrap();
+        home
+    }
     pub fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/workspace-tests");
@@ -35,5 +41,9 @@ impl Drop for Fixture {
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/workspace-tests");
         assert!(self.0.starts_with(&base) && self.0 != base);
         fs::remove_dir_all(&self.0).unwrap();
+        let home = self.0.with_extension("home");
+        if home.exists() {
+            fs::remove_dir_all(home).unwrap();
+        }
     }
 }

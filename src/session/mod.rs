@@ -167,6 +167,15 @@ impl Session {
         mut history: history::History,
         shell: crate::command::Shell,
     ) -> io::Result<Self> {
+        #[cfg(test)]
+        if history.record.is_none()
+            && history.test_recovery.is_none()
+            && let Some(workspace) = &workspace
+        {
+            let home = workspace.path().with_extension("home");
+            std::fs::create_dir_all(&home)?;
+            history.test_recovery = Some(crate::state::Store::in_home(&home)?);
+        }
         let turns = history.turn_count();
         let initial_prompts = history
             .record

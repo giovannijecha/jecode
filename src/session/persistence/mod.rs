@@ -135,6 +135,9 @@ pub(super) struct Record {
     _lock: Lease,
 }
 impl Record {
+    pub(super) fn user_store(&self) -> io::Result<Store> {
+        self.store.parent()
+    }
     pub(super) fn id(&self) -> &str {
         &self.id
     }

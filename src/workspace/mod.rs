@@ -6,6 +6,8 @@ mod directory;
 mod page;
 mod path;
 mod platform;
+mod recovery;
+mod restore;
 mod snapshot;
 mod transaction;
 
@@ -13,6 +15,8 @@ pub use access::Access;
 pub use change::{Change, ChangeError, Preview};
 pub(crate) use directory::Directory;
 pub use path::{input, relative};
+pub use recovery::{RecoveryStore, Version};
+pub use restore::{Inspection, Restored};
 use std::{
     fs::File,
     io::Read,
@@ -21,6 +25,9 @@ use std::{
     time::Instant,
 };
 pub use transaction::Applied;
+#[cfg(test)]
+#[path = "recovery_tests.rs"]
+mod recovery_tests;
 
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 pub const MAX_DIRECTORY_ENTRIES: usize = 4096;

@@ -131,7 +131,15 @@ fn external_changes_have_absolute_previews_and_reject_stale_content() {
         "old\n"
     );
     files.write("b/file", "changed elsewhere\n");
-    assert!(local.apply(edit, &budget).is_err());
+    let recoveries = jecode::workspace::RecoveryStore::in_store(
+        &jecode::state::Store::in_home(&files.home()).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        local
+            .apply(edit, &budget, &recoveries, None, "test")
+            .is_err()
+    );
     assert_eq!(
         std::fs::read_to_string(files.0.join("b/file")).unwrap(),
         "changed elsewhere\n"
@@ -140,7 +148,7 @@ fn external_changes_have_absolute_previews_and_reject_stale_content() {
         .prepare_create("../b/new.txt", "new file", &budget)
         .unwrap();
     assert!(!files.0.join("b/new.txt").exists());
-    match local.apply(create, &budget) {
+    match local.apply(create, &budget, &recoveries, None, "test") {
         Ok(_) => assert_eq!(local.read("../b/new.txt", &budget).unwrap(), "new file"),
         Err(e) if files.unsupported_host_filesystem(&e.to_string()) => {}
         Err(e) => panic!("{e}"),

@@ -138,8 +138,13 @@ fn completed_edit_receipt_does_not_wait_for_a_full_presentation_queue() {
         effect_gate: None,
     };
     let (done, completed) = mpsc::sync_channel(1);
+    let recoveries = crate::workspace::RecoveryStore::in_store(
+        &crate::state::Store::in_home(&files.home()).unwrap(),
+    )
+    .unwrap();
     let handle = std::thread::spawn(move || {
-        let _ = done.send(super::edit::execute(tool, &workspace, &context).0);
+        let _ = done
+            .send(super::edit::execute(tool, &workspace, &context, &recoveries, None, "test").0);
     });
     let before_release = completed.recv_timeout(Duration::from_secs(3)).ok();
     let receipt_ready_before_release = before_release.is_some();
@@ -192,7 +197,14 @@ fn direct_edits_and_create_follow_order_and_reads_observe_the_result() {
         );
         let recovery = results[0].1.get("recovery").and_then(Value::text).unwrap();
         assert_eq!(
-            fs::read_to_string(run.files.0.join(recovery)).unwrap(),
+            fs::read_to_string(
+                run.files
+                    .0
+                    .with_extension("home")
+                    .join(".jecode/v1/recoveries")
+                    .join(format!("{recovery}.before"))
+            )
+            .unwrap(),
             "old\n"
         );
     }
@@ -205,7 +217,7 @@ fn direct_edits_and_create_follow_order_and_reads_observe_the_result() {
 fn competing_edit_between_prepare_and_apply_is_preserved() {
     let files = Arc::new(Mutex::new(None::<std::path::PathBuf>));
     let target = files.clone();
-    let gate: worker::EffectGate = Arc::new(move |name| {
+    let gate: worker::EffectGate = Arc::new(move |name, _| {
         if name == "edit_file" {
             fs::write(
                 target.lock().unwrap().as_ref().unwrap().join("notes.txt"),
@@ -246,7 +258,7 @@ fn cancellation_before_execution_prevents_change_and_joins_worker() {
     let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
     let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
     let release = Arc::new(Mutex::new(release_rx));
-    let gate: worker::EffectGate = Arc::new(move |name| {
+    let gate: worker::EffectGate = Arc::new(move |name, _| {
         if name == "edit_file" {
             entered_tx.send(()).unwrap();
             release.lock().unwrap().recv().unwrap();
@@ -350,4 +362,78 @@ fn forty_direct_effects_keep_exact_order_and_run_once() {
             .unwrap()
             .ends_with(" 39")
     );
+}
+
+#[test]
+fn persisted_edit_receipt_reopens_with_stable_recovery_id_without_replay() {
+    let files = support::Fixture::new();
+    files.write("notes.txt", "old\n");
+    let store = crate::state::Store::in_home(&files.home()).unwrap();
+    let workspace = crate::workspace::Workspace::open(&files.0).unwrap();
+    let history =
+        persistence::create_in(&store, Model::Luna, Some(&files.0), Some(&workspace)).unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let dropped = Arc::new(AtomicBool::new(false));
+    let mut session = Session::with_history(
+        Model::Luna,
+        Fixture {
+            requests: requests.clone(),
+            dropped: dropped.clone(),
+        },
+        Some(workspace),
+        history,
+    )
+    .unwrap();
+    assert!(matches!(next(&mut session), Event::Restored { .. }));
+    assert!(matches!(next(&mut session), Event::Ready));
+    assert!(session.submit("edit once"));
+    assert_eq!(finish(&mut session).0, End::Complete);
+    let output = outputs(&requests.lock().unwrap()[1]);
+    let recovery_id = output[0]
+        .1
+        .get("recovery")
+        .and_then(Value::text)
+        .unwrap()
+        .to_owned();
+    assert!(recovery_id.starts_with("r-"));
+    drop(session);
+    assert!(dropped.load(Ordering::Acquire));
+    let saved = persistence::load(&store, &id, true).unwrap();
+    assert!(
+        saved
+            .history
+            .turns
+            .iter()
+            .flat_map(|turn| &turn.steps)
+            .flat_map(|step| &step.results)
+            .any(|receipt| receipt.output.contains(&recovery_id))
+    );
+    let reopened_requests = Arc::new(Mutex::new(Vec::new()));
+    let reopened_dropped = Arc::new(AtomicBool::new(false));
+    let workspace = crate::workspace::Workspace::open(&files.0).unwrap();
+    let mut resumed = Session::with_history(
+        Model::Luna,
+        Fixture {
+            requests: reopened_requests.clone(),
+            dropped: reopened_dropped,
+        },
+        Some(workspace),
+        saved.history,
+    )
+    .unwrap();
+    assert!(matches!(next(&mut resumed), Event::Restored { .. }));
+    assert!(matches!(next(&mut resumed), Event::Ready));
+    assert!(reopened_requests.lock().unwrap().is_empty());
+    assert_eq!(
+        fs::read_to_string(files.0.join("notes.txt")).unwrap(),
+        "new\n"
+    );
+    drop(resumed);
+    let recovery = crate::workspace::RecoveryStore::in_store(&store).unwrap();
+    assert_eq!(
+        recovery.get(&recovery_id).unwrap().session.as_deref(),
+        Some(id.as_str())
+    );
+    assert_eq!(recovery.get(&recovery_id).unwrap().operation, "edit");
 }

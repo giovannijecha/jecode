@@ -89,6 +89,9 @@ pub fn create(parent: &File, name: &str) -> io::Result<File> {
     child_options(parent, name, false, 0x00170183, 1, 2)
 }
 pub fn metadata_to(source: &File, target: &File) -> io::Result<()> {
+    apply_policy(target, &capture_policy(source)?)
+}
+pub fn capture_policy(source: &File) -> io::Result<Vec<u8>> {
     let mut size = 0;
     // SAFETY: size query only; credentials/security descriptor never enter logs.
     unsafe { GetKernelObjectSecurity(source.as_raw_handle(), 4, null_mut(), 0, &mut size) };
@@ -109,6 +112,16 @@ pub fn metadata_to(source: &File, target: &File) -> io::Result<()> {
     {
         return Err(io::Error::last_os_error());
     }
+    let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), size as usize) };
+    Ok(bytes.to_vec())
+}
+pub fn apply_policy(target: &File, policy: &[u8]) -> io::Result<()> {
+    if policy.is_empty() || policy.len() > 65536 {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    let mut data = vec![0u64; policy.len().div_ceil(8)];
+    unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr().cast::<u8>(), policy.len()) }
+        .copy_from_slice(policy);
     let (mut control, mut revision) = (0, 0);
     // SAFETY: returned initialized security descriptor and scalar outputs.
     if unsafe {
@@ -158,6 +171,10 @@ pub fn move_new(parent: &File, file: &File, _: &str, to: &str) -> io::Result<()>
 pub fn remove_owned(_: &File, file: &File, _: &str) -> io::Result<()> {
     let mut delete = 1u8;
     set(file, (&mut delete as *mut u8).cast(), 1, 13)
+}
+pub fn sync_parent(_: &File) -> io::Result<()> {
+    // Windows does not expose a reliable directory flush for this held handle.
+    Ok(())
 }
 fn set(file: &File, info: Handle, size: u32, class: u32) -> io::Result<()> {
     let mut status = Status {

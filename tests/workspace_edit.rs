@@ -1,6 +1,6 @@
 #[path = "support/workspace.rs"]
 mod support;
-use jecode::workspace::{Budget, Workspace};
+use jecode::workspace::{Budget, RecoveryStore, Workspace};
 use std::{
     fs,
     sync::atomic::{AtomicBool, Ordering},
@@ -12,6 +12,9 @@ fn budget(cancelled: &AtomicBool) -> Budget<'_> {
         cancelled,
         deadline: Instant::now() + Duration::from_secs(5),
     }
+}
+fn recoveries(files: &support::Fixture) -> RecoveryStore {
+    RecoveryStore::in_store(&jecode::state::Store::in_home(&files.home()).unwrap()).unwrap()
 }
 #[test]
 fn exact_edit_is_inert_until_apply_and_retains_original_bytes() {
@@ -30,7 +33,7 @@ fn exact_edit_is_inert_until_apply_and_retains_original_bytes() {
         fs::read_to_string(files.0.join("src/main.rs")).unwrap(),
         original
     );
-    let applied = ws.apply(change, &budget(&cancel));
+    let applied = ws.apply(change, &budget(&cancel), &recoveries(&files), None, "test");
     if applied
         .as_ref()
         .is_err_and(|e| files.unsupported_host_filesystem(&e.to_string()))
@@ -48,10 +51,15 @@ fn exact_edit_is_inert_until_apply_and_retains_original_bytes() {
         original.replace("= 2", "= 3")
     );
     assert_eq!(
-        fs::read_to_string(files.0.join(applied.recovery.unwrap())).unwrap(),
+        fs::read_to_string(
+            recoveries(&files)
+                .root()
+                .join(format!("{}.before", applied.recovery.unwrap()))
+        )
+        .unwrap(),
         original
     );
-    assert_eq!(ws.list("src", &budget(&cancel)).unwrap().omitted, 1);
+    assert_eq!(ws.list("src", &budget(&cancel)).unwrap().omitted, 0);
 }
 #[test]
 fn create_missing_empty_file_and_reject_overwrite_or_missing_parent() {
@@ -60,7 +68,7 @@ fn create_missing_empty_file_and_reject_overwrite_or_missing_parent() {
     let cancel = AtomicBool::new(false);
     let change = ws.prepare_create("empty", "", &budget(&cancel)).unwrap();
     assert!(!files.0.join("empty").exists());
-    let applied = ws.apply(change, &budget(&cancel));
+    let applied = ws.apply(change, &budget(&cancel), &recoveries(&files), None, "test");
     if applied
         .as_ref()
         .is_err_and(|e| files.unsupported_host_filesystem(&e.to_string()))
@@ -82,13 +90,20 @@ fn create_missing_empty_file_and_reject_overwrite_or_missing_parent() {
     let fill = ws
         .prepare_edit("empty", "", "filled\n", &budget(&cancel))
         .unwrap();
-    let applied = ws.apply(fill, &budget(&cancel)).unwrap();
+    let applied = ws
+        .apply(fill, &budget(&cancel), &recoveries(&files), None, "test")
+        .unwrap();
     assert_eq!(
         fs::read_to_string(files.0.join("empty")).unwrap(),
         "filled\n"
     );
     assert_eq!(
-        fs::read(files.0.join(applied.recovery.unwrap())).unwrap(),
+        fs::read(
+            recoveries(&files)
+                .root()
+                .join(format!("{}.before", applied.recovery.unwrap()))
+        )
+        .unwrap(),
         b""
     );
 }
@@ -147,7 +162,10 @@ fn stale_content_identity_creation_and_cancellation_preserve_disk() {
         .prepare_edit("file", "old", "new", &budget(&cancel))
         .unwrap();
     files.write("file", "other editor");
-    assert!(ws.apply(change, &budget(&cancel)).is_err());
+    assert!(
+        ws.apply(change, &budget(&cancel), &recoveries(&files), None, "test")
+            .is_err()
+    );
     assert_eq!(
         fs::read_to_string(files.0.join("file")).unwrap(),
         "other editor"
@@ -157,12 +175,18 @@ fn stale_content_identity_creation_and_cancellation_preserve_disk() {
         .unwrap();
     fs::rename(files.0.join("file"), files.0.join("moved")).unwrap();
     files.write("file", "other editor");
-    assert!(ws.apply(change, &budget(&cancel)).is_err());
+    assert!(
+        ws.apply(change, &budget(&cancel), &recoveries(&files), None, "test")
+            .is_err()
+    );
     let change = ws
         .prepare_create("new", "proposed", &budget(&cancel))
         .unwrap();
     files.write("new", "created meanwhile");
-    assert!(ws.apply(change, &budget(&cancel)).is_err());
+    assert!(
+        ws.apply(change, &budget(&cancel), &recoveries(&files), None, "test")
+            .is_err()
+    );
     assert_eq!(
         fs::read_to_string(files.0.join("new")).unwrap(),
         "created meanwhile"
@@ -171,7 +195,10 @@ fn stale_content_identity_creation_and_cancellation_preserve_disk() {
         .prepare_edit("file", "other editor", "new", &budget(&cancel))
         .unwrap();
     cancel.store(true, Ordering::Release);
-    assert!(ws.apply(change, &budget(&cancel)).is_err());
+    assert!(
+        ws.apply(change, &budget(&cancel), &recoveries(&files), None, "test")
+            .is_err()
+    );
     assert_eq!(fs::read_dir(&files.0).unwrap().count(), 3);
 }
 #[test]
@@ -233,6 +260,9 @@ fn hardlinks_are_not_edited_and_replaced_parent_invalidates_proposal() {
     let change = ws.prepare_create("src/new", "x", &budget(&cancel)).unwrap();
     fs::rename(files.0.join("src"), files.0.join("old-src")).unwrap();
     fs::create_dir(files.0.join("src")).unwrap();
-    assert!(ws.apply(change, &budget(&cancel)).is_err());
+    assert!(
+        ws.apply(change, &budget(&cancel), &recoveries(&files), None, "test")
+            .is_err()
+    );
     assert!(!files.0.join("src/new").exists());
 }

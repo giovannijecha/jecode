@@ -7,7 +7,7 @@
 mod application;
 pub mod certificate;
 mod connection;
-mod crypto;
+pub(crate) mod crypto;
 mod socket;
 pub use connection::{ApplicationWrite, Budget, Connection, IoFailure, IoOperation, NetworkError};
 mod entropy;

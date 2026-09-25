@@ -283,7 +283,7 @@ fn cancellation_before_command_launch_does_not_run_it() {
     let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
     let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
     let release = Arc::new(Mutex::new(release_rx));
-    let gate: worker::EffectGate = Arc::new(move |name| {
+    let gate: worker::EffectGate = Arc::new(move |name, _| {
         if name == "run_command" {
             entered_tx.send(()).unwrap();
             release.lock().unwrap().recv().unwrap();

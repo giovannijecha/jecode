@@ -1,19 +1,23 @@
-//! Recoverable, ordered publication with no-overwrite renames and retained originals.
+//! Recoverable, ordered publication with a private durable copy and transient adjacent names.
 use super::{
-    Budget, Change, ChangeError, Workspace,
+    Budget, Change, ChangeError, RecoveryStore, Workspace,
     change::{After, fail},
     platform,
+    recovery::{Origin, same},
     snapshot::{Snapshot, copy_replacement, matches},
 };
 use std::{
     fs::File,
     io::{self, Write},
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 
 pub struct Applied {
-    /// An existing original is kept here; no routine cleanup removes it.
+    /// Stable identifier of a private retained version, not a workspace path.
     pub recovery: Option<String>,
+    pub warning: Option<String>,
+    pub stop_after: bool,
 }
 struct Staging<'a> {
     parent: &'a File,
@@ -28,7 +32,7 @@ impl Drop for Staging<'_> {
         }
     }
 }
-fn unique(kind: &str) -> String {
+pub(super) fn unique(kind: &str) -> String {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     format!(
         ".jecode-{kind}-{}-{}",
@@ -39,14 +43,31 @@ fn unique(kind: &str) -> String {
 impl Workspace {
     /// The controller consumes this exact prepared Change once after its durable
     /// pre-effect checkpoint. Consuming it prevents accidental double application.
-    pub fn apply(&self, change: Change, budget: &Budget<'_>) -> Result<Applied, ChangeError> {
-        self.apply_with(change, budget, || {})
+    pub fn apply(
+        &self,
+        change: Change,
+        budget: &Budget<'_>,
+        recoveries: &RecoveryStore,
+        session: Option<&str>,
+        operation: &str,
+    ) -> Result<Applied, ChangeError> {
+        self.apply_with(
+            change,
+            budget,
+            recoveries,
+            session,
+            operation,
+            (|| {}, || {}),
+        )
     }
     fn apply_with(
         &self,
         mut change: Change,
         budget: &Budget<'_>,
-        after_stash: impl FnOnce(),
+        recoveries: &RecoveryStore,
+        session: Option<&str>,
+        operation: &str,
+        hooks: (impl FnOnce(), impl FnOnce()),
     ) -> Result<Applied, ChangeError> {
         let (path, parent, name) = self.change_parent(&change.preview.path, budget)?;
         if platform::identity(&parent.file)? != change.parent {
@@ -100,14 +121,62 @@ impl Workspace {
             return fail("parent directory changed during preparation; nothing published");
         }
         drop(current_parent);
+        let mut warning = None;
+        let mut stop_after = false;
         let recovery = if let (Some(original), Some(before)) = (&mut original, &mut change.before) {
             matches(original, before, budget)?;
             let backup = unique("recovery");
+            let target = absolute(self.path(), &path);
+            let adjacent = target.with_file_name(&backup);
+            // Copy across volumes in bounded chunks and sync both private files
+            // and their manifest before removing the target's original name.
+            let mut version = recoveries
+                .capture(
+                    Origin {
+                        workspace: self.path(),
+                        target: &target,
+                        session,
+                        operation,
+                        adjacent: &adjacent,
+                    },
+                    original,
+                    &mut staging.file,
+                    budget,
+                )
+                .map_err(|error| {
+                    ChangeError(
+                        format!(
+                            "could not durably retain the original before publication: {error}"
+                        ),
+                        error.id,
+                    )
+                })?;
+            matches(original, before, budget)
+                .map_err(|error| ChangeError(error.0, Some(version.id.clone())))?;
+            recoveries
+                .verify_pair(&version, budget)
+                .map_err(|error| ChangeError(error.to_string(), Some(version.id.clone())))?;
+            let mut expected_after = recoveries
+                .verified_file(&version, "after", budget)
+                .map_err(|error| ChangeError(error.to_string(), Some(version.id.clone())))?;
+            let stage_matches = same(&mut staging.file, &mut expected_after, budget)
+                .map_err(|error| ChangeError(error.to_string(), Some(version.id.clone())))?;
+            if !stage_matches {
+                return Err(ChangeError(
+                    "staged result changed before publication; original remains in place".into(),
+                    Some(version.id),
+                ));
+            }
             // There is a short absent-name interval, not an atomic replacement.
             // The source inode stays intact; a competing destination wins rather
             // than being overwritten. On any failure restore without replacing.
-            platform::move_new(&parent.file, original, &name, &backup)?;
-            after_stash();
+            platform::move_new(&parent.file, original, &name, &backup).map_err(|error| {
+                ChangeError(
+                    format!("could not begin publication: {error}; original retained at target"),
+                    Some(version.id.clone()),
+                )
+            })?;
+            (hooks.0)();
             // Linux renames by name, Windows by held handle. Reopen the moved
             // object on Linux to detect a path replacement during the first move.
             let validation = validate_stash(&parent.file, original, &backup, before, budget);
@@ -123,21 +192,69 @@ impl Workspace {
             if let Err(error) = publish {
                 let restored = platform::move_new(&parent.file, original, &backup, &name).is_ok();
                 let location = recovery_path(&path, &backup);
-                return Err(ChangeError(if restored {
-                    format!("{error}; original restored; proposed content not published")
-                } else {
-                    format!("{error}; original retained at {location}; destination not overwritten")
-                }));
+                return Err(ChangeError(
+                    if restored {
+                        format!("{error}; original restored; proposed content not published")
+                    } else {
+                        format!(
+                            "{error}; original retained at {location}; destination not overwritten"
+                        )
+                    },
+                    Some(version.id),
+                ));
             }
-            Some(recovery_path(&path, &backup))
+            staging.published = true;
+            (hooks.1)();
+            let checkpoint = platform::sync_parent(&parent.file)
+                .and_then(|()| platform::identity(&staging.file))
+                .and_then(|identity| recoveries.record(&mut version, "applied", Some(identity)));
+            match checkpoint {
+                Ok(()) => {}
+                Err(error) => {
+                    warning = Some(format!(
+                        "change applied but recovery result checkpoint failed: {error}; adjacent transient retained at {}",
+                        adjacent.display()
+                    ));
+                    stop_after = true;
+                }
+            }
+            if !stop_after {
+                let cleanup = platform::remove_owned(&parent.file, original, &backup)
+                    .and_then(|()| platform::sync_parent(&parent.file));
+                if let Err(error) = cleanup {
+                    warning = Some(format!(
+                        "change applied; adjacent cleanup or directory sync failed at {}: {error}",
+                        adjacent.display()
+                    ));
+                    stop_after = true;
+                }
+            }
+            Some(version.id)
         } else {
             platform::move_new(&parent.file, &staging.file, &staging.name, &name)?;
+            staging.published = true;
+            if let Err(error) = platform::sync_parent(&parent.file) {
+                warning = Some(format!("file created but directory sync failed: {error}"));
+                stop_after = true;
+            }
             None
         };
         staging.published = true;
         // Cancellation after publication cannot turn a real change into an
         // invented 'not executed' receipt. The controller records this outcome.
-        Ok(Applied { recovery })
+        Ok(Applied {
+            recovery,
+            warning,
+            stop_after,
+        })
+    }
+}
+fn absolute(workspace: &Path, path: &str) -> PathBuf {
+    let target = Path::new(path);
+    if target.is_absolute() {
+        target.to_owned()
+    } else {
+        workspace.join(target)
     }
 }
 fn recovery_path(path: &str, backup: &str) -> String {

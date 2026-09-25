@@ -19,6 +19,7 @@ pub struct Output {
     pub failed: bool,
     /// Successful output with truncation or omitted entries.
     pub limited: bool,
+    pub stop_after: bool,
 }
 impl Output {
     pub fn error(message: &str) -> Self {
@@ -31,6 +32,7 @@ impl Output {
             summary: message.into(),
             failed: true,
             limited: false,
+            stop_after: false,
         }
     }
     pub(crate) fn success(value: Value, summary: String, limited: bool) -> Self {
@@ -40,6 +42,7 @@ impl Output {
                 summary,
                 failed: false,
                 limited,
+                stop_after: false,
             },
             Err(_) => Self::error("tool result exceeded its output limit; narrow the request"),
         }
@@ -58,12 +61,13 @@ impl Output {
         output.failed = true;
         output
     }
-    pub(crate) fn failed_effect(message: &str) -> Self {
+    pub(crate) fn failed_effect_with_recovery(message: &str, recovery: Option<&str>) -> Self {
         let mut output = Self::success(
             json::object([
                 ("ok", Value::Bool(false)),
                 ("status", string("failed")),
                 ("error", string(message)),
+                ("recovery", recovery.map_or(Value::Null, string)),
             ]),
             message.into(),
             false,

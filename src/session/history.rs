@@ -54,6 +54,8 @@ pub(super) struct History {
     pub base_step: usize,
     pub base_guidance: usize,
     pub record: Option<super::persistence::Record>,
+    #[cfg(test)]
+    pub test_recovery: Option<crate::state::Store>,
     pub projection: super::context::Projection,
     /// Derived from the active workspace; not a second canonical permissions store.
     pub environment: String,
@@ -66,8 +68,20 @@ pub(super) struct History {
     pub fail_checkpoint_from: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub effect_gate: Option<super::worker::EffectGate>,
+    #[cfg(test)]
+    pub test_outcome_checkpoint: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl History {
+    pub fn recovery_store(&self) -> std::io::Result<crate::workspace::RecoveryStore> {
+        if let Some(record) = &self.record {
+            return crate::workspace::RecoveryStore::in_store(&record.user_store()?);
+        }
+        #[cfg(test)]
+        if let Some(store) = &self.test_recovery {
+            return crate::workspace::RecoveryStore::in_store(store);
+        }
+        Err(std::io::ErrorKind::NotFound.into())
+    }
     pub fn begin(&mut self, prompt: String) -> Result<(), Failure> {
         if prompt.len() > super::MAX_PROMPT_BYTES
             || self.record.as_ref().is_some_and(|record| record.legacy())

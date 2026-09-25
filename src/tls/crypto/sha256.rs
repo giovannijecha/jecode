@@ -1,14 +1,14 @@
 //! Portable incremental SHA-256 (FIPS 180-4), adapted from owned archive code.
 use super::secret::erase;
 #[derive(Clone)]
-pub(in crate::tls) struct Sha256 {
+pub(crate) struct Sha256 {
     state: [u32; 8],
     block: [u8; 64],
     used: usize,
     bytes: u64,
 }
 impl Sha256 {
-    pub(in crate::tls) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             state: INITIAL,
             block: [0; 64],
@@ -16,13 +16,13 @@ impl Sha256 {
             bytes: 0,
         }
     }
-    pub(in crate::tls) fn digest(input: &[u8]) -> [u8; 32] {
+    pub(crate) fn digest(input: &[u8]) -> [u8; 32] {
         let mut hash = Self::new();
         hash.update(input);
         hash.finish()
     }
-    pub(in crate::tls) fn update(&mut self, mut input: &[u8]) {
-        // Internal callers hash bounded TLS transcripts, records and key material.
+    pub(crate) fn update(&mut self, mut input: &[u8]) {
+        // Internal callers hash TLS inputs and stream file recovery content.
         self.bytes = self
             .bytes
             .checked_add(input.len() as u64)
@@ -44,7 +44,7 @@ impl Sha256 {
         self.block[..tail.len()].copy_from_slice(tail);
         self.used = tail.len();
     }
-    pub(in crate::tls) fn finish(mut self) -> [u8; 32] {
+    pub(crate) fn finish(mut self) -> [u8; 32] {
         self.block[self.used] = 0x80;
         self.block[self.used + 1..].fill(0);
         if self.used >= 56 {

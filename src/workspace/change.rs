@@ -17,7 +17,7 @@ pub struct Preview {
     pub omitted_bytes: usize,
 }
 #[derive(Debug)]
-pub struct ChangeError(pub String);
+pub struct ChangeError(pub String, pub Option<String>);
 impl std::fmt::Display for ChangeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -26,7 +26,7 @@ impl std::fmt::Display for ChangeError {
 impl std::error::Error for ChangeError {}
 impl From<Error> for ChangeError {
     fn from(value: Error) -> Self {
-        Self(value.to_string())
+        Self(value.to_string(), None)
     }
 }
 impl From<io::Error> for ChangeError {
@@ -40,6 +40,7 @@ impl From<io::Error> for ChangeError {
             } else {
                 "file unavailable or unsupported for safe text changes; proposed content not published".into()
             },
+            None,
         )
     }
 }
@@ -191,7 +192,7 @@ pub(super) fn bidi(c: char) -> bool {
     matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 pub(super) fn fail<T>(text: &str) -> Result<T, ChangeError> {
-    Err(ChangeError(text.into()))
+    Err(ChangeError(text.into(), None))
 }
 
 #[cfg(test)]
