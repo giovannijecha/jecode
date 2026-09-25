@@ -52,6 +52,14 @@ visual request with a recovery error; restore the private image store from a
 backup. These digests detect accidental damage, not malicious rewriting of both
 evidence and session records.
 
+A saved view remains pending until a validated image-bearing response completes.
+Failed, cancelled and incomplete requests do not clear it. Explicit continuation
+resends the saved pixels without reopening the original file or replaying the
+tool. Earlier context may be compacted, but the pending image stays in the
+request. Switching to a text-only model shows text references; switching back
+restores the pending pixels. Later validated visual responses allow ordinary
+compaction of their earlier image receipts.
+
 An interrupted or failed capture does not commit a successful view. An
 incomplete temporary private write is not a valid image ID. A checkpoint failure
 stops the worker; a saved payload without a committed receipt may remain as an

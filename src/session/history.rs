@@ -14,6 +14,9 @@ pub(super) struct Step {
     pub response: Option<Response>,
     pub results: Vec<Receipt>,
     pub accepted: bool,
+    /// A completed, accepted response to a request that carried image pixels.
+    /// Persisted with the response so resume can distinguish viewing from sending.
+    pub validated_visual_input: bool,
     pub attempts: Vec<Attempt>,
 }
 impl Step {
@@ -102,13 +105,33 @@ impl History {
         }) || self.projection.summary.contains("image_id")
     }
     pub fn pending_image(&self) -> bool {
-        self.turns
-            .last()
-            .filter(|turn| turn.end.is_none())
-            .and_then(|turn| turn.steps.last())
-            .is_some_and(|step| {
-                step.accepted && step.results.iter().any(|receipt| receipt.image.is_some())
-            })
+        self.pending_image_step().is_some()
+    }
+    /// Earliest receipt whose pixels have not reached a validated visual response.
+    /// An accepted visual response consumes earlier receipts; its own tool results
+    /// occur afterward and therefore remain pending.
+    pub fn pending_image_step(&self) -> Option<(usize, usize)> {
+        let mut pending = None;
+        for (turn_index, turn) in self.turns.iter().enumerate() {
+            for (step_index, step) in turn.steps.iter().enumerate() {
+                if step.accepted
+                    && step
+                        .response
+                        .as_ref()
+                        .is_some_and(|response| response.status == Status::Completed)
+                {
+                    if step.validated_visual_input {
+                        pending = None;
+                    }
+                    if pending.is_none()
+                        && step.results.iter().any(|receipt| receipt.image.is_some())
+                    {
+                        pending = Some((turn_index, step_index));
+                    }
+                }
+            }
+        }
+        pending
     }
     pub fn recovery_store(&self) -> std::io::Result<crate::workspace::RecoveryStore> {
         if let Some(record) = &self.record {

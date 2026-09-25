@@ -159,6 +159,13 @@ pub(super) fn report(history: &History, model: Model, workspace: bool) -> String
             ));
         }
     }
+    if history.pending_image() {
+        message.push_str(if history.can_view_images() {
+            "\nPending image evidence: saved pixels remain in the next visual request until a validated response completes."
+        } else {
+            "\nPending image evidence: the selected model receives text references only; saved pixels remain available for an image-capable model."
+        });
+    }
     message
 }
 
@@ -214,11 +221,17 @@ pub(super) fn ensure(
 ) -> Result<(), Failure> {
     loop {
         let size = request_bytes(history, model, workspace)?;
-        // The first request after a view must contain the actual pixels. The
-        // ordinary text compaction threshold cannot consume that pending view.
-        if history.pending_image() && history.projection.pending.is_none() {
-            return size.map_or(Err(Failure::ImageRequestLimit), |_| Ok(()));
+        // A captured image remains pending across failed requests, ended turns
+        // and resume. Send its pixels before applying the text threshold.
+        let visual_pending = history.pending_image() && history.can_view_images();
+        if visual_pending && history.projection.pending.is_none() && size.is_some() {
+            return Ok(());
         }
+        let limit = if visual_pending {
+            Failure::ImageRequestLimit
+        } else {
+            Failure::HistoryLimit
+        };
         let bounded_text_size = size.filter(|bytes| *bytes <= MAX_CONTEXT);
         if history.projection.pending.is_none()
             && size.is_some_and(|n| n <= history.projection.limit_bytes)
@@ -236,9 +249,14 @@ pub(super) fn ensure(
                 |_| Ok(()),
             );
         }
-        let candidate = next(history, history.projection.through, history.projection.step);
+        let candidate = next_eligible(
+            history,
+            history.projection.through,
+            history.projection.step,
+            history.pending_image_step(),
+        );
         if history.projection.pending.is_none() && candidate.is_none() {
-            return bounded_text_size.map_or(Err(Failure::HistoryLimit), |_| Ok(()));
+            return bounded_text_size.map_or(Err(limit), |_| Ok(()));
         }
         let before = (
             history.projection.through,
@@ -255,7 +273,7 @@ pub(super) fn ensure(
                 history.projection.pending.is_some(),
             )
         {
-            return bounded_text_size.map_or(Err(Failure::HistoryLimit), |_| Ok(()));
+            return bounded_text_size.map_or(Err(limit), |_| Ok(()));
         }
     }
 }
@@ -286,6 +304,20 @@ fn next(history: &History, through: usize, step: usize) -> Option<(usize, usize)
         return Some((through, step + 1));
     }
     turn.end.map(|_| (through + 1, 0))
+}
+
+fn next_eligible(
+    history: &History,
+    through: usize,
+    step: usize,
+    protected: Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    let current = (through, step);
+    if protected.is_some_and(|position| current >= position) {
+        return None;
+    }
+    next(history, through, step)
+        .filter(|candidate| protected.is_none_or(|position| *candidate <= position))
 }
 
 pub(super) fn valid_cursor(history: &History) -> bool {
@@ -422,14 +454,22 @@ pub(super) fn compact(
     metrics: &mut Metrics,
 ) -> Result<(), Failure> {
     context.check()?;
+    let start = (history.projection.through, history.projection.step);
+    let protected = history.pending_image_step();
+    if protected.is_some_and(|position| start >= position) {
+        if history.can_view_images() && request_bytes(history, model, workspace)?.is_none() {
+            return Err(Failure::ImageRequestLimit);
+        }
+        let _ = context.send(Event::ContextReport("Pending image pixels are retained until a validated visual response; no earlier context is eligible for compaction".into()), false);
+        return Ok(());
+    }
     if history.projection.pending.is_some() {
         return partial::compact(backend, history, context, model, workspace, metrics);
     }
-    let start = (history.projection.through, history.projection.step);
     // The encoder's 2 MiB wire bound is not a claimed model token capacity.
     let budget = MAX_CONTEXT;
     let mut cursor = start;
-    while let Some(candidate) = next(history, cursor.0, cursor.1) {
+    while let Some(candidate) = next_eligible(history, cursor.0, cursor.1, protected) {
         if summary_request(history, model, candidate)?
             .encode(budget)
             .is_err()
@@ -444,7 +484,7 @@ pub(super) fn compact(
             .get(start.0)
             .and_then(|turn| turn.steps.get(start.1))
             .is_some()
-            && next(history, start.0, start.1) == Some((start.0, start.1 + 1))
+            && next_eligible(history, start.0, start.1, protected) == Some((start.0, start.1 + 1))
         {
             return partial::compact(backend, history, context, model, workspace, metrics);
         }
@@ -455,7 +495,12 @@ pub(super) fn compact(
             );
             return Ok(());
         }
-        return Err(failed(history, Failure::HistoryLimit));
+        let limit = if history.pending_image() && history.can_view_images() {
+            Failure::ImageRequestLimit
+        } else {
+            Failure::HistoryLimit
+        };
+        return Err(failed(history, limit));
     }
     let request = summary_request(history, model, cursor)?;
     let before = request

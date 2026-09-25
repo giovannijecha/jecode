@@ -45,7 +45,7 @@ pub(super) fn encode_turn(turn: &Turn) -> Value {
                 turn.steps
                     .iter()
                     .map(|step| {
-                        json::object([
+                        let mut fields = vec![
                             ("text", text(&step.text)),
                             ("reasoning", text(&step.reasoning)),
                             ("accepted", Value::Bool(step.accepted)),
@@ -63,7 +63,11 @@ pub(super) fn encode_turn(turn: &Turn) -> Value {
                                 "results",
                                 Value::Array(step.results.iter().map(receipt).collect()),
                             ),
-                        ])
+                        ];
+                        if step.validated_visual_input {
+                            fields.push(("validated_visual_input", Value::Bool(true)));
+                        }
+                        json::object(fields)
                     })
                     .collect(),
             ),
@@ -112,6 +116,11 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
                     Some(Value::Bool(value)) => *value,
                     _ => return Err(invalid()),
                 },
+                validated_visual_input: match value.get("validated_visual_input") {
+                    None => false,
+                    Some(Value::Bool(true)) => true,
+                    _ => return Err(invalid()),
+                },
                 response,
                 results: Vec::new(),
                 attempts: match value.get("attempts") {
@@ -152,7 +161,13 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
                 {
                     return Err(invalid());
                 }
-            } else if step.accepted || !step.results.is_empty() {
+                if step.validated_visual_input
+                    && (!step.accepted
+                        || response.status != crate::providers::openai_account::Status::Completed)
+                {
+                    return Err(invalid());
+                }
+            } else if step.accepted || !step.results.is_empty() || step.validated_visual_input {
                 return Err(invalid());
             }
             turn.steps.push(step);
@@ -206,7 +221,7 @@ pub(super) fn metrics(m: &Metrics) -> Value {
 }
 
 pub(super) fn step_core(step: &Step) -> Value {
-    json::object([
+    let mut fields = vec![
         ("text", text(&step.text)),
         ("reasoning", text(&step.reasoning)),
         ("accepted", Value::Bool(step.accepted)),
@@ -221,7 +236,11 @@ pub(super) fn step_core(step: &Step) -> Value {
                 .map_or(Value::Null, Response::snapshot),
         ),
         ("results", Value::Array(Vec::new())),
-    ])
+    ];
+    if step.validated_visual_input {
+        fields.push(("validated_visual_input", Value::Bool(true)));
+    }
+    json::object(fields)
 }
 pub(super) fn receipt(receipt: &Receipt) -> Value {
     let mut fields = vec![

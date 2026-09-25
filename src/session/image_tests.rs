@@ -520,33 +520,37 @@ fn oversized_pending_visual_request_fails_before_any_provider_send() {
         persistence::create_in(&store, Model::Luna, Some(&files.0), Some(&workspace)).unwrap();
     history.image_capable = true;
     let png = fixture_png_padded([1, 2, 3, 255], crate::workspace::MAX_IMAGE_BYTES - 200);
-    let evidence = history
+    let other = fixture_png_padded([4, 5, 6, 255], crate::workspace::MAX_IMAGE_BYTES - 200);
+    let first = history
         .images()
         .unwrap()
-        .capture(&png, "screen.png")
+        .capture(&png, "screen-a.png")
+        .unwrap();
+    let second = history
+        .images()
+        .unwrap()
+        .capture(&other, "screen-b.png")
         .unwrap();
     history.begin("Inspect the screenshot".into()).unwrap();
-    for _ in 0..2 {
-        let text = "x".repeat(900_000);
-        history.turns[0].steps.push(history::Step {
-            text: text.clone(),
-            response: Some(tests::response(&text, Status::Completed)),
-            accepted: true,
-            ..Default::default()
-        });
-    }
     history.turns[0].steps.push(history::Step {
-        response: Some(tool_tests::calls_response(vec![tool_tests::call(
-            "image-call",
-            "view_image",
-            r#"{"path":"screen.png"}"#,
-        )])),
-        results: vec![history::Receipt {
-            call_id: "image-call".into(),
-            output: "PNG captured".into(),
-            summary: "PNG captured".into(),
-            image: Some(evidence),
-        }],
+        response: Some(tool_tests::calls_response(vec![
+            tool_tests::call("image-a", "view_image", r#"{"path":"screen-a.png"}"#),
+            tool_tests::call("image-b", "view_image", r#"{"path":"screen-b.png"}"#),
+        ])),
+        results: vec![
+            history::Receipt {
+                call_id: "image-a".into(),
+                output: "PNG captured".into(),
+                summary: "PNG captured".into(),
+                image: Some(first),
+            },
+            history::Receipt {
+                call_id: "image-b".into(),
+                output: "PNG captured".into(),
+                summary: "PNG captured".into(),
+                image: Some(second),
+            },
+        ],
         accepted: true,
         ..Default::default()
     });
@@ -559,6 +563,17 @@ fn oversized_pending_visual_request_fails_before_any_provider_send() {
     let (context, _) = test_context();
     assert_eq!(
         context::ensure(
+            &mut backend,
+            &mut history,
+            &context,
+            Model::Luna,
+            true,
+            &mut Metrics::default(),
+        ),
+        Err(Failure::ImageRequestLimit)
+    );
+    assert_eq!(
+        context::compact(
             &mut backend,
             &mut history,
             &context,

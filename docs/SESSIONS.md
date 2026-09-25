@@ -78,11 +78,16 @@ be promised away.
 
 Generation requests are measured as encoded JSON, including full image Base64,
 against the 8 MiB account HTTP body bound. Summary requests retain a 2 MiB
-bound. A newly completed image view is sent to the model before text compaction
-can summarize its step. If that complete visual request exceeds the wire bound,
+bound. A captured image stays in the model-facing request across failed or
+cancelled generation, close/resume and explicit continuation. Sending the request
+does not mark the pixels inspected: only a validated, completed response to an
+image-bearing request ends that pending state. Compaction may summarize earlier
+eligible context but does not summarize the pending image step. A text-only model
+receives truthful references and cannot consume the pending visual state.
+If the complete visual request exceeds the wire bound,
 Jecode stops with an actionable error instead of omitting or truncating pixels.
 Compact earlier work or create a smaller PNG, then use the saved `image_id` to
-view it again. Once a later model response has inspected the image, compaction
+view it again. Once a validated visual response has completed, compaction
 uses the textual image metadata and the model's visual findings. The summary
 distinguishes those findings from the retained binary evidence; older images can
 be inspected again with `view_image(image_id)` in the same session. A completed
