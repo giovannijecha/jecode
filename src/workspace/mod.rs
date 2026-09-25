@@ -30,12 +30,15 @@ pub use transaction::Applied;
 mod recovery_tests;
 
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
+/// Five MiB leaves room for base64 and request metadata in the existing 8 MiB HTTP body.
+pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 pub const MAX_DIRECTORY_ENTRIES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Path,
     Excluded,
+    Missing,
     Unavailable,
     Text,
     Size,
@@ -48,6 +51,7 @@ impl std::fmt::Display for Error {
         f.write_str(match self {
             Self::Path => "invalid path or unavailable in this session's file-access profile",
             Self::Excluded => "path is excluded from workspace reads",
+            Self::Missing => "file does not exist",
             Self::Unavailable => {
                 "entry unavailable, unsupported or not an ordinary workspace file/directory"
             }
@@ -214,5 +218,46 @@ impl Workspace {
             return Err(Error::Text);
         }
         Ok(text)
+    }
+
+    /// Read one ordinary binary file through the same selected path policy and
+    /// native no-link handles as text reads. The caller validates its format.
+    pub fn read_image_bytes(
+        &self,
+        path: &str,
+        budget: &Budget<'_>,
+    ) -> Result<(Vec<u8>, String), Error> {
+        budget.check()?;
+        let location = self.resolve(path)?;
+        let mut opened = self.open_image_location(&location)?;
+        let before = opened.file.metadata().map_err(|_| Error::Unavailable)?;
+        if !before.is_file() {
+            return Err(Error::Unavailable);
+        }
+        if before.len() > MAX_IMAGE_BYTES as u64 {
+            return Err(Error::Size);
+        }
+        let mut bytes = Vec::with_capacity(before.len() as usize);
+        let mut buffer = [0; 16 * 1024];
+        loop {
+            budget.check()?;
+            let count = opened
+                .file
+                .read(&mut buffer)
+                .map_err(|_| Error::Unavailable)?;
+            if count == 0 {
+                break;
+            }
+            if bytes.len() + count > MAX_IMAGE_BYTES {
+                return Err(Error::Size);
+            }
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        let after = opened.file.metadata().map_err(|_| Error::Unavailable)?;
+        budget.check()?;
+        if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
+            return Err(Error::Changed);
+        }
+        Ok((bytes, location.display))
     }
 }

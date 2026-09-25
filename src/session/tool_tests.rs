@@ -10,7 +10,9 @@ use std::{ops::ControlFlow, sync::Mutex};
 
 #[test]
 fn model_contract_describes_direct_effects_and_clarification_only_for_missing_information() {
-    let request = history::History::default().projected_request(Model::Luna, true);
+    let request = history::History::default()
+        .projected_request(Model::Luna, true)
+        .unwrap();
     assert!(request.instructions.contains("execute directly"));
     assert!(
         request

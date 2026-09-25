@@ -157,7 +157,8 @@ pub(super) fn run(
     {
         return;
     }
-    let mut signed_in = login(&mut backend, &context);
+    let mut catalog = None;
+    let mut signed_in = login(&mut backend, &context, &mut history, model, &mut catalog);
     loop {
         let command = match commands.recv_timeout(Duration::from_millis(20)) {
             Ok(command) => command,
@@ -193,12 +194,12 @@ pub(super) fn run(
                 if signed_in {
                     let _ = context.send(Event::Ready, false);
                 } else {
-                    signed_in = login(&mut backend, &context);
+                    signed_in = login(&mut backend, &context, &mut history, model, &mut catalog);
                 }
                 continue;
             }
             Command::Catalog => {
-                signed_in = load_catalog(&mut backend, &context);
+                signed_in = load_catalog(&mut backend, &context, &mut history, model, &mut catalog);
                 if signed_in {
                     let _ = context.send(Event::Ready, false);
                 }
@@ -216,6 +217,8 @@ pub(super) fn run(
                 match backend.logout(&budget) {
                     Ok(()) => {
                         signed_in = false;
+                        catalog = None;
+                        history.image_capable = false;
                         let _ = context.send(Event::LoggedOut, false);
                     }
                     Err(error) => {
@@ -243,8 +246,17 @@ pub(super) fn run(
                     break;
                 }
                 model = selected;
+                history.image_capable = catalog.as_ref().is_some_and(
+                    |catalog: &crate::providers::openai_account::catalog::Catalog| {
+                        catalog.image_support(model)
+                            == crate::providers::openai_account::catalog::Support::Supported
+                    },
+                );
                 if context.send(Event::ModelChanged(model), false).is_break() {
                     break;
+                }
+                if !history.image_capable && history.has_retained_images() {
+                    let _ = context.send(Event::ContextReport("This model has no verified image input. Saved image evidence remains intact, but its pixels are not visible until an image-capable model is selected.".into()), false);
                 }
                 continue;
             }
@@ -282,7 +294,29 @@ pub(super) fn run(
                 }
                 continue;
             }
+            Command::DiscardPendingImages => {
+                let result = history.abandon_pending_images();
+                if let Ok(changed) = result {
+                    let message = if changed {
+                        "Pending visual input discarded without inspection. Saved receipts and exact image bytes remain; request smaller views or use a saved image_id to inspect again."
+                    } else {
+                        "No pending visual input to discard. Saved image evidence remains intact."
+                    };
+                    let _ = context.send(Event::ContextReport(message.into()), false);
+                }
+                let end = result.map_or_else(End::Failed, |_| End::Complete);
+                let _ = context.send(Event::Finished(end, metrics), false);
+                if end == End::Failed(Failure::Storage) {
+                    break;
+                }
+                continue;
+            }
         };
+        if catalog.as_ref().is_some_and(
+            |catalog: &crate::providers::openai_account::catalog::Catalog| !catalog.fresh(),
+        ) {
+            let _ = load_catalog(&mut backend, &context, &mut history, model, &mut catalog);
+        }
         // Compaction may release earlier resident turns while this one runs.
         let turn_number = history.turn_count();
         let result = history
@@ -342,7 +376,13 @@ pub(super) fn run(
     }
 }
 
-fn login(backend: &mut impl Backend, context: &Context) -> bool {
+fn login(
+    backend: &mut impl Backend,
+    context: &Context,
+    history: &mut History,
+    model: Model,
+    catalog: &mut Option<crate::providers::openai_account::catalog::Catalog>,
+) -> bool {
     let result = backend.login(
         &Budget {
             deadline: Instant::now() + Duration::from_secs(900),
@@ -352,7 +392,7 @@ fn login(backend: &mut impl Backend, context: &Context) -> bool {
     );
     match result {
         Ok(()) => {
-            if load_catalog(backend, context) {
+            if load_catalog(backend, context, history, model, catalog) {
                 context.send(Event::Ready, false).is_continue()
             } else {
                 false
@@ -365,16 +405,28 @@ fn login(backend: &mut impl Backend, context: &Context) -> bool {
     }
 }
 
-fn load_catalog(backend: &mut impl Backend, context: &Context) -> bool {
+fn load_catalog(
+    backend: &mut impl Backend,
+    context: &Context,
+    history: &mut History,
+    model: Model,
+    current: &mut Option<crate::providers::openai_account::catalog::Catalog>,
+) -> bool {
     let budget = Budget {
         deadline: Instant::now() + Duration::from_secs(5),
         cancelled: &context.cancelled,
     };
     match backend.catalog(&budget) {
         Ok(Some(catalog)) => {
+            history.image_capable = catalog.image_support(model)
+                == crate::providers::openai_account::catalog::Support::Supported;
+            *current = Some(catalog.clone());
             let _ = context.send(Event::CatalogLoaded(catalog), false);
         }
-        Ok(None) => {}
+        Ok(None) => {
+            history.image_capable = false;
+            *current = None;
+        }
         Err(error)
             if matches!(
                 error,
@@ -387,6 +439,8 @@ fn load_catalog(backend: &mut impl Backend, context: &Context) -> bool {
             return false;
         }
         Err(error) => {
+            history.image_capable = false;
+            *current = None;
             let kind = match error {
                 client::Error::Catalog(crate::providers::openai_account::catalog::Error::Empty) => {
                     CatalogFailure::Empty

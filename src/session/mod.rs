@@ -5,6 +5,13 @@ mod context;
 mod edit;
 mod generation;
 mod history;
+#[cfg(test)]
+mod image_admission_tests;
+#[cfg(test)]
+mod image_pending_tests;
+#[cfg(test)]
+mod image_tests;
+mod image_tool;
 pub mod persistence;
 mod queue;
 pub mod scope;
@@ -37,6 +44,7 @@ enum Command {
     Prompt(String),
     Inspect,
     Compact,
+    DiscardPendingImages,
     Model(Model),
     Catalog,
 }
@@ -380,6 +388,18 @@ impl Session {
         }
         self.cancelled.store(false, Ordering::Release);
         if self.local_command(Command::Compact) {
+            self.phase = Phase::Generating;
+            true
+        } else {
+            false
+        }
+    }
+    pub fn discard_pending_images(&mut self) -> bool {
+        if !self.ready() {
+            return false;
+        }
+        self.cancelled.store(false, Ordering::Release);
+        if self.local_command(Command::DiscardPendingImages) {
             self.phase = Phase::Generating;
             true
         } else {

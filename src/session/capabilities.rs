@@ -1,9 +1,9 @@
 //! Compose model guidance from the tools actually exposed for this request.
 use crate::{command::Shell, providers::openai_account::Tool, tools};
 
-pub(super) fn for_session(workspace: bool, shell: &Shell) -> (Vec<Tool>, String) {
+pub(super) fn for_session(workspace: bool, image: bool, shell: &Shell) -> (Vec<Tool>, String) {
     let exposed = if workspace {
-        tools::definitions_for(shell)
+        tools::definitions_for(shell, image)
     } else {
         Vec::new()
     };
@@ -25,7 +25,12 @@ pub(super) fn for_session(workspace: bool, shell: &Shell) -> (Vec<Tool>, String)
     if names.contains(&"run_command") {
         guidance.push_str("run_command executes non-interactive commands directly with the selected shell. Use it for relevant tests and authorized operations. ");
         guidance.push_str(tools::COMMAND_REACH);
-        guidance.push_str(" Fetching a known URL, searching the web, controlling a browser and visually inspecting an image are distinct. Jecode exposes no dedicated web-search or image-viewing tool and provides no image input; command text or a screenshot path does not make an image visible to you. Try reasonable available tools for an authorized task before declaring a capability blocked; report attempts, specific blockers and unfinished requirements. Do not routinely ask the user to approve already requested actions; ask for clarification when task information is genuinely missing. Never read, print or transmit credentials. Check exit_code, status, truncation and cleanup_confirmed; a cancelled command may already have effects. Inspect uncertain effects before retrying. ");
+        guidance.push_str(" Fetching a known URL, searching the web, controlling a browser and visually inspecting an image are distinct. Jecode exposes no dedicated web-search or browser tool. Try reasonable available tools for an authorized task before declaring a capability blocked; report attempts, specific blockers and unfinished requirements. Do not routinely ask the user to approve already requested actions; ask for clarification when task information is genuinely missing. Never read, print or transmit credentials. Check exit_code, status, truncation and cleanup_confirmed; a cancelled command may already have effects. Inspect uncertain effects before retrying. ");
+    }
+    if names.contains(&"view_image") {
+        guidance.push_str("view_image sends captured PNG pixels in a multimodal tool result. Use it to inspect a screenshot produced by an available program or revisit a saved image_id. The source path alone is not visual evidence. Earlier images may be represented only by text after compaction; use their image_id to see exact saved pixels again. ");
+    } else {
+        guidance.push_str("This selected model has no verified image-input capability in the current account catalog. Saved image IDs and paths are textual reference only; do not claim to see their pixels. ");
     }
     guidance.push_str("Session saving is handled by the application.");
     (exposed, guidance)

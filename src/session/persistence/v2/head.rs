@@ -1,7 +1,11 @@
 use super::{Record, Tracker, invalid, text};
 use crate::{
     json::{self, Value},
-    session::{Model, context::partial::Pending, history::History},
+    session::{
+        Model,
+        context::{AbandonedVisual, partial::Pending},
+        history::History,
+    },
     state::Store,
     workspace::Access,
 };
@@ -81,6 +85,22 @@ pub(super) fn projection(history: &History) -> Value {
             ),
         ),
         ("failed_partial", text(&p.failed_partial)),
+        (
+            "abandoned_visual",
+            Value::Array(
+                p.abandoned_visual
+                    .iter()
+                    .map(|range| {
+                        json::object([
+                            ("from_turn", number(range.from.0)),
+                            ("from_step", number(range.from.1)),
+                            ("through_turn", number(range.through.0)),
+                            ("through_step", number(range.through.1)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
         (
             "pending",
             p.pending.as_ref().map_or(Value::Null, |pending| {
@@ -295,6 +315,26 @@ pub(super) fn restore_projection(history: &mut History, info: &Info) -> io::Resu
         _ => return Err(invalid()),
     };
     history.projection.failed_partial = field(value, "failed_partial", 32768)?.into();
+    history.projection.abandoned_visual = match value.get("abandoned_visual") {
+        None => Vec::new(), // Heads written before explicit image recovery.
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                let range = AbandonedVisual {
+                    from: (integer(item, "from_turn")?, integer(item, "from_step")?),
+                    through: (
+                        integer(item, "through_turn")?,
+                        integer(item, "through_step")?,
+                    ),
+                };
+                if range.from > range.through || range.through.0 >= history.turn_count() {
+                    return Err(invalid());
+                }
+                Ok(range)
+            })
+            .collect::<io::Result<Vec<_>>>()?,
+        _ => return Err(invalid()),
+    };
     history.projection.pending = match value.get("pending") {
         Some(Value::Null) => None,
         Some(pending) => Some(Pending {

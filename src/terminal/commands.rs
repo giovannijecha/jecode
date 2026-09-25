@@ -152,6 +152,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
                 | Action::Model(_)
                 | Action::Context
                 | Action::Compact
+                | Action::DiscardPendingImages
         )
     {
         notice(model, "Sign in with /login before using this command");
@@ -325,6 +326,14 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             }
             model.menu.close();
             super::account::compacting(model);
+            true
+        }
+        Action::DiscardPendingImages => {
+            if !session.discard_pending_images() {
+                return;
+            }
+            model.menu.close();
+            super::account::discarding_pending_images(model);
             true
         }
         Action::Help => {

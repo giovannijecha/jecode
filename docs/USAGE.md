@@ -63,6 +63,9 @@ Windows, `HOME` on Linux):
   sessions-v2/
     s-...head
     s-...log
+  images/
+    s-.../
+      <sha256>.png
   recoveries/
     r-...json
     r-...before
@@ -270,6 +273,7 @@ scrollback remains available. Bracketed paste does not submit text automatically
 - `/help`: list local commands.
 - `/context`: measured request bytes and the latest available provider token counts.
 - `/compact`: summarize completed context, including completed steps of the active turn.
+- `/discard-pending-images`: explicitly stop sending pending image pixels when an oversized saved batch blocks continuation; keep its receipts and exact saved bytes, and record that no visual inspection occurred.
 
 Startup adds no heading above the conversation. The directory, active
 model and effort share one footer row below the composer. Long paths and model
@@ -296,7 +300,10 @@ within that task; `/compact` requests a new explicit attempt.
 Compaction checkpoints only the model-facing projection. Canonical turns, tool
 arguments and exact receipts stay saved and are not replayed on resume. A summary
 can lose detail; restate critical requirements if needed. The account request
-encoder accepts at most 2 MiB of JSON and 4,096 input items. A large completed
+encoder accepts at most 8 MiB of generation JSON and 4,096 input items.
+Summary requests retain a 2 MiB bound. A pending image view is delivered before
+its step can be compacted; older images remain in private state and can be
+revisited with `view_image` and the saved `image_id`. A large completed
 step, including one call and its receipt, can be summarized in ordered
 reference-data slices. If current uncompleted input cannot fit, Jecode stops
 with a context error. These are byte and item bounds, not a claimed model token

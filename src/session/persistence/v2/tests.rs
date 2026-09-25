@@ -69,6 +69,7 @@ fn canonical_log_exceeds_old_snapshot_limit_and_older_receipts_are_exact() {
                 call_id: format!("read-{index:02}"),
                 output: format!("MARKER-{index:02} {}", "x".repeat(800_000)),
                 summary: format!("Read marker {index:02}"),
+                image: None,
             }],
             ..Default::default()
         });
@@ -281,6 +282,7 @@ fn explicit_v1_import_verifies_canonical_copy_and_preserves_source() {
             call_id: "read-one".into(),
             output: "exact receipt marker".into(),
             summary: "Read one".into(),
+            image: None,
         }],
         ..Default::default()
     });

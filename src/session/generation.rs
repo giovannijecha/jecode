@@ -5,7 +5,7 @@ use super::{
     worker::{Backend, Context, failure, millis, operation_deadline},
 };
 use crate::{
-    providers::openai_account::{Progress, Request},
+    providers::openai_account::{Input, Progress, Request, Status},
     tls::Budget,
     tools::Output,
 };
@@ -98,6 +98,7 @@ pub(super) fn generate(
             call_id: call.id.clone(),
             output: Output::error("tool was not executed because the turn stopped").text,
             summary: "Not executed".into(),
+            image: None,
         })
         .collect();
     // Keep validated terminal facts even if presentation cannot accept them.
@@ -122,5 +123,10 @@ pub(super) fn generate(
     }
     step.text.clone_from(&response.text);
     step.accepted = true;
+    step.validated_visual_input = response.status == Status::Completed
+        && request
+            .input
+            .iter()
+            .any(|item| matches!(item, Input::ToolImage { .. }));
     Ok(())
 }

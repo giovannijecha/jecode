@@ -414,6 +414,7 @@ fn ended_uncertain_turn_does_not_pin_later_compaction() {
             call_id: "call-1".into(),
             output: "not executed".into(),
             summary: "Not executed".into(),
+            image: None,
         }],
         ..Default::default()
     });

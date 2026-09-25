@@ -1,8 +1,9 @@
 # Tools
 
-Jecode exposes six tools when started with an explicit workspace. With no workspace,
-the model receives none. Local UI commands and context management do not add tools
-to the model schema.
+Jecode exposes six base tools when started with a workspace. It also exposes
+`view_image` when the selected account model explicitly lists image input in its
+catalog metadata and the session uses v2 storage. With no workspace, the model
+receives no tools. Local UI commands and context management do not add tools.
 
 | Tool | Purpose |
 | --- | --- |
@@ -12,14 +13,67 @@ to the model schema.
 | `create_file` | Create one new UTF-8 file directly |
 | `edit_file` | Apply an exact text replacement directly |
 | `run_command` | Run a non-interactive shell command directly |
+| `view_image` | Submit a local PNG or saved image ID as visual input when available |
 
-There is no dedicated web-search or image-viewing tool, and Jecode does not send
-image inputs to the model. `run_command` can attempt network operations using
+There is no dedicated web-search or browser tool. `run_command` can attempt network operations using
 available local programs. Fetching a known URL, searching the web and interacting
 with a browser require different methods; connectivity, installed programs and
-remote services must be established from results. Command output is text, so a
-produced screenshot is not visual input to the model. Browser automation and
-native web search are separate planned capabilities.
+remote services must be established from results. Command output is text. A
+program can produce a screenshot file, then `view_image` can submit its pixels.
+A screenshot path alone remains text, not visual input.
+
+## Local image viewing
+
+`view_image` accepts exactly one of `path` and `image_id`. `path` uses the selected
+file-access profile and the same exclusions and no-link opens as other file tools.
+It accepts ordinary PNG files up to 5 MiB. Jecode checks the PNG signature,
+structure, dimensions, chunk checksums and zlib header; it does not decompress
+pixels locally. A corrupt compressed stream that passes these container checks
+may still be rejected by the provider. JPEG, GIF, WebP and animated PNG are not
+supported. Jecode does not resize images. It sends the captured original PNG
+bytes with a `high` detail hint; any provider-side image processing or effective
+visual resolution has not been verified live.
+
+The tool reports the source path, format, width, height, byte count and stable
+`image_id`. The image is delivered as a multimodal content item paired with its
+tool call. Raw bytes and Base64 are absent from tool receipts, diagnostics and
+terminal output. Missing files, unsupported formats, invalid PNG containers,
+read limits and storage failures have distinct errors. If a source is too large,
+save a smaller PNG using an available program and view it again.
+
+Each successful view saves the exact bytes under
+`~/.jecode/v1/images/<session-id>/<sha256>.png` before committing its receipt.
+The v2 log keeps only the digest and metadata; it does not copy the payload into
+successive events. Changing or deleting the original path does not change what
+resume sends. `view_image` with a prior `image_id` in the same session reopens
+the saved copy, even after compaction. It checks the saved file's SHA-256,
+length, PNG structure and dimensions. Missing or altered evidence blocks a
+visual request with a recovery error; restore the private image store from a
+backup. These digests detect accidental damage, not malicious rewriting of both
+evidence and session records.
+
+A saved view remains pending until a validated image-bearing response completes.
+Failed, cancelled and incomplete requests do not clear it. Explicit continuation
+resends the saved pixels without reopening the original file or replaying the
+tool. Earlier context may be compacted, but the pending image stays in the
+request. Switching to a text-only model shows text references; switching back
+restores the pending pixels. Later validated visual responses allow ordinary
+compaction of their earlier image receipts.
+
+Jecode measures the full encoded request before accepting another view. If a
+batch exceeds the 8 MiB account request budget, excess views receive a tool
+error while accepted views remain paired and pending. Use a smaller PNG for the
+rejected call. For an older session already blocked by saved pending pixels,
+`/discard-pending-images` explicitly stops sending those pixels and records
+that they were not inspected. The saved evidence and canonical receipts remain;
+view an `image_id` again when it fits.
+
+An interrupted or failed capture does not commit a successful view. An
+incomplete temporary private write is not a valid image ID. A checkpoint failure
+stops the worker; a saved payload without a committed receipt may remain as an
+orphan and is never replayed as a tool. No automatic image cleanup runs. On
+Windows, file contents are synced but the native state layer cannot guarantee
+directory durability across sudden power loss.
 
 Known files can be read directly. Directory exploration is for discovering unknown
 paths. Tool results report omissions and truncation so a partial result is not
@@ -168,7 +222,9 @@ reference only; Jecode will not silently rebuild it from the project.
 The old 32 KiB proposal and 1 MiB edit-file caps are gone. Account responses
 still have a 1 MiB decoded event and output budget, so the encoded tool call,
 including JSON escaping and other response items, must fit those protocol
-resource bounds. Request context has a 2 MiB budget; new canonical sessions
+resource bounds. Ordinary summary requests retain a 2 MiB encoder bound; the
+generation request uses an 8 MiB HTTP body bound to accommodate image Base64.
+Its measured encoded bytes include the complete image item. New canonical sessions
 append bounded log records instead of one whole-session snapshot. A response
 that exceeds the provider budget is rejected before any tool runs. Jecode saves
 an uncertain pre-effect receipt and then the exact result. A required checkpoint
@@ -207,7 +263,6 @@ for cleanup, but cannot reverse effects already performed.
 
 ## Ordering and recovery
 
-One controller orders effects and records results. A turn is bounded to eight
-model requests and 32 tools. No failed model request is silently resent. Session
+One controller orders effects and records results. No failed model request is silently resent. Session
 resume restores previous facts and waits for new input. An interrupted effect
 without a durable receipt stays uncertain and requires inspection before repeating.

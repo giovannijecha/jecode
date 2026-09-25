@@ -4,14 +4,17 @@ Jecode keeps credentials and settings in `~/.jecode/v1/`. New conversations use
 `sessions-v2/`, with one `<id>.log`, `<id>.head` and single-owner `<id>.lock`
 per session. The earlier `sessions/<id>.json` format remains readable under its
 original 16 MiB and 256-turn contract. Listing and resuming a v1 file do not
-convert or rewrite it.
+convert or rewrite it. `view_image` is available only for v2 sessions.
 
 ## Canonical log
 
 The v2 log appends ordered begin, step, receipt, guidance and outcome revisions.
 Every provider output item, call argument, receipt output, turn metric and user
-message is canonical. A separate projection in the head holds the lossy context
-summary, cursor and partial-compaction checkpoint. The controller can release
+message is canonical. An image receipt stores a SHA-256 reference, source path,
+format, dimensions and byte count. Its binary payload is stored once under
+`~/.jecode/v1/images/<session-id>/` and checked when projected; it is never
+embedded in a canonical log event. A separate projection in the head holds the
+lossy context summary, cursor and partial-compaction checkpoint. The controller can release
 completed turns and steps from memory after a projection checkpoint; the log
 keeps them. Listing reads bounded heads. Resume checks the committed log with a
 fixed-size I/O buffer and rebuilds only the working suffix. Older turns can be
@@ -71,11 +74,39 @@ process interruption and a torn trailing write recover at the committed head.
 Filesystem, controller and hardware failures beyond those OS guarantees cannot
 be promised away.
 
-## Context slices
+## Context slices and images
 
-The provider request is measured as encoded JSON, including the envelope and
-escaping, against its 2 MiB bound. A completed step too large for one summary
-request is represented as ordered user-reference slices. A large call and its
+Generation requests are measured as encoded JSON, including full image Base64,
+against the 8 MiB account HTTP body bound. Summary requests retain a 2 MiB
+bound. A captured image stays in the model-facing request across failed or
+cancelled generation, close/resume and explicit continuation. Sending the request
+does not mark the pixels inspected: only a validated, completed response to an
+image-bearing request ends that pending state. Compaction may summarize earlier
+eligible context but does not summarize the pending image step. A text-only model
+receives truthful references and cannot consume the pending visual state.
+Before committing a successful image receipt, Jecode measures the complete
+encoded request with the proposed image, existing pending images, text and tool
+schema. It compacts eligible earlier context when that can make the view fit.
+If the additional image still cannot fit, that `view_image` call receives a
+paired tool error; earlier accepted views stay pending, and the model can ask
+for a smaller PNG. Saved `image_id` views and repeat views use the same check.
+The original bytes may be saved before a budget rejection, but no successful
+receipt is committed for that call.
+
+An oversized pending batch saved by an earlier version cannot be repaired by
+changing the original files: continuation uses the saved bytes. If the complete
+visual request exceeds the wire bound, Jecode stops before provider contact.
+Run `/discard-pending-images` to explicitly stop projecting the current pending
+pixels, then ask to view smaller PNGs. The command checkpoints a projection
+marker and tells the model the prior views were **not inspected**. It does not
+alter canonical receipts or delete saved image bytes; their `image_id`s can be
+viewed again in a later request if they fit. A failed checkpoint leaves pending
+visual input active. Once a validated visual response has completed, compaction
+uses the textual image metadata and the model's visual findings. The summary
+distinguishes those findings from the retained binary evidence; older images can
+be inspected again with `view_image(image_id)` in the same session. A completed
+step too large for one summary request is represented as ordered user-reference
+slices. A large call and its
 receipt can span slices; each slice names the same call and receipt association,
 byte range and total. These are data items, never executable assistant calls or
 tool-result protocol items. Jecode checkpoints a validated partial summary and

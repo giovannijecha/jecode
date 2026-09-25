@@ -1,6 +1,10 @@
 use crate::{json::Value, workspace};
 
 pub enum Prepared {
+    Image {
+        path: Option<String>,
+        image_id: Option<String>,
+    },
     Command {
         command: String,
         path: String,
@@ -39,6 +43,7 @@ impl Prepared {
             "create_file" => &["path", "content"],
             "edit_file" => &["path", "old_text", "new_text"],
             "run_command" => &["command", "path", "timeout_seconds"],
+            "view_image" => &["path", "image_id"],
             _ => {
                 return Err("unknown tool; use only the advertised workspace tools");
             }
@@ -48,6 +53,30 @@ impl Prepared {
         };
         if fields.keys().any(|key| !keys.contains(&key.as_str())) {
             return Err("unknown tool argument");
+        }
+        if name == "view_image" {
+            let path = args.get("path").and_then(Value::text);
+            let image_id = args.get("image_id").and_then(Value::text);
+            if path.is_some() == image_id.is_some() {
+                return Err("view_image requires exactly one of path or image_id");
+            }
+            if image_id.is_some_and(|id| {
+                id.len() != 64
+                    || !id
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            }) {
+                return Err(
+                    "image_id must be a 64-character lowercase SHA-256 digest from this session",
+                );
+            }
+            let path = path
+                .map(|path| workspace::input(path).map_err(|_| "use a valid local image path"))
+                .transpose()?;
+            return Ok(Self::Image {
+                path,
+                image_id: image_id.map(str::to_owned),
+            });
         }
         let path = match args.get("path") {
             Some(Value::String(path)) => path.as_str(),
@@ -96,6 +125,7 @@ impl Prepared {
     }
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Image { .. } => "view_image",
             Self::List { .. } => "list_files",
             Self::Read { .. } => "read_file",
             Self::Search { .. } => "search_text",
@@ -106,6 +136,13 @@ impl Prepared {
     }
     pub fn path(&self) -> &str {
         match self {
+            Self::Image {
+                path: Some(path), ..
+            } => path,
+            Self::Image {
+                image_id: Some(id), ..
+            } => id,
+            Self::Image { .. } => "",
             Self::List { path, .. }
             | Self::Read { path, .. }
             | Self::Search { path, .. }
@@ -123,6 +160,10 @@ impl Prepared {
         budget: &workspace::Budget<'_>,
     ) -> Result<workspace::Change, workspace::ChangeError> {
         match self {
+            Self::Image { .. } => Err(workspace::ChangeError(
+                "image reads cannot propose a change".into(),
+                None,
+            )),
             Self::Create { path, content } => workspace.prepare_create(path, content, budget),
             Self::Edit { path, old, new } => workspace.prepare_edit(path, old, new, budget),
             _ => Err(workspace::ChangeError(

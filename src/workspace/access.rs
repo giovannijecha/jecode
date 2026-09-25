@@ -91,11 +91,28 @@ impl Workspace {
         })
     }
     pub(super) fn open_location(&self, path: &Location, directory: bool) -> Result<Opened, Error> {
+        self.open_location_with_missing(path, directory, false)
+    }
+    pub(super) fn open_image_location(&self, path: &Location) -> Result<Opened, Error> {
+        self.open_location_with_missing(path, false, true)
+    }
+    fn open_location_with_missing(
+        &self,
+        path: &Location,
+        directory: bool,
+        missing: bool,
+    ) -> Result<Opened, Error> {
         match &path.relative {
             Some(relative) => platform::open(&self.root, relative, directory),
             None => platform::absolute(&path.absolute, directory),
         }
-        .map_err(|_| Error::Unavailable)
+        .map_err(|error| {
+            if missing && error.kind() == std::io::ErrorKind::NotFound {
+                Error::Missing
+            } else {
+                Error::Unavailable
+            }
+        })
     }
 }
 

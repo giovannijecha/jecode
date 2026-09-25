@@ -1,7 +1,7 @@
 //! The only model-facing loop: ordered reads and effects with exact receipts.
 use super::{
     End, Event, Failure, Metrics, Model, generation,
-    history::{History, Step},
+    history::{History, MAX_REQUEST, Receipt, Step},
     worker::{Backend, Context, operation_deadline},
 };
 use crate::{
@@ -58,14 +58,16 @@ pub(super) fn run(
         }
         context.check()?;
         let workspace = workspace.ok_or(Failure::UnexpectedTools)?;
-        execute(history, workspace, context, &clock, metrics)?;
+        execute(backend, history, workspace, context, model, &clock, metrics)?;
     }
 }
 
 fn execute(
+    backend: &mut impl Backend,
     history: &mut History,
     workspace: &Workspace,
     context: &Context,
+    model: Model,
     clock: &impl Fn() -> Instant,
     metrics: &mut Metrics,
 ) -> Result<(), Failure> {
@@ -105,7 +107,17 @@ fn execute(
             receipt.summary = format!("{name} / outcome unknown after interruption");
             history.checkpoint()?;
         }
-        let (output, completion) = match prepared {
+        let (mut output, completion, mut image) = match prepared {
+            Ok(Prepared::Image { path, image_id }) => {
+                let (output, image) = super::image_tool::execute(
+                    history,
+                    workspace,
+                    path.as_deref(),
+                    image_id.as_deref(),
+                    context,
+                )?;
+                (output, None, image)
+            }
             Ok(Prepared::Command {
                 command,
                 path,
@@ -119,7 +131,7 @@ fn execute(
                     workspace,
                     context,
                 );
-                (output, Some(event))
+                (output, Some(event), None)
             }
             Ok(tool) if tool.changes_file() => {
                 let recoveries = history.recovery_store().map_err(|_| Failure::Storage)?;
@@ -132,7 +144,7 @@ fn execute(
                     session_id.as_deref(),
                     &call_id,
                 );
-                (output, Some(event))
+                (output, Some(event), None)
             }
             Ok(tool) => (
                 tool.execute(
@@ -143,13 +155,33 @@ fn execute(
                     },
                 ),
                 None,
+                None,
             ),
-            Err(error) => (Output::error(error), None),
+            Err(error) => (Output::error(error), None, None),
         };
+        if image.is_some() {
+            context.check()?;
+            if !admit_image(
+                backend,
+                history,
+                context,
+                model,
+                metrics,
+                index,
+                &output,
+                image.as_ref().ok_or(Failure::Worker)?,
+            )? {
+                output = Output::error(
+                    "view_image was rejected: this image plus pending visual evidence and context exceed the 8 MiB encoded account request limit. Existing successful views remain pending. Save a smaller PNG and ask to view its path; a saved image_id can be viewed again only if it fits. For a previously blocked session, use /discard-pending-images before requesting replacement views.",
+                );
+                image = None;
+            }
+        }
         let stop_after = output.stop_after;
         let receipt = &mut current(history)?.results[index];
         receipt.summary = format!("{name} / {}", output.summary);
         receipt.output = output.text;
+        receipt.image = image;
         // The exact effect receipt reaches storage before its final presentation.
         // Waiting for channel capacity here cannot delay process supervision or
         // cleanup, and keeps every completion ahead of the next operation.
@@ -180,6 +212,68 @@ fn execute(
         context.check()?;
     }
     Ok(())
+}
+
+/// Stage only the proposed receipt in memory, then measure the exact provider
+/// body. A rejected view never becomes a successful canonical receipt.
+fn candidate_fits(
+    history: &mut History,
+    model: Model,
+    index: usize,
+    output: &Output,
+    image: &crate::image::Evidence,
+) -> Result<bool, Failure> {
+    // The remaining calls in this batch can each still produce a bounded text
+    // receipt. Reserve their worst escaped wire size before pinning pixels.
+    let remaining = current(history)?.results.len().saturating_sub(index + 1);
+    let Some(limit) = remaining
+        .checked_mul(2 * crate::tools::MAX_OUTPUT)
+        .and_then(|reserved| MAX_REQUEST.checked_sub(reserved))
+    else {
+        return Ok(false);
+    };
+    let proposed = Receipt {
+        call_id: current(history)?.results[index].call_id.clone(),
+        output: output.text.clone(),
+        summary: format!("view_image / {}", output.summary),
+        image: Some(image.clone()),
+    };
+    let old = std::mem::replace(&mut current(history)?.results[index], proposed);
+    let measured = history
+        .projected_request(model, true)
+        .map(|request| request.encode(limit));
+    current(history)?.results[index] = old;
+    match measured? {
+        Ok(_) => Ok(true),
+        Err(crate::providers::openai_account::Error::Json(crate::json::Error::Limit)) => Ok(false),
+        Err(_) => Err(Failure::HistoryLimit),
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // The controller owns the provider, receipt and context cursor.
+fn admit_image(
+    backend: &mut impl Backend,
+    history: &mut History,
+    context: &Context,
+    model: Model,
+    metrics: &mut Metrics,
+    index: usize,
+    output: &Output,
+    image: &crate::image::Evidence,
+) -> Result<bool, Failure> {
+    loop {
+        if candidate_fits(history, model, index, output, image)? {
+            return Ok(true);
+        }
+        if !super::context::eligible_before_current_step(history) {
+            return Ok(false);
+        }
+        let before = history.projected_cursor();
+        super::context::compact(backend, history, context, model, true, metrics)?;
+        if before == history.projected_cursor() {
+            return Ok(false);
+        }
+    }
 }
 fn current(history: &mut History) -> Result<&mut Step, Failure> {
     history

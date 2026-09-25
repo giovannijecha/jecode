@@ -60,6 +60,7 @@ fn diagnostic_export_does_not_commit_interrupted_outcome() {
             call_id: "read-1".into(),
             output: "synthetic receipt".into(),
             summary: "Read notes.txt".into(),
+            image: None,
         }],
         ..Default::default()
     });
@@ -375,6 +376,7 @@ fn interrupted_stream_and_prior_receipt_survive_resume_without_replay() {
             call_id: "read-1".into(),
             output: r#"{"text":"prior result"}"#.into(),
             summary: "Read notes.txt".into(),
+            image: None,
         }],
         ..Default::default()
     });

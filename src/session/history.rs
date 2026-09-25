@@ -1,9 +1,11 @@
 //! Canonical attempts and tool receipts; only validated, paired items are projected.
 use super::{End, Failure, Metrics, Model};
+use crate::image::{Evidence, Images, data_url};
 use crate::providers::openai_account::{Input, Request, Response, Status, client::Attempt};
 
 pub(super) const MAX_TEXT: usize = 1024 * 1024;
 pub(super) const MAX_CONTEXT: usize = 2 * 1024 * 1024;
+pub(super) const MAX_REQUEST: usize = 8 * 1024 * 1024;
 
 #[derive(Default)]
 pub(super) struct Step {
@@ -12,6 +14,9 @@ pub(super) struct Step {
     pub response: Option<Response>,
     pub results: Vec<Receipt>,
     pub accepted: bool,
+    /// A completed, accepted response to a request that carried image pixels.
+    /// Persisted with the response so resume can distinguish viewing from sending.
+    pub validated_visual_input: bool,
     pub attempts: Vec<Attempt>,
 }
 impl Step {
@@ -33,6 +38,7 @@ pub(super) struct Receipt {
     pub call_id: String,
     pub output: String,
     pub summary: String,
+    pub image: Option<Evidence>,
 }
 pub(super) struct Turn {
     pub prompt: String,
@@ -57,6 +63,8 @@ pub(super) struct History {
     /// Derived from the active workspace; not a second canonical permissions store.
     pub environment: String,
     pub shell: crate::command::Shell,
+    /// Ephemeral, explicit account-catalog evidence for the selected model.
+    pub image_capable: bool,
     #[cfg(test)]
     pub fail_next_checkpoint: std::sync::atomic::AtomicBool,
     #[cfg(test)]
@@ -69,6 +77,122 @@ pub(super) struct History {
     pub test_outcome_checkpoint: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl History {
+    pub fn images(&self) -> Result<Images, Failure> {
+        if let Some(record) = &self.record {
+            if record.legacy() {
+                return Err(Failure::Storage);
+            }
+            return Images::in_store(
+                &record.user_store().map_err(|_| Failure::Storage)?,
+                record.id(),
+            )
+            .map_err(|_| Failure::Storage);
+        }
+        #[cfg(test)]
+        if let Some(store) = &self.test_recovery {
+            return Images::in_store(store, "s-00000000").map_err(|_| Failure::Storage);
+        }
+        Err(Failure::Storage)
+    }
+    pub fn can_view_images(&self) -> bool {
+        self.image_capable && self.record.as_ref().is_none_or(|record| !record.legacy())
+    }
+    pub fn has_retained_images(&self) -> bool {
+        self.turns.iter().any(|turn| {
+            turn.steps
+                .iter()
+                .any(|step| step.results.iter().any(|receipt| receipt.image.is_some()))
+        }) || self.projection.summary.contains("image_id")
+    }
+    pub fn pending_image(&self) -> bool {
+        self.pending_image_step().is_some()
+    }
+    /// Earliest receipt whose pixels have not reached a validated visual response.
+    /// An accepted visual response consumes earlier receipts; its own tool results
+    /// occur afterward and therefore remain pending.
+    pub fn pending_image_step(&self) -> Option<(usize, usize)> {
+        let mut pending = None;
+        for (turn_index, turn) in self.turns.iter().enumerate() {
+            for (step_index, step) in turn.steps.iter().enumerate() {
+                if step.accepted
+                    && step
+                        .response
+                        .as_ref()
+                        .is_some_and(|response| response.status == Status::Completed)
+                {
+                    if step.validated_visual_input {
+                        pending = None;
+                    }
+                    if pending.is_none()
+                        && !self.abandoned_image_step(turn_index, step_index)
+                        && step.results.iter().any(|receipt| receipt.image.is_some())
+                    {
+                        pending = Some((turn_index, step_index));
+                    }
+                }
+            }
+        }
+        pending
+    }
+    fn abandoned_image_step(&self, turn: usize, step: usize) -> bool {
+        let absolute = (
+            self.base_turn + turn,
+            if turn == 0 {
+                self.base_step + step
+            } else {
+                step
+            },
+        );
+        self.projection
+            .abandoned_visual
+            .iter()
+            .any(|range| range.from <= absolute && absolute <= range.through)
+    }
+    /// Explicitly stop projecting the current pending pixels. Historical
+    /// receipts and image bytes remain immutable and can be viewed again.
+    pub fn abandon_pending_images(&mut self) -> Result<bool, Failure> {
+        let Some(first) = self.pending_image_step() else {
+            return Ok(false);
+        };
+        let last = self
+            .turns
+            .iter()
+            .enumerate()
+            .skip(first.0)
+            .flat_map(|(turn, item)| {
+                item.steps
+                    .iter()
+                    .enumerate()
+                    .filter(move |(step, item)| {
+                        (turn, *step) >= first
+                            && item.accepted
+                            && item.results.iter().any(|receipt| receipt.image.is_some())
+                    })
+                    .map(move |(step, _)| (turn, step))
+            })
+            .last()
+            .ok_or(Failure::Worker)?;
+        let absolute = |(turn, step): (usize, usize)| {
+            (
+                self.base_turn + turn,
+                if turn == 0 {
+                    self.base_step + step
+                } else {
+                    step
+                },
+            )
+        };
+        let range = super::context::AbandonedVisual {
+            from: absolute(first),
+            through: absolute(last),
+        };
+        self.projection.abandoned_visual.push(range);
+        if let Err(error) = self.checkpoint() {
+            self.projection.abandoned_visual.pop();
+            return Err(error);
+        }
+        Ok(true)
+    }
     pub fn recovery_store(&self) -> std::io::Result<crate::workspace::RecoveryStore> {
         if let Some(record) = &self.record {
             return crate::workspace::RecoveryStore::in_store(&record.user_store()?);
@@ -176,16 +300,16 @@ impl History {
         Ok(())
     }
     pub fn request(&self, model: Model, workspace: bool) -> Result<Request, Failure> {
-        let request = self.projected_request(model, workspace);
+        let request = self.projected_request(model, workspace)?;
         request
-            .encode(MAX_CONTEXT)
+            .encode(MAX_REQUEST)
             .map_err(|_| Failure::HistoryLimit)?;
         Ok(request)
     }
-    pub fn projected_request(&self, model: Model, workspace: bool) -> Request {
-        self.make_request(model, workspace, self.input(self.turns.len()))
+    pub fn projected_request(&self, model: Model, workspace: bool) -> Result<Request, Failure> {
+        Ok(self.make_request(model, workspace, self.input(self.turns.len())?))
     }
-    pub fn input(&self, end: usize) -> Vec<Input> {
+    pub fn input(&self, end: usize) -> Result<Vec<Input>, Failure> {
         let mut input = Vec::new();
         if !self.projection.summary.is_empty() {
             input.push(Input::User(format!(
@@ -193,13 +317,17 @@ impl History {
                 self.projection.summary
             )));
         }
+        if !self.projection.abandoned_visual.is_empty() {
+            input.push(Input::User("Pending visual input from earlier saved views was explicitly discarded without a validated visual inspection. Their historical receipts and bytes remain saved; use view_image with image_id to request a new visual inspection when it fits the request budget.".into()));
+        }
         input.extend(self.input_range(
             self.projection.through,
             self.projection.step,
             end,
             usize::MAX,
-        ));
-        input
+            self.can_view_images(),
+        )?);
+        Ok(input)
     }
     pub fn input_range(
         &self,
@@ -207,7 +335,8 @@ impl History {
         start_step: usize,
         end: usize,
         end_step: usize,
-    ) -> Vec<Input> {
+        visual: bool,
+    ) -> Result<Vec<Input>, Failure> {
         let mut input = Vec::new();
         for (turn_index, turn) in self.turns.iter().enumerate().take(end).skip(start) {
             let first = if turn_index == start { start_step } else { 0 };
@@ -265,16 +394,43 @@ impl History {
                     continue;
                 }
                 input.push(Input::Assistant(response.output.clone()));
-                input.extend(step.results.iter().map(|result| Input::ToolResult {
-                    call_id: result.call_id.clone(),
-                    output: result.output.clone(),
-                }));
+                for result in &step.results {
+                    if let Some(image) = &result.image {
+                        if self.abandoned_image_step(turn_index, index) {
+                            input.push(Input::ToolResult {
+                                call_id: result.call_id.clone(),
+                                output: format!("Saved image evidence: {}. Pending pixels were explicitly discarded without a validated visual inspection. Use view_image with image_id to request a new view.", image.description()),
+                            });
+                        } else if visual {
+                            let bytes = self
+                                .images()?
+                                .load(image)
+                                .map_err(|_| Failure::ImageEvidence)?;
+                            input.push(Input::ToolImage {
+                                call_id: result.call_id.clone(),
+                                description: image.description(),
+                                image_url: data_url(&bytes),
+                            });
+                        } else {
+                            input.push(Input::ToolResult {
+                                call_id: result.call_id.clone(),
+                                output: format!("Saved image evidence: {}. Image pixels are not visible in this request. Use view_image with image_id when an image-capable model is selected.", image.description()),
+                            });
+                        }
+                    } else {
+                        input.push(Input::ToolResult {
+                            call_id: result.call_id.clone(),
+                            output: result.output.clone(),
+                        });
+                    }
+                }
             }
         }
-        input
+        Ok(input)
     }
     fn make_request(&self, model: Model, workspace: bool, input: Vec<Input>) -> Request {
-        let (tools, capability) = super::capabilities::for_session(workspace, &self.shell);
+        let (tools, capability) =
+            super::capabilities::for_session(workspace, self.can_view_images(), &self.shell);
         Request {
             model: model.id().into(),
             effort: model.effort().map(str::to_owned),
