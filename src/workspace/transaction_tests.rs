@@ -173,23 +173,34 @@ fn repair_refuses_competing_file_even_when_its_bytes_and_metadata_match() {
             &recoveries,
             None,
             "call",
-            (|| panic!("after stash"), || {}),
+            (
+                || {
+                    // Keep the staged inode allocated while creating the
+                    // competitor; Linux may reuse it immediately after Drop.
+                    let version = recoveries.list().unwrap().pop().unwrap();
+                    let (_, parent, name) = ws.change_parent("notes", &budget).unwrap();
+                    let mut competing = platform::create(&parent.file, &name).unwrap();
+                    competing.write_all(b"changed\n").unwrap();
+                    platform::apply_policy(&competing, &version.after_policy).unwrap();
+                    competing
+                        .set_times(FileTimes::new().set_modified(version.after_modified))
+                        .unwrap();
+                    assert_ne!(
+                        platform::identity(&competing).unwrap(),
+                        version.staged_identity
+                    );
+                    panic!("after stash")
+                },
+                || {},
+            ),
         );
     }));
     assert!(interrupted.is_err());
     let version = recoveries.list().unwrap().pop().unwrap();
-    let (_, parent, name) = ws.change_parent("notes", &budget).unwrap();
-    let mut competing = platform::create(&parent.file, &name).unwrap();
-    competing.write_all(b"changed\n").unwrap();
-    platform::apply_policy(&competing, &version.after_policy).unwrap();
-    competing
-        .set_times(FileTimes::new().set_modified(version.after_modified))
-        .unwrap();
     assert_ne!(
-        platform::identity(&competing).unwrap(),
+        platform::identity(&File::open(files.0.join("notes")).unwrap()).unwrap(),
         version.staged_identity
     );
-    drop(competing);
     let error = recoveries
         .repair(
             &ws.with_access(super::super::Access::Local),
