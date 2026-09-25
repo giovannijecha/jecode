@@ -64,8 +64,11 @@ from generated summary prose, in order; later corrections may supersede older
 instructions. The summary's JSON structure is validated, but that cannot prove
 the model preserved every needed fact. A workspace session can use
 `recall_receipts` to recover exact saved read-only results omitted by a handoff,
-with explicit pagination and no replay. A newly recalled result remains in the
-next request until an accepted response consumes it. Repeated compaction does
+with explicit pagination and no replay. A newly admitted recall result remains
+in the next request until an accepted response consumes it. Aggregate admission
+can return paired errors for pages that do not fit; older oversized batches use
+explicit deferred notices backed by unchanged canonical receipts. Repeated
+compaction does
 not change the canonical record coordinates.
 
 The ordering of pre-effect unknown-outcome and post-effect exact-receipt

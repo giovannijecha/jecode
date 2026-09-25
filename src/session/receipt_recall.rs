@@ -59,16 +59,11 @@ pub(super) fn execute(
     let Some(saved_step) = saved_step else {
         return Output::error("canonical step does not exist in this session");
     };
-    let Some(response) = saved_step.response.as_ref().filter(|response| {
-        saved_step.accepted
-            && response.status == Status::Completed
-            && response.tool_calls.len() == saved_step.results.len()
-            && response
-                .tool_calls
-                .iter()
-                .zip(&saved_step.results)
-                .all(|(call, result)| call.id == result.call_id && result.summary != "Not executed")
-    }) else {
+    let Some(response) = saved_step
+        .response
+        .as_ref()
+        .filter(|response| saved_step.accepted && response.status == Status::Completed)
+    else {
         return Output::error("canonical step has no completed, paired receipts");
     };
     let (Some(call), Some(result)) = (
@@ -77,13 +72,9 @@ pub(super) fn execute(
     ) else {
         return Output::error("receipt index does not exist at this canonical step");
     };
-    if !matches!(
-        call.name.as_str(),
-        "list_files" | "read_file" | "search_text"
-    ) || result.image.is_some()
-    {
+    if !eligible(call, result) {
         return Output::error(
-            "this receipt is outside the session's workspace-read evidence scope",
+            "this receipt is unexecuted, uncertain or outside the session's workspace-read evidence scope",
         );
     }
     if offset > result.output.len() || !result.output.is_char_boundary(offset) {
@@ -101,10 +92,15 @@ pub(super) fn execute(
         }
         let next = if end < result.output.len() {
             Some((receipt, end))
-        } else if receipt + 1 < saved_step.results.len() {
-            Some((receipt + 1, 0))
         } else {
-            None
+            response
+                .tool_calls
+                .iter()
+                .zip(&saved_step.results)
+                .enumerate()
+                .skip(receipt + 1)
+                .find(|(_, (call, result))| eligible(call, result))
+                .map(|(index, _)| (index, 0))
         };
         let next_value = next.map_or(Value::Null, |(receipt, offset)| {
             json::object([
@@ -153,6 +149,45 @@ pub(super) fn execute(
     }
 }
 
+fn eligible(
+    call: &crate::providers::openai_account::ToolCall,
+    result: &super::history::Receipt,
+) -> bool {
+    if call.id != result.call_id
+        || result.summary == "Not executed"
+        || !matches!(
+            call.name.as_str(),
+            "list_files" | "read_file" | "search_text"
+        )
+        || result.image.is_some()
+    {
+        return false;
+    }
+    if result.output.len() <= crate::tools::MAX_OUTPUT
+        && let Ok(value) = json::parse(
+            &result.output,
+            json::Limits {
+                bytes: crate::tools::MAX_OUTPUT,
+                nodes: 4096,
+                depth: 16,
+            },
+        )
+        && (matches!(
+            value.get("status").and_then(Value::text),
+            Some("not_executed" | "uncertain")
+        ) || value.get("executed") == Some(&Value::Bool(false)))
+    {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+#[path = "receipt_recall_cursor_tests.rs"]
+mod cursor_tests;
+#[cfg(test)]
+#[path = "receipt_recall_review_tests.rs"]
+mod review_tests;
 #[cfg(test)]
 #[path = "receipt_recall_tests.rs"]
 mod tests;

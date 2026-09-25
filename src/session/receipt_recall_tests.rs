@@ -318,10 +318,14 @@ fn malformed_references_and_effect_receipts_are_rejected() {
 }
 
 #[test]
-fn pending_recall_over_encoded_request_limit_fails_without_summarizing_it() {
+fn saved_oversized_recall_is_explicitly_deferred_without_changing_canonical_output() {
     let files = crate::workspace_fixture::Fixture::new();
     let workspace = Workspace::open(&files.0).unwrap();
-    let mut history = History::default();
+    let fixture = crate::state::tests::Fixture::new();
+    let mut history =
+        crate::session::persistence::create_in(&fixture.store().unwrap(), Model::Luna, None, None)
+            .unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
     history.begin("Consume recalled evidence".into()).unwrap();
     let calls = (0..9)
         .map(|n| {
@@ -347,6 +351,9 @@ fn pending_recall_over_encoded_request_limit_fails_without_summarizing_it() {
         ..Default::default()
     });
     history.turns[0].end = Some(End::Complete);
+    history.checkpoint().unwrap();
+    drop(history);
+    let saved = crate::session::persistence::load(&fixture.store().unwrap(), &id, true).unwrap();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let mut session = Session::with_history(
         Model::Luna,
@@ -355,19 +362,38 @@ fn pending_recall_over_encoded_request_limit_fails_without_summarizing_it() {
             round: 1,
         },
         Some(workspace),
-        history,
+        saved.history,
     )
     .unwrap();
     assert!(matches!(
-        crate::session::tests::next(&mut session),
+        super::review_tests::next_large(&mut session),
+        Event::Restored { .. }
+    ));
+    assert!(matches!(
+        super::review_tests::next_large(&mut session),
         Event::Ready
     ));
     assert!(session.submit("Continue"));
     loop {
-        if let Event::Finished(end, _) = crate::session::tests::next(&mut session) {
-            assert_eq!(end, End::Failed(crate::session::Failure::HistoryLimit));
+        if let Event::Finished(end, _) = super::review_tests::next_large(&mut session) {
+            assert_eq!(end, End::Complete);
             break;
         }
     }
-    assert!(requests.lock().unwrap().is_empty());
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].contains("Saved recall result deferred"));
+    assert!(requests[0].contains("recall-0"));
+    assert!(requests[0].len() <= super::super::history::MAX_REQUEST);
+    drop(requests);
+    drop(session);
+    let reread = crate::session::persistence::load(&fixture.store().unwrap(), &id, true).unwrap();
+    let saved_step = &reread.history.turns[0].steps[0];
+    assert_eq!(saved_step.results.len(), 9);
+    assert!(
+        saved_step
+            .results
+            .iter()
+            .all(|result| result.output.len() == 1_000_000)
+    );
 }
