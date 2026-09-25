@@ -367,6 +367,7 @@ pub(super) fn compact(
             history.projection.pending = None;
             history.projection.failed = false;
             history.projection.failed_reason = None;
+            history.projection.failed_at_turn = None;
             history.projection.failed_attempts.clear();
             history.projection.failed_partial.clear();
             let reduced = match (original, measured_bytes(history, model, workspace)) {

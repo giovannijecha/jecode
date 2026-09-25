@@ -1,7 +1,7 @@
 //! Explicit, bounded export of safe attempt metadata from a closed session.
-use jecode::{
-    providers::openai_account::client::Attempt,
-    session::{persistence, scope::Directory},
+use jecode::session::{
+    persistence::{self, DiagnosticAttempt},
+    scope::Directory,
 };
 use std::{
     io::{self, Write},
@@ -34,9 +34,12 @@ fn category(value: Option<&str>) -> &str {
         _ => "none_or_unknown",
     }
 }
-fn line(attempt: &Attempt) -> String {
+fn line(record: &DiagnosticAttempt) -> String {
+    let attempt = &record.attempt;
     format!(
-        "request={} connection_attempt={} delivery={} stage={} stage_ms={} accepted_tls_write_bytes={} received_tls_wire_bytes={} decrypted_http_bytes={} http_status={} sse_events={} operation={} category={} os_code={} retrying={}",
+        "turn={} source={} request_in_command={} connection_attempt={} delivery={} stage={} stage_ms={} accepted_tls_write_bytes={} received_tls_wire_bytes={} decrypted_http_bytes={} http_status={} sse_events={} operation={} category={} os_code={} retrying={}",
+        record.turn,
+        record.source.name(),
         attempt.request_sequence,
         attempt.connection_attempt,
         attempt.delivery.name(),
@@ -71,6 +74,7 @@ pub(super) fn run(id: &str, directory: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jecode::providers::openai_account::client::Attempt;
     #[test]
     fn export_uses_only_fixed_labels_and_bounded_numbers() {
         let attempt = Attempt {
@@ -80,7 +84,12 @@ mod tests {
             os_code: Some(10054),
             ..Default::default()
         };
-        let output = line(&attempt);
+        let output = line(&DiagnosticAttempt {
+            turn: 7,
+            source: persistence::AttemptSource::Compaction,
+            attempt,
+        });
+        assert!(output.contains("turn=7 source=compaction request_in_command=0"));
         assert!(output.contains("os_code=10054"));
         assert!(output.contains("operation=none_or_unknown"));
         assert!(!output.contains("synthetic secret"));

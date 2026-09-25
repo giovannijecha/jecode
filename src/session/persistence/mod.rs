@@ -17,9 +17,9 @@ use crate::{
     state::{Lease, Store},
     workspace::{Access, Workspace},
 };
-pub use diagnostics::recent_network_attempts_in;
 #[cfg(test)]
 use diagnostics::recent_network_attempts_in_store;
+pub use diagnostics::{AttemptSource, DiagnosticAttempt, recent_network_attempts_in};
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
@@ -178,6 +178,13 @@ impl Record {
                     ),
                     ("failed", Value::Bool(history.projection.failed)),
                     (
+                        "failed_at_turn",
+                        history
+                            .projection
+                            .failed_at_turn
+                            .map_or(Value::Null, |turn| Value::Number(turn.to_string())),
+                    ),
+                    (
                         "failed_attempts",
                         Value::Array(
                             history
@@ -310,7 +317,7 @@ fn import_in_store(root: &Store, id: &str, directory: &Directory) -> io::Result<
     let before = legacy_store
         .read(&name, LIMIT)?
         .ok_or(io::ErrorKind::NotFound)?;
-    let source = load_legacy(root, id, false)?;
+    let source = load_legacy(root, id, false, false)?;
     directory.require(source.directory.as_deref())?;
     let workspace = source
         .workspace
@@ -372,9 +379,14 @@ pub(super) fn load(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
     if v2::has_head(store, id)? {
         return v2::load(store, id, leased);
     }
-    load_legacy(store, id, leased)
+    load_legacy(store, id, leased, leased)
 }
-fn load_legacy(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
+fn load_legacy(
+    store: &Store,
+    id: &str,
+    leased: bool,
+    recover_interruption: bool,
+) -> io::Result<Saved> {
     if !valid_id(id) {
         return Err(invalid());
     }
@@ -483,6 +495,16 @@ fn load_legacy(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
         Some(Value::Bool(failed)) => *failed,
         _ => return Err(invalid()),
     };
+    history.projection.failed_at_turn = match projection.get("failed_at_turn") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            value
+                .unsigned()
+                .and_then(|turn| turn.try_into().ok())
+                .filter(|turn| *turn <= history.turn_count())
+                .ok_or_else(invalid)?,
+        ),
+    };
     history.projection.failed_attempts = match projection.get("failed_attempts") {
         None => Vec::new(),
         Some(Value::Array(items)) if items.len() <= 256 => items
@@ -515,7 +537,8 @@ fn load_legacy(store: &Store, id: &str, leased: bool) -> io::Result<Saved> {
         return Err(invalid());
     }
     if let Some(lock) = lock {
-        if let Some(turn) = history.turns.last_mut()
+        if recover_interruption
+            && let Some(turn) = history.turns.last_mut()
             && turn.end.is_none()
         {
             turn.end = Some(super::End::Failed(super::Failure::Worker));
@@ -611,7 +634,7 @@ fn list_in_store(root: &Store, directory: &Directory) -> io::Result<Vec<Listed>>
             let overview = if incremental {
                 v2::overview(root, &id, modified)
             } else {
-                load_legacy(root, &id, false).map(|saved| Listed {
+                load_legacy(root, &id, false, false).map(|saved| Listed {
                     id: saved.id,
                     model: Some(saved.model),
                     title: saved.title,

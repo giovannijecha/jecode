@@ -47,7 +47,8 @@ impl fmt::Display for Delivery {
 /// Safe diagnostics only. No request or response material enters this record.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Attempt {
-    /// One-based request number within the current turn; zero in older records.
+    /// One-based request number within this generation or compaction command;
+    /// zero in older records. It is not a session-wide sequence.
     pub request_sequence: u32,
     /// One-based connection attempt for this request; zero in older records.
     pub connection_attempt: u8,
