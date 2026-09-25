@@ -4,6 +4,11 @@ pub fn definitions() -> Vec<Tool> {
     definitions_for(&crate::command::Shell::default())
 }
 pub(crate) fn definitions_for(shell: &crate::command::Shell) -> Vec<Tool> {
+    let native_completion_note = if cfg!(windows) {
+        " On Windows PowerShell, a GUI executable invoked with & may return before it finishes; $LASTEXITCODE and captured output can be stale. For verification, wait explicitly, capture stdout and stderr separately, and exit nonzero if required content or cleanup fails."
+    } else {
+        ""
+    };
     let mut tools: Vec<_> = [
         ("list_files", "List a local directory allowed by the session profile, sorted by name. path defaults to '.', limit defaults to 200 (1..500). Excludes dot paths, build/vendor directories, credential names, links and unsupported entries; reports omissions and truncation. Paths may be relative to the working directory or absolute when the session profile allows it.",
         r#"{"type":"object","properties":{"path":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":500}},"additionalProperties":false}"#),
@@ -21,7 +26,7 @@ pub(crate) fn definitions_for(shell: &crate::command::Shell) -> Vec<Tool> {
     }).collect();
     tools.push(Tool {
         name: "run_command".into(),
-        description: format!("Run one non-interactive command directly using {}. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. The shell can access files/network beyond the workspace; it is not sandboxed. Never read or print credentials. A cancelled command may already have effects; inspect its receipt before repeating it.", shell.label()),
+        description: format!("Run one non-interactive command directly using {}. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. The shell can access files/network beyond the workspace; it is not sandboxed. Never read or print credentials. A cancelled command may already have effects; inspect its receipt before repeating it.{native_completion_note}", shell.label()),
         parameters: json::parse(r#"{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":4096},"path":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":300}},"required":["command"],"additionalProperties":false}"#, Default::default()).expect("owned command schema"),
     });
     tools
