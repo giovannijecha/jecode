@@ -367,12 +367,21 @@ pub(super) fn save(record: &Record, history: &History) -> io::Result<()> {
 }
 
 pub(super) fn load(root: &Store, id: &str, leased: bool) -> io::Result<Saved> {
-    load_inner(root, id, leased, false)
+    load_inner(root, id, leased, false, leased)
+}
+pub(super) fn inspect_leased(root: &Store, id: &str) -> io::Result<Saved> {
+    load_inner(root, id, true, false, false)
 }
 pub(super) fn load_unverified(root: &Store, id: &str) -> io::Result<Saved> {
-    load_inner(root, id, false, true)
+    load_inner(root, id, false, true, false)
 }
-fn load_inner(root: &Store, id: &str, leased: bool, allow_unverified: bool) -> io::Result<Saved> {
+fn load_inner(
+    root: &Store,
+    id: &str,
+    leased: bool,
+    allow_unverified: bool,
+    recover_interruption: bool,
+) -> io::Result<Saved> {
     if !valid_id(id) {
         return Err(invalid());
     }
@@ -466,7 +475,8 @@ fn load_inner(root: &Store, id: &str, leased: bool, allow_unverified: bool) -> i
     }
     if let Some(lock) = lock {
         let mut recovered_interruption = false;
-        if let Some(turn) = history.turns.last_mut()
+        if recover_interruption
+            && let Some(turn) = history.turns.last_mut()
             && turn.end.is_none()
         {
             turn.end = Some(super::super::End::Failed(super::super::Failure::Worker));

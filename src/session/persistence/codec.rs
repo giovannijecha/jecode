@@ -295,6 +295,14 @@ fn optional_count(value: &Value, key: &str) -> io::Result<u32> {
 pub(super) fn attempt(attempt: &Attempt) -> Value {
     let optional = |value: &Option<String>| value.as_deref().map_or(Value::Null, text);
     json::object([
+        (
+            "request_sequence",
+            Value::Number(attempt.request_sequence.to_string()),
+        ),
+        (
+            "connection_attempt",
+            Value::Number(attempt.connection_attempt.to_string()),
+        ),
         ("delivery", text(attempt.delivery.name())),
         (
             "stage",
@@ -303,6 +311,10 @@ pub(super) fn attempt(attempt: &Attempt) -> Value {
                 .map_or(Value::Null, |stage| text(stage.name())),
         ),
         ("operation", optional(&attempt.operation)),
+        (
+            "stage_elapsed_ms",
+            Value::Number(attempt.stage_elapsed_ms.to_string()),
+        ),
         ("category", optional(&attempt.category)),
         (
             "os_code",
@@ -314,11 +326,33 @@ pub(super) fn attempt(attempt: &Attempt) -> Value {
             "accepted_wire_bytes",
             Value::Number(attempt.accepted_wire_bytes.to_string()),
         ),
+        (
+            "received_wire_bytes",
+            Value::Number(attempt.received_wire_bytes.to_string()),
+        ),
+        (
+            "response_plaintext_bytes",
+            Value::Number(attempt.response_plaintext_bytes.to_string()),
+        ),
+        (
+            "response_status",
+            attempt
+                .response_status
+                .map_or(Value::Null, |status| Value::Number(status.to_string())),
+        ),
+        (
+            "stream_events",
+            Value::Number(attempt.stream_events.to_string()),
+        ),
         ("diagnostic", optional(&attempt.diagnostic)),
         ("retrying", Value::Bool(attempt.retrying)),
     ])
 }
 pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
+    let number = |key| match value.get(key) {
+        None => Ok(0),
+        Some(value) => value.unsigned().ok_or_else(invalid),
+    };
     let optional = |key, max| match value.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(text)) if text.len() <= max && !text.chars().any(char::is_control) => {
@@ -330,8 +364,15 @@ pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
         .map(|name| RequestStage::parse(&name).ok_or_else(invalid))
         .transpose()?;
     Ok(Attempt {
+        request_sequence: number("request_sequence")?
+            .try_into()
+            .map_err(|_| invalid())?,
+        connection_attempt: number("connection_attempt")?
+            .try_into()
+            .map_err(|_| invalid())?,
         delivery: Delivery::parse(string(value, "delivery", 32)?).ok_or_else(invalid)?,
         stage,
+        stage_elapsed_ms: number("stage_elapsed_ms")?,
         operation: optional("operation", 64)?,
         category: optional("category", 64)?,
         os_code: match value.get("os_code") {
@@ -344,6 +385,23 @@ pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
             .and_then(Value::unsigned)
             .and_then(|n| n.try_into().ok())
             .ok_or_else(invalid)?,
+        received_wire_bytes: number("received_wire_bytes")?
+            .try_into()
+            .map_err(|_| invalid())?,
+        response_plaintext_bytes: number("response_plaintext_bytes")?
+            .try_into()
+            .map_err(|_| invalid())?,
+        response_status: match value.get("response_status") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .unsigned()
+                    .and_then(|n| u16::try_from(n).ok())
+                    .filter(|n| (100..=599).contains(n))
+                    .ok_or_else(invalid)?,
+            ),
+        },
+        stream_events: number("stream_events")?.try_into().map_err(|_| invalid())?,
         diagnostic: optional("diagnostic", 1024)?,
         retrying: match value.get("retrying") {
             Some(Value::Bool(value)) => *value,

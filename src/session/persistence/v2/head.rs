@@ -68,6 +68,10 @@ pub(super) fn projection(history: &History) -> Value {
         ("limit_bytes", number(p.limit_bytes)),
         ("failed", Value::Bool(p.failed)),
         (
+            "failed_at_turn",
+            p.failed_at_turn.map_or(Value::Null, number),
+        ),
+        (
             "failed_attempts",
             Value::Array(
                 p.failed_attempts
@@ -272,6 +276,16 @@ pub(super) fn restore_projection(history: &mut History, info: &Info) -> io::Resu
     history.projection.failed = match value.get("failed") {
         Some(Value::Bool(v)) => *v,
         _ => return Err(invalid()),
+    };
+    history.projection.failed_at_turn = match value.get("failed_at_turn") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            value
+                .unsigned()
+                .and_then(|turn| turn.try_into().ok())
+                .filter(|turn| *turn <= history.turn_count())
+                .ok_or_else(invalid)?,
+        ),
     };
     history.projection.failed_attempts = match value.get("failed_attempts") {
         Some(Value::Array(items)) if items.len() <= 256 => items

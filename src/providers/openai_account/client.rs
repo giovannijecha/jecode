@@ -11,7 +11,7 @@ mod reply;
 
 use super::{Progress, Request, Response, auth, encode_http};
 use crate::tls::{ApplicationWrite, Budget, Connection, NetworkError, trust::TrustStore};
-use exchange::{ResponseChannel, exchange};
+use exchange::{ExchangeProgress, ResponseChannel, exchange};
 use std::{
     fmt,
     ops::ControlFlow,
@@ -211,14 +211,18 @@ impl Client {
             };
             let mut delivery = Delivery::NotSubmitted;
             let mut write = ApplicationWrite::default();
+            let mut trace = recovery::Trace::default();
             let result = (|| {
-                let mut connection =
-                    connect_channel(&self.trust, &connect).map_err(|error| Error::Transport {
+                let stage_started = std::time::Instant::now();
+                let mut connection = connect_channel(&self.trust, &connect).map_err(|error| {
+                    trace.stage_elapsed_ms = stage_started.elapsed().as_millis() as u64;
+                    Error::Transport {
                         stage: RequestStage::Connect,
                         error,
                         delivery,
                         accepted_wire_bytes: 0,
-                    })?;
+                    }
+                })?;
                 // The connection may have taken time while another instance
                 // signed out or replaced the account. This is the last local
                 // authorization before sending. It holds no response lease.
@@ -244,8 +248,11 @@ impl Client {
                     &bytes,
                     budget,
                     &write_budget,
-                    &mut delivery,
-                    &mut write,
+                    ExchangeProgress {
+                        delivery: &mut delivery,
+                        write: &mut write,
+                        trace: &mut trace,
+                    },
                     &mut progress,
                 )
             })();
@@ -253,6 +260,8 @@ impl Client {
                 Ok(response) => {
                     let _ = progress(Progress::Attempt(Attempt::completed(
                         write.accepted_wire_bytes,
+                        attempt,
+                        trace,
                     )));
                     return Ok(response);
                 }
@@ -263,6 +272,8 @@ impl Client {
                         delivery,
                         write.accepted_wire_bytes,
                         retrying,
+                        attempt,
+                        trace,
                     )))
                     .is_break()
                     {

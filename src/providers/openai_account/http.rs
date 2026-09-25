@@ -40,6 +40,7 @@ pub struct HttpResponseStream {
     error: Option<Error>,
     completed: bool,
     stream_started: bool,
+    response_status: Option<u16>,
 }
 impl Default for HttpResponseStream {
     fn default() -> Self {
@@ -57,6 +58,7 @@ impl HttpResponseStream {
             error: None,
             completed: false,
             stream_started: false,
+            response_status: None,
         }
     }
     pub fn is_finished(&self) -> bool {
@@ -64,6 +66,12 @@ impl HttpResponseStream {
     }
     pub fn stream_started(&self) -> bool {
         self.stream_started
+    }
+    pub fn response_status(&self) -> Option<u16> {
+        self.response_status
+    }
+    pub fn stream_events(&self) -> u32 {
+        self.model.events_seen()
     }
     pub fn push(
         &mut self,
@@ -75,14 +83,17 @@ impl HttpResponseStream {
         }
         let model = &mut self.model;
         let stream_started = &mut self.stream_started;
+        let response_status = &mut self.response_status;
         let mut failure = None;
         let mut completed = false;
         let result = self.http.push(bytes, |event| {
             let result = match event {
                 http::Event::Head(head) if head.status != 200 => {
+                    *response_status = Some(head.status);
                     Err(Error::HttpStatus(head.status))
                 }
                 http::Event::Head(head) => {
+                    *response_status = Some(head.status);
                     match head
                         .get("content-type")
                         .map(|value| {

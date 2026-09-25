@@ -21,6 +21,8 @@ pub(super) struct Projection {
     pub limit_bytes: usize,
     pub failed: bool,
     pub failed_reason: Option<Failure>,
+    /// Absolute canonical turn count when the latest failed compaction ran.
+    pub failed_at_turn: Option<usize>,
     pub pending: Option<partial::Pending>,
     pub failed_attempts: Vec<Attempt>,
     pub failed_partial: String,
@@ -34,6 +36,7 @@ impl Default for Projection {
             limit_bytes: 512 * 1024,
             failed: false,
             failed_reason: None,
+            failed_at_turn: None,
             pending: None,
             failed_attempts: Vec::new(),
             failed_partial: String::new(),
@@ -151,7 +154,8 @@ pub(super) fn observe_compaction(
     context: &Context,
 ) -> ControlFlow<()> {
     match progress {
-        Progress::Attempt(attempt) => {
+        Progress::Attempt(mut attempt) => {
+            attempt.request_sequence = metrics.requests;
             metrics.observe(&attempt);
             if attempt.retrying {
                 let _ = context.send(Event::Retrying, true);
@@ -180,7 +184,8 @@ pub(super) fn failed_attempt(
 ) -> Failure {
     history.projection.failed_attempts = attempts;
     history.projection.failed_partial = partial;
-    failed(history, cause)
+    history.projection.failed_at_turn = Some(history.turn_count());
+    commit_failure(history, cause)
 }
 
 pub(super) fn ensure(
@@ -362,6 +367,11 @@ fn summary_request(history: &History, model: Model, to: (usize, usize)) -> Reque
 }
 
 fn failed(history: &mut History, cause: Failure) -> Failure {
+    history.projection.failed_at_turn = None;
+    commit_failure(history, cause)
+}
+
+fn commit_failure(history: &mut History, cause: Failure) -> Failure {
     history.projection.failed = true;
     history.projection.failed_reason = Some(cause);
     if history.checkpoint().is_err() {
@@ -467,6 +477,7 @@ pub(super) fn compact(
             limit_bytes,
             failed: false,
             failed_reason: None,
+            failed_at_turn: None,
             pending: None,
             failed_attempts: Vec::new(),
             failed_partial: String::new(),

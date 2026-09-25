@@ -36,7 +36,8 @@ pub(super) fn generate(
             cancelled: &context.cancelled,
         },
         &mut |progress| {
-            if let Progress::Attempt(attempt) = progress {
+            if let Progress::Attempt(mut attempt) = progress {
+                attempt.request_sequence = metrics.requests;
                 metrics.observe(&attempt);
                 if attempt.retrying {
                     let _ = context.send(Event::Retrying, true);
