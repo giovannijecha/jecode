@@ -46,6 +46,9 @@ published on 2026-09-23, not Jecode's version or a public contract for
 independent clients. Live account behavior and future server compatibility
 have not been validated for this change.
 
-Networking currently uses HTTP/1.1 over the owned TLS profile. There is no HTTP/2,
-proxy configuration, web browsing, external provider plugin system or stable
-public Rust library API. See [TLS](TLS.md) and [usage](USAGE.md) for other limits.
+Jecode's provider networking currently uses HTTP/1.1 over the owned TLS profile.
+There is no HTTP/2, proxy configuration, dedicated web search, image input or
+image viewing, browser automation integration, external provider plugin system
+or stable public Rust library API. The command runner can attempt network work
+through available local programs; its results establish what actually worked.
+See [TLS](TLS.md), [tools](TOOLS.md) and [usage](USAGE.md) for other limits.

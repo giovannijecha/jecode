@@ -13,6 +13,14 @@ to the model schema.
 | `edit_file` | Apply an exact text replacement directly |
 | `run_command` | Run a non-interactive shell command directly |
 
+There is no dedicated web-search or image-viewing tool, and Jecode does not send
+image inputs to the model. `run_command` can attempt network operations using
+available local programs. Fetching a known URL, searching the web and interacting
+with a browser require different methods; connectivity, installed programs and
+remote services must be established from results. Command output is text, so a
+produced screenshot is not visual input to the model. Browser automation and
+native web search are separate planned capabilities.
+
 Known files can be read directly. Directory exploration is for discovering unknown
 paths. Tool results report omissions and truncation so a partial result is not
 mistaken for a complete search. Tool output is bounded to 32 KiB of encoded JSON.

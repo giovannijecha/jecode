@@ -1,5 +1,7 @@
 use crate::{json, providers::openai_account::Tool};
 
+pub(crate) const COMMAND_REACH: &str = "The shell is not sandboxed and may access files outside the workspace. It can attempt network operations through available programs; connectivity, installed programs, browsers and remote services are unverified until results establish them.";
+
 pub fn definitions() -> Vec<Tool> {
     definitions_for(&crate::command::Shell::default())
 }
@@ -26,7 +28,7 @@ pub(crate) fn definitions_for(shell: &crate::command::Shell) -> Vec<Tool> {
     }).collect();
     tools.push(Tool {
         name: "run_command".into(),
-        description: format!("Run one non-interactive command directly using {}. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. The shell can access files/network beyond the workspace; it is not sandboxed. Never read or print credentials. A cancelled command may already have effects; inspect its receipt before repeating it.{native_completion_note}", shell.label()),
+        description: format!("Run one non-interactive command directly using {}. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. {COMMAND_REACH} Never read or print credentials. A cancelled command may already have effects; inspect its receipt before repeating it.{native_completion_note}", shell.label()),
         parameters: json::parse(r#"{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":4096},"path":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":300}},"required":["command"],"additionalProperties":false}"#, Default::default()).expect("owned command schema"),
     });
     tools

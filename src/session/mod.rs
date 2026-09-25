@@ -1,4 +1,5 @@
 //! One ordered conversation owner with durable local history. Presentation never owns effects.
+mod capabilities;
 mod command;
 mod context;
 mod edit;
@@ -445,6 +446,8 @@ impl Drop for Session {
 
 #[cfg(test)]
 mod account_tests;
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod capability_tests;
 #[cfg(test)]
 pub(crate) mod command_tests;
 #[cfg(test)]
