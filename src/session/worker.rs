@@ -294,6 +294,23 @@ pub(super) fn run(
                 }
                 continue;
             }
+            Command::DiscardPendingImages => {
+                let result = history.abandon_pending_images();
+                if let Ok(changed) = result {
+                    let message = if changed {
+                        "Pending visual input discarded without inspection. Saved receipts and exact image bytes remain; request smaller views or use a saved image_id to inspect again."
+                    } else {
+                        "No pending visual input to discard. Saved image evidence remains intact."
+                    };
+                    let _ = context.send(Event::ContextReport(message.into()), false);
+                }
+                let end = result.map_or_else(End::Failed, |_| End::Complete);
+                let _ = context.send(Event::Finished(end, metrics), false);
+                if end == End::Failed(Failure::Storage) {
+                    break;
+                }
+                continue;
+            }
         };
         if catalog.as_ref().is_some_and(
             |catalog: &crate::providers::openai_account::catalog::Catalog| !catalog.fresh(),

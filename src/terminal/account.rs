@@ -552,6 +552,13 @@ pub(super) fn compacting(model: &mut Model) {
         model.status_spinner.reset(Instant::now());
     }
 }
+pub(super) fn discarding_pending_images(model: &mut Model) {
+    if let Some(view) = &mut model.account {
+        view.phase = Phase::Generating;
+        view.local_operation = Some(LocalOperation::Compact(String::new()));
+        view.notice = "Discarding pending visual input".into();
+    }
+}
 fn completion(end: End, metrics: Metrics, partial_output: bool) -> String {
     let mut result = match end {
         End::Complete => "Complete".into(),

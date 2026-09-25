@@ -274,13 +274,14 @@ fn command_menu_contains_only_aligned_commands_and_dismisses_without_transcript_
             "  /settings",
             "  /context",
             "  /compact",
+            "  /discard-pending-images",
             "  /help",
             "  /login",
             "  /logout"
         ]
     );
     assert_inside(&view::chrome(&model, 80, 24), "/resume");
-    for _ in 0..6 {
+    for _ in 0..7 {
         account::input(&mut model, Key::Down, &mut session);
     }
     assert!(

@@ -273,6 +273,7 @@ scrollback remains available. Bracketed paste does not submit text automatically
 - `/help`: list local commands.
 - `/context`: measured request bytes and the latest available provider token counts.
 - `/compact`: summarize completed context, including completed steps of the active turn.
+- `/discard-pending-images`: explicitly stop sending pending image pixels when an oversized saved batch blocks continuation; keep its receipts and exact saved bytes, and record that no visual inspection occurred.
 
 Startup adds no heading above the conversation. The directory, active
 model and effort share one footer row below the composer. Long paths and model

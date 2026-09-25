@@ -19,7 +19,7 @@ use std::{
     time::Instant,
 };
 
-fn request_images(request: &Request) -> Vec<(String, String)> {
+pub(super) fn request_images(request: &Request) -> Vec<(String, String)> {
     request
         .input
         .iter()
@@ -76,7 +76,7 @@ impl worker::Backend for InterruptedImageBackend {
     }
 }
 
-fn test_context() -> (worker::Context, mpsc::Receiver<Event>) {
+pub(super) fn test_context() -> (worker::Context, mpsc::Receiver<Event>) {
     let (events, received) = mpsc::sync_channel(64);
     (
         worker::Context {
@@ -175,18 +175,18 @@ fn unobserved_pixels_survive_failed_request_and_same_process_continuation() {
     failed_request_then_continue(false);
 }
 
-enum Reply {
+pub(super) enum Reply {
     Complete(&'static str),
     Incomplete,
     Cancelled,
 }
 
-struct ScriptBackend {
+pub(super) struct ScriptBackend {
     replies: std::collections::VecDeque<Reply>,
     requests: Vec<(bool, Vec<(String, String)>)>,
 }
 impl ScriptBackend {
-    fn new(replies: impl IntoIterator<Item = Reply>) -> Self {
+    pub(super) fn new(replies: impl IntoIterator<Item = Reply>) -> Self {
         Self {
             replies: replies.into_iter().collect(),
             requests: Vec::new(),
@@ -226,7 +226,7 @@ impl worker::Backend for ScriptBackend {
     }
 }
 
-fn add_text_turn(history: &mut history::History, text: &str) {
+pub(super) fn add_text_turn(history: &mut history::History, text: &str) {
     history.begin("Earlier work".into()).unwrap();
     let turn = history.turns.last_mut().unwrap();
     turn.steps.push(history::Step {
@@ -240,7 +240,7 @@ fn add_text_turn(history: &mut history::History, text: &str) {
     history.checkpoint().unwrap();
 }
 
-fn add_image_turn(history: &mut history::History, images: &[(&str, &str, &[u8])]) {
+pub(super) fn add_image_turn(history: &mut history::History, images: &[(&str, &str, &[u8])]) {
     let saved = history.images().unwrap();
     let mut calls = Vec::new();
     let mut receipts = Vec::new();
@@ -268,7 +268,7 @@ fn add_image_turn(history: &mut history::History, images: &[(&str, &str, &[u8])]
     history.checkpoint().unwrap();
 }
 
-fn generate_once(
+pub(super) fn generate_once(
     history: &mut history::History,
     backend: &mut ScriptBackend,
     context: &worker::Context,

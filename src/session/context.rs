@@ -14,6 +14,12 @@ use std::{
 };
 
 #[derive(Clone)]
+pub(super) struct AbandonedVisual {
+    pub from: (usize, usize),
+    pub through: (usize, usize),
+}
+
+#[derive(Clone)]
 pub(super) struct Projection {
     pub through: usize,
     pub step: usize,
@@ -26,6 +32,9 @@ pub(super) struct Projection {
     pub pending: Option<partial::Pending>,
     pub failed_attempts: Vec<Attempt>,
     pub failed_partial: String,
+    /// Absolute canonical step ranges explicitly removed from visual projection.
+    /// Receipts and private image files are still retained.
+    pub abandoned_visual: Vec<AbandonedVisual>,
 }
 impl Default for Projection {
     fn default() -> Self {
@@ -40,6 +49,7 @@ impl Default for Projection {
             pending: None,
             failed_attempts: Vec::new(),
             failed_partial: String::new(),
+            abandoned_visual: Vec::new(),
         }
     }
 }
@@ -165,6 +175,9 @@ pub(super) fn report(history: &History, model: Model, workspace: bool) -> String
         } else {
             "\nPending image evidence: the selected model receives text references only; saved pixels remain available for an image-capable model."
         });
+    }
+    if history.pending_image() && history.can_view_images() && bytes.is_none() {
+        message.push_str("\nThis saved visual request exceeds 8 MiB. Run /discard-pending-images to stop sending the current pending pixels without claiming inspection, then request smaller PNG views.");
     }
     message
 }
@@ -318,6 +331,22 @@ fn next_eligible(
     }
     next(history, through, step)
         .filter(|candidate| protected.is_none_or(|position| *candidate <= position))
+}
+
+pub(super) fn eligible_before_current_step(history: &History) -> bool {
+    let Some(turn) = history.turns.last() else {
+        return false;
+    };
+    let Some(step) = turn.steps.len().checked_sub(1) else {
+        return false;
+    };
+    next_eligible(
+        history,
+        history.projection.through,
+        history.projection.step,
+        Some((history.turns.len() - 1, step)),
+    )
+    .is_some()
 }
 
 pub(super) fn valid_cursor(history: &History) -> bool {
@@ -545,6 +574,7 @@ pub(super) fn compact(
         return Err(failed(history, Failure::CompactionOutput));
     }
     let limit_bytes = history.projection.limit_bytes;
+    let abandoned_visual = history.projection.abandoned_visual.clone();
     let old = std::mem::replace(
         &mut history.projection,
         Projection {
@@ -558,6 +588,7 @@ pub(super) fn compact(
             pending: None,
             failed_attempts: Vec::new(),
             failed_partial: String::new(),
+            abandoned_visual,
         },
     );
     let reduced = match (original, measured_bytes(history, model, workspace)) {

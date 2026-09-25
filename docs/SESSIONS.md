@@ -84,10 +84,24 @@ does not mark the pixels inspected: only a validated, completed response to an
 image-bearing request ends that pending state. Compaction may summarize earlier
 eligible context but does not summarize the pending image step. A text-only model
 receives truthful references and cannot consume the pending visual state.
-If the complete visual request exceeds the wire bound,
-Jecode stops with an actionable error instead of omitting or truncating pixels.
-Compact earlier work or create a smaller PNG, then use the saved `image_id` to
-view it again. Once a validated visual response has completed, compaction
+Before committing a successful image receipt, Jecode measures the complete
+encoded request with the proposed image, existing pending images, text and tool
+schema. It compacts eligible earlier context when that can make the view fit.
+If the additional image still cannot fit, that `view_image` call receives a
+paired tool error; earlier accepted views stay pending, and the model can ask
+for a smaller PNG. Saved `image_id` views and repeat views use the same check.
+The original bytes may be saved before a budget rejection, but no successful
+receipt is committed for that call.
+
+An oversized pending batch saved by an earlier version cannot be repaired by
+changing the original files: continuation uses the saved bytes. If the complete
+visual request exceeds the wire bound, Jecode stops before provider contact.
+Run `/discard-pending-images` to explicitly stop projecting the current pending
+pixels, then ask to view smaller PNGs. The command checkpoints a projection
+marker and tells the model the prior views were **not inspected**. It does not
+alter canonical receipts or delete saved image bytes; their `image_id`s can be
+viewed again in a later request if they fit. A failed checkpoint leaves pending
+visual input active. Once a validated visual response has completed, compaction
 uses the textual image metadata and the model's visual findings. The summary
 distinguishes those findings from the retained binary evidence; older images can
 be inspected again with `view_image(image_id)` in the same session. A completed

@@ -25,6 +25,7 @@ pub(super) enum Action {
     Preference(Change),
     Context,
     Compact,
+    DiscardPendingImages,
     Help,
 }
 #[derive(Clone)]
@@ -109,6 +110,11 @@ pub(super) fn commands() -> Vec<Entry> {
             "/compact",
             "Summarize earlier context; retain full history",
             Compact,
+        ),
+        (
+            "/discard-pending-images",
+            "Stop sending pending pixels; keep saved image evidence",
+            DiscardPendingImages,
         ),
         ("/help", "Show shortcuts and available commands", Help),
         ("/login", "Sign in to the saved account", Login),

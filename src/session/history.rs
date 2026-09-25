@@ -124,6 +124,7 @@ impl History {
                         pending = None;
                     }
                     if pending.is_none()
+                        && !self.abandoned_image_step(turn_index, step_index)
                         && step.results.iter().any(|receipt| receipt.image.is_some())
                     {
                         pending = Some((turn_index, step_index));
@@ -132,6 +133,65 @@ impl History {
             }
         }
         pending
+    }
+    fn abandoned_image_step(&self, turn: usize, step: usize) -> bool {
+        let absolute = (
+            self.base_turn + turn,
+            if turn == 0 {
+                self.base_step + step
+            } else {
+                step
+            },
+        );
+        self.projection
+            .abandoned_visual
+            .iter()
+            .any(|range| range.from <= absolute && absolute <= range.through)
+    }
+    /// Explicitly stop projecting the current pending pixels. Historical
+    /// receipts and image bytes remain immutable and can be viewed again.
+    pub fn abandon_pending_images(&mut self) -> Result<bool, Failure> {
+        let Some(first) = self.pending_image_step() else {
+            return Ok(false);
+        };
+        let last = self
+            .turns
+            .iter()
+            .enumerate()
+            .skip(first.0)
+            .flat_map(|(turn, item)| {
+                item.steps
+                    .iter()
+                    .enumerate()
+                    .filter(move |(step, item)| {
+                        (turn, *step) >= first
+                            && item.accepted
+                            && item.results.iter().any(|receipt| receipt.image.is_some())
+                    })
+                    .map(move |(step, _)| (turn, step))
+            })
+            .last()
+            .ok_or(Failure::Worker)?;
+        let absolute = |(turn, step): (usize, usize)| {
+            (
+                self.base_turn + turn,
+                if turn == 0 {
+                    self.base_step + step
+                } else {
+                    step
+                },
+            )
+        };
+        let range = super::context::AbandonedVisual {
+            from: absolute(first),
+            through: absolute(last),
+        };
+        self.projection.abandoned_visual.push(range);
+        if let Err(error) = self.checkpoint() {
+            self.projection.abandoned_visual.pop();
+            return Err(error);
+        }
+        Ok(true)
     }
     pub fn recovery_store(&self) -> std::io::Result<crate::workspace::RecoveryStore> {
         if let Some(record) = &self.record {
@@ -257,6 +317,9 @@ impl History {
                 self.projection.summary
             )));
         }
+        if !self.projection.abandoned_visual.is_empty() {
+            input.push(Input::User("Pending visual input from earlier saved views was explicitly discarded without a validated visual inspection. Their historical receipts and bytes remain saved; use view_image with image_id to request a new visual inspection when it fits the request budget.".into()));
+        }
         input.extend(self.input_range(
             self.projection.through,
             self.projection.step,
@@ -333,7 +396,12 @@ impl History {
                 input.push(Input::Assistant(response.output.clone()));
                 for result in &step.results {
                     if let Some(image) = &result.image {
-                        if visual {
+                        if self.abandoned_image_step(turn_index, index) {
+                            input.push(Input::ToolResult {
+                                call_id: result.call_id.clone(),
+                                output: format!("Saved image evidence: {}. Pending pixels were explicitly discarded without a validated visual inspection. Use view_image with image_id to request a new view.", image.description()),
+                            });
+                        } else if visual {
                             let bytes = self
                                 .images()?
                                 .load(image)

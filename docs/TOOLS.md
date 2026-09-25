@@ -60,6 +60,14 @@ request. Switching to a text-only model shows text references; switching back
 restores the pending pixels. Later validated visual responses allow ordinary
 compaction of their earlier image receipts.
 
+Jecode measures the full encoded request before accepting another view. If a
+batch exceeds the 8 MiB account request budget, excess views receive a tool
+error while accepted views remain paired and pending. Use a smaller PNG for the
+rejected call. For an older session already blocked by saved pending pixels,
+`/discard-pending-images` explicitly stops sending those pixels and records
+that they were not inspected. The saved evidence and canonical receipts remain;
+view an `image_id` again when it fits.
+
 An interrupted or failed capture does not commit a successful view. An
 incomplete temporary private write is not a valid image ID. A checkpoint failure
 stops the worker; a saved payload without a committed receipt may remain as an
