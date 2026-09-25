@@ -73,11 +73,11 @@ impl worker::Backend for ImagesBackend {
                         .map(|start| item[start + 9..].chars().take(64).collect::<String>())
                 })
                 .unwrap_or_default();
-            return Ok(tests::response(
+            return Ok(tests::handoff_response(
+                request,
                 &format!(
                     "The viewed screenshot showed a red pixel. Stored image_id {id} remains available for re-view."
                 ),
-                Status::Completed,
             ));
         }
         self.calls += 1;

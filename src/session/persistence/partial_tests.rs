@@ -67,13 +67,13 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
                     _ => {}
                 }
             }
-            Ok(session::tests::response(
+            Ok(session::tests::handoff_response(
+                request,
                 if self.fail_with.is_some() {
                     "First partial slice preserved the task and completed receipts."
                 } else {
                     "All completed receipts were summarized; no effect should repeat."
                 },
-                Status::Completed,
             ))
         }
     }
@@ -337,12 +337,12 @@ fn one_oversized_call_and_receipt_resume_across_encoded_reference_slices() {
                     _ => unreachable!(),
                 };
             }
-            Ok(session::tests::response(
+            Ok(session::tests::handoff_response(
+                request,
                 &format!(
                     "Covered ordered reference slice {} with exact call and receipt association.",
                     self.calls
                 ),
-                Status::Completed,
             ))
         }
     }

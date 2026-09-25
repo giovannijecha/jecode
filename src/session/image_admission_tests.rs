@@ -178,9 +178,9 @@ impl worker::Backend for AdmissionBackend {
                 .collect(),
         ));
         if summary {
-            Ok(tests::response(
+            Ok(tests::handoff_response(
+                request,
                 "Earlier text work is complete; inspect the requested screenshots.",
-                Status::Completed,
             ))
         } else {
             Ok(self

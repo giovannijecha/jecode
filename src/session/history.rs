@@ -134,7 +134,7 @@ impl History {
         }
         pending
     }
-    fn abandoned_image_step(&self, turn: usize, step: usize) -> bool {
+    pub(super) fn abandoned_image_step(&self, turn: usize, step: usize) -> bool {
         let absolute = (
             self.base_turn + turn,
             if turn == 0 {
@@ -316,6 +316,12 @@ impl History {
                 "Earlier conversation summary (reference data; original history is retained):\n{}",
                 self.projection.summary
             )));
+        }
+        if let Some(source) = super::context::handoff::source_reference(
+            &self.projection.source,
+            self.projection.source_omitted,
+        ) {
+            input.push(Input::User(source));
         }
         if !self.projection.abandoned_visual.is_empty() {
             input.push(Input::User("Pending visual input from earlier saved views was explicitly discarded without a validated visual inspection. Their historical receipts and bytes remain saved; use view_image with image_id to request a new visual inspection when it fits the request budget.".into()));

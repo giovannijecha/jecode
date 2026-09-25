@@ -93,6 +93,44 @@ pub(crate) fn response(text: &str, status: Status) -> Response {
         usage: Default::default(),
     }
 }
+pub(crate) fn handoff_response(request: &Request, completed: &str) -> Response {
+    let boundary = request
+        .instructions
+        .split("source_boundary exactly \"")
+        .nth(1)
+        .and_then(|tail| tail.split('"').next())
+        .expect("compaction boundary");
+    let value = crate::json::object([
+        (
+            "source_boundary",
+            crate::json::Value::String(boundary.into()),
+        ),
+        (
+            "objectives",
+            crate::json::Value::Array(vec![crate::json::Value::String(
+                "Continue the recorded user task".into(),
+            )]),
+        ),
+        ("constraints", crate::json::Value::Array(Vec::new())),
+        ("decisions", crate::json::Value::Array(Vec::new())),
+        (
+            "completed",
+            crate::json::Value::Array(vec![crate::json::Value::String(completed.into())]),
+        ),
+        ("checks", crate::json::Value::Array(Vec::new())),
+        ("remaining", crate::json::Value::Array(Vec::new())),
+        ("uncertainties", crate::json::Value::Array(Vec::new())),
+        (
+            "evidence",
+            crate::json::Value::Array(vec![crate::json::Value::String(format!(
+                "canonical {boundary}"
+            ))]),
+        ),
+    ]);
+    let mut response = response("fixture handoff", Status::Completed);
+    response.text = crate::json::encode(&value, 32768).unwrap();
+    response
+}
 pub(crate) fn next(session: &mut Session) -> Event {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {

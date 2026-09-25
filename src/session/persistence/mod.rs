@@ -176,6 +176,14 @@ impl Record {
                     ("step", Value::Number(history.projection.step.to_string())),
                     ("summary", text(&history.projection.summary)),
                     (
+                        "source",
+                        super::context::handoff::source_value(&history.projection.source),
+                    ),
+                    (
+                        "source_omitted",
+                        Value::Number(history.projection.source_omitted.to_string()),
+                    ),
+                    (
                         "limit_bytes",
                         Value::Number(history.projection.limit_bytes.to_string()),
                     ),
@@ -484,6 +492,14 @@ fn load_legacy(
         return Err(invalid());
     }
     history.projection.summary = string(projection, "summary", 32768)?.into();
+    history.projection.source = super::context::handoff::read_source(projection.get("source"))?;
+    history.projection.source_omitted = match projection.get("source_omitted") {
+        None => 0,
+        Some(value) => value
+            .unsigned()
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(invalid)?,
+    };
     if (history.projection.through == 0 && history.projection.step == 0)
         != history.projection.summary.is_empty()
     {

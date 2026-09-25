@@ -69,6 +69,11 @@ pub(super) fn projection(history: &History) -> Value {
         ("step", number(step)),
         ("guidance_base", number(guidance_base)),
         ("summary", text(&p.summary)),
+        (
+            "source",
+            crate::session::context::handoff::source_value(&p.source),
+        ),
+        ("source_omitted", number(p.source_omitted)),
         ("limit_bytes", number(p.limit_bytes)),
         ("failed", Value::Bool(p.failed)),
         (
@@ -292,6 +297,14 @@ pub(super) fn restore_projection(history: &mut History, info: &Info) -> io::Resu
     history.projection.through = 0;
     history.projection.step = 0;
     history.projection.summary = summary.into();
+    history.projection.source = crate::session::context::handoff::read_source(value.get("source"))?;
+    history.projection.source_omitted = match value.get("source_omitted") {
+        None => 0,
+        Some(value) => value
+            .unsigned()
+            .and_then(|n| n.try_into().ok())
+            .ok_or_else(invalid)?,
+    };
     history.projection.limit_bytes = limit;
     history.projection.failed = match value.get("failed") {
         Some(Value::Bool(v)) => *v,

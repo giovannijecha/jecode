@@ -44,9 +44,9 @@ impl worker::Backend for Capture {
             .unwrap()
             .push(json::parse(&encoded, Default::default()).unwrap());
         if request.instructions.starts_with("Summarize") {
-            return Ok(tests::response(
+            return Ok(tests::handoff_response(
+                request,
                 "Prior work was completed.",
-                Status::Completed,
             ));
         }
         if let Some((entered, release)) = self.first_gate.take() {

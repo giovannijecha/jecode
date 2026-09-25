@@ -42,9 +42,9 @@ impl Backend for Summarizer {
                 )
                 .into());
             }
-            Ok(tests::response(
+            Ok(tests::handoff_response(
+                request,
                 "Retain the user's original goal and completed change in settings.rs.",
-                Status::Completed,
             ))
         } else {
             Ok(tests::response("Continued", Status::Completed))
@@ -152,7 +152,7 @@ fn compaction_projects_a_summary_and_keeps_recent_turns_without_tools() {
     }
     assert!(requests[0].contains("task-0") && requests[0].contains("task-1"));
     assert!(requests[0].contains("task-2"));
-    assert!(!requests[1].contains("task-0"));
+    assert!(requests[1].contains("task-0"));
     assert!(requests[1].contains("settings.rs") && requests[1].contains("continue"));
 }
 #[test]
@@ -217,7 +217,7 @@ fn failed_compaction_is_not_automatically_retried_and_original_projection_remain
     assert_eq!(
         requests
             .iter()
-            .filter(|r| r.contains("Summarize this bounded portion"))
+            .filter(|r| r.contains("Summarize the ordered reference data"))
             .count(),
         1
     );
@@ -392,7 +392,7 @@ fn boundary_guidance_stays_once_in_live_projection() {
     assert_eq!(finish(&mut session), End::Complete);
     let requests = observed.lock().unwrap();
     assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].matches("later guidance").count(), 1); // instruction only
+    assert_eq!(requests[0].matches("later guidance").count(), 0); // still at the cursor boundary
     assert_eq!(requests[1].matches("later guidance").count(), 1);
     assert!(requests[1].contains("original goal"));
 }
@@ -599,5 +599,5 @@ fn refused_step_text_is_preserved_when_raw_items_are_not_projectable() {
     assert_eq!(finish(&mut session), End::Complete);
     let requests = observed.lock().unwrap();
     assert!(requests[0].contains("I cannot complete that operation."));
-    assert!(requests[0].contains("Recorded refused step"));
+    assert!(requests[0].contains("refused"));
 }

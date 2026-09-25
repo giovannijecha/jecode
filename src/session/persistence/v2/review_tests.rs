@@ -27,12 +27,17 @@ fn astra_live_compaction_persists_the_current_turn_completion() {
             _: &Budget<'_>,
             _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
         ) -> Result<Response, client::Error> {
-            let answer = if request.instructions.starts_with("Summarize") {
-                "Prior task completed.".to_owned()
+            if request.instructions.starts_with("Summarize") {
+                Ok(session::tests::handoff_response(
+                    request,
+                    "Prior task completed.",
+                ))
             } else {
-                "DONE ".to_owned() + &"y".repeat(100_000)
-            };
-            Ok(session::tests::response(&answer, Status::Completed))
+                Ok(session::tests::response(
+                    &("DONE ".to_owned() + &"y".repeat(100_000)),
+                    Status::Completed,
+                ))
+            }
         }
     }
     let fixture = crate::state::tests::Fixture::new();
@@ -229,9 +234,9 @@ fn controller_outcomes_and_metrics_stay_with_their_v2_turns() {
             _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
         ) -> Result<Response, client::Error> {
             if request.instructions.starts_with("Summarize") {
-                return Ok(session::tests::response(
+                return Ok(session::tests::handoff_response(
+                    request,
                     "Earlier completed and interrupted work was summarized.",
-                    Status::Completed,
                 ));
             }
             self.calls += 1;
@@ -399,13 +404,13 @@ fn controller_compaction_commits_boundary_guidance_before_close() {
         }
         fn generate(
             &mut self,
-            _: &Request,
+            request: &Request,
             _: &Budget<'_>,
             _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
         ) -> Result<Response, client::Error> {
-            Ok(session::tests::response(
+            Ok(session::tests::handoff_response(
+                request,
                 "First completed step and its guidance were summarized.",
-                Status::Completed,
             ))
         }
     }
@@ -420,12 +425,10 @@ fn controller_compaction_commits_boundary_guidance_before_close() {
             after_step: 0,
             text: "before the step".into(),
         });
+    let completed = "first completed result ".repeat(100);
     history.turns[0].steps.push(Step {
-        text: "first completed result".into(),
-        response: Some(session::tests::response(
-            "first completed result",
-            Status::Completed,
-        )),
+        text: completed.clone(),
+        response: Some(session::tests::response(&completed, Status::Completed)),
         accepted: true,
         ..Default::default()
     });
