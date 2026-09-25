@@ -154,6 +154,12 @@ fn execute(
         // Waiting for channel capacity here cannot delay process supervision or
         // cleanup, and keeps every completion ahead of the next operation.
         let checkpoint = history.checkpoint();
+        #[cfg(test)]
+        if checkpoint.is_ok()
+            && let Some(observed) = &history.test_outcome_checkpoint
+        {
+            observed.store(true, std::sync::atomic::Ordering::Release);
+        }
         if let Some(event) = completion {
             let _ = context.send(event, false);
         }

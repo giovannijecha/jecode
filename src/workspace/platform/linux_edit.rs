@@ -1,6 +1,6 @@
 //! Directory-relative, no-replace publication. Existing inodes are never truncated.
 use super::*;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 unsafe extern "C" {
     fn renameat2(

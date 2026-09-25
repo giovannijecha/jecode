@@ -10,6 +10,7 @@ use crate::{
 use std::{
     fs,
     ops::ControlFlow,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
@@ -107,7 +108,12 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
         persistence::create_in(&store, Model::Luna, Some(&files.0), Some(&workspace)).unwrap();
     let id = history.record.as_ref().unwrap().id().to_owned();
     let target = files.0.join("notes.txt");
+    let gate_entered = Arc::new(AtomicBool::new(false));
+    let checkpointed = Arc::new(AtomicBool::new(false));
+    history.test_outcome_checkpoint = Some(Arc::clone(&checkpointed));
+    let reached = Arc::clone(&gate_entered);
     history.effect_gate = Some(Arc::new(move |name, events| {
+        reached.store(true, Ordering::Release);
         if matches!(case, Case::FailedEdit) && name == "edit_file" {
             fs::write(&target, "competing\n").unwrap();
         }
@@ -144,25 +150,18 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
         } else {
             35
         });
-    let mut unexpected = None;
-    let before_release = loop {
-        if let Some(receipts) = saved_receipts(&store, &id) {
-            let status = receipts
-                .first()
-                .and_then(|value| value.get("status"))
-                .and_then(Value::text);
-            if status == Some(expected) {
-                break Some(receipts);
-            }
-            if !matches!(status, None | Some("uncertain") | Some("not_executed")) {
-                unexpected = Some(receipts);
-                break None;
-            }
-        }
+    while !checkpointed.load(Ordering::Acquire) {
         if Instant::now() >= deadline {
-            break None;
+            break;
         }
         std::thread::sleep(Duration::from_millis(10));
+    }
+    // The channel is full, so the worker is blocked delivering completion
+    // after the successful checkpoint. Read the committed head only once.
+    let before_release = if checkpointed.load(Ordering::Acquire) {
+        saved_receipts(&store, &id)
+    } else {
+        None
     };
     let mut events = Vec::new();
     let finish_deadline = Instant::now() + Duration::from_secs(20);
@@ -183,7 +182,17 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
     let final_receipts = saved_receipts(&store, &id);
     assert!(
         before_release.is_some(),
-        "{case:?} receipt did not reach storage before presentation drained; unexpected={unexpected:?}, final={final_receipts:?}"
+        "{case:?} receipt did not reach storage before presentation drained; gate={}, checkpoint={}, events={}, last={:?}, final={final_receipts:?}",
+        gate_entered.load(Ordering::Acquire),
+        checkpointed.load(Ordering::Acquire),
+        events.len(),
+        events.last().map(std::mem::discriminant)
+    );
+    assert_eq!(
+        before_release.unwrap()[0]
+            .get("status")
+            .and_then(Value::text),
+        Some(expected)
     );
     assert!(matches!(
         events.last(),

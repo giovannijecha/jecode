@@ -68,6 +68,8 @@ pub(super) struct History {
     pub fail_checkpoint_from: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub effect_gate: Option<super::worker::EffectGate>,
+    #[cfg(test)]
+    pub test_outcome_checkpoint: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl History {
     pub fn recovery_store(&self) -> std::io::Result<crate::workspace::RecoveryStore> {
