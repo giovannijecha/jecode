@@ -61,18 +61,7 @@ pub(super) fn encode_turn(turn: &Turn) -> Value {
                             ),
                             (
                                 "results",
-                                Value::Array(
-                                    step.results
-                                        .iter()
-                                        .map(|receipt| {
-                                            json::object([
-                                                ("call_id", text(&receipt.call_id)),
-                                                ("output", text(&receipt.output)),
-                                                ("summary", text(&receipt.summary)),
-                                            ])
-                                        })
-                                        .collect(),
-                                ),
+                                Value::Array(step.results.iter().map(receipt).collect()),
                             ),
                         ])
                     })
@@ -144,6 +133,10 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
                     call_id: string(value, "call_id", 256)?.into(),
                     output: string(value, "output", 1024 * 1024)?.into(),
                     summary: string(value, "summary", 8192)?.into(),
+                    image: value
+                        .get("image")
+                        .map(crate::image::Evidence::parse)
+                        .transpose()?,
                 });
             }
             if let Some(response) = &step.response {
@@ -231,11 +224,15 @@ pub(super) fn step_core(step: &Step) -> Value {
     ])
 }
 pub(super) fn receipt(receipt: &Receipt) -> Value {
-    json::object([
+    let mut fields = vec![
         ("call_id", text(&receipt.call_id)),
         ("output", text(&receipt.output)),
         ("summary", text(&receipt.summary)),
-    ])
+    ];
+    if let Some(image) = &receipt.image {
+        fields.push(("image", image.value()));
+    }
+    json::object(fields)
 }
 pub(super) fn guidance(guidance: &super::super::queue::Guidance) -> Value {
     json::object([

@@ -5,6 +5,9 @@ mod context;
 mod edit;
 mod generation;
 mod history;
+#[cfg(test)]
+mod image_tests;
+mod image_tool;
 pub mod persistence;
 mod queue;
 pub mod scope;

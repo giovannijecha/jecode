@@ -83,6 +83,9 @@ impl Prepared {
             Self::Command { .. } => {
                 return Output::error("commands must execute through the session controller");
             }
+            Self::Image { .. } => {
+                return Output::error("images must execute through the session controller");
+            }
             Self::Create { .. } | Self::Edit { .. } => {
                 return Output::error("file changes must execute through the session controller");
             }

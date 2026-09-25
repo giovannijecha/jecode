@@ -3,9 +3,9 @@ use crate::{json, providers::openai_account::Tool};
 pub(crate) const COMMAND_REACH: &str = "The shell is not sandboxed and may access files outside the workspace. It can attempt network operations through available programs; connectivity, installed programs, browsers and remote services are unverified until results establish them.";
 
 pub fn definitions() -> Vec<Tool> {
-    definitions_for(&crate::command::Shell::default())
+    definitions_for(&crate::command::Shell::default(), false)
 }
-pub(crate) fn definitions_for(shell: &crate::command::Shell) -> Vec<Tool> {
+pub(crate) fn definitions_for(shell: &crate::command::Shell, image: bool) -> Vec<Tool> {
     let native_completion_note = if cfg!(windows) {
         " On Windows PowerShell, a GUI executable invoked with & may return before it finishes; $LASTEXITCODE and captured output can be stale. For verification, wait explicitly, capture stdout and stderr separately, and exit nonzero if required content or cleanup fails."
     } else {
@@ -31,5 +31,12 @@ pub(crate) fn definitions_for(shell: &crate::command::Shell) -> Vec<Tool> {
         description: format!("Run one non-interactive command directly using {}. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. {COMMAND_REACH} Never read or print credentials. A cancelled command may already have effects; inspect its receipt before repeating it.{native_completion_note}", shell.label()),
         parameters: json::parse(r#"{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":4096},"path":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":300}},"required":["command"],"additionalProperties":false}"#, Default::default()).expect("owned command schema"),
     });
+    if image {
+        tools.push(Tool {
+            name: "view_image".into(),
+            description: "View a local PNG image as actual visual input. Supply path relative to the selected working directory, or an absolute path when its file-access profile allows it. Alternatively supply image_id from this session's earlier view to inspect the exact saved bytes again. PNG bytes are captured privately before success; unsupported, invalid, missing and oversized files fail explicitly. Screenshot creation is outside this tool. Original pixels are sent unchanged with high detail; provider-side processing is not locally observable.".into(),
+            parameters: json::parse(r#"{"type":"object","properties":{"path":{"type":"string"},"image_id":{"type":"string"}},"additionalProperties":false}"#, Default::default()).expect("owned image tool schema"),
+        });
+    }
     tools
 }

@@ -423,6 +423,7 @@ mod tests {
                         call_id: "unknown-call".into(),
                         output: "exact-marker".into(),
                         summary: "outcome unknown".into(),
+                        image: None,
                     }],
                     ..Default::default()
                 }],

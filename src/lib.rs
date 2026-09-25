@@ -2,6 +2,7 @@
 
 pub mod command;
 pub mod http;
+pub(crate) mod image;
 pub mod json;
 pub mod providers;
 pub mod session;

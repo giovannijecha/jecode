@@ -198,6 +198,7 @@ fn restart_restores_canonical_receipts_and_waits_for_new_input() {
             call_id: "edit-1".into(),
             output: r#"{"ok":true,"status":"applied","recovery":".jecode-recovery-123-4"}"#.into(),
             summary: "Edited settings.rs".into(),
+            image: None,
         }],
         ..Default::default()
     });
@@ -312,11 +313,13 @@ fn historical_approval_and_denial_receipts_remain_exact_in_v1_and_v2() {
                     call_id: "old-approved".into(),
                     output: approved.into(),
                     summary: "Created approved.txt".into(),
+                    image: None,
                 },
                 Receipt {
                     call_id: "old-denied".into(),
                     output: denied.into(),
                     summary: "Denied · no file changed".into(),
+                    image: None,
                 },
             ],
             ..Default::default()
@@ -378,6 +381,7 @@ fn interrupted_effect_stays_unknown_and_invalid_snapshot_is_not_repaired() {
             call_id: "run-1".into(),
             output: r#"{"status":"unknown"}"#.into(),
             summary: "Outcome unknown after interruption".into(),
+            image: None,
         }],
         ..Default::default()
     });
@@ -751,6 +755,7 @@ fn active_step_projection_resumes_without_replaying_canonical_receipts() {
                 call_id,
                 output: format!(r#"{{"text":"receipt-{index}"}}"#),
                 summary: format!("Read notes.txt / receipt-{index}"),
+                image: None,
             }],
             ..Default::default()
         });

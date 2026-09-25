@@ -81,6 +81,7 @@ Account; Cargo's `--offline` flag only controls build dependency resolution.
 - Enter sends a message; during a response it queues guidance for the next model step.
 - Esc interrupts work. Ctrl+Q exits and joins active work before closing.
 - File changes show a diff. Commands show their shell, directory and timeout.
+- On image-capable account models, `view_image` lets the model inspect a local PNG screenshot or a saved image ID.
 - `/context` shows request size and available provider token counts.
 - `/compact` summarizes earlier context while retaining the full saved history.
 - Type `/` for a command menu; arrows select, Enter opens and Tab completes.

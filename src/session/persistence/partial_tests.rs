@@ -101,6 +101,7 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
                 call_id: format!("read-{n:03}"),
                 output: format!("MARKER-{n:03} {}", "x".repeat(25_000)),
                 summary: format!("Read part-{n:03}.txt"),
+                image: None,
             })
             .collect(),
         ..Default::default()
@@ -366,6 +367,7 @@ fn one_oversized_call_and_receipt_resume_across_encoded_reference_slices() {
             call_id: "oversized-call".into(),
             output: output.clone(),
             summary: "Read big.txt".into(),
+            image: None,
         }],
         ..Default::default()
     });

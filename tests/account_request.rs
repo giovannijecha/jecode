@@ -1,6 +1,6 @@
 use jecode::{
     json::{self, Value},
-    providers::openai_account::{Error, Input, Request, Tool},
+    providers::openai_account::{Error, Input, Request, Tool, encode_http},
 };
 
 fn request() -> Request {
@@ -94,4 +94,46 @@ fn omitted_effort_is_distinct_from_literal_none() {
             .and_then(Value::text),
         Some("none")
     );
+}
+
+#[test]
+fn account_http_encodes_a_paired_multimodal_tool_result() {
+    let mut request = request();
+    let call = json::parse(r#"{"type":"function_call","call_id":"view_1","name":"view_image","arguments":"{\"path\":\"screen.png\"}"}"#, Default::default()).unwrap();
+    request.input.push(Input::Assistant(vec![call]));
+    request.input.push(Input::ToolImage {
+        call_id: "view_1".into(),
+        description: "PNG 1x1, captured from screen.png".into(),
+        image_url: "data:image/png;base64,iVBORw0KGgo=".into(),
+    });
+    let wire = encode_http(&request, "synthetic-access", "synthetic-account").unwrap();
+    let wire = String::from_utf8(wire).unwrap();
+    assert!(wire.starts_with("POST /backend-api/codex/responses HTTP/1.1\r\n"));
+    let body = wire.split_once("\r\n\r\n").unwrap().1;
+    let body = json::parse(body, Default::default()).unwrap();
+    let result = body
+        .get("input")
+        .and_then(Value::array)
+        .unwrap()
+        .last()
+        .unwrap();
+    assert_eq!(
+        result.get("type").and_then(Value::text),
+        Some("function_call_output")
+    );
+    assert_eq!(result.get("call_id").and_then(Value::text), Some("view_1"));
+    let items = result.get("output").and_then(Value::array).unwrap();
+    assert_eq!(
+        items[0].get("type").and_then(Value::text),
+        Some("input_text")
+    );
+    assert_eq!(
+        items[1].get("type").and_then(Value::text),
+        Some("input_image")
+    );
+    assert_eq!(
+        items[1].get("image_url").and_then(Value::text),
+        Some("data:image/png;base64,iVBORw0KGgo=")
+    );
+    assert_eq!(items[1].get("detail").and_then(Value::text), Some("high"));
 }

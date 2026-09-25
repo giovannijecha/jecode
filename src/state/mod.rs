@@ -129,6 +129,11 @@ impl Store {
 
     /// Callers hold the corresponding lock across load/modify/replace sequences.
     pub fn replace(&self, name: &str, contents: &str) -> io::Result<()> {
+        self.replace_bytes(name, contents.as_bytes())
+    }
+
+    /// Atomically commit private binary evidence under the same protected root.
+    pub(crate) fn replace_bytes(&self, name: &str, contents: &[u8]) -> io::Result<()> {
         let destination = self.path(name)?;
         if destination.symlink_metadata().is_ok() {
             platform::check_file(&platform::read(&destination)?)?;
@@ -152,7 +157,7 @@ impl Store {
             }
         };
         let result = (|| {
-            file.write_all(contents.as_bytes())?;
+            file.write_all(contents)?;
             file.sync_all()?;
             drop(file);
             fs::rename(&temporary, &destination)?;

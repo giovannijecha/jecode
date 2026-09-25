@@ -47,8 +47,14 @@ independent clients. Live account behavior and future server compatibility
 have not been validated for this change.
 
 Jecode's provider networking currently uses HTTP/1.1 over the owned TLS profile.
-There is no HTTP/2, proxy configuration, dedicated web search, image input or
-image viewing, browser automation integration, external provider plugin system
+There is no HTTP/2, proxy configuration, dedicated web search,
+browser automation integration, external provider plugin system
 or stable public Rust library API. The command runner can attempt network work
 through available local programs; its results establish what actually worked.
+When explicit account catalog metadata permits it, `view_image` sends local PNG
+evidence using an `input_image` item in a function-call output. This wire shape
+and image modality selection are source-backed by [Codex at
+`86be5320`](https://github.com/openai/codex/blob/86be5320b068ef67b56348b02aa8c33706955da6/codex-rs/core/src/tools/handlers/view_image.rs).
+Jecode's end-to-end visual understanding still needs a maintainer-run live account
+test; offline fixtures validate encoding, storage and lifecycle only.
 See [TLS](TLS.md), [tools](TOOLS.md) and [usage](USAGE.md) for other limits.

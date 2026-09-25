@@ -84,6 +84,8 @@ pub enum Failure {
     Account(client::Error),
     Cancelled,
     HistoryLimit,
+    ImageRequestLimit,
+    ImageEvidence,
     CompactionOutput,
     CompactionIneffective,
     OutputLimit,
@@ -97,6 +99,8 @@ impl fmt::Display for Failure {
             Self::Account(error) => error.fmt(f),
             Self::Cancelled => f.write_str("Interrupted / partial output retained"),
             Self::HistoryLimit => f.write_str("Context cannot be reduced at a completed boundary within the request budget / use /compact explicitly after reducing the input"),
+            Self::ImageRequestLimit => f.write_str("The pending image and context exceed the 8 MiB account request limit. Compact older context or use a smaller PNG, then view the saved image_id again."),
+            Self::ImageEvidence => f.write_str("Saved image evidence is missing or corrupt. Restore the user-scoped image store from backup before continuing with visual context."),
             Self::CompactionOutput => f.write_str("Compaction returned an incomplete, empty or invalid summary / prior context retained"),
             Self::CompactionIneffective => f.write_str("Compaction did not reduce the projected request / prior context retained"),
             Self::OutputLimit => {

@@ -33,6 +33,8 @@ pub struct Entry {
     pub efforts: Option<Vec<String>>,
     pub visible: bool,
     pub compatible: bool,
+    /// Explicit service metadata only. Missing modalities are not image evidence.
+    pub image: Support,
     priority: i32,
 }
 
@@ -114,12 +116,26 @@ impl Catalog {
                 }
                 _ => return Err(Error::Malformed),
             };
+            let modalities = match item.get("input_modalities") {
+                None | Some(Value::Null) => None,
+                Some(Value::Array(items))
+                    if items.len() <= 16 && items.iter().all(|v| v.text().is_some()) =>
+                {
+                    Some(items)
+                }
+                _ => return Err(Error::Malformed),
+            };
+            let image = match modalities {
+                Some(items) if items.iter().any(|value| value.text() == Some("image")) => {
+                    Support::Supported
+                }
+                Some(_) => Support::Unsupported,
+                None => Support::Unknown,
+            };
             let visible = item.get("visibility").and_then(Value::text) == Some("list");
             let compatible = item.get("supports_reasoning_summary_parameter")
                 != Some(&Value::Bool(false))
-                && item
-                    .get("input_modalities")
-                    .and_then(Value::array)
+                && modalities
                     .is_none_or(|items| items.iter().any(|item| item.text() == Some("text")));
             let priority = item
                 .get("priority")
@@ -135,6 +151,7 @@ impl Catalog {
                 efforts,
                 visible,
                 compatible,
+                image,
                 priority,
             });
         }
@@ -183,6 +200,12 @@ impl Catalog {
             Some(_) => Support::Unsupported,
             None => Support::Unknown,
         }
+    }
+
+    pub fn image_support(&self, selection: Model) -> Support {
+        self.entry(selection.id())
+            .filter(|entry| entry.compatible)
+            .map_or(Support::Unknown, |entry| entry.image)
     }
 }
 
@@ -234,5 +257,26 @@ mod tests {
         assert!(catalog.fresh());
         assert!(catalog.fresh_at(catalog.fetched_at + Duration::from_secs(299)));
         assert!(!catalog.fresh_at(catalog.fetched_at + Duration::from_secs(301)));
+    }
+
+    #[test]
+    fn image_support_requires_explicit_account_modalities() {
+        let catalog = Catalog::parse(br#"{"models":[{"slug":"vision","visibility":"list","input_modalities":["text","image"]},{"slug":"text-only","visibility":"list","input_modalities":["text"]},{"slug":"unspecified","visibility":"list"}]}"#).unwrap();
+        assert_eq!(
+            catalog.image_support(Model::new("vision", None).unwrap()),
+            Support::Supported
+        );
+        assert_eq!(
+            catalog.image_support(Model::new("text-only", None).unwrap()),
+            Support::Unsupported
+        );
+        assert_eq!(
+            catalog.image_support(Model::new("unspecified", None).unwrap()),
+            Support::Unknown
+        );
+        assert_eq!(
+            catalog.image_support(Model::new("unknown", None).unwrap()),
+            Support::Unknown
+        );
     }
 }

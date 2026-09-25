@@ -25,6 +25,7 @@ fn large_old_turn_traverses_exact_ordered_event_slices_with_a_resumable_cursor()
                 call_id,
                 output: format!("MARKER-{index:02}-{}", "x".repeat(1_000_000)),
                 summary: format!("Read part {index:02}"),
+                image: None,
             }],
             ..Default::default()
         });

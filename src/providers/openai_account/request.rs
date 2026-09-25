@@ -12,6 +12,11 @@ pub enum Input {
         call_id: String,
         output: String,
     },
+    ToolImage {
+        call_id: String,
+        description: String,
+        image_url: String,
+    },
 }
 
 pub struct Tool {
@@ -71,6 +76,33 @@ impl Request {
                         ("type", string("function_call_output")),
                         ("call_id", string(call_id)),
                         ("output", string(output)),
+                    ]));
+                }
+                Input::ToolImage {
+                    call_id,
+                    description,
+                    image_url,
+                } => {
+                    if !identifier(call_id) || !image_url.starts_with("data:image/png;base64,") {
+                        return Err(Error::InvalidRequest);
+                    }
+                    input.push(json::object([
+                        ("type", string("function_call_output")),
+                        ("call_id", string(call_id)),
+                        (
+                            "output",
+                            Value::Array(vec![
+                                json::object([
+                                    ("type", string("input_text")),
+                                    ("text", string(description)),
+                                ]),
+                                json::object([
+                                    ("type", string("input_image")),
+                                    ("image_url", string(image_url)),
+                                    ("detail", string("high")),
+                                ]),
+                            ]),
+                        ),
                     ]));
                 }
             }

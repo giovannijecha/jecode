@@ -105,7 +105,17 @@ fn execute(
             receipt.summary = format!("{name} / outcome unknown after interruption");
             history.checkpoint()?;
         }
-        let (output, completion) = match prepared {
+        let (output, completion, image) = match prepared {
+            Ok(Prepared::Image { path, image_id }) => {
+                let (output, image) = super::image_tool::execute(
+                    history,
+                    workspace,
+                    path.as_deref(),
+                    image_id.as_deref(),
+                    context,
+                )?;
+                (output, None, image)
+            }
             Ok(Prepared::Command {
                 command,
                 path,
@@ -119,7 +129,7 @@ fn execute(
                     workspace,
                     context,
                 );
-                (output, Some(event))
+                (output, Some(event), None)
             }
             Ok(tool) if tool.changes_file() => {
                 let recoveries = history.recovery_store().map_err(|_| Failure::Storage)?;
@@ -132,7 +142,7 @@ fn execute(
                     session_id.as_deref(),
                     &call_id,
                 );
-                (output, Some(event))
+                (output, Some(event), None)
             }
             Ok(tool) => (
                 tool.execute(
@@ -143,13 +153,18 @@ fn execute(
                     },
                 ),
                 None,
+                None,
             ),
-            Err(error) => (Output::error(error), None),
+            Err(error) => (Output::error(error), None, None),
         };
+        if image.is_some() {
+            context.check()?;
+        }
         let stop_after = output.stop_after;
         let receipt = &mut current(history)?.results[index];
         receipt.summary = format!("{name} / {}", output.summary);
         receipt.output = output.text;
+        receipt.image = image;
         // The exact effect receipt reaches storage before its final presentation.
         // Waiting for channel capacity here cannot delay process supervision or
         // cleanup, and keeps every completion ahead of the next operation.

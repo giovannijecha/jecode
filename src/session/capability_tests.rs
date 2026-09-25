@@ -104,8 +104,8 @@ fn assert_workspace_contract(request: &Value, profile: Access, shell: &crate::co
     assert!(guidance.contains(&format!("Command shell: {}.", shell.label())));
     assert!(guidance.contains(crate::tools::COMMAND_REACH));
     assert!(guidance.contains("Fetching a known URL, searching the web"));
-    assert!(guidance.contains("no dedicated web-search or image-viewing tool"));
-    assert!(guidance.contains("provides no image input"));
+    assert!(guidance.contains("no dedicated web-search or browser tool"));
+    assert!(guidance.contains("no verified image-input capability"));
     assert!(guidance.contains("report attempts, specific blockers and unfinished requirements"));
     assert!(!guidance.contains("You cannot browse the web"));
     let command = tools(request)

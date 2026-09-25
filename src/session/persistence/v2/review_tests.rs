@@ -151,6 +151,7 @@ fn controller_resume_commits_interruption_and_never_replays_old_receipts() {
             call_id: "old-read".into(),
             output: "EXACT-OLD-RECEIPT".into(),
             summary: "Read old file".into(),
+            image: None,
         }],
         ..Default::default()
     });

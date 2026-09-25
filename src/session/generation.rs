@@ -98,6 +98,7 @@ pub(super) fn generate(
             call_id: call.id.clone(),
             output: Output::error("tool was not executed because the turn stopped").text,
             summary: "Not executed".into(),
+            image: None,
         })
         .collect();
     // Keep validated terminal facts even if presentation cannot accept them.
