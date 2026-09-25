@@ -94,7 +94,13 @@ fn check_file_tools_share_selected_directory(shell: &Shell, include_brackets: bo
         let change = workspace
             .prepare_create(&input, "from workspace\n", &budget)
             .unwrap();
-        workspace.apply(change, &budget).unwrap();
+        let recoveries = crate::workspace::RecoveryStore::in_store(
+            &crate::state::Store::in_home(&files.home()).unwrap(),
+        )
+        .unwrap();
+        workspace
+            .apply(change, &budget, &recoveries, None, "test")
+            .unwrap();
         assert_eq!(workspace.read(&input, &budget).unwrap(), "from workspace\n");
         let selected = if in_sub { &sub } else { &root };
         let cwd = if absolute {

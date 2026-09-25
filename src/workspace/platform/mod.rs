@@ -50,10 +50,19 @@ mod unsupported {
     pub fn metadata_to(_: &File, _: &File) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
+    pub fn capture_policy(_: &File) -> io::Result<Vec<u8>> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    pub fn apply_policy(_: &File, _: &[u8]) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
     pub fn move_new(_: &File, _: &File, _: &str, _: &str) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
     pub fn remove_owned(_: &File, _: &File, _: &str) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    pub fn sync_parent(_: &File) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
 }

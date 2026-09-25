@@ -3,14 +3,21 @@ use super::{Event, worker::Context};
 use crate::{
     json::{self, Value},
     tools::{Output, Prepared},
-    workspace::{Budget, Workspace},
+    workspace::{Budget, RecoveryStore, Workspace},
 };
 use std::{
     sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
-pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) -> (Output, Event) {
+pub(super) fn execute(
+    tool: Prepared,
+    workspace: &Workspace,
+    context: &Context,
+    recoveries: &RecoveryStore,
+    session: Option<&str>,
+    operation: &str,
+) -> (Output, Event) {
     let id = context.next_effect.fetch_add(1, Ordering::Relaxed);
     let budget = Budget {
         cancelled: &context.cancelled,
@@ -44,9 +51,9 @@ pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) 
     } else {
         let budget = Budget {
             cancelled: &context.cancelled,
-            deadline: Instant::now() + Duration::from_secs(10),
+            deadline: Instant::now() + Duration::from_secs(30),
         };
-        match workspace.apply(change, &budget) {
+        match workspace.apply(change, &budget, recoveries, session, operation) {
             Ok(result) => {
                 let summary = format!(
                     "{} {} · +{} -{}{}",
@@ -59,24 +66,36 @@ pub(super) fn execute(tool: Prepared, workspace: &Workspace, context: &Context) 
                         .as_ref()
                         .map_or(String::new(), |path| format!("\n  Recovery: {path}"))
                 );
-                (
-                    Output::success(
-                        json::object([
-                            ("ok", Value::Bool(true)),
-                            ("status", Value::String("applied".into())),
-                            ("path", Value::String(preview.path)),
-                            (
-                                "recovery",
-                                result.recovery.map_or(Value::Null, Value::String),
-                            ),
-                        ]),
-                        summary,
-                        false,
-                    ),
-                    true,
-                )
+                let mut output = Output::success(
+                    json::object([
+                        ("ok", Value::Bool(true)),
+                        ("status", Value::String("applied".into())),
+                        ("path", Value::String(preview.path)),
+                        (
+                            "recovery",
+                            result.recovery.map_or(Value::Null, Value::String),
+                        ),
+                        (
+                            "warning",
+                            result
+                                .warning
+                                .as_deref()
+                                .map_or(Value::Null, |message| Value::String(message.into())),
+                        ),
+                    ]),
+                    summary,
+                    false,
+                );
+                if let Some(warning) = result.warning {
+                    output.summary.push_str(&format!("\n  {warning}"));
+                }
+                output.stop_after = result.stop_after;
+                (output, true)
             }
-            Err(error) => (Output::failed_effect(&error.to_string()), false),
+            Err(error) => (
+                Output::failed_effect_with_recovery(&error.to_string(), error.1.as_deref()),
+                false,
+            ),
         }
     };
     let finished = finished(id, &output, applied);

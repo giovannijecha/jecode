@@ -48,6 +48,17 @@ pub fn metadata_to(source: &File, target: &File) -> io::Result<()> {
     }
     target.set_permissions(source.metadata()?.permissions())
 }
+pub fn capture_policy(source: &File) -> io::Result<Vec<u8>> {
+    Ok((source.metadata()?.mode() & 0o777).to_le_bytes().to_vec())
+}
+pub fn apply_policy(target: &File, policy: &[u8]) -> io::Result<()> {
+    let bytes: [u8; 4] = policy.try_into().map_err(|_| io::ErrorKind::InvalidData)?;
+    let mode = u32::from_le_bytes(bytes);
+    if mode & !0o777 != 0 {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    target.set_permissions(std::fs::Permissions::from_mode(mode))
+}
 pub fn move_new(parent: &File, _: &File, from: &str, to: &str) -> io::Result<()> {
     let from = CString::new(from).map_err(|_| io::ErrorKind::InvalidInput)?;
     let to = CString::new(to).map_err(|_| io::ErrorKind::InvalidInput)?;
@@ -87,6 +98,9 @@ pub fn remove_owned(parent: &File, file: &File, name: &str) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+pub fn sync_parent(parent: &File) -> io::Result<()> {
+    parent.sync_all()
 }
 
 #[cfg(test)]

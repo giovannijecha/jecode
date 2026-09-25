@@ -127,6 +127,7 @@ impl Prepared {
             Self::Edit { path, old, new } => workspace.prepare_edit(path, old, new, budget),
             _ => Err(workspace::ChangeError(
                 "read tool cannot propose a change".into(),
+                None,
             )),
         }
     }

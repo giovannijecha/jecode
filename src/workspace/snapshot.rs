@@ -298,6 +298,7 @@ pub(super) fn scan_match(
     found.ok_or_else(|| {
         ChangeError(
             "old_text does not match; read the file and propose an exact replacement".into(),
+            None,
         )
     })
 }

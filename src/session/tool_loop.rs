@@ -78,6 +78,7 @@ fn execute(
             .as_ref()
             .ok_or(Failure::Worker)?
             .tool_calls[index];
+        let call_id = call.id.clone();
         let prepared = Prepared::parse(&call.name, &call.arguments);
         let (name, path) = match &prepared {
             Ok(tool) => (tool.name(), tool.path().to_owned()),
@@ -121,7 +122,16 @@ fn execute(
                 (output, Some(event))
             }
             Ok(tool) if tool.changes_file() => {
-                let (output, event) = super::edit::execute(tool, workspace, context);
+                let recoveries = history.recovery_store().map_err(|_| Failure::Storage)?;
+                let session_id = history.record.as_ref().map(|record| record.id().to_owned());
+                let (output, event) = super::edit::execute(
+                    tool,
+                    workspace,
+                    context,
+                    &recoveries,
+                    session_id.as_deref(),
+                    &call_id,
+                );
                 (output, Some(event))
             }
             Ok(tool) => (
@@ -136,6 +146,7 @@ fn execute(
             ),
             Err(error) => (Output::error(error), None),
         };
+        let stop_after = output.stop_after;
         let receipt = &mut current(history)?.results[index];
         receipt.summary = format!("{name} / {}", output.summary);
         receipt.output = output.text;
@@ -147,6 +158,9 @@ fn execute(
             let _ = context.send(event, false);
         }
         checkpoint?;
+        if stop_after {
+            return Err(Failure::Storage);
+        }
         if !effect {
             let _ = context.send(
                 Event::ToolFinished {

@@ -43,7 +43,7 @@ impl worker::Backend for Backend {
         if self.round != 1 {
             return Ok(tests::response("Recorded the result.", Status::Completed));
         }
-        for _ in 0..63 {
+        for _ in 0..16 {
             let _ = progress(Progress::Text("x"));
         }
         let mut calls = match self.case {
@@ -71,7 +71,7 @@ impl worker::Backend for Backend {
                 r#"{"path":"created.txt","content":"created\n"}"#,
             ));
         }
-        let mut response = tests::response(&"x".repeat(63), Status::Completed);
+        let mut response = tests::response(&"x".repeat(16), Status::Completed);
         for call in &calls {
             response.output.push(json::object([
                 ("type", Value::String("function_call".into())),
@@ -106,14 +106,15 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
     let mut history =
         persistence::create_in(&store, Model::Luna, Some(&files.0), Some(&workspace)).unwrap();
     let id = history.record.as_ref().unwrap().id().to_owned();
-    if matches!(case, Case::FailedEdit) {
-        let target = files.0.join("notes.txt");
-        history.effect_gate = Some(Arc::new(move |name| {
-            if name == "edit_file" {
-                fs::write(&target, "competing\n").unwrap();
-            }
-        }));
-    }
+    let target = files.0.join("notes.txt");
+    history.effect_gate = Some(Arc::new(move |name, events| {
+        if matches!(case, Case::FailedEdit) && name == "edit_file" {
+            fs::write(&target, "competing\n").unwrap();
+        }
+        // The plan has been delivered. Fill the presentation channel without
+        // adding visible text, then let the real effect and checkpoint proceed.
+        while events.try_send(Event::Text(String::new())).is_ok() {}
+    }));
     let mut session = Session::with_history(
         Model::Luna,
         Backend { case, round: 0 },
@@ -125,8 +126,9 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
     assert!(matches!(tests::next(&mut session), Event::Ready));
     assert!(session.submit("run isolated effects"));
 
-    // The 63 streamed text events and the plan occupy all 64 slots. Wait for
-    // the committed receipt without consuming presentation or releasing pressure.
+    // The test gate fills all 64 slots after the plan, so the effect can start
+    // without depending on the number of setup events. Wait for its committed
+    // receipt without draining presentation.
     let expected = if matches!(case, Case::Command) {
         "exited"
     } else if matches!(case, Case::FailedEdit) {
@@ -140,7 +142,7 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
         + Duration::from_secs(if matches!(case, Case::Command) {
             60
         } else {
-            15
+            35
         });
     let mut unexpected = None;
     let before_release = loop {
@@ -187,6 +189,7 @@ pub(crate) fn saturated_events(case: Case) -> Option<Vec<Event>> {
         events.last(),
         Some(Event::Finished(End::Complete, _))
     ));
+    assert!(events.len() >= 64, "presentation was not saturated");
     let final_receipts = final_receipts.unwrap();
     assert_eq!(
         final_receipts[0].get("status").and_then(Value::text),

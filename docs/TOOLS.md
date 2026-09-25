@@ -53,18 +53,88 @@ Jecode prepares the exact change before execution. Creation does not overwrite a
 existing file. Editing requires one exact occurrence of the old text and rejects
 changes made after the preview. The model is instructed to read before editing.
 Large existing files use a temporary, owned snapshot so preparation and stale
-checks do not keep multiple full copies in memory. Existing originals have an
-adjacent `.jecode-recovery-*` copy after publication, referenced in the receipt.
-Do not remove recovery copies until they are no longer needed.
+checks do not keep multiple full copies in memory. Before publishing an edit,
+Jecode streams the exact original and proposed result into private files under
+`~/.jecode/v1/recoveries/`, syncs them and records their workspace, absolute
+target, session and tool call. The receipt's `recovery` value is a stable ID,
+not a project path. Each edit retains two full versions; Jecode does not purge
+them by age or count. The user owns this state and decides when it is no longer
+needed. Creation has no previous version to retain.
 
 The visible diff shows at most 48 KiB and 400 lines. When shortened, it reports
 how many rendered lines and bytes were omitted. Display limits do not shorten the
 change itself.
 For a large existing file, the diff shows the exact replacement
 and byte offset while omitting unchanged surrounding file context. Temporary
-`.jecode-snapshot-*` files are also removed on normal completion or cancellation.
-An abrupt process exit can leave a temporary file behind; it does not replace
-the target or serve as a recovery copy.
+`.jecode-snapshot-*` and `.jecode-staging-*` files are removed on normal
+completion or cancellation. Publication briefly uses an adjacent
+`.jecode-recovery-*` name for the original on the target filesystem. It is
+removed after a successful edit; the durable original is already in private
+state. A crash or cleanup failure can leave an adjacent transient. Inspect it
+and the recovery ID before taking action; Jecode does not delete old or
+interrupted files automatically. User state and the project may be on different
+filesystems: Jecode copies to private state in 16 KiB chunks and uses only
+same-directory, no-overwrite renames for publication.
+Linux flushes the parent directory after publication and cleanup. On Windows,
+the file data and private manifest are flushed, but this implementation has
+no directory-flush guarantee across sudden power loss; use `show` and `repair`
+if the observed name differs from the recorded state after a crash.
+
+## Inspecting and restoring files
+
+Run these commands with the same selected working directory as the originating
+session. They work after closing Jecode and do not contact the model:
+
+```text
+jecode --workspace PATH recover list
+jecode --workspace PATH recover show ID
+jecode --workspace PATH recover cat ID
+jecode --workspace PATH recover restore ID
+jecode --workspace PATH recover repair ID
+```
+
+`list` identifies versions by ID, target, session and operation. `show` reports
+the recorded state, sizes, whether the current target matches a retained
+version, and any adjacent transient.
+`cat` streams the retained original to stdout for inspection or redirection;
+it can contain sensitive project content. `restore` installs that original only
+when the current target is the exact recorded result with its expected file
+identity, metadata and bytes. A conflict leaves the target untouched. To walk
+back several Jecode edits, restore the newest version first, then the preceding
+one. Restoration preserves the original file's ordinary Unix mode or Windows
+DACL access entries and protection mode, and its modification time. Windows
+may normalize the DACL auto-inherited marker. Restoration is itself a visible
+filesystem effect and may leave an incomplete record if interrupted. `repair ID`
+reconciles a captured edit or interrupted restoration after inspecting the
+target and adjacent file. It also removes a verified adjacent transient left
+by an applied edit. Recorded file identities help distinguish Jecode's files
+from competing files with identical contents. Repair refuses conflicts and
+never replaces an occupied name.
+
+The private state records `capturing` before copying either private file,
+then `captured` before an edit can move the target,
+`applied` after publication, and `restoring` before restoration. If the final
+record fails after publication, the operation reports the applied result and
+stops later effects; `repair` can confirm the result from the retained bytes.
+If publication fails after moving the original aside, Jecode tries a
+no-overwrite move back. A competing target wins; the original remains adjacent
+and in private state. An interrupted transaction may need `show` and `repair`
+before restoration. No recovery copy rolls back arbitrary shell effects.
+
+Older receipts that contain an adjacent `.jecode-recovery-*` path remain valid
+historical references. Those files are user data and are never imported,
+moved or removed automatically. To use one, inspect both it and the current
+target, make a separate copy, and restore it manually only after resolving
+any target conflict. The new ID commands apply only to versions in private
+state; they do not reinterpret historical paths.
+
+There is no automatic or in-app cleanup of retained versions. To discard a
+completed version deliberately, close the originating session, inspect its ID,
+and remove exactly its `ID.json`, `ID.before` and `ID.after` files from the
+private `recoveries` directory after making any desired backup. Preserve
+`capturing`, `captured` or `restoring` records and any adjacent transient until their
+outcome has been reconciled. Deleting a version makes its receipt a historical
+reference only; Jecode will not silently rebuild it from the project.
 
 The old 32 KiB proposal and 1 MiB edit-file caps are gone. Account responses
 still have a 1 MiB decoded event and output budget, so the encoded tool call,
