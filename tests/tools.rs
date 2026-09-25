@@ -197,6 +197,64 @@ fn strict_arguments_and_schemas_cover_the_advertised_tools() {
 }
 
 #[test]
+fn image_selectors_accept_nullable_and_legacy_forms_without_repairing_bad_values() {
+    let id = "a".repeat(64);
+    for (argument, path, image_id) in [
+        (
+            r#"{"path":" sample.png","image_id":null}"#.to_owned(),
+            Some(" sample.png"),
+            None,
+        ),
+        (
+            r#"{"path":"sample.png"}"#.to_owned(),
+            Some("sample.png"),
+            None,
+        ),
+        (
+            format!(r#"{{"path":null,"image_id":"{id}"}}"#),
+            None,
+            Some(id.as_str()),
+        ),
+        (format!(r#"{{"image_id":"{id}"}}"#), None, Some(id.as_str())),
+    ] {
+        let args = json::parse(&argument, Default::default()).unwrap();
+        match Prepared::parse("view_image", &args).unwrap() {
+            Prepared::Image {
+                path: actual_path,
+                image_id: actual_id,
+            } => {
+                assert_eq!(actual_path.as_deref(), path);
+                assert_eq!(actual_id.as_deref(), image_id);
+            }
+            _ => panic!("expected image selector"),
+        }
+    }
+    for argument in [
+        r#"{}"#.to_owned(),
+        r#"{"path":null,"image_id":null}"#.to_owned(),
+        format!(r#"{{"path":"sample.png","image_id":"{id}"}}"#),
+        r#"{"path":"","image_id":null}"#.to_owned(),
+        r#"{"path":" \t ","image_id":null}"#.to_owned(),
+        r#"{"path":null,"image_id":""}"#.to_owned(),
+        r#"{"path":null,"image_id":" \t "}"#.to_owned(),
+        r#"{"path":null,"image_id":"ABC"}"#.to_owned(),
+        r#"{"path":null,"image_id":"aaaa"}"#.to_owned(),
+        format!(r#"{{"path":null,"image_id":"{}"}}"#, "A".repeat(64)),
+        r#"{"path":42,"image_id":null}"#.to_owned(),
+        r#"{"path":"sample.png","image_id":false}"#.to_owned(),
+        r#"{"path":[],"image_id":"aaaa"}"#.to_owned(),
+        r#"{"path":"sample.png","image_id":{}}"#.to_owned(),
+        r#"{"path":"sample.png","image_id":null,"extra":1}"#.to_owned(),
+    ] {
+        let args = json::parse(&argument, Default::default()).unwrap();
+        assert!(
+            Prepared::parse("view_image", &args).is_err(),
+            "accepted invalid selectors: {argument}"
+        );
+    }
+}
+
+#[test]
 fn direct_dispatch_cannot_bypass_the_ordered_session_controller() {
     let fixture = Fixture::new();
     fixture.write("file", "old");

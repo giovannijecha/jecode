@@ -206,7 +206,7 @@ fn saved_id_duplicate_views_obey_the_aggregate_budget() {
         .unwrap()
         .capture(&png, "original.png")
         .unwrap();
-    let argument = format!(r#"{{"image_id":"{}"}}"#, saved.id);
+    let argument = format!(r#"{{"path":null,"image_id":"{}"}}"#, saved.id);
     let mut backend = AdmissionBackend {
         replies: [
             tool_tests::calls_response(vec![

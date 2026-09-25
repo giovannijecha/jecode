@@ -85,7 +85,7 @@ impl worker::Backend for ImagesBackend {
             Ok(tool_tests::calls_response(vec![tool_tests::call(
                 "image-call",
                 "view_image",
-                r#"{"path":"screen.png"}"#,
+                r#"{"path":"screen.png","image_id":null}"#,
             )]))
         } else {
             Ok(tests::response(
@@ -166,7 +166,45 @@ fn catalog_capability_controls_tool_exposure_and_retained_image_projection() {
     ready(&mut session);
     assert!(session.submit("Inspect screen.png"));
     assert_eq!(finished(&mut session), End::Complete);
-    assert!(image_item(&requests.lock().unwrap()[1]).is_some());
+    let captured = requests.lock().unwrap();
+    let tools = captured[0].get("tools").and_then(Value::array).unwrap();
+    let view = tools
+        .iter()
+        .find(|tool| tool.get("name").and_then(Value::text) == Some("view_image"))
+        .unwrap();
+    assert_eq!(view.get("strict"), Some(&Value::Bool(true)));
+    let schema = view.get("parameters").unwrap();
+    assert_eq!(
+        schema.get("additionalProperties"),
+        Some(&Value::Bool(false))
+    );
+    assert_eq!(
+        schema.get("required").and_then(Value::array),
+        Some(
+            &[
+                Value::String("path".into()),
+                Value::String("image_id".into())
+            ][..]
+        )
+    );
+    for selector in ["path", "image_id"] {
+        assert_eq!(
+            schema
+                .get("properties")
+                .and_then(|properties| properties.get(selector))
+                .and_then(|property| property.get("type"))
+                .and_then(Value::array),
+            Some(&[Value::String("string".into()), Value::String("null".into())][..])
+        );
+    }
+    assert!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::text) != Some("view_image"))
+            .all(|tool| tool.get("strict").is_none())
+    );
+    assert!(image_item(&captured[1]).is_some());
+    drop(captured);
     let text_model = Model::new("text-only", None).unwrap();
     assert!(session.set_model(text_model));
     assert!(matches!(tests::next(&mut session), Event::ModelChanged(model) if model == text_model));

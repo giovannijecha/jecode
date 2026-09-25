@@ -25,17 +25,20 @@ pub(crate) fn definitions_for(shell: &crate::command::Shell, image: bool) -> Vec
     ].into_iter().map(|(name, description, schema)| Tool {
         name: name.into(), description: description.into(),
         parameters: json::parse(schema, Default::default()).expect("owned tool schema"),
+        strict: None,
     }).collect();
     tools.push(Tool {
         name: "run_command".into(),
         description: format!("Run one non-interactive command directly using {}. command is at most 4096 UTF-8 bytes. path is the starting directory, relative to the working directory or absolute when permitted (default '.'). timeout_seconds defaults to 60 (1..300). stdin is closed. Output streams to the user; results retain up to 6 KiB per stream and report truncation. More than 1 MiB of output stops the command. No background services. {COMMAND_REACH} Never read or print credentials. A cancelled command may already have effects; inspect its receipt before repeating it.{native_completion_note}", shell.label()),
         parameters: json::parse(r#"{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":4096},"path":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":300}},"required":["command"],"additionalProperties":false}"#, Default::default()).expect("owned command schema"),
+        strict: None,
     });
     if image {
         tools.push(Tool {
             name: "view_image".into(),
-            description: "View a local PNG image as actual visual input. Supply path relative to the selected working directory, or an absolute path when its file-access profile allows it. Alternatively supply image_id from this session's earlier view to inspect the exact saved bytes again. PNG bytes are captured privately before success; unsupported, invalid, missing and oversized files fail explicitly. Screenshot creation is outside this tool. Original pixels are sent unchanged with high detail; provider-side processing is not locally observable.".into(),
-            parameters: json::parse(r#"{"type":"object","properties":{"path":{"type":"string"},"image_id":{"type":"string"}},"additionalProperties":false}"#, Default::default()).expect("owned image tool schema"),
+            description: "View a local PNG image as actual visual input. Set exactly one selector to a valid nonempty value and the other to null: path for a local file, or image_id for a 64-character lowercase SHA-256 ID from this session's earlier view. A path may be relative to the selected working directory or absolute when its file-access profile allows it. PNG bytes are captured privately before success; unsupported, invalid, missing and oversized files fail explicitly. Screenshot creation is outside this tool. Original pixels are sent unchanged with high detail; provider-side processing is not locally observable.".into(),
+            parameters: json::parse(r#"{"type":"object","properties":{"path":{"type":["string","null"]},"image_id":{"type":["string","null"]}},"required":["path","image_id"],"additionalProperties":false}"#, Default::default()).expect("owned image tool schema"),
+            strict: Some(true),
         });
     }
     tools

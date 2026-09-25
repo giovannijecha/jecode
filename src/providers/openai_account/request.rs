@@ -23,6 +23,8 @@ pub struct Tool {
     pub name: String,
     pub description: String,
     pub parameters: Value,
+    /// Emit strict only for tool schemas that deliberately opt in.
+    pub strict: Option<bool>,
 }
 
 pub struct Request {
@@ -119,12 +121,16 @@ impl Request {
             {
                 return Err(Error::InvalidRequest);
             }
-            tools.push(json::object([
+            let mut definition = vec![
                 ("type", string("function")),
                 ("name", string(&tool.name)),
                 ("description", string(&tool.description)),
                 ("parameters", tool.parameters.clone()),
-            ]));
+            ];
+            if let Some(strict) = tool.strict {
+                definition.push(("strict", Value::Bool(strict)));
+            }
+            tools.push(json::object(definition));
         }
         let mut reasoning = vec![("summary", string("auto"))];
         if let Some(effort) = &self.effort {
