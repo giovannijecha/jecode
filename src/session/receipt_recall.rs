@@ -1,13 +1,64 @@
 //! Bounded, read-only access to this session's committed workspace-read receipts.
-use super::history::{History, Step};
+use super::history::{History, MAX_TEXT, Receipt, Step};
 use crate::{
     json::{self, Value},
-    providers::openai_account::Status,
-    tools::Output,
+    providers::openai_account::{Status, ToolCall},
+    tools::{Output, Prepared},
     workspace::Budget,
 };
 
 const PAGE_BYTES: usize = 8 * 1024;
+
+/// A page awaiting its first accepted model response is identified from its
+/// paired canonical result, not its display summary. Errors and unexecuted
+/// calls remain saved but do not pin unrelated reads ahead of compaction.
+pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
+    if call.name != "recall_receipts" || call.id != result.call_id || result.output.len() > MAX_TEXT
+    {
+        return false;
+    }
+    let Ok(value) = json::parse(
+        &result.output,
+        json::Limits {
+            bytes: MAX_TEXT,
+            nodes: 4096,
+            depth: 16,
+        },
+    ) else {
+        return false;
+    };
+    let Ok(Prepared::Recall {
+        turn,
+        step,
+        receipt,
+        offset,
+    }) = Prepared::parse(&call.name, &call.arguments)
+    else {
+        return false;
+    };
+    let coordinate = |key| {
+        value
+            .get(key)
+            .and_then(Value::unsigned)
+            .and_then(|n| usize::try_from(n).ok())
+    };
+    value.get("ok") == Some(&Value::Bool(true))
+        && value.get("source").and_then(Value::text).is_some()
+        // The inner call_id names the original source read. The outer receipt
+        // call_id above pairs this result with the recall call being delivered.
+        && value.get("call_id").and_then(Value::text).is_some()
+        && matches!(
+            value.get("call_name").and_then(Value::text),
+            Some("list_files" | "read_file" | "search_text")
+        )
+        && value.get("output").and_then(Value::text).is_some()
+        && (
+            coordinate("turn"),
+            coordinate("step"),
+            coordinate("receipt"),
+            coordinate("offset"),
+        ) == (Some(turn), Some(step), Some(receipt), Some(offset))
+}
 
 fn number(value: usize) -> Value {
     Value::Number(value.to_string())
@@ -185,6 +236,9 @@ fn eligible(
 #[cfg(test)]
 #[path = "receipt_recall_cursor_tests.rs"]
 mod cursor_tests;
+#[cfg(test)]
+#[path = "receipt_recall_delivery_tests.rs"]
+mod delivery_tests;
 #[cfg(test)]
 #[path = "receipt_recall_review_tests.rs"]
 mod review_tests;

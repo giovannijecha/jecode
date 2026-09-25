@@ -17,6 +17,27 @@ fn budget(cancelled: &AtomicBool) -> Budget<'_> {
         deadline: Instant::now() + Duration::from_secs(10),
     }
 }
+fn admitted_page(output: &str) -> String {
+    json::encode(
+        &json::object([
+            ("ok", Value::Bool(true)),
+            (
+                "source",
+                string("original recorded session receipt; no source reread"),
+            ),
+            ("turn", number(0)),
+            ("step", number(0)),
+            ("receipt", number(0)),
+            ("offset", number(0)),
+            ("call_id", string("original-read")),
+            ("call_name", string("read_file")),
+            ("output", string(output)),
+            ("next", Value::Null),
+        ]),
+        super::super::history::MAX_TEXT,
+    )
+    .unwrap()
+}
 fn captured_history(output: String) -> (crate::state::tests::Fixture, String) {
     let fixture = crate::state::tests::Fixture::new();
     let store = fixture.store().unwrap();
@@ -235,7 +256,7 @@ fn newly_recalled_receipt_reaches_the_next_generation_under_context_pressure() {
         )])),
         results: vec![Receipt {
             call_id: "recall-now".into(),
-            output: "RECORDED-ORIGINAL-5831".into(),
+            output: admitted_page("RECORDED-ORIGINAL-5831"),
             summary: "recall_receipts / recorded evidence".into(),
             image: None,
         }],
@@ -339,7 +360,7 @@ fn saved_oversized_recall_is_explicitly_deferred_without_changing_canonical_outp
     let results = (0..9)
         .map(|n| Receipt {
             call_id: format!("recall-{n}"),
-            output: "x".repeat(1_000_000),
+            output: admitted_page(&"x".repeat(995_000)),
             summary: "recall_receipts / recorded evidence".into(),
             image: None,
         })
@@ -394,6 +415,6 @@ fn saved_oversized_recall_is_explicitly_deferred_without_changing_canonical_outp
         saved_step
             .results
             .iter()
-            .all(|result| result.output.len() == 1_000_000)
+            .all(|result| result.output == admitted_page(&"x".repeat(995_000)))
     );
 }

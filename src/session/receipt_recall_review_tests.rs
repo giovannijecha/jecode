@@ -19,6 +19,123 @@ fn budget(cancelled: &AtomicBool) -> Budget<'_> {
     }
 }
 
+struct MixedLargeBatch {
+    round: usize,
+    with_recall: bool,
+}
+impl Backend for MixedLargeBatch {
+    fn login(
+        &mut self,
+        _: &NetworkBudget<'_>,
+        _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+    ) -> Result<(), client::Error> {
+        Ok(())
+    }
+    fn generate(
+        &mut self,
+        request: &Request,
+        _: &NetworkBudget<'_>,
+        _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+    ) -> Result<Response, client::Error> {
+        if request.instructions.starts_with("Summarize") {
+            return Ok(crate::session::tests::handoff_response(
+                request,
+                "Original read receipts were saved.",
+            ));
+        }
+        self.round += 1;
+        if self.round == 1 {
+            let mut calls: Vec<_> = (0..1100)
+                .map(|n| {
+                    tool_tests::call(
+                        &format!("read-{n}"),
+                        "read_file",
+                        r#"{"path":"source.txt"}"#,
+                    )
+                })
+                .collect();
+            if self.with_recall {
+                calls.push(tool_tests::call(
+                    "last-recall",
+                    "recall_receipts",
+                    r#"{"turn":0,"step":0}"#,
+                ));
+            }
+            let response = tool_tests::calls_response(calls);
+            assert!(json::encode(&Value::Array(response.output.clone()), 1024 * 1024).is_ok());
+            return Ok(response);
+        }
+        Ok(crate::session::tests::response(
+            "Consumed the bounded evidence",
+            Status::Completed,
+        ))
+    }
+}
+
+#[test]
+fn astra_mixed_read_batch_with_trailing_recall_remains_compactable() {
+    let files = crate::workspace_fixture::Fixture::new();
+    files.write("source.txt", format!("{}\n", "x".repeat(79)).repeat(100));
+    for with_recall in [false, true] {
+        let mut history = History::default();
+        history.begin("Earlier read".into()).unwrap();
+        history.turns[0].steps.push(Step {
+            response: Some(tool_tests::calls_response(vec![tool_tests::call(
+                "original",
+                "read_file",
+                r#"{"path":"source.txt"}"#,
+            )])),
+            results: vec![Receipt {
+                call_id: "original".into(),
+                output: "original observation ".repeat(400),
+                summary: "read_file / source.txt".into(),
+                image: None,
+            }],
+            accepted: true,
+            ..Default::default()
+        });
+        history.turns[0].end = Some(End::Complete);
+        let mut session = Session::with_history(
+            Model::Luna,
+            MixedLargeBatch {
+                round: 0,
+                with_recall,
+            },
+            Some(Workspace::open(&files.0).unwrap()),
+            history,
+        )
+        .unwrap();
+        assert!(matches!(next_large(&mut session), Event::Ready));
+        let mut outcomes = Vec::new();
+        let mut failed_tools = 0;
+        for prompt in ["Read the evidence", "Continue"] {
+            assert!(session.submit(prompt));
+            loop {
+                match next_large(&mut session) {
+                    Event::ToolFinished { failed, .. } => {
+                        failed_tools += usize::from(failed);
+                    }
+                    Event::Finished(end, metrics) => {
+                        eprintln!(
+                            "mixed batch recall={with_recall}: {end:?}, requests={}, tools={}",
+                            metrics.requests, metrics.tool_calls
+                        );
+                        outcomes.push(end);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(failed_tools, usize::from(with_recall));
+        assert_eq!(
+            outcomes,
+            vec![End::Complete, End::Complete],
+            "adding a rejected recall must not block otherwise compactable reads"
+        );
+    }
+}
+
 pub(super) fn next_large(session: &mut Session) -> Event {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {

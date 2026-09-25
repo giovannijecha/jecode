@@ -125,11 +125,7 @@ impl History {
                     .tool_calls
                     .iter()
                     .zip(&step.results)
-                    .any(|(call, result)| {
-                        call.name == "recall_receipts"
-                            && call.id == result.call_id
-                            && result.summary != "Not executed"
-                    })
+                    .any(|(call, result)| super::receipt_recall::admitted(call, result))
                 {
                     pending = Some((turn_index, step_index));
                 }
