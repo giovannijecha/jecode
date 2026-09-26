@@ -459,12 +459,11 @@ fn ordinary_and_sliced_compaction_expose_index_without_replaying_reads() {
         if large {
             assert!(compacted > 1, "large read should use sliced compaction");
         }
-        // Verification guidance and the index are present after compaction.
-        assert!(
-            requests
-                .iter()
-                .any(|request| request.contains("even when the handoff states facts confidently"))
-        );
+        // The separate discovery and exact-recall guidance remains after compaction.
+        assert!(requests.iter().any(|request| {
+            request.contains("use index_receipts to locate the original call")
+                && request.contains("A handoff summary is not by itself factual verification")
+        }));
     }
 }
 
