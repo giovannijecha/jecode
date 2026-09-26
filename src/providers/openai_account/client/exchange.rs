@@ -222,8 +222,11 @@ pub(super) fn exchange_with_clock(
                     delivery: *delivery,
                 }
             })?;
-        // A slow local progress callback must not extend provider inactivity.
+        // Accepted events retain their receive timestamp. Parsing and bounded
+        // presentation may block this reader, so that local time cannot be
+        // classified as provider inactivity on the next read.
         window.observed(before_events, response.stream_events(), received_at);
+        window.processed(received_at, now());
         trace.response_status = response.response_status();
         trace.stream_events = response.stream_events();
         if response.stream_started() {

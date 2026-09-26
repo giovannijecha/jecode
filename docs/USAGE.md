@@ -120,7 +120,11 @@ the gap between complete accepted events for ordinary generation and every
 compaction path. Valid reasoning and other non-text data events renew the wait;
 headers, partial TLS/HTTP/SSE data and SSE comments do not. A progressing response
 has no implicit total lifetime limit. Cancellation and explicit caller deadlines
-still apply. Changes take effect when starting or resuming a session.
+still apply. The inactivity clock counts time while the response reader can
+receive. Synchronous decoding and delivery into the bounded presentation queue
+do not count as provider inactivity; reading resumes when presentation drains.
+If the provider then remains silent, the remaining idle interval expires.
+Changes take effect when starting or resuming a session.
 `file_access` accepts `local` or `workspace`; omitting it uses `local` for new
 sessions. See [tools](TOOLS.md) for the path exclusions and supported formats.
 

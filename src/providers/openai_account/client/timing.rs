@@ -36,6 +36,7 @@ pub struct ResponseWindow {
     started: Instant,
     last_event: Option<Instant>,
     idle: Duration,
+    local_processing: Duration,
 }
 impl ResponseWindow {
     pub fn new(started: Instant, idle: Duration) -> Self {
@@ -43,16 +44,22 @@ impl ResponseWindow {
             started,
             last_event: None,
             idle,
+            local_processing: Duration::ZERO,
         }
     }
     pub fn since_progress(&self, now: Instant) -> u64 {
         now.saturating_duration_since(self.last_event.unwrap_or(self.started))
+            .saturating_sub(self.local_processing)
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX)
     }
     pub fn deadline(&self, parent: &Budget<'_>) -> Instant {
-        stage_deadline(parent, self.last_event.unwrap_or(self.started), self.idle)
+        stage_deadline(
+            parent,
+            self.last_event.unwrap_or(self.started) + self.local_processing,
+            self.idle,
+        )
     }
     pub fn check(&self, parent: &Budget<'_>, now: Instant) -> Result<(), Termination> {
         if parent.cancelled.load(std::sync::atomic::Ordering::Acquire) {
@@ -76,7 +83,14 @@ impl ResponseWindow {
     pub fn observed(&mut self, before: u32, after: u32, now: Instant) {
         if after > before {
             self.last_event = Some(now);
+            self.local_processing = Duration::ZERO;
         }
+    }
+    /// The reader cannot observe provider progress while it is synchronously
+    /// parsing and delivering a received chunk. Exclude only that local time;
+    /// no event is inferred when presentation returns.
+    pub fn processed(&mut self, received_at: Instant, finished_at: Instant) {
+        self.local_processing += finished_at.saturating_duration_since(received_at);
     }
 }
 

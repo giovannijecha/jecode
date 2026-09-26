@@ -9,6 +9,8 @@ mod persistent;
 mod recovery;
 mod reply;
 mod timing;
+#[cfg(test)]
+pub(crate) mod timing_fixture;
 
 use super::{Progress, Request, Response, auth, encode_http};
 use crate::tls::{ApplicationWrite, Budget, Connection, NetworkError, trust::TrustStore};

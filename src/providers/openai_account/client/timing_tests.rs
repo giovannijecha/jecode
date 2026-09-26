@@ -1,10 +1,94 @@
 use super::*;
 
+#[test]
+fn astra_buffered_completion_is_independent_of_transport_segmentation() {
+    // Both chunks are already available at t=1. Only the local callback
+    // advances time; the provider neither stalls nor delays its completion.
+    struct Ready(VecDeque<Vec<u8>>, usize);
+    impl ResponseChannel for Ready {
+        fn write(
+            &mut self,
+            bytes: &[u8],
+            _: &Budget<'_>,
+            p: &mut ApplicationWrite,
+        ) -> Result<(), NetworkError> {
+            p.accepted_wire_bytes = bytes.len();
+            Ok(())
+        }
+        fn read(&mut self, _: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
+            self.1 += 1;
+            Ok(self.0.pop_front().map(|bytes| Plaintext {
+                kind: ContentType::Application,
+                bytes,
+            }))
+        }
+        fn close(&mut self, _: &Budget<'_>) -> Result<(), NetworkError> {
+            Ok(())
+        }
+    }
+    for split in [false, true] {
+        let origin = Instant::now();
+        let clock = std::cell::Cell::new(origin);
+        let cancelled = AtomicBool::new(false);
+        let budget = Budget {
+            deadline: None,
+            cancelled: &cancelled,
+        };
+        let delta =
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n";
+        let terminal = terminal_event();
+        let first = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{delta}",
+            delta.len() + terminal.len()
+        );
+        let mut channel = Ready(
+            if split {
+                vec![first.into_bytes(), terminal.into_bytes()].into()
+            } else {
+                vec![format!("{first}{terminal}").into_bytes()].into()
+            },
+            0,
+        );
+        let mut trace = recovery::Trace::default();
+        let mut delivery = Delivery::NotSubmitted;
+        let mut write = ApplicationWrite::default();
+        let result = exchange::exchange_with_clock(
+            &mut channel,
+            b"fixture",
+            &budget,
+            exchange::RequestWindows {
+                write: &budget,
+                idle: Duration::from_secs(120),
+            },
+            ExchangeProgress {
+                delivery: &mut delivery,
+                write: &mut write,
+                trace: &mut trace,
+            },
+            |p| {
+                if matches!(p, Progress::Reasoning(_)) {
+                    clock.set(origin + Duration::from_secs(200));
+                }
+                ControlFlow::Continue(())
+            },
+            || clock.get(),
+        );
+        assert!(
+            result.is_ok(),
+            "split={split}, reads={}, buffered={}, termination={:?}, result={result:?}",
+            channel.1,
+            channel.0.len(),
+            trace.termination
+        );
+    }
+}
+
 struct Clocked<'a> {
     origin: Instant,
     clock: &'a std::cell::Cell<Instant>,
     reads: VecDeque<(u64, Vec<u8>)>,
     cancel_on_read: Option<&'a AtomicBool>,
+    stall_on_empty: bool,
     calls: usize,
 }
 impl ResponseChannel for Clocked<'_> {
@@ -17,9 +101,13 @@ impl ResponseChannel for Clocked<'_> {
         progress.accepted_wire_bytes = bytes.len();
         Ok(())
     }
-    fn read(&mut self, _: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
+    fn read(&mut self, budget: &Budget<'_>) -> Result<Option<Plaintext>, NetworkError> {
         self.calls += 1;
         let Some((seconds, bytes)) = self.reads.pop_front() else {
+            if self.stall_on_empty {
+                self.clock.set(budget.deadline.unwrap());
+                return Err(NetworkError::Timeout);
+            }
             return Ok(None);
         };
         self.clock.set(self.origin + Duration::from_secs(seconds));
@@ -76,6 +164,7 @@ fn clocked_channel<'a>(
         clock,
         reads: pieces.into(),
         cancel_on_read: None,
+        stall_on_empty: false,
         calls: 0,
     }
 }
@@ -232,7 +321,7 @@ fn cancellation_after_fragmented_read_is_prompt_and_not_retried() {
 }
 
 #[test]
-fn slow_local_progress_callback_does_not_renew_provider_idle_time() {
+fn slow_local_progress_callback_does_not_keep_a_stalled_provider_alive() {
     let origin = Instant::now();
     let clock = std::cell::Cell::new(origin);
     let cancelled = AtomicBool::new(false);
@@ -242,16 +331,14 @@ fn slow_local_progress_callback_does_not_renew_provider_idle_time() {
     };
     let reasoning =
         "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n";
-    let body = format!("{reasoning}{}", terminal_event());
-    let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+    let header = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+    let chunk = format!("{:x}\r\n{reasoning}\r\n", reasoning.len());
     let mut channel = clocked_channel(
         origin,
         &clock,
-        vec![
-            (1, format!("{header}{reasoning}").into_bytes()),
-            (201, terminal_event().into_bytes()),
-        ],
+        vec![(1, format!("{header}{chunk}").into_bytes())],
     );
+    channel.stall_on_empty = true;
     let mut trace = recovery::Trace::default();
     let mut delivery = Delivery::NotSubmitted;
     let mut write = ApplicationWrite::default();
@@ -285,6 +372,80 @@ fn slow_local_progress_callback_does_not_renew_provider_idle_time() {
         }
     ));
     assert_eq!(trace.termination, Some(Termination::IdleTimeout));
-    assert_eq!(trace.since_progress_ms, Some(199_000));
-    assert_eq!(channel.calls, 1);
+    assert_eq!(trace.since_progress_ms, Some(120_000));
+    assert_eq!(trace.request_elapsed_ms, 320_000);
+    assert_eq!(channel.calls, 2);
+}
+
+#[test]
+fn local_presentation_pause_does_not_suspend_total_budget_or_cancellation() {
+    for cancel_in_callback in [false, true] {
+        let origin = Instant::now();
+        let clock = std::cell::Cell::new(origin);
+        let cancelled = AtomicBool::new(false);
+        let budget = Budget {
+            deadline: Some(origin + Duration::from_secs(90)),
+            cancelled: &cancelled,
+        };
+        let reasoning =
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n";
+        let terminal = terminal_event();
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+            reasoning.len() + terminal.len()
+        );
+        let mut channel = clocked_channel(
+            origin,
+            &clock,
+            vec![
+                (1, format!("{header}{reasoning}").into_bytes()),
+                (1, terminal.into_bytes()),
+            ],
+        );
+        let mut trace = recovery::Trace::default();
+        let mut delivery = Delivery::NotSubmitted;
+        let mut write = ApplicationWrite::default();
+        let error = exchange::exchange_with_clock(
+            &mut channel,
+            b"fixture request",
+            &budget,
+            exchange::RequestWindows {
+                write: &budget,
+                idle: Duration::from_secs(120),
+            },
+            ExchangeProgress {
+                delivery: &mut delivery,
+                write: &mut write,
+                trace: &mut trace,
+            },
+            |progress| {
+                if matches!(progress, Progress::Reasoning(_)) {
+                    clock.set(origin + Duration::from_secs(200));
+                    if cancel_in_callback {
+                        cancelled.store(true, Ordering::Release);
+                    }
+                }
+                ControlFlow::Continue(())
+            },
+            || clock.get(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Transport {
+                stage: RequestStage::ResponseRead,
+                delivery: Delivery::Streaming,
+                ..
+            }
+        ));
+        assert_eq!(
+            trace.termination,
+            Some(if cancel_in_callback {
+                Termination::Cancelled
+            } else {
+                Termination::TotalBudget
+            })
+        );
+        assert_eq!(channel.calls, 1);
+    }
 }

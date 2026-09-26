@@ -482,6 +482,8 @@ pub(crate) mod edit_tests;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 pub(crate) mod outcome_backpressure_tests;
 #[cfg(test)]
+mod presentation_backpressure_tests;
+#[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]
 mod tool_tests;
