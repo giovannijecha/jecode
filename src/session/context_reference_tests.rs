@@ -23,11 +23,12 @@ fn read(id: &str, output: &str) -> Receipt {
 }
 
 fn address(reference: &partial::Reference) -> Value {
-    json::parse(&reference.content, Default::default())
-        .unwrap()
-        .get("recall_address")
-        .unwrap()
-        .clone()
+    reference
+        .association
+        .split_once("; recall_address=")
+        .map_or(Value::Null, |(_, address)| {
+            json::parse(address, Default::default()).unwrap()
+        })
 }
 
 fn retrieve(history: &History, address: &Value) -> crate::tools::Output {
@@ -116,10 +117,8 @@ fn emitted_addresses_select_first_middle_and_last_with_interleaved_output() {
             value.get("output_index").and_then(Value::unsigned),
             Some(output_index)
         );
-        assert_eq!(
-            value.get("tool_call_index").and_then(Value::unsigned),
-            Some(receipt)
-        );
+        assert!(value.get("tool_call_index").is_none());
+        assert!(value.get("recall_address").is_none());
         let address = address(&reference);
         assert_eq!(address.get("turn").and_then(Value::unsigned), Some(0));
         assert_eq!(address.get("step").and_then(Value::unsigned), Some(0));

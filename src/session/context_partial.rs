@@ -153,22 +153,12 @@ pub(super) fn reference_at_position(
                     )
                 })
             });
+            // Pending.offset indexes the serialized value. Keep its legacy byte
+            // representation stable; new recall metadata belongs in the envelope.
             (
                 json::object([
                     ("kind", text("response_item_and_receipt")),
                     ("output_index", Value::Number(output_index.to_string())),
-                    (
-                        "tool_call_index",
-                        if is_call {
-                            Value::Number(call_index.to_string())
-                        } else {
-                            Value::Null
-                        },
-                    ),
-                    (
-                        "recall_address",
-                        recall_address.clone().unwrap_or(Value::Null),
-                    ),
                     ("output_item", item.clone()),
                     ("call_id", call.map_or(Value::Null, |call| text(&call.id))),
                     (
@@ -580,3 +570,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+#[path = "context_partial_upgrade_tests.rs"]
+mod upgrade_tests;
