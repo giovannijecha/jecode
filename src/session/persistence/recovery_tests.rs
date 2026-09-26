@@ -11,6 +11,31 @@ fn older_attempts_load_with_absent_diagnostic_counters() {
     assert_eq!(attempt.request_sequence, 0);
     assert_eq!(attempt.received_wire_bytes, 0);
     assert_eq!(attempt.response_status, None);
+    assert_eq!(attempt.request_elapsed_ms, 0);
+    assert_eq!(attempt.since_progress_ms, None);
+    assert_eq!(attempt.termination, None);
+}
+
+#[test]
+fn timing_diagnostics_round_trip_without_request_content() {
+    use crate::providers::openai_account::client::{Attempt, Delivery, RequestStage};
+    let attempt = Attempt {
+        delivery: Delivery::Streaming,
+        stage: Some(RequestStage::ResponseRead),
+        stage_elapsed_ms: 301_000,
+        request_elapsed_ms: 315_000,
+        since_progress_ms: Some(300_000),
+        termination: Some(crate::providers::openai_account::client::Termination::IdleTimeout),
+        accepted_wire_bytes: 512,
+        response_status: Some(200),
+        stream_events: 17,
+        ..Default::default()
+    };
+    let encoded = super::codec::attempt(&attempt);
+    assert_eq!(super::codec::read_attempt(&encoded).unwrap(), attempt);
+    let body = crate::json::encode(&encoded, 2048).unwrap();
+    assert!(body.contains("stream_idle_timeout"));
+    assert!(!body.contains("prompt"));
 }
 
 #[test]
@@ -388,6 +413,9 @@ fn interrupted_stream_and_prior_receipt_survive_resume_without_replay() {
             delivery: Delivery::Streaming,
             stage: Some(RequestStage::ResponseRead),
             stage_elapsed_ms: 831,
+            request_elapsed_ms: 900,
+            since_progress_ms: Some(120),
+            termination: None,
             operation: Some("TLS record body read".into()),
             category: Some("ConnectionReset".into()),
             os_code: Some(10054),

@@ -130,7 +130,7 @@ fn authenticated_handshake_preserves_coalesced_data_and_finishes_at_the_right_ep
     });
     let cancelled = AtomicBool::new(false);
     let budget = Budget {
-        deadline: Instant::now() + Duration::from_secs(10),
+        deadline: Some(Instant::now() + Duration::from_secs(10)),
         cancelled: &cancelled,
     };
     let trust = TrustStore::fixture(vec![certificate::identity().0], &[]);
@@ -170,7 +170,7 @@ fn untrusted_finished_never_releases_client_finished_or_application_bytes() {
     });
     let cancelled = AtomicBool::new(false);
     let budget = Budget {
-        deadline: Instant::now() + Duration::from_secs(10),
+        deadline: Some(Instant::now() + Duration::from_secs(10)),
         cancelled: &cancelled,
     };
     assert!(matches!(
@@ -210,7 +210,7 @@ fn blocked_partial_record_cancels_and_all_workers_are_joined() {
         let mut socket = TcpStream::connect(address).unwrap();
         socket::configure(&socket).unwrap();
         let budget = Budget {
-            deadline: Instant::now() + Duration::from_secs(10),
+            deadline: Some(Instant::now() + Duration::from_secs(10)),
             cancelled: &cancelled,
         };
         assert_eq!(
@@ -230,7 +230,7 @@ fn tcp_eof_and_deadlines_are_not_authenticated_success() {
     drop(peer);
     let cancelled = AtomicBool::new(false);
     let mut budget = Budget {
-        deadline: Instant::now() + Duration::from_secs(10),
+        deadline: Some(Instant::now() + Duration::from_secs(10)),
         cancelled: &cancelled,
     };
     socket::configure(&socket).unwrap();
@@ -238,7 +238,7 @@ fn tcp_eof_and_deadlines_are_not_authenticated_success() {
         socket::record(&mut socket, &budget),
         Err(NetworkError::Eof(IoOperation::ReadRecordHeader))
     );
-    budget.deadline = Instant::now();
+    budget.deadline = Some(Instant::now());
     assert_eq!(
         socket::record(&mut socket, &budget),
         Err(NetworkError::Timeout)
@@ -257,7 +257,7 @@ fn partial_tls_record_eof_identifies_the_record_body() {
     socket::configure(&socket).unwrap();
     let cancelled = AtomicBool::new(false);
     let budget = Budget {
-        deadline: Instant::now() + Duration::from_secs(5),
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
         cancelled: &cancelled,
     };
     assert_eq!(

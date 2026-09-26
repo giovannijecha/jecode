@@ -369,6 +369,22 @@ pub(super) fn attempt(attempt: &Attempt) -> Value {
             "stage_elapsed_ms",
             Value::Number(attempt.stage_elapsed_ms.to_string()),
         ),
+        (
+            "request_elapsed_ms",
+            Value::Number(attempt.request_elapsed_ms.to_string()),
+        ),
+        (
+            "since_progress_ms",
+            attempt
+                .since_progress_ms
+                .map_or(Value::Null, |n| Value::Number(n.to_string())),
+        ),
+        (
+            "termination",
+            attempt
+                .termination
+                .map_or(Value::Null, |kind| text(kind.name())),
+        ),
         ("category", optional(&attempt.category)),
         (
             "os_code",
@@ -427,6 +443,17 @@ pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
         delivery: Delivery::parse(string(value, "delivery", 32)?).ok_or_else(invalid)?,
         stage,
         stage_elapsed_ms: number("stage_elapsed_ms")?,
+        request_elapsed_ms: number("request_elapsed_ms")?,
+        since_progress_ms: match value.get("since_progress_ms") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(value.unsigned().ok_or_else(invalid)?),
+        },
+        termination: optional("termination", 32)?
+            .map(|name| {
+                crate::providers::openai_account::client::Termination::parse(&name)
+                    .ok_or_else(invalid)
+            })
+            .transpose()?,
         operation: optional("operation", 64)?,
         category: optional("category", 64)?,
         os_code: match value.get("os_code") {

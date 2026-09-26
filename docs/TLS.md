@@ -54,7 +54,13 @@ cargo run --locked --offline --bin jecode-check -- account-attempts SESSION_ID D
 only fixed labels, numeric counters and a validated HTTP status. Request sequence
 is within the turn; connection attempt is within that request. Stage time is
 wall time in the failed connect, write or response-read stage, including local
-decoding and progress delivery. Accepted TLS write bytes are bytes accepted by
+decoding and progress delivery. `request_ms` is elapsed time for that connection
+attempt; `since_progress_ms` counts receive-eligible time since the completed
+write or last accepted SSE event, excluding synchronous local response parsing
+and presentation delivery. `termination` distinguishes setup, write,
+first-response and stream-idle timeouts, explicit total-budget expiry and
+cancellation. Older records have no termination label or progress age. Accepted
+TLS write bytes are bytes accepted by
 the local socket, including TLS framing. Received TLS wire bytes are bytes
 returned by local TCP reads after the request write, including incomplete records.
 Decrypted HTTP bytes were handed to the HTTP decoder; SSE events reached the
@@ -63,6 +69,15 @@ The report omits credentials, prompts, response text, tool arguments and raw
 session contents.
 
 Cancellation and deadlines are checked during connect, reads and writes. The
+model request uses finite setup and write windows, followed by a configurable
+first-event and established-stream inactivity window. A complete accepted SSE
+data event renews only the latter window; incomplete records and keepalive
+comments do not. Response parsing and the bounded presentation queue can stop
+the reader temporarily; that local time is excluded from the inactivity window
+without inventing a new SSE event. Memory remains bounded by the existing
+64-event queue and protocol limits. Cancellation and shutdown interrupt queue
+delivery; an explicit caller total deadline still uses wall time. If presentation
+never drains, provider progress cannot be observed until the reader resumes. The
 standard-library DNS resolver is synchronous and cannot be interrupted inside its
 OS call. Cleanup remains joined. Bounded CPU verification is not interruptible at
 every instruction. Memory clearing cannot guarantee removal of compiler, allocator,

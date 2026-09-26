@@ -31,9 +31,14 @@ fn partial_completed_step_checkpoint_resumes_without_replaying_receipts() {
         fn generate(
             &mut self,
             request: &Request,
-            _: &Budget<'_>,
+            budget: &Budget<'_>,
             progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
         ) -> Result<Response, client::Error> {
+            assert_eq!(
+                format!("{:?}", budget.deadline),
+                "None",
+                "sliced compaction has no implicit total deadline"
+            );
             assert!(request.instructions.starts_with("Summarize"));
             assert!(request.tools.is_empty());
             self.observed
@@ -318,9 +323,14 @@ fn one_oversized_call_and_receipt_resume_across_encoded_reference_slices() {
         fn generate(
             &mut self,
             request: &Request,
-            _: &Budget<'_>,
+            budget: &Budget<'_>,
             _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
         ) -> Result<Response, client::Error> {
+            assert_eq!(
+                format!("{:?}", budget.deadline),
+                "None",
+                "sliced compaction has no implicit total deadline"
+            );
             assert!(request.tools.is_empty());
             let encoded = request.encode(session::history::MAX_CONTEXT)?;
             self.seen.lock().unwrap().push(encoded);

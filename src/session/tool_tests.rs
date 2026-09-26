@@ -57,9 +57,10 @@ impl worker::Backend for Fixture {
         budget: &Budget<'_>,
         progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, client::Error> {
-        if let Some(minimum) = self.deadline_min {
-            assert!(
-                budget.deadline >= minimum,
+        if self.deadline_min.is_some() {
+            assert_eq!(
+                format!("{:?}", budget.deadline),
+                "None",
                 "generation inherited the old task deadline"
             );
         }
@@ -480,7 +481,7 @@ fn old_task_age_does_not_expire_later_operation_deadlines() {
         Ok(End::Complete)
     );
     assert_eq!((metrics.requests, metrics.tool_calls), (2, 4));
-    assert_eq!(clock_calls.get(), 6); // Two generations and four reads.
+    assert_eq!(clock_calls.get(), 4); // Only four reads use operation deadlines.
     drop(workspace);
 }
 

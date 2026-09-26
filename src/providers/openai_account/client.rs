@@ -8,10 +8,15 @@ mod login;
 mod persistent;
 mod recovery;
 mod reply;
+mod timing;
+#[cfg(test)]
+pub(crate) mod timing_fixture;
 
 use super::{Progress, Request, Response, auth, encode_http};
 use crate::tls::{ApplicationWrite, Budget, Connection, NetworkError, trust::TrustStore};
-use exchange::{ExchangeProgress, ResponseChannel, exchange};
+#[cfg(test)]
+use exchange::exchange;
+use exchange::{ExchangeProgress, ResponseChannel, exchange_with_idle};
 use std::{
     fmt,
     ops::ControlFlow,
@@ -48,7 +53,10 @@ pub enum RequestStage {
     RequestWrite,
     ResponseRead,
 }
-pub use recovery::{Attempt, Delivery};
+pub use recovery::{Attempt, Delivery, Termination};
+pub const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = timing::DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+pub const MIN_STREAM_IDLE_TIMEOUT_MS: u64 = timing::MIN_STREAM_IDLE_TIMEOUT_MS;
+pub const MAX_STREAM_IDLE_TIMEOUT_MS: u64 = timing::MAX_STREAM_IDLE_TIMEOUT_MS;
 impl fmt::Display for RequestStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -169,11 +177,32 @@ impl Client {
         budget: &Budget<'_>,
         progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, Error> {
-        self.generate_with(request, budget, progress, |trust, connect| {
-            Connection::connect("chatgpt.com", trust, connect)
-        })
+        self.generate_with_idle(
+            request,
+            budget,
+            Duration::from_millis(timing::DEFAULT_STREAM_IDLE_TIMEOUT_MS),
+            progress,
+        )
     }
 
+    pub fn generate_with_idle(
+        &mut self,
+        request: &Request,
+        budget: &Budget<'_>,
+        idle_timeout: Duration,
+        progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
+    ) -> Result<Response, Error> {
+        self.generate_with_policy(
+            request,
+            budget,
+            progress,
+            |trust, connect| Connection::connect("chatgpt.com", trust, connect),
+            timing::ATTEMPT_STAGE_TIMEOUT,
+            idle_timeout,
+        )
+    }
+
+    #[cfg(test)]
     fn generate_with<C: ResponseChannel>(
         &mut self,
         request: &Request,
@@ -181,41 +210,93 @@ impl Client {
         progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
         connect_channel: impl FnMut(&TrustStore, &Budget<'_>) -> Result<C, NetworkError>,
     ) -> Result<Response, Error> {
-        self.generate_with_timing(
+        self.generate_with_policy(
             request,
             budget,
             progress,
             connect_channel,
             Duration::from_secs(30),
+            Duration::from_millis(timing::DEFAULT_STREAM_IDLE_TIMEOUT_MS),
         )
     }
 
+    #[cfg(test)]
     fn generate_with_timing<C: ResponseChannel>(
+        &mut self,
+        request: &Request,
+        budget: &Budget<'_>,
+        progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
+        connect_channel: impl FnMut(&TrustStore, &Budget<'_>) -> Result<C, NetworkError>,
+        attempt_timeout: Duration,
+    ) -> Result<Response, Error> {
+        self.generate_with_policy(
+            request,
+            budget,
+            progress,
+            connect_channel,
+            attempt_timeout,
+            Duration::from_millis(timing::DEFAULT_STREAM_IDLE_TIMEOUT_MS),
+        )
+    }
+
+    fn generate_with_policy<C: ResponseChannel>(
         &mut self,
         request: &Request,
         budget: &Budget<'_>,
         progress: impl FnMut(Progress<'_>) -> ControlFlow<()>,
         mut connect_channel: impl FnMut(&TrustStore, &Budget<'_>) -> Result<C, NetworkError>,
         attempt_timeout: Duration,
+        idle_timeout: Duration,
     ) -> Result<Response, Error> {
         budget.check()?;
         let mut progress = progress;
         for attempt in 1..=recovery::MAX_CONNECTION_ATTEMPTS {
             budget.check()?;
-            self.ensure_access(budget)?;
+            let setup_started = std::time::Instant::now();
             let connect = Budget {
-                deadline: budget
-                    .deadline
-                    .min(std::time::Instant::now() + attempt_timeout),
+                deadline: Some(timing::stage_deadline(
+                    budget,
+                    setup_started,
+                    attempt_timeout,
+                )),
                 cancelled: budget.cancelled,
             };
             let mut delivery = Delivery::NotSubmitted;
             let mut write = ApplicationWrite::default();
-            let mut trace = recovery::Trace::default();
+            let mut trace = recovery::Trace {
+                started: Some(setup_started),
+                ..Default::default()
+            };
+            let access_started = std::time::Instant::now();
+            if let Err(error) = self.ensure_access(&connect) {
+                if matches!(
+                    error,
+                    Error::Network(NetworkError::Timeout | NetworkError::Cancelled)
+                ) {
+                    record_setup_access_error(
+                        &mut trace,
+                        error,
+                        budget,
+                        setup_started,
+                        access_started,
+                    );
+                    let _ = progress(Progress::Attempt(Attempt::failed(
+                        error, delivery, 0, false, attempt, trace,
+                    )));
+                }
+                return Err(error);
+            }
             let result = (|| {
                 let stage_started = std::time::Instant::now();
                 let mut connection = connect_channel(&self.trust, &connect).map_err(|error| {
                     trace.stage_elapsed_ms = stage_started.elapsed().as_millis() as u64;
+                    trace.request_elapsed_ms = setup_started.elapsed().as_millis() as u64;
+                    trace.termination = timing::stage_termination(
+                        error,
+                        budget,
+                        std::time::Instant::now(),
+                        Termination::SetupTimeout,
+                    );
                     Error::Transport {
                         stage: RequestStage::Connect,
                         error,
@@ -226,7 +307,24 @@ impl Client {
                 // The connection may have taken time while another instance
                 // signed out or replaced the account. This is the last local
                 // authorization before sending. It holds no response lease.
-                self.ensure_access(budget)?;
+                let access_started = std::time::Instant::now();
+                let post_connect = Budget {
+                    deadline: Some(timing::stage_deadline(
+                        budget,
+                        access_started,
+                        timing::ATTEMPT_STAGE_TIMEOUT,
+                    )),
+                    cancelled: budget.cancelled,
+                };
+                self.ensure_access(&post_connect).inspect_err(|error| {
+                    record_setup_access_error(
+                        &mut trace,
+                        *error,
+                        budget,
+                        setup_started,
+                        access_started,
+                    );
+                })?;
                 if unix_seconds()? >= self.tokens.expires_at().saturating_sub(30) {
                     return Err(Error::Expired);
                 }
@@ -238,16 +336,19 @@ impl Client {
                 // The setup budget has served its purpose. A later account
                 // check cannot consume the write's fresh 30-second allowance.
                 let write_budget = Budget {
-                    deadline: budget
-                        .deadline
-                        .min(std::time::Instant::now() + attempt_timeout),
+                    deadline: Some(timing::stage_deadline(
+                        budget,
+                        std::time::Instant::now(),
+                        attempt_timeout,
+                    )),
                     cancelled: budget.cancelled,
                 };
-                exchange(
+                exchange_with_idle(
                     &mut connection,
                     &bytes,
                     budget,
                     &write_budget,
+                    idle_timeout,
                     ExchangeProgress {
                         delivery: &mut delivery,
                         write: &mut write,
@@ -287,6 +388,27 @@ impl Client {
             }
         }
         unreachable!("bounded connection attempts return a result")
+    }
+}
+
+fn record_setup_access_error(
+    trace: &mut recovery::Trace,
+    error: Error,
+    budget: &Budget<'_>,
+    started: std::time::Instant,
+    stage_started: std::time::Instant,
+) {
+    let now = std::time::Instant::now();
+    trace.stage = Some(RequestStage::Connect);
+    trace.stage_elapsed_ms = stage_started
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX);
+    trace.request_elapsed_ms = started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    if let Error::Network(network) = error {
+        trace.termination =
+            timing::stage_termination(network, budget, now, Termination::SetupTimeout);
     }
 }
 

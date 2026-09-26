@@ -26,9 +26,14 @@ impl Backend for Summarizer {
     fn generate(
         &mut self,
         request: &Request,
-        _: &Budget<'_>,
+        budget: &Budget<'_>,
         _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, client::Error> {
+        assert_eq!(
+            format!("{:?}", budget.deadline),
+            "None",
+            "model generation and compaction share the idle policy"
+        );
         self.requests
             .lock()
             .unwrap()

@@ -103,14 +103,19 @@ impl fmt::Display for NetworkError {
 }
 impl std::error::Error for NetworkError {}
 pub struct Budget<'a> {
-    pub deadline: Instant,
+    /// An optional caller total deadline. Model requests use None; their
+    /// transport stages install their own finite deadlines.
+    pub deadline: Option<Instant>,
     pub cancelled: &'a AtomicBool,
 }
 impl Budget<'_> {
     pub fn check(&self) -> Result<(), NetworkError> {
         if self.cancelled.load(Ordering::Acquire) {
             Err(NetworkError::Cancelled)
-        } else if Instant::now() >= self.deadline {
+        } else if self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
             Err(NetworkError::Timeout)
         } else {
             Ok(())
@@ -157,8 +162,11 @@ impl Connection {
             budget.check()?;
             let timeout = budget
                 .deadline
-                .saturating_duration_since(Instant::now())
-                .min(Duration::from_millis(500));
+                .map_or(Duration::from_millis(500), |deadline| {
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(500))
+                });
             match TcpStream::connect_timeout(&address, timeout) {
                 Ok(connected) => {
                     stream = Some(connected);

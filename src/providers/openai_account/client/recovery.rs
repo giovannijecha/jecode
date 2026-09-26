@@ -6,6 +6,39 @@ use std::{fmt, io, thread, time::Duration};
 
 pub(super) const MAX_CONNECTION_ATTEMPTS: u8 = 3;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Termination {
+    SetupTimeout,
+    WriteTimeout,
+    FirstResponseTimeout,
+    IdleTimeout,
+    TotalBudget,
+    Cancelled,
+}
+impl Termination {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SetupTimeout => "setup_timeout",
+            Self::WriteTimeout => "write_timeout",
+            Self::FirstResponseTimeout => "first_response_timeout",
+            Self::IdleTimeout => "stream_idle_timeout",
+            Self::TotalBudget => "total_budget_expired",
+            Self::Cancelled => "cancelled",
+        }
+    }
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "setup_timeout" => Self::SetupTimeout,
+            "write_timeout" => Self::WriteTimeout,
+            "first_response_timeout" => Self::FirstResponseTimeout,
+            "stream_idle_timeout" => Self::IdleTimeout,
+            "total_budget_expired" => Self::TotalBudget,
+            "cancelled" => Self::Cancelled,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Delivery {
     #[default]
@@ -56,6 +89,10 @@ pub struct Attempt {
     pub stage: Option<RequestStage>,
     /// Time in the failed stage; zero when there was no failed stage.
     pub stage_elapsed_ms: u64,
+    /// Attempt age and time since the write or last accepted SSE event.
+    pub request_elapsed_ms: u64,
+    pub since_progress_ms: Option<u64>,
+    pub termination: Option<Termination>,
     pub operation: Option<String>,
     pub category: Option<String>,
     pub os_code: Option<i32>,
@@ -73,7 +110,12 @@ pub struct Attempt {
 }
 #[derive(Clone, Copy, Default)]
 pub(super) struct Trace {
+    pub started: Option<std::time::Instant>,
+    pub stage: Option<RequestStage>,
     pub stage_elapsed_ms: u64,
+    pub request_elapsed_ms: u64,
+    pub since_progress_ms: Option<u64>,
+    pub termination: Option<Termination>,
     pub received_wire_bytes: usize,
     pub response_plaintext_bytes: usize,
     pub response_status: Option<u16>,
@@ -92,7 +134,11 @@ impl Attempt {
             connection_attempt,
             delivery,
             accepted_wire_bytes,
+            stage: trace.stage,
             stage_elapsed_ms: trace.stage_elapsed_ms,
+            request_elapsed_ms: trace.request_elapsed_ms,
+            since_progress_ms: trace.since_progress_ms,
+            termination: trace.termination,
             received_wire_bytes: trace.received_wire_bytes,
             response_plaintext_bytes: trace.response_plaintext_bytes,
             response_status: trace.response_status,
@@ -103,6 +149,9 @@ impl Attempt {
         };
         if let Error::Transport { stage, error, .. } = error {
             attempt.stage = Some(stage);
+            if error == NetworkError::Cancelled {
+                attempt.termination = Some(Termination::Cancelled);
+            }
             if let NetworkError::Io(failure) | NetworkError::Dns(failure) = error {
                 attempt.operation = Some(failure.operation.to_string());
                 attempt.category = Some(format!("{:?}", failure.kind));
@@ -113,6 +162,15 @@ impl Attempt {
             }
         } else if matches!(error, Error::Response { .. }) {
             attempt.stage = Some(RequestStage::ResponseRead);
+            if matches!(
+                error,
+                Error::Response {
+                    error: crate::providers::openai_account::Error::Cancelled,
+                    ..
+                }
+            ) {
+                attempt.termination = Some(Termination::Cancelled);
+            }
         }
         attempt
     }
@@ -129,6 +187,7 @@ impl Attempt {
             response_plaintext_bytes: trace.response_plaintext_bytes,
             response_status: trace.response_status,
             stream_events: trace.stream_events,
+            request_elapsed_ms: trace.request_elapsed_ms,
             ..Self::default()
         }
     }
@@ -193,7 +252,7 @@ mod tests {
         ready.recv().unwrap();
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         assert_eq!(backoff(3, &budget), Err(NetworkError::Cancelled));
         worker.join().unwrap();

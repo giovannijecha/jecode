@@ -17,6 +17,7 @@ pub struct Settings {
     pub model: Model,
     pub reduced_motion: bool,
     pub context_limit_bytes: usize,
+    pub model_stream_idle_timeout_ms: u64,
     pub file_access: Access,
     pub windows_powershell_executable: Option<String>,
     extra: BTreeMap<String, Value>,
@@ -47,6 +48,8 @@ impl Default for Settings {
             model: Model::Luna,
             reduced_motion: false,
             context_limit_bytes: 512 * 1024,
+            model_stream_idle_timeout_ms:
+                crate::providers::openai_account::client::DEFAULT_STREAM_IDLE_TIMEOUT_MS,
             file_access: Access::Local,
             windows_powershell_executable: None,
             extra: BTreeMap::new(),
@@ -95,6 +98,10 @@ impl Settings {
             Value::Number(settings.context_limit_bytes.to_string()),
         );
         fields.insert(
+            "model_stream_idle_timeout_ms".into(),
+            Value::Number(settings.model_stream_idle_timeout_ms.to_string()),
+        );
+        fields.insert(
             "file_access".into(),
             Value::String(settings.file_access.name().into()),
         );
@@ -121,7 +128,7 @@ impl Settings {
             Instant::now() + Duration::from_secs(2),
         )?;
         let Some(body) = store.read("settings.json", 8192)? else {
-            store.replace("settings.json", "{\n  \"version\": 1,\n  \"model\": \"gpt-5.6-luna\",\n  \"effort\": \"medium\",\n  \"reduced_motion\": false,\n  \"context_limit_bytes\": 524288,\n  \"file_access\": \"local\"\n}\n")?;
+            store.replace("settings.json", "{\n  \"version\": 1,\n  \"model\": \"gpt-5.6-luna\",\n  \"effort\": \"medium\",\n  \"reduced_motion\": false,\n  \"context_limit_bytes\": 524288,\n  \"model_stream_idle_timeout_ms\": 300000,\n  \"file_access\": \"local\"\n}\n")?;
             return Ok(Self::default());
         };
         Self::parse(&body)
@@ -163,6 +170,17 @@ impl Settings {
             .and_then(Value::unsigned)
             .filter(|n| (65536..=1572864).contains(n))
             .ok_or_else(invalid)? as usize;
+        let model_stream_idle_timeout_ms = match value.get("model_stream_idle_timeout_ms") {
+            None => crate::providers::openai_account::client::DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+            Some(value) => value
+                .unsigned()
+                .filter(|n| {
+                    (crate::providers::openai_account::client::MIN_STREAM_IDLE_TIMEOUT_MS
+                        ..=crate::providers::openai_account::client::MAX_STREAM_IDLE_TIMEOUT_MS)
+                        .contains(n)
+                })
+                .ok_or_else(invalid)?,
+        };
         let file_access = match value.get("file_access") {
             None => Access::Local,
             Some(value) => value.text().and_then(Access::parse).ok_or_else(invalid)?,
@@ -180,6 +198,7 @@ impl Settings {
             model,
             reduced_motion,
             context_limit_bytes,
+            model_stream_idle_timeout_ms,
             file_access,
             windows_powershell_executable,
             extra: fields
@@ -192,6 +211,7 @@ impl Settings {
                             | "effort"
                             | "reduced_motion"
                             | "context_limit_bytes"
+                            | "model_stream_idle_timeout_ms"
                             | "file_access"
                             | "windows_powershell_executable"
                     )
@@ -303,5 +323,36 @@ mod tests {
         let invalid = json::encode(&Value::Object(fields), 8192).unwrap();
         let error = Settings::parse(&invalid).err().unwrap();
         assert!(error.to_string().contains("windows_powershell_executable"));
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "linux"))]
+    fn stream_idle_setting_validates_and_preserves_unrelated_fields() {
+        let fixture = crate::state::tests::Fixture::new();
+        let Some(store) = fixture.store() else { return };
+        let legacy = r#"{"version":1,"model":"gpt-5.6-luna","reduced_motion":false,"context_limit_bytes":131072,"future_flag":true}"#;
+        store.replace("settings.json", legacy).unwrap();
+        assert_eq!(
+            Settings::load(&store).unwrap().model_stream_idle_timeout_ms,
+            300_000
+        );
+        assert_eq!(store.read("settings.json", 8192).unwrap().unwrap(), legacy);
+        let custom = legacy.replace(
+            "\"future_flag\"",
+            "\"model_stream_idle_timeout_ms\":450000,\"future_flag\"",
+        );
+        store.replace("settings.json", &custom).unwrap();
+        Settings::update(&store, Change::ToggleMotion).unwrap();
+        let updated = store.read("settings.json", 8192).unwrap().unwrap();
+        let parsed = json::parse(&updated, Default::default()).unwrap();
+        assert_eq!(
+            Settings::load(&store).unwrap().model_stream_idle_timeout_ms,
+            450_000
+        );
+        assert_eq!(parsed.get("future_flag"), Some(&Value::Bool(true)));
+        for bad in ["0", "999", "900001", "-1", "null", "\"300000\""] {
+            let changed = custom.replace("450000", bad);
+            assert!(Settings::parse(&changed).is_err(), "{bad}");
+        }
     }
 }

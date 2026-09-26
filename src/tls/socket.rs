@@ -150,7 +150,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         for (script, expected) in [
             (vec![Err(io::ErrorKind::ConnectionReset)], 0),
@@ -187,7 +187,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         let record = vec![23, 3, 3, 0, 2, 42, 43];
         let mut stream = CompleteThenCancel {
@@ -197,6 +197,31 @@ mod tests {
         let mut received = 0;
         assert_eq!(record_from(&mut stream, &budget, &mut received), Ok(record));
         assert_eq!(received, 7);
+    }
+
+    #[test]
+    fn cancellation_during_fragmented_record_stops_before_another_read() {
+        struct PartialThenCancel<'a>(&'a AtomicBool, usize);
+        impl Read for PartialThenCancel<'_> {
+            fn read(&mut self, into: &mut [u8]) -> io::Result<usize> {
+                self.1 += 1;
+                into[0] = 23;
+                self.0.store(true, Ordering::Release);
+                Ok(1)
+            }
+        }
+        let cancelled = AtomicBool::new(false);
+        let budget = Budget {
+            cancelled: &cancelled,
+            deadline: None,
+        };
+        let mut reader = PartialThenCancel(&cancelled, 0);
+        let mut received = 0;
+        assert_eq!(
+            record_from(&mut reader, &budget, &mut received),
+            Err(NetworkError::Cancelled)
+        );
+        assert_eq!((reader.1, received), (1, 1));
     }
 
     struct ScriptRead(VecDeque<Result<Vec<u8>, io::ErrorKind>>);
@@ -217,7 +242,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         for (script, count, operation) in [
             (
@@ -278,7 +303,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         let mut writer = CancelWrite(&cancelled, 0);
         let mut accepted = 0;

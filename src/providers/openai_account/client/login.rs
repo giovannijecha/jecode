@@ -21,7 +21,11 @@ pub(super) fn run(
         return Err(NetworkError::Cancelled.into());
     }
     let budget = Budget {
-        deadline: budget.deadline.min(login.deadline()),
+        deadline: Some(
+            budget
+                .deadline
+                .map_or(login.deadline(), |total| total.min(login.deadline())),
+        ),
         cancelled: budget.cancelled,
     };
     loop {
@@ -67,9 +71,13 @@ pub(super) fn exchange(
     budget: &Budget<'_>,
 ) -> Result<Reply, Error> {
     let budget = Budget {
-        deadline: budget
-            .deadline
-            .min(Instant::now() + Duration::from_secs(30)),
+        deadline: Some(
+            budget
+                .deadline
+                .map_or(Instant::now() + Duration::from_secs(30), |total| {
+                    total.min(Instant::now() + Duration::from_secs(30))
+                }),
+        ),
         cancelled: budget.cancelled,
     };
     let mut connection = Connection::connect(auth::AUTH_HOST, trust, &budget)?;

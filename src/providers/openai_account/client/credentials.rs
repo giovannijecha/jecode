@@ -13,7 +13,13 @@ impl Credentials {
     pub fn open(store: Store, budget: &Budget<'_>) -> Result<Self, Error> {
         budget.check()?;
         let lock = store
-            .lock("credentials.lock", budget.cancelled, budget.deadline)
+            .lock(
+                "credentials.lock",
+                budget.cancelled,
+                budget
+                    .deadline
+                    .unwrap_or(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+            )
             .map_err(|error| match error.kind() {
                 std::io::ErrorKind::Interrupted => {
                     Error::Network(crate::tls::NetworkError::Cancelled)
@@ -95,7 +101,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         let token = "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjb3VudC10ZXN0In19.c2ln";
         let json = format!(
@@ -143,7 +149,7 @@ mod tests {
             let cancelled = AtomicBool::new(false);
             let budget = Budget {
                 cancelled: &cancelled,
-                deadline: Instant::now() + Duration::from_secs(2),
+                deadline: Some(Instant::now() + Duration::from_secs(2)),
             };
             let credentials = Credentials::open(worker_store, &budget).unwrap();
             credentials.refreshing().unwrap();
@@ -155,7 +161,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(2),
+            deadline: Some(Instant::now() + Duration::from_secs(2)),
         };
         Credentials::open(store.clone(), &budget)
             .unwrap()
