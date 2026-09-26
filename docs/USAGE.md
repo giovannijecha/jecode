@@ -314,11 +314,12 @@ within that task; `/compact` requests a new explicit attempt.
 Compaction checkpoints only the model-facing projection. Canonical turns, tool
 arguments and exact receipts stay saved and are not replayed on resume. A summary
 can lose detail; `recall_receipts` can retrieve an original saved workspace-read
-result by absolute turn, step and receipt position without reading the source
-again. Follow its `next` cursor for more bytes or results. The saved observation
-may differ from a new read of a changed file. Restate critical requirements if
-needed. The account request
-encoder accepts at most 8 MiB of generation JSON and 4,096 input items.
+result without reading the source again. Pass a supplied `recall_address` from an
+eligible compaction record unchanged, including its expected call ID, and follow
+`next` unchanged for more bytes or results. The saved observation may differ
+from a new read of a changed file. Restate critical requirements if needed. The
+account request encoder accepts at most 8 MiB of generation JSON and 4,096
+input items.
 Summary requests retain a 2 MiB bound. A pending image view is delivered before
 its step can be compacted; older images remain in private state and can be
 revisited with `view_image` and the saved `image_id`. A large completed

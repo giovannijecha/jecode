@@ -63,6 +63,9 @@ pub(super) mod handoff;
 #[path = "context_partial.rs"]
 pub(super) mod partial;
 #[cfg(test)]
+#[path = "context_reference_tests.rs"]
+mod reference_tests;
+#[cfg(test)]
 #[path = "context_tests.rs"]
 mod tests;
 

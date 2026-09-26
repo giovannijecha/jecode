@@ -6,6 +6,7 @@ pub enum Prepared {
         step: usize,
         receipt: usize,
         offset: usize,
+        expected_call_id: Option<String>,
     },
     Image {
         path: Option<String>,
@@ -50,7 +51,7 @@ impl Prepared {
             "edit_file" => &["path", "old_text", "new_text"],
             "run_command" => &["command", "path", "timeout_seconds"],
             "view_image" => &["path", "image_id"],
-            "recall_receipts" => &["turn", "step", "receipt", "offset"],
+            "recall_receipts" => &["turn", "step", "receipt", "offset", "expected_call_id"],
             _ => {
                 return Err("unknown tool; use only the advertised workspace tools");
             }
@@ -67,6 +68,21 @@ impl Prepared {
                 step: required_nonnegative(args, "step")?,
                 receipt: optional_nonnegative(args, "receipt")?,
                 offset: optional_nonnegative(args, "offset")?,
+                expected_call_id: match args.get("expected_call_id") {
+                    None => None,
+                    Some(Value::String(id))
+                        if !id.is_empty()
+                            && id.len() <= 256
+                            && !id.chars().any(char::is_control) =>
+                    {
+                        Some(id.clone())
+                    }
+                    _ => {
+                        return Err(
+                            "expected_call_id must be a nonempty call ID of at most 256 bytes",
+                        );
+                    }
+                },
             });
         }
         if name == "view_image" {

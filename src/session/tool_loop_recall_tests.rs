@@ -113,9 +113,9 @@ fn cancelled_mixed_batch_retains_only_admitted_recall_after_checkpoint_and_resum
             ..Default::default()
         });
         let recall_args = if admitted {
-            r#"{"turn":0,"step":0}"#
+            r#"{"turn":0,"step":0,"receipt":0,"expected_call_id":"source"}"#
         } else {
-            r#"{"turn":9,"step":0}"#
+            r#"{"turn":0,"step":0,"receipt":0,"expected_call_id":"another-call"}"#
         };
         let response = tool_tests::calls_response(vec![
             tool_tests::call("recall", "recall_receipts", recall_args),
@@ -177,6 +177,10 @@ fn cancelled_mixed_batch_retains_only_admitted_recall_after_checkpoint_and_resum
         assert_eq!(metrics.tool_calls, 1);
         assert_eq!(history.turns[0].steps[1].results[1].summary, "Not executed");
         let recorded = history.turns[0].steps[1].results[0].output.clone();
+        if !admitted {
+            assert!(recorded.contains("expected_call_id does not match"));
+            assert!(!recorded.contains("ORIGINAL-RECEIPT"));
+        }
         assert_eq!(history.pending_recall_step(), admitted.then_some((0, 1)));
         history.turns[0].end = Some(End::Failed(Failure::Cancelled));
         history.turns[0].outcome = Failure::Cancelled.to_string();
