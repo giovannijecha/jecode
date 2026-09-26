@@ -3,6 +3,8 @@
 pub mod auth;
 pub mod catalog;
 pub mod client;
+#[cfg(test)]
+mod continuation_tests;
 mod events;
 mod http;
 mod request;

@@ -24,7 +24,7 @@ impl Response {
                 json::object([("reasoning_tokens", Value::Number(number.to_string()))]),
             );
         }
-        json::object([
+        let mut fields = vec![
             ("id", Value::String(self.id.clone())),
             (
                 "status",
@@ -39,7 +39,11 @@ impl Response {
             ),
             ("output", Value::Array(self.output.clone())),
             ("usage", Value::Object(usage)),
-        ])
+        ];
+        if let Some(end_turn) = self.end_turn {
+            fields.push(("end_turn", Value::Bool(end_turn)));
+        }
+        json::object(fields)
     }
     pub(crate) fn restore(value: &Value) -> Result<Self, Error> {
         let output = value

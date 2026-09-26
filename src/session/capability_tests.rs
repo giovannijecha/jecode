@@ -76,6 +76,35 @@ fn finish(session: &mut Session) {
 fn instructions(request: &Value) -> &str {
     request.get("instructions").and_then(Value::text).unwrap()
 }
+fn assert_work_contract(request: &Value, has_tools: bool) {
+    let guidance = instructions(request);
+    assert!(guidance.contains(super::capabilities::work_contract(has_tools)));
+    for clause in [
+        "requested deliverables",
+        "give brief progress updates while working",
+        "progress report does not finish the task",
+        "Before a final response, review the requirements and evidence",
+        "completed work, unresolved work and concrete blockers",
+        "missing essential information or authorization",
+        "cancellation, explicit stop, refusal, terminal failure or a user limit",
+        "discussion, analysis or plan-only requests",
+    ] {
+        assert!(guidance.contains(clause), "missing {clause}");
+    }
+    if has_tools {
+        for clause in [
+            "Follow pagination and other result cursors",
+            "recover exact earlier observations through saved receipts",
+            "Inspect recoverable tool errors",
+            "Keep verification proportional to the task",
+            "stay within the user's authorization",
+        ] {
+            assert!(guidance.contains(clause), "missing {clause}");
+        }
+    } else {
+        assert!(!guidance.contains("Follow pagination and other result cursors"));
+    }
+}
 fn tools(request: &Value) -> &[Value] {
     request.get("tools").and_then(Value::array).unwrap()
 }
@@ -86,6 +115,7 @@ fn tool_names(request: &Value) -> Vec<&str> {
         .collect()
 }
 fn assert_workspace_contract(request: &Value, profile: Access, shell: &crate::command::Shell) {
+    assert_work_contract(request, true);
     let names = tool_names(request);
     assert_eq!(
         names,
@@ -140,6 +170,7 @@ fn command_enabled_request_does_not_falsely_rule_out_online_work() {
     finish(&mut session);
     let captured = requests.lock().unwrap();
     let request = &captured[0];
+    assert_work_contract(request, true);
     let names = tool_names(request);
     assert!(names.contains(&"run_command"));
     assert!(!instructions(request).contains("You cannot browse the web"));
@@ -184,6 +215,7 @@ fn local_access_and_conversation_only_emit_different_tool_contracts() {
     let captured = requests.lock().unwrap();
     let request = &captured[0];
     assert!(tools(request).is_empty());
+    assert_work_contract(request, false);
     assert!(
         instructions(request)
             .contains("conversation only: no file, command, web search or image tools")

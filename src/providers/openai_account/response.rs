@@ -28,6 +28,8 @@ pub struct Usage {
 pub struct Response {
     pub id: String,
     pub status: Status,
+    /// Only explicit false asks the controller for another generation request.
+    pub end_turn: Option<bool>,
     pub output: Vec<Value>,
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
@@ -98,6 +100,11 @@ pub(super) fn assemble(
             Status::Completed
         } else {
             Status::Incomplete
+        },
+        end_turn: match data.get("end_turn") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(value)) => Some(*value),
+            _ => return Err(Error::InvalidEvent),
         },
         output,
         text: String::new(),

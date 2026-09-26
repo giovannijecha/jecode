@@ -49,7 +49,10 @@ pub(super) fn run(
             Status::Incomplete => return Ok(End::Incomplete),
             Status::Refused => return Ok(End::Refused),
             Status::Completed if response.tool_calls.is_empty() => {
-                if super::queue::take(history, context)? {
+                // The account endpoint can explicitly request another response.
+                // Missing and true signals retain the established final boundary.
+                let follow_up = response.end_turn == Some(false);
+                if super::queue::take(history, context)? || follow_up {
                     continue;
                 }
                 return Ok(End::Complete);
@@ -401,6 +404,9 @@ fn current(history: &mut History) -> Result<&mut Step, Failure> {
         .ok_or(Failure::Worker)
 }
 
+#[cfg(test)]
+#[path = "tool_loop_continuation_tests.rs"]
+mod continuation_tests;
 #[cfg(test)]
 #[path = "tool_loop_persistence_tests.rs"]
 mod persistence_tests;

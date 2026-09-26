@@ -1,6 +1,15 @@
 //! Compose model guidance from the tools actually exposed for this request.
 use crate::{command::Shell, providers::openai_account::Tool, tools};
 
+/// Applied to every ordinary generation, including after tools, compaction and resume.
+pub(super) fn work_contract(has_tools: bool) -> &'static str {
+    if has_tools {
+        "Work mode: Identify the user's requested deliverables, limits and meaningful verification. Continue available, authorized work until each requirement is addressed; give brief progress updates while working, but a progress report does not finish the task. Follow pagination and other result cursors, and recover exact earlier observations through saved receipts when a summary omits them. Inspect recoverable tool errors and continue useful work or try a reasonable correction. Before a final response, review the requirements and evidence. Report completed work, unresolved work and concrete blockers honestly. Stop when the request is satisfied or missing essential information or authorization, a real blocker, cancellation, explicit stop, refusal, terminal failure or a user limit prevents further useful work. For discussion, analysis or plan-only requests, provide the requested answer without implementing. Keep verification proportional to the task and stay within the user's authorization."
+    } else {
+        "Work mode: Identify the user's requested deliverables and limits. Continue available, authorized work until each requirement is addressed; give brief progress updates while working, but a progress report does not finish the task. Before a final response, review the requirements and evidence. Report completed work, unresolved work and concrete blockers honestly. Stop when the request is satisfied or missing essential information or authorization, a real blocker, cancellation, explicit stop, refusal, terminal failure or a user limit prevents further useful work. For discussion, analysis or plan-only requests, provide the requested answer without implementing."
+    }
+}
+
 pub(super) fn for_session(workspace: bool, image: bool, shell: &Shell) -> (Vec<Tool>, String) {
     let exposed = if workspace {
         tools::definitions_for(shell, image)
