@@ -13,6 +13,8 @@ mod image_pending_tests;
 mod image_tests;
 mod image_tool;
 pub mod persistence;
+#[cfg(test)]
+mod provider_failure_tests;
 mod queue;
 mod receipt_recall;
 pub mod scope;

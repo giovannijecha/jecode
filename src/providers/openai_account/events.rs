@@ -1,4 +1,4 @@
-use super::{Error, Response, field, response};
+use super::{Error, FailureEvent, ProviderFailure, Response, field, response};
 use crate::{
     json::{self, Value},
     stream,
@@ -263,7 +263,18 @@ impl State {
                 self.validate_text(&result)?;
                 self.result = Some(result);
             }
-            "response.failed" | "error" => return Err(Error::RemoteFailure),
+            "response.failed" => {
+                return Err(Error::RemoteFailure(ProviderFailure::from_event(
+                    FailureEvent::ResponseFailed,
+                    &event,
+                )));
+            }
+            "error" => {
+                return Err(Error::RemoteFailure(ProviderFailure::from_event(
+                    FailureEvent::Error,
+                    &event,
+                )));
+            }
             _ => {} // Bounded metadata and argument deltas are not executable output.
         }
         Ok(())

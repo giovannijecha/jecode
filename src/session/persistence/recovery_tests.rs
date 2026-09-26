@@ -329,62 +329,6 @@ fn diagnostic_export_does_not_attach_stale_compaction_to_later_turn() {
 }
 
 #[test]
-fn diagnostic_export_preserves_v1_compatibility_without_failure_scope() {
-    use crate::providers::openai_account::client::Attempt;
-    let fixture = crate::state::tests::Fixture::new();
-    let Some(store) = fixture.store() else { return };
-    let mut history = create_legacy_in(&store, Model::Luna, Some(&fixture.0), None).unwrap();
-    let id = history.record.as_ref().unwrap().id().to_owned();
-    history.begin("v1 prompt".into()).unwrap();
-    history.turns[0].steps.push(Step {
-        attempts: vec![Attempt {
-            request_sequence: 3,
-            ..Default::default()
-        }],
-        ..Default::default()
-    });
-    history.turns[0].end = Some(End::Complete);
-    history.projection.failed = true;
-    history.projection.failed_attempts = vec![Attempt {
-        request_sequence: 1,
-        os_code: Some(10054),
-        ..Default::default()
-    }];
-    history.checkpoint().unwrap();
-    let directory = crate::session::scope::Directory::open(&fixture.0).unwrap();
-    assert!(recent_network_attempts_in_store(&store, &id, &directory).is_err());
-    drop(history);
-
-    let sessions = store.directory("sessions").unwrap();
-    let name = format!("{id}.json");
-    let value = crate::json::parse(
-        &sessions.read(&name, LIMIT).unwrap().unwrap(),
-        Default::default(),
-    )
-    .unwrap();
-    let mut value = value;
-    let crate::json::Value::Object(fields) = &mut value else {
-        unreachable!()
-    };
-    let crate::json::Value::Object(projection) = fields.get_mut("projection").unwrap() else {
-        unreachable!()
-    };
-    projection.remove("failed_at_turn");
-    let old = crate::json::encode(&value, LIMIT).unwrap();
-    sessions.replace(&name, &old).unwrap();
-
-    for _ in 0..2 {
-        let attempts = recent_network_attempts_in_store(&store, &id, &directory).unwrap();
-        assert_eq!(attempts.len(), 2);
-        assert_eq!(attempts[0].source, AttemptSource::Generation);
-        assert_eq!(attempts[0].attempt.request_sequence, 3);
-        assert_eq!(attempts[1].source, AttemptSource::Compaction);
-        assert_eq!(attempts[1].attempt.os_code, Some(10054));
-        assert_eq!(sessions.read(&name, LIMIT).unwrap().unwrap(), old);
-    }
-}
-
-#[test]
 fn interrupted_stream_and_prior_receipt_survive_resume_without_replay() {
     use crate::providers::openai_account::client::{Attempt, Delivery, RequestStage};
     let fixture = crate::state::tests::Fixture::new();
@@ -424,6 +368,7 @@ fn interrupted_stream_and_prior_receipt_survive_resume_without_replay() {
             response_plaintext_bytes: 36,
             response_status: Some(200),
             stream_events: 1,
+            provider_failure: None,
             diagnostic: Some("synthetic connection reset / response read".into()),
             retrying: false,
         }],

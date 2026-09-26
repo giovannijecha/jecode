@@ -107,7 +107,7 @@ impl fmt::Display for Error {
             }
             Self::Response { error, delivery } => {
                 write!(f, "{error} / {delivery}")?;
-                if !matches!(error, super::Error::RemoteFailure | super::Error::Cancelled) {
+                if !matches!(error, super::Error::RemoteFailure(_) | super::Error::Cancelled) {
                     f.write_str(" / completion is unvalidated; send an explicit continuation to use the recorded state")?;
                 }
                 Ok(())

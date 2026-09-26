@@ -6,12 +6,14 @@ pub mod client;
 #[cfg(test)]
 mod continuation_tests;
 mod events;
+mod failure;
 mod http;
 mod request;
 mod response;
 mod snapshot;
 
 pub use events::{Limits, Progress, ResponseStream};
+pub use failure::{FailureCode, FailureEvent, ProviderFailure};
 pub use http::{HttpResponseStream, encode_http};
 pub use request::{ENDPOINT, Input, Request, Tool};
 pub use response::{Response, Status, ToolCall, Usage};
@@ -27,7 +29,7 @@ pub enum Error {
     ConflictingOutput,
     InvalidTool,
     InvalidUsage,
-    RemoteFailure,
+    RemoteFailure(ProviderFailure),
     MissingTerminal,
     Limit,
     Cancelled,
@@ -57,7 +59,14 @@ impl fmt::Display for Error {
             Self::ConflictingOutput => "account response output is inconsistent",
             Self::InvalidTool => "account response contains an invalid tool call",
             Self::InvalidUsage => "account response contains invalid token usage",
-            Self::RemoteFailure => "account provider reported a failed response",
+            Self::RemoteFailure(failure) => {
+                return write!(
+                    f,
+                    "account provider reported a failed response / {} / {}",
+                    failure.event.name(),
+                    failure.code.name()
+                );
+            }
             Self::MissingTerminal => "account stream ended before a terminal response",
             Self::Limit => "account response exceeds its configured limit",
             Self::Cancelled => "account stream consumption was cancelled",

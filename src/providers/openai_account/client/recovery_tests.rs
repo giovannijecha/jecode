@@ -1,4 +1,64 @@
 use super::*;
+use crate::providers::openai_account::{FailureCode, FailureEvent, ProviderFailure};
+
+#[test]
+fn provider_failure_attempt_keeps_event_code_and_stream_delivery_without_retry() {
+    let sentinel = "synthetic-secret-token";
+    for (payload, event, code) in [
+        (
+            r#"{"type":"response.failed","response":{"id":"r1","status":"failed","error":{"code":"server_error","message":"synthetic-secret-token"}}}"#,
+            FailureEvent::ResponseFailed,
+            FailureCode::ServerError,
+        ),
+        (
+            r#"{"type":"error","code":"rate_limit_exceeded","message":"synthetic-secret-token"}"#,
+            FailureEvent::Error,
+            FailureCode::RateLimitExceeded,
+        ),
+    ] {
+        let cancelled = AtomicBool::new(false);
+        let body = format!("data: {payload}\n\n");
+        let mut channel = Fixture::new();
+        channel.reads.push_back(Ok(http(&body)));
+        let mut connections = 0;
+        let mut attempts = Vec::new();
+        let error = client()
+            .generate_with(
+                &request(),
+                &budget(&cancelled),
+                |progress| {
+                    if let Progress::Attempt(attempt) = progress {
+                        attempts.push(attempt);
+                    }
+                    ControlFlow::Continue(())
+                },
+                |_, _| {
+                    connections += 1;
+                    Ok(std::mem::replace(&mut channel, Fixture::new()))
+                },
+            )
+            .unwrap_err();
+        let failure = ProviderFailure { event, code };
+        assert_eq!(
+            error,
+            Error::Response {
+                error: crate::providers::openai_account::Error::RemoteFailure(failure),
+                delivery: Delivery::Streaming,
+            }
+        );
+        assert_eq!(connections, 1);
+        assert_eq!(attempts.len(), 1);
+        let attempt = &attempts[0];
+        assert_eq!(attempt.provider_failure, Some(failure));
+        assert_eq!(attempt.delivery, Delivery::Streaming);
+        assert_eq!(attempt.stage, Some(RequestStage::ResponseRead));
+        assert_eq!(attempt.response_status, Some(200));
+        assert_eq!(attempt.stream_events, 1);
+        assert!(attempt.accepted_wire_bytes > 0);
+        assert!(!attempt.retrying);
+        assert!(!format!("{attempt:?} {error}").contains(sentinel));
+    }
+}
 
 #[test]
 fn pre_submission_connection_failure_retries_once_then_completes() {

@@ -180,7 +180,7 @@ fn cancellation_stops_current_chunk_and_cannot_yield_tools() {
 #[test]
 fn failure_limits_and_truncation_never_become_success() {
     let error = consume(&frame(r#"{"type":"error","message":"synthetic secret"}"#)).unwrap_err();
-    assert_eq!(error, Error::RemoteFailure);
+    assert!(matches!(error, Error::RemoteFailure(_)));
     assert!(!error.to_string().contains("synthetic secret"));
     for wire in [
         frame("{"),
