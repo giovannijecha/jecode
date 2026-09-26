@@ -365,7 +365,7 @@ impl Backend for IndexRecorder {
         Ok(tool_tests::calls_response(vec![tool_tests::call(
             "index",
             "recall_receipts",
-            r#"{"mode":"index","turn":0,"step":0}"#,
+            r#"{"mode":"index","turn":0,"step":0,"receipt":0,"offset":0,"expected_call_id":"placeholder"}"#,
         )]))
     }
 }

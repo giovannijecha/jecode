@@ -305,3 +305,129 @@ fn resident_legacy_shape_and_failed_compaction_boundary_remain_bounded() {
     assert!(!covered.text.contains("OLD"));
     assert!(index(&history, 0, 2, 0, &budget(&cancelled)).failed);
 }
+
+#[test]
+fn indexed_page_is_pinned_until_a_following_accepted_response() {
+    let mut history = History::default();
+    history.begin("Use a saved read".into()).unwrap();
+    history.turns[0].steps.push(Step {
+        response: Some(tool_tests::calls_response(vec![tool_tests::call(
+            "source-read",
+            "read_file",
+            r#"{"path":"source.txt"}"#,
+        )])),
+        results: vec![Receipt {
+            call_id: "source-read".into(),
+            output: "recorded value".into(),
+            summary: "read_file / captured".into(),
+            image: None,
+        }],
+        accepted: true,
+        ..Default::default()
+    });
+    history.projection.step = 1;
+    let cancelled = AtomicBool::new(false);
+    let page = index(&history, 0, 0, 0, &budget(&cancelled));
+    assert!(!page.failed);
+    let call = tool_tests::call(
+        "index-call",
+        "recall_receipts",
+        r#"{"mode":"index","turn":0,"step":0,"receipt":0,"offset":0,"expected_call_id":"placeholder"}"#,
+    );
+    assert!(matches!(
+        Prepared::parse(&call.name, &call.arguments),
+        Ok(Prepared::Recall {
+            index: true,
+            offset: 0,
+            expected_call_id: None,
+            ..
+        })
+    ));
+    let mut result = Receipt {
+        call_id: "index-call".into(),
+        output: page.text,
+        summary: "recall_receipts / indexed saved reads".into(),
+        image: None,
+    };
+    assert!(admitted(&call, &result));
+    result.output = result.output.replace("\"receipt\":0", "\"receipt\":1");
+    assert!(!admitted(&call, &result));
+    assert!(
+        Prepared::parse(
+            "recall_receipts",
+            &json::parse(
+                r#"{"mode":"index","turn":0,"step":0,"offset":1,"expected_call_id":"placeholder"}"#,
+                Default::default(),
+            )
+            .unwrap(),
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn index_keeps_original_indices_when_effects_and_unexecuted_reads_are_skipped() {
+    let mut history = History::default();
+    history.begin("Use recorded observations".into()).unwrap();
+    let calls = vec![
+        tool_tests::call("first", "read_file", r#"{"path":"first.txt"}"#),
+        tool_tests::call(
+            "effect",
+            "edit_file",
+            r#"{"path":"first.txt","old_text":"a","new_text":"b"}"#,
+        ),
+        tool_tests::call("second", "read_file", r#"{"path":"second.txt"}"#),
+        tool_tests::call("unexecuted", "read_file", r#"{"path":"later.txt"}"#),
+        tool_tests::call("last", "read_file", r#"{"path":"last.txt"}"#),
+    ];
+    history.turns[0].steps.push(Step {
+        response: Some(tool_tests::calls_response(calls)),
+        results: [
+            ("first", "ORIGINAL-FIRST", "read_file / saved"),
+            ("effect", "applied", "edit_file / applied"),
+            ("second", "ORIGINAL-SECOND", "read_file / saved"),
+            ("unexecuted", "", "Not executed"),
+            ("last", "ORIGINAL-LAST", "read_file / saved"),
+        ]
+        .into_iter()
+        .map(|(call_id, output, summary)| Receipt {
+            call_id: call_id.into(),
+            output: output.into(),
+            summary: summary.into(),
+            image: None,
+        })
+        .collect(),
+        accepted: true,
+        ..Default::default()
+    });
+    history.projection.step = 1;
+    let cancelled = AtomicBool::new(false);
+    let output = index(&history, 0, 0, 0, &budget(&cancelled));
+    assert!(!output.failed);
+    let value = json::parse(&output.text, Default::default()).unwrap();
+    let addresses = value
+        .get("entries")
+        .and_then(Value::array)
+        .unwrap()
+        .iter()
+        .map(|entry| entry.get("recall_address").unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        addresses
+            .iter()
+            .map(|address| address.get("receipt").and_then(Value::unsigned).unwrap())
+            .collect::<Vec<_>>(),
+        vec![0, 2, 4]
+    );
+    assert_eq!(
+        addresses
+            .iter()
+            .map(|address| address
+                .get("expected_call_id")
+                .and_then(Value::text)
+                .unwrap())
+            .collect::<Vec<_>>(),
+        vec!["first", "second", "last"]
+    );
+    assert!(matches!(value.get("next"), Some(Value::Null)));
+}

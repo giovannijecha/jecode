@@ -25,6 +25,10 @@ fn page(
             "source",
             string("original recorded session calls; no workspace reread"),
         ),
+        (
+            "identity",
+            string("use each returned recall_address for guarded content retrieval"),
+        ),
         ("turn", number(start.0)),
         ("step", number(start.1)),
         ("receipt", number(start.2)),

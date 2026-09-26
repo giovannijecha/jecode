@@ -76,30 +76,30 @@ impl Prepared {
                 Some(Value::String(mode)) if mode == "index" => true,
                 _ => return Err("mode must be index when supplied"),
             };
-            if index && (args.get("offset").is_some() || args.get("expected_call_id").is_some()) {
-                return Err("index mode uses turn, step and receipt only");
+            let offset = optional_nonnegative(args, "offset")?;
+            if index && offset != 0 {
+                return Err("index mode requires offset 0; use its next cursor for pagination");
             }
+            let expected_call_id = match args.get("expected_call_id") {
+                None => None,
+                Some(Value::String(id))
+                    if !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control) =>
+                {
+                    Some(id.clone())
+                }
+                _ => {
+                    return Err("expected_call_id must be a nonempty call ID of at most 256 bytes");
+                }
+            };
             return Ok(Self::Recall {
                 index,
                 turn: required_nonnegative(args, "turn")?,
                 step: required_nonnegative(args, "step")?,
                 receipt: optional_nonnegative(args, "receipt")?,
-                offset: optional_nonnegative(args, "offset")?,
-                expected_call_id: match args.get("expected_call_id") {
-                    None => None,
-                    Some(Value::String(id))
-                        if !id.is_empty()
-                            && id.len() <= 256
-                            && !id.chars().any(char::is_control) =>
-                    {
-                        Some(id.clone())
-                    }
-                    _ => {
-                        return Err(
-                            "expected_call_id must be a nonempty call ID of at most 256 bytes",
-                        );
-                    }
-                },
+                offset,
+                // The index locates original identities; a caller-supplied guard
+                // has no identity to check until an exact receipt is requested.
+                expected_call_id: if index { None } else { expected_call_id },
             });
         }
         if name == "view_image" {
