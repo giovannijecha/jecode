@@ -10,6 +10,8 @@ mod diagnostics;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod partial_tests;
 #[cfg(all(test, any(windows, target_os = "linux")))]
+mod provider_failure_tests;
+#[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 mod transcript;
 mod v2;

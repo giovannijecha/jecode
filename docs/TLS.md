@@ -68,6 +68,25 @@ model event decoder. None of these byte counts proves remote processing.
 The report omits credentials, prompts, response text, tool arguments and raw
 session contents.
 
+For a provider-reported stream failure, `provider_event` records either
+`response.failed` or `error` and `provider_code` records an allowlisted error
+code. The code is read from `response.error.code` for `response.failed` and from
+the top-level `code` for `error`. Missing or unrecognized codes are `unknown`;
+wrongly typed or oversized codes are `malformed`. Older attempts and transport
+failures have `unknown` metadata. Raw provider messages and unrecognized code
+strings are discarded, and these labels do not trigger retries. The allowlist
+includes `server_error`, `rate_limit_exceeded`, `slow_down`,
+`server_is_overloaded`, `context_length_exceeded`, `insufficient_quota`,
+`credit_balance_exhausted`, `organization_spend_limit_exceeded`,
+`project_spend_limit_exceeded`, `organization_usage_limit_exceeded`,
+`usage_not_included` and `invalid_prompt`.
+The event shapes and `server_error` example follow the
+[Responses streaming reference](https://platform.openai.com/docs/api-reference/responses-streaming).
+The other allowlisted codes are backed by the
+[API error guide](https://developers.openai.com/api/docs/guides/error-codes) or
+the inspected upstream Codex parser at
+[`e72da2b53805894878023d01949a25a082e0a5cb`](https://github.com/openai/codex/blob/e72da2b53805894878023d01949a25a082e0a5cb/codex-rs/codex-api/src/sse/responses_error.rs).
+
 Cancellation and deadlines are checked during connect, reads and writes. The
 model request uses finite setup and write windows, followed by a configurable
 first-event and established-stream inactivity window. A complete accepted SSE

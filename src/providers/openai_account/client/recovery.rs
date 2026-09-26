@@ -1,6 +1,7 @@
 //! A generation request can be retried only before any application record is
 //! accepted by the local socket. Local acceptance never proves remote receipt.
 use super::{Error, RequestStage};
+use crate::providers::openai_account::ProviderFailure;
 use crate::tls::{Budget, NetworkError};
 use std::{fmt, io, thread, time::Duration};
 
@@ -105,6 +106,7 @@ pub struct Attempt {
     pub response_status: Option<u16>,
     /// Complete SSE data events delivered to the model decoder.
     pub stream_events: u32,
+    pub provider_failure: Option<ProviderFailure>,
     pub diagnostic: Option<String>,
     pub retrying: bool,
 }
@@ -162,6 +164,13 @@ impl Attempt {
             }
         } else if matches!(error, Error::Response { .. }) {
             attempt.stage = Some(RequestStage::ResponseRead);
+            if let Error::Response {
+                error: crate::providers::openai_account::Error::RemoteFailure(failure),
+                ..
+            } = error
+            {
+                attempt.provider_failure = Some(failure);
+            }
             if matches!(
                 error,
                 Error::Response {

@@ -7,6 +7,8 @@ mod batch_tests;
 mod head;
 mod log;
 #[cfg(test)]
+mod provider_failure_tests;
+#[cfg(test)]
 mod recall_tests;
 mod replay;
 #[cfg(test)]

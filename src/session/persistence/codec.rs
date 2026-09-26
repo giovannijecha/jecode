@@ -1,6 +1,6 @@
 use super::*;
-use crate::providers::openai_account::Response;
 use crate::providers::openai_account::client::{Attempt, Delivery, RequestStage};
+use crate::providers::openai_account::{FailureCode, FailureEvent, ProviderFailure, Response};
 use crate::session::{
     End, Failure, Metrics,
     history::{History, Receipt, Step, Turn},
@@ -414,6 +414,15 @@ pub(super) fn attempt(attempt: &Attempt) -> Value {
             "stream_events",
             Value::Number(attempt.stream_events.to_string()),
         ),
+        (
+            "provider_failure",
+            attempt.provider_failure.map_or(Value::Null, |failure| {
+                json::object([
+                    ("event", text(failure.event.name())),
+                    ("code", text(failure.code.name())),
+                ])
+            }),
+        ),
         ("diagnostic", optional(&attempt.diagnostic)),
         ("retrying", Value::Bool(attempt.retrying)),
     ])
@@ -433,6 +442,13 @@ pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
     let stage = optional("stage", 32)?
         .map(|name| RequestStage::parse(&name).ok_or_else(invalid))
         .transpose()?;
+    let provider_failure = match value.get("provider_failure") {
+        None | Some(Value::Null) => None,
+        Some(provider) => Some(ProviderFailure {
+            event: FailureEvent::parse(string(provider, "event", 32)?).ok_or_else(invalid)?,
+            code: FailureCode::parse(string(provider, "code", 64)?).ok_or_else(invalid)?,
+        }),
+    };
     Ok(Attempt {
         request_sequence: number("request_sequence")?
             .try_into()
@@ -483,6 +499,7 @@ pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
             ),
         },
         stream_events: number("stream_events")?.try_into().map_err(|_| invalid())?,
+        provider_failure,
         diagnostic: optional("diagnostic", 1024)?,
         retrying: match value.get("retrying") {
             Some(Value::Bool(value)) => *value,

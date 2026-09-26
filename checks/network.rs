@@ -37,7 +37,7 @@ fn category(value: Option<&str>) -> &str {
 fn line(record: &DiagnosticAttempt) -> String {
     let attempt = &record.attempt;
     format!(
-        "turn={} source={} request_in_command={} connection_attempt={} delivery={} stage={} stage_ms={} request_ms={} since_progress_ms={} termination={} accepted_tls_write_bytes={} received_tls_wire_bytes={} decrypted_http_bytes={} http_status={} sse_events={} operation={} category={} os_code={} retrying={}",
+        "turn={} source={} request_in_command={} connection_attempt={} delivery={} stage={} stage_ms={} request_ms={} since_progress_ms={} termination={} accepted_tls_write_bytes={} received_tls_wire_bytes={} decrypted_http_bytes={} http_status={} sse_events={} provider_event={} provider_code={} operation={} category={} os_code={} retrying={}",
         record.turn,
         record.source.name(),
         attempt.request_sequence,
@@ -57,6 +57,12 @@ fn line(record: &DiagnosticAttempt) -> String {
             .response_status
             .map_or("none".into(), |status| status.to_string()),
         attempt.stream_events,
+        attempt
+            .provider_failure
+            .map_or("unknown", |failure| failure.event.name()),
+        attempt
+            .provider_failure
+            .map_or("unknown", |failure| failure.code.name()),
         operation(attempt.operation.as_deref()),
         category(attempt.category.as_deref()),
         attempt
@@ -80,12 +86,17 @@ pub(super) fn run(id: &str, directory: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use jecode::providers::openai_account::client::{Attempt, Termination};
+    use jecode::providers::openai_account::{FailureCode, FailureEvent, ProviderFailure};
     #[test]
     fn export_uses_only_fixed_labels_and_bounded_numbers() {
         let attempt = Attempt {
             operation: Some("synthetic secret prompt".into()),
             category: Some("synthetic secret response".into()),
             diagnostic: Some("synthetic secret token".into()),
+            provider_failure: Some(ProviderFailure {
+                event: FailureEvent::ResponseFailed,
+                code: FailureCode::ServerError,
+            }),
             os_code: Some(10054),
             request_elapsed_ms: 315_000,
             since_progress_ms: Some(300_000),
@@ -99,11 +110,26 @@ mod tests {
         });
         assert!(output.contains("turn=7 source=compaction request_in_command=0"));
         assert!(output.contains("os_code=10054"));
+        assert!(output.contains("provider_event=response.failed provider_code=server_error"));
         assert!(output.contains("operation=none_or_unknown"));
         assert!(output.contains(
             "request_ms=315000 since_progress_ms=300000 termination=stream_idle_timeout"
         ));
         assert!(!output.contains("synthetic secret"));
         assert!(output.len() < 512);
+    }
+
+    #[test]
+    fn absent_provider_metadata_exports_unknown_without_guessing_transport_cause() {
+        let output = line(&DiagnosticAttempt {
+            turn: 1,
+            source: persistence::AttemptSource::Generation,
+            attempt: Attempt {
+                os_code: Some(10054),
+                ..Default::default()
+            },
+        });
+        assert!(output.contains("provider_event=unknown provider_code=unknown"));
+        assert!(output.contains("os_code=10054"));
     }
 }
