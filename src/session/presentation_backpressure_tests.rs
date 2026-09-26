@@ -168,10 +168,11 @@ fn cancellation_interrupts_full_presentation_without_replaying_request() {
     blocked(&run);
     run.session.cancel();
     assert_eq!(run.returned.recv_timeout(Duration::from_secs(1)), Ok(false));
-    let (_, end) = finish(&mut run.session);
+    let (text, end) = finish(&mut run.session);
     assert_eq!(end, End::Failed(Failure::Cancelled));
     assert_eq!(run.reads.load(Ordering::Acquire), 1);
     assert_eq!(run.requests.load(Ordering::Acquire), 1);
+    let expected = run.expected.clone();
     drop(run);
     let saved = persistence::load(&store, &id, false).unwrap();
     let turn = saved.history.turns.last().unwrap();
@@ -179,7 +180,12 @@ fn cancellation_interrupts_full_presentation_without_replaying_request() {
     // retained outcome and partial text carry the interruption evidence.
     assert_eq!(turn.end, Some(End::Failed(Failure::Worker)));
     assert_eq!(turn.outcome, Failure::Cancelled.to_string());
-    assert_eq!(turn.steps[0].text.len(), 65 * 3);
+    // The cancellation can win just before or just after the 65th delta is
+    // accepted: `entered` is sent before passing that delta to the controller.
+    let saved = &turn.steps[0].text;
+    assert!([64 * 3, 65 * 3].contains(&saved.len()));
+    assert!(expected.starts_with(saved));
+    assert!(expected.starts_with(&text.concat()));
 }
 
 #[test]
