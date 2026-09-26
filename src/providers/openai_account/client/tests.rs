@@ -69,7 +69,7 @@ impl ResponseChannel for Fixture {
 }
 fn budget(cancelled: &AtomicBool) -> Budget<'_> {
     Budget {
-        deadline: Instant::now() + Duration::from_secs(5),
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
         cancelled,
     }
 }
@@ -299,6 +299,58 @@ fn interrupted_body_read_records_bounded_response_progress_without_content() {
 }
 
 #[test]
+fn timeout_after_a_started_stream_keeps_partial_evidence_and_never_resubmits() {
+    let mut channel = Fixture::new();
+    let partial = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
+    channel.reads.push_back(Ok(format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{partial}",
+        partial.len() + 100
+    )
+    .into_bytes()));
+    channel.reads.push_back(Err(NetworkError::Timeout));
+    let cancelled = AtomicBool::new(false);
+    let parent = Budget {
+        deadline: None,
+        cancelled: &cancelled,
+    };
+    let mut connections = 0;
+    let mut attempts = Vec::new();
+    let mut shown = String::new();
+    let error = client()
+        .generate_with(
+            &request(),
+            &parent,
+            |progress| {
+                match progress {
+                    Progress::Text(text) => shown.push_str(text),
+                    Progress::Attempt(attempt) => attempts.push(attempt),
+                    Progress::Reasoning(_) => {}
+                }
+                ControlFlow::Continue(())
+            },
+            |_, _| {
+                connections += 1;
+                Ok(std::mem::replace(&mut channel, Fixture::new()))
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Transport {
+            error: NetworkError::Timeout,
+            delivery: Delivery::Streaming,
+            ..
+        }
+    ));
+    assert_eq!(connections, 1);
+    assert_eq!(shown, "partial");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].termination, Some(Termination::IdleTimeout));
+    assert_eq!(attempts[0].stream_events, 1);
+    assert!(!attempts[0].retrying);
+}
+
+#[test]
 fn os_code_is_structured_without_exposing_io_message() {
     let failure = crate::tls::IoFailure {
         operation: IoOperation::Connect,
@@ -310,6 +362,9 @@ fn os_code_is_structured_without_exposing_io_message() {
     assert!(display.contains("ConnectionRefused"));
     assert!(display.contains("OS 12345"));
 }
+
+#[path = "timing_tests.rs"]
+mod timing_tests;
 
 #[path = "recovery_tests.rs"]
 mod recovery_tests;

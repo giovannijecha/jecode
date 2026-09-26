@@ -427,7 +427,7 @@ pub(super) fn compact(
         let result = backend.generate(
             &request,
             &Budget {
-                deadline: Instant::now() + Duration::from_secs(180),
+                deadline: None,
                 cancelled: &context.cancelled,
             },
             &mut |progress| {

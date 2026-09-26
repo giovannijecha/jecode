@@ -113,7 +113,13 @@ impl Session {
             Some(directory.path()),
             workspace.as_ref(),
         )?;
-        Self::with_history_shell(model, worker::Account::default(), workspace, history, shell)
+        Self::with_history_shell(
+            model,
+            worker::Account::with_idle_timeout(settings.model_stream_idle_timeout_ms),
+            workspace,
+            history,
+            shell,
+        )
     }
     pub fn resume(
         saved: persistence::Saved,
@@ -141,7 +147,7 @@ impl Session {
         )?;
         Self::with_history_shell(
             saved.model,
-            worker::Account::default(),
+            worker::Account::with_idle_timeout(settings.model_stream_idle_timeout_ms),
             workspace,
             saved.history,
             shell,

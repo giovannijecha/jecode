@@ -8,10 +8,7 @@ use crate::{
     providers::openai_account::{Input, Progress, Request, Status, client::Attempt},
     tls::Budget,
 };
-use std::{
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::ops::ControlFlow;
 
 #[derive(Clone)]
 pub(super) struct AbandonedVisual {
@@ -590,7 +587,7 @@ pub(super) fn compact(
     let result = backend.generate(
         &request,
         &Budget {
-            deadline: Instant::now() + Duration::from_secs(180),
+            deadline: None,
             cancelled: &context.cancelled,
         },
         &mut |progress| observe_compaction(progress, &mut attempts, &mut partial, metrics, context),

@@ -36,8 +36,23 @@ pub(crate) trait Backend: Send {
         progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, client::Error>;
 }
-#[derive(Default)]
-pub(super) struct Account(Option<client::Client>);
+pub(super) struct Account {
+    client: Option<client::Client>,
+    idle_timeout: Duration,
+}
+impl Default for Account {
+    fn default() -> Self {
+        Self::with_idle_timeout(client::DEFAULT_STREAM_IDLE_TIMEOUT_MS)
+    }
+}
+impl Account {
+    pub(super) fn with_idle_timeout(milliseconds: u64) -> Self {
+        Self {
+            client: None,
+            idle_timeout: Duration::from_millis(milliseconds),
+        }
+    }
+}
 #[cfg(test)]
 pub(crate) type EffectGate = Arc<dyn Fn(&str, &SyncSender<Event>) + Send + Sync>;
 impl Backend for Account {
@@ -46,19 +61,19 @@ impl Backend for Account {
         budget: &Budget<'_>,
         code: &mut dyn FnMut(&str) -> ControlFlow<()>,
     ) -> Result<(), client::Error> {
-        self.0 = Some(client::Client::connect(budget, code)?);
+        self.client = Some(client::Client::connect(budget, code)?);
         Ok(())
     }
     fn logout(&mut self, budget: &Budget<'_>) -> Result<(), client::Error> {
         client::Client::logout(budget)?;
-        self.0 = None;
+        self.client = None;
         Ok(())
     }
     fn catalog(
         &mut self,
         budget: &Budget<'_>,
     ) -> Result<Option<crate::providers::openai_account::catalog::Catalog>, client::Error> {
-        self.0
+        self.client
             .as_mut()
             .ok_or(client::Error::Expired)?
             .catalog(budget)
@@ -70,10 +85,10 @@ impl Backend for Account {
         budget: &Budget<'_>,
         progress: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
     ) -> Result<Response, client::Error> {
-        self.0
+        self.client
             .as_mut()
             .ok_or(client::Error::Expired)?
-            .generate(request, budget, progress)
+            .generate_with_idle(request, budget, self.idle_timeout, progress)
     }
 }
 
@@ -212,7 +227,7 @@ pub(super) fn run(
                 let unaffected = AtomicBool::new(false);
                 let budget = Budget {
                     cancelled: &unaffected,
-                    deadline: Instant::now() + Duration::from_secs(5),
+                    deadline: Some(Instant::now() + Duration::from_secs(5)),
                 };
                 match backend.logout(&budget) {
                     Ok(()) => {
@@ -385,7 +400,7 @@ fn login(
 ) -> bool {
     let result = backend.login(
         &Budget {
-            deadline: Instant::now() + Duration::from_secs(900),
+            deadline: Some(Instant::now() + Duration::from_secs(900)),
             cancelled: &context.cancelled,
         },
         &mut |code| context.send(Event::LoginCode(code.into()), true),
@@ -413,7 +428,7 @@ fn load_catalog(
     current: &mut Option<crate::providers::openai_account::catalog::Catalog>,
 ) -> bool {
     let budget = Budget {
-        deadline: Instant::now() + Duration::from_secs(5),
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
         cancelled: &context.cancelled,
     };
     match backend.catalog(&budget) {

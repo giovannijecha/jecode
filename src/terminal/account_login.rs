@@ -51,7 +51,7 @@ fn drive(
             let result = connect(
                 &Budget {
                     cancelled: &worker_cancelled,
-                    deadline: Instant::now() + Duration::from_secs(900),
+                    deadline: Some(Instant::now() + Duration::from_secs(900)),
                 },
                 &mut |code| {
                     shown = true;

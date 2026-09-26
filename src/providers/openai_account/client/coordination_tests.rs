@@ -43,7 +43,7 @@ fn request() -> Request {
 fn budget(cancelled: &AtomicBool, duration: Duration) -> Budget<'_> {
     Budget {
         cancelled,
-        deadline: Instant::now() + duration,
+        deadline: Some(Instant::now() + duration),
     }
 }
 
@@ -118,7 +118,7 @@ fn account_replacement_or_logout_before_retry_prevents_another_send() {
                 |progress| {
                     if let crate::providers::openai_account::Progress::Attempt(attempt) = progress {
                         attempts += 1;
-                        assert!(attempt.retrying);
+                        assert!(attempt.retrying, "{attempt:?}");
                         if logout {
                             Client::logout_in(
                                 store.clone(),

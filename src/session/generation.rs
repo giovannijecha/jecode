@@ -2,17 +2,14 @@
 use super::{
     Event, Failure, Metrics,
     history::{MAX_TEXT, Receipt, Step, Turn},
-    worker::{Backend, Context, failure, millis, operation_deadline},
+    worker::{Backend, Context, failure, millis},
 };
 use crate::{
     providers::openai_account::{Input, Progress, Request, Status},
     tls::Budget,
     tools::Output,
 };
-use std::{
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::{ops::ControlFlow, time::Instant};
 
 pub(super) fn generate(
     backend: &mut impl Backend,
@@ -20,7 +17,7 @@ pub(super) fn generate(
     turn: &mut Turn,
     context: &Context,
     started: Instant,
-    clock: &impl Fn() -> Instant,
+    _clock: &impl Fn() -> Instant,
     metrics: &mut Metrics,
 ) -> Result<(), Failure> {
     context.check()?;
@@ -32,7 +29,7 @@ pub(super) fn generate(
     let result = backend.generate(
         request,
         &Budget {
-            deadline: operation_deadline(clock(), Duration::from_secs(600)),
+            deadline: None,
             cancelled: &context.cancelled,
         },
         &mut |progress| {

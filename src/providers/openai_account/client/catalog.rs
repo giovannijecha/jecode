@@ -32,7 +32,13 @@ impl Client {
         }
         let short = Budget {
             cancelled: budget.cancelled,
-            deadline: budget.deadline.min(Instant::now() + Duration::from_secs(5)),
+            deadline: Some(
+                budget
+                    .deadline
+                    .map_or(Instant::now() + Duration::from_secs(5), |total| {
+                        total.min(Instant::now() + Duration::from_secs(5))
+                    }),
+            ),
         };
         let mut connection =
             connect_channel(&self.trust, &short).map_err(|error| Error::Transport {
@@ -138,9 +144,13 @@ fn exchange(
     decoder.finish(|_| ControlFlow::Continue(()))?;
     let _ = channel.close(&Budget {
         cancelled: budget.cancelled,
-        deadline: budget
-            .deadline
-            .min(Instant::now() + Duration::from_millis(100)),
+        deadline: Some(
+            budget
+                .deadline
+                .map_or(Instant::now() + Duration::from_millis(100), |total| {
+                    total.min(Instant::now() + Duration::from_millis(100))
+                }),
+        ),
     });
     Catalog::parse(&body).map_err(Error::Catalog)
 }
@@ -209,7 +219,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         let body = r#"{"models":[{"slug":"model-one","visibility":"list","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}"#;
         let catalog = client
@@ -251,7 +261,7 @@ mod tests {
             let cancelled = AtomicBool::new(false);
             let budget = Budget {
                 cancelled: &cancelled,
-                deadline: Instant::now() + Duration::from_secs(1),
+                deadline: Some(Instant::now() + Duration::from_secs(1)),
             };
             let result = client.catalog_with(&budget, |_, _| {
                 Ok(Channel {
@@ -268,7 +278,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(1),
+            deadline: Some(Instant::now() + Duration::from_secs(1)),
         };
         let result = client.catalog_with(&budget, |_, _| {
             Ok(Channel {
@@ -336,7 +346,7 @@ mod tests {
             let cancelled = AtomicBool::new(false);
             let budget = Budget {
                 cancelled: &cancelled,
-                deadline: Instant::now() + Duration::from_secs(4),
+                deadline: Some(Instant::now() + Duration::from_secs(4)),
             };
             let body = r#"{"models":[{"slug":"model-one","visibility":"list"}]}"#;
             let result = client.catalog_with(&budget, |_, _| {
@@ -352,7 +362,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let budget = Budget {
             cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(2),
+            deadline: Some(Instant::now() + Duration::from_secs(2)),
         };
         Client::logout_in(store.clone(), &budget).unwrap();
         release_tx.send(()).unwrap();

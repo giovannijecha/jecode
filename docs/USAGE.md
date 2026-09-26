@@ -92,6 +92,7 @@ without Unix metadata permissions.
   "effort": "medium",
   "reduced_motion": false,
   "context_limit_bytes": 524288,
+  "model_stream_idle_timeout_ms": 300000,
   "file_access": "local"
 }
 ```
@@ -112,6 +113,14 @@ unknown rather than as evidence that an effort is unsupported.
 Other settings can be edited while Jecode is closed. The context threshold is between 65,536 and
 1,572,864 serialized request bytes. It is an application budget, not a model token
 window. `JECODE_REDUCED_MOTION=1` overrides animation; `NO_COLOR=1` disables colors.
+`model_stream_idle_timeout_ms` accepts 1,000 through 900,000 milliseconds. Its
+default is 300,000 milliseconds, including for older settings that omit the field.
+It bounds the wait from request writing to the first complete SSE data event, then
+the gap between complete accepted events for ordinary generation and every
+compaction path. Valid reasoning and other non-text data events renew the wait;
+headers, partial TLS/HTTP/SSE data and SSE comments do not. A progressing response
+has no implicit total lifetime limit. Cancellation and explicit caller deadlines
+still apply. Changes take effect when starting or resuming a session.
 `file_access` accepts `local` or `workspace`; omitting it uses `local` for new
 sessions. See [tools](TOOLS.md) for the path exclusions and supported formats.
 
@@ -126,6 +135,7 @@ select a PowerShell 7 executable. To select one, add its absolute path to
   "effort": "medium",
   "reduced_motion": false,
   "context_limit_bytes": 524288,
+  "model_stream_idle_timeout_ms": 300000,
   "file_access": "local",
   "windows_powershell_executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
 }

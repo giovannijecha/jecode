@@ -368,7 +368,7 @@ fn run(args: impl Iterator<Item = OsString>) -> io::Result<u8> {
             let cancelled = std::sync::atomic::AtomicBool::new(false);
             let budget = jecode::tls::Budget {
                 cancelled: &cancelled,
-                deadline: std::time::Instant::now() + std::time::Duration::from_secs(5),
+                deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(5)),
             };
             match jecode::providers::openai_account::client::Client::logout(&budget) {
                 Ok(()) => {
