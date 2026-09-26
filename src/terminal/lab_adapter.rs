@@ -111,6 +111,21 @@ impl Snapshot {
                     status: model::Status::Failed,
                     text: model.edit_notice.into(),
                 })
+            })
+            .or_else(|| {
+                (account.is_none()
+                    && !model.streaming()
+                    && (model.status.starts_with("Interrupted")
+                        || model.status.starts_with("Simulated stream failure")
+                        || model.status.starts_with("Preview history full")))
+                .then(|| model::Notice {
+                    status: if model.status.starts_with("Simulated stream failure") {
+                        model::Status::Failed
+                    } else {
+                        model::Status::Warned
+                    },
+                    text: model.status.into(),
+                })
             });
         let footer = account.map_or_else(
             || composer::Footer {
