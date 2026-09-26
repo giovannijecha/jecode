@@ -149,8 +149,8 @@ pub(crate) fn execute(
         } else {
             steps
         };
-        let mut absolute_step = if absolute_turn == turn { step } else { 0 };
-        while absolute_step < last {
+        let first_step = if absolute_turn == turn { step } else { 0 };
+        for absolute_step in first_step..last {
             if budget.check().is_err() {
                 return Output::error("receipt index cancelled or timed out");
             }
@@ -181,10 +181,13 @@ pub(crate) fn execute(
                         .as_ref()
                         .filter(|response| response.status == Status::Completed)
                 {
-                    let end = saved
-                        .receipt_base
+                    let end = first
                         .saturating_add(crate::session::persistence::RECEIPT_WINDOW)
+                        .min(saved.receipt_base.saturating_add(saved.receipts.len()))
                         .min(response.tool_calls.len());
+                    if end <= first && first < response.tool_calls.len() {
+                        return Output::error("compacted canonical receipts are incomplete");
+                    }
                     for index in first..end {
                         let Some(result) = saved.receipts[index - saved.receipt_base].as_ref()
                         else {
@@ -267,7 +270,6 @@ pub(crate) fn execute(
                     return output;
                 }
             }
-            absolute_step += 1;
         }
     }
     finish(start, through, &entries, None)

@@ -300,6 +300,9 @@ mod delivery_tests;
 #[path = "receipt_recall_index_tests.rs"]
 mod index_tests;
 #[cfg(test)]
+#[path = "receipt_recall_pagination_tests.rs"]
+mod pagination_tests;
+#[cfg(test)]
 #[path = "receipt_recall_review_tests.rs"]
 mod review_tests;
 #[cfg(test)]
