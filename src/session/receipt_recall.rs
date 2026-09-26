@@ -32,6 +32,7 @@ pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
         step,
         receipt,
         offset,
+        expected_call_id,
     }) = Prepared::parse(&call.name, &call.arguments)
     else {
         return false;
@@ -47,6 +48,9 @@ pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
         // The inner call_id names the original source read. The outer receipt
         // call_id above pairs this result with the recall call being delivered.
         && value.get("call_id").and_then(Value::text).is_some()
+        && expected_call_id.as_deref().is_none_or(|expected| {
+            value.get("call_id").and_then(Value::text) == Some(expected)
+        })
         && matches!(
             value.get("call_name").and_then(Value::text),
             Some("list_files" | "read_file" | "search_text")
@@ -67,12 +71,41 @@ fn string(value: &str) -> Value {
     Value::String(value.into())
 }
 
+pub(super) fn address(
+    turn: usize,
+    step: usize,
+    receipt: usize,
+    offset: usize,
+    call_id: &str,
+) -> Value {
+    json::object([
+        ("turn", number(turn)),
+        ("step", number(step)),
+        ("receipt", number(receipt)),
+        ("offset", number(offset)),
+        ("expected_call_id", string(call_id)),
+    ])
+}
+
+#[cfg(test)]
 pub(super) fn execute(
     history: &History,
     turn: usize,
     step: usize,
     receipt: usize,
     offset: usize,
+    budget: &Budget<'_>,
+) -> Output {
+    execute_with_identity(history, turn, step, receipt, offset, None, budget)
+}
+
+pub(super) fn execute_with_identity(
+    history: &History,
+    turn: usize,
+    step: usize,
+    receipt: usize,
+    offset: usize,
+    expected_call_id: Option<&str>,
     budget: &Budget<'_>,
 ) -> Output {
     if budget.check().is_err() {
@@ -123,6 +156,11 @@ pub(super) fn execute(
     ) else {
         return Output::error("receipt index does not exist at this canonical step");
     };
+    if expected_call_id.is_some_and(|expected| expected != call.id) {
+        return Output::error(
+            "expected_call_id does not match the original call at this receipt index",
+        );
+    }
     if !eligible(call, result) {
         return Output::error(
             "this receipt is unexecuted, uncertain or outside the session's workspace-read evidence scope",
@@ -154,12 +192,8 @@ pub(super) fn execute(
                 .map(|(index, _)| (index, 0))
         };
         let next_value = next.map_or(Value::Null, |(receipt, offset)| {
-            json::object([
-                ("turn", number(turn)),
-                ("step", number(step)),
-                ("receipt", number(receipt)),
-                ("offset", number(offset)),
-            ])
+            let next_call = &response.tool_calls[receipt];
+            address(turn, step, receipt, offset, &next_call.id)
         });
         let value = json::object([
             ("ok", Value::Bool(true)),
@@ -200,7 +234,7 @@ pub(super) fn execute(
     }
 }
 
-fn eligible(
+pub(super) fn eligible(
     call: &crate::providers::openai_account::ToolCall,
     result: &super::history::Receipt,
 ) -> bool {

@@ -89,14 +89,20 @@ directory-wide budget.
 
 `recall_receipts` reads an original, committed `list_files`, `read_file` or
 `search_text` result from the current session. It never reruns the historical
-tool or opens the original source path. Supply the absolute canonical `turn`
-and `step` from a compaction handoff, plus the zero-based `receipt` position in
-that step's call order. The response includes the original call ID, tool name,
+tool or opens the original source path. Eligible compaction records provide a
+`recall_address` object containing the absolute canonical `turn` and `step`,
+the zero-based `receipt` position in that step's original tool-call order,
+`offset: 0`, and `expected_call_id`. Pass that object unchanged as the tool
+arguments. The optional call ID guard rejects a coordinate that points to a
+different original call before returning content; older calls without it remain
+valid. A response-item `output_index` and a compaction record or fragment number
+are different indices. The response includes the original call ID, tool name,
 summary, exact output bytes as UTF-8 text, total byte count and a `next`
-position. Follow `next` when it is present; its `offset` is a UTF-8 byte offset,
-not a line number. The cursor skips effects and unexecuted or uncertain
-receipts, while retaining the original receipt indices. A completed read in an
-interrupted batch remains available even if a later sibling did not execute.
+address with the correct call ID. Follow `next` unchanged when it is present;
+its `offset` is a UTF-8 byte offset, not a line number. The cursor skips effects
+and unexecuted or uncertain receipts, while retaining the original receipt
+indices. A completed read in an interrupted batch remains available even if a
+later sibling did not execute.
 A response carries at most 8 KiB of original result text and
 must also fit the 32 KiB encoded tool-output bound. Heavily escaped text may
 therefore use smaller pages.

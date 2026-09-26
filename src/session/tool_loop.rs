@@ -131,13 +131,15 @@ fn execute(
                     step,
                     receipt,
                     offset,
+                    expected_call_id,
                 }) => {
-                    let output = super::receipt_recall::execute(
+                    let output = super::receipt_recall::execute_with_identity(
                         history,
                         turn,
                         step,
                         receipt,
                         offset,
+                        expected_call_id.as_deref(),
                         &Budget {
                             cancelled: &context.cancelled,
                             deadline: operation_deadline(clock(), Duration::from_secs(10)),

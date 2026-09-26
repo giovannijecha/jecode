@@ -63,8 +63,10 @@ coordinates. Bounded source user requests and guidance are retained separately
 from generated summary prose, in order; later corrections may supersede older
 instructions. The summary's JSON structure is validated, but that cannot prove
 the model preserved every needed fact. A workspace session can use
-`recall_receipts` to recover exact saved read-only results omitted by a handoff,
-with explicit pagination and no replay. A newly admitted recall result remains
+`recall_receipts` to recover exact saved read-only results omitted by a handoff.
+Eligible reference records supply a guarded address with the original call ID;
+record numbers and response-item indices are separate. Pagination supplies the
+next guarded address, with no replay. A newly admitted recall result remains
 in the next request until an accepted response consumes it. Aggregate admission
 can return paired errors for pages that do not fit; older oversized batches use
 explicit deferred notices backed by unchanged canonical receipts. Repeated

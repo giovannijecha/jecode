@@ -135,6 +135,26 @@ pub(super) fn reference_at_position(
                 .then(|| response.tool_calls.get(call_index))
                 .flatten();
             let receipt = is_call.then(|| step.results.get(call_index)).flatten();
+            let recall_address = call.zip(receipt).and_then(|(call, receipt)| {
+                (step.accepted
+                    && response.status == Status::Completed
+                    && super::super::receipt_recall::eligible(call, receipt))
+                .then(|| {
+                    super::super::receipt_recall::address(
+                        history.base_turn + turn_index,
+                        if turn_index == 0 {
+                            history.base_step + step_index
+                        } else {
+                            step_index
+                        },
+                        call_index,
+                        0,
+                        &call.id,
+                    )
+                })
+            });
+            // Pending.offset indexes the serialized value. Keep its legacy byte
+            // representation stable; new recall metadata belongs in the envelope.
             (
                 json::object([
                     ("kind", text("response_item_and_receipt")),
@@ -176,12 +196,19 @@ pub(super) fn reference_at_position(
                     ),
                 ]),
                 if is_call {
-                    format!(
+                    let paired = format!(
                         "call_id={}; call_name={}; receipt_call_id={}",
                         call.map_or("missing", |call| call.id.as_str()),
                         call.map_or("missing", |call| call.name.as_str()),
                         receipt.map_or("missing", |receipt| receipt.call_id.as_str())
-                    )
+                    );
+                    recall_address.map_or(paired.clone(), |address| {
+                        format!(
+                            "{paired}; recall_address={}",
+                            json::encode(&address, 80 * 1024 * 1024)
+                                .expect("bounded canonical call ID")
+                        )
+                    })
                 } else {
                     format!("response item {output_index}; no executable call")
                 },
@@ -543,3 +570,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+#[path = "context_partial_upgrade_tests.rs"]
+mod upgrade_tests;

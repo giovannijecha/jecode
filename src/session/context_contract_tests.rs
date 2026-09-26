@@ -173,6 +173,52 @@ fn sliced_compaction_request_uses_absolute_coordinates_after_release() {
             .iter()
             .all(|request| !request.contains("canonical turn=0 step=0"))
     );
+    let fragments: Vec<String> = requests
+        .iter()
+        .flat_map(|request| {
+            let value = json::parse(request, Default::default()).unwrap();
+            value
+                .get("input")
+                .and_then(Value::array)
+                .unwrap()
+                .iter()
+                .filter_map(|item| {
+                    item.get("content")
+                        .and_then(Value::array)?
+                        .first()?
+                        .get("text")?
+                        .text()
+                        .filter(|text| {
+                            text.starts_with("Completed step record")
+                                && text.contains("recall_address=")
+                        })
+                        .map(str::to_owned)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        fragments.len() > 1,
+        "the read record should span bounded slices"
+    );
+    for fragment in fragments {
+        let association = fragment
+            .split("; ordered reference-data fragment")
+            .next()
+            .unwrap();
+        for field in [
+            "recall_address={",
+            "\"expected_call_id\":\"large-read\"",
+            "\"receipt\":0",
+            "\"step\":1",
+            "\"turn\":0",
+        ] {
+            assert!(
+                association.contains(field),
+                "missing {field} in {association}"
+            );
+        }
+    }
 }
 
 struct Recorder {
@@ -294,6 +340,18 @@ fn emitted_compaction_is_ordered_reference_data_and_continuation_keeps_source_co
             .unwrap()
             .is_empty()
     );
+    assert!(items.iter().any(|item| {
+        item.get("content")
+            .and_then(Value::array)
+            .and_then(|content| content.first())
+            .and_then(|content| content.get("text"))
+            .and_then(Value::text)
+            .is_some_and(|text| {
+                text.contains("ordered non-executing reference data")
+                    && text.contains("recall_address")
+                    && text.contains("\"expected_call_id\":\"read-01\"")
+            })
+    }));
     let encoded = &requests[0];
     let call = encoded.find("read-01").unwrap();
     let receipt = encoded.find("Evidence key CEDAR-41 score 731").unwrap();

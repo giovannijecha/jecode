@@ -69,29 +69,55 @@ fn utf8_cursor_skips_effect_and_unexecuted_sibling_after_resume() {
         cancelled: &cancelled,
         deadline: Instant::now() + Duration::from_secs(10),
     };
-    let mut cursor = (0, 0);
+    let mut cursor = address(0, 0, 0, 0, "read-a");
     let mut assembled = String::new();
     loop {
-        let page = execute(&saved.history, 0, 0, cursor.0, cursor.1, &budget);
+        let crate::tools::Prepared::Recall {
+            turn,
+            step,
+            receipt,
+            offset,
+            expected_call_id,
+        } = crate::tools::Prepared::parse("recall_receipts", &cursor).unwrap()
+        else {
+            unreachable!()
+        };
+        let page = execute_with_identity(
+            &saved.history,
+            turn,
+            step,
+            receipt,
+            offset,
+            expected_call_id.as_deref(),
+            &budget,
+        );
         assert!(!page.failed, "{}", page.text);
         let value = json::parse(&page.text, Default::default()).unwrap();
         assert_eq!(
             value.get("call_id").and_then(Value::text),
-            Some(if cursor.0 == 0 { "read-a" } else { "read-last" })
+            Some(if receipt == 0 { "read-a" } else { "read-last" })
         );
-        if cursor.0 == 0 {
+        if receipt == 0 {
             assembled.push_str(value.get("output").and_then(Value::text).unwrap());
         } else {
             assert_eq!(value.get("output").and_then(Value::text), Some(last));
             assert!(matches!(value.get("next"), Some(Value::Null)));
             break;
         }
-        let next = value.get("next").unwrap();
-        cursor = (
-            next.get("receipt").and_then(Value::unsigned).unwrap() as usize,
-            next.get("offset").and_then(Value::unsigned).unwrap() as usize,
+        cursor = value.get("next").unwrap().clone();
+        let next_receipt = cursor.get("receipt").and_then(Value::unsigned).unwrap();
+        assert!(next_receipt == 0 || next_receipt == 3);
+        assert_eq!(
+            cursor.get("expected_call_id").and_then(Value::text),
+            Some(if next_receipt == 0 {
+                "read-a"
+            } else {
+                "read-last"
+            })
         );
-        assert!(cursor.0 == 0 || cursor == (3, 0));
+        if next_receipt == 3 {
+            assert_eq!(cursor.get("offset").and_then(Value::unsigned), Some(0));
+        }
     }
     assert_eq!(assembled, first);
     for index in [1, 2] {
