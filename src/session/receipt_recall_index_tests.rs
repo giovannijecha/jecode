@@ -17,6 +17,189 @@ fn budget(cancelled: &AtomicBool) -> Budget<'_> {
 
 #[test]
 #[cfg(any(windows, target_os = "linux"))]
+fn large_released_turn_does_not_hide_later_receipts() {
+    let fixture = crate::state::tests::Fixture::new();
+    let store = fixture.store().unwrap();
+    let mut history =
+        crate::session::persistence::create_in(&store, Model::Luna, None, None).unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
+    history.begin("Large old turn".into()).unwrap();
+    let result = format!(r#"{{"ok":true,"content":"{}"}}"#, "x".repeat(8000));
+    for step in 0..86 {
+        let calls = (0..125)
+            .map(|receipt| {
+                tool_tests::call(
+                    &format!("old-{step}-{receipt}"),
+                    "read_file",
+                    r#"{"path":"old.txt"}"#,
+                )
+            })
+            .collect();
+        history.turns[0].steps.push(Step {
+            response: Some(tool_tests::calls_response(calls)),
+            results: (0..125)
+                .map(|receipt| Receipt {
+                    call_id: format!("old-{step}-{receipt}"),
+                    output: result.clone(),
+                    summary: "read_file / saved".into(),
+                    image: None,
+                })
+                .collect(),
+            accepted: true,
+            ..Default::default()
+        });
+        history.checkpoint().unwrap();
+        history.projection.step = 1;
+        history.projection.summary = "Old evidence".into();
+        history.checkpoint().unwrap();
+        history.release_projected();
+    }
+    history.turns[0].end = Some(crate::session::End::Complete);
+    history.checkpoint().unwrap();
+    history.begin("Later small turn".into()).unwrap();
+    history.turns[1].steps.push(Step {
+        response: Some(tool_tests::calls_response(vec![tool_tests::call(
+            "later",
+            "read_file",
+            r#"{"path":"later.txt"}"#,
+        )])),
+        results: vec![Receipt {
+            call_id: "later".into(),
+            output: "EXACT-LATER".into(),
+            summary: "read_file / saved".into(),
+            image: None,
+        }],
+        accepted: true,
+        ..Default::default()
+    });
+    history.checkpoint().unwrap();
+    history.projection.through = 1;
+    history.projection.step = 1;
+    history.checkpoint().unwrap();
+    history.release_projected();
+    let cancelled = AtomicBool::new(false);
+    let long_budget = Budget {
+        cancelled: &cancelled,
+        deadline: Instant::now() + Duration::from_secs(120),
+    };
+    let known = execute_with_identity(&history, 1, 0, 0, 0, Some("later"), &long_budget);
+    assert!(!known.failed && known.text.contains("EXACT-LATER"));
+    assert!(!index(&history, 1, 0, 0, &long_budget).failed);
+    let mut cursor = (0, 0, 0);
+    let mut found = Vec::new();
+    let mut pages = 0;
+    loop {
+        let discovery = index(&history, cursor.0, cursor.1, cursor.2, &long_budget);
+        assert!(!discovery.failed, "{}", discovery.text);
+        assert!(discovery.text.len() <= 8 * 1024);
+        let value = json::parse(&discovery.text, Default::default()).unwrap();
+        for entry in value.get("entries").and_then(Value::array).unwrap() {
+            let address = entry.get("recall_address").unwrap();
+            let point = (
+                address.get("turn").and_then(Value::unsigned).unwrap() as usize,
+                address.get("step").and_then(Value::unsigned).unwrap() as usize,
+                address.get("receipt").and_then(Value::unsigned).unwrap() as usize,
+            );
+            let expected = if point.0 == 0 {
+                format!("old-{}-{}", point.1, point.2)
+            } else {
+                assert_eq!(point, (1, 0, 0));
+                "later".into()
+            };
+            assert_eq!(
+                address.get("expected_call_id").and_then(Value::text),
+                Some(expected.as_str())
+            );
+            assert_eq!(
+                entry
+                    .get("arguments")
+                    .and_then(|args| args.get("path"))
+                    .and_then(Value::text),
+                Some(if point.0 == 0 { "old.txt" } else { "later.txt" })
+            );
+            found.push((point, expected));
+        }
+        pages += 1;
+        let next = value.get("next").unwrap();
+        if matches!(next, Value::Null) {
+            break;
+        }
+        let next_cursor = (
+            next.get("turn").and_then(Value::unsigned).unwrap() as usize,
+            next.get("step").and_then(Value::unsigned).unwrap() as usize,
+            next.get("receipt").and_then(Value::unsigned).unwrap() as usize,
+        );
+        assert!(next_cursor > cursor, "index cursor did not advance");
+        cursor = next_cursor;
+        if pages == 3 {
+            drop(history);
+            history = crate::session::persistence::load(&store, &id, true)
+                .unwrap()
+                .history;
+        }
+    }
+    assert!(pages > 100);
+    let expected = (0..86)
+        .flat_map(|step| {
+            (0..125).map(move |receipt| ((0, step, receipt), format!("old-{step}-{receipt}")))
+        })
+        .chain([((1, 0, 0), "later".into())])
+        .collect::<Vec<_>>();
+    assert_eq!(found, expected);
+    assert!(!execute_with_identity(&history, 1, 0, 0, 0, Some("later"), &long_budget).failed);
+    // Exact retrieval still has the older whole-turn limit for this oversized
+    // turn; discovery now reaches the independently retrievable later turn.
+    assert!(execute_with_identity(&history, 0, 0, 0, 0, Some("old-0-0"), &long_budget).failed);
+    cancelled.store(true, Ordering::Release);
+    assert!(index(&history, 0, 0, 0, &long_budget).failed);
+}
+
+#[test]
+#[cfg(any(windows, target_os = "linux"))]
+fn damaged_committed_log_cannot_be_returned_as_an_empty_index_page() {
+    let fixture = crate::state::tests::Fixture::new();
+    let store = fixture.store().unwrap();
+    let mut history =
+        crate::session::persistence::create_in(&store, Model::Luna, None, None).unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
+    history.begin("Captured read".into()).unwrap();
+    history.turns[0].steps.push(Step {
+        response: Some(tool_tests::calls_response(vec![tool_tests::call(
+            "read",
+            "read_file",
+            r#"{"path":"saved.txt"}"#,
+        )])),
+        results: vec![Receipt {
+            call_id: "read".into(),
+            output: "ORIGINAL".into(),
+            summary: "read_file / saved".into(),
+            image: None,
+        }],
+        accepted: true,
+        ..Default::default()
+    });
+    history.checkpoint().unwrap();
+    history.projection.step = 1;
+    history.projection.summary = "Unverified handoff".into();
+    history.checkpoint().unwrap();
+    history.release_projected();
+    let cancelled = AtomicBool::new(false);
+    assert!(!index(&history, 0, 0, 0, &budget(&cancelled)).failed);
+    let path = store
+        .directory("sessions-v2")
+        .unwrap()
+        .root()
+        .join(format!("{id}.log"));
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.set_len(file.metadata().unwrap().len() - 1).unwrap();
+    drop(file);
+    let damaged = index(&history, 0, 0, 0, &budget(&cancelled));
+    assert!(damaged.failed);
+    assert!(damaged.text.contains("corrupt"), "{}", damaged.text);
+}
+
+#[test]
+#[cfg(any(windows, target_os = "linux"))]
 fn confident_error_and_omission_remain_checkable_after_source_changes_and_resume() {
     for handoff in [
         "Checked alpha=7, beta=0, total=7.",

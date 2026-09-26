@@ -1,5 +1,6 @@
 //! On-demand, bounded addresses for read receipts covered by compaction.
 use super::*;
+use std::io;
 
 const INDEX_BYTES: usize = 8 * 1024;
 
@@ -60,8 +61,59 @@ fn entry(turn: usize, step: usize, receipt: usize, call: &ToolCall, arguments: b
     ])
 }
 
-/// Lists only the completed, eligible reads already covered by the durable
-/// projection. Released turns are loaded on demand from the committed log.
+fn finish(
+    start: (usize, usize, usize),
+    through: (usize, usize),
+    entries: &[Value],
+    next: Option<(usize, usize, usize)>,
+) -> Output {
+    Output::success(
+        page(start, through, entries, next),
+        format!("indexed {} saved reads", entries.len()),
+        next.is_some(),
+    )
+}
+
+fn append(
+    start: (usize, usize, usize),
+    through: (usize, usize),
+    entries: &mut Vec<Value>,
+    position: (usize, usize, usize),
+    call: &ToolCall,
+) -> Result<(), Output> {
+    entries.push(entry(position.0, position.1, position.2, call, true));
+    if json::encode(&page(start, through, entries, Some(position)), INDEX_BYTES).is_ok() {
+        return Ok(());
+    }
+    entries.pop();
+    if !entries.is_empty() {
+        return Err(finish(start, through, entries, Some(position)));
+    }
+    entries.push(entry(position.0, position.1, position.2, call, false));
+    if json::encode(&page(start, through, entries, None), INDEX_BYTES).is_err() {
+        return Err(Output::error(
+            "recorded call identity exceeds the index limit",
+        ));
+    }
+    Ok(())
+}
+
+fn following(
+    turn: usize,
+    step: usize,
+    step_count: usize,
+    through: (usize, usize),
+) -> Option<(usize, usize, usize)> {
+    let next = if step + 1 < step_count {
+        (turn, step + 1)
+    } else {
+        (turn + 1, 0)
+    };
+    (next < through).then_some((next.0, next.1, 0))
+}
+
+/// Lists completed reads already covered by the durable projection. The v2
+/// path visits committed events without rebuilding a whole released turn.
 pub(crate) fn execute(
     history: &History,
     turn: usize,
@@ -86,39 +138,98 @@ pub(crate) fn execute(
         let resident_index = absolute_turn.checked_sub(history.base_turn);
         let resident = resident_index.and_then(|index| history.turns.get(index));
         let logged =
-            if resident.is_none() || absolute_turn == history.base_turn && history.base_step > 0 {
-                match history
-                    .record
-                    .as_ref()
-                    .and_then(|record| record.recorded_turn(absolute_turn).ok())
-                {
-                    Some(saved) => Some(saved),
-                    None => return Output::error("compacted canonical turn is unavailable"),
-                }
-            } else {
-                None
-            };
+            resident.is_none() || absolute_turn == history.base_turn && history.base_step > 0;
         let steps = if absolute_turn == history.base_turn {
             history.base_step + resident.map_or(0, |turn| turn.steps.len())
         } else {
-            resident
-                .or(logged.as_ref())
-                .map_or(0, |turn| turn.steps.len())
+            resident.map_or(usize::MAX, |turn| turn.steps.len())
         };
         let last = if absolute_turn == end_turn {
             end_step.min(steps)
         } else {
             steps
         };
-        for absolute_step in if absolute_turn == turn { step } else { 0 }..last {
+        let mut absolute_step = if absolute_turn == turn { step } else { 0 };
+        while absolute_step < last {
             if budget.check().is_err() {
                 return Output::error("receipt index cancelled or timed out");
             }
-            let saved = if absolute_turn == history.base_turn && absolute_step >= history.base_step
-            {
+            if logged && (resident.is_none() || absolute_step < history.base_step) {
+                let Some(record) = history.record.as_ref() else {
+                    return Output::error("compacted canonical step is unavailable");
+                };
+                let first = if absolute_turn == turn && absolute_step == step {
+                    receipt
+                } else {
+                    0
+                };
+                let saved = match record.indexed_step(absolute_turn, absolute_step, first, budget) {
+                    Ok(Some(saved)) => saved,
+                    Ok(None) if absolute_turn < end_turn => break,
+                    Ok(None) => return Output::error("compacted canonical step is unavailable"),
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                        return Output::error("receipt index cancelled or timed out");
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                        return Output::error("compacted canonical evidence is corrupt");
+                    }
+                    Err(_) => return Output::error("compacted canonical step is unavailable"),
+                };
+                if saved.accepted
+                    && let Some(response) = saved
+                        .response
+                        .as_ref()
+                        .filter(|response| response.status == Status::Completed)
+                {
+                    let end = saved
+                        .receipt_base
+                        .saturating_add(crate::session::persistence::RECEIPT_WINDOW)
+                        .min(response.tool_calls.len());
+                    for index in first..end {
+                        let Some(result) = saved.receipts[index - saved.receipt_base].as_ref()
+                        else {
+                            return Output::error("compacted canonical receipts are incomplete");
+                        };
+                        let call = &response.tool_calls[index];
+                        if result.call_id != call.id {
+                            return Output::error(
+                                "compacted canonical receipt identity is corrupt",
+                            );
+                        }
+                        if result.observed
+                            && matches!(
+                                call.name.as_str(),
+                                "list_files" | "read_file" | "search_text"
+                            )
+                            && let Err(output) = append(
+                                start,
+                                through,
+                                &mut entries,
+                                (absolute_turn, absolute_step, index),
+                                call,
+                            )
+                        {
+                            return output;
+                        }
+                    }
+                    if end < response.tool_calls.len() {
+                        return finish(
+                            start,
+                            through,
+                            &entries,
+                            Some((absolute_turn, absolute_step, end)),
+                        );
+                    }
+                }
+                return finish(
+                    start,
+                    through,
+                    &entries,
+                    following(absolute_turn, absolute_step, saved.step_count, through),
+                );
+            }
+            let saved = if absolute_turn == history.base_turn {
                 resident.and_then(|turn| turn.steps.get(absolute_step - history.base_step))
-            } else if let Some(logged) = &logged {
-                logged.steps.get(absolute_step)
             } else {
                 resident.and_then(|turn| turn.steps.get(absolute_step))
             };
@@ -146,32 +257,18 @@ pub(crate) fn execute(
                 if !eligible(call, result) {
                     continue;
                 }
-                let position = (absolute_turn, absolute_step, index);
-                entries.push(entry(absolute_turn, absolute_step, index, call, true));
-                if json::encode(&page(start, through, &entries, Some(position)), INDEX_BYTES)
-                    .is_err()
-                {
-                    entries.pop();
-                    if entries.is_empty() {
-                        entries.push(entry(absolute_turn, absolute_step, index, call, false));
-                        if json::encode(&page(start, through, &entries, None), INDEX_BYTES).is_err()
-                        {
-                            return Output::error("recorded call identity exceeds the index limit");
-                        }
-                        continue;
-                    }
-                    return Output::success(
-                        page(start, through, &entries, Some(position)),
-                        format!("indexed {} saved reads", entries.len()),
-                        true,
-                    );
+                if let Err(output) = append(
+                    start,
+                    through,
+                    &mut entries,
+                    (absolute_turn, absolute_step, index),
+                    call,
+                ) {
+                    return output;
                 }
             }
+            absolute_step += 1;
         }
     }
-    Output::success(
-        page(start, through, &entries, None),
-        format!("indexed {} saved reads", entries.len()),
-        false,
-    )
+    finish(start, through, &entries, None)
 }

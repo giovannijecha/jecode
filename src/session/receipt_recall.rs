@@ -257,18 +257,23 @@ pub(super) fn eligible(
     result: &super::history::Receipt,
 ) -> bool {
     if call.id != result.call_id
-        || result.summary == "Not executed"
         || !matches!(
             call.name.as_str(),
             "list_files" | "read_file" | "search_text"
         )
-        || result.image.is_some()
     {
         return false;
     }
-    if result.output.len() <= crate::tools::MAX_OUTPUT
+    observed(&result.summary, &result.output, result.image.is_some())
+}
+
+pub(super) fn observed(summary: &str, output: &str, image: bool) -> bool {
+    if summary == "Not executed" || image {
+        return false;
+    }
+    if output.len() <= crate::tools::MAX_OUTPUT
         && let Ok(value) = json::parse(
-            &result.output,
+            output,
             json::Limits {
                 bytes: crate::tools::MAX_OUTPUT,
                 nodes: 4096,

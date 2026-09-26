@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod batch_tests;
 mod head;
+pub(super) mod index;
 mod log;
 #[cfg(test)]
 mod provider_failure_tests;
@@ -32,7 +33,7 @@ use std::{
     io,
     path::Path,
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Instant,
@@ -61,6 +62,8 @@ pub(super) struct Tracker {
     steps: Vec<StepMark>,
     guidance: Vec<u64>,
     end: Option<u64>,
+    turn_index_cache: Option<Arc<index::TurnCache>>,
+    index_cache: Option<Arc<index::Cache>>,
 }
 impl Default for Tracker {
     fn default() -> Self {
@@ -79,6 +82,8 @@ impl Default for Tracker {
             steps: Vec::new(),
             guidance: Vec::new(),
             end: None,
+            turn_index_cache: None,
+            index_cache: None,
         }
     }
 }
@@ -680,6 +685,29 @@ pub(super) fn page(record: &Record, start: usize, count: usize) -> io::Result<Ve
         return Err(log::corrupt());
     }
     Ok(turns)
+}
+
+/// Visit one turn's canonical events without rebuilding the whole turn. The log
+/// still validates the complete committed prefix against the durable head.
+pub(super) fn visit_events(
+    record: &Record,
+    turn: usize,
+    check: impl FnMut() -> io::Result<()>,
+    mut event: impl FnMut(Value) -> io::Result<()>,
+) -> io::Result<()> {
+    let info = checked_head(&record.store, &record.id)?;
+    if turn >= info.turns {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    log::visit_checked(
+        &record.store,
+        &record.id,
+        info.committed,
+        info.rolling,
+        turn..turn + 1,
+        check,
+        |_, value| event(value),
+    )
 }
 
 pub(super) fn turn_slices(

@@ -79,6 +79,26 @@ pub(super) fn visit(
     expected_hash: u64,
     first_turn: usize,
     last_turn: usize,
+    event: impl FnMut(usize, json::Value) -> io::Result<()>,
+) -> io::Result<()> {
+    visit_checked(
+        store,
+        id,
+        committed,
+        expected_hash,
+        first_turn..last_turn,
+        || Ok(()),
+        event,
+    )
+}
+
+pub(super) fn visit_checked(
+    store: &Store,
+    id: &str,
+    committed: u64,
+    expected_hash: u64,
+    turns: std::ops::Range<usize>,
+    mut check: impl FnMut() -> io::Result<()>,
     mut event: impl FnMut(usize, json::Value) -> io::Result<()>,
 ) -> io::Result<()> {
     let mut file = store.read_file(&format!("{id}.log"))?;
@@ -88,6 +108,7 @@ pub(super) fn visit(
     let mut position = 0u64;
     let mut rolling = HASH_START;
     while position < committed {
+        check()?;
         if committed - position < HEADER as u64 {
             return Err(corrupt());
         }
@@ -99,13 +120,14 @@ pub(super) fn visit(
         if length > EVENT_LIMIT || committed - position - (HEADER as u64) < length as u64 {
             return Err(corrupt());
         }
-        let keep = turn >= first_turn as u64 && turn < last_turn as u64;
+        let keep = turn >= turns.start as u64 && turn < turns.end as u64;
         let mut bytes = keep.then(|| Vec::with_capacity(length));
         let mut remaining = length;
         let mut digest = HASH_START;
         rolling = hash(rolling, &header);
         let mut chunk = [0u8; CHUNK];
         while remaining != 0 {
+            check()?;
             let count = remaining.min(CHUNK);
             file.read_exact(&mut chunk[..count])
                 .map_err(|_| corrupt())?;
