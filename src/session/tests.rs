@@ -201,6 +201,7 @@ pub(crate) fn ready_fixture() -> Session {
     start(false, false).0
 }
 
+#[cfg(windows)]
 pub(crate) fn persisted_terminal_fixture(
     home: &std::path::Path,
     directory: &std::path::Path,
