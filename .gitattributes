@@ -5,3 +5,4 @@
 *.toml text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
+tests/fixtures/tui/*.ansi binary

@@ -1,0 +1,50 @@
+@-- Slice 2: a two-turn transcript exercising every Markdown element.
+@-- Run: cargo run -- fixtures/transcript.jef [--width 60] [--ascii]
+@meta cwd ~/Codex/jecode
+@meta model opus-5.5
+@meta effort high
+@user
+Rename SessionStore to SessionLedger and update every caller. Keep the on-disk format unchanged, perché i vecchi file devono ancora aprirsi.
+
+@assistant
+## Plan
+I'll rename the public type in one pass and leave the storage format alone, so existing sessions keep opening.
+
+1. Rename the type in `src/session/store.rs`.
+2. Update the **14 call sites** across five files, including the ones behind `#[cfg(test)]`, which are easy to miss because they only compile under `cargo test`.
+3. Run `cargo test --locked` and `cargo clippy`.
+
+Things I will not touch:
+- the JSON field names on disk
+- public CLI flags
+  - `--resume` keeps its current spelling
+  - `--session` stays an alias
+
+> The file format is versioned by `format: 3`; renaming the Rust type does not change what gets written.
+
+```rust
+pub struct SessionLedger {
+    dir: PathBuf,
+    // Opened lazily; see open().
+    format: u32,
+}
+
+fn open(dir: &Path) -> io::Result<SessionLedger> {
+    let format = 3;
+    Ok(SessionLedger { dir: dir.into(), format })
+}
+```
+
+---
+
+Background on the naming: see [the ADR](https://example.dev/adr/0007) for why "ledger" fits an append-only log. Done ✓ 👍🏽
+
+@user
+Grazie! Now also add a short note to the changelog.
+
+@assistant
+Added under **Unreleased**:
+
+```
+- Renamed SessionStore to SessionLedger (no format change).
+```

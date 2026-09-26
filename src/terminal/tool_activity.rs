@@ -155,6 +155,7 @@ impl Activity {
         self.active_mut().unwrap().observed = now;
         true
     }
+    #[cfg(test)]
     pub fn marker(&self) -> &'static str {
         self.spinner.marker(self.reduced_motion)
     }

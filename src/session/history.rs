@@ -51,6 +51,8 @@ pub(super) struct Turn {
 #[derive(Default)]
 pub(super) struct History {
     pub turns: Vec<Turn>,
+    /// Presentation-only link from `/clear`; never projected into model input.
+    pub display_parent: Option<String>,
     /// Number of canonical turns kept only in the incremental log.
     pub base_turn: usize,
     /// Completed steps of the first resident turn retained only in the log.

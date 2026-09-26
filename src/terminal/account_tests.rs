@@ -28,6 +28,7 @@ fn restored_history_and_context_notices_do_not_swallow_streamed_text() {
             items: vec![session::TranscriptItem {
                 role: "Assistant",
                 text: "Saved answer".into(),
+                tool: None,
             }],
         },
     );
@@ -48,6 +49,106 @@ fn restored_history_and_context_notices_do_not_swallow_streamed_text() {
     event(&mut model, Event::Text("Guided response".into()));
     assert_eq!(model.blocks.last().unwrap().text, "Guided response");
 }
+
+#[test]
+fn restored_tool_detail_expands_and_folds_without_an_effect_or_fake_duration() {
+    let mut model = model(session::Model::Luna, None);
+    let output = (1..=10)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
+    let raw = crate::json::encode(
+        &crate::json::object([
+            ("ok", crate::json::Value::Bool(true)),
+            ("text", crate::json::Value::String(output.clone())),
+            ("truncated", crate::json::Value::Bool(true)),
+        ]),
+        crate::tools::MAX_OUTPUT,
+    )
+    .unwrap();
+    event(
+        &mut model,
+        Event::Restored {
+            id: "synthetic-session".into(),
+            turns: 1,
+            items: vec![session::TranscriptItem {
+                role: "Tool",
+                text: "10 lines / more available".into(),
+                tool: Some(session::TranscriptTool {
+                    name: "read_file".into(),
+                    subject: "src/main.rs".into(),
+                    summary: "10 lines / more available".into(),
+                    output: raw,
+                    failed: false,
+                    limited: true,
+                    outcome_unknown: false,
+                }),
+            }],
+        },
+    );
+    let detail = model.tool_details.get(&0).unwrap();
+    assert_eq!(detail.elapsed_ms, u64::MAX);
+    assert_eq!(detail.status, super::super::lab::model::Status::Warned);
+    let caps = super::super::lab::caps::Caps {
+        color: super::super::lab::caps::ColorDepth::None,
+        ascii: false,
+        reduced_motion: true,
+    };
+    let mut layout = super::super::lab::view::Layout::default();
+    let snapshot = super::super::lab_adapter::Snapshot::from_model(&model);
+    let folded = snapshot.frame(&mut layout, 80, 24, &caps, 0);
+    assert!(
+        folded
+            .iter()
+            .any(|row| row.text.contains("5 earlier lines"))
+    );
+    assert!(!folded.iter().any(|row| row.text.contains("0.0s")));
+    model.expanded = true;
+    let snapshot = super::super::lab_adapter::Snapshot::from_model(&model);
+    let expanded = snapshot.frame(&mut layout, 80, 24, &caps, 0);
+    assert!(expanded.iter().any(|row| row.text.contains("line 1")));
+    assert!(
+        !expanded
+            .iter()
+            .any(|row| row.text.contains("5 earlier lines"))
+    );
+    model.expanded = false;
+    let snapshot = super::super::lab_adapter::Snapshot::from_model(&model);
+    assert_eq!(snapshot.frame(&mut layout, 80, 24, &caps, 0), folded);
+}
+
+#[test]
+fn opaque_historical_tool_result_does_not_become_a_success() {
+    let tool = super::super::model::Model::restored_tool(session::TranscriptTool {
+        name: "read_file".into(),
+        subject: "src/main.rs".into(),
+        summary: "saved receipt".into(),
+        output: "older opaque format".into(),
+        failed: false,
+        limited: false,
+        outcome_unknown: true,
+    });
+    assert_eq!(tool.status, super::super::lab::model::Status::Warned);
+    assert!(tool.summary.contains("outcome unavailable"));
+    assert_eq!(tool.elapsed_ms, u64::MAX);
+}
+
+#[test]
+fn v2_conversation_can_submit_after_256_turns() {
+    let mut session = session::tests::ready_fixture();
+    let mut model = model(session::Model::Luna, None);
+    event(&mut model, Event::Ready);
+    model.account.as_mut().unwrap().turns = 256;
+    model.editor.insert("turn 257");
+    input(&mut model, super::super::Key::Enter, &mut session);
+    assert_eq!(model.account.as_ref().unwrap().turns, 257);
+    assert_eq!(model.blocks.last().unwrap().speaker, "Assistant");
+    assert!(
+        model
+            .blocks
+            .iter()
+            .any(|block| block.speaker == "You" && block.text == "turn 257")
+    );
+}
 use crate::session::Failure;
 
 #[test]
@@ -67,6 +168,7 @@ fn request_boundaries_group_reads_but_assistant_text_closes_the_group() {
             &mut model,
             Event::ToolFinished {
                 summary: if failed { "denied" } else { "more available" }.into(),
+                output: String::new(),
                 failed,
                 limited,
             },
@@ -90,6 +192,7 @@ fn request_boundaries_group_reads_but_assistant_text_closes_the_group() {
         &mut model,
         Event::ToolFinished {
             summary: "2 entries / 0 omitted".into(),
+            output: String::new(),
             failed: false,
             limited: false,
         },
@@ -140,6 +243,7 @@ fn tool_activity_and_later_text_keep_distinct_stable_blocks() {
         &mut model,
         Event::ToolFinished {
             summary: "12 lines".into(),
+            output: String::new(),
             failed: false,
             limited: false,
         },
@@ -311,6 +415,7 @@ fn failed_login_keeps_restored_history_and_draft_visible() {
             items: vec![session::TranscriptItem {
                 role: "Assistant",
                 text: "Saved answer".into(),
+                tool: None,
             }],
             turns: 1,
         },

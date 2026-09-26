@@ -233,6 +233,17 @@ impl Editor {
         self.text.drain(self.cursor..end);
         self.preferred_column = None;
     }
+    pub fn line_backspace(&mut self) {
+        let start = self.text[..self.cursor].rfind('\n').map_or(0, |n| n + 1);
+        if start < self.cursor {
+            self.text.drain(start..self.cursor);
+            self.cursor = start;
+        } else if start > 0 {
+            self.text.drain(start - 1..start);
+            self.cursor = start - 1;
+        }
+        self.preferred_column = None;
+    }
     fn previous_word(&self) -> usize {
         let stops = boundaries(&self.text);
         let mut index = stops.binary_search(&self.cursor).unwrap_or(0);
@@ -284,9 +295,6 @@ impl Editor {
             .min_by_key(|stop| (stop.column.abs_diff(column), stop.column > column))
             .map_or(self.cursor, |stop| stop.index);
         true
-    }
-    pub fn has_visual_lines(&self) -> bool {
-        Visual::new(&self.text, self.columns).rows.len() > 1
     }
     pub fn take(&mut self) -> String {
         self.cursor = 0;

@@ -48,6 +48,9 @@ fn resize(master: &File, rows: u16, columns: u16) {
     assert_eq!(unsafe { ioctl(master.as_raw_fd(), 0x5414, &size) }, 0);
 }
 fn until(master: &mut File, needle: &str) -> String {
+    until_all(master, &[needle])
+}
+fn until_all(master: &mut File, needles: &[&str]) -> String {
     let deadline = Instant::now() + Duration::from_secs(8);
     let mut output = Vec::new();
     while Instant::now() < deadline {
@@ -62,15 +65,38 @@ fn until(master: &mut File, needle: &str) -> String {
         }
         assert!(output.len() <= 1_048_576);
         let text = String::from_utf8_lossy(&output);
-        if text.contains(needle) {
+        if needles.iter().all(|needle| text.contains(needle)) {
             return text.into_owned();
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!(
-        "missing {needle:?}; output: {}",
+        "missing {needles:?}; output: {}",
         String::from_utf8_lossy(&output)
     );
+}
+
+fn assert_no_color_sgr(output: &str) {
+    for sequence in output.split("\x1b[").skip(1) {
+        let Some((parameters, _)) = sequence.split_once('m') else {
+            continue;
+        };
+        if !parameters
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == ';')
+        {
+            continue;
+        }
+        for code in parameters
+            .split(';')
+            .filter_map(|part| part.parse::<u16>().ok())
+        {
+            assert!(
+                !matches!(code, 30..=49 | 90..=107),
+                "NO_COLOR emitted color SGR {code}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -116,42 +142,36 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
     );
     assert!(!first.contains("1049"));
     assert!(!first.contains("\x1b[36m"));
+    assert!(first.contains("\x1b[?2026h"));
     assert_ne!(attributes(&slave), before);
     master
-        .write_all(b"\x1b[200~/code\n\x03\x11\x1b[201~")
+        .write_all(b"\x1b[200~alpha\r\n  beta\x1b[201~")
         .unwrap();
-    let paste = until(&mut master, "??\x1b[7m");
-    assert!(paste.contains("/code"));
-    assert!(
-        paste.contains("\x1b[7m"),
-        "NO_COLOR cursor must keep its block"
-    );
-    assert!(!paste.contains("??|"), "cursor must not replace input text");
+    let paste = until_all(&mut master, &["beta", "\x1b[0;7m"]);
+    assert!(paste.contains("alpha"));
+    assert_no_color_sgr(&paste);
     assert!(!paste.contains("Streaming locally"));
-    // Ctrl+C clears the inert draft; no process termination in raw mode.
+    master.write_all(b"\x0fmore").unwrap();
+    let expanded = until(&mut master, "betamore");
+    assert!(!expanded.contains("Streaming locally"));
+    // Ctrl+C clears an idle draft; no process termination in raw mode.
     master.write_all(b"\x03/code\r").unwrap();
     let completed = until(&mut master, "No compiler or command was invoked.");
     assert!(completed.contains("Unicode sample:"));
     assert!(!completed.contains("```"));
     master.write_all(b"/tools-error\r").unwrap();
-    let active = until(&mut master, "Exploring workspace");
-    assert!(
-        active.contains("⠿ Exploring workspace"),
-        "static indicator: {active}"
-    );
+    let active = until(&mut master, "Working");
+    assert!(active.contains("⣿"), "static indicator: {active}");
     let completed = until(&mut master, "completed activity stays");
-    assert!(completed.contains("Exploration finished with errors"));
+    assert!(completed.contains("local tool preview"));
     assert!(completed.contains("permission denied"));
-    assert!(
-        !completed.contains("\x1b[0;"),
-        "NO_COLOR must include tool rows"
-    );
+    assert_no_color_sgr(&completed);
     master.write_all(b"/edit\r").unwrap();
     let edited = until(&mut master, "Simulated edit complete");
     assert!(edited.contains("-       2"));
     assert!(edited.contains("+       3"));
     assert!(!edited.contains("Enter confirm"));
-    assert!(!edited.contains("\x1b[0;"), "diff must respect NO_COLOR");
+    assert_no_color_sgr(&edited);
     master.write_all(b"/command-error\r").unwrap();
     let output = until(&mut master, "running 2 tests");
     assert!(!output.contains("Simulated command complete"));
@@ -159,27 +179,26 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
     assert!(completed.contains("exit 101"));
     assert!(completed.contains("expected: 3, received: 2"));
     master.write_all(b"/command\r").unwrap();
-    let completed = until(&mut master, "exit 0 · 2 passed");
+    let completed = until(&mut master, "Simulated command complete");
     assert!(completed.contains("exit 0"));
     assert!(!completed.contains("Enter confirm"));
     master.write_all(b"/long\r").unwrap();
-    until(&mut master, "⠿ Streaming");
+    until(&mut master, "Streaming");
     master.write_all(b"draft\x1b").unwrap();
-    until(&mut master, "Interrupted / partial response kept");
+    until(&mut master, "Interrupted - partial output retained");
     for (rows, columns) in [(12, 40), (24, 80), (16, 60), (24, 80)] {
         resize(&master, rows, columns);
         let resized = until(&mut master, "Local demo");
-        assert!(resized.contains("\r\x1b[J"));
-        assert!(!resized.contains("\x1b[2J"));
-        assert!(!resized.contains("\x1b[3J"));
-        assert!(!resized.contains("useful harness"));
-        assert!(!resized.contains("fn main"));
+        assert!(resized.contains("\x1b[2J"));
+        assert!(resized.contains("\x1b[3J"));
+        assert!(resized.contains("\x1b[?2026h"));
         assert!(resized.contains("draft"));
     }
     master.write_all(&[17]).unwrap();
     let exit = until(&mut master, "\x1b[?25h");
     assert!(!exit.contains("1049"));
     assert!(exit.contains("\x1b[?25h"));
+    assert!(exit.contains("\x1b[?2026l"));
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(status) = child.0.try_wait().unwrap() {

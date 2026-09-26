@@ -201,6 +201,49 @@ pub(crate) fn ready_fixture() -> Session {
     start(false, false).0
 }
 
+#[cfg(windows)]
+pub(crate) fn persisted_terminal_fixture(
+    home: &std::path::Path,
+    directory: &std::path::Path,
+) -> Session {
+    let store = crate::state::Store::in_home(home).unwrap();
+    let history = persistence::create_in(&store, Model::Luna, Some(directory), None).unwrap();
+    Session::with_history_shell(
+        Model::Luna,
+        Fixture {
+            observed: Arc::new(Observed::default()),
+            fail_first: false,
+            flood: false,
+            catalog: None,
+        },
+        None,
+        history,
+        crate::command::Shell::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn legacy_owner_keeps_its_original_prompt_and_turn_limits() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let history = persistence::create(&store, Model::Luna, None).unwrap();
+    let backend = Fixture {
+        observed: Arc::new(Observed::default()),
+        fail_first: false,
+        flood: false,
+        catalog: None,
+    };
+    let mut session = Session::with_history(Model::Luna, backend, None, history).unwrap();
+    session.phase = Phase::Ready;
+    assert_eq!(session.prompt_limit(), 8192);
+    assert!(!session.submit(&"a".repeat(8193)));
+    assert_eq!(session.turns, 0);
+    session.turns = 256;
+    assert!(session.legacy_turn_limit_reached());
+    assert!(!session.submit("next"));
+}
+
 #[test]
 fn prompt_recall_seeds_from_canonical_user_turns_only_and_stays_bounded() {
     let mut history = history::History::default();

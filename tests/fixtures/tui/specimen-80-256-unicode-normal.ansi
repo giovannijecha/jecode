@@ -1,0 +1,32 @@
+[?2026h[J[0;1;38;5;255mTones[0m
+[0;38;5;248m256 colors · unicode · motion[0m
+[0mText · default foreground for assistant prose[0m
+[0;38;5;248mMuted · metadata, footer, status[0m
+[0;38;5;111mAccent · rules, spinner, prompt[0m
+[0;38;5;254;48;5;236mRename the session store and update every caller                                [0m
+[0;38;5;252;48;5;235mfn open(dir: &Path) -> io::Result<SessionLedger> {                              [0m
+[0;38;5;149;48;5;22m+ pub struct SessionLedger {                                                    [0m
+[0;38;5;210;48;5;52m- pub struct SessionStore {                                                     [0m
+[0;38;5;149mSuccess · step completed[0m
+[0;38;5;179mWarning · retrying in 12s[0m
+[0;38;5;210mError · exit 101[0m
+[0;38;5;141mKeyword · string · number are syntax overlays[0m
+[0;38;5;234;48;5;189mCursor block                                                                    [0m
+[0m[0m
+[0;1;38;5;255mGlyphs and tree[0m
+[0m[0;38;5;248mok[0m [0;38;5;149m✓[0m   [0;38;5;248mfail[0m [0;38;5;210m✗[0m   [0;38;5;248mwarn[0m [0;38;5;179m![0m   [0;38;5;248mprompt[0m [0;38;5;111m›[0m   [0;38;5;248mmore[0m …   [0m
+[0;38;5;111m────────────────────────────────────────────────────────────────────────────────[0m
+[0m[0;38;5;248m├─[0m [0;38;5;149m✓[0m Read 6 files[0;38;5;248m · src/session/ · 0.4s[0m[0m
+[0m[0;38;5;248m│[0m    [0;38;5;248m41[0m [0;38;5;210;48;5;52m- pub struct SessionStore {[0m[0m
+[0m[0;38;5;248m└─[0m [0;38;5;210m✗[0m Run cargo clippy[0;38;5;248m · exit 101 · 8.1s[0m[0m
+[0m[0m
+[0;1;38;5;255mWidth (every right edge must line up)[0m
+[0m[0;38;5;248m│[0mplain ascii text that is long enough to…[0;38;5;248m│[0m[0m
+[0m[0;38;5;248m│[0mcittà, perché, naïve · é composed · Ωμέ…[0;38;5;248m│[0m[0m
+[0m[0;38;5;248m│[0m日本語のテキスト and 한국어 mixed with …[0;38;5;248m│[0m[0m
+[0m[0;38;5;248m│[0memoji 👍🏽 👨‍👩‍👧 🇮🇹 ❤️ ⚡ 1️⃣ end             [0;38;5;248m│[0m[0m
+[0m[0;38;5;248m│[0marrows ↑↓←→ and box drawing ─│├└ stay n…[0;38;5;248m│[0m[0m
+[0m[0;38;5;248m│[0mWrapping keeps words whole where it can [0;38;5;248m│[0m[0m
+[0m[0;38;5;248m│[0mand never splits 日本語 or 👨‍👩‍👧 across    [0;38;5;248m│[0m[0m
+[0m[0;38;5;248m│[0mrows.                                   [0;38;5;248m│[0m[0m
+[?2026l

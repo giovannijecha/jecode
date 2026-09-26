@@ -64,7 +64,7 @@ impl Decoder {
             if self.pending == END {
                 let paste = self.paste.take().unwrap();
                 output.push(if paste.overflow {
-                    Key::PasteRejected("Paste exceeds 8 KiB / draft kept")
+                    Key::PasteRejected("Paste exceeds 256 KiB / draft kept")
                 } else if let Ok(text) = String::from_utf8(paste.bytes) {
                     Key::Paste(text)
                 } else {
@@ -140,7 +140,9 @@ impl Decoder {
             17 => Some(Key::Quit),
             1 => Some(Key::Home),
             5 => Some(Key::End),
-            10 | 15 => Some(Key::Newline),
+            10 => Some(Key::Newline),
+            15 => Some(Key::Expand),
+            21 => Some(Key::LineBackspace),
             16 => Some(Key::HistoryPrevious),
             14 => Some(Key::HistoryNext),
             23 => Some(Key::WordBackspace),

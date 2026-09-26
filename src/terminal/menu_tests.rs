@@ -19,16 +19,19 @@ fn command_selection_tab_and_escape_never_submit_a_model_prompt() {
     type_text(&mut model, &mut session, "/c");
     account::input(&mut model, Key::Down, &mut session);
     account::input(&mut model, Key::Tab, &mut session);
-    assert_eq!(model.editor.text, "/compact");
+    assert_eq!(model.editor.text, "/context");
     account::input(&mut model, Key::Escape, &mut session);
     assert!(!model.menu.active(&model.editor.text));
-    assert_eq!(model.editor.text, "/compact");
+    assert_eq!(model.editor.text, "/context");
     model.editor.take();
     type_text(&mut model, &mut session, "/not-a-command");
     account::input(&mut model, Key::Enter, &mut session);
     assert!(session.ready());
     assert!(model.blocks.iter().all(|b| b.speaker != "You"));
-    assert_eq!(model.editor.text, "/not-a-command");
+    let receipt = model.command_receipts.values().last().unwrap();
+    assert_eq!(receipt.input, "/not-a-command");
+    assert_eq!(receipt.status, lab::model::Status::Failed);
+    assert!(model.editor.text.is_empty());
 }
 
 #[test]
@@ -36,15 +39,13 @@ fn model_picker_filters_and_waits_for_acknowledgement() {
     let (mut model, mut session) = ready();
     type_text(&mut model, &mut session, "/model");
     account::input(&mut model, Key::Enter, &mut session);
-    type_text(&mut model, &mut session, "terra");
-    account::input(&mut model, Key::Enter, &mut session);
+    type_text(&mut model, &mut session, "2"); // Numbered short model menu.
     assert_eq!(
         model.account.as_ref().unwrap().selected,
         session::Model::Luna
     );
     assert!(session.ready());
-    account::input(&mut model, Key::Down, &mut session);
-    account::input(&mut model, Key::Enter, &mut session);
+    type_text(&mut model, &mut session, "2"); // Medium effort.
     assert_eq!(
         model.account.as_ref().unwrap().selected,
         session::Model::Luna
@@ -64,6 +65,91 @@ fn model_picker_filters_and_waits_for_acknowledgement() {
     );
     assert!(model.menu.panel.is_none());
     assert!(model.editor.text.is_empty());
+    let receipt = model.command_receipts.values().last().unwrap();
+    assert_eq!(receipt.input, "/model gpt-5.6-terra");
+    assert_eq!(receipt.result, "Model set to gpt-5.6-terra");
+    assert_eq!(receipt.note, "was gpt-5.6-luna");
+}
+
+#[test]
+fn argument_commands_report_actual_success_and_keep_previous_value_on_no_match() {
+    let (mut model, mut session) = ready();
+    type_text(&mut model, &mut session, "/model terra");
+    account::input(&mut model, Key::Enter, &mut session);
+    let receipt = model.command_receipts.values().last().unwrap();
+    assert_eq!(receipt.input, "/model terra");
+    assert_eq!(receipt.status, lab::model::Status::Running);
+    assert_eq!(
+        model.account.as_ref().unwrap().selected,
+        session::Model::Luna
+    );
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while !session.ready() {
+        if let Some(event) = session.poll() {
+            account::event(&mut model, event);
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    let receipt = model.command_receipts.values().last().unwrap();
+    assert_eq!(receipt.status, lab::model::Status::Done);
+    assert_eq!(receipt.result, "Model set to gpt-5.6-terra");
+    assert_eq!(receipt.note, "was gpt-5.6-luna");
+    assert_eq!(
+        model.account.as_ref().unwrap().selected,
+        session::Model::Terra
+    );
+
+    type_text(&mut model, &mut session, "/effort xhigh");
+    account::input(&mut model, Key::Enter, &mut session);
+    let receipt = model.command_receipts.values().last().unwrap();
+    assert_eq!(receipt.status, lab::model::Status::Warned);
+    assert!(receipt.result.contains("No effort matches"));
+    assert_eq!(receipt.note, "kept medium");
+    assert_eq!(
+        model.account.as_ref().unwrap().selected,
+        session::Model::Terra
+    );
+    assert!(session.ready());
+
+    type_text(&mut model, &mut session, "/effort provider default");
+    account::input(&mut model, Key::Enter, &mut session);
+    assert!(!session.ready());
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while !session.ready() {
+        if let Some(event) = session.poll() {
+            account::event(&mut model, event);
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    let receipt = model.command_receipts.values().last().unwrap();
+    assert_eq!(receipt.input, "/effort provider default");
+    assert_eq!(receipt.status, lab::model::Status::Done);
+    assert_eq!(receipt.result, "Effort set to provider default");
+    assert_eq!(receipt.note, "was medium");
+    assert_eq!(model.account.as_ref().unwrap().selected.effort(), None);
+}
+
+#[test]
+fn status_and_clear_use_the_selected_session_without_sending_model_input() {
+    let (mut model, mut session) = ready();
+    type_text(&mut model, &mut session, "/status");
+    account::input(&mut model, Key::Enter, &mut session);
+    let receipt = model.command_receipts.values().last().unwrap();
+    assert_eq!(receipt.input, "/status");
+    assert!(
+        receipt
+            .facts
+            .iter()
+            .any(|(name, value)| name == "model" && value == "gpt-5.6-luna")
+    );
+    assert!(session.ready());
+    assert!(model.blocks.iter().all(|block| block.speaker != "You"));
+    type_text(&mut model, &mut session, "/clear");
+    account::input(&mut model, Key::Enter, &mut session);
+    assert!(matches!(model.navigation, Some(navigation::Request::Clear)));
+    assert!(session.ready());
 }
 
 #[test]
@@ -71,8 +157,7 @@ fn cancelling_effort_step_leaves_pair_and_draft_unchanged() {
     let (mut model, mut session) = ready();
     type_text(&mut model, &mut session, "/model");
     account::input(&mut model, Key::Enter, &mut session);
-    type_text(&mut model, &mut session, "terra");
-    account::input(&mut model, Key::Enter, &mut session);
+    type_text(&mut model, &mut session, "2");
     assert_eq!(model.menu.panel.as_ref().unwrap().title, "Reasoning effort");
     account::input(&mut model, Key::Escape, &mut session);
     assert_eq!(

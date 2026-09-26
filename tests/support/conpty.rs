@@ -145,6 +145,13 @@ impl Console {
         Self::start_named(directory, "native_console_child")
     }
     pub fn start_named(directory: &std::path::Path, test: &str) -> Self {
+        Self::start_named_in_home(directory, test, None)
+    }
+    pub fn start_named_in_home(
+        directory: &std::path::Path,
+        test: &str,
+        home: Option<&std::path::Path>,
+    ) -> Self {
         let (input_read, input) = pipe();
         let (mut output_read, output_write) = pipe();
         let output = Arc::new(Mutex::new(Vec::new()));
@@ -213,11 +220,15 @@ impl Console {
                 .collect();
         let mut vars: Vec<(String, String)> = std::env::vars()
             .filter(|(k, _)| {
-                !k.eq_ignore_ascii_case("JECODE_TUI_TEST_DIR")
-                    && !k.eq_ignore_ascii_case("JECODE_TUI_TRACE")
-                    && !k.eq_ignore_ascii_case("NO_COLOR")
+                !(k.eq_ignore_ascii_case("JECODE_TUI_TEST_DIR")
+                    || k.eq_ignore_ascii_case("JECODE_TUI_TRACE")
+                    || k.eq_ignore_ascii_case("NO_COLOR")
+                    || home.is_some() && k.eq_ignore_ascii_case("USERPROFILE"))
             })
             .collect();
+        if let Some(home) = home {
+            vars.push(("USERPROFILE".into(), home.to_str().unwrap().into()));
+        }
         vars.push((
             "JECODE_TUI_TEST_DIR".into(),
             directory.to_str().unwrap().into(),

@@ -23,8 +23,24 @@ impl SavedDraft {
         model.prompt_history.restore_navigation(self.navigation);
     }
 }
+/// Return the visible recovered edit and the hidden earlier draft in order.
+pub(super) fn unwind(model: &mut Model) -> Vec<String> {
+    let visible = model.editor.text.clone();
+    if let Some(saved) = model.account.as_mut().and_then(|view| view.recovery.take()) {
+        saved.restore(model);
+        [visible, model.editor.text.clone()]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect()
+    } else {
+        (!visible.is_empty())
+            .then_some(visible)
+            .into_iter()
+            .collect()
+    }
+}
 
-pub(super) fn retrieve(model: &mut Model, session: &mut Session) {
+pub(super) fn retrieve(model: &mut Model, _session: &mut Session) {
     if model.menu.active(&model.editor.text) {
         return;
     }
@@ -38,7 +54,11 @@ pub(super) fn retrieve(model: &mut Model, session: &mut Session) {
         view.local_failed = false;
         return;
     }
-    let Some(text) = session.withdraw_latest() else {
+    let Some(text) = model
+        .account
+        .as_mut()
+        .and_then(|view| view.queued_turns.pop_back())
+    else {
         let view = model.account.as_mut().unwrap();
         view.local_notice = "No pending message to edit; draft kept".into();
         view.local_failed = false;
@@ -49,7 +69,7 @@ pub(super) fn retrieve(model: &mut Model, session: &mut Session) {
     view.recovery = Some(saved);
     view.local_notice = "Editing withdrawn message · Enter sends · Alt+↓ abandons".into();
     view.local_failed = false;
-    model.editor.replace(&text);
+    model.editor.replace(&text.text);
     model.menu = Menu::default();
     model.menu.pasted_literal = true;
 }

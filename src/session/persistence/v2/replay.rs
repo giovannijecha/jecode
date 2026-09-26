@@ -161,7 +161,7 @@ impl Replay {
         let count = self.turns.len();
         for (index, value) in self.turns.into_iter().enumerate() {
             let mut decoded =
-                codec::decode(&Value::Array(vec![value])).map_err(|_| log::corrupt())?;
+                codec::decode_v2(&Value::Array(vec![value])).map_err(|_| log::corrupt())?;
             let turn = decoded.turns.pop().ok_or_else(log::corrupt)?;
             if index + 1 < count && turn.end.is_none() {
                 return Err(log::corrupt());

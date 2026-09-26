@@ -34,11 +34,10 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-pub(crate) use queue::Pending as PendingGuidance;
 pub use types::*;
 #[cfg(test)]
 pub(crate) use worker::Backend as TestBackend;
-pub(crate) const MAX_PROMPT_BYTES: usize = 8192;
+pub(crate) const MAX_PROMPT_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_RECALLED_PROMPTS: usize = 64;
 
 enum Command {
@@ -75,6 +74,8 @@ pub struct Session {
     catalog: Option<crate::providers::openai_account::catalog::Catalog>,
     selected: Model,
     initial_prompts: Vec<String>,
+    max_prompt_bytes: usize,
+    legacy: bool,
 }
 impl Session {
     pub fn start(model: Model) -> io::Result<Self> {
@@ -95,6 +96,14 @@ impl Session {
         directory: &std::path::Path,
         workspace: Option<crate::workspace::Workspace>,
     ) -> io::Result<Self> {
+        Self::with_directory_from(model, directory, workspace, None)
+    }
+    pub(crate) fn with_directory_from(
+        model: Model,
+        directory: &std::path::Path,
+        workspace: Option<crate::workspace::Workspace>,
+        display_parent: Option<&str>,
+    ) -> io::Result<Self> {
         let directory = scope::Directory::open(directory)?;
         if workspace
             .as_ref()
@@ -109,12 +118,18 @@ impl Session {
             settings.windows_powershell_executable.as_deref(),
             Some(directory.path()),
         )?;
-        let history = persistence::create_in(
-            &crate::state::Store::user()?,
-            model,
-            Some(directory.path()),
-            workspace.as_ref(),
-        )?;
+        let store = crate::state::Store::user()?;
+        let history = if let Some(parent) = display_parent {
+            persistence::create_in_from(
+                &store,
+                model,
+                Some(directory.path()),
+                workspace.as_ref(),
+                parent,
+            )?
+        } else {
+            persistence::create_in(&store, model, Some(directory.path()), workspace.as_ref())?
+        };
         Self::with_history_shell(
             model,
             worker::Account::with_idle_timeout(settings.model_stream_idle_timeout_ms),
@@ -195,6 +210,11 @@ impl Session {
             history.test_recovery = Some(crate::state::Store::in_home(&home)?);
         }
         let turns = history.turn_count();
+        let legacy = history
+            .record
+            .as_ref()
+            .is_some_and(|record| record.legacy());
+        let max_prompt_bytes = if legacy { 8192 } else { MAX_PROMPT_BYTES };
         let initial_prompts = history
             .record
             .as_ref()
@@ -251,6 +271,8 @@ impl Session {
             catalog: None,
             selected: model,
             initial_prompts,
+            max_prompt_bytes,
+            legacy,
         })
     }
     pub(crate) fn take_initial_prompts(&mut self) -> Vec<String> {
@@ -261,7 +283,8 @@ impl Session {
         if self.phase != Phase::Ready
             || self.queued != 0
             || prompt.trim().is_empty()
-            || prompt.len() > MAX_PROMPT_BYTES
+            || prompt.len() > self.max_prompt_bytes
+            || self.legacy_turn_limit_reached()
             || self.selection_unavailable()
         {
             return false;
@@ -277,6 +300,12 @@ impl Session {
         self.turns += 1;
         self.phase = Phase::Generating;
         true
+    }
+    pub(crate) fn prompt_limit(&self) -> usize {
+        self.max_prompt_bytes
+    }
+    pub(crate) fn legacy_turn_limit_reached(&self) -> bool {
+        self.legacy && self.turns >= 256
     }
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
@@ -323,7 +352,7 @@ impl Session {
         if self.phase != Phase::Generating
             || self.cancelled.load(Ordering::Acquire)
             || text.trim().is_empty()
-            || text.len() > MAX_PROMPT_BYTES
+            || text.len() > self.max_prompt_bytes
             || self.queued >= 8
         {
             return false;
@@ -341,6 +370,7 @@ impl Session {
         self.queued = self.queued.saturating_sub(1);
         Some(text)
     }
+    #[cfg(test)]
     pub(crate) fn pending_guidance(&self) -> Arc<queue::Pending> {
         Arc::clone(&self.guidance)
     }

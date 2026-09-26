@@ -45,7 +45,9 @@ fn control_key(virtual_key: u16) -> Option<Key> {
         0x43 => Some(Key::Interrupt),
         0x41 => Some(Key::Home),
         0x45 => Some(Key::End),
-        0x4a | 0x4f | 0x0d => Some(Key::Newline),
+        0x4a | 0x0d => Some(Key::Newline),
+        0x4f => Some(Key::Expand),
+        0x55 => Some(Key::LineBackspace),
         0x50 => Some(Key::HistoryPrevious),
         0x4e => Some(Key::HistoryNext),
         0x57 | 0x08 => Some(Key::WordBackspace),
@@ -265,7 +267,7 @@ fn windows_console_abi_layouts() {
 fn native_control_records_distinguish_editor_actions_from_exit_and_submit() {
     assert_eq!(control_key(0x51), Some(Key::Quit));
     assert_eq!(control_key(0x43), Some(Key::Interrupt));
-    assert_eq!(control_key(0x4f), Some(Key::Newline));
+    assert_eq!(control_key(0x4f), Some(Key::Expand));
     assert_eq!(control_key(0x0d), Some(Key::Newline));
     assert_eq!(control_key(0x50), Some(Key::HistoryPrevious));
     assert_eq!(control_key(0x4e), Some(Key::HistoryNext));

@@ -36,7 +36,7 @@ use the same format and remain readable without conversion.
 One log event is bounded by 80 MiB of encoded JSON, derived from the existing
 bounded provider response and receipt sizes. The reader handles its bytes in
 64 KiB I/O chunks; it never loads a complete session snapshot. A submitted
-prompt remains limited to 8 KiB, streamed step text to 1 MiB, and one receipt
+prompt remains limited to 256 KiB, streamed step text to 1 MiB, and one receipt
 output to 1 MiB. These are per-item bounds, not session-age limits.
 
 ## Commit and recovery

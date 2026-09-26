@@ -1,4 +1,5 @@
 //! Pure, bounded command and selection surfaces inside the composer.
+#[cfg(test)]
 use super::{
     model::Model,
     style::{Row, Tone},
@@ -18,6 +19,9 @@ pub(super) enum Action {
     Browse,
     Resume(String),
     Models,
+    Effort,
+    Clear,
+    Status,
     DefaultModels,
     SelectModel(String, bool),
     Settings,
@@ -51,6 +55,7 @@ pub(super) struct Panel {
 #[derive(Clone, Default)]
 pub(super) struct Menu {
     pub panel: Option<Panel>,
+    pub query: String,
     pub selected: usize,
     pub hidden: bool,
     pub pasted_literal: bool,
@@ -68,27 +73,32 @@ impl Menu {
                 .map(|e| Entry::new(&e.label, &e.description, e.action.clone()))
                 .collect()
         });
-        let query = text.trim_start_matches('/').trim().to_lowercase();
-        source
-            .into_iter()
-            .filter(|e| {
-                if self.panel.is_none() {
-                    e.label.trim_start_matches('/').starts_with(&query)
-                } else {
-                    format!("{} {}", e.label, e.description)
-                        .to_lowercase()
-                        .contains(&query)
-                }
+        let query = if self.panel.is_some() {
+            self.query.as_str()
+        } else {
+            text.trim_start_matches('/').trim()
+        };
+        let choices: Vec<_> = source
+            .iter()
+            .map(|entry| super::lab::picker::Choice {
+                label: entry.label.trim_start_matches('/').into(),
+                detail: entry.description.clone(),
             })
+            .collect();
+        super::lab::picker::matches(&choices, query)
+            .into_iter()
+            .map(|found| source[found.index].clone())
             .collect()
     }
     pub fn close(&mut self) {
         self.panel = None;
+        self.query.clear();
         self.selected = 0;
         self.hidden = true;
     }
     pub fn open(&mut self, panel: Panel) {
         self.panel = Some(panel);
+        self.query.clear();
         self.selected = 0;
         self.hidden = false;
     }
@@ -100,6 +110,17 @@ pub(super) fn commands() -> Vec<Entry> {
         ("/new", "Start a new conversation in this directory", New),
         ("/resume", "Find and reopen a saved conversation", Browse),
         ("/model", "Choose the model for this conversation", Models),
+        (
+            "/effort",
+            "Set reasoning effort for this conversation",
+            Effort,
+        ),
+        ("/status", "Show this conversation's session facts", Status),
+        (
+            "/clear",
+            "Start fresh context and keep the visible transcript",
+            Clear,
+        ),
         ("/settings", "Change saved defaults and animation", Settings),
         (
             "/context",
@@ -268,6 +289,7 @@ pub(super) fn sessions(
     }
 }
 
+#[cfg(test)]
 pub(super) fn rows(model: &Model, width: usize, available: usize) -> Vec<Row> {
     if model.account.is_none() || !model.menu.active(&model.editor.text) || available == 0 {
         return Vec::new();

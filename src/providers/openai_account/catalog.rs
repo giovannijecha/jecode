@@ -177,6 +177,12 @@ impl Catalog {
         self.fresh_at(Instant::now())
     }
 
+    #[cfg(test)]
+    pub(crate) fn stale_for_test(mut self) -> Self {
+        self.fetched_at -= Duration::from_secs(301);
+        self
+    }
+
     fn fresh_at(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.fetched_at) < Duration::from_secs(300)
     }

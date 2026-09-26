@@ -6,6 +6,39 @@ use crate::session::{
 use std::{io::Write, time::Instant};
 
 #[test]
+fn clear_links_display_history_without_copying_it_into_the_new_model_context() {
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let mut old = create(&store, Model::Luna, None, None).unwrap();
+    let old_id = old.record.as_ref().unwrap().id().to_owned();
+    old.begin("original prompt".into()).unwrap();
+    old.turns.last_mut().unwrap().end = Some(End::Complete);
+    old.turns.last_mut().unwrap().outcome = "Complete".into();
+    old.checkpoint().unwrap();
+    let next = create_with_parent(&store, Model::Luna, None, None, &old_id).unwrap();
+    let next_id = next.record.as_ref().unwrap().id().to_owned();
+    assert!(next.turns.is_empty());
+    assert!(next.projection.summary.is_empty());
+    let visible = next.transcript();
+    assert!(
+        visible
+            .iter()
+            .any(|item| item.role == "You" && item.text == "original prompt")
+    );
+    assert!(visible.iter().any(|item| item.role == "ClearBoundary" &&
+        item.text == format!("{old_id}\n{next_id}")));
+    drop(next);
+    drop(old);
+    let resumed = super::super::load(&store, &next_id, true).unwrap();
+    assert_eq!(
+        resumed.history.display_parent.as_deref(),
+        Some(old_id.as_str())
+    );
+    assert!(resumed.history.turns.is_empty());
+    assert_eq!(resumed.history.transcript().len(), visible.len());
+}
+
+#[test]
 fn three_hundred_turns_resume_with_bounded_old_page() {
     let fixture = crate::state::tests::Fixture::new();
     let Some(store) = fixture.store() else { return };

@@ -205,6 +205,9 @@ pub enum Event {
     },
     ToolFinished {
         summary: String,
+        /// Exact available textual result; presentation may fold it without
+        /// changing the canonical receipt or model context.
+        output: String,
         failed: bool,
         limited: bool,
     },
@@ -252,4 +255,18 @@ pub enum CatalogFailure {
 pub struct TranscriptItem {
     pub role: &'static str,
     pub text: String,
+    /// Presentational facts reconstructed from the paired canonical tool call
+    /// and receipt. No historical effect is replayed to populate this field.
+    pub tool: Option<TranscriptTool>,
+}
+
+pub struct TranscriptTool {
+    pub name: String,
+    pub subject: String,
+    pub summary: String,
+    pub output: String,
+    pub failed: bool,
+    pub limited: bool,
+    /// Older or opaque receipts may lack a verifiable outcome flag.
+    pub outcome_unknown: bool,
 }

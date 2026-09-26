@@ -166,12 +166,12 @@ fn slash_menu_filters_and_closes_with_one_marker_and_adjacent_query() {
     let rows: Vec<_> = shown.lines().collect();
     let (upper, lower) = rules(&shown);
     assert_eq!(rows[upper + 1], "› /new");
-    assert_eq!(rows[upper + 7], "  /discard-pending-images");
-    assert_eq!(rows[upper + 8], "  /help");
-    assert_eq!(rows[upper + 9], "  /login");
-    assert_eq!(rows[upper + 10], "  /logout");
-    assert_eq!(rows[upper + 11], "  / ");
-    assert_eq!(lower, upper + 12, "menu and input must touch: {shown}");
+    assert_eq!(rows[upper + 7], "  /settings");
+    assert_eq!(rows[upper + 10], "  /discard-pending-images");
+    assert_eq!(rows[upper + 11], "  /help");
+    assert_eq!(rows[upper + 12], "  /login");
+    assert_eq!(rows[upper + 13], "  / ");
+    assert_eq!(lower, upper + 14, "menu and input must touch: {shown}");
     assert_eq!(rows[upper + 1..lower].join("\n").matches('›').count(), 1);
 
     account::input(&mut model, Key::Text("co".into()), &mut session);
@@ -264,6 +264,7 @@ fn model_tool_command_execution_and_completion_replace_one_status_in_place() {
         &mut model,
         Event::ToolFinished {
             summary: "12 lines".into(),
+            output: String::new(),
             failed: false,
             limited: false,
         },

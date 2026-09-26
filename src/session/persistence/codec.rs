@@ -1,3 +1,5 @@
+// Keep this codec whole: legacy snapshots and v2 single-turn replay share the
+// same field and pairing validation, with only the prompt bound differing.
 use super::*;
 use crate::providers::openai_account::client::{Attempt, Delivery, RequestStage};
 use crate::providers::openai_account::{FailureCode, FailureEvent, ProviderFailure, Response};
@@ -79,6 +81,15 @@ pub(super) fn encode_turn(turn: &Turn) -> Value {
 /// frames). A step's validated response supplies the receipt count and order;
 /// no separate item-count ceiling may reject an already committed batch.
 pub(super) fn decode(value: &Value) -> io::Result<History> {
+    decode_with_limit(value, 8192)
+}
+
+/// v2 log replay shares the turn schema but has a larger per-prompt bound.
+pub(super) fn decode_v2(value: &Value) -> io::Result<History> {
+    decode_with_limit(value, super::super::MAX_PROMPT_BYTES)
+}
+
+fn decode_with_limit(value: &Value, prompt_limit: usize) -> io::Result<History> {
     let turns = value
         .array()
         .filter(|turns| turns.len() <= 256)
@@ -94,7 +105,7 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
             _ => return Err(invalid()),
         };
         let mut turn = Turn {
-            prompt: string(value, "prompt", 8192)?.into(),
+            prompt: string(value, "prompt", prompt_limit)?.into(),
             steps: Vec::new(),
             end,
             outcome: string(value, "outcome", 1024)?.into(),
@@ -197,7 +208,7 @@ pub(super) fn decode(value: &Value) -> io::Result<History> {
             }
             turn.guidance.push(super::super::queue::Guidance {
                 after_step,
-                text: string(item, "text", 8192)?.into(),
+                text: string(item, "text", prompt_limit)?.into(),
             });
         }
         history.turns.push(turn);
@@ -506,4 +517,25 @@ pub(super) fn read_attempt(value: &Value) -> io::Result<Attempt> {
             _ => return Err(invalid()),
         },
     })
+}
+
+#[cfg(test)]
+mod prompt_limit_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_snapshot_limit_stays_eight_kib_while_v2_replay_accepts_larger_prompts() {
+        let mut history = History::default();
+        history.turns.push(Turn {
+            prompt: "a".repeat(8193),
+            steps: Vec::new(),
+            end: Some(End::Complete),
+            outcome: String::new(),
+            metrics: Metrics::default(),
+            guidance: Vec::new(),
+        });
+        let value = encode(&history);
+        assert!(decode(&value).is_err());
+        assert_eq!(decode_v2(&value).unwrap().turns[0].prompt.len(), 8193);
+    }
 }

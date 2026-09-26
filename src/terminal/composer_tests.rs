@@ -27,7 +27,10 @@ fn assert_inside(rows: &[style::Row], needle: &str) {
         .map(|(i, _)| i)
         .collect();
     assert_eq!(rules.len(), 2);
-    let index = rows.iter().position(|r| r.text.contains(needle)).unwrap();
+    let index = rows
+        .iter()
+        .position(|r| r.text.contains(needle))
+        .unwrap_or_else(|| panic!("missing {needle}: {rows:?}"));
     assert!(
         rules[0] < index && index < rules[1],
         "{needle} escaped the composer: {rows:?}"
@@ -67,27 +70,30 @@ fn account_wait_think_and_local_feedback_keep_their_own_sides_of_the_rule() {
     for (width, height) in [(80, 24), (25, 9)] {
         let rows = view::chrome(&model, width, height);
         assert_above(&rows, "Thinking");
-        assert_inside(&rows, "Wait for");
+        assert_inside(&rows, "1 queued");
     }
     account::input(&mut model, Key::Escape, &mut session);
+    assert_eq!(model.editor.text, "/");
     model.editor.take();
     account::input(&mut model, Key::Text("next guidance".into()), &mut session);
     account::input(&mut model, Key::Enter, &mut session);
-    assert_inside(&view::chrome(&model, 80, 24), "1 queued");
-    account::event(&mut model, Event::GuidanceReturned("next guidance".into()));
+    assert_inside(&view::chrome(&model, 80, 24), "next guidance");
+    assert!(
+        model
+            .account
+            .as_ref()
+            .unwrap()
+            .pending_messages()
+            .is_empty()
+    );
     account::event(
         &mut model,
-        Event::Finished(End::Complete, Metrics::default()),
+        Event::Finished(End::Failed(Failure::Cancelled), Metrics::default()),
     );
     let rows = view::frame(&model, 80, 24);
     assert!(!rows.iter().any(|r| r.text.contains("Thinking")));
     assert!(!rows.iter().any(|r| r.text.contains("Waiting for model")));
-    assert_eq!(
-        rows.iter()
-            .filter(|r| r.text.contains("Queued message was not sent"))
-            .count(),
-        1
-    );
+    assert_eq!(model.editor.text, "next guidance");
 }
 
 #[test]
@@ -119,6 +125,7 @@ fn account_completion_failure_and_cancel_clear_activity_without_duplicate_result
                 &mut model,
                 Event::ToolFinished {
                     summary: "12 lines".into(),
+                    output: String::new(),
                     failed: false,
                     limited: false,
                 },
@@ -206,7 +213,7 @@ fn login_code_notice_remains_above_the_composer_at_supported_widths() {
             .unwrap();
         let code = rows
             .iter()
-            .position(|row| row.text.contains("Enter code: FAKE-CODE"))
+            .position(|row| row.text.contains("Code: FAKE-CODE"))
             .unwrap_or_else(|| panic!("login code hidden at {columns} columns: {rows:?}"));
         assert!(code < upper, "login code entered the composer: {rows:?}");
         assert!(rows.iter().all(|row| row.transient));
@@ -271,13 +278,15 @@ fn command_menu_contains_only_aligned_commands_and_dismisses_without_transcript_
             "› /new",
             "  /resume",
             "  /model",
+            "  /effort",
+            "  /status",
+            "  /clear",
             "  /settings",
             "  /context",
             "  /compact",
             "  /discard-pending-images",
             "  /help",
-            "  /login",
-            "  /logout"
+            "  /login"
         ]
     );
     assert_inside(&view::chrome(&model, 80, 24), "/resume");
@@ -289,7 +298,7 @@ fn command_menu_contains_only_aligned_commands_and_dismisses_without_transcript_
             .last()
             .unwrap()
             .text
-            .contains("› /help")
+            .contains("› /context")
     );
     account::input(&mut model, Key::Escape, &mut session);
     assert_eq!(model.editor.text, "/");
@@ -371,7 +380,8 @@ fn panels_remain_bounded_with_long_paths_drafts_and_untrusted_labels() {
             assert!(rows.len() < height || height == 1, "{columns}x{height}");
             assert!(
                 rows.iter()
-                    .all(|r| r.transient && text::width(&r.text) < columns)
+                    .all(|r| r.transient && lab::text::width(&r.text) < columns),
+                "{columns}x{height}: {rows:?}"
             );
             assert!(
                 rows.iter()
@@ -403,7 +413,11 @@ fn pending_context_preserves_the_next_draft_and_busy_help_cannot_split_a_respons
     account::input(&mut model, Key::Enter, &mut session);
     assert_eq!(model.blocks.len(), 3); // Report, user prompt, streaming answer.
     command(&mut model, &mut session, "/help");
-    assert_eq!(model.editor.text, "/help");
+    assert!(model.editor.text.is_empty());
+    assert_eq!(
+        model.account.as_ref().unwrap().pending_messages(),
+        ["/help"]
+    );
     assert_eq!(model.blocks.len(), 3);
     account::event(&mut model, Event::Text("Uninterrupted response".into()));
     assert_eq!(model.blocks.last().unwrap().text, "Uninterrupted response");

@@ -26,12 +26,14 @@ impl Demo {
         }
         match self.step {
             0 => self.call = model.start_tool("list_files", "src".into(), now),
-            1 => model.finish_tool(self.call, "8 entries / 0 omitted", false, false, now),
+            1 => model.finish_tool_output(self.call, "8 entries / 0 omitted", false, false,
+                "account.rs\neditor.rs\nmodel.rs\nrender.rs\nview.rs\ninput.rs\nmenu.rs\nrecovery.rs\n", now),
             2 => self.call = model.start_tool("read_file", "src/session/mod.rs".into(), now),
-            3 => model.finish_tool(self.call, "80 lines", false, false, now),
+            3 => model.finish_tool_output(self.call, "80 lines", false, false,
+                &(1..=12).map(|line| format!("line {line}\n")).collect::<String>(), now),
             4 => model.tools.waiting("Waiting for model"),
             5 => self.call = model.start_tool("search_text", "src/terminal".into(), now),
-            6 => model.finish_tool(
+            6 => model.finish_tool_output(
                 self.call,
                 if self.failure {
                     "permission denied (simulated)"
@@ -40,6 +42,8 @@ impl Demo {
                 },
                 self.failure,
                 false,
+                if self.failure { "permission denied (simulated)" }
+                    else { "src/terminal/view.rs:15: frame\nsrc/terminal/model.rs:80: input" },
                 now,
             ),
             _ => {

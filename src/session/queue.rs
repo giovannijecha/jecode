@@ -27,6 +27,7 @@ impl Pending {
             .unwrap_or_else(|error| error.into_inner())
             .pop_back()
     }
+    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Vec<String> {
         self.0
             .lock()
