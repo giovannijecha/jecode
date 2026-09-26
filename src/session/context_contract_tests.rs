@@ -324,6 +324,7 @@ fn rich_history() -> History {
 
 struct IndexRecorder {
     requests: Arc<Mutex<Vec<String>>>,
+    expected: String,
 }
 impl Backend for IndexRecorder {
     fn login(
@@ -352,6 +353,24 @@ impl Backend for IndexRecorder {
         if let Some(Input::ToolResult { output, .. }) = request
             .input
             .iter()
+            .find(|item| matches!(item, Input::ToolResult { call_id, .. } if call_id == "exact"))
+        {
+            let page = json::parse(output, Default::default()).unwrap();
+            assert_eq!(
+                page.get("source").and_then(Value::text),
+                Some("original recorded session receipt; no source reread")
+            );
+            assert_eq!(page.get("call_id").and_then(Value::text), Some("original"));
+            let saved = page.get("output").and_then(Value::text).unwrap();
+            assert!(!saved.is_empty() && self.expected.starts_with(saved));
+            return Ok(tests::response(
+                "Exact saved evidence received",
+                Status::Completed,
+            ));
+        }
+        if let Some(Input::ToolResult { output, .. }) = request
+            .input
+            .iter()
             .find(|item| matches!(item, Input::ToolResult { call_id, .. } if call_id == "index"))
         {
             assert!(output.contains("\"mode\":\"index\""), "{output}");
@@ -360,12 +379,20 @@ impl Backend for IndexRecorder {
                 "{output}"
             );
             assert!(output.contains("\"path\":\"source.txt\""), "{output}");
-            return Ok(tests::response("Index received", Status::Completed));
+            let page = json::parse(output, Default::default()).unwrap();
+            let address = page.get("entries").and_then(Value::array).unwrap()[0]
+                .get("recall_address")
+                .unwrap();
+            return Ok(tool_tests::calls_response(vec![tool_tests::call(
+                "exact",
+                "recall_receipts",
+                &json::encode(address, 1024).unwrap(),
+            )]));
         }
         Ok(tool_tests::calls_response(vec![tool_tests::call(
             "index",
-            "recall_receipts",
-            r#"{"mode":"index","turn":0,"step":0,"receipt":0,"offset":0,"expected_call_id":"placeholder"}"#,
+            "index_receipts",
+            r#"{"turn":0,"step":0,"receipt":0}"#,
         )]))
     }
 }
@@ -384,6 +411,11 @@ fn ordinary_and_sliced_compaction_expose_index_without_replaying_reads() {
         history
             .begin("Use the exact old source observation".into())
             .unwrap();
+        let expected = if large {
+            "\"".repeat(900_000)
+        } else {
+            "OLD-OBSERVATION".repeat(1000)
+        };
         history.turns[0].steps.push(Step {
             response: Some(tool_tests::calls_response(vec![tool_tests::call(
                 "original",
@@ -392,11 +424,7 @@ fn ordinary_and_sliced_compaction_expose_index_without_replaying_reads() {
             )])),
             results: vec![Receipt {
                 call_id: "original".into(),
-                output: if large {
-                    "\"".repeat(900_000)
-                } else {
-                    "OLD-OBSERVATION".repeat(1000)
-                },
+                output: expected.clone(),
                 summary: "read_file / saved observation".into(),
                 image: None,
             }],
@@ -410,6 +438,7 @@ fn ordinary_and_sliced_compaction_expose_index_without_replaying_reads() {
             Model::Luna,
             IndexRecorder {
                 requests: requests.clone(),
+                expected,
             },
             Some(workspace),
             history,

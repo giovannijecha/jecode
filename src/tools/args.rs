@@ -52,6 +52,7 @@ impl Prepared {
             "edit_file" => &["path", "old_text", "new_text"],
             "run_command" => &["command", "path", "timeout_seconds"],
             "view_image" => &["path", "image_id"],
+            "index_receipts" => &["mode", "turn", "step", "receipt"],
             "recall_receipts" => &[
                 "mode",
                 "turn",
@@ -70,9 +71,9 @@ impl Prepared {
         if fields.keys().any(|key| !keys.contains(&key.as_str())) {
             return Err("unknown tool argument");
         }
-        if name == "recall_receipts" {
+        if matches!(name, "index_receipts" | "recall_receipts") {
             let index = match args.get("mode") {
-                None => false,
+                None => name == "index_receipts",
                 Some(Value::String(mode)) if mode == "index" => true,
                 _ => return Err("mode must be index when supplied"),
             };
@@ -173,7 +174,8 @@ impl Prepared {
     }
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Recall { .. } => "recall_receipts",
+            Self::Recall { index: true, .. } => "index_receipts",
+            Self::Recall { index: false, .. } => "recall_receipts",
             Self::Image { .. } => "view_image",
             Self::List { .. } => "list_files",
             Self::Read { .. } => "read_file",

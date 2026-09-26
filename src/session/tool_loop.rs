@@ -82,7 +82,7 @@ fn execute(
         .ok_or(Failure::Worker)?
         .tool_calls
         .iter()
-        .any(|call| call.name == "recall_receipts")
+        .any(|call| matches!(call.name.as_str(), "index_receipts" | "recall_receipts"))
         .then(|| RecallAdmission::new(history, model))
         .transpose()?;
     let mut defer_tail = false;
@@ -279,7 +279,7 @@ fn execute(
 }
 
 const BATCH_DELIVERY_LIMIT: &str = "tool was not executed because the aggregate result delivery reached the 8 MiB request limit; consume earlier results and issue a new call";
-const RECALL_NOT_ADMITTED: &str = "recall result was not admitted to this batch because the aggregate delivery reached the 8 MiB request limit; the original recorded source remains available through recall_receipts after this response";
+const RECALL_NOT_ADMITTED: &str = "recall result was not admitted to this batch because the aggregate delivery reached the 8 MiB request limit; the original recorded source remains available through index_receipts and recall_receipts after this response";
 
 /// A function_call_output changes only its JSON-quoted output field. Measure
 /// the provider request once, then account for that field's exact encoded delta
@@ -308,7 +308,10 @@ impl RecallAdmission {
             .max(wire_len(&Output::error(RECALL_NOT_ADMITTED).text));
         let mut suffix_reserve = vec![0usize; calls.len() + 1];
         for index in (0..calls.len()).rev() {
-            let additional = if calls[index].name == "recall_receipts" {
+            let additional = if matches!(
+                calls[index].name.as_str(),
+                "index_receipts" | "recall_receipts"
+            ) {
                 tail_wire.saturating_sub(placeholder_wire[index])
             } else {
                 // Owned tool outputs are JSON text bounded by MAX_OUTPUT. A

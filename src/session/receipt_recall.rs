@@ -17,7 +17,9 @@ pub(super) use saved_index::execute as index;
 /// paired canonical result, not its display summary. Errors and unexecuted
 /// calls remain saved but do not pin unrelated reads ahead of compaction.
 pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
-    if call.name != "recall_receipts" || call.id != result.call_id || result.output.len() > MAX_TEXT
+    if !matches!(call.name.as_str(), "index_receipts" | "recall_receipts")
+        || call.id != result.call_id
+        || result.output.len() > MAX_TEXT
     {
         return false;
     }

@@ -331,8 +331,8 @@ fn indexed_page_is_pinned_until_a_following_accepted_response() {
     assert!(!page.failed);
     let call = tool_tests::call(
         "index-call",
-        "recall_receipts",
-        r#"{"mode":"index","turn":0,"step":0,"receipt":0,"offset":0,"expected_call_id":"placeholder"}"#,
+        "index_receipts",
+        r#"{"turn":0,"step":0,"receipt":0}"#,
     );
     assert!(matches!(
         Prepared::parse(&call.name, &call.arguments),
@@ -346,10 +346,22 @@ fn indexed_page_is_pinned_until_a_following_accepted_response() {
     let mut result = Receipt {
         call_id: "index-call".into(),
         output: page.text,
-        summary: "recall_receipts / indexed saved reads".into(),
+        summary: "index_receipts / indexed saved reads".into(),
         image: None,
     };
     assert!(admitted(&call, &result));
+    let legacy_call = tool_tests::call(
+        "legacy-index-call",
+        "recall_receipts",
+        r#"{"mode":"index","turn":0,"step":0,"receipt":0,"offset":0,"expected_call_id":"placeholder"}"#,
+    );
+    let legacy_result = Receipt {
+        call_id: "legacy-index-call".into(),
+        output: result.output.clone(),
+        summary: result.summary.clone(),
+        image: None,
+    };
+    assert!(admitted(&legacy_call, &legacy_result));
     result.output = result.output.replace("\"receipt\":0", "\"receipt\":1");
     assert!(!admitted(&call, &result));
     assert!(
