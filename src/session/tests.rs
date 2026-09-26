@@ -187,6 +187,14 @@ fn unavailable_saved_pair_blocks_send_until_an_idle_replacement_is_applied() {
     assert!(session.submit("explicit request"));
     assert_eq!(finish(&mut session).1, End::Complete);
     assert_eq!(observed.requests.lock().unwrap().len(), 1);
+    let first = observed.requests.lock().unwrap()[0].clone();
+    let body = crate::json::parse(&first, Default::default()).unwrap();
+    assert!(
+        body.get("instructions")
+            .and_then(crate::json::Value::text)
+            .unwrap()
+            .contains(capabilities::work_contract(false))
+    );
 }
 pub(crate) fn ready_fixture() -> Session {
     start(false, false).0
@@ -356,6 +364,14 @@ fn failed_attempt_requires_explicit_continuation_with_partial_text_as_reference(
     assert_eq!(text, "partial");
     assert!(matches!(end, End::Failed(Failure::Account(_))));
     assert_eq!(observed.requests.lock().unwrap().len(), 1);
+    let first = observed.requests.lock().unwrap()[0].clone();
+    let body = crate::json::parse(&first, Default::default()).unwrap();
+    assert!(
+        body.get("instructions")
+            .and_then(crate::json::Value::text)
+            .unwrap()
+            .contains(capabilities::work_contract(false))
+    );
     assert!(session.submit("explicit continuation"));
     assert_eq!(finish(&mut session).1, End::Complete);
     let requests = observed.requests.lock().unwrap();

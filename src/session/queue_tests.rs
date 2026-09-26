@@ -220,6 +220,16 @@ fn guidance_waits_for_a_model_boundary_and_cancel_returns_unsent_messages() {
         }
         assert_eq!(accepted, !cancel);
         assert_eq!(returned, cancel);
+        let requests_guard = requests.lock().unwrap();
+        for request in requests_guard.iter() {
+            let body = crate::json::parse(request, Default::default()).unwrap();
+            let instructions = body
+                .get("instructions")
+                .and_then(crate::json::Value::text)
+                .unwrap();
+            assert!(instructions.contains(crate::session::capabilities::work_contract(false)));
+        }
+        drop(requests_guard);
         if !cancel {
             let requests = requests.lock().unwrap();
             assert!(!requests[0].contains("second option"));

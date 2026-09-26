@@ -179,6 +179,8 @@ fn selected_pair_is_used_for_every_request_in_a_tool_loop() {
     assert_eq!(requests.len(), 2);
     for request in requests.iter() {
         let value = json::parse(request, Default::default()).unwrap();
+        let instructions = value.get("instructions").and_then(Value::text).unwrap();
+        assert!(instructions.contains(capabilities::work_contract(true)));
         assert_eq!(
             value.get("model").and_then(Value::text),
             Some("account-model")
@@ -191,6 +193,7 @@ fn selected_pair_is_used_for_every_request_in_a_tool_loop() {
             Some("xhigh")
         );
     }
+    assert!(requests[1].contains("function_call_output"));
     drop(requests);
     drop(session);
 }

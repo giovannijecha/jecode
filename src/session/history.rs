@@ -542,13 +542,14 @@ impl History {
     fn make_request(&self, model: Model, workspace: bool, input: Vec<Input>) -> Request {
         let (tools, capability) =
             super::capabilities::for_session(workspace, self.can_view_images(), &self.shell);
+        let work_contract = super::capabilities::work_contract(!tools.is_empty());
         Request {
             model: model.id().into(),
             effort: model.effort().map(str::to_owned),
             input,
             tools,
             instructions: format!(
-                "You are Jecode, a concise and careful programming assistant. Help with the user's actual request. {capability} {} Never claim to have inspected, modified or tested anything without evidence. Distinguish suggestions from completed actions.",
+                "You are Jecode, a concise and careful programming assistant. Help with the user's actual request. {work_contract} {capability} {} Never claim to have inspected, modified or tested anything without evidence. Distinguish suggestions from completed actions.",
                 self.environment
             ),
         }
