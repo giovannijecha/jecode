@@ -89,6 +89,7 @@ pub(crate) fn response(text: &str, status: Status) -> Response {
         text: text.into(),
         output,
         status,
+        end_turn: None,
         tool_calls: vec![],
         usage: Default::default(),
     }
@@ -280,6 +281,7 @@ impl worker::Backend for Boundaries {
         Ok(Response {
             id: "fixture".into(),
             status: Status::Completed,
+            end_turn: None,
             output,
             text: "Same\n\nSame".into(),
             tool_calls: Vec::new(),

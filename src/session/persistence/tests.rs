@@ -22,6 +22,7 @@ fn repeated_messages_response() -> Response {
     Response {
         id: "legacy_fixture".into(),
         status: Status::Completed,
+        end_turn: None,
         output,
         text: "Same\n\nSame".into(),
         tool_calls: Vec::new(),
