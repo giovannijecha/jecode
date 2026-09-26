@@ -162,6 +162,7 @@ fn account_activity_updates_through_chrome_only_resizes_without_replaying_histor
         (
             Event::ToolFinished {
                 summary: "12 lines".into(),
+                output: String::new(),
                 failed: false,
                 limited: false,
             },

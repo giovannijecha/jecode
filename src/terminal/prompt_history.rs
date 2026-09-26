@@ -18,6 +18,10 @@ impl PromptHistory {
     pub(super) fn browsing(&self) -> bool {
         self.position.is_some()
     }
+    pub(super) fn edited(&mut self) {
+        self.position = None;
+        self.draft = None;
+    }
     /// Move the current traversal out while another editor owns history keys.
     /// Entries stay in this history so incoming turns and eviction remain live.
     pub(super) fn suspend_navigation(&mut self) -> Navigation {

@@ -2,11 +2,14 @@
 mod account;
 mod account_login;
 mod action_demo;
+#[cfg(test)]
 mod action_view;
 mod activity_view;
+#[cfg(test)]
 mod block;
 mod command_view;
 mod commands;
+#[cfg(test)]
 mod composer;
 mod diagnostics;
 mod edit_view;
@@ -14,6 +17,9 @@ mod editor;
 mod editor_visual;
 #[cfg(any(test, windows, target_os = "linux"))]
 mod input;
+mod lab;
+mod lab_adapter;
+#[cfg(test)]
 mod markdown;
 mod menu;
 mod model;
@@ -26,16 +32,20 @@ mod reconciliation_tests;
 mod recovery;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
 mod render;
 mod resize;
 mod schedule;
 mod session_browser;
 mod spinner;
+#[allow(dead_code)] // The session browser still uses this palette; legacy views are test-only.
 mod style;
 mod text;
 mod tool_activity;
 mod tool_demo;
+#[cfg(test)]
 mod tool_view;
+#[cfg(test)]
 mod view;
 
 use std::{
@@ -44,8 +54,8 @@ use std::{
 };
 
 const START_SEQUENCE: &[u8] = b"\r\x1b[?25l\x1b[?2004h";
-const NAVIGATION_SEQUENCE: &[u8] = b"\x1b[0m\x1b[?2004l\x1b[?25h";
-const EXIT_SEQUENCE: &[u8] = b"\x1b[0m\x1b[?2004l\x1b[?25h\r\n";
+const NAVIGATION_SEQUENCE: &[u8] = b"\x1b[?7h\x1b[?2026l\x1b[0m\x1b[?2004l\x1b[?25h";
+const EXIT_SEQUENCE: &[u8] = b"\x1b[?7h\x1b[?2026l\x1b[0m\x1b[?2004l\x1b[?25h\r\n";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Key {
@@ -54,6 +64,8 @@ enum Key {
     PasteRejected(&'static str),
     Enter,
     Newline,
+    Expand,
+    LineBackspace,
     Escape,
     Interrupt,
     Quit,
@@ -177,6 +189,7 @@ fn run(
         workspace,
         saved,
         prepared: None,
+        carried: None,
     };
     while let Some(next) = run_once(start)? {
         start = next;
@@ -191,11 +204,12 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         workspace,
         saved,
         prepared,
+        carried,
     } = start;
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("Jecode needs an interactive terminal"));
     }
-    let color = std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
+    let mut caps = lab::caps::Caps::detect(|key| std::env::var(key).ok(), cfg!(windows));
     let mut terminal = platform::Terminal::open()?;
     let mut trace = diagnostics::Trace::open()?;
     // Guard exists before any escape write so partial startup also restores state.
@@ -216,6 +230,14 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
             )
         },
     );
+    if let Some(carried) = carried {
+        model.blocks = carried.blocks;
+        model.tool_details = carried.tools;
+        model.command_receipts = carried.receipts;
+        if let Some(view) = &mut model.account {
+            view.cleared_from = carried.previous_id;
+        }
+    }
     let location =
         directory.map(|directory| navigation::Location::new(directory, workspace.as_ref()));
     if let Some(view) = &mut model.account {
@@ -229,6 +251,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     };
     model.tools.reduced_motion = std::env::var_os("JECODE_REDUCED_MOTION")
         .map_or(configured_motion, |value| !value.is_empty() && value != "0");
+    caps.reduced_motion = model.tools.reduced_motion;
     // Start only after terminal/diagnostic initialization succeeded. Closing the
     // UI drops this owner, cancels its operation and joins its worker.
     let mut session = if let Some(prepared) = prepared {
@@ -253,22 +276,20 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     };
     if let Some(session) = &mut session {
         model.prompt_history.load(session.take_initial_prompts());
-        account::attach_queue(&mut model, session);
     }
-    let mut renderer = render::Renderer::default();
-    let mut layout = view::Layout::default();
+    let mut renderer = lab::render::Renderer::default();
+    let mut layout = lab::view::Layout::default();
     let mut resize = resize::Resize::default();
     let mut paint = schedule::PaintSchedule::default();
     paint.request();
-    let mut transcript_pending = true;
     let mut previous_size = (0, 0);
+    let started = Instant::now();
     loop {
         let size = terminal.size()?;
         model.editor.set_columns(size.0.saturating_sub(4).max(1));
         if size != previous_size {
             trace.changed();
             paint.request();
-            transcript_pending = true;
         }
         let now = Instant::now();
         let region = resize.region(size, previous_size, now);
@@ -276,16 +297,13 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
             && let Some(region) = region
         {
             let geometry_preview = region == resize::Region::Composer;
-            let region = if region == resize::Region::Transcript && !transcript_pending {
-                resize::Region::Composer
+            caps.reduced_motion = model.tools.reduced_motion;
+            let snapshot = lab_adapter::Snapshot::from_model(&model);
+            let now_ms = started.elapsed().as_millis() as u64;
+            let frame = if geometry_preview {
+                snapshot.preview(size.0, size.1, &caps, now_ms)
             } else {
-                region
-            };
-            let frame = match region {
-                resize::Region::Transcript => layout.frame(&model, size.0, size.1),
-                resize::Region::Composer => {
-                    renderer.with_chrome(view::chrome(&model, size.0, size.1))
-                }
+                snapshot.frame(&mut layout, size.0, size.1, &caps, now_ms)
             };
             if terminal.size()? != size {
                 continue;
@@ -294,7 +312,11 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
             if trace.active() {
                 trace.record("before", size, rows, 0, &terminal.diagnostic_position()?)?;
             }
-            let changed = renderer.draw(frame, size, color);
+            let changed = if geometry_preview {
+                renderer.preview(frame, size, caps.color)
+            } else {
+                renderer.draw(frame, size, caps.color)
+            };
             if !changed.is_empty() {
                 output.write_all(changed.as_bytes())?;
                 output.flush()?;
@@ -309,9 +331,6 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                 )?;
             }
             previous_size = size;
-            if region == resize::Region::Transcript {
-                transcript_pending = false;
-            }
             paint.painted(Instant::now());
             if geometry_preview {
                 // The composer-only paint must not consume pending source work.
@@ -319,28 +338,47 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
             }
         }
         for key in terminal.poll()? {
+            let was_expanded = model.expanded;
             if let Some(session) = &mut session {
                 account::input(&mut model, key, session);
             } else {
                 model.input(key, Instant::now());
             }
+            if model.expanded != was_expanded {
+                renderer.invalidate();
+            }
             paint.request();
-            transcript_pending = true;
             if model.quit {
                 return Ok(None);
             }
             if let Some(request) = model.navigation.take() {
+                let clear = matches!(request, navigation::Request::Clear);
                 match location.as_ref().unwrap().resolve(request) {
                     Ok(mut next) => {
+                        if clear {
+                            next.selected = model.account.as_ref().map(|view| view.selected);
+                            next.carried = Some(navigation::Carried {
+                                blocks: model.blocks.clone(),
+                                tools: model.tool_details.clone(),
+                                receipts: model.command_receipts.clone(),
+                                previous_id: model
+                                    .account
+                                    .as_ref()
+                                    .and_then(|view| view.id.clone()),
+                            });
+                        }
                         if next.prepare().is_err() {
                             if let Some(view) = &mut model.account {
                                 view.local_notice = "Cannot open that conversation · check its directory or another owner · current session and draft kept".into();
                             }
                             continue;
                         }
-                        let frame = renderer.with_chrome(Vec::new());
-                        output
-                            .write_all(renderer.draw(frame, terminal.size()?, color).as_bytes())?;
+                        renderer.invalidate();
+                        output.write_all(
+                            renderer
+                                .draw(Vec::new(), terminal.size()?, caps.color)
+                                .as_bytes(),
+                        )?;
                         output.flush()?;
                         screen.newline_on_drop = false;
                         // The current worker and lease are joined/released before the next run.
@@ -359,16 +397,25 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         if let Some(session) = &mut session {
             for _ in 0..64 {
                 let Some(event) = session.poll() else { break };
+                let ended = match &event {
+                    crate::session::Event::Finished(end, _) => Some(*end),
+                    _ => None,
+                };
+                let catalog_loaded = matches!(&event, crate::session::Event::CatalogLoaded(_));
                 account::event(&mut model, event);
+                if catalog_loaded {
+                    commands::complete_argument(&mut model, session);
+                }
+                if let Some(end) = ended {
+                    account::after_finished(&mut model, session, end);
+                }
                 paint.request();
-                transcript_pending = true;
             }
         }
         if model.tick(Instant::now()) {
             paint.request();
             // Account ticks only change transient animation and elapsed status.
             // Demo ticks may also append scripted transcript output.
-            transcript_pending |= model.account.is_none();
         }
     }
 }
@@ -407,6 +454,8 @@ mod menu_native_tests;
 mod menu_tests;
 #[cfg(test)]
 mod performance_tests;
+#[cfg(all(test, windows))]
+mod real_conpty_tests;
 #[cfg(test)]
 mod reflow_tests;
 #[cfg(test)]

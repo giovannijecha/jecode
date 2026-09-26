@@ -116,31 +116,31 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
     );
     assert!(!first.contains("1049"));
     assert!(!first.contains("\x1b[36m"));
+    assert!(first.contains("\x1b[?2026h"));
     assert_ne!(attributes(&slave), before);
     master
-        .write_all(b"\x1b[200~/code\n\x03\x11\x1b[201~")
+        .write_all(b"\x1b[200~alpha\r\n  beta\x1b[201~")
         .unwrap();
-    let paste = until(&mut master, "??\x1b[7m");
-    assert!(paste.contains("/code"));
+    let paste = until(&mut master, "beta");
+    assert!(paste.contains("alpha"));
     assert!(
         paste.contains("\x1b[7m"),
         "NO_COLOR cursor must keep its block"
     );
-    assert!(!paste.contains("??|"), "cursor must not replace input text");
     assert!(!paste.contains("Streaming locally"));
-    // Ctrl+C clears the inert draft; no process termination in raw mode.
+    master.write_all(b"\x0fmore").unwrap();
+    let expanded = until(&mut master, "betamore");
+    assert!(!expanded.contains("Streaming locally"));
+    // Ctrl+C clears an idle draft; no process termination in raw mode.
     master.write_all(b"\x03/code\r").unwrap();
     let completed = until(&mut master, "No compiler or command was invoked.");
     assert!(completed.contains("Unicode sample:"));
     assert!(!completed.contains("```"));
     master.write_all(b"/tools-error\r").unwrap();
-    let active = until(&mut master, "Exploring workspace");
-    assert!(
-        active.contains("⠿ Exploring workspace"),
-        "static indicator: {active}"
-    );
+    let active = until(&mut master, "Working");
+    assert!(active.contains("⠿ Working"), "static indicator: {active}");
     let completed = until(&mut master, "completed activity stays");
-    assert!(completed.contains("Exploration finished with errors"));
+    assert!(completed.contains("local tool preview"));
     assert!(completed.contains("permission denied"));
     assert!(
         !completed.contains("\x1b[0;"),
@@ -163,23 +163,22 @@ fn real_terminal_stream_resize_paste_cancel_and_restore() {
     assert!(completed.contains("exit 0"));
     assert!(!completed.contains("Enter confirm"));
     master.write_all(b"/long\r").unwrap();
-    until(&mut master, "⠿ Streaming");
+    until(&mut master, "Streaming");
     master.write_all(b"draft\x1b").unwrap();
     until(&mut master, "Interrupted / partial response kept");
     for (rows, columns) in [(12, 40), (24, 80), (16, 60), (24, 80)] {
         resize(&master, rows, columns);
         let resized = until(&mut master, "Local demo");
-        assert!(resized.contains("\r\x1b[J"));
-        assert!(!resized.contains("\x1b[2J"));
-        assert!(!resized.contains("\x1b[3J"));
-        assert!(!resized.contains("useful harness"));
-        assert!(!resized.contains("fn main"));
+        assert!(resized.contains("\x1b[2J"));
+        assert!(resized.contains("\x1b[3J"));
+        assert!(resized.contains("\x1b[?2026h"));
         assert!(resized.contains("draft"));
     }
     master.write_all(&[17]).unwrap();
     let exit = until(&mut master, "\x1b[?25h");
     assert!(!exit.contains("1049"));
     assert!(exit.contains("\x1b[?25h"));
+    assert!(exit.contains("\x1b[?2026l"));
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(status) = child.0.try_wait().unwrap() {

@@ -31,14 +31,69 @@ fn measured_head(store: &Store, id: &str) -> (usize, usize, usize, usize) {
 }
 
 fn mixed_prompt(index: usize) -> String {
+    // This fixture exercises the historical 8 KiB prompt/head shape. The
+    // application limit is larger, but repeating 256 KiB 72 times would test
+    // context exhaustion rather than recall metadata.
+    const FIXTURE_PROMPT_BYTES: usize = 8192;
     let mut prompt = format!("{index:04}");
     let content = "\"\\\r\n🌍";
-    while prompt.len() + content.len() <= session::MAX_PROMPT_BYTES {
+    while prompt.len() + content.len() <= FIXTURE_PROMPT_BYTES {
         prompt.push_str(content);
     }
-    prompt.push_str(&"x".repeat(session::MAX_PROMPT_BYTES - prompt.len()));
-    assert_eq!(prompt.len(), session::MAX_PROMPT_BYTES);
+    prompt.push_str(&"x".repeat(FIXTURE_PROMPT_BYTES - prompt.len()));
+    assert_eq!(prompt.len(), FIXTURE_PROMPT_BYTES);
     prompt
+}
+
+#[test]
+fn a_256_kib_prompt_survives_submission_checkpoint_and_resume() {
+    use crate::providers::openai_account::{Progress, Request, Response, Status, client};
+    use crate::tls::Budget;
+    use std::ops::ControlFlow;
+    struct Answer;
+    impl session::worker::Backend for Answer {
+        fn login(
+            &mut self,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        ) -> Result<(), client::Error> {
+            Ok(())
+        }
+        fn generate(
+            &mut self,
+            _: &Request,
+            _: &Budget<'_>,
+            _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+        ) -> Result<Response, client::Error> {
+            Ok(session::tests::response("saved answer", Status::Completed))
+        }
+    }
+    let fixture = crate::state::tests::Fixture::new();
+    let Some(store) = fixture.store() else { return };
+    let history = create(&store, Model::Luna, None, None).unwrap();
+    let id = history.record.as_ref().unwrap().id().to_owned();
+    let prompt = format!("{}done", "🌍".repeat((session::MAX_PROMPT_BYTES - 4) / 4));
+    assert_eq!(prompt.len(), session::MAX_PROMPT_BYTES);
+    let mut run = Session::with_history(Model::Luna, Answer, None, history).unwrap();
+    assert!(matches!(
+        session::tests::next(&mut run),
+        Event::Restored { .. }
+    ));
+    assert!(matches!(session::tests::next(&mut run), Event::Ready));
+    assert!(run.submit(&prompt));
+    loop {
+        if let Event::Finished(end, _) = session::tests::next(&mut run) {
+            assert_eq!(end, End::Complete);
+            break;
+        }
+    }
+    drop(run);
+    let saved = super::super::load(&store, &id, true).unwrap();
+    assert_eq!(saved.turns, 1);
+    assert_eq!(saved.history.turns[0].prompt, prompt);
+    assert_eq!(saved.history.transcript()[0].text, prompt);
+    assert!(saved.title.len() <= 8192);
+    assert_eq!(saved.title, &prompt[..8192]);
 }
 
 #[test]

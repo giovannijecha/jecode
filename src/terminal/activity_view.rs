@@ -1,9 +1,9 @@
 //! Runtime state belongs to the transient transcript tail above the input rule.
-use super::{
-    model::Model,
-    style::{Row, Tone, lines},
-};
+use super::model::Model;
+#[cfg(test)]
+use super::style::{Row, Tone, lines};
 
+#[cfg(test)]
 pub(super) fn rows(model: &Model, width: usize, available: usize) -> Vec<Row> {
     let mut rows = if let Some(run) = model.account.as_ref().and_then(|v| v.command.as_ref()) {
         super::command_view::active(run, width, model.tools.reduced_motion)

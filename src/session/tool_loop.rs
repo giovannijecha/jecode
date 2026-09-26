@@ -240,6 +240,7 @@ fn execute(
         let receipt = &mut current(history)?.results[index];
         receipt.summary = format!("{name} / {}", output.summary);
         receipt.output = output.text;
+        let presentation_output = receipt.output.clone();
         receipt.image = image;
         // The exact effect receipt reaches storage before its final presentation.
         // Waiting for channel capacity here cannot delay process supervision or
@@ -267,6 +268,7 @@ fn execute(
             let _ = context.send(
                 Event::ToolFinished {
                     summary: output.summary,
+                    output: presentation_output,
                     failed: output.failed,
                     limited: output.limited,
                 },

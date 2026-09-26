@@ -8,7 +8,7 @@ have separate responsibilities.
 | --- | --- |
 | `src/main.rs` | CLI parsing and selected workspace |
 | `src/terminal/` | Input, inline layout and streamed rendering |
-| `src/session/` | Ordered conversation, tool loop, queued guidance, metrics and context |
+| `src/session/` | Ordered conversation, tool loop, metrics and context |
 | `src/session/persistence/` | Versioned canonical history and resume |
 | `src/state/` | User-scoped files, settings, permissions and file locks |
 | `src/providers/openai_account/` | Authentication, credential refresh and Responses protocol |
@@ -46,9 +46,14 @@ Credentials use a separate file and never enter session encoding.
 The refresh lease covers loading and replacement, not model generation. Concurrent
 instances reload account state before each model request.
 
-The renderer keeps stable output in native scrollback and redraws a bounded
-transient area for activity and the composer. It supports no-color and
-reduced-motion modes. Rendering has no authority to read files or run commands.
+The terminal adapts canonical session events to typed transcript blocks and
+owns a bounded FIFO of prompts entered during generation. It submits each
+pending prompt as a new turn after the previous turn completes. The renderer
+uses synchronized paints and relative tail updates in the normal buffer. A
+resize previews one screen and then replays the transcript at the settled
+width; Ctrl+O uses the same replay path for global tool-detail expansion.
+The renderer supports no-color and reduced-motion modes and has no authority
+to read files or run commands.
 
 The compiler, Cargo, linker, OS and CI runner are infrastructure. Native APIs are
 used for certificate roots, randomness, terminal control, filesystem operations,

@@ -8,7 +8,14 @@ use std::io;
 
 pub(super) enum Request {
     New,
+    Clear,
     Resume(String),
+}
+pub(super) struct Carried {
+    pub blocks: Vec<super::model::Block>,
+    pub tools: std::collections::BTreeMap<usize, super::lab::model::Tool>,
+    pub receipts: std::collections::BTreeMap<usize, super::lab::model::Receipt>,
+    pub previous_id: Option<String>,
 }
 pub(super) struct Start {
     pub selected: Option<session::Model>,
@@ -16,6 +23,7 @@ pub(super) struct Start {
     pub workspace: Option<Workspace>,
     pub saved: Option<Saved>,
     pub prepared: Option<session::Session>,
+    pub carried: Option<Carried>,
 }
 impl Start {
     /// Complete the fallible resume while the previous conversation still owns its draft.
@@ -35,7 +43,14 @@ impl Start {
         let session = if let Some(saved) = self.saved.take() {
             session::Session::resume(saved, directory, workspace)?
         } else {
-            session::Session::with_directory(self.selected.unwrap(), directory.path(), workspace)?
+            session::Session::with_directory_from(
+                self.selected.unwrap(),
+                directory.path(),
+                workspace,
+                self.carried
+                    .as_ref()
+                    .and_then(|carried| carried.previous_id.as_deref()),
+            )?
         };
         self.prepared = Some(session);
         Ok(())
@@ -73,6 +88,26 @@ impl Location {
                     workspace,
                     saved: None,
                     prepared: None,
+                    carried: None,
+                })
+            }
+            Request::Clear => {
+                let directory = Directory::open(self.directory.path())?;
+                let workspace = self
+                    .file_tools
+                    .then(|| {
+                        Workspace::open(directory.path())
+                            .map(|opened| opened.with_access(self.access))
+                            .map_err(|_| io::Error::other("working directory unavailable"))
+                    })
+                    .transpose()?;
+                Ok(Start {
+                    selected: None,
+                    directory: Some(directory),
+                    workspace,
+                    saved: None,
+                    prepared: None,
+                    carried: None,
                 })
             }
             Request::Resume(id) => resume(&id, &self.directory),
@@ -96,5 +131,6 @@ pub(super) fn resume(id: &str, directory: &Directory) -> io::Result<Start> {
         workspace,
         saved: Some(saved),
         prepared: None,
+        carried: None,
     })
 }

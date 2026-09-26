@@ -24,6 +24,62 @@ pub struct Demo {
     step: usize,
 }
 impl Demo {
+    pub fn block_index(&self) -> usize {
+        self.block
+    }
+    pub fn tool(&self, block: &Block) -> super::lab::model::Tool {
+        use super::lab::model::{Detail, Status, Tool};
+        let interrupted = block.text.contains("Preview interrupted");
+        let status = if self.phase == Phase::Running {
+            Status::Running
+        } else if interrupted {
+            Status::Warned
+        } else if self.kind == Kind::CommandError {
+            Status::Failed
+        } else {
+            Status::Done
+        };
+        let summary = if self.phase == Phase::Running {
+            if self.kind == Kind::Edit { "+1 -1" } else { "" }
+        } else {
+            block.text.lines().last().unwrap_or("")
+        };
+        let detail = if self.kind == Kind::Edit {
+            Detail::Diff(
+                block
+                    .text
+                    .lines()
+                    .skip(1)
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        } else {
+            let mut lines: Vec<_> = block.text.lines().skip(3).collect();
+            if self.phase == Phase::Done {
+                lines.pop();
+            }
+            Detail::Output(lines.join("\n"))
+        };
+        Tool {
+            verb: if self.kind == Kind::Edit {
+                "Edit"
+            } else {
+                "Run"
+            }
+            .into(),
+            subject: if self.kind == Kind::Edit {
+                "src/settings.rs"
+            } else {
+                "cargo test --lib"
+            }
+            .into(),
+            summary: summary.trim_start_matches(['✓', '!']).trim().into(),
+            status,
+            elapsed_ms: self.elapsed().as_millis() as u64,
+            detail,
+        }
+    }
     pub fn start(prompt: &str, blocks: &mut Vec<Block>, now: Instant) -> Option<Self> {
         let kind = match prompt {
             "/edit" => Kind::Edit,

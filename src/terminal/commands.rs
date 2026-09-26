@@ -1,4 +1,6 @@
 //! Local navigation never becomes a model message or expands its tool schema.
+//! Argument resolution, dispatch and acknowledgement share this boundary so
+//! a receipt cannot report a choice before the session saves that choice.
 use super::{
     Key,
     menu::{self, Action},
@@ -6,11 +8,49 @@ use super::{
     navigation::Request,
 };
 use crate::{
-    session::Session,
+    session::{self, Session},
     state::{Store, settings::Settings},
 };
 
 pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool {
+    if model.menu.panel.is_some() {
+        match key {
+            Key::Text(text) => {
+                if model
+                    .menu
+                    .panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.entries.len() <= super::lab::picker::VISIBLE)
+                {
+                    if let Some(index) = (text.chars().count() == 1)
+                        .then(|| text.chars().next().and_then(|ch| ch.to_digit(10)))
+                        .flatten()
+                        .map(|n| n as usize)
+                        .filter(|n| *n > 0 && *n <= model.menu.entries("").len())
+                    {
+                        let entry = model.menu.entries("")[index - 1].clone();
+                        execute(model, session, entry.action);
+                        return true;
+                    }
+                    return true;
+                }
+                model.menu.query.push_str(text);
+                model.menu.selected = 0;
+                return true;
+            }
+            Key::Paste(text) => {
+                model.menu.query.push_str(text);
+                model.menu.selected = 0;
+                return true;
+            }
+            Key::Backspace => {
+                model.menu.query.pop();
+                model.menu.selected = 0;
+                return true;
+            }
+            _ => {}
+        }
+    }
     if matches!(
         key,
         Key::Text(_)
@@ -42,14 +82,30 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
         model.menu.hidden = false;
         return false;
     }
+    if *key == Key::Enter
+        && model.menu.panel.is_none()
+        && model.editor.text.starts_with('/')
+        && !model.editor.text.contains('\n')
+        && !model.menu.pasted_literal
+    {
+        let line = model.editor.text.trim().to_owned();
+        if let Some((name, args)) = line.split_once(char::is_whitespace)
+            && !args.trim().is_empty()
+        {
+            match name {
+                "/model" | "/effort" => {
+                    execute_argument(model, session, &line);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+    }
     if model.menu.active(&model.editor.text) {
         let entries = model.menu.entries(&model.editor.text);
         let count = entries.len();
         match key {
             Key::Escape => {
-                if model.menu.panel.is_some() {
-                    model.editor.take();
-                }
                 model.menu.close();
                 if session.ready() {
                     let view = model.account.as_mut().unwrap();
@@ -65,9 +121,9 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
                 if count > 0 {
                     let selected = model.menu.selected.min(count - 1);
                     model.menu.selected = if *key == Key::Up {
-                        (selected + count - 1) % count
+                        selected.saturating_sub(1)
                     } else {
-                        (selected + 1) % count
+                        (selected + 1).min(count - 1)
                     };
                 }
                 return true;
@@ -84,6 +140,8 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
             Key::Enter => {
                 if let Some(entry) = entries.get(model.menu.selected.min(count.saturating_sub(1))) {
                     execute(model, session, entry.action.clone());
+                } else if model.menu.panel.is_none() && model.editor.text.starts_with('/') {
+                    unknown_command(model);
                 }
                 return true;
             }
@@ -99,11 +157,217 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
         if let Some(entry) = menu::commands().into_iter().find(|e| e.label == command) {
             execute(model, session, entry.action);
         } else {
-            notice(model, "Unknown command · type / to choose");
+            unknown_command(model);
         }
         return true;
     }
     false
+}
+fn unknown_command(model: &mut Model) {
+    let input = model.editor.take();
+    let suggestion = menu::commands()
+        .into_iter()
+        .map(|entry| (edit_distance(&input, &entry.label), entry.label))
+        .min_by_key(|(distance, _)| *distance)
+        .filter(|(distance, _)| *distance <= 3);
+    let note = suggestion.map_or_else(
+        || "try /help".into(),
+        |(_, name)| format!("did you mean {name}?"),
+    );
+    receipt(
+        model,
+        &input,
+        super::lab::model::Status::Failed,
+        "Unknown command",
+        &note,
+        Vec::new(),
+    );
+}
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, left) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, right) in b.iter().enumerate() {
+            let substitute = diagonal + usize::from(left != *right);
+            diagonal = row[j + 1];
+            row[j + 1] = substitute.min(row[j] + 1).min(diagonal + 1);
+        }
+    }
+    row[b.len()]
+}
+
+fn receipt(
+    model: &mut Model,
+    input: &str,
+    status: super::lab::model::Status,
+    result: &str,
+    note: &str,
+    facts: Vec<(String, String)>,
+) -> usize {
+    let index = model.blocks.len();
+    model.blocks.push(Block {
+        speaker: "CommandReceipt",
+        text: format!("{input} · {result} · {note}"),
+    });
+    model.command_receipts.insert(
+        index,
+        super::lab::model::Receipt {
+            input: input.into(),
+            status,
+            result: result.into(),
+            note: note.into(),
+            facts,
+        },
+    );
+    index
+}
+
+fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
+    if session.signed_out() {
+        receipt(
+            model,
+            line,
+            super::lab::model::Status::Warned,
+            "Sign in required",
+            "previous value kept",
+            Vec::new(),
+        );
+        model.editor.take();
+        return;
+    }
+    let Some(catalog) = model
+        .account
+        .as_ref()
+        .and_then(|view| view.catalog.as_ref())
+        .filter(|catalog| catalog.fresh())
+        .cloned()
+    else {
+        if session.refresh_catalog() {
+            let view = model.account.as_mut().unwrap();
+            view.pending_argument = Some(line.into());
+            view.loading_catalog(false);
+        } else {
+            receipt(
+                model,
+                line,
+                super::lab::model::Status::Warned,
+                "Catalog unavailable",
+                "selection kept",
+                Vec::new(),
+            );
+        }
+        model.editor.take();
+        return;
+    };
+    let (command, query) = line.split_once(char::is_whitespace).unwrap();
+    let query = query.trim();
+    let current = model.account.as_ref().unwrap().selected;
+    let (selected, noun, before) = if command == "/model" {
+        let choices: Vec<_> = catalog
+            .entries
+            .iter()
+            .filter(|entry| entry.visible && entry.compatible)
+            .collect();
+        let labels: Vec<_> = choices
+            .iter()
+            .map(|entry| super::lab::picker::Choice {
+                label: entry.id.clone(),
+                detail: entry.name.clone(),
+            })
+            .collect();
+        let Some(found) = super::lab::picker::matches(&labels, query).first().cloned() else {
+            receipt(
+                model,
+                line,
+                super::lab::model::Status::Warned,
+                &format!("No model matches \"{query}\""),
+                &format!("kept {}", current.id()),
+                Vec::new(),
+            );
+            model.editor.take();
+            return;
+        };
+        let id = &choices[found.index].id;
+        let same_effort = session::Model::new(id, current.effort()).unwrap();
+        let selected = if catalog.support(same_effort)
+            == crate::providers::openai_account::catalog::Support::Unsupported
+        {
+            session::Model::new(id, None).unwrap()
+        } else {
+            same_effort
+        };
+        (selected, "Model", current.id())
+    } else {
+        let Some(entry) = catalog.entry(current.id()) else {
+            receipt(
+                model,
+                line,
+                super::lab::model::Status::Warned,
+                "Current model absent from catalog",
+                "effort kept",
+                Vec::new(),
+            );
+            model.editor.take();
+            return;
+        };
+        let mut choices = vec!["provider default".to_string()];
+        choices.extend(entry.efforts.iter().flatten().cloned());
+        let labels: Vec<_> = choices
+            .iter()
+            .map(|level| super::lab::picker::Choice {
+                label: level.clone(),
+                detail: String::new(),
+            })
+            .collect();
+        let Some(found) = super::lab::picker::matches(&labels, query).first().cloned() else {
+            receipt(
+                model,
+                line,
+                super::lab::model::Status::Warned,
+                &format!("No effort matches \"{query}\""),
+                &format!("kept {}", current.effort().unwrap_or("provider default")),
+                Vec::new(),
+            );
+            model.editor.take();
+            return;
+        };
+        let effort = (found.index > 0).then(|| choices[found.index].as_str());
+        (
+            current.with_effort(effort).unwrap(),
+            "Effort",
+            current.effort().unwrap_or("provider default"),
+        )
+    };
+    if selected == current {
+        receipt(
+            model,
+            line,
+            super::lab::model::Status::Done,
+            &format!("{noun} already selected"),
+            &format!("kept {before}"),
+            Vec::new(),
+        );
+        model.editor.take();
+        return;
+    }
+    execute(model, session, Action::Model(selected));
+}
+
+pub(super) fn complete_argument(model: &mut Model, session: &mut Session) {
+    if let Some(line) = model
+        .account
+        .as_mut()
+        .and_then(|view| view.pending_argument.take())
+    {
+        model.editor.replace(&line);
+        if line == "/effort" {
+            execute(model, session, Action::Effort);
+        } else {
+            execute_argument(model, session, &line);
+        }
+    }
 }
 
 fn execute(model: &mut Model, session: &mut Session, action: Action) {
@@ -147,6 +411,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
         && matches!(
             action,
             Action::Models
+                | Action::Effort
                 | Action::DefaultModels
                 | Action::SelectModel(..)
                 | Action::Model(_)
@@ -166,6 +431,49 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
         Action::Login | Action::Logout => unreachable!(),
         Action::New => {
             model.navigation = Some(Request::New);
+            true
+        }
+        Action::Clear => {
+            model.navigation = Some(Request::Clear);
+            true
+        }
+        Action::Status => {
+            let view = model.account.as_ref().unwrap();
+            let facts = vec![
+                (
+                    "session".into(),
+                    view.id.clone().unwrap_or_else(|| "pending".into()),
+                ),
+                ("model".into(), view.selected.id().into()),
+                (
+                    "effort".into(),
+                    view.selected.effort().unwrap_or("provider default").into(),
+                ),
+                (
+                    "directory".into(),
+                    view.directory
+                        .clone()
+                        .unwrap_or_else(|| "Conversation only".into()),
+                ),
+                (
+                    "access".into(),
+                    if view.file_tools {
+                        view.access.name()
+                    } else {
+                        "no file tools"
+                    }
+                    .into(),
+                ),
+            ];
+            receipt(
+                model,
+                "/status",
+                super::lab::model::Status::Done,
+                "Session",
+                "",
+                facts,
+            );
+            model.menu.close();
             true
         }
         Action::Resume(id) => {
@@ -210,6 +518,40 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
                 true
             } else if session.refresh_catalog() {
                 model.account.as_mut().unwrap().loading_catalog(false);
+                model.menu.close();
+                true
+            } else {
+                false
+            }
+        }
+        Action::Effort => {
+            if let Some(catalog) = model
+                .account
+                .as_ref()
+                .unwrap()
+                .catalog
+                .as_ref()
+                .filter(|catalog| catalog.fresh())
+            {
+                let selected = model.account.as_ref().unwrap().selected;
+                if let Some(entry) = catalog.entry(selected.id()) {
+                    model.menu.open(menu::efforts(entry, selected, false));
+                    true
+                } else {
+                    receipt(
+                        model,
+                        "/effort",
+                        super::lab::model::Status::Warned,
+                        "Current model absent from catalog",
+                        "effort kept",
+                        Vec::new(),
+                    );
+                    true
+                }
+            } else if session.refresh_catalog() {
+                let view = model.account.as_mut().unwrap();
+                view.pending_argument = Some("/effort".into());
+                view.loading_catalog(false);
                 model.menu.close();
                 true
             } else {
@@ -300,9 +642,38 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             }
         }
         Action::Model(selected) => {
+            let previous = model.account.as_ref().unwrap().selected;
+            let typed = model.editor.text.trim();
+            let line = if typed.starts_with("/model ") || typed.starts_with("/effort ") {
+                typed.to_owned()
+            } else if selected.id() != previous.id() {
+                format!("/model {}", selected.id())
+            } else {
+                format!(
+                    "/effort {}",
+                    selected.effort().unwrap_or("provider default")
+                )
+            };
             if !session.set_model(selected) {
+                receipt(
+                    model,
+                    &line,
+                    super::lab::model::Status::Warned,
+                    "Selection unavailable",
+                    "previous value kept",
+                    Vec::new(),
+                );
                 return;
             }
+            let index = receipt(
+                model,
+                &line,
+                super::lab::model::Status::Running,
+                "Applying selection",
+                "waiting for saved acknowledgement",
+                Vec::new(),
+            );
+            model.account.as_mut().unwrap().pending_model_receipt = Some((index, previous));
             model.menu.close();
             model.account.as_mut().unwrap().updating();
             true
@@ -337,24 +708,18 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             true
         }
         Action::Help => {
-            let commands = menu::commands()
+            let facts = menu::commands()
                 .into_iter()
-                .map(|e| format!("{} — {}", e.label, e.description))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let view = model.account.as_ref().unwrap();
-            let location = view.directory.as_deref().unwrap_or("Conversation only");
-            let access = if view.file_tools {
-                view.access.name()
-            } else {
-                "no file tools"
-            };
-            model.blocks.push(Block {
-                speaker: "Status",
-                text: format!(
-                    "{commands}\n\n↑↓ choose · Enter select · Tab complete\nEsc closes menus or stops work · Ctrl+Q exits after cleanup\nEnter queues guidance while a turn runs. Alt+↑ edits the latest pending message; Alt+↓ discards a recovered edit and restores the prior draft.\n\nDirectory: {location}\nAccess: {access}. Changes and commands execute directly."
-                ),
-            });
+                .map(|entry| (entry.label, entry.description))
+                .collect();
+            receipt(
+                model,
+                "/help",
+                super::lab::model::Status::Done,
+                "Commands",
+                "Enter queues a new turn while busy",
+                facts,
+            );
             model.menu.close();
             true
         }
@@ -383,9 +748,10 @@ mod tests {
         let mut model = account::model(session::Model::Luna, None);
         account::event(&mut model, Event::Ready);
         execute(&mut model, &mut session, Action::Help);
-        let help = &model.blocks.last().unwrap().text;
-        assert!(help.contains("Changes and commands execute directly"));
-        assert!(!help.contains("require approval"));
+        let help = model.command_receipts.values().last().unwrap();
+        assert_eq!(help.input, "/help");
+        assert!(help.facts.iter().any(|(name, _)| name == "/clear"));
+        assert!(help.facts.iter().any(|(name, _)| name == "/effort"));
     }
 
     #[test]

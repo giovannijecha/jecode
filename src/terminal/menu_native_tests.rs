@@ -2,7 +2,7 @@
 use super::*;
 #[allow(dead_code)]
 #[path = "../../tests/support/conpty.rs"]
-mod conpty;
+pub(super) mod conpty;
 use std::{fs, path::PathBuf, time::Duration};
 
 #[test]

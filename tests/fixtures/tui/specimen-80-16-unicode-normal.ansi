@@ -1,0 +1,32 @@
+[?2026h[J[0;1;97mTones[0m
+[0;90m16 colors · unicode · motion[0m
+[0mText · default foreground for assistant prose[0m
+[0;90mMuted · metadata, footer, status[0m
+[0;94mAccent · rules, spinner, prompt[0m
+[0mRename the session store and update every caller                                [0m
+[0mfn open(dir: &Path) -> io::Result<SessionLedger> {                              [0m
+[0;32m+ pub struct SessionLedger {                                                    [0m
+[0;31m- pub struct SessionStore {                                                     [0m
+[0;32mSuccess · step completed[0m
+[0;33mWarning · retrying in 12s[0m
+[0;91mError · exit 101[0m
+[0;35mKeyword · string · number are syntax overlays[0m
+[0;7mCursor block                                                                    [0m
+[0m[0m
+[0;1;97mGlyphs and tree[0m
+[0m[0;90mok[0m [0;32m✓[0m   [0;90mfail[0m [0;91m✗[0m   [0;90mwarn[0m [0;33m![0m   [0;90mprompt[0m [0;94m›[0m   [0;90mmore[0m …   [0m
+[0;94m────────────────────────────────────────────────────────────────────────────────[0m
+[0m[0;90m├─[0m [0;32m✓[0m Read 6 files[0;90m · src/session/ · 0.4s[0m[0m
+[0m[0;90m│[0m    [0;90m41[0m [0;31m- pub struct SessionStore {[0m[0m
+[0m[0;90m└─[0m [0;91m✗[0m Run cargo clippy[0;90m · exit 101 · 8.1s[0m[0m
+[0m[0m
+[0;1;97mWidth (every right edge must line up)[0m
+[0m[0;90m│[0mplain ascii text that is long enough to…[0;90m│[0m[0m
+[0m[0;90m│[0mcittà, perché, naïve · é composed · Ωμέ…[0;90m│[0m[0m
+[0m[0;90m│[0m日本語のテキスト and 한국어 mixed with …[0;90m│[0m[0m
+[0m[0;90m│[0memoji 👍🏽 👨‍👩‍👧 🇮🇹 ❤️ ⚡ 1️⃣ end             [0;90m│[0m[0m
+[0m[0;90m│[0marrows ↑↓←→ and box drawing ─│├└ stay n…[0;90m│[0m[0m
+[0m[0;90m│[0mWrapping keeps words whole where it can [0;90m│[0m[0m
+[0m[0;90m│[0mand never splits 日本語 or 👨‍👩‍👧 across    [0;90m│[0m[0m
+[0m[0;90m│[0mrows.                                   [0;90m│[0m[0m
+[?2026l

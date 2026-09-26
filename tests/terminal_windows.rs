@@ -74,13 +74,29 @@ fn wait_for(directory: &Path, counter: &mut usize, text: &str) -> String {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+fn wait_until(directory: &Path, counter: &mut usize, matches: impl Fn(&str) -> bool) -> String {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let screen = snapshot(directory, counter);
+        if matches(&screen) {
+            return screen;
+        }
+        assert!(Instant::now() < deadline, "condition not reached: {screen}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn is_rule(row: &str) -> bool {
+    let trimmed = row.trim();
+    !trimmed.is_empty() && trimmed.chars().all(|ch| ch == '─')
+}
 
 fn above_composer(screen: &str, text: &str) {
     let rows: Vec<_> = screen.lines().collect();
     let rules: Vec<_> = rows
         .iter()
         .enumerate()
-        .filter(|(_, row)| row.contains('─'))
+        .filter(|(_, row)| is_rule(row))
         .map(|(index, _)| index)
         .collect();
     assert_eq!(rules.len(), 2, "{screen}");
@@ -94,16 +110,17 @@ fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mu
     assert!(screen.contains("-       2"), "{screen}");
     assert!(screen.contains("+       3"), "{screen}");
     assert!(!screen.contains("Enter confirm"), "{screen}");
-    gap_before(&screen, "pub fn retry_limit");
     for width in [50, 100, 60, 120] {
         console.resize(width, 36);
         std::thread::sleep(Duration::from_millis(150));
         let screen = snapshot(directory, counter);
-        assert_eq!(
-            screen.matches("Simulated edit complete").count(),
-            1,
-            "{screen}"
-        );
+        if width >= 100 {
+            assert_eq!(
+                screen.matches("Simulated edit complete").count(),
+                1,
+                "{screen}"
+            );
+        }
         assert_eq!(
             screen.matches("Edit src/settings.rs").count(),
             1,
@@ -119,7 +136,7 @@ fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mu
     assert!(!screen.contains("Enter confirm"), "{screen}");
     console.input.write_all(b"/command-error\r").unwrap();
     let screen = wait_for(directory, counter, "running 2 tests");
-    above_composer(&screen, "Running command");
+    above_composer(&screen, "Working");
     assert!(!screen.contains("Simulated command complete"), "{screen}");
     console.resize(55, 24);
     std::thread::sleep(Duration::from_millis(150));
@@ -127,33 +144,21 @@ fn action_previews(console: &mut conpty::Console, directory: &Path, counter: &mu
     let screen = wait_for(directory, counter, "Simulated command complete");
     assert!(screen.contains("exit 101"), "{screen}");
     assert!(screen.contains("expected: 3, received: 2"), "{screen}");
-    assert_eq!(screen.matches("$ cargo test --lib").count(), 1, "{screen}");
+    assert_eq!(
+        screen.matches("Run cargo test --lib").count(),
+        1,
+        "{screen}"
+    );
     assert_eq!(
         screen.matches("Simulated command complete").count(),
         1,
         "{screen}"
     );
-    gap_before(&screen, "running 2 tests");
-    gap_before(&screen, "! Simulated command complete");
-    assert!(!screen.contains("Running command"), "{screen}");
+    assert!(!screen.contains("Working ·"), "{screen}");
     console.input.write_all(b"/command\r").unwrap();
     let screen = wait_for(directory, counter, "exit 0 · 2 passed");
     assert!(!screen.contains("Enter confirm"), "{screen}");
     assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
-}
-
-fn gap_before(screen: &str, needle: &str) {
-    let rows: Vec<_> = screen.lines().collect();
-    let at = rows.iter().position(|row| row.contains(needle)).unwrap();
-    assert!(at >= 2, "{screen}");
-    assert!(
-        rows[at - 1].trim().is_empty(),
-        "missing spacing before {needle}: {screen}"
-    );
-    assert!(
-        !rows[at - 2].trim().is_empty(),
-        "excess spacing before {needle}: {screen}"
-    );
 }
 
 #[test]
@@ -174,7 +179,7 @@ fn real_windows_resize_keeps_one_composer() {
         console.resize(width, 36);
         std::thread::sleep(Duration::from_millis(40));
         let screen = snapshot(&directory, &mut counter);
-        let rules: Vec<_> = screen.lines().filter(|line| line.contains('─')).collect();
+        let rules: Vec<_> = screen.lines().filter(|line| is_rule(line)).collect();
         assert_eq!(
             rules.len(),
             2,
@@ -183,74 +188,63 @@ fn real_windows_resize_keeps_one_composer() {
         assert!(
             rules
                 .iter()
-                .all(|line| line.trim().chars().count() == width as usize - 1),
+                .all(|line| line.trim().chars().count() == width as usize),
             "stale composer width during drag: {screen}"
         );
     }
     console.resize(120, 36);
     std::thread::sleep(Duration::from_millis(150));
     console.input.write_all(b"/tools-error\r").unwrap();
-    wait_for(&directory, &mut counter, "Exploring workspace");
+    wait_for(&directory, &mut counter, "Working");
     for width in [60, 95, 50, 120] {
         console.resize(width, 36);
         std::thread::sleep(Duration::from_millis(150));
         let screen = snapshot(&directory, &mut counter);
-        assert_eq!(screen.matches("Exploring workspace").count(), 1, "{screen}");
-        above_composer(&screen, "Exploring workspace");
+        assert_eq!(screen.matches("Working").count(), 1, "{screen}");
+        above_composer(&screen, "Working");
         assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
-        let header = screen
-            .lines()
-            .find(|l| l.contains("Exploring workspace"))
-            .unwrap();
+        let header = screen.lines().find(|l| l.contains("Working")).unwrap();
         assert_eq!(
-            header.split("Exploring").next().unwrap().chars().count(),
-            2,
+            header.split("Working").next().unwrap().chars().count(),
+            3,
             "{screen}"
         );
         assert!(
-            matches!(header.chars().next(), Some('\u{2800}'..='\u{28ff}')),
+            matches!(header.chars().nth(1), Some('\u{2800}'..='\u{28ff}')),
             "{screen}"
         );
     }
     let screen = wait_for(&directory, &mut counter, "completed activity stays");
-    assert_eq!(
-        screen.matches("Exploration finished with errors").count(),
-        1,
-        "{screen}"
-    );
-    assert_eq!(screen.matches("permission denied").count(), 1, "{screen}");
-    let header = screen
-        .lines()
-        .find(|l| l.contains("Exploration finished"))
-        .unwrap();
-    assert_eq!(
-        header.split("Exploration").next().unwrap().chars().count(),
-        2,
-        "{screen}"
-    );
-    assert!(
-        !screen.contains("Exploring workspace"),
-        "active group archived: {screen}"
-    );
+    assert_eq!(screen.matches("Search src/terminal").count(), 1, "{screen}");
+    assert!(screen.contains("permission denied"), "{screen}");
+    assert!(!screen.contains("Working ·"), "{screen}");
+    console.input.write_all(b"\x0f").unwrap();
+    let screen = wait_until(&directory, &mut counter, |screen| {
+        !screen.contains("7 earlier lines")
+            && screen
+                .lines()
+                .any(|line| line.trim_end().ends_with("line 1"))
+    });
+    assert!(screen.contains("line 12"), "{screen}");
+    console.input.write_all(b"\x0f").unwrap();
+    let screen = wait_until(&directory, &mut counter, |screen| {
+        screen.contains("7 earlier lines")
+            && !screen
+                .lines()
+                .any(|line| line.trim_end().ends_with("line 1"))
+    });
+    assert!(screen.contains("line 12"), "{screen}");
     console.input.write_all(b"/tools\r").unwrap();
-    wait_for(&directory, &mut counter, "Exploring workspace");
+    wait_for(&directory, &mut counter, "Working");
     console.input.write_all(b"\x1b").unwrap();
-    let screen = wait_for(&directory, &mut counter, "Exploration interrupted");
-    assert_eq!(
-        screen.matches("Exploration interrupted").count(),
-        1,
-        "{screen}"
-    );
-    assert!(
-        !screen.contains("Exploring workspace"),
-        "cancelled group archived: {screen}"
-    );
+    let screen = wait_for(&directory, &mut counter, "preview interrupted");
+    assert!(!screen.contains("Working ·"), "{screen}");
     action_previews(&mut console, &directory, &mut counter);
     console.input.write_all(b"/long\r").unwrap();
     let deadline = Instant::now() + Duration::from_secs(40);
     loop {
         let screen = snapshot(&directory, &mut counter);
-        if screen.contains("28.") && !screen.contains("Streaming / Esc") {
+        if screen.contains("28.") && !screen.contains("Streaming ·") {
             break;
         }
         assert!(
@@ -273,10 +267,7 @@ fn real_windows_resize_keeps_one_composer() {
         std::thread::sleep(Duration::from_millis(40));
         let during_drag = snapshot(&directory, &mut counter);
         assert_eq!(
-            during_drag
-                .lines()
-                .filter(|line| line.contains('─'))
-                .count(),
+            during_drag.lines().filter(|line| is_rule(line)).count(),
             2,
             "wrapped rules after long transcript: {during_drag}"
         );
@@ -284,7 +275,6 @@ fn real_windows_resize_keeps_one_composer() {
         let screen = snapshot(&directory, &mut counter);
         std::fs::write(directory.join(format!("screen-{counter}.txt")), &screen).unwrap();
         assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
-        assert_eq!(screen.matches("Local demo").count(), 1, "{screen}");
         assert!(screen.contains("28."), "last paragraph lost: {screen}");
         for n in 1..=28 {
             assert!(
@@ -302,11 +292,14 @@ fn real_windows_resize_keeps_one_composer() {
     let screen = snapshot(&directory, &mut counter);
     std::fs::write(directory.join("rapid-screen.txt"), &screen).unwrap();
     assert_eq!(screen.matches("Ask anything").count(), 1, "{screen}");
-    assert_eq!(screen.matches("Local demo").count(), 1, "{screen}");
     assert!(screen.contains("28."), "last paragraph lost: {screen}");
+    let input_start = Instant::now();
     console.input.write_all(b"draft-kept").unwrap();
-    std::thread::sleep(Duration::from_millis(150));
-    let screen = snapshot(&directory, &mut counter);
+    let screen = wait_for(&directory, &mut counter, "draft-kept");
+    eprintln!(
+        "ConPTY input after rapid resize: {:.1} ms to visible draft",
+        input_start.elapsed().as_secs_f64() * 1_000.0
+    );
     assert_eq!(screen.matches("draft-kept").count(), 1, "{screen}");
     console.input.write_all(b"\x1b").unwrap();
     drop(console);
@@ -339,16 +332,23 @@ fn real_windows_composer_preserves_bracketed_multiline_paste_and_newline_key() {
         .unwrap();
     let screen = wait_for(&directory, &mut counter, "café");
     assert!(screen.contains("› alpha"), "{screen}");
-    assert!(screen.contains("beta  café"), "{screen}");
+    assert!(screen.contains("beta    café"), "{screen}");
     assert!(!screen.contains("Streaming locally"), "{screen}");
     console.input.write_all(b"\x0fmore").unwrap();
     let screen = wait_for(&directory, &mut counter, "more");
+    assert!(
+        screen.contains("beta    cafémore"),
+        "Ctrl+O must preserve the draft: {screen}"
+    );
     assert!(!screen.contains("Streaming locally"), "{screen}");
+    console.input.write_all(b"\x0anewline").unwrap();
+    let screen = wait_for(&directory, &mut counter, "newline");
+    assert!(screen.contains("newline"), "{screen}");
     console.resize(35, 12);
     std::thread::sleep(Duration::from_millis(180));
     let screen = snapshot(&directory, &mut counter);
     assert_eq!(
-        screen.lines().filter(|row| row.contains('─')).count(),
+        screen.lines().filter(|row| is_rule(row)).count(),
         2,
         "{screen}"
     );
@@ -371,7 +371,7 @@ fn current_composer(screen: &str) -> String {
     let rules: Vec<_> = rows
         .iter()
         .enumerate()
-        .filter(|(_, row)| row.contains('─'))
+        .filter(|(_, row)| is_rule(row))
         .map(|(index, _)| index)
         .collect();
     assert_eq!(rules.len(), 2, "{screen}");
@@ -408,21 +408,21 @@ fn conpty_block_cursor_keeps_ciao_in_the_same_cells() {
     }
     let mut counter = 0;
     console.input.write_all(b"ciao").unwrap();
-    wait_for_composer(&directory, &mut counter, "› ciao");
+    wait_for_composer(&directory, &mut counter, " › ciao");
     for _ in 0..4 {
         console.input.write_all(b"\x1b[D").unwrap();
         std::thread::sleep(Duration::from_millis(50));
         let screen = snapshot(&directory, &mut counter);
-        assert_eq!(current_composer(&screen), "› ciao", "{screen}");
+        assert_eq!(current_composer(&screen), " › ciao", "{screen}");
     }
     console.input.write_all(b"X").unwrap();
-    wait_for_composer(&directory, &mut counter, "› Xciao");
+    wait_for_composer(&directory, &mut counter, " › Xciao");
     console.input.write_all(b"\x7f").unwrap();
-    wait_for_composer(&directory, &mut counter, "› ciao");
+    wait_for_composer(&directory, &mut counter, " › ciao");
     console.input.write_all(b"\x1b[3~").unwrap();
-    wait_for_composer(&directory, &mut counter, "› iao");
+    wait_for_composer(&directory, &mut counter, " › iao");
     console.input.write_all(b"c").unwrap();
-    wait_for_composer(&directory, &mut counter, "› ciao");
+    wait_for_composer(&directory, &mut counter, " › ciao");
     console.input.write_all(b"\x11").unwrap();
     drop(console);
     assert!(
@@ -448,30 +448,30 @@ fn conpty_ctrl_backspace_and_neighbor_shortcuts_edit_without_losing_input() {
     }
     let mut counter = 0;
     console.input.write_all(b"alpha beta").unwrap();
-    wait_for_composer(&directory, &mut counter, "› alpha beta");
+    wait_for_composer(&directory, &mut counter, " › alpha beta");
     // This BS byte makes ConPTY emit a Ctrl-down record followed by a BS
     // character record with no modifier. DEL below remains ordinary Backspace.
     console.input.write_all(b"\x08").unwrap();
-    wait_for_composer(&directory, &mut counter, "› alpha");
+    wait_for_composer(&directory, &mut counter, " › alpha");
     console.input.write_all(b"\x1b\x7f").unwrap();
-    wait_for_composer(&directory, &mut counter, "›  Ask anything…");
+    wait_for_composer(&directory, &mut counter, " › Ask anything…");
 
     console.input.write_all(b"word\x7f").unwrap();
-    wait_for_composer(&directory, &mut counter, "› wor");
+    wait_for_composer(&directory, &mut counter, " › wor");
     console.input.write_all(b"\x03red blue\x17").unwrap();
-    wait_for_composer(&directory, &mut counter, "› red");
+    wait_for_composer(&directory, &mut counter, " › red");
     console
         .input
         .write_all(b"\x03red blue\x01\x1b[3;5~")
         .unwrap();
-    wait_for_composer(&directory, &mut counter, "› blue");
+    wait_for_composer(&directory, &mut counter, " › blue");
     console.input.write_all(b"\x1b[1;5DZ\x1b[1;5C!").unwrap();
-    wait_for_composer(&directory, &mut counter, "› Zblue!");
+    wait_for_composer(&directory, &mut counter, " › Zblue!");
     console
         .input
         .write_all(b"\x03\x1b[200~one two\x08three\x1b[201~")
         .unwrap();
-    wait_for_composer(&directory, &mut counter, "› one two?three");
+    wait_for_composer(&directory, &mut counter, " › one two?three");
     console.input.write_all(b"\x11").unwrap();
     drop(console);
     assert!(

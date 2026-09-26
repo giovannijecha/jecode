@@ -1,4 +1,6 @@
 //! Translate conversation events to presentation; no network or credential owner.
+//! Phase changes, queue claims and event acknowledgement stay in one reducer so
+//! late completion cannot dispatch or overwrite an unsent human message.
 use super::{
     Key,
     model::{Block, Model},
@@ -7,7 +9,7 @@ use crate::{
     providers::openai_account::auth,
     session::{self, End, Event, Metrics, Session},
 };
-use std::sync::Arc;
+use std::collections::VecDeque;
 use std::time::Instant;
 
 #[derive(PartialEq)]
@@ -35,7 +37,8 @@ pub(super) struct View {
     pub failed: bool,
     pub partial_output: bool,
     turns: usize,
-    pub pending: Option<Arc<session::PendingGuidance>>,
+    turn_started: Option<Instant>,
+    pub(super) queued_turns: VecDeque<String>,
     pub recovery: Option<super::recovery::SavedDraft>,
     active_tool: Option<usize>,
     pub edit: Option<super::edit_view::Edit>,
@@ -43,7 +46,10 @@ pub(super) struct View {
     pub selected: session::Model,
     pub catalog: Option<crate::providers::openai_account::catalog::Catalog>,
     pub pending_catalog: Option<bool>, // true: selecting defaults
+    pub pending_argument: Option<String>,
+    pub pending_model_receipt: Option<(usize, session::Model)>,
     pub id: Option<String>,
+    pub cleared_from: Option<String>,
     pub directory: Option<String>,
     pub file_tools: bool,
     pub access: crate::workspace::Access,
@@ -74,15 +80,17 @@ impl View {
     pub fn generating(&self) -> bool {
         self.phase == Phase::Generating
     }
+    pub fn elapsed_ms(&self) -> u64 {
+        self.turn_started
+            .map_or(0, |started| started.elapsed().as_millis() as u64)
+    }
     pub fn updating(&mut self) {
         self.phase = Phase::Updating;
         self.local_operation = Some(LocalOperation::Model);
         self.notice = "Changing model…".into();
     }
     pub fn pending_messages(&self) -> Vec<String> {
-        self.pending
-            .as_ref()
-            .map_or_else(Vec::new, |queue| queue.snapshot())
+        self.queued_turns.iter().cloned().collect()
     }
     pub fn loading_catalog(&mut self, defaults: bool) {
         self.phase = Phase::Updating;
@@ -105,7 +113,8 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
         failed: false,
         partial_output: false,
         turns: 0,
-        pending: None,
+        turn_started: None,
+        queued_turns: VecDeque::new(),
         recovery: None,
         active_tool: None,
         edit: None,
@@ -113,7 +122,10 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
         selected,
         catalog: None,
         pending_catalog: None,
+        pending_argument: None,
+        pending_model_receipt: None,
         id: None,
+        cleared_from: None,
         directory,
         file_tools: false,
         access: crate::workspace::Access::Workspace,
@@ -123,7 +135,48 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
 }
 
 pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
-    attach_queue(model, session);
+    if matches!(key, Key::Escape | Key::Interrupt)
+        && model.account.as_ref().is_some_and(View::generating)
+    {
+        recover_queued(model);
+        session.cancel();
+        let view = model.account.as_mut().unwrap();
+        view.notice = "Stopping...".into();
+        if let Some(command) = &mut view.command {
+            command.stopping = true;
+        }
+        model.tools.waiting("Stopping / waiting for cleanup");
+        return;
+    }
+    if key == Key::Enter && model.account.as_ref().is_some_and(View::generating) {
+        if model
+            .account
+            .as_ref()
+            .is_some_and(|view| view.notice.starts_with("Stopping"))
+        {
+            let view = model.account.as_mut().unwrap();
+            view.local_notice = "Stopping / draft kept until cleanup completes".into();
+            view.local_failed = false;
+            return;
+        }
+        if !model.editor.text.trim().is_empty() {
+            let view = model.account.as_mut().unwrap();
+            if view.queued_turns.len() < 8 && model.editor.text.len() <= session.prompt_limit() {
+                let prompt = model.editor.take();
+                view.queued_turns.push_back(prompt.clone());
+                view.local_notice.clear();
+                view.local_failed = false;
+                super::recovery::submitted(model, &prompt, false);
+            } else {
+                view.local_notice = format!(
+                    "Queue full or prompt exceeds {} KiB / draft kept",
+                    session.prompt_limit() / 1024
+                );
+                view.local_failed = true;
+            }
+        }
+        return;
+    }
     if super::commands::input(model, &key, session) {
         return;
     }
@@ -149,8 +202,11 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
                 view.local_failed = false;
                 return;
             }
-            if model.editor.text.len() > session::MAX_PROMPT_BYTES {
-                view.local_notice = "Prompt exceeds 8 KiB / draft kept".into();
+            if model.editor.text.len() > session.prompt_limit() {
+                view.local_notice = format!(
+                    "Prompt exceeds {} KiB / draft kept",
+                    session.prompt_limit() / 1024
+                );
                 view.local_failed = true;
                 return;
             }
@@ -158,28 +214,18 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
                 view.notice = "Signed out / use /login to sign in; draft kept and will not send automatically".into();
                 return;
             }
-            if view.phase == Phase::Generating && !model.editor.text.trim().is_empty() {
-                if session.enqueue(&model.editor.text) {
-                    let prompt = model.editor.take();
-                    view.local_notice.clear();
-                    view.local_failed = false;
-                    super::recovery::submitted(model, &prompt, false);
-                } else {
-                    view.local_notice = "Queue full or stopping / draft kept".into();
-                    view.local_failed = false;
-                }
-                return;
-            }
             if view.phase != Phase::Ready || model.editor.text.trim().is_empty() {
                 return;
             }
-            if view.turns >= 256 {
+            if session.legacy_turn_limit_reached() {
                 view.local_notice =
-                    "Session limit reached / draft kept; restart to continue".into();
+                    "Legacy session limit reached / import the session to continue; draft kept"
+                        .into();
                 view.local_failed = true;
                 return;
             }
-            if !session.submit(&model.editor.text) {
+            let prompt = model.editor.text.clone();
+            if !session.submit(&prompt) {
                 view.local_notice = if session.selection_unavailable() {
                     UNAVAILABLE_SELECTION_NOTICE.into()
                 } else {
@@ -191,6 +237,7 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             view.turns += 1;
             let prompt = model.editor.take();
             view.phase = Phase::Generating;
+            view.turn_started = Some(Instant::now());
             view.failed = false;
             view.partial_output = false;
             view.local_notice.clear();
@@ -208,8 +255,7 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             });
         }
         Key::Escape | Key::Interrupt
-            if matches!(view.phase, Phase::Login | Phase::Generating)
-                || view.pending_catalog.is_some() =>
+            if view.phase == Phase::Login || view.pending_catalog.is_some() =>
         {
             session.cancel();
             view.notice = "Stopping...".into();
@@ -223,21 +269,75 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
     }
 }
 
-pub(super) fn attach_queue(model: &mut Model, session: &Session) {
-    if let Some(view) = &mut model.account
-        && view.pending.is_none()
-    {
-        view.pending = Some(session.pending_guidance());
+/// A completed turn claims one pending human message as a new turn. A failed
+/// or ambiguous turn leaves the rest with the person, never auto resubmits.
+pub(super) fn after_finished(model: &mut Model, session: &mut Session, end: End) {
+    if !matches!(end, End::Complete | End::Refused) || !session.ready() {
+        recover_queued(model);
+        return;
     }
+    let Some(prompt) = model
+        .account
+        .as_mut()
+        .and_then(|v| v.queued_turns.pop_front())
+    else {
+        return;
+    };
+    if !session.submit(&prompt) {
+        model
+            .account
+            .as_mut()
+            .unwrap()
+            .queued_turns
+            .push_front(prompt);
+        recover_queued(model);
+        model.account.as_mut().unwrap().local_notice =
+            "Queued message was not sent / recovered in the composer".into();
+        return;
+    }
+    let view = model.account.as_mut().unwrap();
+    view.turns += 1;
+    view.phase = Phase::Generating;
+    view.turn_started = Some(Instant::now());
+    view.failed = false;
+    view.partial_output = false;
+    view.notice = "Waiting for model".into();
+    model.status_spinner.reset(Instant::now());
+    model.prompt_history.record_new_turn(&prompt);
+    model.blocks.push(Block {
+        speaker: "You",
+        text: prompt,
+    });
+    model.blocks.push(Block {
+        speaker: "Assistant",
+        text: String::new(),
+    });
+}
+
+fn recover_queued(model: &mut Model) {
+    let Some(view) = &mut model.account else {
+        return;
+    };
+    if view.queued_turns.is_empty() && view.recovery.is_none() {
+        return;
+    }
+    let mut drafts: Vec<String> = view.queued_turns.drain(..).collect();
+    drafts.extend(super::recovery::unwind(model));
+    model.editor.replace(&drafts.join("\n"));
+    model.menu.pasted_literal = true;
 }
 
 pub(super) fn event(model: &mut Model, event: Event) {
+    if matches!(event, Event::LoggedOut | Event::LoginFailed(_)) {
+        recover_queued(model);
+    }
     if matches!(
         event,
         Event::Finished(..) | Event::LoginFailed(_) | Event::LoggedOut
     ) {
         super::edit_view::stop(model);
         super::command_view::stop(model);
+        model.close_running_tools("turn ended before tool result; inspect the outcome");
     }
     let Some(view) = &mut model.account else {
         return;
@@ -249,6 +349,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
                 model.prompt_history.record_new_turn(&text);
             }
             view.phase = Phase::Generating;
+            view.turn_started = Some(Instant::now());
             view.partial_output = false;
             view.notice = "Waiting for model".into();
             model.status_spinner.reset(Instant::now());
@@ -291,11 +392,58 @@ pub(super) fn event(model: &mut Model, event: Event) {
         }
         Event::Restored { id, items, turns } => {
             view.turns = turns;
-            view.id = Some(id);
-            model.blocks.extend(items.into_iter().map(|item| Block {
-                speaker: item.role,
-                text: item.text,
-            }));
+            view.id = Some(id.clone());
+            if view.cleared_from.is_none() {
+                for item in items {
+                    let index = model.blocks.len();
+                    if item.role == "ClearBoundary"
+                        && let Some((previous, current)) = item.text.split_once('\n')
+                    {
+                        model.command_receipts.insert(
+                            index,
+                            super::lab::model::Receipt {
+                                input: "/clear".into(),
+                                status: super::lab::model::Status::Done,
+                                result: "Fresh context started".into(),
+                                note: format!("previous session {previous}"),
+                                facts: vec![
+                                    ("previous session".into(), previous.into()),
+                                    ("current session".into(), current.into()),
+                                ],
+                            },
+                        );
+                    }
+                    if let Some(tool) = item.tool {
+                        model.tool_details.insert(index, Model::restored_tool(tool));
+                    }
+                    model.blocks.push(Block {
+                        speaker: item.role,
+                        text: item.text,
+                    });
+                }
+            }
+            if let Some(previous) = view.cleared_from.take() {
+                let index = model.blocks.len();
+                model.blocks.push(Block {
+                    speaker: "CommandReceipt",
+                    text: format!(
+                        "/clear · Fresh context started · previous {previous} · current {id}"
+                    ),
+                });
+                model.command_receipts.insert(
+                    index,
+                    super::lab::model::Receipt {
+                        input: "/clear".into(),
+                        status: super::lab::model::Status::Done,
+                        result: "Fresh context started".into(),
+                        note: format!("previous session {previous}"),
+                        facts: vec![
+                            ("previous session".into(), previous),
+                            ("current session".into(), id),
+                        ],
+                    },
+                );
+            }
         }
         Event::EditPlanned { id, preview } if view.phase == Phase::Generating => {
             super::edit_view::planned(model, id, preview)
@@ -321,7 +469,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
         } => super::command_view::finished(model, id, summary, success, failed),
         Event::LoginCode(code) => {
             view.notice = format!(
-                "Sign in at {}\nEnter code: {code}\nWaiting for approval / Esc cancels",
+                "Code: {code}\nSign in at {}\nWaiting for approval / Esc cancels",
                 auth::VERIFICATION_URL
             );
         }
@@ -340,7 +488,9 @@ pub(super) fn event(model: &mut Model, event: Event) {
                         .into();
                 view.local_failed = true;
             }
-            if let Some(defaults) = view.pending_catalog.take() {
+            if view.pending_argument.is_some() {
+                view.pending_catalog = None;
+            } else if let Some(defaults) = view.pending_catalog.take() {
                 let current = if defaults {
                     crate::state::settings::Settings::user()
                         .map(|settings| settings.model)
@@ -356,6 +506,23 @@ pub(super) fn event(model: &mut Model, event: Event) {
         Event::CatalogFailed(kind) => {
             view.catalog = None;
             view.pending_catalog = None;
+            if let Some(line) = view.pending_argument.take() {
+                let index = model.blocks.len();
+                model.blocks.push(Block {
+                    speaker: "CommandReceipt",
+                    text: format!("{line} · catalog unavailable · previous value kept"),
+                });
+                model.command_receipts.insert(
+                    index,
+                    super::lab::model::Receipt {
+                        input: line,
+                        status: super::lab::model::Status::Warned,
+                        result: "Catalog unavailable".into(),
+                        note: "previous value kept".into(),
+                        facts: Vec::new(),
+                    },
+                );
+            }
             view.local_notice = match kind {
                 session::CatalogFailure::Unavailable => {
                     "Account model catalog unavailable / selection kept; /model retries"
@@ -374,6 +541,27 @@ pub(super) fn event(model: &mut Model, event: Event) {
             view.local_failed = true;
         }
         Event::ModelChanged(selected) => {
+            if let Some((index, previous)) = view.pending_model_receipt.take()
+                && let Some(receipt) = model.command_receipts.get_mut(&index)
+            {
+                let changed_model = selected.id() != previous.id();
+                let value = if changed_model {
+                    selected.id()
+                } else {
+                    selected.effort().unwrap_or("provider default")
+                };
+                let before = if changed_model {
+                    previous.id()
+                } else {
+                    previous.effort().unwrap_or("provider default")
+                };
+                receipt.status = super::lab::model::Status::Done;
+                receipt.result = format!(
+                    "{} set to {value}",
+                    if changed_model { "Model" } else { "Effort" }
+                );
+                receipt.note = format!("was {before}");
+            }
             view.selected = selected;
             view.phase = Phase::Ready;
             view.local_operation = None;
@@ -404,11 +592,12 @@ pub(super) fn event(model: &mut Model, event: Event) {
         }
         Event::ToolFinished {
             summary,
+            output,
             failed,
             limited,
         } if view.phase == Phase::Generating => {
             if let Some(index) = view.active_tool.take() {
-                model.finish_tool(index, &summary, failed, limited, Instant::now());
+                model.finish_tool_output(index, &summary, failed, limited, &output, Instant::now());
             }
         }
         Event::Text(text) if view.phase == Phase::Generating => {
@@ -437,6 +626,14 @@ pub(super) fn event(model: &mut Model, event: Event) {
             }
         }
         Event::Finished(end, metrics) => {
+            if let Some((index, _)) = view.pending_model_receipt.take()
+                && let Some(receipt) = model.command_receipts.get_mut(&index)
+            {
+                receipt.status = super::lab::model::Status::Failed;
+                receipt.result = format!("Selection was not saved: {end:?}");
+                receipt.note = "previous value kept".into();
+            }
+            view.turn_started = None;
             let signing_out = view.phase == Phase::SigningOut;
             model.tools.close(
                 &model.blocks,
@@ -547,6 +744,7 @@ pub(super) fn event(model: &mut Model, event: Event) {
 pub(super) fn compacting(model: &mut Model) {
     if let Some(view) = &mut model.account {
         view.phase = Phase::Generating;
+        view.turn_started = Some(Instant::now());
         view.local_operation = Some(LocalOperation::Compact(String::new()));
         view.notice = "Compacting context".into();
         model.status_spinner.reset(Instant::now());

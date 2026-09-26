@@ -1,0 +1,32 @@
+[?2026h[J[0;1mTones[0m
+no color - ascii - reduced motion
+Text · default foreground for assistant prose
+Muted · metadata, footer, status
+Accent · rules, spinner, prompt
+Rename the session store and update every caller                                                                        
+fn open(dir: &Path) -> io::Result<SessionLedger> {                                                                      
++ pub struct SessionLedger {                                                                                            
+- pub struct SessionStore {                                                                                             
+Success · step completed
+Warning · retrying in 12s
+Error · exit 101
+Keyword · string · number are syntax overlays
+[0;7mCursor block                                                                                                            [0m
+
+[0;1mGlyphs and tree[0m
+ok +   fail x   warn !   prompt >   more ...   
+------------------------------------------------------------------------------------------------------------------------
+|- + Read 6 files - src/session/ - 0.4s
+|    41 - pub struct SessionStore {
+`- x Run cargo clippy - exit 101 - 8.1s
+
+[0;1mWidth (every right edge must line up)[0m
+|plain ascii text that is long enough ...|
+|città, perché, naïve · é composed · Ω...|
+|日本語のテキスト and 한국어 mixed wit...|
+|emoji 👍🏽 👨‍👩‍👧 🇮🇹 ❤️ ⚡ 1️⃣ end             |
+|arrows ↑↓←→ and box drawing ─│├└ stay...|
+|Wrapping keeps words whole where it can |
+|and never splits 日本語 or 👨‍👩‍👧 across    |
+|rows.                                   |
+[?2026l

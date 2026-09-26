@@ -101,7 +101,10 @@ Use `/settings` to choose the default model and its reasoning effort, file-acces
 profile and reduced motion. Model and access defaults apply to new conversations;
 existing sessions keep their saved choices. Animation changes apply immediately.
 `/model` opens a searchable account model list, then the supported effort choices.
-The pair changes only after the final choice is saved, at an idle boundary. Esc
+`/model NAME` selects a matching model, and `/effort LEVEL` selects a supported
+effort for the current model. `/effort` opens its choices. A short list is a
+numbered menu; a long list can be filtered by typing. The pair changes only
+after the choice is saved, at an idle boundary. Esc
 before then keeps the active pair. Neither command starts a new model request.
 An `"effort": null` setting selects the provider default. Older settings without
 an effort field retain their previous effective medium effort. Catalog metadata
@@ -112,7 +115,11 @@ you choose a usable pair with `/model`. A missing capability field is treated as
 unknown rather than as evidence that an effort is unsupported.
 Other settings can be edited while Jecode is closed. The context threshold is between 65,536 and
 1,572,864 serialized request bytes. It is an application budget, not a model token
-window. `JECODE_REDUCED_MOTION=1` overrides animation; `NO_COLOR=1` disables colors.
+window. `JECODE_REDUCED_MOTION=1` freezes animation; `NO_COLOR=1` disables
+colors. `JECODE_COLOR=truecolor|256|16|none` selects a color fallback when
+`NO_COLOR` is unset. `JECODE_ASCII=1` replaces box drawing, braille and other
+UI symbols with ASCII. Terminal capability detection otherwise uses `TERM`,
+`COLORTERM` and the Windows terminal environment.
 `model_stream_idle_timeout_ms` accepts 1,000 through 900,000 milliseconds. Its
 default is 300,000 milliseconds, including for older settings that omit the field.
 It bounds the wait from request writing to the first complete SSE data event, then
@@ -191,7 +198,7 @@ Type part of a title or folder, use arrows and Enter to choose, or Esc to return
 The selected ID comes from that captured list. A missing folder or an already
 owned session leaves the current conversation open. `/new` starts in the same
 directory using saved defaults. Navigation waits for the current operation and
-queued guidance to finish. Jecode validates and opens the destination before
+queued turns to finish. Jecode validates and opens the destination before
 releasing the current conversation; the current worker is then joined before
 the new conversation accepts input.
 
@@ -216,19 +223,27 @@ reported rather than overwritten with an empty session.
 The resumed transcript shows the working suffix and notes when earlier history
 is on disk. Full provider items, tool arguments, results and recorded turn metrics
 remain in the canonical log. New v2 sessions have no 256-turn or 16 MiB
-whole-session snapshot limit. A submitted user message is limited to 8 KiB.
+whole-session snapshot limit. A submitted user message is limited to 256 KiB.
 Existing v1 files retain their original format and limits until explicitly
 imported.
 
+`/clear` starts a new saved session in the same directory with the current
+model, effort and file-access profile. The earlier transcript stays visible,
+with a receipt naming both session IDs, but the next model request starts with
+fresh context. The previous session and its canonical history remain saved.
+Resuming the new session follows the recorded display boundary without
+replaying old tools or sending old turns to the model.
+
 ## Input and context
 
-Enter sends the draft. Ctrl+O inserts a newline; Ctrl+J also works when the
-terminal delivers it separately from Enter. Windows console key records also
-distinguish Shift+Enter and Ctrl+Enter. Some terminals intercept modified keys or
-send the same code for two shortcuts; Ctrl+O is the newline fallback. Bracketed
+Enter sends the draft. Ctrl+J inserts a newline; Alt+Enter and Shift+Enter work
+when the terminal delivers distinct encodings. Ctrl+O expands or folds all
+available tool detail in the transcript. Windows console key records also
+distinguish modified Enter keys. Some terminals intercept modified keys or
+send the same code for two shortcuts. Bracketed
 paste keeps line breaks, indentation, tabs and Unicode. CRLF and lone CR become LF.
 Pasted slash-prefixed text remains a prompt, not a local command. An insertion or
-paste that would exceed 8 KiB is rejected in full with a message inside the
+paste that would exceed 256 KiB is rejected in full with a message inside the
 composer; the prior draft stays editable. A rejected submission also keeps the
 draft.
 
@@ -237,10 +252,12 @@ delivered; VT terminals can also use Alt+B/F. Ctrl+Backspace/Delete delete a wor
 where distinguishable, and Ctrl+W deletes the previous word. The Windows console
 path distinguishes DEL from BS when the terminal sends those different codes;
 if both keys send the same code, use Ctrl+W or VT Alt+Backspace.
-Home/End move to the start/end of the current logical line; Ctrl+A/E do the same.
+Ctrl+U deletes to the start of the current logical line. Home/End move to the
+start/end of the current logical line; Ctrl+A/E do the same.
 Ctrl+Home/End move to the start/end of the whole draft where delivered. Up/Down
-move through visual rows of a multiline or wrapped draft. On a single visual row, Up recalls a user
-prompt and Down returns toward the current draft. With no menu open, Page Up/Down
+move through visual rows of a multiline or wrapped draft. At the first or last
+visual row, Up/Down move into prompt history or back toward the saved draft.
+Editing a recalled prompt ends history browsing. With no menu open, Page Up/Down
 browse prompt history even with a multiline draft; Ctrl+P/N are alternatives if the
 terminal takes the Page keys. The unsent draft and its cursor are
 restored after the newest entry. Up to 64 recent user prompts are recalled from
@@ -249,10 +266,10 @@ intraturn guidance and provider output are excluded. Guidance that starts a new
 canonical turn is available for recall. Recalled prompts remain
 editable and never send automatically.
 
-During generation Enter queues guidance; up to eight messages can wait for
-delivery. Short previews appear inside the composer. Guidance is inserted at a
-boundary between model/tool steps. If a turn has just finished, it starts the
-next turn. It does not interrupt the ordered execution of a current effect.
+During generation Enter queues a separate user turn; up to eight messages can
+wait for delivery. The pending messages appear oldest-first above the activity
+row. After the active turn completes, Jecode submits the next queued message
+as a new turn. No queued message interrupts an ordered tool effect.
 
 Alt+Up withdraws the newest message that is still pending and puts it in the
 editor. Edit it and press Enter to submit it through the normal path. A message
@@ -269,39 +286,48 @@ If you browse prompt history from a recovered edit, use Ctrl+N (or Page Down) to
 return to that edit before pressing Enter. Submitting a recalled entry is
 blocked while the withdrawn text is hidden, so neither draft is lost.
 
-Pending guidance and the saved draft exist only in this running process. On
-cancellation, logout or delivery failure, guidance that was never sent appears
-in scrollback marked "Queued message was not sent" for manual copying; it is
-never resent automatically. Ctrl+Q joins active work and exits, but unsent
-composer and queue text is not stored for a later launch.
+The pending queue and unsent draft exist only in this running process. Esc or
+Ctrl+C during generation stops the active work and returns every still-unsent
+message to the composer, oldest first, followed by the current draft. A message
+already submitted as a new turn is not returned. Failed or ambiguous requests
+do not trigger automatic resend. Ctrl+C then clears an idle draft, then quits
+when idle and empty. Ctrl+Q joins active work and exits; unsent composer and
+queue text is not stored for a later launch.
 
-Esc interrupts. Ctrl+Q exits after active work is cancelled and joined. Terminal
-scrollback remains available. Bracketed paste does not submit text automatically.
+Esc interrupts. Ctrl+Q exits after active work is cancelled and joined. A
+resize previews the current viewport and replays the transcript after the
+window settles; Ctrl+O also replays it when changing tool-detail expansion.
+This can clear terminal scrollback without changing saved session history.
+Bracketed paste does not submit text automatically.
 
 - `/new`: start a new conversation in the same directory.
 - `/resume`: find and reopen another saved conversation.
 - `/login`: sign in or report that this conversation is already signed in.
 - `/logout`: remove local account access and keep this conversation open.
-- `/model`: change the model for this conversation.
+- `/model [name]`: change the model for this conversation using the account catalog.
+- `/effort [level]`: change reasoning effort for the selected model.
+- `/status`: show the current saved session, directory, model and effort.
+- `/clear`: start fresh model context in a new saved session while retaining the visible transcript and previous session.
 - `/settings`: change saved defaults and animation.
 - `/help`: list local commands.
 - `/context`: measured request bytes and the latest available provider token counts.
 - `/compact`: summarize completed context, including completed steps of the active turn.
 - `/discard-pending-images`: explicitly stop sending pending image pixels when an oversized saved batch blocks continuation; keep its receipts and exact saved bytes, and record that no visual inspection occurred.
 
-Startup adds no heading above the conversation. The directory, active
-model and effort share one footer row below the composer. Long paths and model
-names shorten to fit narrow windows; `/help` shows the directory in full.
-Account choices and local feedback stay in the composer; sign-in instructions,
-failures and signed-out state appear in the runtime status area above it. The
-footer does not gain a permanent authentication indicator.
+Startup adds no heading above the conversation. The directory, active model
+and effort share one footer row below the composer. Long paths and model names
+shorten to fit narrow windows; `/help` shows the directory in full. Sign-in
+instructions, failures, signed-out state and local feedback appear above the
+composer. Tool rows retain their last five output lines or first eight diff
+lines by default; Ctrl+O toggles all available detail. Folding cannot restore
+source bytes that a tool truncated before saving.
 
-Type `/` to expand the composer with the command menu, then type to filter.
-Up/Down selects, Enter executes and Tab completes the selected command. The menu
-shows only command names, between the composer's two lines. Esc closes it and
-retains the draft. Help and context reports are printed in terminal scrollback,
-leaving the composer ready for the next input; they are not saved as conversation
-messages or sent to the model. Model changes update the footer after being saved.
+Type `/` to show matching commands below the composer, then type to filter.
+Up/Down selects, Enter executes and Tab completes the selected command. A
+filterable picker keeps the previous draft while it owns the query. Esc closes
+it and retains the draft. Local command outcomes appear as visible receipts;
+they are not sent to the model. Model and effort changes update the footer
+only after being saved.
 Use Ctrl+Q to save and exit.
 
 Local commands run between turns and do not become model tools. Before every

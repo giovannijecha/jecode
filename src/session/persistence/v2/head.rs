@@ -30,6 +30,7 @@ pub(super) struct Info {
     pub guidance_base: usize,
     pub verified: bool,
     pub title: String,
+    pub display_parent: Option<String>,
     pub recent: Vec<String>,
     pub(super) projection: Value,
 }
@@ -141,6 +142,10 @@ pub(super) fn write(record: &Record, history: &History, tracker: &mut Tracker) -
         ("rolling", number(tracker.rolling)),
         ("turns", number(tracker.turns)),
         ("title", text(&tracker.title)),
+        (
+            "display_parent",
+            history.display_parent.as_deref().map_or(Value::Null, text),
+        ),
         (
             "recent",
             Value::Array(tracker.recent.iter().map(|s| text(s)).collect()),
@@ -264,7 +269,14 @@ pub(super) fn read(store: &Store, id: &str) -> io::Result<Info> {
         step,
         guidance_base,
         verified,
-        title: field(&value, "title", super::super::super::MAX_PROMPT_BYTES)?.into(),
+        title: field(&value, "title", 8192)?.into(),
+        display_parent: match value.get("display_parent") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(parent)) if super::valid_id(parent) && parent != id => {
+                Some(parent.clone())
+            }
+            _ => return Err(invalid()),
+        },
         recent,
         projection,
     })

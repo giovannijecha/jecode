@@ -1,0 +1,32 @@
+[?2026h[J[0;1;38;2;220;228;240mTones[0m
+[0;38;2;154;164;178mtruecolor · unicode · motion[0m
+[0mText · default foreground for assistant prose[0m
+[0;38;2;154;164;178mMuted · metadata, footer, status[0m
+[0;38;2;122;162;247mAccent · rules, spinner, prompt[0m
+[0;38;2;226;232;240;48;2;40;46;57mRename the session store and update every caller                                [0m
+[0;38;2;201;209;217;48;2;32;37;44mfn open(dir: &Path) -> io::Result<SessionLedger> {                              [0m
+[0;38;2;158;206;106;48;2;30;46;35m+ pub struct SessionLedger {                                                    [0m
+[0;38;2;239;139;139;48;2;49;32;38m- pub struct SessionStore {                                                     [0m
+[0;38;2;158;206;106mSuccess · step completed[0m
+[0;38;2;224;175;104mWarning · retrying in 12s[0m
+[0;38;2;239;139;139mError · exit 101[0m
+[0;38;2;187;154;247mKeyword · string · number are syntax overlays[0m
+[0;38;2;26;27;38;48;2;192;202;245mCursor block                                                                    [0m
+[0m[0m
+[0;1;38;2;220;228;240mGlyphs and tree[0m
+[0m[0;38;2;154;164;178mok[0m [0;38;2;158;206;106m✓[0m   [0;38;2;154;164;178mfail[0m [0;38;2;239;139;139m✗[0m   [0;38;2;154;164;178mwarn[0m [0;38;2;224;175;104m![0m   [0;38;2;154;164;178mprompt[0m [0;38;2;122;162;247m›[0m   [0;38;2;154;164;178mmore[0m …   [0m
+[0;38;2;122;162;247m────────────────────────────────────────────────────────────────────────────────[0m
+[0m[0;38;2;154;164;178m├─[0m [0;38;2;158;206;106m✓[0m Read 6 files[0;38;2;154;164;178m · src/session/ · 0.4s[0m[0m
+[0m[0;38;2;154;164;178m│[0m    [0;38;2;154;164;178m41[0m [0;38;2;239;139;139;48;2;49;32;38m- pub struct SessionStore {[0m[0m
+[0m[0;38;2;154;164;178m└─[0m [0;38;2;239;139;139m✗[0m Run cargo clippy[0;38;2;154;164;178m · exit 101 · 8.1s[0m[0m
+[0m[0m
+[0;1;38;2;220;228;240mWidth (every right edge must line up)[0m
+[0m[0;38;2;154;164;178m│[0mplain ascii text that is long enough to…[0;38;2;154;164;178m│[0m[0m
+[0m[0;38;2;154;164;178m│[0mcittà, perché, naïve · é composed · Ωμέ…[0;38;2;154;164;178m│[0m[0m
+[0m[0;38;2;154;164;178m│[0m日本語のテキスト and 한국어 mixed with …[0;38;2;154;164;178m│[0m[0m
+[0m[0;38;2;154;164;178m│[0memoji 👍🏽 👨‍👩‍👧 🇮🇹 ❤️ ⚡ 1️⃣ end             [0;38;2;154;164;178m│[0m[0m
+[0m[0;38;2;154;164;178m│[0marrows ↑↓←→ and box drawing ─│├└ stay n…[0;38;2;154;164;178m│[0m[0m
+[0m[0;38;2;154;164;178m│[0mWrapping keeps words whole where it can [0;38;2;154;164;178m│[0m[0m
+[0m[0;38;2;154;164;178m│[0mand never splits 日本語 or 👨‍👩‍👧 across    [0;38;2;154;164;178m│[0m[0m
+[0m[0;38;2;154;164;178m│[0mrows.                                   [0;38;2;154;164;178m│[0m[0m
+[?2026l

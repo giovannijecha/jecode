@@ -49,7 +49,7 @@ fn editor_preserves_unicode_sequences_and_limits_input() {
     assert_eq!(editor.text, "one to");
     editor.insert("x");
     assert_eq!(editor.text, "one txo");
-    editor.insert(&"a".repeat(8192));
+    editor.insert(&"a".repeat(crate::session::MAX_PROMPT_BYTES));
     assert_eq!(editor.text, "one txo");
     editor.take();
     editor.insert("a\x1b[2J\r\n\u{202e}b");
@@ -67,9 +67,19 @@ fn stream_keeps_draft_cancels_without_replay_and_can_restart() {
     assert!(model.tick(start + Duration::from_secs(1)));
     model.input(Key::Text("next draft".into()), start);
     model.input(Key::Enter, start);
-    assert_eq!(model.editor.text, "next draft");
+    assert!(model.editor.text.is_empty());
+    assert_eq!(
+        model
+            .demo_queue
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["next draft"]
+    );
     assert_eq!(model.blocks.len(), 3);
     model.input(Key::Escape, start);
+    assert_eq!(model.editor.text, "next draft");
+    assert!(model.demo_queue.is_empty());
     let partial = model.blocks.last().unwrap().text.clone();
     assert!(!partial.is_empty());
     assert!(!model.tick(start + Duration::from_secs(10)));
@@ -79,6 +89,36 @@ fn stream_keeps_draft_cancels_without_replay_and_can_restart() {
     assert_eq!(model.blocks.len(), 5);
     model.input(Key::Quit, start);
     assert!(model.quit);
+}
+
+#[test]
+fn offline_preview_dispatches_queued_messages_as_separate_turns_in_order() {
+    let start = Instant::now();
+    let mut model = model::Model::new(start);
+    model.input(Key::Text("/long".into()), start);
+    model.input(Key::Enter, start);
+    for prompt in ["first pending", "second pending"] {
+        model.input(Key::Text(prompt.into()), start);
+        model.input(Key::Enter, start);
+    }
+    model.input(Key::Text("unsent draft".into()), start);
+    assert_eq!(model.demo_queue.len(), 2);
+    for n in 1..1200 {
+        model.tick(start + Duration::from_millis(n * 40));
+        if !model.streaming() {
+            break;
+        }
+    }
+    assert!(!model.streaming());
+    assert!(model.demo_queue.is_empty());
+    assert_eq!(model.editor.text, "unsent draft");
+    let prompts: Vec<_> = model
+        .blocks
+        .iter()
+        .filter(|block| block.speaker == "You")
+        .map(|block| block.text.as_str())
+        .collect();
+    assert_eq!(prompts, ["/long", "first pending", "second pending"]);
 }
 
 #[test]
@@ -166,12 +206,16 @@ fn paste_budget_and_control_bytes_cannot_submit_or_exit() {
     let mut decoder = input::Decoder::default();
     let now = Instant::now();
     assert!(decoder.push(b"\x1b[200~", now).is_empty());
-    assert!(decoder.push(&vec![b'x'; 9000], now).is_empty());
+    assert!(
+        decoder
+            .push(&vec![b'x'; crate::session::MAX_PROMPT_BYTES + 1], now)
+            .is_empty()
+    );
     assert!(decoder.push(b"\r\n\x03\x11", now).is_empty());
     let keys = decoder.push(b"\x1b[201~", now);
     assert_eq!(
         keys,
-        vec![Key::PasteRejected("Paste exceeds 8 KiB / draft kept")]
+        vec![Key::PasteRejected("Paste exceeds 256 KiB / draft kept")]
     );
     let mut model = model::Model::new(now);
     model.editor.insert("keep me");
@@ -184,7 +228,7 @@ fn paste_budget_and_control_bytes_cannot_submit_or_exit() {
     assert!(
         view::chrome(&model, 80, 24)
             .iter()
-            .any(|row| row.text.contains("Paste exceeds 8 KiB"))
+            .any(|row| row.text.contains("Paste exceeds 256 KiB"))
     );
 }
 

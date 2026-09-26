@@ -33,7 +33,7 @@ fn vt_shortcuts_keep_enter_distinct_and_accept_common_modifier_encodings() {
         (b"\x1b[B", Key::Down),
         (b"\x1b[13;2u", Key::Newline),
         (b"\x17", Key::WordBackspace),
-        (b"\x0f", Key::Newline),
+        (b"\x0f", Key::Expand),
         (b"\x0a", Key::Newline),
         (b"\x10", Key::HistoryPrevious),
         (b"\x0e", Key::HistoryNext),
@@ -189,17 +189,15 @@ fn history_restores_unsent_multiline_draft_and_does_not_mutate_recalled_prompt()
     model.editor.insert("draft\n  pending");
     model.input(Key::Up, Instant::now());
     assert_eq!(model.editor.text, "draft\n  pending");
-    let cursor = model.editor.cursor;
     model.input(Key::PageUp, Instant::now());
     assert_eq!(model.editor.text, "second\n  original");
     model.input(Key::Text(" edited".into()), Instant::now());
+    assert!(!model.prompt_history.browsing());
     model.input(Key::PageUp, Instant::now());
-    assert_eq!(model.editor.text, "first");
-    model.input(Key::PageDown, Instant::now());
     assert_eq!(model.editor.text, "second\n  original");
     model.input(Key::PageDown, Instant::now());
-    assert_eq!(model.editor.text, "draft\n  pending");
-    assert_eq!(model.editor.cursor, cursor);
+    assert_eq!(model.editor.text, "second\n  original edited");
+    assert_eq!(model.editor.cursor, model.editor.text.len());
     model.editor.take();
     model.input(Key::Up, Instant::now());
     assert_eq!(model.editor.text, "second\n  original");
@@ -324,7 +322,11 @@ fn invalid_utf8_paste_rejects_all_bytes_without_changing_the_draft() {
 fn input_and_submission_limits_report_and_retain_draft_inside_composer() {
     let (mut model, mut session) = ready();
     account::input(&mut model, Key::Text("keep".into()), &mut session);
-    account::input(&mut model, Key::Paste("x".repeat(8190)), &mut session);
+    account::input(
+        &mut model,
+        Key::Paste("x".repeat(session::MAX_PROMPT_BYTES)),
+        &mut session,
+    );
     assert_eq!(model.editor.text, "keep");
     assert!(
         model
@@ -332,17 +334,17 @@ fn input_and_submission_limits_report_and_retain_draft_inside_composer() {
             .as_ref()
             .unwrap()
             .local_notice
-            .contains("8 KiB")
+            .contains("256 KiB")
     );
     assert!(
         view::chrome(&model, 80, 24)
             .iter()
             .any(|row| row.text.contains("draft kept"))
     );
-    model.editor.text = "x".repeat(8193);
+    model.editor.text = "x".repeat(session::MAX_PROMPT_BYTES + 1);
     model.editor.cursor = model.editor.text.len();
     account::input(&mut model, Key::Enter, &mut session);
-    assert_eq!(model.editor.text.len(), 8193);
+    assert_eq!(model.editor.text.len(), session::MAX_PROMPT_BYTES + 1);
     assert!(
         model
             .account

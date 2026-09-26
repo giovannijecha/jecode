@@ -3,8 +3,9 @@
 An owned coding harness for your terminal, written in Rust.
 
 Jecode streams model responses, reads local project files, changes files and
-runs commands directly. Conversations live in the terminal's natural
-scrollback. Sessions, settings and account credentials belong to your user profile.
+runs commands directly. Conversations render in the terminal's normal buffer;
+resize and tool-detail expansion can replay scrollback. Sessions, settings and
+account credentials belong to your user profile.
 
 The application uses the Rust standard library and original code, with no external
 crates, vendored libraries or runtime helpers for networking and presentation.
@@ -78,15 +79,16 @@ Account; Cargo's `--offline` flag only controls build dependency resolution.
 
 ## Working with Jecode
 
-- Enter sends a message; during a response it queues guidance for the next model step.
-- Esc interrupts work. Ctrl+Q exits and joins active work before closing.
+- Enter sends a message; during a response it queues a separate turn after the current one.
+- Esc stops active work and returns unsent queued messages to the composer. Ctrl+Q exits and joins active work before closing.
+- Ctrl+O expands or folds all available tool detail, including earlier output; Ctrl+J inserts a newline.
 - File changes show a diff. Commands show their shell, directory and timeout.
 - On image-capable account models, `view_image` lets the model inspect a local PNG screenshot or a saved image ID.
 - `/context` shows request size and available provider token counts.
 - `/compact` summarizes earlier context while retaining the full saved history.
 - Type `/` for a command menu; arrows select, Enter opens and Tab completes.
 - `/login` and `/logout` change account access without closing the conversation.
-- `/new`, `/resume`, `/model` and `/settings` manage conversations and preferences.
+- `/new`, `/resume`, `/model`, `/effort`, `/clear` and `/settings` manage conversations and preferences; `/status` shows session facts.
 - `NO_COLOR` and reduced motion are supported.
 
 See [usage and configuration](docs/USAGE.md), [session recovery](docs/SESSIONS.md), [tools](docs/TOOLS.md),

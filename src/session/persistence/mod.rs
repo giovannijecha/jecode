@@ -1,6 +1,8 @@
 //! Versioned user-scoped session storage. A lease prevents two owners.
 //! The v1 snapshot reader/writer stays here to preserve its exact existing
 //! contract; v2's incremental transactions live in their own module.
+//! Shared listing, import and record leases remain together because each must
+//! enforce the same directory and ownership checks across both formats.
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod access_tests;
 #[cfg(test)]
@@ -301,6 +303,15 @@ pub(super) fn create_in(
     workspace: Option<&Workspace>,
 ) -> io::Result<History> {
     v2::create(store, model, directory, workspace)
+}
+pub(super) fn create_in_from(
+    store: &Store,
+    model: Model,
+    directory: Option<&Path>,
+    workspace: Option<&Workspace>,
+    parent: &str,
+) -> io::Result<History> {
+    v2::create_with_parent(store, model, directory, workspace, parent)
 }
 #[cfg(test)]
 fn create_legacy_in(

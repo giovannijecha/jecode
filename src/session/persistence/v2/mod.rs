@@ -94,7 +94,19 @@ pub(super) fn create(
     directory: Option<&Path>,
     workspace: Option<&Workspace>,
 ) -> io::Result<History> {
-    create_with_verification(root, model, directory, workspace, true)
+    create_with_verification(root, model, directory, workspace, true, None)
+}
+pub(super) fn create_with_parent(
+    root: &Store,
+    model: Model,
+    directory: Option<&Path>,
+    workspace: Option<&Workspace>,
+    parent: &str,
+) -> io::Result<History> {
+    if !valid_id(parent) {
+        return Err(invalid());
+    }
+    create_with_verification(root, model, directory, workspace, true, Some(parent))
 }
 pub(super) fn create_unverified(
     root: &Store,
@@ -102,7 +114,7 @@ pub(super) fn create_unverified(
     directory: Option<&Path>,
     workspace: Option<&Workspace>,
 ) -> io::Result<History> {
-    create_with_verification(root, model, directory, workspace, false)
+    create_with_verification(root, model, directory, workspace, false, None)
 }
 fn create_with_verification(
     root: &Store,
@@ -110,6 +122,7 @@ fn create_with_verification(
     directory: Option<&Path>,
     workspace: Option<&Workspace>,
     verified: bool,
+    display_parent: Option<&str>,
 ) -> io::Result<History> {
     let settings = crate::state::settings::Settings::load(root)?;
     let store = root.directory("sessions-v2")?;
@@ -154,6 +167,7 @@ fn create_with_verification(
     };
     let mut history = History {
         record: Some(record),
+        display_parent: display_parent.map(str::to_owned),
         ..Default::default()
     };
     history.projection.limit_bytes = settings.context_limit_bytes;
@@ -315,7 +329,16 @@ pub(super) fn save(record: &Record, history: &History) -> io::Result<()> {
             &envelope("begin", 0, 0, begin_value(&turn.prompt)),
         )?;
         if next.title.is_empty() {
-            next.title = turn.prompt.clone();
+            // A long prompt belongs in the canonical log. The list title is
+            // only a preview and must leave head space for projection data.
+            let end = turn
+                .prompt
+                .char_indices()
+                .map(|(offset, character)| offset + character.len_utf8())
+                .take_while(|end| *end <= 8192)
+                .last()
+                .unwrap_or(0);
+            next.title = turn.prompt[..end].into();
         }
         next.recent.push(turn.prompt.clone());
         if next.recent.len() > super::super::MAX_RECALLED_PROMPTS {
@@ -430,6 +453,7 @@ fn load_inner(
         return Err(log::corrupt());
     }
     history.base_turn = first;
+    history.display_parent = info.display_parent.clone();
     history.base_step = info.step;
     history.base_guidance = info.guidance_base;
     head::restore_projection(&mut history, &info)?;

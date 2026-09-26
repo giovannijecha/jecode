@@ -2,6 +2,9 @@
 use super::{
     model::{Block, Model},
     spinner::Spinner,
+};
+#[cfg(test)]
+use super::{
     style::{Row, Tone},
     tool_view::clipped,
 };
@@ -21,6 +24,17 @@ pub(super) struct Run {
 pub(super) fn planned(model: &mut Model, id: u64, preview: Preview) {
     model.tools.close(&model.blocks, false, Instant::now());
     let block = model.blocks.len();
+    model.tool_details.insert(
+        block,
+        super::lab::model::Tool {
+            verb: "Run".into(),
+            subject: preview.command.clone(),
+            summary: String::new(),
+            status: super::lab::model::Status::Running,
+            elapsed_ms: 0,
+            detail: super::lab::model::Detail::Output(String::new()),
+        },
+    );
     let escaped = preview.command.contains('\t');
     let visible = if escaped {
         preview.command.replace('\\', "\\\\").replace('\t', "\\t")
@@ -90,6 +104,16 @@ pub(super) fn output(model: &mut Model, id: u64, channel: Channel, text: &str) {
         return;
     };
     let block = &mut model.blocks[run.block];
+    if let Some(tool) = model.tool_details.get_mut(&run.block)
+        && let super::lab::model::Detail::Output(output) = &mut tool.detail
+    {
+        for line in text.split_inclusive('\n') {
+            if channel == Channel::Stderr {
+                output.push_str("stderr: ");
+            }
+            output.push_str(line);
+        }
+    }
     for part in text.split_inclusive('\n') {
         if !run.line_open || run.channel != Some(channel) {
             if !block.text.ends_with('\n') {
@@ -113,6 +137,17 @@ pub(super) fn finished(model: &mut Model, id: u64, summary: String, success: boo
     };
     if view.command.as_ref().is_some_and(|run| run.id == id) {
         let run = view.command.take().unwrap();
+        if let Some(tool) = model.tool_details.get_mut(&run.block) {
+            tool.summary = summary.clone();
+            tool.status = if failed {
+                super::lab::model::Status::Failed
+            } else if success {
+                super::lab::model::Status::Done
+            } else {
+                super::lab::model::Status::Warned
+            };
+            tool.elapsed_ms = run.started.elapsed().as_millis() as u64;
+        }
         let block = &mut model.blocks[run.block];
         if !block.text.ends_with('\n') {
             block.text.push('\n');
@@ -129,6 +164,7 @@ pub(super) fn finished(model: &mut Model, id: u64, summary: String, success: boo
         view.notice = "Processing command result".into();
     }
 }
+#[cfg(test)]
 pub(super) fn active(run: &Run, width: usize, reduced: bool) -> Vec<Row> {
     let marker = run.spinner.marker(reduced);
     let state = if run.stopping {
@@ -149,6 +185,11 @@ pub(super) fn active(run: &Run, width: usize, reduced: bool) -> Vec<Row> {
 }
 pub(super) fn stop(model: &mut Model) {
     if let Some(run) = model.account.as_mut().and_then(|v| v.command.take()) {
+        if let Some(tool) = model.tool_details.get_mut(&run.block) {
+            tool.status = super::lab::model::Status::Warned;
+            tool.summary = "outcome uncertain; inspect effects".into();
+            tool.elapsed_ms = run.started.elapsed().as_millis() as u64;
+        }
         model.blocks[run.block].text.push_str("\n! Turn stopped before the command result was received; inspect effects before repeating it");
     }
 }

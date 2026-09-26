@@ -26,6 +26,7 @@ impl Spinner {
         }
         true
     }
+    #[cfg(test)]
     pub fn marker(&self, reduced_motion: bool) -> &'static str {
         if reduced_motion {
             "⠿"

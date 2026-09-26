@@ -1,0 +1,27 @@
+# Slice 1 specimen: tones, glyphs, tree layout, width-exact clipping.
+# Run: cargo run -- fixtures/specimen.txt [--color 256|16|none] [--ascii]
+heading: Tones
+@caps
+text: Text · default foreground for assistant prose
+muted: Muted · metadata, footer, status
+accent: Accent · rules, spinner, prompt
+user: Rename the session store and update every caller
+code: fn open(dir: &Path) -> io::Result<SessionLedger> {
+added: + pub struct SessionLedger {
+removed: - pub struct SessionStore {
+success: Success · step completed
+warning: Warning · retrying in 12s
+error: Error · exit 101
+keyword: Keyword · string · number are syntax overlays
+cursor: Cursor block
+
+heading: Glyphs and tree
+@glyphs
+
+heading: Width (every right edge must line up)
+@clip plain ascii text that is long enough to overflow the box
+@clip città, perché, naïve · e\u{301} composed · Ωμέγα
+@clip 日本語のテキスト and 한국어 mixed with Latin
+@clip emoji 👍🏽 👨\u{200d}👩\u{200d}👧 🇮🇹 ❤\u{fe0f} ⚡ 1\u{fe0f}\u{20e3} end
+@clip arrows ↑↓←→ and box drawing ─│├└ stay narrow
+@wrap Wrapping keeps words whole where it can and never splits 日本語 or 👨\u{200d}👩\u{200d}👧 across rows.

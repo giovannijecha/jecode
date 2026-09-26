@@ -6,9 +6,11 @@ pub struct Stop {
     pub index: usize,
     pub row: usize,
     pub column: usize,
+    #[allow(dead_code)] // Used by the test-only legacy renderer oracle.
     pub byte: usize,
     /// End of the unit starting here, before a later soft wrap can move its
     /// following insertion stop to the next row.
+    #[allow(dead_code)] // Used by the test-only legacy renderer oracle.
     pub display_end: usize,
 }
 pub struct Visual {
