@@ -2,6 +2,7 @@ use crate::{json::Value, workspace};
 
 pub enum Prepared {
     Recall {
+        index: bool,
         turn: usize,
         step: usize,
         receipt: usize,
@@ -51,7 +52,14 @@ impl Prepared {
             "edit_file" => &["path", "old_text", "new_text"],
             "run_command" => &["command", "path", "timeout_seconds"],
             "view_image" => &["path", "image_id"],
-            "recall_receipts" => &["turn", "step", "receipt", "offset", "expected_call_id"],
+            "recall_receipts" => &[
+                "mode",
+                "turn",
+                "step",
+                "receipt",
+                "offset",
+                "expected_call_id",
+            ],
             _ => {
                 return Err("unknown tool; use only the advertised workspace tools");
             }
@@ -63,7 +71,16 @@ impl Prepared {
             return Err("unknown tool argument");
         }
         if name == "recall_receipts" {
+            let index = match args.get("mode") {
+                None => false,
+                Some(Value::String(mode)) if mode == "index" => true,
+                _ => return Err("mode must be index when supplied"),
+            };
+            if index && (args.get("offset").is_some() || args.get("expected_call_id").is_some()) {
+                return Err("index mode uses turn, step and receipt only");
+            }
             return Ok(Self::Recall {
+                index,
                 turn: required_nonnegative(args, "turn")?,
                 step: required_nonnegative(args, "step")?,
                 receipt: optional_nonnegative(args, "receipt")?,

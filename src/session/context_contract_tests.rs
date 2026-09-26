@@ -8,6 +8,7 @@ use crate::{
         history::{Receipt, Step},
         tests, tool_tests,
     },
+    workspace::Workspace,
 };
 use std::sync::{Arc, Mutex};
 
@@ -270,6 +271,28 @@ fn finished(session: &mut Session) -> End {
     }
 }
 
+fn next_large_compaction_event(session: &mut Session) -> Event {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    loop {
+        if let Some(event) = session.poll() {
+            return event;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "session event stalled"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn large_compaction_finished(session: &mut Session) -> End {
+    loop {
+        if let Event::Finished(end, _) = next_large_compaction_event(session) {
+            return end;
+        }
+    }
+}
+
 fn rich_history() -> History {
     let mut history = History::default();
     history.begin("Inspect evidence with read_file only. Never use shell extraction. Output header file,key,score and sum all scores.".into()).unwrap();
@@ -297,6 +320,123 @@ fn rich_history() -> History {
     history.turns[0].end = Some(End::Complete);
     history.turns[0].outcome = "Complete".into();
     history
+}
+
+struct IndexRecorder {
+    requests: Arc<Mutex<Vec<String>>>,
+}
+impl Backend for IndexRecorder {
+    fn login(
+        &mut self,
+        _: &Budget<'_>,
+        _: &mut dyn FnMut(&str) -> ControlFlow<()>,
+    ) -> Result<(), client::Error> {
+        Ok(())
+    }
+    fn generate(
+        &mut self,
+        request: &Request,
+        _: &Budget<'_>,
+        _: &mut dyn FnMut(Progress<'_>) -> ControlFlow<()>,
+    ) -> Result<Response, client::Error> {
+        self.requests
+            .lock()
+            .unwrap()
+            .push(request.encode(MAX_REQUEST)?);
+        if request.instructions.starts_with("Summarize") {
+            return Ok(tests::handoff_response(
+                request,
+                "The observed value is confidently reported as WRONG.",
+            ));
+        }
+        if let Some(Input::ToolResult { output, .. }) = request
+            .input
+            .iter()
+            .find(|item| matches!(item, Input::ToolResult { call_id, .. } if call_id == "index"))
+        {
+            assert!(output.contains("\"mode\":\"index\""), "{output}");
+            assert!(
+                output.contains("\"expected_call_id\":\"original\""),
+                "{output}"
+            );
+            assert!(output.contains("\"path\":\"source.txt\""), "{output}");
+            return Ok(tests::response("Index received", Status::Completed));
+        }
+        Ok(tool_tests::calls_response(vec![tool_tests::call(
+            "index",
+            "recall_receipts",
+            r#"{"mode":"index","turn":0,"step":0}"#,
+        )]))
+    }
+}
+
+#[test]
+#[cfg(any(windows, target_os = "linux"))]
+fn ordinary_and_sliced_compaction_expose_index_without_replaying_reads() {
+    for large in [false, true] {
+        let fixture = crate::state::tests::Fixture::new();
+        let store = fixture.store().unwrap();
+        let files = crate::workspace_fixture::Fixture::new();
+        files.write("source.txt", "OLD-OBSERVATION\n");
+        let workspace = Workspace::open(&files.0).unwrap();
+        let mut history =
+            crate::session::persistence::create_in(&store, Model::Luna, None, None).unwrap();
+        history
+            .begin("Use the exact old source observation".into())
+            .unwrap();
+        history.turns[0].steps.push(Step {
+            response: Some(tool_tests::calls_response(vec![tool_tests::call(
+                "original",
+                "read_file",
+                r#"{"path":"source.txt"}"#,
+            )])),
+            results: vec![Receipt {
+                call_id: "original".into(),
+                output: if large {
+                    "\"".repeat(900_000)
+                } else {
+                    "OLD-OBSERVATION".repeat(1000)
+                },
+                summary: "read_file / saved observation".into(),
+                image: None,
+            }],
+            accepted: true,
+            ..Default::default()
+        });
+        history.turns[0].end = Some(End::Complete);
+        history.checkpoint().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let mut session = Session::with_history(
+            Model::Luna,
+            IndexRecorder {
+                requests: requests.clone(),
+            },
+            Some(workspace),
+            history,
+        )
+        .unwrap();
+        while !matches!(next_large_compaction_event(&mut session), Event::Ready) {}
+        assert!(session.compact());
+        assert_eq!(large_compaction_finished(&mut session), End::Complete);
+        files.write("source.txt", "NEW-OBSERVATION\n");
+        assert!(session.submit("Continue from the saved evidence"));
+        assert_eq!(large_compaction_finished(&mut session), End::Complete);
+        let requests = requests.lock().unwrap();
+        let compacted = requests
+            .iter()
+            .filter(|request| request.contains("Summarize the ordered reference data"))
+            .count();
+        assert!(compacted >= 1);
+        if large {
+            assert!(compacted > 1, "large read should use sliced compaction");
+        }
+        // Verification guidance and the index are present after compaction.
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.contains("even when the handoff states facts confidently"))
+        );
+    }
 }
 
 #[test]
@@ -358,7 +498,7 @@ fn emitted_compaction_is_ordered_reference_data_and_continuation_keeps_source_co
     assert!(call < receipt);
     assert!(encoded.contains("Never use shell extraction") && encoded.contains("file,key,score"));
     assert!(requests[1].contains("Never use shell extraction"));
-    assert!(requests[2].contains("Earlier validated handoff"));
+    assert!(requests[2].contains("Earlier model-generated handoff"));
     assert!(requests[2].contains("Correction: include a grand total row"));
     let later = &requests[3];
     let original = later.find("Never use shell extraction").unwrap();

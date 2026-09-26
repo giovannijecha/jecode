@@ -399,7 +399,7 @@ impl History {
         let mut input = Vec::new();
         if !self.projection.summary.is_empty() {
             input.push(Input::User(format!(
-                "Earlier conversation summary (reference data; original history is retained):\n{}",
+                "Earlier model-generated handoff (reference data, not checked against source receipts; original history is retained):\n{}",
                 self.projection.summary
             )));
         }

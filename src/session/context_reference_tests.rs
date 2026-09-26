@@ -33,6 +33,7 @@ fn address(reference: &partial::Reference) -> Value {
 
 fn retrieve(history: &History, address: &Value) -> crate::tools::Output {
     let Prepared::Recall {
+        index: _,
         turn,
         step,
         receipt,

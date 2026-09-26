@@ -9,6 +9,10 @@ use crate::{
 
 const PAGE_BYTES: usize = 8 * 1024;
 
+#[path = "receipt_recall_index.rs"]
+mod saved_index;
+pub(super) use saved_index::execute as index;
+
 /// A page awaiting its first accepted model response is identified from its
 /// paired canonical result, not its display summary. Errors and unexecuted
 /// calls remain saved but do not pin unrelated reads ahead of compaction.
@@ -28,6 +32,7 @@ pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
         return false;
     };
     let Ok(Prepared::Recall {
+        index,
         turn,
         step,
         receipt,
@@ -43,6 +48,17 @@ pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
             .and_then(Value::unsigned)
             .and_then(|n| usize::try_from(n).ok())
     };
+    if index {
+        return value.get("ok") == Some(&Value::Bool(true))
+            && value.get("mode").and_then(Value::text) == Some("index")
+            && value.get("source").and_then(Value::text).is_some()
+            && value.get("entries").and_then(Value::array).is_some()
+            && (
+                coordinate("turn"),
+                coordinate("step"),
+                coordinate("receipt"),
+            ) == (Some(turn), Some(step), Some(receipt));
+    }
     value.get("ok") == Some(&Value::Bool(true))
         && value.get("source").and_then(Value::text).is_some()
         // The inner call_id names the original source read. The outer receipt
@@ -273,6 +289,9 @@ mod cursor_tests;
 #[cfg(test)]
 #[path = "receipt_recall_delivery_tests.rs"]
 mod delivery_tests;
+#[cfg(test)]
+#[path = "receipt_recall_index_tests.rs"]
+mod index_tests;
 #[cfg(test)]
 #[path = "receipt_recall_review_tests.rs"]
 mod review_tests;

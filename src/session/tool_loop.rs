@@ -127,24 +127,30 @@ fn execute(
         } else {
             match prepared {
                 Ok(Prepared::Recall {
+                    index,
                     turn,
                     step,
                     receipt,
                     offset,
                     expected_call_id,
                 }) => {
-                    let output = super::receipt_recall::execute_with_identity(
-                        history,
-                        turn,
-                        step,
-                        receipt,
-                        offset,
-                        expected_call_id.as_deref(),
-                        &Budget {
-                            cancelled: &context.cancelled,
-                            deadline: operation_deadline(clock(), Duration::from_secs(10)),
-                        },
-                    );
+                    let budget = Budget {
+                        cancelled: &context.cancelled,
+                        deadline: operation_deadline(clock(), Duration::from_secs(10)),
+                    };
+                    let output = if index {
+                        super::receipt_recall::index(history, turn, step, receipt, &budget)
+                    } else {
+                        super::receipt_recall::execute_with_identity(
+                            history,
+                            turn,
+                            step,
+                            receipt,
+                            offset,
+                            expected_call_id.as_deref(),
+                            &budget,
+                        )
+                    };
                     (output, None, None)
                 }
                 Ok(Prepared::Image { path, image_id }) => {

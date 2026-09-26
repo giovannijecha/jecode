@@ -204,7 +204,7 @@ pub(super) fn instructions(boundary: &str) -> String {
     )
 }
 
-pub(super) fn valid(text: &str, boundary: &str) -> Result<(), Failure> {
+pub(crate) fn valid(text: &str, boundary: &str) -> Result<(), Failure> {
     if text.len() > 32768 {
         return Err(Failure::CompactionOutput);
     }
