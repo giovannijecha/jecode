@@ -163,16 +163,17 @@ fn animation_is_bounded_stops_when_idle_and_respects_reduced_motion() {
         for n in 1..=999 {
             paints += usize::from(model.tick(now + Duration::from_millis(n)));
         }
+        // Elapsed time repaints even when motion is disabled.
+        assert!((9..=25).contains(&paints), "{paints}");
         if reduced {
-            assert_eq!(paints, 0);
             assert_eq!(model.tools.marker(), first);
         } else {
-            assert_eq!(paints, 12);
             assert_ne!(model.tools.marker(), first);
         }
         model
             .tools
             .close(&model.blocks, true, now + Duration::from_secs(1));
+        model.close_running_tools("stopped");
         assert!(!model.tick(now + Duration::from_secs(2)));
     }
 }

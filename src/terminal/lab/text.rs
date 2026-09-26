@@ -22,6 +22,11 @@ pub fn safe(text: &str) -> String {
     out
 }
 
+/// Display an untrusted label in exactly one terminal row.
+pub fn single_line(text: &str) -> String {
+    safe(text).replace('\n', " ")
+}
+
 fn bidi(ch: char) -> bool {
     matches!(ch, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }

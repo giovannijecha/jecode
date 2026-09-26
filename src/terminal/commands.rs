@@ -94,7 +94,7 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
         {
             match name {
                 "/model" | "/effort" => {
-                    execute_argument(model, session, &line);
+                    execute_argument(model, session, &line, true);
                     return true;
                 }
                 _ => {}
@@ -165,9 +165,12 @@ pub(super) fn input(model: &mut Model, key: &Key, session: &mut Session) -> bool
 }
 fn unknown_command(model: &mut Model) {
     let input = model.editor.take();
+    unknown_command_line(model, &input);
+}
+fn unknown_command_line(model: &mut Model, input: &str) {
     let suggestion = menu::commands()
         .into_iter()
-        .map(|entry| (edit_distance(&input, &entry.label), entry.label))
+        .map(|entry| (edit_distance(input, &entry.label), entry.label))
         .min_by_key(|(distance, _)| *distance)
         .filter(|(distance, _)| *distance <= 3);
     let note = suggestion.map_or_else(
@@ -176,12 +179,35 @@ fn unknown_command(model: &mut Model) {
     );
     receipt(
         model,
-        &input,
+        input,
         super::lab::model::Status::Failed,
         "Unknown command",
         &note,
         Vec::new(),
     );
+}
+
+/// Returns true only for a single-line local command. The live editor never
+/// serves as scratch space for a queued command.
+pub(super) fn queued(model: &mut Model, session: &mut Session, line: &str) -> bool {
+    if !line.starts_with('/') || line.contains('\n') {
+        return false;
+    }
+    let line = line.trim();
+    if let Some((name, args)) = line.split_once(char::is_whitespace)
+        && !args.trim().is_empty()
+        && matches!(name, "/model" | "/effort")
+    {
+        execute_argument(model, session, line, false);
+    } else if let Some(entry) = menu::commands()
+        .into_iter()
+        .find(|entry| entry.label == line)
+    {
+        execute_core(model, session, entry.action, Some(line), false);
+    } else {
+        unknown_command_line(model, line);
+    }
+    true
 }
 fn edit_distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
@@ -224,7 +250,7 @@ fn receipt(
     index
 }
 
-fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
+fn execute_argument(model: &mut Model, session: &mut Session, line: &str, consume_editor: bool) {
     if session.signed_out() {
         receipt(
             model,
@@ -234,7 +260,9 @@ fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
             "previous value kept",
             Vec::new(),
         );
-        model.editor.take();
+        if consume_editor {
+            model.editor.take();
+        }
         return;
     }
     let Some(catalog) = model
@@ -258,7 +286,9 @@ fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
                 Vec::new(),
             );
         }
-        model.editor.take();
+        if consume_editor {
+            model.editor.take();
+        }
         return;
     };
     let (command, query) = line.split_once(char::is_whitespace).unwrap();
@@ -286,7 +316,9 @@ fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
                 &format!("kept {}", current.id()),
                 Vec::new(),
             );
-            model.editor.take();
+            if consume_editor {
+                model.editor.take();
+            }
             return;
         };
         let id = &choices[found.index].id;
@@ -309,7 +341,9 @@ fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
                 "effort kept",
                 Vec::new(),
             );
-            model.editor.take();
+            if consume_editor {
+                model.editor.take();
+            }
             return;
         };
         let mut choices = vec!["provider default".to_string()];
@@ -330,7 +364,9 @@ fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
                 &format!("kept {}", current.effort().unwrap_or("provider default")),
                 Vec::new(),
             );
-            model.editor.take();
+            if consume_editor {
+                model.editor.take();
+            }
             return;
         };
         let effort = (found.index > 0).then(|| choices[found.index].as_str());
@@ -349,28 +385,49 @@ fn execute_argument(model: &mut Model, session: &mut Session, line: &str) {
             &format!("kept {before}"),
             Vec::new(),
         );
-        model.editor.take();
+        if consume_editor {
+            model.editor.take();
+        }
         return;
     }
-    execute(model, session, Action::Model(selected));
+    execute_core(
+        model,
+        session,
+        Action::Model(selected),
+        Some(line),
+        consume_editor,
+    );
 }
 
 pub(super) fn complete_argument(model: &mut Model, session: &mut Session) {
+    if !session.ready() || !model.account.as_ref().is_some_and(|view| view.ready()) {
+        return;
+    }
     if let Some(line) = model
         .account
         .as_mut()
         .and_then(|view| view.pending_argument.take())
     {
-        model.editor.replace(&line);
         if line == "/effort" {
-            execute(model, session, Action::Effort);
+            execute_core(model, session, Action::Effort, Some(&line), false);
         } else {
-            execute_argument(model, session, &line);
+            execute_argument(model, session, &line, false);
         }
     }
 }
 
 fn execute(model: &mut Model, session: &mut Session, action: Action) {
+    let line = model.editor.text.trim().to_owned();
+    execute_core(model, session, action, Some(&line), true);
+}
+
+fn execute_core(
+    model: &mut Model,
+    session: &mut Session,
+    action: Action,
+    line: Option<&str>,
+    consume_editor: bool,
+) {
     if matches!(action, Action::Login) {
         if session.signed_out() && session.login() {
             model.account.as_mut().unwrap().logging_in();
@@ -380,7 +437,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             notice(model, "Wait for the current account transition");
         }
         model.menu.close();
-        if model.editor.text.starts_with('/') {
+        if consume_editor && model.editor.text.starts_with('/') {
             model.editor.take();
         }
         return;
@@ -395,7 +452,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             );
         }
         model.menu.close();
-        if model.editor.text.starts_with('/') {
+        if consume_editor && model.editor.text.starts_with('/') {
             model.editor.take();
         }
         return;
@@ -643,7 +700,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
         }
         Action::Model(selected) => {
             let previous = model.account.as_ref().unwrap().selected;
-            let typed = model.editor.text.trim();
+            let typed = line.unwrap_or("");
             let line = if typed.starts_with("/model ") || typed.starts_with("/effort ") {
                 typed.to_owned()
             } else if selected.id() != previous.id() {
@@ -724,7 +781,7 @@ fn execute(model: &mut Model, session: &mut Session, action: Action) {
             true
         }
     };
-    if done {
+    if done && consume_editor {
         model.editor.take();
         model.menu.pasted_literal = false;
     }

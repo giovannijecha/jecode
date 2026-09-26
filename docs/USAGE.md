@@ -266,10 +266,13 @@ intraturn guidance and provider output are excluded. Guidance that starts a new
 canonical turn is available for recall. Recalled prompts remain
 editable and never send automatically.
 
-During generation Enter queues a separate user turn; up to eight messages can
-wait for delivery. The pending messages appear oldest-first above the activity
-row. After the active turn completes, Jecode submits the next queued message
-as a new turn. No queued message interrupts an ordered tool effect.
+During generation Enter queues up to eight items. They appear oldest-first above
+the activity row. After the active turn completes, Jecode handles each item in
+order: a slash command runs locally, while ordinary text starts a new model
+turn. A model change waits for its saved acknowledgement before the next item;
+`/clear` carries later items and the current draft into the fresh session.
+Pasted slash-prefixed text remains literal. No queued item interrupts an ordered
+tool effect.
 
 Alt+Up withdraws the newest message that is still pending and puts it in the
 editor. Edit it and press Enter to submit it through the normal path. A message
@@ -320,7 +323,10 @@ shorten to fit narrow windows; `/help` shows the directory in full. Sign-in
 instructions, failures, signed-out state and local feedback appear above the
 composer. Tool rows retain their last five output lines or first eight diff
 lines by default; Ctrl+O toggles all available detail. Folding cannot restore
-source bytes that a tool truncated before saving.
+source bytes that a tool truncated before saving. Saved command receipts show
+their available stdout and stderr as separate lines, along with recorded
+outcome, truncation and duration facts. Receipt discovery displays recall
+addresses and pagination without rereading workspace files.
 
 Type `/` to show matching commands below the composer, then type to filter.
 Up/Down selects, Enter executes and Tab completes the selected command. A

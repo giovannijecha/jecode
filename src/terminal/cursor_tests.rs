@@ -84,7 +84,7 @@ fn empty_lines_tabs_unicode_and_wraps_keep_cursor_on_the_displayed_unit() {
     model.editor.replace("a\tb");
     model.editor.cursor = 1;
     let (row, span) = cursor_row(&model, 80);
-    assert_eq!(row.text, "› a   b");
+    assert_eq!(row.text, "› a    b");
     assert_eq!(&row.text[span], " ");
 
     model.editor.replace("e\u{301} 中 👩\u{200d}💻 각");

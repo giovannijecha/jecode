@@ -1,5 +1,6 @@
 //! Composer chrome, unchanged in shape from jecode: an accent rule, the
 //! `›` draft with a block cursor, a closing rule and the muted footer.
+use super::super::editor_visual::Visual;
 use super::super::menu;
 use super::block::MARGIN;
 use super::glyph::Glyphs;
@@ -7,7 +8,6 @@ use super::picker;
 use super::style::{Row, Tone};
 use super::text;
 use super::unicode::clusters;
-use std::ops::Range;
 
 /// Session facts shown under the composer.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -117,21 +117,11 @@ fn prompt(draft: &str, cursor: usize, frame: Tone, width: usize, glyph: &Glyphs)
             .push(&placeholder[head.len()..], Tone::Muted);
         return vec![first];
     }
-    // Drafts from the composer are already clean; a raw one keeps its
-    // cursor at the end.
-    let clean = text::safe(draft);
-    let cursor = if cursor >= draft.len() || clean.len() != draft.len() {
-        clean.len()
-    } else {
-        cursor
-    };
     // One cell stays free at the end of each row for the cursor block.
-    let spans = layout(&clean, width.saturating_sub(lead + 2).max(1));
-    let at = spans
-        .iter()
-        .rposition(|span| span.start <= cursor)
-        .unwrap_or(0);
-    let (shown, before, after) = window(spans.len(), at);
+    let visual = Visual::new(draft, width.saturating_sub(lead + 2).max(1));
+    let cursor = visual.stop(cursor);
+    let at = cursor.row;
+    let (shown, before, after) = window(visual.rows.len(), at);
     let fold = |count: usize| {
         let label = format!("{} {count} more lines", glyph.ellipsis);
         Row::new(
@@ -148,21 +138,21 @@ fn prompt(draft: &str, cursor: usize, frame: Tone, width: usize, glyph: &Glyphs)
         if before > 0 && index == DRAFT_HEAD + before {
             out.push(fold(before));
         }
-        let span = spans[index].clone();
+        let content = &visual.rows[index];
         let mut row = if index == 0 {
             first.clone()
         } else {
             Row::new(" ".repeat(lead), Tone::Text)
         };
         if index == at {
-            let cursor = cursor.min(span.end);
-            let head = clusters(&clean[cursor..span.end]).next().unwrap_or(" ");
-            let tail = (cursor + head.len()).min(span.end);
-            row.push(&clean[span.start..cursor], Tone::Text)
+            let byte = cursor.byte.min(content.len());
+            let head = clusters(&content[byte..]).next().unwrap_or(" ");
+            let tail = (byte + head.len()).min(content.len());
+            row.push(&content[..byte], Tone::Text)
                 .push(head, Tone::Cursor)
-                .push(&clean[tail.max(cursor)..span.end], Tone::Text);
+                .push(&content[tail..], Tone::Text);
         } else {
-            row.push(&clean[span], Tone::Text);
+            row.push(content, Tone::Text);
         }
         out.push(row);
     }
@@ -170,19 +160,6 @@ fn prompt(draft: &str, cursor: usize, frame: Tone, width: usize, glyph: &Glyphs)
         out.push(fold(after));
     }
     out
-}
-
-/// Visual rows of a clean draft as byte ranges: hard lines, then wraps.
-fn layout(clean: &str, columns: usize) -> Vec<Range<usize>> {
-    let mut spans = Vec::new();
-    let mut offset = 0;
-    for line in clean.split('\n') {
-        for range in text::wrap_line(line, columns) {
-            spans.push(range.start + offset..range.end + offset);
-        }
-        offset += line.len() + 1;
-    }
-    spans
 }
 
 /// Which rows to draw: the first, then `DRAFT_TAIL` rows ending at the

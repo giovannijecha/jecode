@@ -79,7 +79,7 @@ Account; Cargo's `--offline` flag only controls build dependency resolution.
 
 ## Working with Jecode
 
-- Enter sends a message; during a response it queues a separate turn after the current one.
+- Enter sends a message; during a response it queues text or a local slash command in order.
 - Esc stops active work and returns unsent queued messages to the composer. Ctrl+Q exits and joins active work before closing.
 - Ctrl+O expands or folds all available tool detail, including earlier output; Ctrl+J inserts a newline.
 - File changes show a diff. Commands show their shell, directory and timeout.

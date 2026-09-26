@@ -27,6 +27,11 @@ enum LocalOperation {
     Context,
     Compact(String),
 }
+#[derive(Clone)]
+pub(super) struct Queued {
+    pub text: String,
+    pub literal: bool,
+}
 pub(super) const UNAVAILABLE_SELECTION_NOTICE: &str =
     "Selected model or effort unavailable in this account catalog / use /model; draft kept";
 pub(super) struct View {
@@ -38,7 +43,8 @@ pub(super) struct View {
     pub partial_output: bool,
     turns: usize,
     turn_started: Option<Instant>,
-    pub(super) queued_turns: VecDeque<String>,
+    pub(super) queued_turns: VecDeque<Queued>,
+    queue_halted: bool,
     pub recovery: Option<super::recovery::SavedDraft>,
     active_tool: Option<usize>,
     pub edit: Option<super::edit_view::Edit>,
@@ -90,7 +96,10 @@ impl View {
         self.notice = "Changing model…".into();
     }
     pub fn pending_messages(&self) -> Vec<String> {
-        self.queued_turns.iter().cloned().collect()
+        self.queued_turns
+            .iter()
+            .map(|item| item.text.clone())
+            .collect()
     }
     pub fn loading_catalog(&mut self, defaults: bool) {
         self.phase = Phase::Updating;
@@ -115,6 +124,7 @@ pub(super) fn model(selected: session::Model, directory: Option<&std::path::Path
         turns: 0,
         turn_started: None,
         queued_turns: VecDeque::new(),
+        queue_halted: false,
         recovery: None,
         active_tool: None,
         edit: None,
@@ -163,7 +173,10 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
             let view = model.account.as_mut().unwrap();
             if view.queued_turns.len() < 8 && model.editor.text.len() <= session.prompt_limit() {
                 let prompt = model.editor.take();
-                view.queued_turns.push_back(prompt.clone());
+                view.queued_turns.push_back(Queued {
+                    text: prompt.clone(),
+                    literal: model.menu.pasted_literal,
+                });
                 view.local_notice.clear();
                 view.local_failed = false;
                 super::recovery::submitted(model, &prompt, false);
@@ -178,6 +191,7 @@ pub(super) fn input(model: &mut Model, key: Key, session: &mut Session) {
         return;
     }
     if super::commands::input(model, &key, session) {
+        drain_queue(model, session);
         return;
     }
     match &key {
@@ -276,25 +290,75 @@ pub(super) fn after_finished(model: &mut Model, session: &mut Session, end: End)
         recover_queued(model);
         return;
     }
-    let Some(prompt) = model
-        .account
-        .as_mut()
-        .and_then(|v| v.queued_turns.pop_front())
-    else {
-        return;
-    };
-    if !session.submit(&prompt) {
-        model
-            .account
-            .as_mut()
-            .unwrap()
-            .queued_turns
-            .push_front(prompt);
+    drain_queue(model, session);
+}
+
+/// Claim queued items at the same local-command boundary as direct input.
+/// A catalog/model change or navigation keeps later items owned by this view.
+pub(super) fn drain_queue(model: &mut Model, session: &mut Session) {
+    if model.account.as_ref().is_some_and(|view| view.queue_halted) {
         recover_queued(model);
-        model.account.as_mut().unwrap().local_notice =
-            "Queued message was not sent / recovered in the composer".into();
+        if let Some(view) = &mut model.account {
+            view.queue_halted = false;
+        }
         return;
     }
+    while session.ready()
+        && model
+            .account
+            .as_ref()
+            .is_some_and(|view| view.ready() && view.pending_argument.is_none())
+        && model.navigation.is_none()
+        && model.menu.panel.is_none()
+    {
+        let Some(item) = model
+            .account
+            .as_mut()
+            .and_then(|v| v.queued_turns.pop_front())
+        else {
+            return;
+        };
+        let receipts = model.command_receipts.len();
+        if !item.literal && super::commands::queued(model, session, &item.text) {
+            if model.command_receipts.len() > receipts
+                && model
+                    .command_receipts
+                    .values()
+                    .last()
+                    .is_some_and(|receipt| {
+                        matches!(
+                            receipt.status,
+                            super::lab::model::Status::Warned | super::lab::model::Status::Failed
+                        )
+                    })
+            {
+                recover_queued(model);
+                return;
+            }
+            continue;
+        }
+        let prompt = item.text;
+        if !session.submit(&prompt) {
+            model
+                .account
+                .as_mut()
+                .unwrap()
+                .queued_turns
+                .push_front(Queued {
+                    text: prompt,
+                    literal: item.literal,
+                });
+            recover_queued(model);
+            model.account.as_mut().unwrap().local_notice =
+                "Queued message was not sent / recovered in the composer".into();
+            return;
+        }
+        submit_queued(model, &prompt);
+        return;
+    }
+}
+
+fn submit_queued(model: &mut Model, prompt: &str) {
     let view = model.account.as_mut().unwrap();
     view.turns += 1;
     view.phase = Phase::Generating;
@@ -303,10 +367,10 @@ pub(super) fn after_finished(model: &mut Model, session: &mut Session, end: End)
     view.partial_output = false;
     view.notice = "Waiting for model".into();
     model.status_spinner.reset(Instant::now());
-    model.prompt_history.record_new_turn(&prompt);
+    model.prompt_history.record_new_turn(prompt);
     model.blocks.push(Block {
         speaker: "You",
-        text: prompt,
+        text: prompt.into(),
     });
     model.blocks.push(Block {
         speaker: "Assistant",
@@ -314,14 +378,14 @@ pub(super) fn after_finished(model: &mut Model, session: &mut Session, end: End)
     });
 }
 
-fn recover_queued(model: &mut Model) {
+pub(super) fn recover_queued(model: &mut Model) {
     let Some(view) = &mut model.account else {
         return;
     };
     if view.queued_turns.is_empty() && view.recovery.is_none() {
         return;
     }
-    let mut drafts: Vec<String> = view.queued_turns.drain(..).collect();
+    let mut drafts: Vec<String> = view.queued_turns.drain(..).map(|item| item.text).collect();
     drafts.extend(super::recovery::unwind(model));
     model.editor.replace(&drafts.join("\n"));
     model.menu.pasted_literal = true;
@@ -504,6 +568,9 @@ pub(super) fn event(model: &mut Model, event: Event) {
             }
         }
         Event::CatalogFailed(kind) => {
+            if view.pending_argument.is_some() && !view.queued_turns.is_empty() {
+                view.queue_halted = true;
+            }
             view.catalog = None;
             view.pending_catalog = None;
             if let Some(line) = view.pending_argument.take() {

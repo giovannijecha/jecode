@@ -53,6 +53,7 @@ fn native_real_session_child() {
         saved: None,
         prepared: Some(session),
         carried: None,
+        pending: None,
     });
     stop.store(true, Ordering::Relaxed);
     observer.join().unwrap();

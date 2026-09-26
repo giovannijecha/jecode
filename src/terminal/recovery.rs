@@ -69,7 +69,7 @@ pub(super) fn retrieve(model: &mut Model, _session: &mut Session) {
     view.recovery = Some(saved);
     view.local_notice = "Editing withdrawn message · Enter sends · Alt+↓ abandons".into();
     view.local_failed = false;
-    model.editor.replace(&text);
+    model.editor.replace(&text.text);
     model.menu = Menu::default();
     model.menu.pasted_literal = true;
 }

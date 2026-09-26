@@ -29,6 +29,27 @@ fn cli_selection_overrides_defaults_without_mutating_them() {
 use std::time::Duration;
 
 #[test]
+fn running_tool_elapsed_advances_and_completion_freezes_its_duration() {
+    let mut model = account::model(crate::session::Model::Luna, None);
+    model.tools.reduced_motion = true;
+    let start = std::time::Instant::now();
+    let index = model.start_tool("read_file", "large.txt".into(), start);
+    assert!(model.tick(start + Duration::from_secs(2)));
+    assert_eq!(model.tool_details[&index].elapsed_ms, 2_000);
+    model.finish_tool_output(
+        index,
+        "read complete",
+        false,
+        false,
+        "",
+        start + Duration::from_millis(2_500),
+    );
+    assert_eq!(model.tool_details[&index].elapsed_ms, 2_500);
+    model.tick(start + Duration::from_secs(4));
+    assert_eq!(model.tool_details[&index].elapsed_ms, 2_500);
+}
+
+#[test]
 fn editor_preserves_unicode_sequences_and_limits_input() {
     let mut editor = editor::Editor::default();
     for sample in ["e\u{301}", "👩‍💻", "🇮🇹", "क्‍ष", "中文", "\u{600}a"] {
@@ -155,7 +176,10 @@ fn layouts_stay_bounded_and_render_only_changed_rows() {
         for height in [1, 5, 9, 24, 60, 250] {
             let frame = view::frame(&model, width, height);
             for row in &frame {
-                assert!(text::width(&row.text) <= width.saturating_sub(1).max(1));
+                assert!(
+                    super::lab::text::width(&row.text) <= width.saturating_sub(1).max(1),
+                    "{width}x{height}: {row:?}"
+                );
                 assert!(!row.text.contains(['\x1b', '\n', '\u{009b}', '\u{202e}']));
             }
             let mut renderer = render::Renderer::default();

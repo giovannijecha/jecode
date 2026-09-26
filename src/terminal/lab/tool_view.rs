@@ -49,13 +49,16 @@ pub fn mark<'a>(status: Status, glyph: &'a Glyphs, spinner: &'a str) -> (&'a str
 }
 
 fn step(tool: &Tool, last: bool, width: usize, glyph: &Glyphs, spinner: &str) -> Row {
+    let verb = text::single_line(&tool.verb);
+    let subject = text::single_line(&tool.subject);
+    let summary_text = text::single_line(&tool.summary);
     let (mark, tone) = mark(tool.status, glyph, spinner);
     let mut row = Row::new(MARGIN, Tone::Text);
     row.push(if last { glyph.last } else { glyph.branch }, Tone::Muted)
         .push(" ", Tone::Text)
         .push(mark, tone)
         .push(" ", Tone::Text)
-        .push(&tool.verb, Tone::Heading)
+        .push(&verb, Tone::Heading)
         .push(" ", Tone::Text);
     let time = if tool.elapsed_ms == u64::MAX {
         String::new()
@@ -64,16 +67,16 @@ fn step(tool: &Tool, last: bool, width: usize, glyph: &Glyphs, spinner: &str) ->
     };
     let summary = match tool.summary.is_empty() {
         true => String::new(),
-        false => format!(" {} {}", glyph.dot, tool.summary),
+        false => format!(" {} {}", glyph.dot, summary_text),
     };
     // Right side: two cells of air, the time, and the closing margin.
     let room = width.saturating_sub(text::width(&row.text) + text::width(&time) + 2 + MARGIN.len());
     let subject_room = if room >= 24 {
-        (room * 2 / 3).min(text::width(&tool.subject))
+        (room * 2 / 3).min(text::width(&subject))
     } else {
         room
     };
-    let subject = text::clip(&tool.subject, subject_room, glyph.ellipsis);
+    let subject = text::clip(&subject, subject_room, glyph.ellipsis);
     let summary_room = room.saturating_sub(text::width(&subject));
     let summary = if summary_room >= 4 {
         text::clip(&summary, summary_room, glyph.ellipsis)
@@ -95,6 +98,9 @@ fn detail(
     expanded: bool,
     out: &mut Vec<Row>,
 ) {
+    let verb = text::single_line(&tool.verb);
+    let subject = text::single_line(&tool.subject);
+    let summary = text::single_line(&tool.summary);
     // Detail text starts under the verb: margin, stem, four cells.
     let lead = MARGIN.len() + text::width(stem) + 4;
     let room = width.saturating_sub(lead + MARGIN.len());
@@ -114,10 +120,10 @@ fn detail(
     let full_width = MARGIN.len()
         + text::width(glyph.last)
         + 3
-        + text::width(&tool.verb)
+        + text::width(&verb)
         + 1
-        + text::width(&tool.subject)
-        + text::width(&format!(" {} {}", glyph.dot, tool.summary))
+        + text::width(&subject)
+        + text::width(&format!(" {} {}", glyph.dot, summary))
         + 2
         + time_width
         + MARGIN.len();
@@ -126,7 +132,7 @@ fn detail(
         && full_width > width
     {
         out.push(line_row(
-            &tool.summary,
+            &summary,
             if tool.status == Status::Failed {
                 Tone::Error
             } else {
@@ -148,7 +154,8 @@ fn detail(
     };
     match &tool.detail {
         Detail::Output(output) => {
-            let lines: Vec<&str> = output.trim_end().lines().collect();
+            let safe = text::safe(output);
+            let lines: Vec<&str> = safe.trim_end().lines().collect();
             let keep = if expanded { lines.len() } else { OUTPUT_TAIL };
             let hidden = lines.len().saturating_sub(keep);
             if hidden > 0 {
@@ -163,7 +170,8 @@ fn detail(
             }
         }
         Detail::Diff(diff) => {
-            let lines: Vec<&str> = diff.trim_end().lines().collect();
+            let safe = text::safe(diff);
+            let lines: Vec<&str> = safe.trim_end().lines().collect();
             let keep = if expanded { lines.len() } else { DIFF_HEAD };
             for line in lines.iter().take(keep) {
                 let (tone, band) = match line.as_bytes().first() {

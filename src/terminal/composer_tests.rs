@@ -380,7 +380,8 @@ fn panels_remain_bounded_with_long_paths_drafts_and_untrusted_labels() {
             assert!(rows.len() < height || height == 1, "{columns}x{height}");
             assert!(
                 rows.iter()
-                    .all(|r| r.transient && text::width(&r.text) < columns)
+                    .all(|r| r.transient && lab::text::width(&r.text) < columns),
+                "{columns}x{height}: {rows:?}"
             );
             assert!(
                 rows.iter()

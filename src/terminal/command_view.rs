@@ -21,6 +21,16 @@ pub(super) struct Run {
     pub stopping: bool,
     running: bool,
 }
+impl Run {
+    pub(super) fn elapsed(&self, now: Instant) -> Option<(usize, u64)> {
+        self.running.then(|| {
+            (
+                self.block,
+                now.saturating_duration_since(self.started).as_millis() as u64,
+            )
+        })
+    }
+}
 pub(super) fn planned(model: &mut Model, id: u64, preview: Preview) {
     model.tools.close(&model.blocks, false, Instant::now());
     let block = model.blocks.len();
@@ -146,7 +156,9 @@ pub(super) fn finished(model: &mut Model, id: u64, summary: String, success: boo
             } else {
                 super::lab::model::Status::Warned
             };
-            tool.elapsed_ms = run.started.elapsed().as_millis() as u64;
+            tool.elapsed_ms = tool
+                .elapsed_ms
+                .max(run.started.elapsed().as_millis() as u64);
         }
         let block = &mut model.blocks[run.block];
         if !block.text.ends_with('\n') {
@@ -188,7 +200,9 @@ pub(super) fn stop(model: &mut Model) {
         if let Some(tool) = model.tool_details.get_mut(&run.block) {
             tool.status = super::lab::model::Status::Warned;
             tool.summary = "outcome uncertain; inspect effects".into();
-            tool.elapsed_ms = run.started.elapsed().as_millis() as u64;
+            tool.elapsed_ms = tool
+                .elapsed_ms
+                .max(run.started.elapsed().as_millis() as u64);
         }
         model.blocks[run.block].text.push_str("\n! Turn stopped before the command result was received; inspect effects before repeating it");
     }
@@ -197,3 +211,36 @@ pub(super) fn stop(model: &mut Model) {
 #[cfg(test)]
 #[path = "command_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod elapsed_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn running_command_elapsed_advances_with_reduced_motion_and_freezes_on_stop() {
+        let start = Instant::now();
+        let mut model = super::super::account::model(crate::session::Model::Luna, None);
+        model.tools.reduced_motion = true;
+        planned(
+            &mut model,
+            1,
+            Preview {
+                command: "echo fixture".into(),
+                cwd: ".".into(),
+                shell: "test".into(),
+                timeout_seconds: 10,
+            },
+        );
+        started(&mut model, 1);
+        let run = model.account.as_mut().unwrap().command.as_mut().unwrap();
+        run.started = start;
+        let index = run.block;
+        assert!(model.tick(start + Duration::from_millis(2_300)));
+        assert_eq!(model.tool_details[&index].elapsed_ms, 2_300);
+        stop(&mut model);
+        let finished = model.tool_details[&index].elapsed_ms;
+        model.tick(start + Duration::from_secs(5));
+        assert_eq!(model.tool_details[&index].elapsed_ms, finished);
+    }
+}

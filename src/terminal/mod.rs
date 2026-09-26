@@ -25,6 +25,8 @@ mod menu;
 mod model;
 mod navigation;
 mod platform;
+#[cfg(test)]
+mod presentation_regression_tests;
 mod prompt_history;
 mod reconcile;
 #[cfg(test)]
@@ -35,6 +37,8 @@ mod recovery_tests;
 #[cfg(test)]
 mod render;
 mod resize;
+#[cfg(test)]
+mod review_regression_tests;
 mod schedule;
 mod session_browser;
 mod spinner;
@@ -43,6 +47,7 @@ mod style;
 mod text;
 mod tool_activity;
 mod tool_demo;
+mod tool_projection;
 #[cfg(test)]
 mod tool_view;
 #[cfg(test)]
@@ -190,6 +195,7 @@ fn run(
         saved,
         prepared: None,
         carried: None,
+        pending: None,
     };
     while let Some(next) = run_once(start)? {
         start = next;
@@ -205,6 +211,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         saved,
         prepared,
         carried,
+        pending,
     } = start;
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("Jecode needs an interactive terminal"));
@@ -237,6 +244,9 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
         if let Some(view) = &mut model.account {
             view.cleared_from = carried.previous_id;
         }
+    }
+    if let Some(pending) = pending {
+        pending.restore(&mut model);
     }
     let location =
         directory.map(|directory| navigation::Location::new(directory, workspace.as_ref()));
@@ -286,7 +296,7 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
     let started = Instant::now();
     loop {
         let size = terminal.size()?;
-        model.editor.set_columns(size.0.saturating_sub(4).max(1));
+        model.editor.set_columns(size.0.saturating_sub(5).max(1));
         if size != previous_size {
             trace.changed();
             paint.request();
@@ -351,47 +361,20 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
             if model.quit {
                 return Ok(None);
             }
-            if let Some(request) = model.navigation.take() {
-                let clear = matches!(request, navigation::Request::Clear);
-                match location.as_ref().unwrap().resolve(request) {
-                    Ok(mut next) => {
-                        if clear {
-                            next.selected = model.account.as_ref().map(|view| view.selected);
-                            next.carried = Some(navigation::Carried {
-                                blocks: model.blocks.clone(),
-                                tools: model.tool_details.clone(),
-                                receipts: model.command_receipts.clone(),
-                                previous_id: model
-                                    .account
-                                    .as_ref()
-                                    .and_then(|view| view.id.clone()),
-                            });
-                        }
-                        if next.prepare().is_err() {
-                            if let Some(view) = &mut model.account {
-                                view.local_notice = "Cannot open that conversation · check its directory or another owner · current session and draft kept".into();
-                            }
-                            continue;
-                        }
-                        renderer.invalidate();
-                        output.write_all(
-                            renderer
-                                .draw(Vec::new(), terminal.size()?, caps.color)
-                                .as_bytes(),
-                        )?;
-                        output.flush()?;
-                        screen.newline_on_drop = false;
-                        // The current worker and lease are joined/released before the next run.
-                        drop(session);
-                        return Ok(Some(next));
-                    }
-                    Err(_) => {
-                        if let Some(view) = &mut model.account {
-                            view.local_notice = "Cannot open that conversation · check its folder or another running owner · current session kept".into();
-                            view.local_failed = false;
-                        }
-                    }
-                }
+            if model.navigation.is_some()
+                && let Some(next) = navigation::resolve(&mut model, location.as_ref().unwrap())
+            {
+                renderer.invalidate();
+                output.write_all(
+                    renderer
+                        .draw(Vec::new(), terminal.size()?, caps.color)
+                        .as_bytes(),
+                )?;
+                output.flush()?;
+                screen.newline_on_drop = false;
+                // The current worker and lease are joined/released before the next run.
+                drop(session);
+                return Ok(Some(next));
             }
         }
         if let Some(session) = &mut session {
@@ -401,16 +384,31 @@ fn run_once(start: navigation::Start) -> io::Result<Option<navigation::Start>> {
                     crate::session::Event::Finished(end, _) => Some(*end),
                     _ => None,
                 };
-                let catalog_loaded = matches!(&event, crate::session::Event::CatalogLoaded(_));
                 account::event(&mut model, event);
-                if catalog_loaded {
-                    commands::complete_argument(&mut model, session);
-                }
+                commands::complete_argument(&mut model, session);
                 if let Some(end) = ended {
                     account::after_finished(&mut model, session, end);
                 }
+                account::drain_queue(&mut model, session);
                 paint.request();
+                if model.navigation.is_some() {
+                    break;
+                }
             }
+        }
+        if model.navigation.is_some()
+            && let Some(next) = navigation::resolve(&mut model, location.as_ref().unwrap())
+        {
+            renderer.invalidate();
+            output.write_all(
+                renderer
+                    .draw(Vec::new(), terminal.size()?, caps.color)
+                    .as_bytes(),
+            )?;
+            output.flush()?;
+            screen.newline_on_drop = false;
+            drop(session);
+            return Ok(Some(next));
         }
         if model.tick(Instant::now()) {
             paint.request();

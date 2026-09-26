@@ -106,7 +106,8 @@ fn word_line_and_visual_row_editing_preserve_safe_boundaries() {
     assert_eq!(model.editor.text, "one abcde\nxyz");
     model.input(Key::DraftEnd, Instant::now());
     model.input(Key::Up, Instant::now());
-    assert_eq!(&model.editor.text[model.editor.cursor..], "e\nxyz");
+    // Shared composer word wrapping keeps "abcde" on its own visual row.
+    assert_eq!(&model.editor.text[model.editor.cursor..], "de\nxyz");
     model.input(Key::Down, Instant::now());
     assert_eq!(model.editor.cursor, model.editor.text.len());
     model.input(Key::WordBackspace, Instant::now());

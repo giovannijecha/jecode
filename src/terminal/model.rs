@@ -18,6 +18,7 @@ pub struct Model {
     pub tool_details: BTreeMap<usize, super::lab::model::Tool>,
     pub command_receipts: BTreeMap<usize, super::lab::model::Receipt>,
     tool_started: BTreeMap<usize, Instant>,
+    tool_names: BTreeMap<usize, &'static str>,
     pub expanded: bool,
     pub status_spinner: Spinner,
     pub action_demo: Option<super::action_demo::Demo>,
@@ -48,6 +49,7 @@ impl Model {
             tool_details: BTreeMap::new(),
             command_receipts: BTreeMap::new(),
             tool_started: BTreeMap::new(),
+            tool_names: BTreeMap::new(),
             expanded: false,
             status_spinner,
             action_demo: None,
@@ -274,6 +276,26 @@ impl Model {
         self.status = "Streaming locally";
     }
     pub fn tick(&mut self, now: Instant) -> bool {
+        let mut elapsed_changed = false;
+        for (&index, &started) in &self.tool_started {
+            if let Some(tool) = self.tool_details.get_mut(&index)
+                && tool.status == super::lab::model::Status::Running
+            {
+                let elapsed = now.saturating_duration_since(started).as_millis() as u64;
+                elapsed_changed |= tool.elapsed_ms / 100 != elapsed / 100;
+                tool.elapsed_ms = elapsed;
+            }
+        }
+        if let Some((index, elapsed)) = self
+            .account
+            .as_ref()
+            .and_then(|view| view.command.as_ref())
+            .and_then(|run| run.elapsed(now))
+            && let Some(tool) = self.tool_details.get_mut(&index)
+        {
+            elapsed_changed |= tool.elapsed_ms / 100 != elapsed / 100;
+            tool.elapsed_ms = elapsed;
+        }
         if let Some(demo) = &mut self.action_demo {
             let changed = demo.tick(&mut self.blocks, now, self.tools.reduced_motion);
             self.tool_details.insert(
@@ -285,7 +307,7 @@ impl Model {
                 self.status = "Complete - local action preview";
                 self.dispatch_demo_queue(now);
             }
-            return changed;
+            return changed || elapsed_changed;
         }
         let command_animated = self
             .account
@@ -304,10 +326,10 @@ impl Model {
             } else {
                 self.dispatch_demo_queue(now);
             }
-            return animated || changed;
+            return animated || changed || elapsed_changed;
         }
         if self.pending.is_empty() || now < self.next {
-            return animated;
+            return animated || elapsed_changed;
         }
         let end = self.pending[self.offset..]
             .char_indices()
@@ -359,6 +381,7 @@ impl Model {
             },
         );
         self.tool_started.insert(index, now);
+        self.tool_names.insert(index, name);
         index
     }
     fn tool_verb(name: &str) -> &str {
@@ -376,6 +399,7 @@ impl Model {
         }
     }
     pub fn restored_tool(source: crate::session::TranscriptTool) -> super::lab::model::Tool {
+        let projected = super::tool_projection::project(&source.name, &source.output);
         super::lab::model::Tool {
             verb: Self::tool_verb(&source.name).into(),
             subject: source.subject,
@@ -391,68 +415,24 @@ impl Model {
             } else {
                 super::lab::model::Status::Done
             },
-            // Canonical receipts do not store a duration. Do not display 0.0s.
-            elapsed_ms: u64::MAX,
-            detail: super::lab::model::Detail::Output(Self::tool_output(&source.output)),
+            elapsed_ms: projected.elapsed_ms.unwrap_or(u64::MAX),
+            detail: super::lab::model::Detail::Output(projected.detail),
         }
     }
     pub fn close_running_tools(&mut self, reason: &str) {
-        for tool in self.tool_details.values_mut() {
+        let now = Instant::now();
+        for (&index, tool) in &mut self.tool_details {
             if tool.status == super::lab::model::Status::Running {
                 tool.status = super::lab::model::Status::Warned;
                 tool.summary = reason.into();
+                if let Some(started) = self.tool_started.remove(&index) {
+                    tool.elapsed_ms = tool
+                        .elapsed_ms
+                        .max(now.saturating_duration_since(started).as_millis() as u64);
+                }
+                self.tool_names.remove(&index);
             }
         }
-    }
-    fn tool_output(raw: &str) -> String {
-        let Ok(value) = crate::json::parse(
-            raw,
-            crate::json::Limits {
-                bytes: raw.len().max(1),
-                nodes: 100_000,
-                depth: 64,
-            },
-        ) else {
-            return raw.into();
-        };
-        if let Some(text) = value.get("text").and_then(crate::json::Value::text) {
-            return text.into();
-        }
-        if let Some(entries) = value.get("entries").and_then(crate::json::Value::array) {
-            return entries
-                .iter()
-                .filter_map(|entry| {
-                    let name = entry.get("name")?.text()?;
-                    let suffix = if entry.get("type").and_then(crate::json::Value::text)
-                        == Some("directory")
-                    {
-                        "/"
-                    } else {
-                        ""
-                    };
-                    Some(format!("{name}{suffix}"))
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-        }
-        if let Some(found) = value.get("matches").and_then(crate::json::Value::array) {
-            return found
-                .iter()
-                .filter_map(|entry| {
-                    Some(format!(
-                        "{}:{}: {}",
-                        entry.get("path")?.text()?,
-                        entry.get("line")?.unsigned()?,
-                        entry.get("text")?.text()?
-                    ))
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-        }
-        if let Some(error) = value.get("error").and_then(crate::json::Value::text) {
-            return error.into();
-        }
-        raw.into()
     }
     #[cfg(test)]
     pub fn finish_tool(
@@ -489,7 +469,9 @@ impl Model {
                 } else {
                     super::lab::model::Status::Done
                 };
-                tool.detail = super::lab::model::Detail::Output(Self::tool_output(output));
+                let name = self.tool_names.remove(&index).unwrap_or("");
+                let projected = super::tool_projection::project(name, output);
+                tool.detail = super::lab::model::Detail::Output(projected.detail);
                 tool.elapsed_ms = self.tool_started.remove(&index).map_or(0, |started| {
                     now.saturating_duration_since(started).as_millis() as u64
                 });
