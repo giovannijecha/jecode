@@ -167,6 +167,11 @@ fn strict_arguments_and_schemas_cover_the_advertised_tools() {
         ("read_file", r#"{"path":"text","max_lines":401}"#),
         ("recall_receipts", r#"{"turn":0}"#),
         ("recall_receipts", r#"{"turn":0,"step":-1}"#),
+        ("index_receipts", r#"{"turn":0}"#),
+        (
+            "index_receipts",
+            r#"{"turn":0,"step":0,"expected_call_id":"fake"}"#,
+        ),
         (
             "recall_receipts",
             r#"{"turn":0,"step":0,"session_id":"other"}"#,
@@ -194,6 +199,7 @@ fn strict_arguments_and_schemas_cover_the_advertised_tools() {
         [
             "list_files",
             "read_file",
+            "index_receipts",
             "recall_receipts",
             "search_text",
             "create_file",

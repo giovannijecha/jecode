@@ -73,6 +73,7 @@ fn utf8_cursor_skips_effect_and_unexecuted_sibling_after_resume() {
     let mut assembled = String::new();
     loop {
         let crate::tools::Prepared::Recall {
+            index: _,
             turn,
             step,
             receipt,

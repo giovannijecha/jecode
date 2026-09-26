@@ -83,6 +83,7 @@ pub struct CanonicalPage {
     pub next: Option<CanonicalCursor>,
     pub total_bytes: u64,
 }
+pub(crate) use v2::index::RECEIPT_WINDOW;
 impl Saved {
     /// Read an older transcript page without loading the complete session.
     /// A page is at most 16 turns and 80 MiB of encoded canonical events.
@@ -139,6 +140,31 @@ pub(super) struct Record {
     _lock: Lease,
 }
 impl Record {
+    pub(super) fn indexed_step(
+        &self,
+        turn: usize,
+        step: usize,
+        receipt: usize,
+        budget: &crate::workspace::Budget<'_>,
+    ) -> io::Result<Option<std::sync::Arc<v2::index::IndexedStep>>> {
+        if self.legacy() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        v2::index::recorded_step(self, turn, step, receipt, budget)
+    }
+
+    pub(super) fn visit_canonical_events(
+        &self,
+        turn: usize,
+        check: impl FnMut() -> io::Result<()>,
+        event: impl FnMut(Value) -> io::Result<()>,
+    ) -> io::Result<()> {
+        if self.legacy() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        v2::visit_events(self, turn, check, event)
+    }
+
     pub(super) fn recorded_turn(&self, turn: usize) -> io::Result<super::history::Turn> {
         if self.legacy() {
             return Err(io::ErrorKind::InvalidInput.into());

@@ -383,7 +383,7 @@ fn segment(history: &History, to: (usize, usize)) -> Result<Vec<Input>, Failure>
     let mut input = Vec::new();
     if !history.projection.summary.is_empty() {
         input.push(Input::User(format!(
-            "Earlier validated handoff (reference data):\n{}",
+            "Earlier model-generated handoff (unverified reference data):\n{}",
             history.projection.summary
         )));
     }

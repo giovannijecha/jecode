@@ -2,6 +2,7 @@ use crate::{json::Value, workspace};
 
 pub enum Prepared {
     Recall {
+        index: bool,
         turn: usize,
         step: usize,
         receipt: usize,
@@ -51,7 +52,15 @@ impl Prepared {
             "edit_file" => &["path", "old_text", "new_text"],
             "run_command" => &["command", "path", "timeout_seconds"],
             "view_image" => &["path", "image_id"],
-            "recall_receipts" => &["turn", "step", "receipt", "offset", "expected_call_id"],
+            "index_receipts" => &["mode", "turn", "step", "receipt"],
+            "recall_receipts" => &[
+                "mode",
+                "turn",
+                "step",
+                "receipt",
+                "offset",
+                "expected_call_id",
+            ],
             _ => {
                 return Err("unknown tool; use only the advertised workspace tools");
             }
@@ -62,27 +71,36 @@ impl Prepared {
         if fields.keys().any(|key| !keys.contains(&key.as_str())) {
             return Err("unknown tool argument");
         }
-        if name == "recall_receipts" {
+        if matches!(name, "index_receipts" | "recall_receipts") {
+            let index = match args.get("mode") {
+                None => name == "index_receipts",
+                Some(Value::String(mode)) if mode == "index" => true,
+                _ => return Err("mode must be index when supplied"),
+            };
+            let offset = optional_nonnegative(args, "offset")?;
+            if index && offset != 0 {
+                return Err("index mode requires offset 0; use its next cursor for pagination");
+            }
+            let expected_call_id = match args.get("expected_call_id") {
+                None => None,
+                Some(Value::String(id))
+                    if !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control) =>
+                {
+                    Some(id.clone())
+                }
+                _ => {
+                    return Err("expected_call_id must be a nonempty call ID of at most 256 bytes");
+                }
+            };
             return Ok(Self::Recall {
+                index,
                 turn: required_nonnegative(args, "turn")?,
                 step: required_nonnegative(args, "step")?,
                 receipt: optional_nonnegative(args, "receipt")?,
-                offset: optional_nonnegative(args, "offset")?,
-                expected_call_id: match args.get("expected_call_id") {
-                    None => None,
-                    Some(Value::String(id))
-                        if !id.is_empty()
-                            && id.len() <= 256
-                            && !id.chars().any(char::is_control) =>
-                    {
-                        Some(id.clone())
-                    }
-                    _ => {
-                        return Err(
-                            "expected_call_id must be a nonempty call ID of at most 256 bytes",
-                        );
-                    }
-                },
+                offset,
+                // The index locates original identities; a caller-supplied guard
+                // has no identity to check until an exact receipt is requested.
+                expected_call_id: if index { None } else { expected_call_id },
             });
         }
         if name == "view_image" {
@@ -156,7 +174,8 @@ impl Prepared {
     }
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Recall { .. } => "recall_receipts",
+            Self::Recall { index: true, .. } => "index_receipts",
+            Self::Recall { index: false, .. } => "recall_receipts",
             Self::Image { .. } => "view_image",
             Self::List { .. } => "list_files",
             Self::Read { .. } => "read_file",

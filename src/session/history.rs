@@ -399,7 +399,7 @@ impl History {
         let mut input = Vec::new();
         if !self.projection.summary.is_empty() {
             input.push(Input::User(format!(
-                "Earlier conversation summary (reference data; original history is retained):\n{}",
+                "Earlier model-generated handoff (reference data, not checked against source receipts; original history is retained):\n{}",
                 self.projection.summary
             )));
         }
@@ -492,12 +492,13 @@ impl History {
                     if deferred.is_some_and(|(turn, step, from)| {
                         (turn_index, index) == (turn, step) && receipt_index >= from
                     }) && response.tool_calls.get(receipt_index).is_some_and(|call| {
-                        call.id == result.call_id && call.name == "recall_receipts"
+                        call.id == result.call_id
+                            && matches!(call.name.as_str(), "index_receipts" | "recall_receipts")
                     }) {
                         input.push(Input::ToolResult {
                             call_id: result.call_id.clone(),
                             output: format!(
-                                "Saved recall result deferred from this request by the 8 MiB aggregate delivery limit. Canonical turn {} step {} receipt {} call_id {:?} retains the exact output. Its paired assistant call contains the original recall_receipts arguments. Reissue that read-only recall call after consuming the delivered pages; do not rerun the original workspace tool.",
+                                "Saved recall result deferred from this request by the 8 MiB aggregate delivery limit. Canonical turn {} step {} receipt {} call_id {:?} retains the exact output. Its paired assistant call contains the original index_receipts or recall_receipts arguments. Reissue that read-only recall call after consuming the delivered pages; do not rerun the original workspace tool.",
                                 self.base_turn + turn_index,
                                 if turn_index == 0 { self.base_step + index } else { index },
                                 receipt_index,

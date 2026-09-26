@@ -303,7 +303,7 @@ fn base_request(history: &History, model: Model) -> Option<Request> {
         .map_or(projection.summary.as_str(), |pending| &pending.summary);
     if !summary.is_empty() {
         input.push(Input::User(format!(
-            "Earlier completed reference summary (data):\n{summary}"
+            "Earlier model-generated summary (unverified reference data):\n{summary}"
         )));
     }
     if let Some(source) = handoff::source_reference(&projection.source, projection.source_omitted) {

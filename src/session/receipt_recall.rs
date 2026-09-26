@@ -9,11 +9,17 @@ use crate::{
 
 const PAGE_BYTES: usize = 8 * 1024;
 
+#[path = "receipt_recall_index.rs"]
+mod saved_index;
+pub(super) use saved_index::execute as index;
+
 /// A page awaiting its first accepted model response is identified from its
 /// paired canonical result, not its display summary. Errors and unexecuted
 /// calls remain saved but do not pin unrelated reads ahead of compaction.
 pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
-    if call.name != "recall_receipts" || call.id != result.call_id || result.output.len() > MAX_TEXT
+    if !matches!(call.name.as_str(), "index_receipts" | "recall_receipts")
+        || call.id != result.call_id
+        || result.output.len() > MAX_TEXT
     {
         return false;
     }
@@ -28,6 +34,7 @@ pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
         return false;
     };
     let Ok(Prepared::Recall {
+        index,
         turn,
         step,
         receipt,
@@ -43,6 +50,17 @@ pub(super) fn admitted(call: &ToolCall, result: &Receipt) -> bool {
             .and_then(Value::unsigned)
             .and_then(|n| usize::try_from(n).ok())
     };
+    if index {
+        return value.get("ok") == Some(&Value::Bool(true))
+            && value.get("mode").and_then(Value::text) == Some("index")
+            && value.get("source").and_then(Value::text).is_some()
+            && value.get("entries").and_then(Value::array).is_some()
+            && (
+                coordinate("turn"),
+                coordinate("step"),
+                coordinate("receipt"),
+            ) == (Some(turn), Some(step), Some(receipt));
+    }
     value.get("ok") == Some(&Value::Bool(true))
         && value.get("source").and_then(Value::text).is_some()
         // The inner call_id names the original source read. The outer receipt
@@ -239,18 +257,23 @@ pub(super) fn eligible(
     result: &super::history::Receipt,
 ) -> bool {
     if call.id != result.call_id
-        || result.summary == "Not executed"
         || !matches!(
             call.name.as_str(),
             "list_files" | "read_file" | "search_text"
         )
-        || result.image.is_some()
     {
         return false;
     }
-    if result.output.len() <= crate::tools::MAX_OUTPUT
+    observed(&result.summary, &result.output, result.image.is_some())
+}
+
+pub(super) fn observed(summary: &str, output: &str, image: bool) -> bool {
+    if summary == "Not executed" || image {
+        return false;
+    }
+    if output.len() <= crate::tools::MAX_OUTPUT
         && let Ok(value) = json::parse(
-            &result.output,
+            output,
             json::Limits {
                 bytes: crate::tools::MAX_OUTPUT,
                 nodes: 4096,
@@ -273,6 +296,12 @@ mod cursor_tests;
 #[cfg(test)]
 #[path = "receipt_recall_delivery_tests.rs"]
 mod delivery_tests;
+#[cfg(test)]
+#[path = "receipt_recall_index_tests.rs"]
+mod index_tests;
+#[cfg(test)]
+#[path = "receipt_recall_pagination_tests.rs"]
+mod pagination_tests;
 #[cfg(test)]
 #[path = "receipt_recall_review_tests.rs"]
 mod review_tests;
