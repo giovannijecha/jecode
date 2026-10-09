@@ -5,6 +5,34 @@ use crate::{
 };
 
 impl App {
+    /// A plain-chat staging list becomes visible composer elements when the
+    /// session opens in the TUI. Clear staging only after the editor owns it.
+    pub(super) fn restore_staged(&mut self) {
+        let Some(handle) = self.persistence.clone() else {
+            return;
+        };
+        let mut input = handle.snapshot().input;
+        if input.staged.is_empty() {
+            return;
+        }
+        let empty = self.state.editor.text.is_empty();
+        let cursor = self.state.editor.cursor;
+        self.state.editor.cursor = self.state.editor.text.len();
+        for attachment in input.staged.drain(..) {
+            self.state.editor.attach(attachment);
+            self.state.editor.insert(" ");
+        }
+        self.state.editor.cursor = if empty {
+            self.state.editor.text.len()
+        } else {
+            cursor
+        };
+        self.state.history.edited();
+        self.edited();
+        handle.input(input);
+        self.persist_input(true);
+    }
+
     pub(super) fn session_hint(&mut self) {
         let Some(handle) = &self.persistence else {
             return;
@@ -48,6 +76,7 @@ impl App {
                         .history
                         .draft(self.state.queue.draft(&self.state.editor)),
                 ),
+                staged: handle.snapshot().input.staged,
                 queued,
                 paused,
                 previous: None,
@@ -202,6 +231,7 @@ impl App {
                 self.state.editor.cursor = cursor;
                 self.state.history.restore(document.input.history);
                 self.state.suggestions.refresh(&self.state.editor.text);
+                self.restore_staged();
                 self.local_start(&format!("/resume {id}"));
                 self.local_finish(Kind::Notice, &format!("Resumed {title} · {status}"), vec![]);
                 self.state.changed();

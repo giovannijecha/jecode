@@ -309,3 +309,39 @@ fn legacy_inline_pdf_image_is_hidden_from_history_reads() {
     assert!(content.contains("[inline PDF image omitted]"));
     assert!(!content.contains("base64,"));
 }
+
+#[test]
+fn text_only_model_does_not_budget_for_unsent_image_parts() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let mut client = OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into());
+    client.fixture_inputs(&["text"]);
+    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    agent.enable_sessions(home.path()).unwrap();
+    let image = agent
+        .sessions()
+        .unwrap()
+        .store()
+        .attachments()
+        .import_bytes("shot.png", &crate::attachments::tests::png(4, 3))
+        .unwrap();
+    agent
+        .prepare_turn(Prompt::new(MARKER.to_string(), vec![image]))
+        .unwrap();
+    let messages = agent.messages.lock().unwrap().clone();
+    let projected = agent.projected_context(&agent.context, &messages);
+    let bare = projected
+        .iter()
+        .map(|message| message.encode().len())
+        .sum::<usize>()
+        + crate::tools::definitions().encode().len()
+        + agent.request_environment().len();
+    assert_eq!(agent.context_estimate(&messages), bare);
+    let request = crate::attachments::provider::materialize(
+        projected,
+        agent.tools.attachments(),
+        agent.client.inputs(),
+    )
+    .unwrap();
+    assert_eq!(parts(request.last().unwrap()), ["text"]);
+}

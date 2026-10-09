@@ -16,6 +16,8 @@ A conversation is saved from its first sent request, before provider work starts
 Adding an attachment to the composer or another pending draft also saves the
 session so its copied bytes remain reachable. Opening the app, text-only
 drafting, queueing and local commands alone do not create a saved session.
+`--plain` saves `/attach` staging immediately and restores it on resume;
+switching to the fullscreen composer shows those attachments in its draft.
 An interrupted or failed request still leaves a saved conversation. Before
 the first request or attachment, unsent input stays in memory and is lost on exit.
 
@@ -85,7 +87,7 @@ Other saved sessions remain available. The session
 list stays open over the fresh context; Esc returns to its composer. The unsent
 composer, FIFO queue and paused drafts stay with the new conversation. The new
 conversation is saved after a request is sent or its inherited drafts contain
-attachments. Old autosave handles cannot
+attachments; pending `--plain` attachments also move with it. Old autosave handles cannot
 recreate deleted history.
 
 During a turn, `/resume` joins the existing command queue. A stopped or failed

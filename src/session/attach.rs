@@ -3,7 +3,9 @@
 use crate::{
     agent::Agent,
     attachments::{Attachment, paths},
+    sessions::Handle,
 };
+use std::collections::BTreeMap;
 use std::io::Write;
 
 /// The path list of an `/attach` line.
@@ -18,6 +20,11 @@ pub fn stage(
     staged: &mut Vec<Attachment>,
     output: &mut impl Write,
 ) -> Result<(), String> {
+    if arguments.trim() == "--clear" {
+        staged.clear();
+        save(agent, staged)?;
+        return writeln!(output, "Staged attachments cleared.").map_err(|error| error.to_string());
+    }
     let directory = std::env::current_dir().map_err(|error| error.to_string())?;
     let imported = if arguments.contains("attachment:") {
         let pool = agent
@@ -42,7 +49,56 @@ pub fn stage(
         agent.import_attachments(&paths::typed(arguments, &directory)?)?
     };
     staged.extend(imported);
+    save(agent, staged)?;
     announce(staged, output)
+}
+
+/// Keep plain-chat pending attachments in the session without changing its
+/// composer draft, queue or history.
+pub fn save(agent: &Agent, staged: &[Attachment]) -> Result<(), String> {
+    let handle = agent.sessions().ok_or("Session storage is unavailable")?;
+    let mut input = handle.snapshot().input;
+    input.staged = staged.to_vec();
+    handle.input(input);
+    handle.flush()
+}
+
+/// Move the active staging list to a resumed session before releasing its
+/// references in the previous session. Existing staged entries at the target
+/// are retained, including repeated attachments.
+pub fn transfer(
+    agent: &Agent,
+    previous: Option<&Handle>,
+    staged: &mut Vec<Attachment>,
+) -> Result<(), String> {
+    let current = agent.sessions().ok_or("Session storage is unavailable")?;
+    let saved = current.snapshot().input.staged;
+    let mut present = BTreeMap::<&str, usize>::new();
+    for attachment in staged.iter() {
+        *present.entry(&attachment.id).or_default() += 1;
+    }
+    let mut target_counts = BTreeMap::<&str, usize>::new();
+    let mut additional = Vec::new();
+    for attachment in &saved {
+        let count = target_counts.entry(&attachment.id).or_default();
+        *count += 1;
+        if *count > present.get(attachment.id.as_str()).copied().unwrap_or(0) {
+            additional.push(attachment.clone());
+        }
+    }
+    staged.extend(additional);
+    save(agent, staged)?;
+    if let Some(previous) = previous
+        && previous.id() != current.id()
+    {
+        let mut input = previous.snapshot().input;
+        if !input.staged.is_empty() {
+            input.staged.clear();
+            previous.input(input);
+            previous.flush()?;
+        }
+    }
+    Ok(())
 }
 
 pub fn announce(staged: &[Attachment], output: &mut impl Write) -> Result<(), String> {
@@ -60,68 +116,4 @@ pub fn announce(staged: &[Attachment], output: &mut impl Write) -> Result<(), St
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::*;
-    use crate::{
-        config::{Settings, Store},
-        json::Value,
-        openrouter::OpenRouter,
-        test_support::{Directory, HttpFixture, completion},
-        tools::Tools,
-    };
-    use std::io::Cursor;
-
-    #[test]
-    fn plain_chat_stages_files_until_the_next_message() {
-        let home = Directory::new();
-        let project = Directory::new();
-        std::fs::write(project.path().join("notes.txt"), "staged text").unwrap();
-        let fixture = HttpFixture::new(vec![
-            (200, completion("Read.", vec![])),
-            (200, completion("Plain.", vec![])),
-        ]);
-        let mut agent = Agent::new(
-            OpenRouter::fixture(fixture.endpoint.clone()),
-            Tools::new(project.path()).unwrap(),
-        );
-        let mut config = SessionConfig {
-            store: Store::new(home.path().join("config.json")),
-            settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-            bash: crate::tools::find_bash().unwrap(),
-        };
-        let notes = project.path().join("notes.txt");
-        let mut input = Cursor::new(format!(
-            "/attach missing.txt\n/attach \"{}\"\n\nthen plain\n/exit\n",
-            notes.display()
-        ));
-        let mut output = Vec::new();
-        let mut status = Vec::new();
-        chat(
-            &mut agent,
-            &mut config,
-            &mut input,
-            &mut output,
-            &mut status,
-            Vec::new(),
-        )
-        .unwrap();
-        let output = String::from_utf8(output).unwrap();
-        assert!(String::from_utf8(status).unwrap().contains("Cannot attach"));
-        assert!(output.contains("Staged [1# File: notes.txt] for your next message."));
-        let requests = fixture.finish();
-        assert_eq!(requests.len(), 2);
-        let last = |index: usize| {
-            requests[index]
-                .body
-                .get("messages")
-                .and_then(Value::as_array)
-                .unwrap()
-                .last()
-                .unwrap()
-                .encode()
-        };
-        // Enter alone sends only the staged attachment; the next line is plain.
-        assert!(last(0).contains("attachment:att-"));
-        assert!(!last(1).contains("attachment:att-"));
-    }
-}
+mod tests;

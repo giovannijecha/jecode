@@ -260,6 +260,43 @@ fn draft_attachments_survive_a_restart_and_resume() {
 }
 
 #[test]
+fn plain_staged_attachments_become_one_visible_tui_element() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let mut first = Agent::new(
+        OpenRouter::fixture(OFFLINE.into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    first.enable_sessions(home.path()).unwrap();
+    let handle = first.sessions().unwrap();
+    let pool = handle.store().attachments();
+    let attachment = pool.import_bytes("pending.txt", b"pending").unwrap();
+    let mut input = handle.snapshot().input;
+    input.draft = crate::sessions::Draft::from_prompt("existing draft".into());
+    input.staged.push(attachment.clone());
+    handle.input(input);
+    handle.flush().unwrap();
+    let id = handle.id();
+    drop(handle);
+    drop(first);
+
+    let mut resumed = app(&home, &directory, OFFLINE);
+    resumed.resume_session(&id);
+    assert_eq!(
+        resumed.state.editor.display(),
+        "existing draft[1# File: pending.txt] "
+    );
+    let saved = resumed.persistence.as_ref().unwrap().snapshot().input;
+    assert!(saved.staged.is_empty());
+    assert_eq!(saved.draft.attachments, vec![attachment.clone()]);
+    drop(resumed);
+
+    let mut reopened = app(&home, &directory, OFFLINE);
+    reopened.resume_session(&id);
+    assert_eq!(reopened.state.editor.attachments, vec![attachment]);
+}
+
+#[test]
 fn an_import_that_finishes_after_a_session_change_is_not_inserted() {
     let home = Directory::new();
     let directory = Directory::new();

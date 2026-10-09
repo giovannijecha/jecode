@@ -60,6 +60,8 @@ impl Draft {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Input {
     pub draft: Draft,
+    /// Attachments staged by the line-based chat for its next message.
+    pub staged: Vec<Attachment>,
     pub queued: Vec<Prompt>,
     pub paused: Vec<Draft>,
     pub previous: Option<Draft>,
@@ -78,6 +80,7 @@ impl Input {
                     .chain(&self.history)
                     .flat_map(|prompt| &prompt.attachments),
             )
+            .chain(&self.staged)
             .map(|attachment| attachment.id.clone())
             .collect()
     }
@@ -102,6 +105,7 @@ impl Input {
     #[cfg(test)]
     pub fn meaningful(&self) -> bool {
         !self.draft.text.is_empty()
+            || !self.staged.is_empty()
             || !self.queued.is_empty()
             || !self.paused.is_empty()
             || self.previous.is_some()
@@ -125,6 +129,7 @@ impl Input {
             |prompt: &Prompt| Prompt::new(redactor.text(&prompt.text), prompt.attachments.clone());
         Self {
             draft: draft(&self.draft),
+            staged: self.staged.clone(),
             queued: self.queued.iter().map(prompt).collect(),
             paused: self.paused.iter().map(draft).collect(),
             previous: self.previous.as_ref().map(draft),
@@ -135,6 +140,10 @@ impl Input {
     fn value(&self) -> Value {
         Value::object([
             ("draft", self.draft.value()),
+            (
+                "staged",
+                Value::Array(self.staged.iter().map(Attachment::value).collect()),
+            ),
             ("queued", prompts(&self.queued)),
             (
                 "paused",
@@ -160,6 +169,14 @@ impl Input {
         let history = prompt_list(value, "history", 50)?;
         Ok(Self {
             draft: Draft::parse(required(value, "draft")?)?,
+            staged: match value.get("staged") {
+                None => Vec::new(),
+                Some(Value::Array(values)) => values
+                    .iter()
+                    .map(Attachment::parse)
+                    .collect::<Result<Vec<_>, _>>()?,
+                Some(_) => return Err("Invalid saved staged attachments".into()),
+            },
             queued,
             paused,
             history,

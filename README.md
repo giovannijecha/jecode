@@ -1,5 +1,9 @@
 # Jecode
 
+[![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
+
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+
 A personal terminal coding agent written in Rust, using OpenRouter and four tools:
 `read`, `write`, `edit` and `bash`. Tools execute directly in your project.
 

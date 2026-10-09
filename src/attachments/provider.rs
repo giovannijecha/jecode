@@ -302,13 +302,24 @@ fn file_part(name: &str, bytes: &[u8]) -> Value {
 /// Estimated tokens the materialized form adds beyond the stored message.
 /// Payload size says nothing useful here: a 4 MB PNG and a 40 KB JPEG of the
 /// same dimensions cost the same, so images are weighed by pixels.
+#[cfg(test)]
 pub fn weight(message: &Value) -> usize {
+    weight_for(message, Inputs::default())
+}
+
+/// Apply the same model capability decision used by `content` before adding
+/// the cost of image parts to a request estimate.
+pub fn weight_for(message: &Value, inputs: Inputs) -> usize {
     let attachments = match message.get("role").and_then(Value::as_str) {
         Some("user") => super::of_message(message),
         Some("tool") => requested(message).into_iter().collect(),
         _ => return 0,
     };
-    attachments.iter().map(tokens).sum()
+    attachments
+        .iter()
+        .filter(|attachment| attachment.kind() != Kind::Image || inputs.image != Some(false))
+        .map(tokens)
+        .sum()
 }
 
 fn tokens(attachment: &Attachment) -> usize {

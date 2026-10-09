@@ -134,6 +134,9 @@ fn read_views_follow_their_tool_results() {
             ("content", Value::string("seen")),
         ]),
     ];
+    let text_only = materialize(messages.clone(), Some(&pool), known(false, false)).unwrap();
+    assert_eq!(types(&text_only[2]), ["text"]);
+    assert_eq!(weight_for(&messages[0], known(false, false)), 0);
     let request = materialize(messages, Some(&pool), Inputs::default()).unwrap();
     // Tool results stay contiguous; the view follows the run.
     let roles = request

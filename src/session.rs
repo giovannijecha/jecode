@@ -47,6 +47,7 @@ fn chat_inner(
     resume: Option<Option<String>>,
     mut staged: Vec<Attachment>,
 ) -> Result<(), String> {
+    let previous = agent.sessions();
     agent.enable_sessions(
         config
             .store
@@ -61,6 +62,7 @@ fn chat_inner(
     } else {
         persistence::hint(agent, output)?;
     }
+    attach::transfer(agent, previous.as_ref(), &mut staged)?;
     if !staged.is_empty() {
         attach::announce(&staged, output)?;
     }
@@ -96,11 +98,17 @@ fn chat_inner(
                 "Pending drafts are managed in the fullscreen terminal interface."
             )
             .map_err(|error| error.to_string()),
-            "/resume" => persistence::resume(agent, config, None, input, output, status),
+            "/resume" => {
+                let previous = agent.sessions();
+                persistence::resume(agent, config, None, input, output, status)
+                    .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
+            }
             "/tmp" => temporary::print(agent, "", output),
             _ if line.starts_with("/tmp ") => temporary::print(agent, line[5..].trim(), output),
             _ if line.starts_with("/resume ") => {
+                let previous = agent.sessions();
                 persistence::resume(agent, config, Some(line[8..].trim()), input, output, status)
+                    .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
             }
             "/export" => agent.archive().save().and_then(|path| {
                 agent.record_local(
@@ -131,10 +139,19 @@ fn chat_inner(
                 writeln!(output, "Unknown command. Use /help to see commands.")
                     .map_err(|error| error.to_string())
             }
-            _ => agent.run_turn(
-                Prompt::new(line.to_owned(), std::mem::take(&mut staged)),
-                &mut Console::new(output, status),
-            ),
+            _ => {
+                let prompt = Prompt::new(line.to_owned(), staged.clone());
+                let before = agent.archive().messages.lock().unwrap().len();
+                let result = agent.run_turn(prompt.clone(), &mut Console::new(output, status));
+                let accepted =
+                    agent.archive().messages.lock().unwrap().get(before) == Some(&prompt.message());
+                if accepted {
+                    staged.clear();
+                    result.and(attach::save(agent, &staged))
+                } else {
+                    result
+                }
+            }
         };
         let result = result.and(agent.save_session());
         if let Err(error) = result {

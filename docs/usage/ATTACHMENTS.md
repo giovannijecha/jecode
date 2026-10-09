@@ -45,6 +45,11 @@ directory; backslashes stay literal so Windows paths need no escaping.
 In plain chat it also accepts saved references, for example
 `/attach attachment:att-123-456-7`. A resumed draft shows this command beside
 its labels so its stored copies can be staged again without the source files.
+Plain-chat staging is saved immediately. It survives exit, `/new`, `/resume`
+and deletion of the source conversation; an empty line sends the staged items.
+Use `/attach --clear` in plain chat to discard the staged list without sending.
+Opening that session in the fullscreen composer turns the staging list into
+visible draft elements once, while keeping any existing draft text.
 
 ## What the model receives
 
@@ -90,8 +95,8 @@ Copies live in the project's session bucket, beside the saved sessions:
 ```
 
 The copy is taken once, so later changes to the source file do not affect it.
-Images that need conversion also store the converted view. Drafts, queued and
-paused messages, prompt history and saved messages all keep their elements
+Images that need conversion also store the converted view. Drafts, plain-chat
+staging, queued and paused messages, prompt history and saved messages keep their elements
 across cancellation, session switches, restarts and crash recovery.
 Images returned inside OpenRouter PDF parser annotations are also stored in
 this bucket. The conversation keeps references alongside the parser hash and

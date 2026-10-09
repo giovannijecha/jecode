@@ -58,6 +58,7 @@ impl Archive {
         let mut attachments: Vec<_> = messages
             .iter()
             .flat_map(crate::attachments::of_message)
+            .chain(messages.iter().filter_map(read_attachment))
             .filter(|attachment| seen.insert(attachment.id.clone()))
             .collect();
         let annotation_ids: Vec<_> = messages
@@ -140,6 +141,17 @@ impl Archive {
         }
         Err("Could not reserve a unique export filename".into())
     }
+}
+
+/// A successful `read attachment:...` result names an asset even when this
+/// conversation did not import it as a user attachment.
+fn read_attachment(message: &Value) -> Option<crate::attachments::Attachment> {
+    if message.get("role").and_then(Value::as_str) != Some("tool") {
+        return None;
+    }
+    let result = crate::json::parse(message.get("content")?.as_str()?).ok()?;
+    let attachment = crate::attachments::Attachment::parse(result.get("attachment")?).ok()?;
+    (result.get("reference")?.as_str()? == attachment.reference()).then_some(attachment)
 }
 
 /// The folder beside an export that holds its attachments.

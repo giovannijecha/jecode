@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Rust (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2025
+            toolchain: 1.95.0-x86_64-pc-windows-gnullvm
+          - name: Linux
+            os: ubuntu-24.04
+            toolchain: 1.95.0
+          - name: macOS
+            os: macos-15
+            toolchain: 1.95.0
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust
+        shell: bash
+        run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
+      - name: Use the bundled Windows linker
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup component add rust-mingw --toolchain ${{ matrix.toolchain }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value 'CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=rust-lld'
+      - name: Check formatting
+        run: cargo +${{ matrix.toolchain }} fmt --all -- --check
+      - name: Build offline
+        run: cargo +${{ matrix.toolchain }} build --locked --offline
+      - name: Check all targets
+        run: cargo +${{ matrix.toolchain }} clippy --locked --offline --all-targets -- -D warnings
+      - name: Run tests
+        run: cargo +${{ matrix.toolchain }} test --locked --offline --quiet

@@ -176,3 +176,57 @@ fn exports_bundle_referenced_attachments_beside_the_json() {
         "only the first export and its folder remain"
     );
 }
+
+#[test]
+fn export_bundles_attachment_read_from_another_session() {
+    let directory = Directory::new();
+    let storage = Directory::new();
+    let pool = crate::attachments::Pool::new(storage.path().join("attachments"));
+    let png = crate::attachments::tests::png(4, 3);
+    let image = pool.import_bytes("other-session.png", &png).unwrap();
+    let result = Value::object([
+        ("view", Value::string("image")),
+        ("attachment", image.value()),
+        ("reference", Value::string(image.reference())),
+    ]);
+    let archive = Archive {
+        effort: "default".into(),
+        events: Arc::new(Mutex::new(vec![])),
+        attachments: Some(pool),
+        model: "fixture/model".into(),
+        directory: directory.path().to_path_buf(),
+        messages: Arc::new(Mutex::new(vec![Value::object([
+            ("role", Value::string("tool")),
+            ("tool_call_id", Value::string("read-other")),
+            ("content", Value::string(result.encode())),
+        ])])),
+        redactor: Redactor::new("fixture-secret".into()),
+    };
+    let path = archive.save().unwrap();
+    let document = json::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let listed = document
+        .get("attachments")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0].get("id").and_then(Value::as_str),
+        Some(image.id.as_str())
+    );
+    let relative = listed[0].get("path").and_then(Value::as_str).unwrap();
+    assert_eq!(
+        fs::read(path.parent().unwrap().join(relative)).unwrap(),
+        png
+    );
+    *archive.messages.lock().unwrap() = vec![Value::object([
+        ("role", Value::string("tool")),
+        (
+            "content",
+            Value::string(format!("Saw {} in plain output", image.reference())),
+        ),
+    ])];
+    let plain = archive.save().unwrap();
+    let plain_document = json::parse(&fs::read_to_string(&plain).unwrap()).unwrap();
+    assert!(plain_document.get("attachments").is_none());
+    assert!(!bundle_directory(&plain).exists());
+}

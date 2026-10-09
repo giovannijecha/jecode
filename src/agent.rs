@@ -288,13 +288,17 @@ impl Agent {
             && context.measured_end >= context.from
             && context.measured_end <= messages.len()
         {
-            context.estimate(messages, self.compatible_from)
+            context.estimate(messages, self.compatible_from, self.client.inputs())
         } else {
             context.estimate_bytes(
-                crate::context::bytes(&self.projected_context(context, messages))
+                self.context_bytes(&self.projected_context(context, messages))
                     .saturating_add(crate::tools::definitions().encode().len()),
             )
         }
+    }
+
+    fn context_bytes(&self, messages: &[Value]) -> usize {
+        crate::context::bytes_for(messages, self.client.inputs())
     }
 
     fn context_estimate(&self, messages: &[Value]) -> usize {

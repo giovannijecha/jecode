@@ -1,0 +1,30 @@
+name: Bug report
+description: Report reproducible behavior in Jecode.
+body:
+  - type: markdown
+    attributes:
+      value: Use synthetic examples. Report vulnerabilities privately through the Security tab; omit keys, transcripts and personal attachments.
+  - type: input
+    id: revision
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and terminal
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

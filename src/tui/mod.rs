@@ -147,6 +147,7 @@ fn run_inner(
         Some(None) => app.open_sessions(),
         None => {}
     }
+    app.restore_staged();
     let mut decoder = Decoder::default();
     let mut dirty = true;
     let mut pending = None;
