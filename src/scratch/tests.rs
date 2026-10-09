@@ -66,7 +66,7 @@ fn all_four_tools_share_the_session_area_without_changing_the_project_cwd() {
             concat!(
                 "set -e; cat project.txt; bash \"$JECODE_TMP/probes/check.sh\"; ",
                 "test -n \"$TMPDIR\"; test -n \"$TEMP\"; test -n \"$TMP\"; ",
-                "created=$(mktemp); printf 'temp' > \"$created\"; ",
+                "created=$(mktemp \"$TMPDIR/check.XXXXXXXXXX\"); printf 'temp' > \"$created\"; ",
                 "if command -v cygpath >/dev/null; then cygpath -m \"$created\"; else printf '%s\\n' \"$created\"; fi"
             ),
         )],
@@ -81,7 +81,10 @@ fn all_four_tools_share_the_session_area_without_changing_the_project_cwd() {
     assert_eq!(lines.next(), Some("project"));
     assert_eq!(lines.next(), Some("after"));
     let generated = fs::canonicalize(lines.next().unwrap()).unwrap();
-    assert!(generated.starts_with(&root));
+    assert!(
+        generated.starts_with(&root),
+        "{generated:?} outside {root:?}"
+    );
     assert_eq!(fs::read_to_string(generated).unwrap(), "temp");
     assert_eq!(fs::read_dir(project.path()).unwrap().count(), 1);
     let info = tools.temporary().unwrap().info().unwrap();
