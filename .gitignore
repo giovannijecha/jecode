@@ -1,0 +1,14 @@
+/target/
+JECODE.md
+.jecode/
+JECODE-SESSION-*.json
+.env
+.env.*
+*.log
+*.key
+*.pem
+*.p12
+/.tmp/
+/.artifacts/
+/artifacts/
+/test-results/

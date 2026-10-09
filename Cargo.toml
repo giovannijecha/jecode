@@ -1,0 +1,21 @@
+[package]
+name = "jecode"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "A personal terminal agent written in Rust"
+license = "MIT"
+authors = ["Giovanni Jecha"]
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+
+[build-dependencies]
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"
