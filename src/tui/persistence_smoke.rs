@@ -73,6 +73,7 @@ fn sessions_windows_smoke() {
     run(
         Agent::new(client, Tools::new(directory.path()).unwrap()),
         tests::config(&directory),
+        Default::default(),
     )
     .unwrap();
     let home = directory.path().join(".jecode");

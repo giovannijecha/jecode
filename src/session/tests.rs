@@ -55,6 +55,7 @@ fn interactive_session_recovers_from_api_errors_and_can_clear_history() {
         &mut input,
         &mut output,
         &mut events,
+        Vec::new(),
     )
     .unwrap();
     let output = String::from_utf8(output).unwrap();
@@ -137,6 +138,7 @@ fn model_command_preserves_context_and_does_not_change_saved_defaults() {
         &mut input,
         &mut output,
         &mut Vec::new(),
+        Vec::new(),
     )
     .unwrap();
     assert_eq!(agent.model(), "fixture/new");

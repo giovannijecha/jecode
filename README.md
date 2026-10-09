@@ -1,5 +1,9 @@
 # Jecode
 
+[![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
+
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+
 A personal terminal coding agent written in Rust, using OpenRouter and four tools:
 `read`, `write`, `edit` and `bash`. Tools execute directly in your project.
 
@@ -81,6 +85,7 @@ completion. Type `/cancel` to leave setup without replacing your settings.
 jecode
 jecode "Explain the structure of this project"
 jecode --model provider/model-id "Check this change"
+jecode --attach report.pdf "Summarize this report"
 jecode setup
 ```
 
@@ -89,6 +94,7 @@ jecode setup
 | `/new` | Start a new conversation using the saved defaults. |
 | `/resume [ID]` | Resume a conversation; Ctrl+D in the list marks it for deletion, Enter confirms. |
 | `/drafts` | Review pending messages; edit one with Enter, discard with Ctrl+D, or send a paused draft with Ctrl+S. |
+| `/attach PATH...` | Attach files to the draft; dropping files or Alt+V for a clipboard image does the same. |
 | `/model [ID]` | Choose the current conversation's model, then its effort. |
 | `/effort [NAME]` | Choose a supported reasoning effort for this conversation. |
 | `/settings` | Change the saved model, effort or OpenRouter key. |

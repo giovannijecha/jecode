@@ -1,6 +1,7 @@
 mod layout;
 use super::terminal::Key;
 use super::text;
+use crate::attachments::{self, Attachment, MARKER, Prompt};
 pub use layout::Layout;
 
 const LIMIT: usize = 1024 * 1024;
@@ -9,12 +10,15 @@ const LIMIT: usize = 1024 * 1024;
 pub struct Editor {
     pub text: String,
     pub cursor: usize,
+    /// One per marker in `text`, in order. Only `attach` adds markers.
+    pub attachments: Vec<Attachment>,
     goal: Option<usize>,
 }
 
 impl Editor {
     pub fn insert(&mut self, text: &str) -> bool {
-        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        // Typed or pasted text never carries attachment markers.
+        let text = attachments::strip(&text.replace("\r\n", "\n").replace('\r', "\n"));
         if text.len() > LIMIT.saturating_sub(self.text.len()) {
             return false;
         }
@@ -24,21 +28,68 @@ impl Editor {
         true
     }
 
-    pub fn replace(&mut self, text: String) {
-        // Recovery may combine several bounded messages. Never truncate recovered text.
-        self.cursor = text.len();
-        self.text = text;
+    /// Inserts an attachment element at the cursor.
+    pub fn attach(&mut self, attachment: Attachment) {
+        let index = self.markers(self.cursor);
+        self.attachments.insert(index, attachment);
+        self.text.insert(self.cursor, MARKER);
+        self.cursor += MARKER.len_utf8();
         self.goal = None;
     }
 
-    pub fn take(&mut self) -> String {
+    pub fn replace(&mut self, text: String) {
+        self.set(Prompt::plain(text));
+    }
+
+    pub fn set(&mut self, prompt: Prompt) {
+        // Recovery may combine several bounded messages. Never truncate recovered text.
+        self.cursor = prompt.text.len();
+        self.text = prompt.text;
+        self.attachments = prompt.attachments;
+        self.goal = None;
+    }
+
+    pub fn prompt(&self) -> Prompt {
+        Prompt::new(self.text.clone(), self.attachments.clone())
+    }
+
+    pub fn take(&mut self) -> Prompt {
         self.cursor = 0;
         self.goal = None;
-        std::mem::take(&mut self.text)
+        Prompt::new(
+            std::mem::take(&mut self.text),
+            std::mem::take(&mut self.attachments),
+        )
+    }
+
+    /// Text with numbered labels in place of markers.
+    pub fn display(&self) -> String {
+        attachments::expand(&self.text, &self.attachments)
+    }
+
+    fn markers(&self, end: usize) -> usize {
+        self.text[..end].chars().filter(|&c| c == MARKER).count()
+    }
+
+    /// Removes a byte range together with the attachments it contains.
+    fn remove(&mut self, start: usize, end: usize) {
+        let first = self.markers(start);
+        let count = self.text[start..end]
+            .chars()
+            .filter(|&c| c == MARKER)
+            .count();
+        self.attachments.drain(first..first + count);
+        self.text.drain(start..end);
     }
 
     pub fn layout(&self, columns: usize) -> Layout {
-        Layout::new(&self.text, self.cursor, columns)
+        let labels = self
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(index, attachment)| attachment.label(index + 1))
+            .collect::<Vec<_>>();
+        Layout::new(&self.text, self.cursor, columns, &labels)
     }
 
     pub fn viewport(&self, columns: usize, secret: bool) -> (String, usize) {
@@ -46,12 +97,13 @@ impl Editor {
         let display = if secret {
             "*".repeat(self.text.chars().count())
         } else {
-            text::clean(&self.text).replace('\n', " ")
+            text::clean(&self.display()).replace('\n', " ")
         };
         let before = if secret {
             self.text[..self.cursor].chars().count()
         } else {
-            text::cells(&text::clean(&self.text[..self.cursor]).replace('\n', " "))
+            let prefix = attachments::expand(&self.text[..self.cursor], &self.attachments);
+            text::cells(&text::clean(&prefix).replace('\n', " "))
         };
         let wanted = before.saturating_sub(columns - 1);
         let mut skipped = 0;
@@ -100,12 +152,12 @@ impl Editor {
                 } else {
                     self.previous()
                 };
-                self.text.drain(start..self.cursor);
+                self.remove(start, self.cursor);
                 self.cursor = start;
             }
             46 => {
                 let end = if ctrl { self.word_right() } else { self.next() };
-                self.text.drain(self.cursor..end);
+                self.remove(self.cursor, end);
             }
             37 => {
                 self.cursor = if ctrl {
@@ -127,7 +179,7 @@ impl Editor {
             69 if ctrl => self.cursor = self.line_end(),
             85 if ctrl => {
                 let start = self.line_start();
-                self.text.drain(start..self.cursor);
+                self.remove(start, self.cursor);
                 self.cursor = start;
             }
             _ => {}

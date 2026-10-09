@@ -131,3 +131,72 @@ fn session_output_configuration_switches_owner_and_keeps_prior_refs_readable() {
     tools.configure_output_store(prior);
     assert!(tools.outputs.resolve(&reference).is_ok());
 }
+
+#[test]
+fn attachment_references_read_text_pages_and_describe_other_kinds() {
+    let workspace = Directory::new();
+    let home = Directory::new();
+    let outside = Directory::new();
+    let mut tools = Tools::new(workspace.path()).unwrap();
+    let read = |tools: &Tools, path: &str, offset: usize| {
+        tools.execute(
+            "read",
+            &Value::object([
+                ("path", Value::string(path)),
+                ("byte_offset", Value::number(offset)),
+            ])
+            .encode(),
+        )
+    };
+    assert!(
+        read(&tools, "attachment:att-1-2-3", 0)
+            .get("error")
+            .is_some()
+    );
+    let pool = crate::attachments::Pool::new(home.path().join("attachments"));
+    tools.configure_attachments(pool.clone());
+    let source = outside.path().join("notes.txt");
+    std::fs::write(&source, "outside the workspace").unwrap();
+    let text = pool
+        .import_file(&source, &crate::cancel::Cancellation::default())
+        .unwrap();
+    let page = read(&tools, &text.reference(), 8);
+    assert_eq!(
+        page.get("content").and_then(Value::as_str),
+        Some("the workspace")
+    );
+    assert_eq!(
+        page.get("reference").and_then(Value::as_str),
+        Some(text.reference().as_str())
+    );
+    assert!(
+        page.get("attached_from")
+            .and_then(Value::as_str)
+            .unwrap()
+            .ends_with("notes.txt")
+    );
+    let image = pool
+        .import_bytes("shot.png", &crate::attachments::tests::png(2, 2))
+        .unwrap();
+    let shown = read(&tools, &image.reference(), 0);
+    assert_eq!(shown.get("view").and_then(Value::as_str), Some("image"));
+    assert!(!shown.encode().contains("base64"));
+    let binary = pool.import_bytes("blob.bin", &[0, 1, 2, 255]).unwrap();
+    let opaque = read(&tools, &binary.reference(), 0);
+    assert!(opaque.get("view").is_none());
+    assert!(opaque.get("content").is_none());
+    assert!(
+        opaque
+            .get("note")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("has not interpreted")
+    );
+    let local = opaque.get("local_path").and_then(Value::as_str).unwrap();
+    assert_eq!(std::fs::read(local).unwrap(), [0, 1, 2, 255]);
+    assert!(
+        read(&tools, "attachment:../escape", 0)
+            .get("error")
+            .is_some()
+    );
+}

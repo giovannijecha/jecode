@@ -49,6 +49,7 @@ fn composer_windows_smoke() {
             settings,
             bash: crate::tools::find_bash().unwrap(),
         },
+        Default::default(),
     )
     .unwrap();
     assert_eq!(fixture.finish().len(), 4);
@@ -152,7 +153,7 @@ fn resize_windows_smoke() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    run(agent, tests::config(&directory)).unwrap();
+    run(agent, tests::config(&directory), Default::default()).unwrap();
     let requests = fixture.finish();
     assert_eq!(requests.len(), 3);
     assert_eq!(

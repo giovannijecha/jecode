@@ -22,6 +22,8 @@ pub struct Stream {
     calls: BTreeMap<usize, Value>,
     reasoning: Vec<Value>,
     reasoning_text: String,
+    // PDF parsing results to replay with this message on later requests.
+    annotations: Vec<Value>,
     finish: Option<String>,
     done: bool,
     saw_data: bool,
@@ -92,6 +94,9 @@ impl Stream {
         if !self.reasoning_text.is_empty() {
             fields.insert("reasoning".into(), Value::string(self.reasoning_text));
         }
+        if !self.annotations.is_empty() {
+            fields.insert("annotations".into(), Value::Array(self.annotations));
+        }
         let mut response = Value::object([(
             "choices",
             Value::Array(vec![Value::object([
@@ -161,6 +166,14 @@ impl Stream {
                 return Err("OpenRouter stream changed its finish reason".into());
             }
             self.finish = Some(reason.into());
+        }
+        for source in [choice.get("delta"), choice.get("message")]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(Value::Array(annotations)) = source.get("annotations") {
+                self.annotations.extend(annotations.iter().cloned());
+            }
         }
         let Some(delta) = choice.get("delta") else {
             return Ok(());

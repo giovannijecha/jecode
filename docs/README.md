@@ -16,6 +16,7 @@ on; saved sessions belong to that directory.
 | [Tools](usage/TOOLS.md) | File operations, Bash execution, output references and native cleanup. |
 | [Saved sessions](usage/SESSIONS.md) | Explicit resume, unsent input, deletion and storage format. |
 | [Export](usage/EXPORT.md) | Manual JSON snapshots, retained evidence and output limits. |
+| [Attachments](usage/ATTACHMENTS.md) | File drops, clipboard images, `/attach`, provider delivery, storage and native requirements. |
 | [Temporary files](usage/TEMPORARY.md) | Session working areas, tool paths, retention and explicit cleanup. |
 | [Long-running work](usage/LONG_WORK.md) | Connection recovery, context compaction and practical boundaries. |
 | [Copy](usage/COPY.md) | Response/code/quote selection and clipboard delivery. |

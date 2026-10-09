@@ -1,10 +1,38 @@
 use super::{App, Feedback, Kind, drafts::Queue, editor::Editor, selector::Selector, state::Item};
 use crate::{
     events::Event,
-    sessions::{Draft, Input, Record},
+    sessions::{Input, Record},
 };
 
 impl App {
+    /// A plain-chat staging list becomes visible composer elements when the
+    /// session opens in the TUI. Clear staging only after the editor owns it.
+    pub(super) fn restore_staged(&mut self) {
+        let Some(handle) = self.persistence.clone() else {
+            return;
+        };
+        let mut input = handle.snapshot().input;
+        if input.staged.is_empty() {
+            return;
+        }
+        let empty = self.state.editor.text.is_empty();
+        let cursor = self.state.editor.cursor;
+        self.state.editor.cursor = self.state.editor.text.len();
+        for attachment in input.staged.drain(..) {
+            self.state.editor.attach(attachment);
+            self.state.editor.insert(" ");
+        }
+        self.state.editor.cursor = if empty {
+            self.state.editor.text.len()
+        } else {
+            cursor
+        };
+        self.state.history.edited();
+        self.edited();
+        handle.input(input);
+        self.persist_input(true);
+    }
+
     pub(super) fn session_hint(&mut self) {
         let Some(handle) = &self.persistence else {
             return;
@@ -37,10 +65,7 @@ impl App {
             return;
         }
         if let Some(handle) = &self.persistence {
-            let draft = |editor: &Editor| Draft {
-                text: editor.text.clone(),
-                cursor: editor.cursor,
-            };
+            let draft = super::drafts::draft;
             let (queued, mut paused) = self.state.queue.snapshot(&self.state.editor);
             if self.state.history.has_edited_recall() {
                 paused.push(draft(self.state.queue.draft(&self.state.editor)));
@@ -51,6 +76,7 @@ impl App {
                         .history
                         .draft(self.state.queue.draft(&self.state.editor)),
                 ),
+                staged: handle.snapshot().input.staged,
                 queued,
                 paused,
                 previous: None,
@@ -140,7 +166,7 @@ impl App {
                     .iter()
                     .map(|draft| {
                         let mut editor = Editor::default();
-                        editor.replace(draft.text.clone());
+                        editor.set(draft.prompt());
                         editor.cursor = draft.cursor;
                         editor
                     })
@@ -200,10 +226,12 @@ impl App {
                         presentation.elapsed = None;
                     }
                 }
-                self.state.editor.replace(document.input.draft.text);
-                self.state.editor.cursor = document.input.draft.cursor;
+                let cursor = document.input.draft.cursor;
+                self.state.editor.set(document.input.draft.prompt());
+                self.state.editor.cursor = cursor;
                 self.state.history.restore(document.input.history);
                 self.state.suggestions.refresh(&self.state.editor.text);
+                self.restore_staged();
                 self.local_start(&format!("/resume {id}"));
                 self.local_finish(Kind::Notice, &format!("Resumed {title} · {status}"), vec![]);
                 self.state.changed();

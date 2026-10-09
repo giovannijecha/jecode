@@ -1,5 +1,6 @@
 use super::{Document, Store, journal, same_directory, valid_id};
 use crate::{output, scratch};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,8 @@ pub(crate) struct Removal {
     durable: Vec<PathBuf>,
     output: output::Removal,
     scratch: Option<scratch::Removal>,
+    /// Attachments the deleted conversation sent; no grace period applies.
+    released: BTreeSet<String>,
 }
 
 impl Store {
@@ -108,8 +111,16 @@ impl Store {
         let output =
             output::prepare_removal(&self.output_directory(), &self.directory, id, document)?;
         let scratch = self.temporary_area(id)?.prepare_removal()?;
+        // Draft attachments are left to the regular grace period: a fresh
+        // conversation may inherit the draft before its first save.
+        let released = document
+            .messages
+            .iter()
+            .flat_map(|message| crate::attachments::references(message.encode().as_bytes()))
+            .collect();
         Ok(Removal {
             bucket: self.bucket.clone(),
+            released,
             ancillary,
             durable,
             output,
@@ -120,6 +131,13 @@ impl Store {
 
 impl Removal {
     pub(crate) fn remove(self) -> Result<DeleteReport, String> {
+        self.remove_with_live(&BTreeSet::new())
+    }
+
+    pub(crate) fn remove_with_live(
+        self,
+        live_attachments: &BTreeSet<String>,
+    ) -> Result<DeleteReport, String> {
         let mut report = DeleteReport::default();
         let output = self.output.remove().map_err(incomplete)?;
         report.files += output.files;
@@ -138,6 +156,10 @@ impl Removal {
             })?;
             report.files += 1;
         }
+        // Collection is best effort: the conversation itself is already gone.
+        report.files += crate::attachments::Pool::new(self.bucket.join("attachments"))
+            .collect(&self.bucket, live_attachments, &self.released)
+            .unwrap_or(0);
         Ok(report)
     }
 }

@@ -22,11 +22,27 @@ impl Agent {
             )?;
             self.tools
                 .configure_temporary(store.temporary_area(&document.id)?);
+            self.tools.configure_attachments(store.attachments());
             self.context.reset_usage();
             self.persistence = Some(Handle::new(store, document, self.redactor.clone()));
             self.checkpoint(Stage::Preserve)?;
         }
         Ok(())
+    }
+
+    /// Copies files into the session attachment pool, all or none.
+    pub fn import_attachments(
+        &self,
+        paths: &[std::path::PathBuf],
+    ) -> Result<Vec<crate::attachments::Attachment>, String> {
+        let pool = self
+            .tools
+            .attachments()
+            .ok_or("Attachments need session storage, which is unavailable")?;
+        paths
+            .iter()
+            .map(|path| pool.import_file(path, &self.cancellation))
+            .collect()
     }
 
     pub fn sessions(&self) -> Option<Handle> {
@@ -46,8 +62,12 @@ impl Agent {
         self.checkpoint(Stage::Preserve)
     }
 
-    pub fn prepare_turn(&mut self, prompt: &str) -> Result<(), String> {
-        if prompt.trim().is_empty() {
+    pub fn prepare_turn(
+        &mut self,
+        prompt: impl Into<crate::attachments::Prompt>,
+    ) -> Result<(), String> {
+        let prompt = prompt.into();
+        if prompt.is_empty() {
             return Err("The prompt must not be empty".into());
         }
         if self.prepared.is_some() {
@@ -55,15 +75,12 @@ impl Agent {
         }
         self.refresh_project_instructions()?;
         let before = self.messages.lock().unwrap().len();
-        self.messages.lock().unwrap().push(Value::object([
-            ("role", Value::string("user")),
-            ("content", Value::string(prompt)),
-        ]));
+        self.messages.lock().unwrap().push(prompt.message());
         if let Err(error) = self.checkpoint(Stage::Begin) {
             self.messages.lock().unwrap().truncate(before);
             return Err(error);
         }
-        self.prepared = Some(prompt.into());
+        self.prepared = Some(prompt);
         Ok(())
     }
 
@@ -197,7 +214,8 @@ impl Agent {
             self.redactor.clone(),
         )?;
         let next = Handle::new(store, document, self.redactor.clone());
-        let report = current.delete()?;
+        let live_attachments = next.snapshot().input.attachment_ids();
+        let report = current.delete(&live_attachments)?;
         self.client.set_model(model)?;
         self.client.set_effort(effort);
         self.clear();

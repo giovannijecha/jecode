@@ -129,6 +129,7 @@ fn ready_recovery_does_not_submit_queued_commands_or_an_unfinished_user_request(
         draft: Draft {
             text: "è draft".into(),
             cursor: 2,
+            ..Default::default()
         },
         ..Input::default()
     });

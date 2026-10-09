@@ -3,7 +3,7 @@ pub struct Command {
     pub description: &'static str,
 }
 
-pub const COMMANDS: [Command; 10] = [
+pub const COMMANDS: [Command; 11] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -37,6 +37,10 @@ pub const COMMANDS: [Command; 10] = [
         description: "Copy the last completed response or one of its blocks",
     },
     Command {
+        name: "/attach",
+        description: "Attach files to the draft; drop files or press Alt+V for an image",
+    },
+    Command {
         name: "/tmp",
         description: "Show session temporary files; /tmp clean clears them",
     },
@@ -46,9 +50,9 @@ pub const COMMANDS: [Command; 10] = [
     },
 ];
 
-pub const HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands and keyboard controls\n/copy         Choose response, code or quote to copy\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/drafts       Edit or discard pending drafts in the terminal interface\n/exit         Quit\n\nEnter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Cancel active work and quit\nCtrl+D        In /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
+pub const HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands and keyboard controls\n/copy         Choose response, code or quote to copy\n/attach PATH  Attach files to the draft; dropped files attach too\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/drafts       Edit or discard pending drafts in the terminal interface\n/exit         Quit\n\nEnter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Cancel active work and quit\nCtrl+D        In /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
 
-pub const PLAIN_HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands\n/copy         Choose response, code or quote to copy\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/exit         Quit\n\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
+pub const PLAIN_HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands\n/copy         Choose response, code or quote to copy\n/attach PATH  Attach files to the next message\n/attach --clear Discard staged files without sending\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/exit         Quit\n\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
 #[derive(Clone, Debug)]
 pub struct Match {
     pub index: usize,

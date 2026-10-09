@@ -119,9 +119,15 @@ fn measured_history_uses_calibrated_growth_and_falls_back_without_density() {
     let appended = message("tool", &"new output ".repeat(1000));
     let size = appended.encode().len();
     messages.push(appended);
-    assert_eq!(context.estimate(&messages, 0), 1000 + size.div_ceil(2));
+    assert_eq!(
+        context.estimate(&messages, 0, Default::default()),
+        1000 + size.div_ceil(2)
+    );
     context.calibration = None;
-    assert_eq!(context.estimate(&messages, 0), 1000 + size);
+    assert_eq!(
+        context.estimate(&messages, 0, Default::default()),
+        1000 + size
+    );
 }
 
 #[test]

@@ -429,7 +429,7 @@ fn interactive_windows_smoke() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    run(agent, config(&directory)).unwrap();
+    run(agent, config(&directory), Default::default()).unwrap();
     assert_eq!(fixture.finish().len(), 7);
     let exports: Vec<_> = fs::read_dir(directory.path())
         .unwrap()

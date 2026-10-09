@@ -94,6 +94,16 @@ impl Store {
         self.bucket.join("outputs")
     }
 
+    /// Session-owned copies of attached files, shared by this project's sessions.
+    pub fn attachments(&self) -> crate::attachments::Pool {
+        crate::attachments::Pool::new(self.bucket.join("attachments"))
+    }
+
+    /// Where this project's session documents and journals live.
+    pub fn bucket(&self) -> &Path {
+        &self.bucket
+    }
+
     pub fn temporary_area(&self, id: &str) -> Result<crate::scratch::Area, String> {
         crate::scratch::Area::new(self.temporary.join(id), self.directory.clone(), id)
     }

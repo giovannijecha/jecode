@@ -89,15 +89,16 @@ fn provider_errors_do_not_expose_credentials() {
 
 #[test]
 fn transport_has_no_fixed_four_megabyte_conversation_limit() {
-    let fixture = HttpFixture::new(vec![(
-        200,
-        crate::test_support::completion("Accepted.", vec![]),
-    )]);
-    let client = OpenRouter::fixture(fixture.endpoint.clone());
     let messages = [Value::object([
         ("role", Value::string("user")),
         ("content", Value::string("x".repeat(4 * 1024 * 1024))),
     ])];
+    // Encoding and escaping this request can exceed the fixture's usual wait on busy runners.
+    let fixture = HttpFixture::with_wait(
+        vec![(200, crate::test_support::completion("Accepted.", vec![]))],
+        std::time::Duration::from_secs(30),
+    );
+    let client = OpenRouter::fixture(fixture.endpoint.clone());
     assert_eq!(client.complete(&messages).unwrap().text, "Accepted.");
     assert_eq!(
         fixture.finish()[0].body.get("messages"),

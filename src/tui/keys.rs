@@ -6,6 +6,8 @@ mod vt;
 pub enum Decoded {
     Key(Key),
     Text(String),
+    /// One complete paste, which may be a file drop.
+    Paste(String),
     Error,
     Scroll(i16),
 }
@@ -39,7 +41,7 @@ impl Decoder {
             }) {
                 match decoded {
                     Decoded::Error => return Err(()),
-                    Decoded::Text(value) => text.push_str(&value),
+                    Decoded::Text(value) | Decoded::Paste(value) => text.push_str(&value),
                     Decoded::Key(key) if matches!(key.character, 9 | 10 | 13) => {
                         text.push(char::from_u32(key.character.into()).unwrap())
                     }
@@ -79,7 +81,7 @@ impl Decoder {
                     if std::mem::take(&mut self.overflow) {
                         vec![Decoded::Error]
                     } else {
-                        vec![Decoded::Text(text)]
+                        vec![Decoded::Paste(text)]
                     }
                 } else {
                     self.overflow = false;
@@ -179,7 +181,7 @@ mod tests {
             }));
         }
         assert_eq!(output.len(), 1);
-        assert!(matches!(&output[0], Decoded::Text(text) if text == "first\r\nsecond"));
+        assert!(matches!(&output[0], Decoded::Paste(text) if text == "first\r\nsecond"));
     }
     #[test]
     fn combines_console_utf16_surrogates() {
@@ -195,6 +197,25 @@ mod tests {
             })
             .collect();
         assert!(matches!(&output[0], Decoded::Text(text) if text == "🙂"));
+    }
+
+    #[test]
+    fn native_batches_preserve_a_complete_bracketed_paste() {
+        let mut decoder = Decoder::default();
+        let text = "'C:\\Temp\\a$x ` β.bin'";
+        let bracketed = format!("\x1b[200~{text}\x1b[201~");
+        assert_eq!(
+            decoder.paste(&bracketed.encode_utf16().collect::<Vec<_>>()),
+            Ok(text.to_owned())
+        );
+        let mut decoder = Decoder::default();
+        let first = decoder
+            .paste(&"\x1b[200~first\r".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
+        let second = decoder
+            .paste(&"\nsecond\x1b[201~".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
+        assert_eq!(first + &second, "first\rsecond");
     }
 
     #[test]

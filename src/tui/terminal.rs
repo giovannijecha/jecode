@@ -33,6 +33,8 @@ pub enum Input {
     #[cfg(any(windows, test))]
     Paste(Vec<u16>),
     #[cfg(any(windows, test))]
+    PasteOverflow,
+    #[cfg(any(windows, test))]
     Scroll(i16),
     #[cfg(windows)]
     Modes(u32, u32, u32),

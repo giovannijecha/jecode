@@ -162,18 +162,22 @@ fn interrupted_tool_is_unknown_unstarted_calls_are_not_executed_and_partial_is_d
 #[test]
 fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
     let mut input = Input {
+        staged: vec![],
         draft: Draft {
             text: "edited latest".into(),
             cursor: 3,
+            ..Default::default()
         },
         queued: vec!["first queued".into(), "second queued".into()],
         paused: vec![Draft {
             text: "already paused".into(),
             cursor: 7,
+            ..Default::default()
         }],
         previous: Some(Draft {
             text: "earlier draft".into(),
             cursor: 2,
+            ..Default::default()
         }),
         history: vec!["last prompt".into(), "  /help".into(), "  prompt".into()],
     };
@@ -187,18 +191,22 @@ fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
             Draft {
                 text: "first queued".into(),
                 cursor: "first queued".len(),
+                ..Default::default()
             },
             Draft {
                 text: "second queued".into(),
                 cursor: "second queued".len(),
+                ..Default::default()
             },
             Draft {
                 text: "already paused".into(),
                 cursor: 7,
+                ..Default::default()
             },
             Draft {
                 text: "edited latest".into(),
                 cursor: 3,
+                ..Default::default()
             },
         ]
     );
@@ -237,10 +245,12 @@ fn saved_paused_drafts_round_trip_and_legacy_snapshots_migrate() {
         Draft {
             text: "same 🙂".into(),
             cursor: "same ".len(),
+            ..Default::default()
         },
         Draft {
             text: "same 🙂".into(),
             cursor: "same 🙂".len(),
+            ..Default::default()
         },
     ];
     assert_eq!(
@@ -261,10 +271,12 @@ fn saved_paused_drafts_round_trip_and_legacy_snapshots_migrate() {
     parsed.input.draft = Draft {
         text: "withdrawn".into(),
         cursor: 4,
+        ..Default::default()
     };
     parsed.input.previous = Some(Draft {
         text: "original".into(),
         cursor: 1,
+        ..Default::default()
     });
     parsed.recover();
     assert_eq!(parsed.input.draft.text, "original");
@@ -287,11 +299,13 @@ fn five_identical_pending_inputs_stay_separate_after_repeated_recovery() {
         draft: Draft {
             text: "repeat".into(),
             cursor: 2,
+            ..Default::default()
         },
         queued: vec!["repeat".into(), "repeat".into(), "repeat".into()],
         paused: vec![Draft {
             text: "repeat".into(),
             cursor: 1,
+            ..Default::default()
         }],
         ..Input::default()
     };
@@ -394,12 +408,14 @@ fn invalid_context_cursor_scope_and_future_format_are_rejected() {
     invalid.input.draft = Draft {
         text: "è".into(),
         cursor: 1,
+        ..Default::default()
     };
     assert!(Document::parse(&invalid.value()).is_err());
     invalid = doc.clone();
     invalid.input.paused.push(Draft {
         text: "è".into(),
         cursor: 1,
+        ..Default::default()
     });
     assert!(Document::parse(&invalid.value()).is_err());
     invalid = doc.clone();
@@ -423,7 +439,11 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
     let text = format!("{key} è draft");
     let cursor = format!("{key} è").len();
     handle.input(Input {
-        draft: Draft { text, cursor },
+        draft: Draft {
+            text,
+            cursor,
+            ..Default::default()
+        },
         ..Input::default()
     });
     handle.flush().unwrap();
@@ -439,6 +459,7 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
         draft: Draft {
             text,
             cursor: "è ".len() + 15,
+            ..Default::default()
         },
         ..Input::default()
     });
@@ -452,6 +473,7 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
         paused: vec![Draft {
             text: format!("before {key} after"),
             cursor: format!("before {key}").len(),
+            ..Default::default()
         }],
         ..Input::default()
     });

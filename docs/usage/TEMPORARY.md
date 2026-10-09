@@ -39,7 +39,12 @@ pointing to this session area. Use quoted paths:
 ```bash
 bash "$JECODE_TMP/probes/check.sh"
 some-command > "$JECODE_TMP/report.txt"
+created=$(mktemp "$TMPDIR/check.XXXXXXXXXX")
 ```
+
+Pass an explicit template to `mktemp` to use the session area on every platform.
+macOS can use its native user temporary directory instead of `TMPDIR` when no
+template is supplied.
 
 Git Bash can normalize temporary environment paths into its `/c/...` notation;
 native Windows child programs receive paths usable by Windows APIs. Jecode does
@@ -94,5 +99,6 @@ resume and interruption, cleanup/save failures, retained complete output,
 junction rejection, legacy context, queued TUI commands and plain chat. Linux
 checks under WSL with native tmpfs fixtures exercise the shared tools, Bash temporary files, folder/session
 boundaries, interruption, resume and cleanup. Native Windows child paths,
-junctions and queued TUI commands have Windows-specific coverage. macOS has
-compilation checks for Intel and Apple Silicon; runtime verification remains open.
+junctions and queued TUI commands have Windows-specific coverage. GitHub Actions
+runs the shared test suite on native Windows, Linux and macOS; ignored clipboard
+and interactive terminal checks still require a suitable native host.

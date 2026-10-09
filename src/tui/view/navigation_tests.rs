@@ -160,7 +160,7 @@ fn command_panels_show_suggestion_or_multiline_position_in_the_title() {
     state.editor.insert("/");
     state.suggestions.refresh(&state.editor.text);
     let commands = composer_frame(&state, "model", "directory");
-    assert!(commands.live[1].plain().contains("1–6 / 10"));
+    assert!(commands.live[1].plain().contains("1–6 / 11"));
     state
         .editor
         .replace("/tmp clean\none\ntwo\nthree\nfour\nfive\nsix".into());

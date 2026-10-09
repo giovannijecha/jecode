@@ -47,6 +47,11 @@ Modules stay around 500 lines or fewer and split by responsibility:
   Summary truncation learns an output allowance that survives resume, resets on
   a model/effort change and stays bounded by the current context and provider
   output limit; live prompt measurements remain separate from this resource state.
+- `attachments/`: prompts with owned attachment elements, the session-bucket
+  asset pool and its collection, media detection, dropped-path recognition,
+  the native clipboard/conversion boundary (`capture.rs`) and request
+  materialization (`provider.rs`), which builds image/file parts and manifests
+  only when a request is sent. `tools/attachment.rs` serves `attachment:ID` reads.
 - `export.rs`, `redact.rs`, `cancel.rs`: conversation snapshots, key masking and
   cooperative cancellation shared with the native process runner.
 - `openrouter/`: provider API, completion parsing, incremental SSE streaming, model

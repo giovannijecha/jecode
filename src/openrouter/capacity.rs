@@ -46,6 +46,17 @@ impl OpenRouter {
                     .iter()
                     .any(|value| value.as_str() == Some("response_format"))
             });
+        self.inputs = model
+            .and_then(|model| model.get("architecture"))
+            .and_then(|architecture| architecture.get("input_modalities"))
+            .and_then(Value::as_array)
+            .map(|inputs| {
+                inputs
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            });
         let limits = model.and_then(|model| {
             let context = model
                 .get("context_length")

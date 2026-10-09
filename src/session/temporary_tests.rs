@@ -49,6 +49,7 @@ fn plain_chat_reports_and_cleans_temporary_files_without_a_provider_request_for_
         &mut input,
         &mut output,
         &mut status,
+        Vec::new(),
     )
     .unwrap();
     let output = String::from_utf8(output).unwrap();

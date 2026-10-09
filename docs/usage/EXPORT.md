@@ -35,3 +35,6 @@ complete output saved separately in the folder's personal session bucket. These
 files are not embedded in the export. File reads include their range and
 continuation offsets. Follow those indicators when interpreting an exported
 session.
+
+Attached files are copied into a `.attachments` folder beside the JSON and
+listed in its `attachments` array; see [ATTACHMENTS.md](ATTACHMENTS.md#export).

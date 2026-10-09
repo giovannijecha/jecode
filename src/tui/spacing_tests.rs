@@ -287,7 +287,7 @@ fn the_lower_area_stays_at_the_bottom_with_space_before_queue_notices_and_activi
     let mut state = State::default();
     state.message(Kind::Assistant, "answer");
     state.activity = Some(Activity::new());
-    state.queue.push("next prompt".into()).unwrap();
+    state.queue.push("next prompt").unwrap();
     state.notice = Some(super::Feedback::result(Kind::Warning, "notice"));
     let frame = view::frame(&state, "model", "directory");
     assert_eq!(frame.composer, state.height - 7);

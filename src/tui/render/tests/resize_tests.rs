@@ -107,7 +107,7 @@ fn resizing_during_streaming_then_tools_and_finalization_never_saves_provisional
     state.editor.insert("kept draft\nsecond line🙂");
     state.editor.cursor = "kept draft\nsec".len();
     let draft = state.editor.clone();
-    state.queue.push("follow-up queued".into()).unwrap();
+    state.queue.push("follow-up queued").unwrap();
     state.activity = Some(Activity::new());
     state.event(Event::Streaming {
         text: "A provisional answer.".into(),
@@ -174,7 +174,7 @@ fn a_second_resize_discards_unwritten_rows_and_a_large_replay_keeps_input_respon
     );
     assert!(display.needs_draw(&state, first_deadline));
     state.editor.insert("kept draft");
-    state.queue.push("follow-up queued".into()).unwrap();
+    state.queue.push("follow-up queued").unwrap();
     let second_resize = first_deadline + Duration::from_millis(1);
     geometry(&mut screen, &mut state, &mut display, 70, 20, second_resize);
     assert!(!step(&mut display, &mut screen, &state, second_resize).contains("\x1b[3J"));

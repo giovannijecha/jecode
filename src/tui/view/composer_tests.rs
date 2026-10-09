@@ -93,7 +93,7 @@ fn active_borders_are_gray_and_queued_messages_precede_notices_and_activity() {
         ..State::default()
     };
     state.event(Event::Reasoning);
-    state.queue.push("one\ntwo".into()).unwrap();
+    state.queue.push("one\ntwo").unwrap();
     state.notice = Some(crate::tui::Feedback::result(Kind::Warning, "queue notice"));
     let frame = frame(&state, "model", "dir");
     assert!(frame.live[0].plain().starts_with("› one…"));

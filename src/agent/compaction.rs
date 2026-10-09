@@ -37,7 +37,12 @@ impl Agent {
                 return Err("No output space remains in the model context; the original session is preserved".into());
             }
             let persistence = self.persistence.clone();
-            let result = self.complete_retry(&messages, true, output_tokens, &mut |update| {
+            let request = crate::attachments::provider::materialize(
+                messages.clone(),
+                self.tools.attachments(),
+                self.client.inputs(),
+            )?;
+            let result = self.complete_retry(&request, true, output_tokens, &mut |update| {
                 match &update {
                     Update::Text(text) => {
                         if let Some(persistence) = &persistence {
@@ -58,7 +63,7 @@ impl Agent {
                     let input_end = self.messages.lock().unwrap().len();
                     self.context.observe(completion.usage.as_ref(), input_end);
                     self.context.calibrate(
-                        context::bytes(&messages)
+                        self.context_bytes(&messages)
                             .saturating_add(crate::tools::definitions().encode().len()),
                     );
                     return Ok(completion);
@@ -121,13 +126,13 @@ impl Agent {
             return Ok(false);
         }
         if !forced {
-            let before = context::bytes(&self.projected_context(&self.context, &original));
+            let before = self.context_bytes(&self.projected_context(&self.context, &original));
             let mut preview = self.context.clone();
             preview.preview_until = original.len();
             preview.preview_limit = (input_budget / 12).clamp(512, 2048);
             preview.input_tokens = None;
             preview.measured_end = 0;
-            let after = context::bytes(&self.projected_context(&preview, &original));
+            let after = self.context_bytes(&self.projected_context(&preview, &original));
             let large_output = original[self.context.from..].iter().any(|message| {
                 message.get("role").and_then(Value::as_str) == Some("tool")
                     && message
@@ -186,7 +191,7 @@ impl Agent {
         next.request_limit = (input_budget / 4).max(1024);
         next.summary = " ".into();
         let fixed = next.estimate_bytes(
-            context::bytes(&self.projected_context(&next, &original))
+            self.context_bytes(&self.projected_context(&next, &original))
                 .saturating_add(crate::tools::definitions().encode().len())
                 .saturating_add(self.request_environment().len())
                 .saturating_add(768),
@@ -211,7 +216,7 @@ impl Agent {
             })
             .collect::<Vec<_>>();
         let requests = next.user_requests(&original);
-        let before_bytes = context::bytes(&self.projected_context(&self.context, &original));
+        let before_bytes = self.context_bytes(&self.projected_context(&self.context, &original));
         drop(original);
         events.emit(Event::Maintenance {
             text: format!(
@@ -233,7 +238,7 @@ impl Agent {
         {
             return Err("The summary and original user requests do not fit the available context; the previous context and original session are preserved".into());
         }
-        let after_bytes = context::bytes(&self.projected_context(&next, &original));
+        let after_bytes = self.context_bytes(&self.projected_context(&next, &original));
         drop(original);
         if after_bytes >= before_bytes {
             return Err("Context compaction did not reduce the request. The original conversation and context are preserved; choose a model with more context or retry.".into());

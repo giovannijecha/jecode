@@ -16,7 +16,7 @@ pub struct Agent {
     redactor: crate::redact::Redactor,
     events: Messages,
     persistence: Option<crate::sessions::Handle>,
-    prepared: Option<String>,
+    prepared: Option<crate::attachments::Prompt>,
     context: crate::context::Context,
     project_instructions: String,
 }
@@ -110,6 +110,7 @@ impl Agent {
             redactor: self.redactor.clone(),
             effort: self.effort().name().into(),
             events: Arc::clone(&self.events),
+            attachments: self.tools.attachments().cloned(),
         }
     }
 
@@ -117,9 +118,14 @@ impl Agent {
         self.cancellation.clone()
     }
 
-    pub fn run_turn(&mut self, prompt: &str, events: &mut impl EventSink) -> Result<(), String> {
+    pub fn run_turn(
+        &mut self,
+        prompt: impl Into<crate::attachments::Prompt>,
+        events: &mut impl EventSink,
+    ) -> Result<(), String> {
+        let prompt = prompt.into();
         let mut partial = String::new();
-        let result = self.turn(prompt, &mut |event| {
+        let result = self.turn(&prompt, &mut |event| {
             match &event {
                 Event::Streaming { text } => partial = text.clone(),
                 Event::Message { .. }
@@ -143,8 +149,12 @@ impl Agent {
         result.and(saved)
     }
 
-    fn turn(&mut self, prompt: &str, events: &mut impl EventSink) -> Result<(), String> {
-        if self.prepared.as_deref() != Some(prompt) {
+    fn turn(
+        &mut self,
+        prompt: &crate::attachments::Prompt,
+        events: &mut impl EventSink,
+    ) -> Result<(), String> {
+        if self.prepared.as_ref() != Some(prompt) {
             self.prepare_turn(prompt)?;
         }
         self.prepared = None;
@@ -154,7 +164,16 @@ impl Agent {
                 return Err("Operation cancelled".into());
             }
             let completion = self.next_completion(limits, events)?;
-            self.messages.lock().unwrap().push(completion.message);
+            let mut message = completion.message;
+            let annotation_error =
+                crate::attachments::annotations::store(&mut message, self.tools.attachments())
+                    .err();
+            if annotation_error.is_some()
+                && let Value::Object(fields) = &mut message
+            {
+                fields.remove("annotations");
+            }
+            self.messages.lock().unwrap().push(message);
             if let Err(error) = self.checkpoint(crate::sessions::Stage::Completion) {
                 self.cancel_calls(&completion.calls);
                 return Err(error);
@@ -166,6 +185,10 @@ impl Agent {
             {
                 self.cancel_calls(&completion.calls);
                 return Err(error);
+            }
+            if let Some(error) = annotation_error {
+                self.cancel_calls(&completion.calls);
+                return Err(format!("Could not store PDF annotations: {error}"));
             }
             if completion.calls.is_empty() {
                 return Ok(());
@@ -265,13 +288,17 @@ impl Agent {
             && context.measured_end >= context.from
             && context.measured_end <= messages.len()
         {
-            context.estimate(messages, self.compatible_from)
+            context.estimate(messages, self.compatible_from, self.client.inputs())
         } else {
             context.estimate_bytes(
-                crate::context::bytes(&self.projected_context(context, messages))
+                self.context_bytes(&self.projected_context(context, messages))
                     .saturating_add(crate::tools::definitions().encode().len()),
             )
         }
+    }
+
+    fn context_bytes(&self, messages: &[Value]) -> usize {
+        crate::context::bytes_for(messages, self.client.inputs())
     }
 
     fn context_estimate(&self, messages: &[Value]) -> usize {
@@ -335,6 +362,8 @@ mod recovery;
 mod summary;
 mod temporary;
 
+#[cfg(test)]
+mod attachment_tests;
 #[cfg(test)]
 mod compaction_tests;
 #[cfg(test)]

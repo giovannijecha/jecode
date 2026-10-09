@@ -20,7 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

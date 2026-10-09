@@ -145,9 +145,10 @@ pub(super) fn resume(
         writeln!(
             output,
             "\nRecovered draft (not sent; copy/edit before sending):\n{}",
-            document.input.draft.text
+            document.input.draft.prompt().display()
         )
         .map_err(|error| error.to_string())?;
+        recover_attachments(&document.input.draft, output)?;
     }
     for (index, draft) in document.input.paused.iter().enumerate() {
         writeln!(
@@ -155,7 +156,28 @@ pub(super) fn resume(
             "\nPaused draft {}/{} (not sent; copy/edit before sending):\n{}",
             index + 1,
             document.input.paused.len(),
-            draft.text
+            draft.prompt().display()
+        )
+        .map_err(|error| error.to_string())?;
+        recover_attachments(draft, output)?;
+    }
+    Ok(())
+}
+
+fn recover_attachments(
+    draft: &crate::sessions::Draft,
+    output: &mut impl Write,
+) -> Result<(), String> {
+    if !draft.attachments.is_empty() {
+        let references = draft
+            .attachments
+            .iter()
+            .map(crate::attachments::Attachment::reference)
+            .collect::<Vec<_>>()
+            .join(" ");
+        writeln!(
+            output,
+            "Restore these attachments before sending: /attach {references}"
         )
         .map_err(|error| error.to_string())?;
     }

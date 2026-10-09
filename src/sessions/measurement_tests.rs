@@ -136,7 +136,11 @@ fn session_history_and_listing() {
             let (projected, elapsed) = timed(|| loaded.context.project(&loaded.messages, 0));
             assert_eq!(projected, loaded.messages);
             row(&path, "context_project", size, repeat, elapsed, bytes);
-            let (estimated, elapsed) = timed(|| loaded.context.estimate(&loaded.messages, 0));
+            let (estimated, elapsed) = timed(|| {
+                loaded
+                    .context
+                    .estimate(&loaded.messages, 0, Default::default())
+            });
             assert!(estimated > 0);
             row(&path, "context_estimate", size, repeat, elapsed, bytes);
             let (records, elapsed) = timed(|| loaded.records());

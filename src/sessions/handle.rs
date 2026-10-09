@@ -222,7 +222,10 @@ impl Handle {
         self.0.lock().unwrap().save()
     }
 
-    pub(crate) fn delete(&self) -> Result<super::DeleteReport, String> {
+    pub(crate) fn delete(
+        &self,
+        live_attachments: &std::collections::BTreeSet<String>,
+    ) -> Result<super::DeleteReport, String> {
         let mut live = self.0.lock().unwrap();
         if live.deleted || live.document.pending.active {
             return Err("Session deletion requires an open, ready conversation".into());
@@ -231,7 +234,10 @@ impl Handle {
         if live.lease.is_none() {
             live.lease = Some(live.store.acquire(&live.document.id)?);
         }
-        let report = live.store.removal(&live.document)?.remove()?;
+        let report = live
+            .store
+            .removal(&live.document)?
+            .remove_with_live(live_attachments)?;
         // Every clone must stop saving before releasing the exclusive lease.
         live.deleted = true;
         live.dirty = None;

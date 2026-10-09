@@ -83,6 +83,7 @@ mod tests {
             effort: "default".into(),
             redactor: Redactor::empty(),
             events: Arc::new(Mutex::new(vec![])),
+            attachments: None,
             messages: Arc::new(Mutex::new(vec![Value::object([
                 ("role", Value::string("assistant")),
                 (
@@ -146,6 +147,7 @@ mod tests {
             &mut Cursor::new("Task\n/copy\n/cancel\n/exit\n"),
             &mut output,
             &mut Vec::new(),
+            Vec::new(),
         )
         .unwrap();
         let output = String::from_utf8(output).unwrap();

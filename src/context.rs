@@ -281,16 +281,22 @@ impl Context {
             })
             .unwrap_or_default()
     }
-    pub fn estimate(&self, messages: &[Value], compatible_from: usize) -> usize {
+    pub fn estimate(
+        &self,
+        messages: &[Value],
+        compatible_from: usize,
+        inputs: crate::attachments::provider::Inputs,
+    ) -> usize {
         if let Some(tokens) = self.input_tokens
             && self.measured_end >= self.from
             && self.measured_end <= messages.len()
         {
-            return tokens
-                .saturating_add(self.estimate_bytes(bytes(&messages[self.measured_end..])));
+            return tokens.saturating_add(
+                self.estimate_bytes(bytes_for(&messages[self.measured_end..], inputs)),
+            );
         }
         self.estimate_bytes(
-            bytes(&self.project(messages, compatible_from))
+            bytes_for(&self.project(messages, compatible_from), inputs)
                 .saturating_add(crate::tools::definitions().encode().len()),
         )
     }
@@ -313,7 +319,12 @@ pub fn portable(message: &Value) -> Value {
                 .filter(|(key, _)| {
                     matches!(
                         key.as_str(),
-                        "role" | "content" | "tool_calls" | "tool_call_id"
+                        "role"
+                            | "content"
+                            | "tool_calls"
+                            | "tool_call_id"
+                            | "attachments"
+                            | "annotations"
                     )
                 })
                 .map(|(key, value)| (key.clone(), value.clone()))
@@ -323,8 +334,15 @@ pub fn portable(message: &Value) -> Value {
     }
 }
 pub fn bytes(messages: &[Value]) -> usize {
+    bytes_for(messages, crate::attachments::provider::Inputs::default())
+}
+
+pub fn bytes_for(messages: &[Value], inputs: crate::attachments::provider::Inputs) -> usize {
     messages.iter().fold(0usize, |total, message| {
-        total.saturating_add(message.encode().len())
+        // Attachments are sent as content parts whose cost the stored text omits.
+        total
+            .saturating_add(message.encode().len())
+            .saturating_add(crate::attachments::provider::weight_for(message, inputs))
     })
 }
 

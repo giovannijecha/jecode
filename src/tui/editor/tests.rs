@@ -35,7 +35,7 @@ fn visual_movement_uses_cells_and_remembers_the_column_on_short_lines() {
     assert!(editor.vertical(false, 8));
     assert!(editor.vertical(false, 8));
     assert_eq!(editor.cursor, editor.text.len());
-    let layout = Layout::new("abcd界z", 4, 4);
+    let layout = Layout::new("abcd界z", 4, 4, &[]);
     assert_eq!(layout.cursor, (1, 0));
     assert_eq!(layout.rows[1].text, "界z");
 }

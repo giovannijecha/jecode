@@ -1,4 +1,5 @@
 use crate::agent::Agent;
+use crate::attachments::Prompt;
 use crate::config::{self, Settings, Store};
 use crate::console::Console;
 use crate::openrouter::OpenRouter;
@@ -24,18 +25,20 @@ pub fn configure() -> Result<(), String> {
 pub fn run(
     model_override: Option<String>,
     prompt: Option<String>,
+    attachments: Vec<String>,
     plain: bool,
 ) -> Result<(), String> {
-    launch(model_override, prompt, plain, None)
+    launch(model_override, prompt, attachments, plain, None)
 }
 
 pub fn resume(id: Option<String>, plain: bool) -> Result<(), String> {
-    launch(None, None, plain, Some(id))
+    launch(None, None, Vec::new(), plain, Some(id))
 }
 
 fn launch(
     model_override: Option<String>,
     prompt: Option<String>,
+    attachments: Vec<String>,
     plain: bool,
     resume: Option<Option<String>>,
 ) -> Result<(), String> {
@@ -90,8 +93,17 @@ fn launch(
     }
     let mut agent = Agent::new(client, tools);
     agent.enable_sessions(store.path().parent().expect("configuration directory"))?;
+    let attachments = agent.import_attachments(
+        &attachments
+            .iter()
+            .map(|path| crate::attachments::paths::argument(path, &directory))
+            .collect::<Vec<_>>(),
+    )?;
     if let Some(prompt) = prompt {
-        return agent.run_turn(&prompt, &mut Console::new(&mut output, &mut status));
+        return agent.run_turn(
+            Prompt::new(prompt, attachments),
+            &mut Console::new(&mut output, &mut status),
+        );
     }
     if !interactive {
         if let Some(resume) = resume {
@@ -107,7 +119,10 @@ fn launch(
         if prompt.len() > 1024 * 1024 {
             return Err("Task exceeds the 1 MiB input limit".into());
         }
-        return agent.run_turn(&prompt, &mut Console::new(&mut output, &mut status));
+        return agent.run_turn(
+            Prompt::new(prompt, attachments),
+            &mut Console::new(&mut output, &mut status),
+        );
     }
     let mut session_config = SessionConfig {
         store,
@@ -120,7 +135,11 @@ fn launch(
         drop(status);
         return match resume {
             Some(id) => crate::tui::resume(agent, session_config, id),
-            None => crate::tui::run(agent, session_config),
+            None => crate::tui::run(
+                agent,
+                session_config,
+                Prompt::new(String::new(), attachments),
+            ),
         };
     }
     match resume {
@@ -138,6 +157,7 @@ fn launch(
             &mut input,
             &mut output,
             &mut status,
+            attachments,
         ),
     }
 }

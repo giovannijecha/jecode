@@ -1,4 +1,5 @@
 mod agent;
+mod attachments;
 mod bootstrap;
 mod cancel;
 mod cli;
@@ -51,8 +52,9 @@ fn main() -> ExitCode {
         Action::Run {
             model,
             prompt,
+            attachments,
             plain,
-        } => bootstrap::run(model, prompt, plain),
+        } => bootstrap::run(model, prompt, attachments, plain),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

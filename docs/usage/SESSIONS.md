@@ -13,9 +13,13 @@ Jecode shows a reminder to use `/resume`. Opening Jecode never resumes work
 automatically.
 
 A conversation is saved from its first sent request, before provider work starts.
-Opening the app, drafting, queueing and local commands alone do not create a saved
-session. An interrupted or failed request still leaves a saved conversation.
-Before that first request, unsent input stays in memory and is lost on exit.
+Adding an attachment to the composer or another pending draft also saves the
+session so its copied bytes remain reachable. Opening the app, text-only
+drafting, queueing and local commands alone do not create a saved session.
+`--plain` saves `/attach` staging immediately and restores it on resume;
+switching to the fullscreen composer shows those attachments in its draft.
+An interrupted or failed request still leaves a saved conversation. Before
+the first request or attachment, unsent input stays in memory and is lost on exit.
 
 ```powershell
 jecode resume
@@ -28,8 +32,8 @@ Run that command from the conversation's original project folder.
 
 `/resume` opens the same folder-scoped selector inside the TUI. `/resume ID`
 selects a saved conversation directly. The list includes the current conversation
-after its first sent request and marks its row `current`. An empty launch, unsent
-draft or local commands alone never add a current row or increase the count. Selecting that
+after its first sent request or attachment and marks its row `current`. An empty
+launch, text-only unsent draft or local commands alone never add a current row. Selecting that
 row returns to the existing composer. Saved sessions are ordered by most recent
 update, with their first request as the title, age, model and identifier. A
 legacy draft-only session uses its draft as the title. No model call generates titles.
@@ -82,7 +86,8 @@ owned conversation viewport; the shell screen and scrollback remain intact.
 Other saved sessions remain available. The session
 list stays open over the fresh context; Esc returns to its composer. The unsent
 composer, FIFO queue and paused drafts stay with the new conversation. The new
-conversation is saved only after a request is sent. Old autosave handles cannot
+conversation is saved after a request is sent or its inherited drafts contain
+attachments; pending `--plain` attachments also move with it. Old autosave handles cannot
 recreate deleted history.
 
 During a turn, `/resume` joins the existing command queue. A stopped or failed
@@ -101,7 +106,7 @@ to restore ownership is reported explicitly.
 
 The composer text and Unicode-safe caret, up to eight queued messages, separate
 paused drafts with their own carets, and up to fifty dispatched prompts are saved
-once the conversation has a sent request. Prompt history excludes local commands,
+once the conversation has a sent request or an attachment in its input. Prompt history excludes local commands,
 including commands in older saved histories. Ctrl+P/N browses sent prompts and
 preserves the original unsent composer. Submitting a recalled prompt restores it;
 editing a recalled prompt also saves that edit as a separate paused draft if
@@ -156,6 +161,10 @@ folder's session bucket. References use `output:SESSION_ID:OUTPUT_ID:stdout` or
 in the shared output root. This compatibility does not establish ownership of
 those old files. `/tmp clean` keeps all tool streams; session deletion removes only the
 selected session's marked output directory, including unreferenced crash remnants.
+
+Attached files live in the bucket's `attachments/` pool and are referenced by
+id from messages and saved input. An asset is removed when no saved session
+refers to it any more; see [ATTACHMENTS.md](ATTACHMENTS.md#storage-and-retention).
 
 New sessions use an owned append journal, `jecode.session.journal`, version 3,
 in `SESSION_ID.jsonl`. Files live under a stable folder bucket. The saved canonical directory is checked

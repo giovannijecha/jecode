@@ -1,3 +1,4 @@
+mod attach;
 pub mod commands;
 mod copy;
 pub(crate) mod delete;
@@ -7,20 +8,23 @@ pub(crate) mod temporary;
 pub use settings::SessionConfig;
 
 use crate::agent::Agent;
+use crate::attachments::{Attachment, Prompt};
 use crate::console::Console;
 use crate::input::read_line;
 use std::io::{BufRead, Write};
 
 pub use commands::HELP;
 
+/// A line-based chat whose first message carries `staged` attachments.
 pub fn chat(
     agent: &mut Agent,
     config: &mut SessionConfig,
     input: &mut impl BufRead,
     output: &mut impl Write,
     status: &mut impl Write,
+    staged: Vec<Attachment>,
 ) -> Result<(), String> {
-    chat_inner(agent, config, input, output, status, None)
+    chat_inner(agent, config, input, output, status, None, staged)
 }
 
 pub fn chat_with_resume(
@@ -31,7 +35,7 @@ pub fn chat_with_resume(
     status: &mut impl Write,
     id: Option<String>,
 ) -> Result<(), String> {
-    chat_inner(agent, config, input, output, status, Some(id))
+    chat_inner(agent, config, input, output, status, Some(id), Vec::new())
 }
 
 fn chat_inner(
@@ -41,7 +45,9 @@ fn chat_inner(
     output: &mut impl Write,
     status: &mut impl Write,
     resume: Option<Option<String>>,
+    mut staged: Vec<Attachment>,
 ) -> Result<(), String> {
+    let previous = agent.sessions();
     agent.enable_sessions(
         config
             .store
@@ -56,6 +62,10 @@ fn chat_inner(
     } else {
         persistence::hint(agent, output)?;
     }
+    attach::transfer(agent, previous.as_ref(), &mut staged)?;
+    if !staged.is_empty() {
+        attach::announce(&staged, output)?;
+    }
     loop {
         write!(output, "\n> ")
             .and_then(|_| output.flush())
@@ -65,7 +75,10 @@ fn chat_inner(
         };
         let line = line.trim();
         let result = match line {
-            "" => continue,
+            "" if staged.is_empty() => continue,
+            _ if attach::command(line).is_some() => {
+                attach::stage(agent, attach::command(line).unwrap(), &mut staged, output)
+            }
             "/exit" => return agent.save_session(),
             "/help" => {
                 agent.record_local_details(
@@ -85,11 +98,17 @@ fn chat_inner(
                 "Pending drafts are managed in the fullscreen terminal interface."
             )
             .map_err(|error| error.to_string()),
-            "/resume" => persistence::resume(agent, config, None, input, output, status),
+            "/resume" => {
+                let previous = agent.sessions();
+                persistence::resume(agent, config, None, input, output, status)
+                    .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
+            }
             "/tmp" => temporary::print(agent, "", output),
             _ if line.starts_with("/tmp ") => temporary::print(agent, line[5..].trim(), output),
             _ if line.starts_with("/resume ") => {
+                let previous = agent.sessions();
                 persistence::resume(agent, config, Some(line[8..].trim()), input, output, status)
+                    .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
             }
             "/export" => agent.archive().save().and_then(|path| {
                 agent.record_local(
@@ -120,7 +139,19 @@ fn chat_inner(
                 writeln!(output, "Unknown command. Use /help to see commands.")
                     .map_err(|error| error.to_string())
             }
-            _ => agent.run_turn(line, &mut Console::new(output, status)),
+            _ => {
+                let prompt = Prompt::new(line.to_owned(), staged.clone());
+                let before = agent.archive().messages.lock().unwrap().len();
+                let result = agent.run_turn(prompt.clone(), &mut Console::new(output, status));
+                let accepted =
+                    agent.archive().messages.lock().unwrap().get(before) == Some(&prompt.message());
+                if accepted {
+                    staged.clear();
+                    result.and(attach::save(agent, &staged))
+                } else {
+                    result
+                }
+            }
         };
         let result = result.and(agent.save_session());
         if let Err(error) = result {

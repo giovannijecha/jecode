@@ -1,3 +1,4 @@
+mod attachment;
 mod files;
 mod schema;
 mod shell;
@@ -18,6 +19,7 @@ pub struct Tools {
     bash: PathBuf,
     outputs: crate::output::Store,
     temporary: Option<crate::scratch::Area>,
+    attachments: Option<crate::attachments::Pool>,
 }
 
 impl Tools {
@@ -35,6 +37,7 @@ impl Tools {
             root,
             bash: shell::find_bash()?,
             temporary: None,
+            attachments: None,
         })
     }
 
@@ -65,6 +68,14 @@ impl Tools {
     }
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
         self.outputs.include(redactor);
+    }
+
+    pub fn configure_attachments(&mut self, pool: crate::attachments::Pool) {
+        self.attachments = Some(pool);
+    }
+
+    pub fn attachments(&self) -> Option<&crate::attachments::Pool> {
+        self.attachments.as_ref()
     }
 
     pub fn configure_temporary(&mut self, area: crate::scratch::Area) {
@@ -121,7 +132,9 @@ impl Tools {
             match name {
                 "read" => {
                     let path = required_string(&arguments, "path")?;
-                    if crate::output::is_reference(path) {
+                    if attachment::is_reference(path) {
+                        attachment::read(self.attachments.as_ref(), path, &arguments, cancellation)
+                    } else if crate::output::is_reference(path) {
                         files::read_page(&self.outputs.resolve(path)?, &arguments, cancellation)
                     } else {
                         let (root, arguments) = self.file_arguments(&arguments, false)?;

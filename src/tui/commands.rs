@@ -6,6 +6,7 @@ use super::{
     state::Item,
 };
 use crate::{
+    attachments::Prompt,
     effort::Effort,
     session::commands::{self, COMMANDS},
 };
@@ -61,37 +62,55 @@ impl App {
     }
 
     pub(super) fn submit(&mut self) -> Result<bool, String> {
+        if !self.imports.is_empty() {
+            self.warn("Attachments are still importing. Wait before sending your draft.");
+            return Ok(false);
+        }
         if self.state.queue.is_editing() {
-            if self.state.editor.text.trim().is_empty() {
+            if self.state.editor.prompt().is_empty() {
                 self.warn("The draft is empty. Esc cancels; discard it in /drafts.");
             } else {
                 self.finish_draft_edit(true);
             }
             return Ok(false);
         }
-        if self.state.editor.text.trim().is_empty() {
+        let mut prompt = self.state.editor.prompt();
+        if prompt.is_empty() {
             return Ok(false);
         }
-        let mut prompt = self.state.editor.text.clone();
         if (self.worker.is_none()
-            || matches!(self.state.suggestions.chosen(), Some("/copy" | "/drafts")))
+            || matches!(
+                self.state.suggestions.chosen(),
+                Some("/copy" | "/drafts" | "/attach")
+            ))
             && self.state.suggestions.visible
+            && prompt.attachments.is_empty()
             && let Some(chosen) = self.state.suggestions.chosen()
         {
-            prompt = chosen.into();
+            prompt = Prompt::plain(chosen);
         }
-        if prompt
-            .split_whitespace()
-            .next()
-            .is_some_and(|name| name.eq_ignore_ascii_case("/copy"))
+        let command = prompt.attachments.is_empty();
+        if command
+            && prompt
+                .text
+                .split_whitespace()
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case("/copy"))
         {
             self.state.history.submitted(&mut self.state.editor);
             self.edited();
             self.capture_input();
-            self.copy_command(&prompt);
+            self.copy_command(&prompt.text);
             return Ok(false);
         }
-        if prompt.trim().eq_ignore_ascii_case("/drafts") {
+        if command && let Some(arguments) = attach_arguments(&prompt.text) {
+            self.state.history.submitted(&mut self.state.editor);
+            self.edited();
+            self.capture_input();
+            self.attach_command(arguments);
+            return Ok(false);
+        }
+        if command && prompt.text.trim().eq_ignore_ascii_case("/drafts") {
             self.state.history.submitted(&mut self.state.editor);
             self.edited();
             self.open_drafts();
@@ -113,18 +132,23 @@ impl App {
         self.dispatch(prompt)
     }
 
-    pub(super) fn dispatch(&mut self, prompt: String) -> Result<bool, String> {
-        if prompt.trim().eq_ignore_ascii_case("/drafts") {
+    pub(super) fn dispatch(&mut self, prompt: Prompt) -> Result<bool, String> {
+        let command = prompt.attachments.is_empty() && prompt.text.trim_start().starts_with('/');
+        if command && prompt.text.trim().eq_ignore_ascii_case("/drafts") {
             self.open_drafts();
             return Ok(false);
         }
-        if self.copy_command(&prompt) {
+        if command && self.copy_command(&prompt.text) {
+            return Ok(false);
+        }
+        if command && let Some(arguments) = attach_arguments(&prompt.text) {
+            self.attach_command(arguments);
             return Ok(false);
         }
         self.capture_input();
         self.state.clear_notice();
         self.state.information = None;
-        if !prompt.trim_start().starts_with('/') {
+        if !command {
             if let Err(error) = self.agent.as_mut().unwrap().prepare_turn(&prompt) {
                 self.state.message(Kind::Error, &error);
                 self.keep_failed_prompt(prompt);
@@ -133,13 +157,13 @@ impl App {
             self.state.history.record(&prompt);
             self.capture_input();
             self.state
-                .message(Kind::User, &self.archive.redactor.text(&prompt));
+                .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());
             self.worker = Some(Worker::start(self.agent.take().unwrap(), prompt));
             self.state.status = "Starting...".into();
             return Ok(false);
         }
-        let value = prompt.trim();
+        let value = prompt.text.trim();
         let (name, arguments) = value
             .split_once(char::is_whitespace)
             .map_or((value, ""), |(name, args)| (name, args.trim()));
@@ -341,4 +365,11 @@ impl App {
         self.state.clear_notice();
         self.job = Some(Job::catalog(self.agent.as_ref().unwrap().api(), purpose));
     }
+}
+
+/// The path list of an `/attach` command.
+fn attach_arguments(text: &str) -> Option<&str> {
+    let text = text.trim_start();
+    let (name, arguments) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    name.eq_ignore_ascii_case("/attach").then_some(arguments)
 }

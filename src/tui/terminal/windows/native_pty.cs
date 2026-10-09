@@ -157,6 +157,9 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native row 099");
                 pty.Send("kept draft β🙂"); Thread.Sleep(150);
+                // Windows Terminal delivers a file drop as a paste of its quoted path.
+                pty.Send("\x1b[200~\"" + System.IO.Path.Combine(directory, "drop me.txt") + "\"\x1b[201~");
+                pty.Wait("Attached 1 item");
                 pty.Send("\x1b[<64;10;5M"); pty.Wait("Back to bottom");
                 pty.Send("\x1b"); Thread.Sleep(150);
                 pty.Send("\x10"); pty.Wait("Prompt history");
