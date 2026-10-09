@@ -18,8 +18,6 @@ pub struct Agent {
     persistence: Option<crate::sessions::Handle>,
     prepared: Option<String>,
     context: crate::context::Context,
-    reviewing_completion: bool,
-    measured_review_bytes: usize,
     project_instructions: String,
 }
 
@@ -41,8 +39,6 @@ impl Agent {
             persistence: None,
             prepared: None,
             context: crate::context::Context::default(),
-            reviewing_completion: false,
-            measured_review_bytes: 0,
             project_instructions: String::new(),
         };
         agent.clear();
@@ -98,10 +94,7 @@ impl Agent {
     }
 
     pub fn clear(&mut self) {
-        self.reviewing_completion = false;
-        self.measured_review_bytes = 0;
         self.project_instructions.clear();
-        self.tools.reset_watches();
         self.prepared = None;
         self.context = crate::context::Context::default();
         self.compatible_from = 0;
@@ -125,7 +118,6 @@ impl Agent {
     }
 
     pub fn run_turn(&mut self, prompt: &str, events: &mut impl EventSink) -> Result<(), String> {
-        self.reviewing_completion = false;
         let mut partial = String::new();
         let result = self.turn(prompt, &mut |event| {
             match &event {
@@ -138,7 +130,6 @@ impl Agent {
             }
             events.emit(event)
         });
-        self.reviewing_completion = false;
         if let Err(error) = &result {
             self.record_turn_error(error, &partial);
         }
@@ -168,37 +159,6 @@ impl Agent {
                 self.cancel_calls(&completion.calls);
                 return Err(error);
             }
-            if !completion.text.is_empty() && completion.calls.is_empty() {
-                self.context
-                    .evidence
-                    .update_file_constraints(self.tools.protection_status(&self.cancellation));
-            }
-            if !completion.text.is_empty()
-                && completion.calls.is_empty()
-                && !self.reviewing_completion
-                && self.context.evidence.needs_attention()
-            {
-                self.reviewing_completion = true;
-                self.record_local_details(
-                    "Completion review",
-                    "Reviewing recorded file changes and checks before accepting a final response",
-                    "notice",
-                    &[],
-                );
-                self.checkpoint(crate::sessions::Stage::Preserve)?;
-                events.emit(Event::RequestDiscarded)?;
-                events.emit(Event::Maintenance {
-                    text: "Reviewing observed file changes and recorded checks before finishing"
-                        .into(),
-                })?;
-                continue;
-            }
-            if completion.calls.is_empty()
-                && let Some(problem) = self.context.evidence.protection_problem()
-            {
-                events.emit(Event::RequestDiscarded)?;
-                return Err(problem);
-            }
             if !completion.text.is_empty()
                 && let Err(error) = events.emit(Event::Message {
                     text: self.redact(&completion.text),
@@ -208,18 +168,6 @@ impl Agent {
                 return Err(error);
             }
             if completion.calls.is_empty() {
-                if self.reviewing_completion {
-                    self.context.evidence.finish_review();
-                }
-                if let Some(notice) = self.context.evidence.completion_notice() {
-                    self.record_local_details("Completion evidence", &notice, "warning", &[]);
-                    events.emit(Event::Maintenance {
-                        text: self.redact(&notice),
-                    })?;
-                }
-                if !completion.text.trim().is_empty() {
-                    self.record_report_delivery();
-                }
                 return Ok(());
             }
             for (index, call) in completion.calls.iter().enumerate() {
@@ -261,9 +209,7 @@ impl Agent {
     }
 
     fn tool_result(&mut self, call: &ToolCall, result: &Value) {
-        let mut messages = self.messages.lock().unwrap();
-        let index = messages.len();
-        messages.push(Value::object([
+        self.messages.lock().unwrap().push(Value::object([
             ("role", Value::string("tool")),
             ("tool_call_id", Value::string(&call.id)),
             (
@@ -271,15 +217,6 @@ impl Agent {
                 Value::string(self.redactor.value(result).encode()),
             ),
         ]));
-        drop(messages);
-        let arguments = crate::json::parse(&call.arguments).unwrap_or(Value::Null);
-        self.tools.record_file_history(index, result);
-        self.context.evidence.record(
-            index,
-            &call.name,
-            &self.redactor.value(&arguments),
-            &self.redactor.value(result),
-        );
     }
 
     fn cancel_calls(&mut self, calls: &[ToolCall]) {
@@ -297,7 +234,7 @@ impl Agent {
     fn transport_messages(&self) -> Vec<Value> {
         let original = self.messages.lock().unwrap();
         let mut messages = self.projected_context(&self.context, &original);
-        let temporary = self.request_environment(&original);
+        let temporary = self.request_environment();
         if !temporary.is_empty()
             && let Some(Value::Object(system)) = messages.first_mut()
         {
@@ -343,13 +280,9 @@ impl Agent {
             && self.context.measured_end >= self.context.from
             && self.context.measured_end <= messages.len()
         {
-            estimate.saturating_add(
-                self.completion_review_state(messages)
-                    .len()
-                    .saturating_sub(self.measured_review_bytes),
-            )
+            estimate
         } else {
-            estimate.saturating_add(self.request_environment(messages).len())
+            estimate.saturating_add(self.request_environment().len())
         }
     }
 
@@ -394,16 +327,11 @@ impl Agent {
 }
 
 mod compaction;
-mod delivery;
-
 mod environment;
 mod history;
 mod persistence;
 mod project_instructions;
 mod recovery;
-mod repetition;
-#[cfg(test)]
-mod review_tests;
 mod summary;
 mod temporary;
 
@@ -414,29 +342,15 @@ mod context_tests;
 #[cfg(test)]
 mod delete_tests;
 #[cfg(test)]
-mod delivery_tests;
-#[cfg(test)]
-mod file_change_tests;
-#[cfg(test)]
 mod history_tests;
 #[cfg(test)]
 mod instruction_tests;
 #[cfg(test)]
 mod long_work_tests;
 #[cfg(test)]
-mod memory_tests;
-#[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]
-mod protection_recovery_tests;
-#[cfg(test)]
-mod protection_tests;
-#[cfg(test)]
 mod recovery_tests;
-#[cfg(test)]
-mod request_review_tests;
-#[cfg(test)]
-mod scope_tests;
 #[cfg(test)]
 mod summary_tests;
 #[cfg(test)]

@@ -27,7 +27,7 @@ fn archived_requests_cannot_misidentify_a_newer_live_request_as_the_previous_tas
         ..Context::default()
     };
     let projected = context.project(&messages, 0);
-    let archive = projected[2].get("content").and_then(Value::as_str).unwrap();
+    let archive = projected[1].get("content").and_then(Value::as_str).unwrap();
     assert!(
         archive
             .contains("Latest original user request: history:3 (retained in the live transcript)"),

@@ -232,7 +232,9 @@ fn legacy_system_messages_get_current_tool_paths_without_rewriting_saved_evidenc
             .contains("tmp:relative/path")
     );
     assert!(
-        request[1]
+        request
+            .last()
+            .unwrap()
             .get("content")
             .unwrap()
             .as_str()

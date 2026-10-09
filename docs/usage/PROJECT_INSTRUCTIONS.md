@@ -26,8 +26,7 @@ own working directory.
 
 The file provides project instructions to the model. Explicit user requests
 take precedence over those instructions, and the native tool contracts remain
-in force. Markdown does not add native file protection; use the `protect` tool
-when a task needs a preservation registration.
+in force.
 
 ## Updates and saved sessions
 

@@ -3,11 +3,7 @@ use crate::openrouter::Limits;
 use crate::test_support::{Directory, HttpFixture, completion};
 
 fn candidate() -> String {
-    let mut value = crate::json::parse(&crate::context::memory::fixture("Inspect only")).unwrap();
-    if let Value::Object(fields) = &mut value {
-        fields.insert("remaining".into(), Value::Array(vec![]));
-    }
-    value.encode()
+    "Inspect only".into()
 }
 
 fn truncated() -> Value {

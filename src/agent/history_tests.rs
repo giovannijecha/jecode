@@ -236,17 +236,8 @@ fn paged_history_exposes_the_executed_action_owner_after_compaction_and_a_new_re
             Some(&Value::string("history:2"))
         );
         assert_eq!(source.get("tool"), Some(&Value::string("write")));
-        assert!(
-            source
-                .get("eligible_proof")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .contains(&Value::string("change"))
-        );
-        // Retrieving prior write proof is not itself a new write or a passed check.
+        // Retrieving an earlier write result is not itself a new write.
         assert!(page.get("bytes_written").is_none());
-        assert!(page.get("check_status").is_none());
     }
     assert_eq!(*agent.messages.lock().unwrap(), original);
     assert_eq!(

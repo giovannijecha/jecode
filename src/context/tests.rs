@@ -181,7 +181,7 @@ fn a_request_already_in_recent_history_is_not_duplicated() {
 }
 
 #[test]
-fn many_corrections_keep_the_original_objective_and_the_latest_request() {
+fn recent_requests_stay_verbatim_newest_first_within_the_budget() {
     let mut messages = vec![
         message("system", "Agent"),
         message("user", "Original objective: preserve protected.txt"),
@@ -207,60 +207,10 @@ fn many_corrections_keep_the_original_objective_and_the_latest_request() {
         .map(Value::encode)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(encoded.contains("Original objective: preserve protected.txt"));
     assert!(encoded.contains("Latest correction: exclusive upper date bound"));
+    assert!(encoded.contains(&format!("Correction 29: {}", "detail ".repeat(70))));
+    // The oldest requests leave the view; history:requests still returns them.
+    assert!(!encoded.contains("Original objective"));
+    assert!(encoded.contains("Earlier requests are omitted"));
     assert!(encoded.contains("history:requests"));
-    assert!(encoded.contains("intermediate requests are omitted"));
-}
-
-#[test]
-fn large_change_reports_become_explicit_previews_without_losing_the_originals() {
-    let changes = (0..100)
-        .map(|index| {
-            Value::object([
-                ("path", Value::string(format!("src/file-{index}"))),
-                ("first_observed", Value::string("evidence ".repeat(100))),
-            ])
-        })
-        .collect::<Vec<_>>();
-    let report = Value::object([
-        ("file_changes", Value::Array(changes.clone())),
-        (
-            "file_tracking",
-            Value::object([
-                ("status", Value::string("incomplete")),
-                ("errors", Value::Array(changes)),
-            ]),
-        ),
-    ]);
-    let original = message("tool", &report.encode());
-    let context = Context {
-        preview_until: 2,
-        preview_limit: 1024,
-        ..Context::default()
-    };
-    let projected = context.project_message(&original, 1, 0);
-    let preview =
-        crate::json::parse(projected.get("content").and_then(Value::as_str).unwrap()).unwrap();
-    assert_eq!(preview.get("context_truncated"), Some(&Value::Bool(true)));
-    assert_eq!(
-        preview.get("history_reference").and_then(Value::as_str),
-        Some("history:1")
-    );
-    assert_eq!(
-        preview.get("file_changes_original_count"),
-        Some(&Value::number(100))
-    );
-    assert_eq!(
-        preview
-            .get("file_tracking")
-            .unwrap()
-            .get("errors_original_count"),
-        Some(&Value::number(100))
-    );
-    assert!(projected.encode().len() < 2048);
-    assert_eq!(
-        original.get("content").and_then(Value::as_str),
-        Some(report.encode().as_str())
-    );
 }

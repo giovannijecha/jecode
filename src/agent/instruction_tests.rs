@@ -70,6 +70,5 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
         .unwrap()[0];
     assert_eq!(sent, &projection[0]);
     assert!(sent.encode().contains("Environment:"));
-    assert!(sent.encode().contains("Native request state:"));
     assert!(!sent.encode().contains("Legacy harness instructions"));
 }

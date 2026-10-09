@@ -73,44 +73,7 @@ pub fn tool_summary(name: &str, result: &Value) -> String {
                 "; output truncated"
             });
         }
-        if let Some(status) = result.get("check_status").and_then(Value::as_str) {
-            summary.push_str(&format!("; check {status}"));
-        }
-        if let Some(changes) = result.get("file_changes").and_then(Value::as_array)
-            && !changes.is_empty()
-        {
-            summary.push_str(&format!("; {} observed file(s) changed", changes.len()));
-        }
-        if result
-            .get("file_tracking")
-            .and_then(|tracking| tracking.get("status"))
-            .and_then(Value::as_str)
-            == Some("incomplete")
-        {
-            summary.push_str("; file comparison incomplete");
-        }
         return summary;
-    }
-    if name == "protect"
-        && let Some(entries) = result.get("file_protections").and_then(Value::as_array)
-    {
-        let failures = entries
-            .iter()
-            .filter(|entry| {
-                matches!(
-                    entry.get("state").and_then(Value::as_str),
-                    Some("violated" | "unknown")
-                )
-            })
-            .count();
-        return if failures > 0 {
-            format!("{} registered files; {failures} unresolved", entries.len())
-        } else {
-            format!(
-                "{} registered file protections; no unresolved changes",
-                entries.len()
-            )
-        };
     }
     if let Some(bytes) = result.get("bytes_written").and_then(Value::as_usize) {
         return format!("wrote {bytes} bytes");
@@ -122,17 +85,6 @@ pub fn tool_summary(name: &str, result: &Value) -> String {
 }
 
 pub fn description(name: &str, arguments: &Value) -> String {
-    if name == "protect" {
-        let action = arguments
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("invalid action");
-        let paths = arguments
-            .get("paths")
-            .map(Value::encode)
-            .unwrap_or_else(|| "all registered files".into());
-        return format!("{action} {paths}");
-    }
     if name == "bash" {
         return arguments
             .get("command")

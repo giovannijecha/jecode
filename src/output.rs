@@ -75,44 +75,6 @@ impl Store {
         })
     }
 
-    pub(crate) fn protection_path(&self, id: &str) -> Result<PathBuf, String> {
-        self.protection_artifact(id, "baseline")
-    }
-
-    pub(crate) fn protection_intent_path(&self, id: &str) -> Result<PathBuf, String> {
-        self.protection_artifact(id, "preservation")
-    }
-
-    pub(crate) fn protection_intents(&self) -> Result<Vec<PathBuf>, String> {
-        let directory = self.owned_directory()?;
-        let mut paths = Vec::new();
-        for item in fs::read_dir(directory).map_err(|error| error.to_string())? {
-            let item = item.map_err(|error| error.to_string())?;
-            if let Some(name) = item.file_name().to_str()
-                && let Some(id) = name.strip_suffix(".preservation")
-                && crate::sessions::valid_id(id)
-            {
-                paths.push(self.protection_intent_path(id)?);
-            }
-        }
-        Ok(paths)
-    }
-
-    fn protection_artifact(&self, id: &str, extension: &str) -> Result<PathBuf, String> {
-        if !crate::sessions::valid_id(id) {
-            return Err("Invalid protection snapshot identifier".into());
-        }
-        let directory =
-            fs::canonicalize(self.owned_directory()?).map_err(|error| error.to_string())?;
-        let path = directory.join(format!("{id}.{extension}"));
-        if let Ok(metadata) = fs::symlink_metadata(&path)
-            && (!metadata.is_file() || metadata.file_type().is_symlink())
-        {
-            return Err("Protection snapshot must be an owned regular file".into());
-        }
-        Ok(path)
-    }
-
     pub fn create(&self) -> Result<Logs, String> {
         let directory = self.owned_directory()?;
         let id = crate::sessions::identifier();

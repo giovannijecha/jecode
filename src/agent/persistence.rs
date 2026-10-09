@@ -64,7 +64,6 @@ impl Agent {
             return Err(error);
         }
         self.prepared = Some(prompt.into());
-        self.tools.begin_request(before);
         Ok(())
     }
 
@@ -150,13 +149,9 @@ impl Agent {
         *self.events.lock().unwrap() = document.events;
         self.compatible_from = document.compatible_from;
         self.context = document.context;
-        self.context
-            .evidence
-            .rebuild(&self.messages.lock().unwrap());
-        self.tools.restore_watches(&self.messages.lock().unwrap())?;
         let calibration = self.context.calibration;
         self.context.reset_usage();
-        // Fresh guards and request paths invalidate the direct prompt measurement,
+        // A fresh request path invalidates the direct prompt measurement,
         // while the saved model's conservative token density remains useful.
         self.context.calibration = calibration;
         self.prepared = None;
@@ -170,10 +165,6 @@ impl Agent {
             self.redactor.clone(),
         )?;
         self.tools.configure_temporary(temporary);
-        self.tools.recover_protections()?;
-        self.context
-            .evidence
-            .update_file_constraints(self.tools.protection_status(&self.cancellation));
         Ok(status)
     }
 

@@ -1,8 +1,6 @@
 mod files;
-mod protection;
 mod schema;
 mod shell;
-mod watch;
 
 pub(crate) use files::read_text_page;
 pub use schema::definitions;
@@ -12,7 +10,6 @@ use crate::cancel::Cancellation;
 use crate::json::{self, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 pub(super) const OUTPUT_LIMIT: usize = 64 * 1024;
 
@@ -21,8 +18,6 @@ pub struct Tools {
     bash: PathBuf,
     outputs: crate::output::Store,
     temporary: Option<crate::scratch::Area>,
-    watches: Mutex<watch::Watch>,
-    protections: Mutex<protection::Protection>,
 }
 
 impl Tools {
@@ -40,46 +35,11 @@ impl Tools {
             root,
             bash: shell::find_bash()?,
             temporary: None,
-            watches: Mutex::new(watch::Watch::default()),
-            protections: Mutex::new(protection::Protection::default()),
         })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    pub(crate) fn reset_watches(&self) {
-        self.watches.lock().unwrap().reset();
-        self.protections.lock().unwrap().reset();
-    }
-
-    pub(crate) fn record_file_history(&self, at: usize, result: &Value) {
-        self.watches.lock().unwrap().record(at, result);
-        self.protections.lock().unwrap().record(at, result);
-    }
-
-    pub(crate) fn restore_watches(&self, messages: &[Value]) -> Result<(), String> {
-        self.watches.lock().unwrap().rebuild(messages);
-        self.protections.lock().unwrap().rebuild(messages)
-    }
-
-    pub(crate) fn begin_request(&self, at: usize) {
-        self.protections.lock().unwrap().begin_request(at);
-    }
-
-    pub(crate) fn protection_status(&self, cancellation: &Cancellation) -> Vec<Value> {
-        self.protections
-            .lock()
-            .unwrap()
-            .status(&self.root, &self.outputs, cancellation)
-    }
-
-    pub(crate) fn recover_protections(&self) -> Result<(), String> {
-        self.protections
-            .lock()
-            .unwrap()
-            .recover(&self.root, &self.outputs)
     }
 
     pub fn bash(&self) -> &Path {
@@ -165,104 +125,24 @@ impl Tools {
                         files::read_page(&self.outputs.resolve(path)?, &arguments, cancellation)
                     } else {
                         let (root, arguments) = self.file_arguments(&arguments, false)?;
-                        let mut result = files::read(&root, &arguments, cancellation)?;
-                        self.observe_file(
-                            &root,
-                            &arguments,
-                            "before_file_tool",
-                            cancellation,
-                            &mut result,
-                        );
-                        Ok(result)
+                        files::read(&root, &arguments, cancellation)
                     }
                 }
                 "write" | "edit" => {
                     let (root, arguments) = self.file_arguments(&arguments, name == "write")?;
-                    if root == self.root {
-                        if let Some(refusal) = self
-                            .protections
-                            .lock()
-                            .unwrap()
-                            .scope_refusal(&root, cancellation)
-                        {
-                            return Ok(refusal);
-                        }
-                        self.protections
-                            .lock()
-                            .unwrap()
-                            .refuse_write(&root, required_string(&arguments, "path")?)?;
-                    }
-                    let result = if name == "write" {
+                    if name == "write" {
                         files::write(&root, &arguments)
                     } else {
                         files::edit(&root, &arguments)
-                    };
-                    result.map(|mut result| {
-                        self.observe_file(
-                            &root,
-                            &arguments,
-                            "file_tool",
-                            cancellation,
-                            &mut result,
-                        );
-                        result
-                    })
+                    }
                 }
                 "bash" => {
-                    self.protections.lock().unwrap().require_registration()?;
-                    if let Some(refusal) = self
-                        .protections
-                        .lock()
-                        .unwrap()
-                        .scope_refusal(&self.root, cancellation)
-                    {
-                        return Ok(refusal);
-                    }
-                    let watched = match arguments.get("watch") {
-                        None => Vec::new(),
-                        Some(Value::Array(paths)) => paths
-                            .iter()
-                            .map(|path| {
-                                let path = path
-                                    .as_str()
-                                    .ok_or("watch must be an array of project file paths")?;
-                                if path.starts_with("tmp:")
-                                    || crate::output::is_reference(path)
-                                    || path.starts_with("history:")
-                                {
-                                    return Err("watch accepts existing project files only".into());
-                                }
-                                let path = files::existing_path(&self.root, path)?;
-                                if !path.is_file() {
-                                    return Err(
-                                        "watch accepts existing regular project files only".into(),
-                                    );
-                                }
-                                Ok(path)
-                            })
-                            .collect::<Result<Vec<_>, String>>()?,
-                        _ => return Err("watch must be an array of project file paths".into()),
-                    };
                     let temporary = self
                         .temporary
                         .as_ref()
                         .map(|area| area.ensure())
                         .transpose()?;
-                    let mut report = watch::Report::default();
-                    {
-                        let mut watches = self.watches.lock().unwrap();
-                        watches.scan(&self.root, "before_command", cancellation, &mut report);
-                        for path in watched {
-                            watches.observe(
-                                &self.root,
-                                &path,
-                                "before_command",
-                                cancellation,
-                                &mut report,
-                            );
-                        }
-                    }
-                    let mut result = shell::execute(
+                    Ok(shell::execute(
                         &self.bash,
                         &self.root,
                         &arguments,
@@ -270,81 +150,12 @@ impl Tools {
                         &self.outputs,
                         temporary.as_deref(),
                     )
-                    .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
-                    let mut watches = self.watches.lock().unwrap();
-                    watches.scan(&self.root, "during_command", cancellation, &mut report);
-                    watches.attach(&mut result, report);
-                    Ok(result)
-                }
-                "protect" => {
-                    let mut result = self.protections.lock().unwrap().execute(
-                        &self.root,
-                        &self.outputs,
-                        &arguments,
-                        cancellation,
-                    );
-                    let paths = self.protections.lock().unwrap().active_paths(&self.root);
-                    let mut report = watch::Report::default();
-                    let mut watches = self.watches.lock().unwrap();
-                    for path in paths {
-                        watches.observe(
-                            &self.root,
-                            &path,
-                            if result.get("bytes_written").is_some() {
-                                "file_tool"
-                            } else {
-                                "before_file_tool"
-                            },
-                            cancellation,
-                            &mut report,
-                        );
-                    }
-                    watches.attach(&mut result, report);
-                    Ok(result)
+                    .unwrap_or_else(|error| Value::object([("error", Value::string(error))])))
                 }
                 _ => Err(format!("Unknown tool: {name}")),
             }
         });
-        let mut result =
-            result.unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
-        let changes = self.protections.lock().unwrap().changes(
-            &self.root,
-            &self.outputs,
-            cancellation,
-            name == "protect",
-        );
-        if (!changes.is_empty() || name == "protect")
-            && let Value::Object(fields) = &mut result
-        {
-            fields.insert("file_protections".into(), Value::Array(changes));
-            if name == "protect" {
-                fields.insert("file_protections_scope".into(), Value::string("all"));
-            }
-        }
-        result
-    }
-
-    fn observe_file(
-        &self,
-        root: &Path,
-        arguments: &Value,
-        source: &str,
-        cancellation: &Cancellation,
-        result: &mut Value,
-    ) {
-        if root != self.root {
-            if let Value::Object(fields) = result {
-                fields.insert("file_scope".into(), Value::string("temporary"));
-            }
-            return;
-        }
-        let path = arguments.get("path").and_then(Value::as_str).unwrap_or("");
-        if let Ok(path) = files::existing_path(root, path) {
-            let mut report = watch::Report::default();
-            let mut watches = self.watches.lock().unwrap();
-            watches.observe(root, &path, source, cancellation, &mut report);
-            watches.attach(result, report);
-        }
+        result.unwrap_or_else(|error| Value::object([("error", Value::string(error))]))
     }
 }
 

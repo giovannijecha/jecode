@@ -1,6 +1,7 @@
 use crate::json::Value;
 
-/// Derived provenance, never proposed by the model or stored in original messages.
+/// Describes where a history message came from: its role, the user request it
+/// answers and, for tool results, the originating call.
 pub fn record(messages: &[Value], index: usize) -> Value {
     let message = messages.get(index);
     let role = message
@@ -55,38 +56,5 @@ pub fn record(messages: &[Value], index: usize) -> Value {
             call.and_then(|(_, call)| call.get("function")?.get("name")?.as_str())
                 .map_or(Value::Null, Value::string),
         ),
-        (
-            "eligible_proof",
-            Value::Array(
-                kinds(messages, index)
-                    .into_iter()
-                    .map(Value::string)
-                    .collect(),
-            ),
-        ),
     ])
 }
-
-// Use the same validator as memory acceptance; metadata cannot relax its contract.
-fn kinds(messages: &[Value], index: usize) -> Vec<&'static str> {
-    ["decision", "inspection", "change", "check"]
-        .into_iter()
-        .filter(|kind| {
-            let proposal = Value::object([(
-                "completed",
-                Value::Array(vec![Value::object([
-                    ("description", Value::string("Reference eligibility")),
-                    ("kind", Value::string(*kind)),
-                    (
-                        "evidence",
-                        Value::Array(vec![Value::string(format!("history:{index}"))]),
-                    ),
-                ])]),
-            )]);
-            super::entries(&proposal, "completed", messages).is_ok()
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests;

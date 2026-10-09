@@ -64,10 +64,7 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
         ),
         (
             200,
-            completion(
-                &crate::context::memory::fixture("Keep the current inspection"),
-                vec![],
-            ),
+            completion(&String::from("Keep the current inspection"), vec![]),
         ),
         (200, completion("Inspection finished.", vec![])),
     ]);
@@ -92,7 +89,7 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
 }
 
 #[test]
-fn a_provider_context_rejection_reduces_chunks_and_retries_without_losing_the_prompt() {
+fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt() {
     let directory = Directory::new();
     // Keep this unknown-capacity rejection larger than the current tool contract.
     let prompt = "original objective ".repeat(750);
@@ -110,16 +107,7 @@ fn a_provider_context_rejection_reduces_chunks_and_retries_without_losing_the_pr
         (
             200,
             completion(
-                &crate::context::memory::fixture("Keep the original objective and continue."),
-                vec![],
-            ),
-        ),
-        (
-            200,
-            completion(
-                &crate::context::memory::fixture(
-                    "Original objective retained, including the last portion.",
-                ),
+                &String::from("Original objective retained, including the last portion."),
                 vec![],
             ),
         ),
@@ -145,11 +133,10 @@ fn a_provider_context_rejection_reduces_chunks_and_retries_without_losing_the_pr
         Some(prompt.as_str())
     );
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 3);
     assert!(requests[1].body.get("tools").is_none());
-    assert!(requests[2].body.get("tools").is_none());
-    assert!(requests[3].body.get("tools").is_some());
-    assert!(requests[3].body.encode().contains("last portion"));
+    assert!(requests[2].body.get("tools").is_some());
+    assert!(requests[2].body.encode().contains("last portion"));
     assert_eq!(
         agent
             .messages
@@ -190,7 +177,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
         (
             200,
             completion(
-                &crate::context::memory::fixture("Goal and original evidence preserved."),
+                &String::from("Goal and original evidence preserved."),
                 vec![],
             ),
         ),
@@ -254,7 +241,6 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
     assert!(memory.len() > 8192);
     let fixture = HttpFixture::new(vec![
         (200, completion(&memory, vec![])),
-        (200, completion(&memory, vec![])),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -291,5 +277,5 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
     assert!(agent.context.summary.len() > 8192);
     assert!(agent.context.estimate(&agent.messages.lock().unwrap(), 0) < 28000);
     assert_eq!(agent.messages.lock().unwrap().len(), 6);
-    assert_eq!(fixture.finish().len(), 3);
+    assert_eq!(fixture.finish().len(), 2);
 }

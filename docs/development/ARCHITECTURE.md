@@ -22,71 +22,31 @@ Modules stay around 500 lines or fewer and split by responsibility:
   anchored scrolling, source reflow, commands and background
   workers. Each responsibility has its own module.
 - `agent.rs`, `agent/`, `context.rs`, `context/`, `events.rs`: conversation/tool loop,
-  recovery, context projection, validated continuity memory, execution facts and
-  compaction independent of rendering. `agent/history.rs` exposes read-only
-  paginated original messages and the full retained operational ledger through
-  the existing read tool. `context/memory/projection.rs` bounds the active
-  completed-work view without archiving constraints or unfinished work.
-  `context/memory/proof.rs` validates completed and resolved entries against
-  original user/tool evidence and identifies rejected fields and references.
-  `context/memory/request.rs` requires explicit review of prior requirements
-  on a newer user request and stamps an owned review boundary. Subsequent
-  portions of that request keep delta retention. New proven resolutions remove
-  exact repeated pending copies without waiving other work or file constraints.
-  Preview progress cannot make a user decision newer than that boundary stale;
-  tool-proof freshness uses the accepted summary boundary rather than the
-  preview cursor. Older tool results before that accepted boundary stay stale.
-  Requests retain the current user's original history boundary across compaction
-  and resume, so summarized actions remain attributable to their request.
-  The archived request view identifies the current request from the complete
-  transcript, including a newer request in the live tail. Its introduction exposes
-  factual history locations rather than assigning precedence to an archived task.
-  Continuity memory exposes a response schema. `context/memory/pending.rs` accepts
-  pending text or a description with an optional operation kind and canonicalizes
-  only that representation before native retention and proof validation. Pending
-  annotations supply no completion or decision proof; unsupported fields fail.
-  `context/memory/evidence.rs` derives source roles, originating user requests,
-  matching tool calls and eligible proof kinds from original history. Compaction,
-  execution-state views and paginated history use the same provenance. Tool
-  ownership follows the original call even when a later user request intervenes.
-  `context/state.rs` presents native boundaries separately from proposed memory;
-  it does not instruct the model to follow an old next action.
+  recovery, context projection and compaction independent of rendering. Jecode
+  helps the model through tools, context and history; it adds no completion
+  gates, repeated-command refusals or output validation.
+  `agent/history.rs` exposes read-only paginated original messages, the ordered
+  user requests and the current summary through the existing read tool.
+  `context/source.rs` derives each message's role, originating user request and
+  matching tool call from original history; summaries and history reads share it.
+  Tool ownership follows the original call even when a later user request intervenes.
+  `agent/summary.rs` folds the newest source-labelled transcript records that
+  fit into one plain-text handoff written by the same model, in a single request
+  that also carries the original user requests and the previous summary.
+  `context/view.rs` keeps recent user requests verbatim after compaction within
+  a byte budget and turns large older tool results into previews with history
+  references.
   `agent/environment.rs` supplies the agent identity, working-directory/access
-  facts and the latest original user-request reference. During completion review
-  it exposes the provisional response reference, final-delivery state and live
-  native blocker. These replace the general workflow and completion-review
-  paragraphs; native execution guards and tool contracts remain independent.
-  Session temporary paths and explicit cleanup receipts are factual views too.
-  Current projections leave the saved original system message unchanged.
+  facts and session temporary paths. Current projections leave the saved
+  original system message unchanged.
   `agent/project_instructions.rs` loads the launch-directory `JECODE.md` before
   each user request and keeps one snapshot for the turn. The current system
   projection includes its rules independently of compaction and saved history;
   changed rules invalidate direct prompt measurements while keeping conservative
   token calibration and the learned context ceiling.
-  `context/memory/feedback.rs` exposes rejected proposals, cited source types
-  and independent field/entry failures through the existing native validators.
-  `context/memory/repair.rs` supplies the same native source eligibility plus
-  original requests, call arguments and result facts for a structured rejected
-  proposal. Repairs keep the original transcript portion boundary instead of
-  resummarizing its code/output payloads and leaving a newly displaced tail.
-  Missing update facts, oversized requests and provider context rejections use
-  the original bounded transcript path; original history is retained throughout.
-  The summary-only projection exposes earlier completed proofs as a read-only
-  `completed_archive` with exact kinds and references. The response's `completed`
-  field proposes additions to the native ledger, whose full prior identities
-  remain retained and validated independently of the displayed archive.
-  Accepted state and retry limits remain unchanged. Explicit stable targets in
-  completed/resolved descriptions can appear within prose; unknown, extended or
-  ambiguous targets never select a previous item by semantic guesswork.
-  Summary truncation also learns a native output allowance with accepted
-  context. It survives resume, resets on a model/effort change and stays bounded
-  by the current context and provider output limit; live prompt measurements
-  remain separate from this resource state.
-  `agent/delivery.rs` records successful final-response delivery after completion
-  guards and supplies that receipt to later summaries. It proves delivery only,
-  uses the existing saved event format and stays outside the rendered transcript.
-  `agent/repetition.rs` checks archived native Bash receipts before an exact
-  command is repeated; deliberate re-execution needs an explicit reason.
+  Summary truncation learns an output allowance that survives resume, resets on
+  a model/effort change and stays bounded by the current context and provider
+  output limit; live prompt measurements remain separate from this resource state.
 - `export.rs`, `redact.rs`, `cancel.rs`: conversation snapshots, key masking and
   cooperative cancellation shared with the native process runner.
 - `openrouter/`: provider API, completion parsing, incremental SSE streaming, model
@@ -95,24 +55,7 @@ Modules stay around 500 lines or fewer and split by responsibility:
   context space. Provider failures retain the underlying code, parameter and
   message after credential redaction and diagnostic length bounding.
 - `json.rs`, `process.rs`, `process/`, `output.rs`, `tools/`: owned JSON, cancellable foreground
-  processes, complete output storage and the five tools. `tools/watch.rs` and
-  `tools/watch/fingerprint.rs` compare explicitly observed project files through
-  standard filesystem APIs; native version receipts rebuild observation on resume.
-  `context/evidence.rs` keeps indirect changes and check freshness independent of
-  model memory, with bounded request details and separate completion notices.
-  `context/evidence/comparisons.rs` reconciles an earlier incomplete comparison
-  only when a later native protection status proves the exact path preserved
-  against a registration predating that uncertainty. Unknown baselines, known
-  changes and recorded check outcomes retain their independent evidence state.
-  `tools/protection.rs` owns explicit file constraints, exact binary snapshots,
-  guarded restoration and registration recovery; `tools/protection/scope.rs`
-  requires review of carried registrations before a new request's mutations and
-  supplies bounded related-file inventory. `protection/directories.rs` retains
-  directory declarations across requests and native receipt recovery;
-  `protection/decisions.rs` validates classification and exclusions, while
-  `protection/registration.rs` captures existing baselines. `context/protection.rs` retains
-  their native states across compaction; the agent refreshes them before accepting
-  completion. Snapshots and synced intents use the session-owned output store.
+  processes, complete output storage and the four tools.
   `tools/schema.rs` advertises meaningful numeric bounds, leaving read offsets
   without an artificial maximum; native argument parsing still validates them.
 

@@ -1,17 +1,18 @@
 use crate::{json::Value, openrouter::Limits};
 
-pub(crate) mod evidence;
-pub(crate) mod memory;
-mod protection;
-mod state;
+pub(crate) mod source;
 mod view;
+
+pub(crate) use view::excerpt;
+
+/// Introduces a compaction summary, which the same model wrote in an earlier context window.
+const SUMMARY_PREFIX: &str = "Another language model started this task and wrote the summary below. The work it did with tools is still in place: files, saved outputs and the original history. Build on it and avoid repeating finished work.";
 
 /// A view of durable history. Compaction never deletes the source messages.
 #[derive(Clone, Debug)]
 pub struct Context {
     pub from: usize,
     pub summary: String,
-    pub memory_limit: Option<usize>,
     pub ceiling: Option<usize>,
     pub input_tokens: Option<usize>,
     pub measured_end: usize,
@@ -21,14 +22,14 @@ pub struct Context {
     pub summary_output_tokens: usize,
     pub preview_until: usize,
     pub preview_limit: usize,
-    pub evidence: evidence::Evidence,
+    /// Byte budget for verbatim recent user requests after compaction.
+    pub request_limit: usize,
 }
 impl Default for Context {
     fn default() -> Self {
         Self {
             from: 1,
             summary: String::new(),
-            memory_limit: None,
             ceiling: None,
             input_tokens: None,
             measured_end: 0,
@@ -37,7 +38,7 @@ impl Default for Context {
             summary_output_tokens: 0,
             preview_until: 0,
             preview_limit: 0,
-            evidence: evidence::Evidence::default(),
+            request_limit: 0,
         }
     }
 }
@@ -46,10 +47,6 @@ impl Context {
         Value::object([
             ("from", Value::number(self.from)),
             ("summary", Value::string(&self.summary)),
-            (
-                "memory_limit",
-                self.memory_limit.map_or(Value::Null, Value::number),
-            ),
             ("ceiling", self.ceiling.map_or(Value::Null, Value::number)),
             (
                 "input_tokens",
@@ -72,7 +69,7 @@ impl Context {
             ),
             ("preview_until", Value::number(self.preview_until)),
             ("preview_limit", Value::number(self.preview_limit)),
-            ("execution_evidence", self.evidence.value()),
+            ("request_limit", Value::number(self.request_limit)),
         ])
     }
     pub fn parse(value: Option<&Value>) -> Result<Self, String> {
@@ -100,15 +97,6 @@ impl Context {
                 .and_then(Value::as_str)
                 .ok_or("Invalid context summary")?
                 .into(),
-            memory_limit: match value.get("memory_limit") {
-                None | Some(Value::Null) => None,
-                Some(value) => Some(
-                    value
-                        .as_usize()
-                        .filter(|value| *value > 0)
-                        .ok_or("Invalid saved continuity memory limit")?,
-                ),
-            },
             ceiling: optional("ceiling")?,
             input_tokens: optional("input_tokens")?,
             measured_end: number("measured_end")?,
@@ -143,7 +131,11 @@ impl Context {
                     .as_usize()
                     .ok_or("Invalid saved context preview limit")
             })?,
-            evidence: evidence::Evidence::parse(value.get("execution_evidence"))?,
+            request_limit: value.get("request_limit").map_or(Ok(0), |value| {
+                value
+                    .as_usize()
+                    .ok_or("Invalid saved context request limit")
+            })?,
         })
     }
     pub fn validate(&self, messages: &[Value]) -> Result<(), String> {
@@ -152,7 +144,6 @@ impl Context {
             || self.measured_end > messages.len()
             || (self.from > 1 && self.summary.trim().is_empty())
             || self.ceiling == Some(0)
-            || self.memory_limit == Some(0)
             || self
                 .calibration
                 .is_some_and(|(tokens, bytes)| tokens == 0 || bytes == 0)
@@ -164,7 +155,7 @@ impl Context {
         {
             return Err("Invalid saved context boundary".into());
         }
-        self.evidence.validate(messages)
+        Ok(())
     }
     pub fn reset_usage(&mut self) {
         // Summary allowance belongs to the saved model/effort, not this live projection.
@@ -226,21 +217,20 @@ impl Context {
         if let Some(system) = messages.first() {
             result.push(system.clone());
         }
-        if !self.summary.is_empty()
-            || self.evidence.needs_attention()
-            || self.evidence.has_file_constraints()
-        {
-            result.push(Value::object([
-                ("role", Value::string("system")),
-                ("content", Value::string(self.state_view(messages))),
-            ]));
-        }
-        if let Some(requests) = view::requests(
-            messages,
-            self.from,
-            self.preview_limit.max(1024).saturating_mul(2).min(8192),
-        ) {
+        if let Some(requests) = view::requests(messages, self.from, self.request_budget()) {
             result.push(requests);
+        }
+        if !self.summary.is_empty() {
+            result.push(Value::object([
+                ("role", Value::string("user")),
+                (
+                    "content",
+                    Value::string(format!(
+                        "{SUMMARY_PREFIX} It covers the conversation before history:{}; read history:N for any original message and history:requests for every user request.\n\n{}",
+                        self.from, self.summary
+                    )),
+                ),
+            ]));
         }
         result.extend(
             messages
@@ -250,13 +240,6 @@ impl Context {
                 .map(|(index, message)| self.project_message(message, index, compatible_from)),
         );
         result
-    }
-
-    pub(crate) fn memory_view(&self) -> String {
-        self.memory_limit.map_or_else(
-            || self.summary.clone(),
-            |limit| memory::active_view(&self.summary, limit),
-        )
     }
 
     pub(crate) fn project_message(
@@ -279,19 +262,24 @@ impl Context {
         }
     }
 
+    fn request_budget(&self) -> usize {
+        // Sessions saved before the request budget existed keep the former bound.
+        if self.request_limit > 0 {
+            self.request_limit
+        } else {
+            8192
+        }
+    }
+
     pub(crate) fn user_requests(&self, messages: &[Value]) -> String {
-        view::requests(
-            messages,
-            messages.len(),
-            self.preview_limit.max(1024).saturating_mul(2).min(8192),
-        )
-        .and_then(|value| {
-            value
-                .get("content")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_default()
+        view::requests(messages, messages.len(), self.request_budget())
+            .and_then(|value| {
+                value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default()
     }
     pub fn estimate(&self, messages: &[Value], compatible_from: usize) -> usize {
         if let Some(tokens) = self.input_tokens
@@ -338,22 +326,6 @@ pub fn bytes(messages: &[Value]) -> usize {
     messages.iter().fold(0usize, |total, message| {
         total.saturating_add(message.encode().len())
     })
-}
-
-pub fn groups(messages: &[Value], from: usize) -> Vec<(usize, usize)> {
-    let mut groups = Vec::new();
-    let mut start = from;
-    while start < messages.len() {
-        let mut end = start + 1;
-        while end < messages.len()
-            && messages[end].get("role").and_then(Value::as_str) == Some("tool")
-        {
-            end += 1;
-        }
-        groups.push((start, end));
-        start = end;
-    }
-    groups
 }
 
 #[cfg(test)]

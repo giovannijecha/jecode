@@ -239,17 +239,7 @@ fn live_requests_keep_the_rules_after_context_compaction() {
         ),
         (
             200,
-            completion(
-                &crate::context::memory::fixture("Continue inspection"),
-                vec![],
-            ),
-        ),
-        (
-            200,
-            completion(
-                &crate::context::memory::fixture("Continue inspection"),
-                vec![],
-            ),
+            completion(&String::from("Continue inspection"), vec![]),
         ),
         (200, completion("Finished", vec![])),
     ]);
@@ -278,8 +268,8 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     assert!(agent.context.from > 1);
     assert!(!agent.context.summary.is_empty());
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(requests.len(), 4);
-    for request in [&requests[0], &requests[3]] {
+    assert_eq!(requests.len(), 3);
+    for request in [&requests[0], &requests[2]] {
         assert!(system(request).contains("Compaction project rules"));
         assert_eq!(
             system(request).matches("Project instructions from").count(),

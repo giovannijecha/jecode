@@ -3,9 +3,8 @@
 Jecode imposes no model-request count, tool-call count or elapsed-time ceiling on
 a turn. It continues while the selected model requests tools. A final response,
 user interruption, or an error that needs intervention ends the turn. It does not
-guess that repeated commands or quiet processes are stuck, or alter the model's
-reasoning strategy. Recorded file/check evidence can trigger one completion review
-before a proposed final response is accepted, as described below.
+guess that repeated commands or quiet processes are stuck, second-guess a final
+response, or alter the model's reasoning strategy.
 
 ## Connection recovery
 
@@ -38,10 +37,11 @@ reconnection status above the composer; input and interruption remain available.
 
 The original provider messages and tool results remain in the saved session,
 display source and JSON export. The request sent to the model is a separate view:
-the original system instructions, validated continuity memory when present,
-anchored original user requests, and recent complete message groups. The first
-objective and latest corrections remain represented even when there are many
-requests. A group never separates a tool call from its results.
+the original system instructions, the most recent original user requests, the
+conversation summary when present, and the messages since the last compaction.
+After compaction, recent user requests stay verbatim, newest first, within about
+a quarter of the input budget; older ones are listed as omitted and remain
+available through `history:requests`.
 After a model change, older provider-specific reasoning fields are removed only
 from the request view.
 
@@ -70,70 +70,36 @@ requests retain their adaptive context-based allowance. A truncated ordinary
 response reports the model, effort and requested output allowance, preserving
 completed tool results without executing incomplete calls.
 
-Before the view fills the input budget, Jecode compacts older groups with the
-**same selected model**, with tools disabled. Recent groups use about a third of
-the input budget; the newest complete group is retained when space permits.
-Large older tool outputs become explicit context previews with `history_reference`.
-New tool results remain complete until another compaction. The original stored
-results are never replaced by previews.
+Before the view fills the input budget, Jecode first turns large older tool
+outputs into explicit context previews with `history_reference`; new tool
+results remain complete until another compaction, and the original stored
+results are never replaced by previews. When that is not enough, Jecode
+summarizes everything since the previous compaction with the **same selected
+model**, with tools disabled. The live view then restarts from the summary.
 
-Continuity memory is a JSON object with `objective`, `constraints`, `completed`,
-`remaining`, and `next_action`. Completed entries name their kind and cite
-original `history:N` evidence. A change is distinct from a check. Failed,
-cancelled, unknown or ordinary shell results cannot prove a passed check. A known
-failed attempt can be recorded as an inspection, preserving useful diagnostics,
-but cannot resolve unfinished work without new successful evidence.
-Successful reads may accompany a change or check as supporting context. At least
-one primary mutation or recorded passed check must prove the entry; a new read
-cannot resolve unfinished work using only an older primary result.
-Jecode carries previous constraints, unfinished descriptions and completed
-work forward even if the proposed memory omits or paraphrases them. Reusing an
-old evidence reference cannot replace the completed entry's kind or identity.
-Copying a shortened active preview restores the retained original description. Removing
-an unfinished item requires its exact description and new successful evidence;
-withdrawing a constraint requires a new user decision. Original
-user requests and Jecode's recorded execution facts accompany the memory so that
-continuation does not depend on the summary alone.
+The summary is plain text written by the model: a handoff with the goals,
+constraints, decisions, completed work, open errors and next steps that the
+continuation needs. Each summary request carries the original user requests and
+the previous summary, so repeated compaction folds new work into one updated
+handoff. Jecode masks known credentials but does not validate or rewrite it; the original transcript, saved
+output and `history:N` references remain available for anything the summary
+omits. The next request carries the summary as a user message that tells the
+model another model started the task, its tool work is still in place, and
+`history:N` holds the originals.
 
-Summary requests label previous constraints and remaining items with scoped,
-content-based references. Labels stay stable when other items are removed or
-reordered. The model can cite an exact label to resolve an item instead of retyping
-its exact wording. Jecode restores the original description before validation
-and storage; the labels do not change the persisted history. Invented or obsolete
-labels cannot resolve or withdraw old work. Jecode omits those contributions,
-retains the original items and records a warning with an explicit reconciliation
-action. Source and check validation still apply to every accepted entry.
+Compaction makes one summary request. Source-labelled transcript records, with
+previews for large outputs, are included newest first; when they do not all fit,
+the oldest are left out with a note pointing to `history:N`. A provider context
+rejection halves the transcript share and retries; a truncated summary doubles
+the output allowance, always leaving a quarter of the window for transcript
+input. A provider context rejection can also reduce the learned capacity and
+trigger compaction even when catalog metadata is unavailable.
 
-Memory space takes priority over older recent groups. The saved validated ledger
-retains every completed identity and evidence reference. If that ledger exceeds
-the active allowance, its model view shows at most 16 recent completed entries,
-with bounded descriptions, and a native `completed_archive` reference and count.
-`history:memory` reads the complete current ledger with normal pagination.
-Constraints, unfinished descriptions and resolutions keep their exact text in
-the active view; they are never archived to hide a capacity failure. If the required
-memory still cannot fit, Jecode preserves the previous context and reports it.
-The memory allowance derives from the active input budget and carried summary
-size; there is no fixed 8 KiB upper limit. Recent groups yield room for carried
-facts and growth, while the complete projected request must still fit the model.
-When the accepted memory is smaller than its reserved allowance, recent complete
-groups can reclaim that space if the request still fits and remains smaller than
-the previous view. Reserving future memory does not permanently discard a recent
-tool preview that fits beside the actual summary.
-
-Source-labelled transcript records, with previews for large outputs, are
-processed in portions when they cannot fit a summary request. Summary requests
-adapt their input portion and output allowance to provider context/truncation
-errors. A provider context rejection can reduce the learned capacity and trigger
-compaction even when catalog metadata is unavailable.
-
-The memory must pass schema, source-reference and continuity checks, reduce the
-request view and be saved before work continues. A rejected memory gets one
-repair attempt with the rejected proposal and a specific reason. An unusable,
-interrupted or unsaved memory leaves the previous view available and retains the
-source history. These checks cannot establish semantic coverage of every user
-requirement; the original transcript and saved output remain the evidence. A provider
-output limit on an ordinary response still reports an incomplete response rather
-than executing partial calls. The retained session can be continued explicitly.
+The summary must reduce the request view and be saved before work continues. An
+empty, interrupted or unsaved summary leaves the previous view available and
+retains the source history. A provider output limit on an ordinary response still
+reports an incomplete response rather than executing partial calls. The retained
+session can be continued explicitly.
 
 The TUI reports compaction and completion in the conversation. Compaction and
 retries are part of the original turn: its activity timer does not restart, its
@@ -143,111 +109,18 @@ the saved context view and original transcript without starting work.
 `read(path="history:N")` retrieves an original message by its zero-based index.
 Tool results are returned as structured text and provider reasoning fields are
 excluded. `history:requests` retrieves the complete ordered user requests, and
-`history:memory` retrieves the full retained operational ledger.
+`history:memory` retrieves the current summary.
 All support the same line and UTF-8 byte pagination as file reads, mask known
 credentials and remain read-only after compaction and explicit resume.
 Tool-result reads include `request_history_reference` to retrieve their original
-arguments, including exact content from a previous write without duplicating it
-in version receipts.
+arguments, including exact content from a previous write.
 
 ## Foreground commands and output
 
-Explicit file constraints use `protect` to register exact originals before
-mutations. Native status survives reads, model summaries and resume. A proposed
-final response with violated or unknown protections triggers the bounded review;
-if they remain unresolved at its next final response, the turn returns an
-incomplete-completion error and does not display that response as a successful
-completion. A registered `require_check` condition similarly requires a passed
-recorded check after the last tracked mutation. Re-reading a changed file or
-writing different content cannot dismiss these conditions. This stronger condition
-applies to registered protections; ordinary observation still uses the completion
-notice described below.
-
-When a new user request carries earlier protections, project writes and Bash
-wait for a fresh preservation-scope review. `protect status` supplies a bounded
-inventory of related unregistered files. The model must compare it with the new
-request and classify newly covered paths before retrying. Earlier directory
-declarations require recording their existing new members; status exclusions
-cannot waive that scope. Files remain editable during their creating request.
-Other candidates can be explicitly excluded with a reason. A status call alone
-does not approve unclassified candidates. A refusal with
-`outcome:"not_started"` means the command or write did not execute; an unresolved
-scope refusal blocks successful completion and survives resume. Read-only file
-inspection and session-temporary writes remain available during that review.
-
-`protect restore` uses a saved binary baseline and the current-version token to
-restore incidental changes exactly. Recovery uses synced registration intents,
-including when a file was later deleted; it does not expand a saved directory
-scope again. A missing original or corrupt baseline remains unknown. Registration
-interrupted before durable metadata cannot silently capture the current bytes as
-a replacement baseline. Such uncertainty requires a newer explicit user decision
-before release and renewed work. See [TOOLS.md](TOOLS.md) for actions and scope.
-
-Before repeating an exact Bash command whose native result was archived out of
-the active transcript, Jecode returns `not_started` with its original history
-reference. Review that result and the current request. A deliberate new check
-after edits can supply `repeat_reason`; an explicitly once-only operation must
-not be repeated. This is an execution review, not a cached fresh check or an
-atomic exactly-once guarantee. Reworded scripts are outside this exact-text guard.
-
-Jecode starts Bash with `errexit` and `pipefail` by default, including when the
-model omits a verification flag. Verification commands use `check:true` to also
-record `check_status` as passed, failed, cancelled,
-timed_out or unknown. An unhandled pipeline failure therefore cannot be hidden
-by a successful trailing `tail` or `echo`. Bash's normal conditional and explicit
-error-handling rules still apply; negative tests must capture and assert their
-expected exit codes. Explicit `check:false` selects ordinary shell behavior;
-`shell_mode` reports which mode actually ran.
-
-Recorded facts retain the latest tool, last tracked project mutation or uncertain
-file comparison, up to four recent checks, and observed files still needing
-inspection independently of model-generated memory. A later project write/edit
-or observed indirect change makes earlier checks stale. A check that changes an
-observed file is itself stale, even when its exit code is zero. Changes found
-before a check are part of that check's input; changes found during it are not
-treated as independently verified. These facts accompany the model request before
-and after compaction. Request previews limit change details while full receipts
-remain in the original history and saved session.
-
-Files read, written or edited through project file tools are observed automatically;
-`bash` can add existing project files with `watch`. Content fingerprints are read
-in bounded chunks before and after commands, without trusting only size or
-modification time. They use Rust's standard noncryptographic hasher for local
-change detection, not security attestation. Unreadable, out-of-scope, cancelled
-or unstable comparisons remain explicitly incomplete. Tracking restores versions
-from native results on resume and resets with a new session. Original read history
-can help restore a file when that read contains the required complete text.
-
-A read marks inspection while retaining the observed indirect change for the
-completion review. It cannot silently approve altered protected content. An
-explicit write/edit or returning to the first observed version removes that
-indirect-change reminder. Review acknowledgement remains tied to the same change
-receipt across turns and resume; a later mutation needs review again. These facts
-record actions, not proof of every constraint. If the model proposes a
-final response while observed changes or incomplete comparisons still need
-inspection, or the latest check failed or is stale, Jecode requests one completion
-review in the same turn. Its instruction stays available while the model inspects,
-restores incidental changes or checks again. Jecode retains the provisional
-response in original history, records the review and keeps normal cancellation
-and persistence. The review respects the user's scope and forbids replaying
-completed formatters or diagnostic stages. It asks the model to compare affected
-existing success, error and boundary behavior with the original inspected source,
-including output format and exit status. The replacement final answer must be
-self-contained; the provisional answer is retained as history, not delivered as
-the final result. This guidance does not make the review a semantic oracle.
-If facts still need attention at the
-following final response, Jecode returns control with a separate completion notice;
-it does not start an endless review loop or fabricate a process failure. A passed
-check means its command exited successfully, not coverage of every requirement.
-The inspection notice names the missing file-tool receipt; it does not assert
-that no inspection occurred through Bash, whose command semantics are not inferred.
-
-This is scoped observation, not a filesystem sandbox or continuous watcher.
-Unobserved files, newly created paths not added through file tools, transient
-changes restored within a command, concurrent changes after comparison and
-external paths are not covered. Legacy sessions without native version receipts
-start observation when a file is read or explicitly watched again. Bash retains
-normal system access. See [TOOLS.md](TOOLS.md) for fields and usage.
+Bash runs ordinary `bash -c` commands: Jecode does not refuse repeated commands,
+force `errexit` or `pipefail`, or track file changes between calls. The model
+reads the exit code and output and decides what to do next. See
+[TOOLS.md](TOOLS.md) for fields and usage.
 
 Bash waits for the command without an imposed timeout, even if it stays silent.
 The model may request a positive `timeout_seconds` for a particular command;
@@ -325,24 +198,13 @@ Loopback tests use synthetic credentials and cover an 80-request turn,
 56 consecutive temporary errors followed by recovery without repeating a command,
 server-directed delay and cancellation, incomplete streams, credential failure,
 repeated compaction and resume, provider context rejection, failed summary saves,
-invalid memory repair/rejection, large recent-group previews, history retrieval,
-ordered user corrections, empty responses and strict check pipeline failures,
-observed indirect file changes, stale mutating checks, content changes preserving
-size and timestamp, deletion/restoration, explicit watch scope and completion notices,
-complete output retrieval, long UTF-8 lines, sessions over 64 MiB, legacy migration
+large tool-output previews, history retrieval, ordered user corrections, empty
+responses, complete output retrieval, long UTF-8 lines, sessions over 64 MiB, legacy migration
 and crash recovery. Process tests cover cancellation and timeout after the shell
 has exited; Windows and Linux tests also cover owner disappearance. Streaming
 journal tests cover bounded growth, UTF-8 replacement and torn checkpoints. These
 exercise the mechanisms; they are not a multi-day live OpenRouter soak test.
-Preservation tests cover exact binary/CRLF restoration, deleted files, stale
-restore tokens, refusal of same-request release, reads after violation, fresh
-check requirements, final comparisons, compaction and resume. Saved started-tool
-checkpoints simulate interrupted registration before its receipt, with complete
-and partial copies, absent metadata and changed originals; they do not force-kill a process
-during a filesystem copy.
-The observed-file and completion-review runtime checks were executed on Windows
-in this iteration; they have not been executed on Linux or macOS. Existing
-Windows and Linux coverage includes the earlier recovery and persistence checks.
+Windows and Linux coverage includes the recovery and persistence checks.
 Linux checks execute under WSL with native tmpfs fixtures; macOS has all-target compilation coverage for
 Intel and Apple Silicon, with native runtime checks still required.
 

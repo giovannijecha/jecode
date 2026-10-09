@@ -55,14 +55,7 @@ impl Agent {
             });
             match result {
                 Ok(completion) => {
-                    let (input_end, review_bytes) = {
-                        let original = self.messages.lock().unwrap();
-                        (
-                            original.len(),
-                            self.completion_review_state(&original).len(),
-                        )
-                    };
-                    self.measured_review_bytes = review_bytes;
+                    let input_end = self.messages.lock().unwrap().len();
                     self.context.observe(completion.usage.as_ref(), input_end);
                     self.context.calibrate(
                         context::bytes(&messages)
@@ -154,7 +147,7 @@ impl Agent {
                 && after < before
                 && self
                     .projected_estimate(&preview, &original)
-                    .saturating_add(self.request_environment(&original).len())
+                    .saturating_add(self.request_environment().len())
                     < input_budget
             {
                 // Keep every conversation group and its proof. A native preview
@@ -170,71 +163,36 @@ impl Agent {
                 }
                 self.record_local_details(
                     "Context previews",
-                    "Reduced large tool payloads without summarizing conversation or changing saved proof",
+                    "Reduced large tool payloads without summarizing conversation",
                     "notice",
-                    &[("before_bytes".into(), before.to_string()), ("after_bytes".into(), after.to_string())],
+                    &[
+                        ("before_bytes".into(), before.to_string()),
+                        ("after_bytes".into(), after.to_string()),
+                    ],
                 );
                 return Ok(false);
             }
         }
-        let groups = context::groups(&original, self.context.from);
         let end = original.len();
-        let mut next = self.context.clone();
-        next.preview_until = end;
-        next.preview_limit = (input_budget / 12).clamp(512, 2048);
-        let mut recent = 0usize;
-        let mut cut = end;
-        for &(start, end) in groups.iter().rev() {
-            let size = original[start..end]
-                .iter()
-                .enumerate()
-                .map(|(index, message)| {
-                    next.project_message(message, start + index, self.compatible_from)
-                        .encode()
-                        .len()
-                })
-                .sum();
-            if recent > 0 && recent.saturating_add(size) > input_budget / 3 {
-                break;
-            }
-            recent = recent.saturating_add(size);
-            cut = start;
-        }
-        if cut == self.context.from && !groups.is_empty() {
-            cut = groups[0].1;
-        }
-        if cut == self.context.from && self.context.summary.is_empty() {
+        if self.context.from >= end {
             return Ok(false);
         }
-        let preferred_cut = cut;
-        next.from = cut;
-        // Include the progress header and owned evidence when reserving memory space.
+        // Like a context checkpoint: the summary replaces everything since the
+        // previous one, beside recent user requests kept verbatim.
+        let mut next = self.context.clone();
+        next.from = end;
+        next.preview_until = end;
+        next.preview_limit = (input_budget / 12).clamp(512, 2048);
+        next.request_limit = (input_budget / 4).max(1024);
         next.summary = " ".into();
-        let fixed_cost = |candidate: &context::Context| {
-            candidate.estimate_bytes(
-                context::bytes(&self.projected_context(candidate, &original))
-                    .saturating_add(crate::tools::definitions().encode().len())
-                    .saturating_add(self.request_environment(&original).len())
-                    .saturating_add(768),
-            )
-        };
-        // Reserve room for carried facts and growth instead of imposing an 8 KiB job ceiling.
-        let memory_reserve = (input_budget / 2).min(
-            8192.max(
-                self.context
-                    .memory_view()
-                    .len()
-                    .saturating_add(input_budget / 16),
-            ),
+        let fixed = next.estimate_bytes(
+            context::bytes(&self.projected_context(&next, &original))
+                .saturating_add(crate::tools::definitions().encode().len())
+                .saturating_add(self.request_environment().len())
+                .saturating_add(768),
         );
-        while fixed_cost(&next).saturating_add(memory_reserve) > input_budget && cut < end {
-            // Prioritize carried work over older recent groups, retaining original references.
-            cut = context::groups(&original, cut)[0].1;
-            next.from = cut;
-        }
-        let fixed = fixed_cost(&next);
-        let memory_limit = input_budget.saturating_sub(fixed).min(input_budget / 2);
-        if memory_limit < 512 {
+        let limit = input_budget.saturating_sub(fixed).min(input_budget / 2);
+        if limit < 512 {
             return Err("The original user requests and system instructions exceed the available context. The original session is preserved; choose a model with more context.".into());
         }
         let transcript = original[self.context.from..end]
@@ -262,68 +220,36 @@ impl Agent {
             ),
         })?;
         let (summary, output_floor) =
-            self.summarize(&transcript, &requests, limits, memory_limit, events)?;
+            self.summarize(&transcript, &requests, limits, limit, events)?;
         next.summary = self.redact(&summary);
         next.summary_output_tokens = output_floor;
-        next.memory_limit = Some(memory_limit);
         next.input_tokens = None;
         next.measured_end = 0;
         let original = self.messages.lock().unwrap();
-        while self
-            .projected_estimate(&next, &original)
-            .saturating_add(self.request_environment(&original).len())
-            >= input_budget
-            && cut < end
-        {
-            cut = context::groups(&original, cut)[0].1;
-            next.from = cut;
-        }
         if self
             .projected_estimate(&next, &original)
-            .saturating_add(self.request_environment(&original).len())
+            .saturating_add(self.request_environment().len())
             >= input_budget
         {
-            return Err("Continuity memory and original user requests do not fit the available context; the previous context and original session are preserved".into());
-        }
-        // The actual memory may be much smaller than its growth reservation.
-        // Reclaim recent complete groups when both capacity and reduction permit it.
-        let reclaimed = context::groups(&original, preferred_cut)
-            .into_iter()
-            .filter(|(_, end)| *end <= cut)
-            .collect::<Vec<_>>();
-        for (start, _) in reclaimed.into_iter().rev() {
-            next.from = start;
-            if self
-                .projected_estimate(&next, &original)
-                .saturating_add(self.request_environment(&original).len())
-                >= input_budget
-                || context::bytes(&self.projected_context(&next, &original)) >= before_bytes
-            {
-                next.from = cut;
-                break;
-            }
-            cut = start;
+            return Err("The summary and original user requests do not fit the available context; the previous context and original session are preserved".into());
         }
         let after_bytes = context::bytes(&self.projected_context(&next, &original));
         drop(original);
         if after_bytes >= before_bytes {
             return Err("Context compaction did not reduce the request. The original conversation and context are preserved; choose a model with more context or retry.".into());
         }
-        let count = cut - self.context.from;
+        let count = end - self.context.from;
         let previous = std::mem::replace(&mut self.context, next);
-        let text = format!(
-            "Context compacted · {count} messages summarized · {} kept",
-            end - cut
-        );
+        let text = format!("Context compacted · {count} messages summarized");
         self.record_local_details(
             "Context compaction",
-            "Continuity summary prepared",
+            "Conversation summary prepared",
             "notice",
             &[("model".into(), self.model().into())],
         );
         if let Some(Value::Object(event)) = self.events.lock().unwrap().last_mut() {
             event.insert("summary".into(), Value::string(&self.context.summary));
-            event.insert("context_from".into(), Value::number(cut));
+            event.insert("context_from".into(), Value::number(end));
         }
         if let Err(error) = self.checkpoint(Stage::Preserve) {
             self.context = previous;

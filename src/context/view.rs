@@ -1,60 +1,45 @@
 use crate::json::{self, Value};
 
+/// Recent user requests before `before`, newest first within `budget`. They stay
+/// verbatim; the request crossing the budget is shortened and older ones are omitted.
 pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Option<Value> {
+    let is_user = |message: &Value| message.get("role").and_then(Value::as_str) == Some("user");
     let requests = messages
         .iter()
         .enumerate()
         .take(before)
-        .filter(|(_, message)| message.get("role").and_then(Value::as_str) == Some("user"))
+        .filter(|(_, message)| is_user(message))
         .collect::<Vec<_>>();
-    if requests.is_empty() {
-        return None;
-    }
-    let quota = (budget / requests.len()).clamp(160, budget.max(160));
-    let latest_index = messages
-        .iter()
-        .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-        .unwrap();
-    let label = |index| {
-        if index == latest_index {
+    let latest_index = messages.iter().rposition(is_user)?;
+    let mut entries = Vec::new();
+    let mut used = 0;
+    for &(index, message) in requests.iter().rev() {
+        let text = message.get("content").and_then(Value::as_str).unwrap_or("");
+        let label = if index == latest_index {
             format!("history:{index} — current original user request:\n")
         } else {
             format!("history:{index} — archived user request:\n")
-        }
-    };
-    let mut entries = Vec::new();
-    let (first_index, first) = requests[0];
-    let first_text = first.get("content").and_then(Value::as_str).unwrap_or("");
-    let first_label = label(first_index);
-    let first_entry = format!(
-        "{first_label}{}",
-        excerpt(first_text, (budget / 3).max(quota)),
-    );
-    let mut used = first_entry.len();
-    entries.push((first_index, first_entry));
-    for &(index, message) in requests.iter().skip(1).rev() {
-        let text = message.get("content").and_then(Value::as_str).unwrap_or("");
-        let label = label(index);
-        // Preserve the current request in full when the existing preview budget
-        // permits it, rather than assigning it the same quota as old requests.
-        let limit = if index == latest_index {
-            budget.saturating_sub(used + label.len())
-        } else {
-            quota
         };
-        let entry = format!("{label}{}", excerpt(text, limit));
-        if used + entry.len() > budget && !entries.is_empty() {
+        let available = budget.saturating_sub(used + label.len());
+        if available == 0 {
             break;
         }
-        used += entry.len();
-        entries.push((index, entry));
+        let entry = format!("{label}{}", excerpt(text, available));
+        used += entry.len() + 2;
+        entries.push(entry);
+        if text.len() > available {
+            break;
+        }
+    }
+    if entries.is_empty() {
+        return None;
     }
     let omitted = if entries.len() < requests.len() {
-        "Some intermediate requests are omitted from this view.\n\n"
+        "Earlier requests are omitted from this view.\n\n"
     } else {
         ""
     };
-    entries.sort_by_key(|(index, _)| *index);
+    entries.reverse();
     let location = if latest_index >= before {
         "retained in the live transcript"
     } else {
@@ -65,12 +50,8 @@ pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Opti
         (
             "content",
             Value::string(format!(
-                "Original user request excerpts, in chronological order.\nLatest original user request: history:{latest_index} ({location}).\nComplete original request history: history:requests.\n\n{omitted}{}",
-                entries
-                    .into_iter()
-                    .map(|(_, text)| text)
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
+                "Recent original user requests, in chronological order.\nLatest original user request: history:{latest_index} ({location}).\nComplete original request history: history:requests.\n\n{omitted}{}",
+                entries.join("\n\n")
             )),
         ),
     ]))
@@ -97,12 +78,6 @@ pub(super) fn preview(message: &Value, index: usize, limit: usize) -> Value {
             shortened = true;
         }
     }
-    for key in ["file_changes", "file_observations", "file_protections"] {
-        shortened |= preview_entries(fields, key, limit / 3);
-    }
-    if let Some(Value::Object(tracking)) = fields.get_mut("file_tracking") {
-        shortened |= preview_entries(tracking, "errors", limit / 3);
-    }
     if !shortened {
         return message.clone();
     }
@@ -119,37 +94,7 @@ pub(super) fn preview(message: &Value, index: usize, limit: usize) -> Value {
     message
 }
 
-fn preview_entries(
-    fields: &mut std::collections::BTreeMap<String, Value>,
-    key: &str,
-    limit: usize,
-) -> bool {
-    let Some(Value::Array(entries)) = fields.get_mut(key) else {
-        return false;
-    };
-    if entries
-        .iter()
-        .map(|entry| entry.encode().len())
-        .sum::<usize>()
-        <= limit
-    {
-        return false;
-    }
-    let count = entries.len();
-    let mut bytes = 0;
-    let keep = entries
-        .iter()
-        .take_while(|entry| {
-            bytes += entry.encode().len();
-            bytes <= limit
-        })
-        .count();
-    entries.truncate(keep);
-    fields.insert(format!("{key}_original_count"), Value::number(count));
-    true
-}
-
-pub(super) fn excerpt(text: &str, limit: usize) -> String {
+pub(crate) fn excerpt(text: &str, limit: usize) -> String {
     if text.len() <= limit {
         return text.into();
     }

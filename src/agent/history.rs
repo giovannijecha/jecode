@@ -7,12 +7,6 @@ use crate::{
 
 impl Agent {
     pub(super) fn execute_tool(&self, call: &ToolCall) -> Value {
-        if call.name == "bash"
-            && let Ok(arguments) = json::parse(&call.arguments)
-            && let Some(refusal) = self.repetition_refusal(&arguments)
-        {
-            return refusal;
-        }
         if call.name == "read"
             && let Ok(arguments) = json::parse(&call.arguments)
             && arguments
@@ -36,8 +30,7 @@ impl Agent {
         let messages = self.messages.lock().unwrap();
         let mut source = None;
         let text = if path == "history:memory" {
-            json::parse(&self.context.summary)
-                .map_or_else(|_| self.context.summary.clone(), |value| value.pretty())
+            self.context.summary.clone()
         } else if path == "history:requests" {
             messages
                 .iter()
@@ -62,7 +55,7 @@ impl Agent {
             let message = messages
                 .get(index)
                 .ok_or("History message does not exist in this session")?;
-            source = Some(context::memory::source_record(&messages, index));
+            source = Some(context::source::record(&messages, index));
             if message.get("role").and_then(Value::as_str) == Some("user") {
                 message
                     .get("content")

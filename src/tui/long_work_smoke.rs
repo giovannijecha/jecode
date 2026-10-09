@@ -51,7 +51,7 @@ fn long_work_windows_smoke() {
     responses.push(Response::Json(
         200,
         completion(
-            &crate::context::memory::fixture("The foreground command ran once; report its result."),
+            &String::from("The foreground command ran once; report its result."),
             vec![],
         ),
     ));

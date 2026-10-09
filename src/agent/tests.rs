@@ -171,7 +171,7 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
     for request in &requests {
         assert_eq!(
             request.body.get("tools").unwrap().as_array().unwrap().len(),
-            5
+            4
         );
     }
     let fourth = requests[3]

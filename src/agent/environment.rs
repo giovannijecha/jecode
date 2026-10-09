@@ -42,59 +42,7 @@ impl Agent {
         message
     }
 
-    pub(super) fn request_environment(&self, messages: &[Value]) -> String {
-        let mut environment = self.temporary_instructions();
-        if let Some(request) = messages
-            .iter()
-            .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-        {
-            let state = Value::object([(
-                "latest_user_request",
-                Value::string(format!("history:{request}")),
-            )]);
-            environment.push_str(&format!("\n\nNative request state:\n{}", state.encode()));
-        }
-        let review = self.completion_review_state(messages);
-        if !review.is_empty() {
-            environment.push_str("\n\n");
-            environment.push_str(&review);
-        }
-        environment
-    }
-
-    pub(super) fn completion_review_state(&self, messages: &[Value]) -> String {
-        if !self.reviewing_completion {
-            return String::new();
-        }
-        let candidate = messages.iter().rposition(|message| {
-            message.get("role").and_then(Value::as_str) == Some("assistant")
-                && message
-                    .get("tool_calls")
-                    .and_then(Value::as_array)
-                    .is_none_or(|calls| calls.is_empty())
-                && message
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .is_some_and(|text| !text.trim().is_empty())
-        });
-        let state = Value::object([
-            ("status", Value::string("reviewing")),
-            (
-                "candidate_response",
-                candidate.map_or(Value::Null, |at| Value::string(format!("history:{at}"))),
-            ),
-            ("candidate_delivered", Value::Bool(false)),
-            (
-                "native_blocker",
-                self.context
-                    .evidence
-                    .protection_problem()
-                    .map_or(Value::Null, Value::string),
-            ),
-        ]);
-        format!("Native completion state:\n{}", state.encode())
+    pub(super) fn request_environment(&self) -> String {
+        self.temporary_instructions()
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -18,13 +18,6 @@ pub(super) fn execute(
     if text.trim().is_empty() {
         return Err("command must not be empty".into());
     }
-    let (check, strict) = match arguments.get("check") {
-        None => (false, true),
-        Some(Value::Bool(false)) => (false, false),
-        Some(Value::Bool(true)) => (true, true),
-        _ => return Err("check must be a boolean".into()),
-    };
-    let mode = if strict { "strict" } else { "ordinary" };
     let timeout = arguments
         .get("timeout_seconds")
         .map(|value| {
@@ -38,7 +31,7 @@ pub(super) fn execute(
     let logs = outputs.create()?;
     let stdout_ref = logs.stdout_ref;
     let stderr_ref = logs.stderr_ref;
-    let mut command = command(bash, root, text, strict);
+    let mut command = command(bash, root, text);
     command.env_remove("JECODE_TMP");
     if let Some(temporary) = temporary {
         let temporary = crate::scratch::environment_path(temporary);
@@ -65,16 +58,6 @@ pub(super) fn execute(
                     )),
                 ),
                 ("outcome", Value::string("unknown")),
-                ("check", Value::Bool(check)),
-                ("shell_mode", Value::string(mode)),
-                (
-                    "check_status",
-                    if check {
-                        Value::string("unknown")
-                    } else {
-                        Value::Null
-                    },
-                ),
                 ("stdout_file", Value::string(stdout_ref)),
                 ("stderr_file", Value::string(stderr_ref)),
             ]));
@@ -104,35 +87,12 @@ pub(super) fn execute(
         ("stdout_file", Value::string(stdout_ref)),
         ("stderr_file", Value::string(stderr_ref)),
         ("capture", Value::string("tail")),
-        ("check", Value::Bool(check)),
-        ("shell_mode", Value::string(mode)),
-        (
-            "check_status",
-            if !check {
-                Value::Null
-            } else {
-                Value::string(if output.cancelled {
-                    "cancelled"
-                } else if output.timed_out {
-                    "timed_out"
-                } else if output.exit_code == Some(0) {
-                    "passed"
-                } else if output.exit_code.is_some() {
-                    "failed"
-                } else {
-                    "unknown"
-                })
-            },
-        ),
     ]))
 }
 
-fn command(bash: &Path, root: &Path, text: &str, strict: bool) -> Command {
+fn command(bash: &Path, root: &Path, text: &str) -> Command {
     let mut command = Command::new(bash);
     command.args(["--noprofile", "--norc"]);
-    if strict {
-        command.args(["-e", "-o", "pipefail"]);
-    }
     command
         .args(["-c", text])
         .current_dir(root)
@@ -180,97 +140,6 @@ mod tests {
     use super::*;
     use crate::test_support::Directory;
     use std::time::Instant;
-
-    #[test]
-    fn a_check_exposes_pipeline_failure_and_stops_before_a_successful_trailing_command() {
-        let directory = Directory::new();
-        let arguments = Value::object([
-            (
-                "command",
-                Value::string("false | cat; printf 'masked' > marker"),
-            ),
-            ("check", Value::Bool(true)),
-        ]);
-        let result = execute(
-            &find_bash().unwrap(),
-            directory.path(),
-            &arguments,
-            &Cancellation::default(),
-        )
-        .unwrap();
-        assert_eq!(result.get("exit_code"), Some(&Value::number(1)));
-        assert_eq!(
-            result.get("check_status").and_then(Value::as_str),
-            Some("failed")
-        );
-        assert!(!directory.path().join("marker").exists());
-        let ordinary = execute(
-            &find_bash().unwrap(),
-            directory.path(),
-            &Value::object([
-                (
-                    "command",
-                    Value::string("false | cat; printf 'ordinary shell'"),
-                ),
-                ("check", Value::Bool(false)),
-            ]),
-            &Cancellation::default(),
-        )
-        .unwrap();
-        assert_eq!(ordinary.get("exit_code"), Some(&Value::number(0)));
-        assert_eq!(ordinary.get("check"), Some(&Value::Bool(false)));
-    }
-
-    #[test]
-    fn default_shell_mode_exposes_failures_even_when_the_model_omits_the_check_flag() {
-        let directory = Directory::new();
-        let result = run(
-            directory.path(),
-            "false | cat; printf 'masked' > marker",
-            10,
-        );
-        assert_eq!(result.get("exit_code"), Some(&Value::number(1)));
-        assert_eq!(
-            result.get("shell_mode").and_then(Value::as_str),
-            Some("strict")
-        );
-        assert_eq!(result.get("check"), Some(&Value::Bool(false)));
-        assert!(!directory.path().join("marker").exists());
-    }
-
-    #[test]
-    fn successful_checks_are_recorded_and_invalid_check_arguments_never_execute() {
-        let directory = Directory::new();
-        let arguments = Value::object([
-            ("command", Value::string("printf 'verified' | cat")),
-            ("check", Value::Bool(true)),
-        ]);
-        let result = execute(
-            &find_bash().unwrap(),
-            directory.path(),
-            &arguments,
-            &Cancellation::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            result.get("check_status").and_then(Value::as_str),
-            Some("passed")
-        );
-        let invalid = Value::object([
-            ("command", Value::string("touch marker")),
-            ("check", Value::string("true")),
-        ]);
-        assert!(
-            execute(
-                &find_bash().unwrap(),
-                directory.path(),
-                &invalid,
-                &Cancellation::default()
-            )
-            .is_err()
-        );
-        assert!(!directory.path().join("marker").exists());
-    }
 
     fn execute(
         bash: &Path,
@@ -357,7 +226,7 @@ mod tests {
     fn shell_does_not_inherit_the_api_key_or_startup_script() {
         let directory = Directory::new();
         let bash = find_bash().unwrap();
-        let command = command(&bash, directory.path(), "true", false);
+        let command = command(&bash, directory.path(), "true");
         for variable in ["OPENROUTER_API_KEY", "BASH_ENV", "ENV"] {
             assert!(
                 command

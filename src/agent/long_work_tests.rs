@@ -259,9 +259,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
         (
             200,
             completion(
-                &crate::context::memory::fixture(
-                    "Goal: inspect source. First read completed; continue verification.",
-                ),
+                &String::from("Goal: inspect source. First read completed; continue verification."),
                 vec![],
             ),
         ),
@@ -269,9 +267,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
         (
             200,
             completion(
-                &crate::context::memory::fixture(
-                    "Goal: inspect source. Both reads completed; report verified facts.",
-                ),
+                &String::from("Goal: inspect source. Both reads completed; report verified facts."),
                 vec![],
             ),
         ),

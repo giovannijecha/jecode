@@ -2,6 +2,13 @@ use super::*;
 use crate::test_support::{Directory, HttpFixture, Response, completion, tool_call};
 use std::time::Duration;
 
+fn text(messages: &[Value]) -> String {
+    messages
+        .iter()
+        .filter_map(|message| message.get("content").and_then(Value::as_str))
+        .collect()
+}
+
 #[test]
 fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
     let directory = Directory::new();
@@ -29,7 +36,7 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
         ]));
     }
     agent.context.from = 5;
-    agent.context.summary = crate::context::memory::fixture("Change the current goal");
+    agent.context.summary = String::from("Change the current goal");
     let original = agent.messages.lock().unwrap().clone();
     {
         // Compaction estimates an already locked history; instructions borrow it.
@@ -37,9 +44,7 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
         assert!(agent.context_estimate(&history) < 21000);
     }
     assert!(
-        agent.transport_messages()[0]
-            .encode()
-            .contains(r#"\"latest_user_request\":\"history:3\""#)
+        text(&agent.transport_messages()).contains("history:3 — current original user request")
     );
     assert_eq!(*agent.messages.lock().unwrap(), original);
     agent.enable_sessions(home.path()).unwrap();
@@ -50,24 +55,14 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
     resumed.resume(&id).unwrap();
     assert_eq!(*resumed.messages.lock().unwrap(), original);
     assert!(
-        resumed.transport_messages()[0]
-            .encode()
-            .contains(r#"\"latest_user_request\":\"history:3\""#)
+        text(&resumed.transport_messages()).contains("history:3 — current original user request")
     );
     resumed
         .prepare_turn("Audit without more code changes")
         .unwrap();
-    let payload = resumed.transport_messages();
-    assert!(
-        payload[0]
-            .encode()
-            .contains(r#"\"latest_user_request\":\"history:5\""#)
-    );
-    assert!(
-        !payload[0]
-            .encode()
-            .contains(r#"\"latest_user_request\":\"history:3\""#)
-    );
+    let payload = text(&resumed.transport_messages());
+    assert!(payload.contains("history:3 — archived user request"));
+    assert!(payload.ends_with("Audit without more code changes"));
     assert!(fixture.finish().is_empty());
 }
 
