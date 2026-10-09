@@ -313,7 +313,12 @@ pub fn portable(message: &Value) -> Value {
                 .filter(|(key, _)| {
                     matches!(
                         key.as_str(),
-                        "role" | "content" | "tool_calls" | "tool_call_id"
+                        "role"
+                            | "content"
+                            | "tool_calls"
+                            | "tool_call_id"
+                            | "attachments"
+                            | "annotations"
                     )
                 })
                 .map(|(key, value)| (key.clone(), value.clone()))
@@ -324,7 +329,10 @@ pub fn portable(message: &Value) -> Value {
 }
 pub fn bytes(messages: &[Value]) -> usize {
     messages.iter().fold(0usize, |total, message| {
-        total.saturating_add(message.encode().len())
+        // Attachments are sent as content parts whose cost the stored text omits.
+        total
+            .saturating_add(message.encode().len())
+            .saturating_add(crate::attachments::provider::weight(message))
     })
 }
 

@@ -69,7 +69,7 @@ fn automatic_queue_dispatch_and_catalog_loading_keep_an_unread_error() {
         let fixture = HttpFixture::streaming(responses);
         let mut app = app(&home, &project, &fixture.endpoint);
         app.dispatch("first request".into()).unwrap();
-        app.state.queue.push(prompt.into()).unwrap();
+        app.state.queue.push(prompt).unwrap();
         app.state.notify(Feedback::result(
             Kind::Error,
             "Autosave failed after queuing",

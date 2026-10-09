@@ -1,7 +1,7 @@
 use super::{App, Feedback, Kind, drafts::Queue, editor::Editor, selector::Selector, state::Item};
 use crate::{
     events::Event,
-    sessions::{Draft, Input, Record},
+    sessions::{Input, Record},
 };
 
 impl App {
@@ -37,10 +37,7 @@ impl App {
             return;
         }
         if let Some(handle) = &self.persistence {
-            let draft = |editor: &Editor| Draft {
-                text: editor.text.clone(),
-                cursor: editor.cursor,
-            };
+            let draft = super::drafts::draft;
             let (queued, mut paused) = self.state.queue.snapshot(&self.state.editor);
             if self.state.history.has_edited_recall() {
                 paused.push(draft(self.state.queue.draft(&self.state.editor)));
@@ -140,7 +137,7 @@ impl App {
                     .iter()
                     .map(|draft| {
                         let mut editor = Editor::default();
-                        editor.replace(draft.text.clone());
+                        editor.set(draft.prompt());
                         editor.cursor = draft.cursor;
                         editor
                     })
@@ -200,8 +197,9 @@ impl App {
                         presentation.elapsed = None;
                     }
                 }
-                self.state.editor.replace(document.input.draft.text);
-                self.state.editor.cursor = document.input.draft.cursor;
+                let cursor = document.input.draft.cursor;
+                self.state.editor.set(document.input.draft.prompt());
+                self.state.editor.cursor = cursor;
                 self.state.history.restore(document.input.history);
                 self.state.suggestions.refresh(&self.state.editor.text);
                 self.local_start(&format!("/resume {id}"));

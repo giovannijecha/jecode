@@ -57,7 +57,11 @@ fn temporary_cleanup_queues_until_tools_finish_and_keeps_the_draft_and_quiet_con
     submit(&mut app, "Create a scratch probe and a source file");
     submit(&mut app, "/tmp clean");
     assert_eq!(
-        app.state.queue.messages.front().map(String::as_str),
+        app.state
+            .queue
+            .messages
+            .front()
+            .map(|prompt| prompt.text.as_str()),
         Some("/tmp clean")
     );
     app.state.editor.replace("retained\ndraft".into());

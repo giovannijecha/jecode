@@ -97,16 +97,11 @@ impl Selector {
         let options = queue
             .messages
             .iter()
-            .map(|text| (text.as_str(), "Queued"))
-            .chain(
-                queue
-                    .paused
-                    .iter()
-                    .map(|draft| (draft.text.as_str(), "Paused")),
-            )
+            .map(|prompt| (prompt.display(), "Queued"))
+            .chain(queue.paused.iter().map(|draft| (draft.display(), "Paused")))
             .enumerate()
             .map(|(index, (text, status))| OptionRow {
-                name: crate::copy::preview(text),
+                name: crate::copy::preview(&text),
                 description: status.into(),
                 choice: Choice::Draft(index),
             })

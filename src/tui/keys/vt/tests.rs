@@ -23,7 +23,7 @@ fn mouse_wheel_is_scroll_only_and_clicks_releases_and_invalid_reports_are_ignore
         [Decoded::Scroll(-3), Decoded::Scroll(3)]
     ));
     let events = decoder.bytes(b"\x1b[200~\x1b[<64;10;5M\x1b[201~");
-    assert!(matches!(events.as_slice(), [Decoded::Text(text)] if text == "\x1b[<64;10;5M"));
+    assert!(matches!(events.as_slice(), [Decoded::Paste(text)] if text == "\x1b[<64;10;5M"));
     assert!(decoder.bytes(b"\x1b[<64;10;").is_empty());
     assert!(matches!(
         decoder.bytes(b"5M").as_slice(),
@@ -106,7 +106,7 @@ fn bracketed_paste_keeps_control_bytes_and_arrows_as_text() {
         output.extend(decoder.bytes(chunk));
     }
     assert_eq!(output.len(), 2);
-    assert!(matches!(&output[0], Decoded::Text(text) if text == "first\r\n\x03\x11\x1b[A\tlast"));
+    assert!(matches!(&output[0], Decoded::Paste(text) if text == "first\r\n\x03\x11\x1b[A\tlast"));
     assert!(matches!(&output[1], Decoded::Key(key) if key.code == 13 && !key.ctrl()));
 }
 

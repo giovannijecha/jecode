@@ -12,7 +12,7 @@ fn streamed_tables_resize_and_finalize_without_saving_provisional_layouts() {
     };
     state.message(Kind::Assistant, &"retained paragraph\n".repeat(30));
     state.editor.insert("kept draft");
-    state.queue.push("follow-up queued".into()).unwrap();
+    state.queue.push("follow-up queued").unwrap();
     state.activity = Some(Activity::new());
     let mut display = Display::new((state.width, state.height));
     let mut screen = Screen::new(state.width, state.height);

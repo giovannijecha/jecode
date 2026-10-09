@@ -213,6 +213,24 @@ close with Esc and by typing; confirm the draft/caret is preserved. Check that
 short feedback expires after five seconds, errors wait for the next action and
 dismissed UI rows stay absent after resizing and resume.
 
+## Attachment verification
+
+On Windows 11 with Windows PowerShell 5.1, the ConPTY fixture pastes a quoted
+path the way Windows Terminal delivers a drop and checks the saved draft holds
+the element beside typed Unicode text. The conversion check turned a synthetic
+3000x10 BMP into a 2048x7 PNG, and the clipboard check read a real PNG image
+without printing its contents. Drop, Alt+V, `/attach`, queueing, recall,
+resume, export and provider parts are covered by isolated fixtures.
+
+Through Webterminal, a headless Chrome probe dropped a binary from outside the
+working directory onto an isolated debug Jecode. Jecode attached it with
+identical bytes, and Alt+V attached the clipboard image.
+
+Under WSL (Ubuntu, WSL2), `wslpath` and `powershell.exe` standard-input interop
+were probed directly; Jecode itself was not built inside WSL, and the Linux and
+macOS capture paths were not compiled. A physical mouse drop into Windows
+Terminal or a browser, and macOS hosts, remain manual checks.
+
 ## Linux and WSL
 
 Run the same normal gates on Linux. The equivalent ignored PTY check uses the

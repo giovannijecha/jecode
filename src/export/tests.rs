@@ -36,6 +36,7 @@ fn exports_exact_protocol_messages_and_masks_the_key_in_nested_arguments() {
     let archive = Archive {
         effort: "default".into(),
         events: Arc::new(Mutex::new(vec![])),
+        attachments: None,
         model: "fixture/model".into(),
         directory: directory.path().to_path_buf(),
         messages: Arc::new(Mutex::new(original.clone())),
@@ -97,4 +98,81 @@ fn an_existing_archive_observes_clear_and_export_errors_are_recoverable() {
     unavailable.directory = directory.path().join("missing");
     assert!(unavailable.save().unwrap_err().contains("Could not create"));
     assert!(archive.save().is_ok());
+}
+
+#[test]
+fn exports_bundle_referenced_attachments_beside_the_json() {
+    let directory = Directory::new();
+    let storage = Directory::new();
+    let pool = crate::attachments::Pool::new(storage.path().join("attachments"));
+    let blob = pool.import_bytes("data.bin", &[0, 255, 7]).unwrap();
+    let parsed_page = pool
+        .import_bytes("pdf-page.png", &[137, 80, 78, 71])
+        .unwrap();
+    let unused = pool.import_bytes("unused.txt", b"x").unwrap();
+    let prompt = crate::attachments::Prompt::new(
+        format!("{0} and again {0}", crate::attachments::MARKER),
+        vec![blob.clone(), blob.clone()],
+    );
+    let archive = Archive {
+        effort: "default".into(),
+        events: Arc::new(Mutex::new(vec![])),
+        attachments: Some(pool),
+        model: "fixture/model".into(),
+        directory: directory.path().to_path_buf(),
+        messages: Arc::new(Mutex::new(vec![
+            prompt.message(),
+            Value::object([
+                ("role", Value::string("assistant")),
+                (
+                    "annotations",
+                    Value::Array(vec![Value::object([(
+                        "file",
+                        Value::object([
+                            ("hash", Value::string("parsed-hash")),
+                            (
+                                "content",
+                                Value::object([
+                                    ("jecode_attachment", Value::string(parsed_page.reference())),
+                                    ("media", Value::string("image/png")),
+                                ]),
+                            ),
+                        ]),
+                    )])]),
+                ),
+            ]),
+        ])),
+        redactor: Redactor::new("fixture-secret".into()),
+    };
+    let path = archive.save().unwrap();
+    let document = json::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    let listed = document
+        .get("attachments")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(listed.len(), 2);
+    let relative = listed[0].get("path").and_then(Value::as_str).unwrap();
+    assert_eq!(
+        fs::read(path.parent().unwrap().join(relative)).unwrap(),
+        [0, 255, 7]
+    );
+    assert!(relative.ends_with(&format!("{}/data.bin", blob.id)));
+    let parsed = listed[1].get("path").and_then(Value::as_str).unwrap();
+    assert_eq!(
+        fs::read(path.parent().unwrap().join(parsed)).unwrap(),
+        [137, 80, 78, 71]
+    );
+    assert!(parsed.ends_with(&format!("{}/pdf-page.png", parsed_page.id)));
+    assert!(!bundle_directory(&path).join(&unused.id).exists());
+    // Without storage the export fails whole instead of dropping data.
+    let orphan = Archive {
+        attachments: None,
+        ..archive
+    };
+    assert!(orphan.save().is_err());
+    assert_eq!(
+        fs::read_dir(directory.path()).unwrap().count(),
+        2,
+        "only the first export and its folder remain"
+    );
 }

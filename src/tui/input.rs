@@ -2,6 +2,22 @@ use super::{App, Decoded, Feedback, Kind, selector::Purpose, terminal::Key};
 
 impl App {
     pub(super) fn input(&mut self, decoded: Decoded) -> Result<bool, String> {
+        let decoded = match decoded {
+            // Terminals deliver a file drop as a paste of its paths.
+            Decoded::Paste(text) => {
+                if self.state.selector.is_none()
+                    && self.deletion_job.is_none()
+                    && let Some(paths) = crate::attachments::paths::dropped(&text)
+                {
+                    self.state.feedback_input(true);
+                    self.state.information = None;
+                    self.attach(super::attach::Source::Paths(paths));
+                    return Ok(false);
+                }
+                Decoded::Text(text)
+            }
+            decoded => decoded,
+        };
         let key = match decoded {
             Decoded::Scroll(amount) => {
                 self.scroll(amount);
@@ -12,7 +28,7 @@ impl App {
                 self.warn("Input exceeds 1 MiB. Insertion rejected; your draft was kept.");
                 return Ok(false);
             }
-            Decoded::Text(text) => {
+            Decoded::Text(text) | Decoded::Paste(text) => {
                 if self.state.tool_focus.is_some() {
                     self.state.select_tool(None);
                 }
@@ -147,6 +163,20 @@ impl App {
         }
         if key.alt() && key.code == 40 {
             // Draft management has one panel; Alt+Down no longer discards text.
+            return Ok(false);
+        }
+        if key.alt() && !key.ctrl() && key.code == 86 {
+            // The clipboard is read only for this explicit shortcut.
+            self.state.feedback_input(true);
+            #[cfg(not(test))]
+            let source = super::attach::Source::Clipboard;
+            #[cfg(test)]
+            let source = super::attach::Source::Image(
+                self.clipboard_image
+                    .take()
+                    .unwrap_or_else(|| Err("The clipboard has no image".into())),
+            );
+            self.attach(source);
             return Ok(false);
         }
         if self.state.suggestions.visible && !key.ctrl() && !key.alt() {

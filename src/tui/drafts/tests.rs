@@ -4,7 +4,7 @@ use super::*;
 fn five_identical_prompts_remain_five_distinct_paused_drafts() {
     let mut queue = Queue::default();
     for _ in 0..5 {
-        queue.push("same prompt".into()).unwrap();
+        queue.push("same prompt").unwrap();
     }
     queue.pause();
     assert!(queue.messages.is_empty());
@@ -14,16 +14,16 @@ fn five_identical_prompts_remain_five_distinct_paused_drafts() {
     let (queued, paused) = queue.snapshot(&Editor::default());
     assert!(queued.is_empty());
     assert_eq!(paused.len(), 5);
-    assert_eq!(queue.take(2).as_deref(), Some("same prompt"));
+    assert_eq!(queue.take(2).unwrap(), "same prompt");
     assert_eq!(queue.len(), 4);
 }
 
 #[test]
 fn queue_edit_save_cancel_and_discard_affect_only_selected_slot() {
     let mut queue = Queue::default();
-    queue.push("first".into()).unwrap();
-    queue.push("second".into()).unwrap();
-    queue.push("third".into()).unwrap();
+    queue.push("first").unwrap();
+    queue.push("second").unwrap();
+    queue.push("third").unwrap();
     let mut editor = Editor::default();
     editor.insert("unfinished composer");
     editor.cursor = 4;
@@ -56,8 +56,8 @@ fn queue_edit_save_cancel_and_discard_affect_only_selected_slot() {
 #[test]
 fn pause_during_edit_preserves_slot_and_live_snapshot() {
     let mut queue = Queue::default();
-    queue.push("automatic one".into()).unwrap();
-    queue.push("automatic two".into()).unwrap();
+    queue.push("automatic one").unwrap();
+    queue.push("automatic two").unwrap();
     let mut already_paused = Editor::default();
     already_paused.replace("already paused".into());
     already_paused.cursor = 2;
@@ -89,7 +89,7 @@ fn pause_during_edit_preserves_slot_and_live_snapshot() {
 #[test]
 fn appending_automatic_message_keeps_paused_edit_in_its_original_slot() {
     let mut queue = Queue::default();
-    queue.push("automatic".into()).unwrap();
+    queue.push("automatic").unwrap();
     let mut paused = Editor::default();
     paused.replace("paused original".into());
     paused.cursor = 4;
@@ -100,7 +100,7 @@ fn appending_automatic_message_keeps_paused_edit_in_its_original_slot() {
     editor.replace("paused revision".into());
     editor.cursor = 6;
 
-    queue.push("new automatic".into()).unwrap();
+    queue.push("new automatic").unwrap();
     assert_eq!(queue.edit_index(), Some(2));
     let (queued, paused) = queue.snapshot(&editor);
     assert_eq!(queued, ["automatic", "new automatic"]);
@@ -155,7 +155,7 @@ fn history_filters_commands_and_restores_original_after_recall_edits() {
 fn history_is_bounded_and_cancel_restores_caret() {
     let mut history = History::default();
     for i in 0..60 {
-        history.record(&i.to_string());
+        history.record(i.to_string());
     }
     assert_eq!(history.snapshot().len(), 50);
     let mut editor = Editor::default();
@@ -183,7 +183,7 @@ fn repeated_dispatched_prompts_remain_distinct_history_entries() {
 fn automatic_sends_preserve_history_navigation_without_creating_an_edited_recall() {
     let mut history = History::default();
     for i in 0..50 {
-        history.record(&i.to_string());
+        history.record(i.to_string());
     }
     let mut editor = Editor::default();
     editor.replace("main draft".into());

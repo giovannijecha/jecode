@@ -263,10 +263,12 @@ disappears after completion or cleanup.
 | Up / Down during inspection | Select the previous/next tool; reveal its header when outside the viewport. |
 | Enter during inspection | Expand or collapse retained details without sending the draft. |
 | Esc / Tab during inspection | Return to the draft, leaving active work running. |
-| Backspace / Delete | Delete before/after the caret. |
+| Backspace / Delete | Delete before/after the caret. An attachment element is removed whole. |
 | Ctrl+Backspace / Delete, Ctrl+W | Delete by word as reported by the host. |
 | Ctrl+U | Delete back to the logical line start. |
 | Alt+Up, `/drafts` | Open the pending drafts list, including during work. |
+| Alt+V | Attach the clipboard image; Ctrl+V stays the host's text paste. |
+| File drop, `/attach PATH...` | Attach files at the caret. See [ATTACHMENTS.md](../usage/ATTACHMENTS.md). |
 | Ctrl+D in `/drafts` | Mark only the selected draft for discard; Enter confirms, Esc cancels. |
 | Ctrl+S in `/drafts` | Explicitly send or queue a paused draft from the list or its editor. |
 | Esc | Cancel a draft edit or close a panel first; while reading normally, return to the bottom; otherwise stop work. |

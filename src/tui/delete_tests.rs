@@ -97,7 +97,7 @@ fn delete_current_resets_screen_and_context_preserves_unsent_work_and_cannot_res
     let store = old.store();
     current.state.editor.insert("kept draft 🦀");
     current.state.editor.cursor = 5;
-    current.state.queue.push("follow-up kept".into()).unwrap();
+    current.state.queue.push("follow-up kept").unwrap();
     current.state.history.record("Delete this conversation");
     current
         .state
@@ -113,7 +113,12 @@ fn delete_current_resets_screen_and_context_preserves_unsent_work_and_cannot_res
     assert_eq!(current.state.editor.text, "kept draft 🦀");
     assert_eq!(current.state.editor.cursor, 5);
     assert_eq!(
-        current.state.queue.messages.front().map(String::as_str),
+        current
+            .state
+            .queue
+            .messages
+            .front()
+            .map(|prompt| prompt.text.as_str()),
         Some("follow-up kept")
     );
     assert!(current.state.history.snapshot().is_empty());

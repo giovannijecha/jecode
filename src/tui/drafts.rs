@@ -1,22 +1,23 @@
 use super::editor::Editor;
+use crate::attachments::Prompt;
 use std::collections::VecDeque;
 
 #[derive(Default)]
 pub struct History {
-    prompts: VecDeque<String>,
+    prompts: VecDeque<Prompt>,
     position: Option<usize>,
     saved: Option<Editor>,
 }
 
 impl History {
-    pub fn snapshot(&self) -> Vec<String> {
+    pub fn snapshot(&self) -> Vec<Prompt> {
         self.prompts.iter().cloned().collect()
     }
 
-    pub fn restore(&mut self, prompts: Vec<String>) {
+    pub fn restore(&mut self, prompts: Vec<Prompt>) {
         self.prompts = prompts
             .into_iter()
-            .filter(|prompt| is_prompt(prompt))
+            .filter(is_prompt)
             .rev()
             .take(50)
             .collect::<Vec<_>>()
@@ -31,11 +32,12 @@ impl History {
         self.saved.as_ref().unwrap_or(editor)
     }
 
-    pub fn record(&mut self, prompt: &str) {
-        if !is_prompt(prompt) {
+    pub fn record(&mut self, prompt: impl Into<Prompt>) {
+        let prompt = prompt.into();
+        if !is_prompt(&prompt) {
             return;
         }
-        self.prompts.push_back(prompt.into());
+        self.prompts.push_back(prompt);
         if self.prompts.len() > 50 {
             self.prompts.pop_front();
             if let Some(position) = &mut self.position {
@@ -94,11 +96,11 @@ impl History {
                     self.prompts.len()
                 }
             };
-            editor.replace(self.prompts[index - 1].clone());
+            editor.set(self.prompts[index - 1].clone());
             self.position = Some(index);
         } else if let Some(index) = self.position {
             if index < self.prompts.len() {
-                editor.replace(self.prompts[index].clone());
+                editor.set(self.prompts[index].clone());
                 self.position = Some(index + 1);
             } else {
                 self.cancel(editor);
@@ -109,13 +111,14 @@ impl History {
     }
 }
 
-fn is_prompt(text: &str) -> bool {
-    !text.trim().is_empty() && !text.trim_start().starts_with('/')
+fn is_prompt(prompt: &Prompt) -> bool {
+    !prompt.attachments.is_empty()
+        || (!prompt.text.trim().is_empty() && !prompt.text.trim_start().starts_with('/'))
 }
 
 #[derive(Default)]
 pub struct Queue {
-    pub messages: VecDeque<String>,
+    pub messages: VecDeque<Prompt>,
     pub paused: Vec<Editor>,
     editing: Option<Editing>,
 }
@@ -148,7 +151,8 @@ impl Queue {
             .map_or(editor, |editing| &editing.previous)
     }
 
-    pub fn push(&mut self, text: String) -> Result<(), String> {
+    pub fn push(&mut self, prompt: impl Into<Prompt>) -> Result<(), String> {
+        let prompt = prompt.into();
         if self.messages.len() == 8 {
             return Err("Queue is full (8 messages). Your draft was kept.".into());
         }
@@ -157,7 +161,7 @@ impl Queue {
         {
             editing.index += 1;
         }
-        self.messages.push_back(text);
+        self.messages.push_back(prompt);
         Ok(())
     }
 
@@ -165,19 +169,19 @@ impl Queue {
         if self.editing.is_some() {
             return Err("Finish the current queued edit first.".into());
         }
-        let text = if index < self.messages.len() {
-            self.messages.get(index).cloned()
-        } else {
-            self.paused
-                .get(index - self.messages.len())
-                .map(|draft| draft.text.clone())
-        };
-        let Some(text) = text else {
+        let Some(prompt) = (index < self.messages.len())
+            .then(|| self.messages[index].clone())
+            .or_else(|| {
+                self.paused
+                    .get(index - self.messages.len())
+                    .map(Editor::prompt)
+            })
+        else {
             return Err("No queued draft at that position.".into());
         };
         let previous = editor.clone();
         if index < self.messages.len() {
-            editor.replace(text);
+            editor.set(prompt);
         } else {
             *editor = self.paused[index - self.messages.len()].clone();
         }
@@ -190,7 +194,7 @@ impl Queue {
             return false;
         };
         if editing.index < self.messages.len() {
-            self.messages[editing.index] = editor.text.clone();
+            self.messages[editing.index] = editor.prompt();
         } else {
             self.paused[editing.index - self.messages.len()] = editor.clone();
         }
@@ -223,7 +227,7 @@ impl Queue {
         }
     }
 
-    pub fn take(&mut self, index: usize) -> Option<String> {
+    pub fn take(&mut self, index: usize) -> Option<Prompt> {
         if self.is_editing() {
             return None;
         }
@@ -231,7 +235,7 @@ impl Queue {
             self.messages.remove(index)
         } else {
             let index = index - self.messages.len();
-            (index < self.paused.len()).then(|| self.paused.remove(index).text)
+            (index < self.paused.len()).then(|| self.paused.remove(index).take())
         }
     }
 
@@ -243,9 +247,9 @@ impl Queue {
         let mut paused: Vec<_> = self
             .messages
             .drain(..)
-            .map(|text| {
+            .map(|prompt| {
                 let mut editor = Editor::default();
-                editor.replace(text);
+                editor.set(prompt);
                 editor
             })
             .collect();
@@ -258,27 +262,25 @@ impl Queue {
         }
     }
 
-    pub fn snapshot(&self, editor: &Editor) -> (Vec<String>, Vec<crate::sessions::Draft>) {
+    pub fn snapshot(&self, editor: &Editor) -> (Vec<Prompt>, Vec<crate::sessions::Draft>) {
         let mut queued: Vec<_> = self.messages.iter().cloned().collect();
-        let mut paused: Vec<_> = self
-            .paused
-            .iter()
-            .map(|draft| crate::sessions::Draft {
-                text: draft.text.clone(),
-                cursor: draft.cursor,
-            })
-            .collect();
+        let mut paused: Vec<_> = self.paused.iter().map(draft).collect();
         if let Some(editing) = &self.editing {
             if editing.index < queued.len() {
-                queued[editing.index] = editor.text.clone();
+                queued[editing.index] = editor.prompt();
             } else {
-                paused[editing.index - queued.len()] = crate::sessions::Draft {
-                    text: editor.text.clone(),
-                    cursor: editor.cursor,
-                };
+                paused[editing.index - queued.len()] = draft(editor);
             }
         }
         (queued, paused)
+    }
+}
+
+pub fn draft(editor: &Editor) -> crate::sessions::Draft {
+    crate::sessions::Draft {
+        text: editor.text.clone(),
+        cursor: editor.cursor,
+        attachments: editor.attachments.clone(),
     }
 }
 

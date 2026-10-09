@@ -37,7 +37,12 @@ impl Agent {
                 return Err("No output space remains in the model context; the original session is preserved".into());
             }
             let persistence = self.persistence.clone();
-            let result = self.complete_retry(&messages, true, output_tokens, &mut |update| {
+            let request = crate::attachments::provider::materialize(
+                messages.clone(),
+                self.tools.attachments(),
+                self.client.inputs(),
+            )?;
+            let result = self.complete_retry(&request, true, output_tokens, &mut |update| {
                 match &update {
                     Update::Text(text) => {
                         if let Some(persistence) = &persistence {

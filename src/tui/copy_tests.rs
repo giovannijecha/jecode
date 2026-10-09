@@ -99,7 +99,7 @@ fn copy_during_work_is_immediate_and_keeps_its_snapshot_until_selection() {
             .any(|line| line.plain().contains("Esc closes menu"))
     );
     assert!(app.state.queue.messages.is_empty());
-    app.state.queue.push("/help".into()).unwrap();
+    app.state.queue.push("/help").unwrap();
     app.state.editor.replace("draft kept".into());
     release.send(()).unwrap();
     let started = Instant::now();

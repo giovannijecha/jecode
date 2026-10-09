@@ -47,7 +47,7 @@ fn a_fresh_launch_and_unsent_work_never_count_as_a_session_in_resume() {
     let project = Directory::new();
     let mut current = app(&home, &project);
     current.state.editor.insert("unsent draft");
-    current.state.queue.push("unsent follow-up".into()).unwrap();
+    current.state.queue.push("unsent follow-up").unwrap();
     current.persist_input(true);
     current.dispatch("/help".into()).unwrap();
     current.dispatch("/resume".into()).unwrap();
@@ -85,7 +85,7 @@ fn current_and_last_saved_deletions_keep_resume_open_without_an_empty_replacemen
     seed(&current, "Current saved conversation");
     let current_id = current.persistence.as_ref().unwrap().id();
     current.state.editor.insert("kept draft");
-    current.state.queue.push("kept follow-up".into()).unwrap();
+    current.state.queue.push("kept follow-up").unwrap();
     current.open_sessions();
     delete(&mut current, &current_id);
     assert!(current.state.selector.is_some());
@@ -99,7 +99,12 @@ fn current_and_last_saved_deletions_keep_resume_open_without_an_empty_replacemen
     current.poll().unwrap();
     assert!(current.worker.is_none());
     assert_eq!(
-        current.state.queue.messages.front().map(String::as_str),
+        current
+            .state
+            .queue
+            .messages
+            .front()
+            .map(|prompt| prompt.text.as_str()),
         Some("kept follow-up")
     );
     let visible = view::frame(&current.state, "fixture/model", "fixture")

@@ -209,7 +209,7 @@ fn streaming_checkpoints_grow_linearly_and_recover_the_last_complete_utf8_prefix
     let (_directory, _home, store, mut doc) = fixture();
     doc.pending.active = true;
     doc.context.summary = "An unchanged continuity summary".repeat(1024);
-    doc.input.history = vec!["An unchanged prompt".repeat(1024)];
+    doc.input.history = vec!["An unchanged prompt".repeat(1024).into()];
     let id = doc.id.clone();
     let handle = Handle::new(store.clone(), doc, Redactor::empty());
     handle.flush().unwrap();
@@ -323,6 +323,7 @@ fn version_two_journals_accept_new_deltas_without_losing_their_state() {
     doc.input.draft = Draft {
         text: "Unsent work".into(),
         cursor: 6,
+        ..Default::default()
     };
     lease.save(&doc).unwrap();
     let saved = store.fixture_load(&doc.id).unwrap();

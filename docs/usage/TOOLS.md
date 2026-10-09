@@ -38,6 +38,11 @@ matching tool call and the tool name. A result belongs to the request that issue
 its call, even if another user message arrived before the result. Missing origins
 are `null`. Metadata and content use credential redaction.
 
+`attachment:ID` reads a file attached to the conversation, including one from
+outside the working directory: text pages, an image or PDF shown again in the
+next request, or the local path of an uninterpreted binary. Attachments are
+read-only. See [ATTACHMENTS.md](ATTACHMENTS.md#reading-attachments-again).
+
 ## Temporary working files
 
 The same file tools accept `tmp:relative/path` in the session's working area under

@@ -55,11 +55,17 @@ public static class JecodeConsole {
         for (int index = 0; index < count; index++) AddKey(records[index], keys);
         return keys;
     }
-    static void AddKey(Record key, List<Record> keys) {
+    static bool KeyEvent(Record key) {
         // Unicode input may arrive on Alt release (including UTF-16 surrogate pairs).
         bool unicodeRelease = key.Down == 0 && key.Character != 0 && (key.Key == 18 || key.Key == 231);
-        if (key.Type != 1 || (key.Down == 0 && !unicodeRelease)) return;
-        if ((key.Key == 16 || key.Key == 17 || key.Key == 18) && key.Character == 0) return;
+        return key.Type == 1 && (key.Down != 0 || unicodeRelease) &&
+            !((key.Key == 16 || key.Key == 17 || key.Key == 18) && key.Character == 0) &&
+            // ConPTY may synthesize a pasted character as Alt+numpad digits,
+            // then deliver the character on Alt release. Digits are not keys.
+            !(key.Character == 0 && (key.Controls & 3) != 0 && key.Key >= 96 && key.Key <= 105);
+    }
+    static void AddKey(Record key, List<Record> keys) {
+        if (!KeyEvent(key)) return;
         for (int repeat = 0; repeat < Math.Max(1, (int)key.Repeat); repeat++) keys.Add(key);
     }
     public static bool BufferedText(List<Record> keys, bool recentBurst) {
@@ -102,6 +108,94 @@ public static class JecodeConsole {
         }
         WriteKeys(keys, writer, ref pasteBurst, ref lastText, now);
     }
+    // ReadConsoleInput can split one paste into several reads. Keep printable
+    // records together until the burst is quiet, then emit one paste event.
+    public sealed class Burst {
+        const int Gap = 50;
+        const int MaxUnits = 1024 * 1024 + 1;
+        readonly List<Record> pending = new List<Record>();
+        long lastText = -1000;
+        int wheel;
+        int printable;
+        bool bulk;
+        bool overflow;
+
+        static bool Text(Record key) {
+            int modifiers = Modifiers(key) & 5;
+            return key.Character != 0 &&
+                (modifiers == 0 || (modifiers == 5 && key.Character >= 32));
+        }
+        static void WriteKey(Record key, TextWriter writer) {
+            writer.WriteLine("K|" + key.Key + "|" + Modifiers(key) + "|" + key.Character);
+        }
+        void WritePending(TextWriter writer) {
+            if (overflow || pending.Count == MaxUnits) {
+                // Do not pass a truncated bracketed paste to the decoder: its
+                // closing marker may have been dropped with the suffix.
+                writer.WriteLine("I|overflow");
+            } else if (pending.Count > 1 && printable > 0) {
+                var units = new List<string>(pending.Count);
+                foreach (Record key in pending) units.Add(key.Character.ToString());
+                writer.WriteLine("P|" + string.Join(",", units));
+            } else {
+                foreach (Record key in pending) WriteKey(key, writer);
+            }
+            pending.Clear();
+            printable = 0;
+            bulk = false;
+            overflow = false;
+        }
+        public void Flush(TextWriter writer) {
+            if (pending.Count == 0) return;
+            // A lone typed character followed by Enter is a submission. If a
+            // larger text batch preceded Enter, preserve it as paste content.
+            if (!bulk && !overflow && pending.Count == 2 &&
+                pending[0].Character >= 32 && pending[1].Key == 13 && pending[1].Character == 13) {
+                Record enter = pending[1];
+                pending.RemoveAt(1);
+                WritePending(writer);
+                WriteKey(enter, writer);
+                return;
+            }
+            WritePending(writer);
+        }
+        public void Idle(TextWriter writer, long now) {
+            if (pending.Count > 0 && now - lastText > Gap) Flush(writer);
+        }
+        public void Emit(Record[] records, uint count, TextWriter writer, long now) {
+            Idle(writer, now);
+            int batchPrintable = 0;
+            for (int index = 0; index < count; index++) {
+                Record key = records[index];
+                int delta = Wheel(key);
+                if (delta != 0) {
+                    Flush(writer);
+                    batchPrintable = 0;
+                    wheel += delta;
+                    int rows = -(wheel / 120) * 3;
+                    wheel %= 120;
+                    if (rows != 0) writer.WriteLine("W|" + rows);
+                    continue;
+                }
+                if (!KeyEvent(key)) continue;
+                bool text = Text(key);
+                int repeat = Math.Max(1, (int)key.Repeat);
+                for (int item = 0; item < repeat; item++) {
+                    if (!text) {
+                        Flush(writer);
+                        batchPrintable = 0;
+                        WriteKey(key, writer);
+                    } else {
+                        if (key.Character >= 32 && ++batchPrintable > 1) bulk = true;
+                        if (pending.Count < MaxUnits) pending.Add(key);
+                        else overflow = true;
+                        if (key.Character >= 32) printable++;
+                        lastText = now;
+                    }
+                }
+            }
+        }
+    }
     public static void Restore(uint inputMode, uint outputMode, uint codePage) {
         using (var input = CreateFileW("CONIN$", 0xc0000000u, 3, IntPtr.Zero, 3, 0, IntPtr.Zero))
         using (var output = CreateFileW("CONOUT$", 0xc0000000u, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
@@ -138,10 +232,8 @@ public static class JecodeConsole {
                 var stopping = pipe.ReadAsync(stop, 0, 1);
                 Record[] records = new Record[4096];
                 string size = "";
-                bool pasteBurst = false;
+                var burst = new Burst();
                 var clock = System.Diagnostics.Stopwatch.StartNew();
-                long lastText = -1000;
-                int wheel = 0;
                 while (!stopping.IsCompleted) {
                     ScreenInfo info;
                     Check(GetConsoleScreenBufferInfo(output, out info), "measure screen");
@@ -156,10 +248,11 @@ public static class JecodeConsole {
                     if (available > 0) {
                         uint count;
                         Check(ReadConsoleInput(input, records, (uint)records.Length, out count));
-                        Emit(records, count, writer, ref pasteBurst, ref lastText, ref wheel, clock.ElapsedMilliseconds);
-                    }
+                        burst.Emit(records, count, writer, clock.ElapsedMilliseconds);
+                    } else burst.Idle(writer, clock.ElapsedMilliseconds);
                     Thread.Sleep(10);
                 }
+                burst.Flush(writer);
             } finally {
                 try {
                     Console.Out.Write("\x1b[0m\x1b[?2026l\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[?1049l\x1b[?25h");

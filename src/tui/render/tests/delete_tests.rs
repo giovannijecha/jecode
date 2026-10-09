@@ -22,7 +22,7 @@ fn a_current_deletion_erases_the_owned_conversation_without_using_native_history
     assert!(screen.history.is_empty());
     state.items.clear();
     state.editor.insert("kept draft");
-    state.queue.push("follow-up".into()).unwrap();
+    state.queue.push("follow-up").unwrap();
     state.generation += 1;
     state.changed();
     display.reset((state.width, state.height));

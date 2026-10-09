@@ -89,7 +89,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
     let mut renderer = Renderer::new();
     update(&mut renderer, &mut screen, &mut state);
     state.activity = Some(Activity::new());
-    state.queue.push("queued pending".into()).unwrap();
+    state.queue.push("queued pending").unwrap();
     let mut streamed = String::new();
     for _ in 0..20 {
         streamed.push_str("streamed paragraph\n");

@@ -11,6 +11,7 @@ pub enum Action {
     Run {
         model: Option<String>,
         prompt: Option<String>,
+        attachments: Vec<String>,
         plain: bool,
     },
 }
@@ -37,6 +38,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, St
     let mut prompt = Vec::new();
     let mut plain = false;
     let mut resume = false;
+    let mut attachments = Vec::new();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--plain" if prompt.is_empty() => plain = true,
@@ -53,6 +55,13 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, St
                 }
                 model = Some(value);
             }
+            "--attach" if prompt.is_empty() => {
+                let value = arguments.next().ok_or("--attach requires a file path")?;
+                if value.is_empty() {
+                    return Err("--attach requires a file path".into());
+                }
+                attachments.push(value);
+            }
             "--" => {
                 prompt.extend(arguments);
                 break;
@@ -64,7 +73,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, St
         }
     }
     if resume {
-        if model.is_some() || prompt.len() > 1 {
+        if model.is_some() || prompt.len() > 1 || !attachments.is_empty() {
             return Err("Usage: jecode [--plain] resume [SESSION_ID]. Change the model with /model after resuming.".into());
         }
         return Ok(Action::Resume {
@@ -86,6 +95,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, St
     Ok(Action::Run {
         model,
         prompt,
+        attachments,
         plain,
     })
 }
@@ -97,7 +107,7 @@ pub fn print_help() {
     #[cfg(not(windows))]
     let requirements = "Requires HTTPS-enabled curl, Bash and kill on PATH.\nThe Unix TUI also requires stty and a VT terminal with /dev/tty.";
     println!(
-        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nKey, default model and effort live in plain text in ~/.jecode/config.json.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\n\nTools: read, write, edit, bash (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory; JECODE_BASH selects Bash.",
+        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nKey, default model and effort live in plain text in ~/.jecode/config.json.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\n\nTools: read, write, edit, bash (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory; JECODE_BASH selects Bash.",
         crate::session::HELP,
     );
 }
@@ -127,6 +137,19 @@ mod tests {
         assert!(
             matches!(parse(arguments(&["--", "resume"])).unwrap(), Action::Run { prompt: Some(prompt), .. } if prompt == "resume")
         );
+    }
+
+    #[test]
+    fn attach_is_repeatable_and_precedes_the_prompt() {
+        assert!(matches!(
+            parse(arguments(&["--attach", "a.png", "--plain", "--attach", "b c.pdf", "explain"])).unwrap(),
+            Action::Run { attachments, prompt: Some(prompt), plain: true, .. }
+                if attachments == ["a.png", "b c.pdf"] && prompt == "explain"
+        ));
+        assert!(parse(arguments(&["explain", "--attach", "a.png"])).is_err());
+        assert!(parse(arguments(&["--attach"])).is_err());
+        assert!(parse(arguments(&["--attach", ""])).is_err());
+        assert!(parse(arguments(&["--attach", "a.png", "resume"])).is_err());
     }
 
     #[test]

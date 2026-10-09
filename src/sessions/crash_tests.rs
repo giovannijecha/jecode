@@ -146,6 +146,7 @@ fn crash_child() {
         draft: crate::sessions::Draft {
             text: "unfinished draft".into(),
             cursor: 3,
+            ..Default::default()
         },
         queued: vec!["queued follow-up".into()],
         ..crate::sessions::Input::default()

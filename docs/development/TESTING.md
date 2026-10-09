@@ -81,6 +81,16 @@ cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tu
 cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 ```
 
+The attachment boundary has two ignored checks. The conversion check writes
+synthetic BMP fixtures and runs on Windows, WSL with interop, or macOS. The
+clipboard check reads the real clipboard without changing it and prints only
+the image size or the outcome:
+
+```text
+cargo test --locked --offline attachments::capture::tests::native_conversion_bounds_unsupported_images -- --exact --ignored --nocapture
+cargo test --locked --offline attachments::capture::tests::native_clipboard_read_reports_its_outcome -- --exact --ignored --nocapture
+```
+
 ## Manual Windows console checks
 
 The manual Windows console smoke tests use local HTTP fixtures and are ignored

@@ -14,7 +14,8 @@ pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Opti
     let mut entries = Vec::new();
     let mut used = 0;
     for &(index, message) in requests.iter().rev() {
-        let text = message.get("content").and_then(Value::as_str).unwrap_or("");
+        let text = crate::attachments::provider::user_text(message);
+        let text = text.as_str();
         let label = if index == latest_index {
             format!("history:{index} — current original user request:\n")
         } else {

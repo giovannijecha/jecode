@@ -1,4 +1,5 @@
 mod activity;
+mod attach;
 mod cards;
 mod commands;
 mod copy;
@@ -63,9 +64,12 @@ struct App {
     copy_targets: Vec<crate::copy::Target>,
     copy_job: Option<(String, crate::clipboard::Job)>,
     deletion_job: Option<delete::Job>,
+    imports: Vec<attach::Import>,
     settings_parent: Option<selector::Setting>,
     #[cfg(test)]
     copied_text: Option<String>,
+    #[cfg(test)]
+    clipboard_image: Option<Result<Vec<u8>, String>>,
 }
 
 impl App {
@@ -95,27 +99,36 @@ impl App {
             copy_targets: vec![],
             copy_job: None,
             deletion_job: None,
+            imports: Vec::new(),
             settings_parent: None,
             #[cfg(test)]
             copied_text: None,
+            #[cfg(test)]
+            clipboard_image: None,
         };
         app.session_hint();
         app
     }
 }
 
-pub fn run(agent: Agent, config: SessionConfig) -> Result<(), String> {
-    run_inner(agent, config, None)
+/// Opens the TUI; a non-empty `draft` starts the composer, as `--attach` does.
+pub fn run(
+    agent: Agent,
+    config: SessionConfig,
+    draft: crate::attachments::Prompt,
+) -> Result<(), String> {
+    run_inner(agent, config, None, draft)
 }
 
 pub fn resume(agent: Agent, config: SessionConfig, id: Option<String>) -> Result<(), String> {
-    run_inner(agent, config, Some(id))
+    run_inner(agent, config, Some(id), Default::default())
 }
 
 fn run_inner(
     mut agent: Agent,
     config: SessionConfig,
     resume: Option<Option<String>>,
+    draft: crate::attachments::Prompt,
 ) -> Result<(), String> {
     agent.enable_sessions(
         config
@@ -126,6 +139,9 @@ fn run_inner(
     )?;
     let terminal = Terminal::open(&config.bash)?;
     let mut app = App::new(agent, config, Some(terminal));
+    if !draft.is_empty() {
+        app.state.editor.set(draft);
+    }
     match resume {
         Some(Some(id)) => app.resume_session(&id),
         Some(None) => app.open_sessions(),
@@ -170,7 +186,7 @@ fn run_inner(
             let delay = app
                 .state
                 .feedback_wait(now, app.renderer.wait(&app.state, now));
-            if app.copy_job.is_some() {
+            if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
             } else {
                 delay
@@ -225,9 +241,14 @@ impl App {
                     .resized((size.width, size.height), Instant::now());
             }
             #[cfg(any(windows, test))]
+            Input::PasteOverflow => {
+                *decoder = Decoder::default();
+                self.input(Decoded::Error)?;
+            }
+            #[cfg(any(windows, test))]
             Input::Paste(text) => match decoder.paste(&text) {
                 Ok(text) if !text.is_empty() => {
-                    self.input(Decoded::Text(text))?;
+                    self.input(Decoded::Paste(text))?;
                 }
                 Err(()) => {
                     self.input(Decoded::Error)?;
@@ -247,10 +268,12 @@ impl Drop for App {
         }
         // Finish process cleanup before returning control to the caller's shell.
         drop(self.copy_job.take());
+        self.imports.clear();
         drop(self.worker.take());
         drop(self.job.take());
         let deletion_error = self.finish_delete(true).err();
         self.persist_input(true);
+        self.collect_attachments();
         let fullscreen = self.terminal.is_some();
         // The guardian leaves the alternate screen before any shell output.
         drop(self.terminal.take());

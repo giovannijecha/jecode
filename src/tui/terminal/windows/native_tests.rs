@@ -156,6 +156,7 @@ fn native_console_fixture() {
     }
     full_width_console(&bash);
     restored(&path);
+    std::fs::write(path.join("drop me.txt"), "dropped through ConPTY").unwrap();
     let response = (0..100)
         .map(|i| format!("Native row {i:03}\n"))
         .collect::<String>();
@@ -171,7 +172,7 @@ fn native_console_fixture() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(&path).unwrap(),
     );
-    crate::tui::run(agent, config).unwrap();
+    crate::tui::run(agent, config, Default::default()).unwrap();
     restored(&path);
     let sessions = crate::sessions::Store::new(path.join("home"), &path)
         .unwrap()
@@ -183,7 +184,11 @@ fn native_console_fixture() {
         .unwrap()
         .fixture_load(&sessions[0].id)
         .unwrap();
-    assert_eq!(saved.input.draft.text, "kept draft β🙂");
+    assert_eq!(
+        saved.input.draft.text,
+        format!("kept draft β🙂{} ", crate::attachments::MARKER)
+    );
+    assert_eq!(saved.input.draft.attachments[0].name, "drop me.txt");
     assert_eq!(fixture.finish().len(), 1);
     println!("NATIVE_RESTORED");
 }

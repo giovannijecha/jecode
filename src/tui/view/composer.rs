@@ -91,13 +91,13 @@ pub(super) fn render(
         .queue
         .messages
         .iter()
-        .map(|text| (text.as_str(), "queued"))
+        .map(|prompt| (prompt.display(), "queued"))
         .chain(
             state
                 .queue
                 .paused
                 .iter()
-                .map(|draft| (draft.text.as_str(), "paused")),
+                .map(|draft| (draft.display(), "paused")),
         );
     for (index, (message, status)) in entries.take(visible).enumerate() {
         let first = message.lines().next().unwrap_or("");
@@ -328,7 +328,14 @@ fn input(
         if state.editor.text.is_empty() {
             line.push("Ask anything…", MUTED);
         } else {
-            line.push(&layout.rows[index].text, foreground);
+            let row = &layout.rows[index];
+            let mut at = 0;
+            for label in &row.labels {
+                line.push(&row.text[at..label.start], foreground);
+                line.push(&row.text[label.clone()], ACCENT);
+                at = label.end;
+            }
+            line.push(&row.text[at..], foreground);
         }
         if index == layout.cursor.0 {
             let column = layout.cursor.1 + 2;

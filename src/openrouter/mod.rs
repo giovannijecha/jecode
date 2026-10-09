@@ -32,6 +32,8 @@ pub struct OpenRouter {
     effort: Effort,
     limits: Option<Option<Limits>>,
     summary_json: bool,
+    /// The model's input modalities from the catalog; None when unknown.
+    inputs: Option<Vec<String>>,
 }
 
 pub struct ToolCall {
@@ -132,11 +134,32 @@ impl OpenRouter {
             model,
             effort: Effort::Default,
             summary_json: false,
+            inputs: None,
         })
     }
 
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    pub fn inputs(&self) -> crate::attachments::provider::Inputs {
+        crate::attachments::provider::Inputs {
+            image: self.accepts("image"),
+            file: self.accepts("file"),
+        }
+    }
+
+    /// Whether the model takes an input modality such as "image" or "file";
+    /// None until the catalog has been read or when the model is not listed.
+    pub fn accepts(&self, modality: &str) -> Option<bool> {
+        self.inputs
+            .as_ref()
+            .map(|inputs| inputs.iter().any(|input| input == modality))
+    }
+
+    #[cfg(test)]
+    pub fn fixture_inputs(&mut self, inputs: &[&str]) {
+        self.inputs = Some(inputs.iter().map(|input| (*input).to_owned()).collect());
     }
 
     pub fn api(&self) -> Api {
@@ -155,6 +178,7 @@ impl OpenRouter {
         validate_model(&model)?;
         if model != self.model {
             self.summary_json = false;
+            self.inputs = None;
             self.limits = if self.api.base_url.starts_with("http://127.0.0.1:") {
                 Some(Some(Limits {
                     context: usize::MAX,
@@ -224,6 +248,14 @@ impl OpenRouter {
             && let Value::Object(fields) = &mut body
         {
             fields.insert("reasoning".into(), reasoning);
+        }
+        if crate::attachments::provider::has_files(messages)
+            && let Value::Object(fields) = &mut body
+        {
+            fields.insert(
+                "plugins".into(),
+                crate::attachments::provider::plugins(self.accepts("file")),
+            );
         }
         let body = body.encode();
         let mut stream = stream::Stream::default();

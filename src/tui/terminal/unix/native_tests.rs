@@ -158,7 +158,7 @@ fn native_pty_fixture() {
             Tools::new(&path).unwrap(),
         )
     };
-    crate::tui::run(agent(), config()).unwrap();
+    crate::tui::run(agent(), config(), Default::default()).unwrap();
     assert_eq!(mode::stty(&tty, &["-g"]).unwrap(), original);
     assert!(!path.join("late.txt").exists());
     let sessions = crate::sessions::Store::new(path.join("home"), &path).unwrap();

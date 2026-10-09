@@ -163,6 +163,7 @@ impl Drop for Terminal {
 fn parse(line: &str) -> Input {
     let fields: Vec<_> = line.split('|').collect();
     match fields.as_slice() {
+        ["I", "overflow"] => Input::PasteOverflow,
         ["R", input, output, code_page] => match (input.parse(), output.parse(), code_page.parse())
         {
             (Ok(input), Ok(output), Ok(code_page)) => Input::Modes(input, output, code_page),

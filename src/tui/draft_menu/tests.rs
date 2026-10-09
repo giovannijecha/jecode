@@ -76,7 +76,7 @@ fn editing_and_discarding_one_of_five_equal_drafts_keeps_the_composer_separate()
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
     for _ in 0..5 {
-        app.state.queue.push("same draft".into()).unwrap();
+        app.state.queue.push("same draft").unwrap();
     }
     text(&mut app, "original composer");
     app.state.editor.cursor = 3;
@@ -121,7 +121,7 @@ fn numbered_choices_cancel_discard_marks_and_empty_drafts_panel_stays_open() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
-    app.state.queue.push("one".into()).unwrap();
+    app.state.queue.push("one").unwrap();
     app.open_drafts();
     key(&mut app, 68, 4);
     text(&mut app, "1");
@@ -430,7 +430,7 @@ fn draft_panels_and_edit_controls_fit_small_viewports_without_losing_text() {
     let mut app = app(&directory, &fixture);
     app.state
         .queue
-        .push("long queued draft β🙂\nsecond line".into())
+        .push("long queued draft β🙂\nsecond line")
         .unwrap();
     app.state.editor.replace("kept main draft".into());
     let main = app.state.editor.clone();

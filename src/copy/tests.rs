@@ -8,6 +8,7 @@ fn archive(messages: Vec<Value>) -> Archive {
         directory: "fixture".into(),
         messages: Arc::new(Mutex::new(messages)),
         events: Arc::new(Mutex::new(vec![])),
+        attachments: None,
         redactor: Redactor::new("fixture-private-key".into()),
         effort: "default".into(),
     }

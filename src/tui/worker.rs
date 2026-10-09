@@ -11,7 +11,7 @@ pub struct Worker {
     cancellation: Cancellation,
 }
 impl Worker {
-    pub fn start(mut agent: Agent, prompt: String) -> Self {
+    pub fn start(mut agent: Agent, prompt: crate::attachments::Prompt) -> Self {
         let cancellation = agent.cancellation();
         cancellation.reset();
         let (sender, events) = mpsc::sync_channel(16);

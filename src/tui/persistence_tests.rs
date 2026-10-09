@@ -105,8 +105,8 @@ fn failed_queued_preparation_returns_all_unsent_work_in_order() {
     let directory = Directory::new();
     let mut current = app(&home, &directory, "http://127.0.0.1:1/chat/completions");
     saved_exchange(&current);
-    current.state.queue.push("first queued".into()).unwrap();
-    current.state.queue.push("second queued".into()).unwrap();
+    current.state.queue.push("first queued").unwrap();
+    current.state.queue.push("second queued").unwrap();
     current.state.editor.replace("current draft".into());
     current.persist_input(true);
     let path = journal(&home, &current);
@@ -169,8 +169,8 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
         .editor
         .replace("original β draft\nsecond line".into());
     first.state.editor.cursor = 5;
-    first.state.queue.push("first queued".into()).unwrap();
-    first.state.queue.push("last queued".into()).unwrap();
+    first.state.queue.push("first queued").unwrap();
+    first.state.queue.push("last queued").unwrap();
     first
         .state
         .queue
@@ -280,7 +280,7 @@ fn session_search_uses_existing_selector_and_escape_preserves_draft_and_cursor()
         seed.agent
             .as_mut()
             .unwrap()
-            .prepare_turn(&format!("Saved task {index}"))
+            .prepare_turn(format!("Saved task {index}"))
             .unwrap();
         drop(seed);
     }
@@ -342,7 +342,7 @@ fn resume_rejects_another_folder_and_new_transfers_only_unsent_input() {
         }
     )));
     other.state.editor.replace("saved draft".into());
-    other.state.queue.push("next request".into()).unwrap();
+    other.state.queue.push("next request").unwrap();
     other.capture_input();
     let old = other.persistence.as_ref().unwrap().clone();
     other.dispatch("/new".into()).unwrap();
@@ -418,6 +418,7 @@ fn an_edited_history_recall_is_recovered_as_one_separate_paused_draft() {
             [crate::sessions::Draft {
                 text: recall.text.clone(),
                 cursor: recall.cursor,
+                ..Default::default()
             }]
         );
     }

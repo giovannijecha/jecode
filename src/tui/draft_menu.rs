@@ -92,11 +92,11 @@ impl App {
             return Ok(false);
         }
         let text = if self.state.queue.is_editing() {
-            self.state.editor.text.clone()
+            self.state.editor.prompt()
         } else {
-            self.state.queue.paused[index - queued].text.clone()
+            self.state.queue.paused[index - queued].prompt()
         };
-        if text.trim().is_empty() {
+        if text.is_empty() {
             self.warn("The draft is empty. Edit it or discard it in /drafts.");
             return Ok(false);
         }
@@ -125,7 +125,7 @@ impl App {
         self.dispatch(text)
     }
 
-    pub(super) fn keep_failed_prompt(&mut self, text: String) {
+    pub(super) fn keep_failed_prompt(&mut self, text: crate::attachments::Prompt) {
         self.state.queue.messages.push_front(text);
         self.state.queue.pause();
         self.edited();
