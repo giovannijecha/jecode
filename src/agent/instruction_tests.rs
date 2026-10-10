@@ -71,4 +71,30 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
     assert_eq!(sent, &projection[0]);
     assert!(sent.encode().contains("Environment:"));
     assert!(!sent.encode().contains("Legacy harness instructions"));
+    let temporary = resumed.tools.temporary_instructions();
+    for request in &requests {
+        let system = request.body.get("messages").unwrap().as_array().unwrap()[0]
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert_eq!(system.matches("Working files and verification:").count(), 1);
+        assert!(system.contains("useful durable tests"));
+        assert!(system.contains("one-off verification"));
+        assert!(system.contains(&temporary));
+        for tool in request.body.get("tools").unwrap().as_array().unwrap() {
+            let function = tool.get("function").unwrap();
+            if matches!(
+                function.get("name").and_then(Value::as_str),
+                Some("write" | "bash")
+            ) {
+                assert!(
+                    function
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap()
+                        .contains("one-off verification")
+                );
+            }
+        }
+    }
 }
