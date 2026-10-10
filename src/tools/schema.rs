@@ -54,7 +54,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "write",
-            "Create or replace a complete UTF-8 file. Project paths require an existing parent directory. tmp:relative/path writes disposable working files in this session's temporary area and creates parent directories there. Keep durable source code, tests and build recipes in the project.",
+            "Create or replace a complete UTF-8 file. Project paths require an existing parent directory. Use tmp:relative/path for disposable scripts and one-off verification files; it writes in this session's temporary area and creates parent directories there. Keep project deliverables, including useful durable tests, in the project.",
             Value::object([("path", string()), ("content", string())]),
             &["path", "content"],
         ),
@@ -70,7 +70,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run a foreground Bash command from the project working directory. stdin is closed. No timeout unless positive timeout_seconds is supplied. JECODE_TMP, TMPDIR, TEMP and TMP point to persistent session temporary storage; quote paths. Returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references; full streams remain readable through them. Bash has normal system access; use finite foreground commands.",
+            "Run a foreground Bash command from the project working directory. stdin is closed. No timeout unless positive timeout_seconds is supplied. JECODE_TMP, TMPDIR, TEMP and TMP point to persistent session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references; full streams remain readable through them. Bash has normal system access; use finite foreground commands.",
             Value::object([
                 ("command", string()),
                 (

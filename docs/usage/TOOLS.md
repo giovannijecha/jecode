@@ -52,8 +52,9 @@ project working directory and receives `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP`
 for disposable files. Working files survive interruption, exit and explicit
 resume. `/new` uses a new area; `/tmp clean` clears only the current one when idle.
 Deleting a session from `/resume` removes its entire owned area.
-There is no automatic eviction. See [TEMPORARY.md](TEMPORARY.md) for scope,
-cleanup and tool usage.
+There is no automatic eviction. Keep durable project verification in the project;
+use the session area for one-off checks and their disposable output. See
+[TEMPORARY.md](TEMPORARY.md) for placement, cleanup and tool usage.
 
 ## Bash execution and saved output
 

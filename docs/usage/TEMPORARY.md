@@ -12,8 +12,22 @@ bucket uses the existing canonical project identity. An ownership record checks
 both project and session before files are used or cleared. The area is created
 on first use; its metadata is excluded from file and size counts.
 
-Source code, durable tests and build recipes still belong in the project.
-Existing artifacts are not moved or removed automatically.
+## Choose where verification files belong
+
+Keep source code, durable tests and reusable project verification in the project.
+Follow its existing test conventions and use checks proportional to the change.
+Put one-off verification scripts, tools or dependencies installed solely for a
+check, their configuration, and check-only fixtures, logs, reports, screenshots
+and browser traces in the active session area. Use `tmp:` with file tools or
+quoted `$JECODE_TMP` paths in Bash. Add lasting test infrastructure only when
+future project use or an explicit user request justifies it. Honor explicit
+user or project output requirements.
+
+Set generated-output paths explicitly: `TMPDIR`, `TEMP` and `TMP` only affect
+programs that use them and do not redirect arbitrary output. Before finishing,
+inspect files you created, move your disposable leftovers into the session area
+and preserve preexisting user files and necessary project deliverables. This is
+model guidance; Jecode does not classify or move files automatically.
 
 ## Use from file and shell tools
 

@@ -225,6 +225,7 @@ fn resumed_sessions_reload_current_rules_without_rewriting_original_history() {
 #[test]
 fn live_requests_keep_the_rules_after_context_compaction() {
     let directory = Directory::new();
+    let home = Directory::new();
     fs::write(directory.path().join(FILE_NAME), "Compaction project rules").unwrap();
     let fixture = HttpFixture::new(vec![
         (
@@ -244,6 +245,8 @@ fn live_requests_keep_the_rules_after_context_compaction() {
         (200, completion("Finished", vec![])),
     ]);
     let mut agent = agent(&directory, &fixture);
+    agent.enable_sessions(home.path()).unwrap();
+    let temporary = agent.tools.temporary_instructions();
     let prompt = "original objective ".repeat(750);
     let original = agent.messages.lock().unwrap().clone();
     let mut notices = Vec::new();
@@ -271,6 +274,15 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     assert_eq!(requests.len(), 3);
     for request in [&requests[0], &requests[2]] {
         assert!(system(request).contains("Compaction project rules"));
+        assert!(system(request).contains(&temporary));
+        assert!(system(request).contains("useful durable tests"));
+        assert!(system(request).contains("one-off verification"));
+        assert_eq!(
+            system(request)
+                .matches("Working files and verification:")
+                .count(),
+            1
+        );
         assert_eq!(
             system(request).matches("Project instructions from").count(),
             1
