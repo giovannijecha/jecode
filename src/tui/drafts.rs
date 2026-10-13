@@ -1,5 +1,6 @@
 use super::editor::Editor;
 use crate::attachments::Prompt;
+use crate::inbox::Inbox;
 use std::collections::VecDeque;
 
 #[derive(Default)]
@@ -116,33 +117,91 @@ fn is_prompt(prompt: &Prompt) -> bool {
         || (!prompt.text.trim().is_empty() && !prompt.text.trim_start().starts_with('/'))
 }
 
+/// A pending draft: a queued prompt by its inbox entry, or a paused draft.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Slot {
+    Queued(u64),
+    Paused(usize),
+}
+
+/// Queued prompts live in the inbox shared with the agent, which takes
+/// ordinary messages while it works. Paused drafts stay local until sent.
 #[derive(Default)]
 pub struct Queue {
-    pub messages: VecDeque<Prompt>,
+    inbox: Inbox,
     pub paused: Vec<Editor>,
     editing: Option<Editing>,
 }
 
 struct Editing {
-    index: usize,
+    slot: Slot,
     previous: Editor,
 }
 
 impl Queue {
+    pub fn new(inbox: Inbox) -> Self {
+        Self {
+            inbox,
+            ..Self::default()
+        }
+    }
+
+    pub fn inbox(&self) -> &Inbox {
+        &self.inbox
+    }
+
+    pub fn queued(&self) -> usize {
+        self.inbox.with(|entries| entries.len())
+    }
+
     pub fn len(&self) -> usize {
-        self.messages.len() + self.paused.len()
+        self.queued() + self.paused.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.messages.is_empty() && self.paused.is_empty()
+        self.len() == 0
     }
 
     pub fn is_editing(&self) -> bool {
         self.editing.is_some()
     }
 
+    pub fn editing(&self) -> Option<Slot> {
+        self.editing.as_ref().map(|editing| editing.slot)
+    }
+
+    /// The combined position of the draft being edited.
     pub fn edit_index(&self) -> Option<usize> {
-        self.editing.as_ref().map(|editing| editing.index)
+        self.editing().and_then(|slot| self.position(slot))
+    }
+
+    pub fn position(&self, slot: Slot) -> Option<usize> {
+        match slot {
+            Slot::Queued(id) => self.inbox.with(|entries| entries.position(id)),
+            Slot::Paused(index) => (index < self.paused.len()).then(|| self.queued() + index),
+        }
+    }
+
+    /// Queued prompts, then paused drafts, with their display text.
+    pub fn drafts(&self) -> Vec<(Slot, String)> {
+        let mut drafts: Vec<_> = self.inbox.with(|entries| {
+            entries
+                .prompts()
+                .map(|(id, prompt)| (Slot::Queued(id), prompt.display()))
+                .collect()
+        });
+        drafts.extend(
+            self.paused
+                .iter()
+                .enumerate()
+                .map(|(index, draft)| (Slot::Paused(index), draft.display())),
+        );
+        drafts
+    }
+
+    #[cfg(test)]
+    pub fn slot(&self, index: usize) -> Option<Slot> {
+        self.drafts().get(index).map(|(slot, _)| *slot)
     }
 
     pub fn draft<'a>(&'a self, editor: &'a Editor) -> &'a Editor {
@@ -153,39 +212,40 @@ impl Queue {
 
     pub fn push(&mut self, prompt: impl Into<Prompt>) -> Result<(), String> {
         let prompt = prompt.into();
-        if self.messages.len() == 8 {
-            return Err("Queue is full (8 messages). Your draft was kept.".into());
-        }
-        if let Some(editing) = &mut self.editing
-            && editing.index >= self.messages.len()
-        {
-            editing.index += 1;
-        }
-        self.messages.push_back(prompt);
-        Ok(())
+        self.inbox.update(|entries| entries.push(prompt)).map(drop)
     }
 
-    pub fn begin_edit(&mut self, index: usize, editor: &mut Editor) -> Result<(), String> {
+    /// The oldest queued prompt, for dispatch while the agent is idle.
+    pub fn pop_front(&mut self) -> Option<Prompt> {
+        if self.is_editing() {
+            return None;
+        }
+        self.inbox.update(|entries| entries.pop_front())
+    }
+
+    pub fn begin_edit(&mut self, slot: Slot, editor: &mut Editor) -> Result<(), String> {
         if self.editing.is_some() {
             return Err("Finish the current queued edit first.".into());
         }
-        let Some(prompt) = (index < self.messages.len())
-            .then(|| self.messages[index].clone())
-            .or_else(|| {
-                self.paused
-                    .get(index - self.messages.len())
-                    .map(Editor::prompt)
-            })
-        else {
-            return Err("No queued draft at that position.".into());
-        };
         let previous = editor.clone();
-        if index < self.messages.len() {
-            editor.set(prompt);
-        } else {
-            *editor = self.paused[index - self.messages.len()].clone();
+        match slot {
+            Slot::Queued(id) => {
+                // A held entry stays queued but cannot join the turn until the edit ends.
+                let prompt = self
+                    .inbox
+                    .update(|entries| entries.hold(id))
+                    .ok_or("This message was already sent.")?;
+                editor.set(prompt);
+            }
+            Slot::Paused(index) => {
+                *editor = self
+                    .paused
+                    .get(index)
+                    .ok_or("No queued draft at that position.")?
+                    .clone();
+            }
         }
-        self.editing = Some(Editing { index, previous });
+        self.editing = Some(Editing { slot, previous });
         Ok(())
     }
 
@@ -193,10 +253,12 @@ impl Queue {
         let Some(editing) = self.editing.take() else {
             return false;
         };
-        if editing.index < self.messages.len() {
-            self.messages[editing.index] = editor.prompt();
-        } else {
-            self.paused[editing.index - self.messages.len()] = editor.clone();
+        match editing.slot {
+            Slot::Queued(_) => {
+                let prompt = editor.prompt();
+                self.inbox.update(|entries| entries.release(Some(prompt)));
+            }
+            Slot::Paused(index) => self.paused[index] = editor.clone(),
         }
         *editor = editing.previous;
         true
@@ -206,47 +268,39 @@ impl Queue {
         let Some(editing) = self.editing.take() else {
             return false;
         };
+        if matches!(editing.slot, Slot::Queued(_)) {
+            self.inbox.update(|entries| entries.release(None));
+        }
         *editor = editing.previous;
         true
     }
 
-    pub fn discard(&mut self, index: usize) -> bool {
+    pub fn discard(&mut self, slot: Slot) -> bool {
+        self.take(slot).is_some()
+    }
+
+    /// Removes a draft that has not been sent; `None` if it already was.
+    pub fn take(&mut self, slot: Slot) -> Option<Prompt> {
         if self.is_editing() {
-            return false;
+            return None;
         }
-        if index < self.messages.len() {
-            self.messages.remove(index).is_some()
-        } else {
-            let index = index - self.messages.len();
-            if index < self.paused.len() {
-                self.paused.remove(index);
-                true
-            } else {
-                false
+        match slot {
+            Slot::Queued(id) => self.inbox.update(|entries| entries.remove(id)),
+            Slot::Paused(index) => {
+                (index < self.paused.len()).then(|| self.paused.remove(index).take())
             }
         }
     }
 
-    pub fn take(&mut self, index: usize) -> Option<Prompt> {
-        if self.is_editing() {
-            return None;
-        }
-        if index < self.messages.len() {
-            self.messages.remove(index)
-        } else {
-            let index = index - self.messages.len();
-            (index < self.paused.len()).then(|| self.paused.remove(index).take())
-        }
-    }
-
+    /// Turns every queued prompt into a leading paused draft.
     pub fn pause(&mut self) {
-        let count = self.messages.len();
+        let (prompts, held) = self.inbox.update(|entries| entries.drain());
+        let count = prompts.len();
         if count == 0 {
             return;
         }
-        let mut paused: Vec<_> = self
-            .messages
-            .drain(..)
+        let mut paused: Vec<_> = prompts
+            .into_iter()
             .map(|prompt| {
                 let mut editor = Editor::default();
                 editor.set(prompt);
@@ -255,24 +309,75 @@ impl Queue {
             .collect();
         paused.append(&mut self.paused);
         self.paused = paused;
-        // Combined index order is unchanged when queued entries become the
-        // leading paused entries.
-        if let Some(editing) = &self.editing {
-            debug_assert!(editing.index < self.paused.len());
+        // Combined positions are unchanged when queued entries lead the paused ones.
+        if let Some(editing) = &mut self.editing {
+            editing.slot = match editing.slot {
+                Slot::Queued(_) => Slot::Paused(held.unwrap_or(0)),
+                Slot::Paused(index) => Slot::Paused(index + count),
+            };
         }
     }
 
-    pub fn snapshot(&self, editor: &Editor) -> (Vec<Prompt>, Vec<crate::sessions::Draft>) {
-        let mut queued: Vec<_> = self.messages.iter().cloned().collect();
-        let mut paused: Vec<_> = self.paused.iter().map(draft).collect();
-        if let Some(editing) = &self.editing {
-            if editing.index < queued.len() {
-                queued[editing.index] = editor.prompt();
-            } else {
-                paused[editing.index - queued.len()] = draft(editor);
-            }
+    /// Keeps a prompt that could not start a turn as the first paused draft.
+    pub fn keep_failed(&mut self, prompt: Prompt) {
+        self.pause();
+        let mut editor = Editor::default();
+        editor.set(prompt);
+        self.paused.insert(0, editor);
+        if let Some(Editing {
+            slot: Slot::Paused(index),
+            ..
+        }) = &mut self.editing
+        {
+            *index += 1;
         }
-        (queued, paused)
+    }
+
+    /// Replaces every draft, as when another session opens.
+    pub fn reset(&mut self, paused: Vec<Editor>) {
+        self.inbox.update(|entries| {
+            entries.drain();
+            entries.unacknowledged();
+        });
+        self.editing = None;
+        self.paused = paused;
+    }
+
+    /// Passes queued and paused drafts, including an unsaved edit, to `save`
+    /// while the inbox is locked. The agent accepts only prompts captured
+    /// here, and an accepted message cannot reappear in a later capture.
+    pub fn capture<R>(
+        &self,
+        editor: &Editor,
+        save: impl FnOnce(Vec<Prompt>, Vec<crate::sessions::Draft>) -> R,
+    ) -> R {
+        let editing = self.editing();
+        let mut paused: Vec<_> = self.paused.iter().map(draft).collect();
+        if let Some(Slot::Paused(index)) = editing {
+            paused[index] = draft(editor);
+        }
+        self.inbox.with(|entries| {
+            if let Some(Slot::Queued(_)) = editing {
+                entries.revise(editor.prompt());
+            }
+            save(entries.record(), paused)
+        })
+    }
+
+    #[cfg(test)]
+    pub fn snapshot(&self, editor: &Editor) -> (Vec<Prompt>, Vec<crate::sessions::Draft>) {
+        self.capture(editor, |queued, paused| (queued, paused))
+    }
+
+    /// Queued prompts, oldest first.
+    #[cfg(test)]
+    pub fn messages(&self) -> Vec<Prompt> {
+        self.inbox.with(|entries| {
+            entries
+                .prompts()
+                .map(|(_, prompt)| prompt.clone())
+                .collect()
+        })
     }
 }
 

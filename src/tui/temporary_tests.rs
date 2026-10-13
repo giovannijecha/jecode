@@ -59,8 +59,8 @@ fn temporary_cleanup_queues_until_tools_finish_and_keeps_the_draft_and_quiet_con
     assert_eq!(
         app.state
             .queue
-            .messages
-            .front()
+            .messages()
+            .first()
             .map(|prompt| prompt.text.as_str()),
         Some("/tmp clean")
     );
@@ -68,7 +68,7 @@ fn temporary_cleanup_queues_until_tools_finish_and_keeps_the_draft_and_quiet_con
     app.state.editor.cursor = 3;
     app.edited();
     let deadline = Instant::now() + Duration::from_secs(8);
-    while app.worker.is_some() || !app.state.queue.messages.is_empty() {
+    while app.worker.is_some() || !app.state.queue.messages().is_empty() {
         app.poll().unwrap();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));

@@ -20,6 +20,8 @@ struct Live {
 
 pub enum Stage {
     Begin,
+    /// Submitted messages joined the turn; the given prompts stay queued.
+    Accept(Vec<crate::attachments::Prompt>),
     Completion,
     Tool(String),
     ToolFinished,
@@ -125,12 +127,13 @@ impl Handle {
         {
             return Err("Session history cannot shrink; start a new conversation instead".into());
         }
-        let preparation = matches!(stage, Stage::Begin).then(|| {
+        let preparation = matches!(stage, Stage::Begin | Stage::Accept(_)).then(|| {
             (
                 live.document.messages.len(),
                 live.document.events.len(),
                 live.document.pending.clone(),
                 live.validated.clone(),
+                live.document.input.clone(),
             )
         });
         let appended = messages
@@ -146,6 +149,10 @@ impl Handle {
             .collect::<Vec<_>>();
         live.document.events.extend(appended);
         live.document.model = live.redactor.text(&archive.model);
+        if let Stage::Accept(queued) = &stage {
+            // Accepted messages leave the queue in the same save that adds them.
+            live.document.input.queued = queued.clone();
+        }
         live.document.input = live.document.input.redacted(&live.redactor);
         live.document.effort = crate::effort::Effort::parse(&archive.effort)?;
         live.document.compatible_from = compatible_from;
@@ -161,17 +168,18 @@ impl Handle {
             Stage::Tool(id) => live.document.pending.tool = Some(live.redactor.text(&id)),
             Stage::ToolFinished => live.document.pending.tool = None,
             Stage::Ready => live.document.pending = Pending::default(),
-            Stage::Preserve => {}
+            Stage::Accept(_) | Stage::Preserve => {}
         }
         live.dirty.get_or_insert_with(Instant::now);
         let result = live.save();
         if result.is_err()
-            && let Some((messages, events, pending, validated)) = preparation
+            && let Some((messages, events, pending, validated, input)) = preparation
         {
             live.document.messages.truncate(messages);
             live.document.events.truncate(events);
             live.document.pending = pending;
             live.validated = validated;
+            live.document.input = input;
         }
         result
     }

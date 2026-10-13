@@ -102,8 +102,8 @@ fn current_and_last_saved_deletions_keep_resume_open_without_an_empty_replacemen
         current
             .state
             .queue
-            .messages
-            .front()
+            .messages()
+            .first()
             .map(|prompt| prompt.text.as_str()),
         Some("kept follow-up")
     );

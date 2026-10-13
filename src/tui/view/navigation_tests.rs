@@ -151,7 +151,7 @@ fn queue_overflow_uses_its_first_preview_without_displacing_the_next_message() {
         assert!(!narrow.live[0].plain().contains('/'));
         assert!(text::cells(&narrow.live[0].plain()) <= width);
     }
-    assert_eq!(state.queue.messages.len(), 8);
+    assert_eq!(state.queue.messages().len(), 8);
 }
 
 #[test]

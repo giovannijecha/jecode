@@ -19,6 +19,7 @@ pub struct Agent {
     prepared: Option<crate::attachments::Prompt>,
     context: crate::context::Context,
     project_instructions: String,
+    inbox: crate::inbox::Inbox,
 }
 
 impl Agent {
@@ -40,6 +41,7 @@ impl Agent {
             prepared: None,
             context: crate::context::Context::default(),
             project_instructions: String::new(),
+            inbox: crate::inbox::Inbox::default(),
         };
         agent.clear();
         agent
@@ -116,6 +118,11 @@ impl Agent {
 
     pub fn cancellation(&self) -> Cancellation {
         self.cancellation.clone()
+    }
+
+    /// Prompts submitted while this agent works; ordinary messages join the active turn.
+    pub fn inbox(&self) -> crate::inbox::Inbox {
+        self.inbox.clone()
     }
 
     /// Observes this conversation's persistent processes while a worker owns the agent.
@@ -196,6 +203,9 @@ impl Agent {
                 return Err(format!("Could not store PDF annotations: {error}"));
             }
             if completion.calls.is_empty() {
+                if self.continue_turn(events)? {
+                    continue;
+                }
                 return Ok(());
             }
             for (index, call) in completion.calls.iter().enumerate() {
@@ -361,6 +371,7 @@ impl Agent {
 mod compaction;
 mod environment;
 mod history;
+mod input;
 mod persistence;
 mod project_instructions;
 mod recovery;
@@ -377,6 +388,8 @@ mod context_tests;
 mod delete_tests;
 #[cfg(test)]
 mod history_tests;
+#[cfg(test)]
+mod input_tests;
 #[cfg(test)]
 mod instruction_tests;
 #[cfg(test)]

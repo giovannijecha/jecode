@@ -69,7 +69,7 @@ fn tool_inspection_preserves_the_draft_and_source_and_returns_to_editing() {
     assert_eq!(app.state.generation, generation);
     assert_eq!(app.state.editor.text, "kept draft");
     assert_eq!(app.state.editor.cursor, caret);
-    assert!(app.worker.is_none() && app.state.queue.messages.is_empty());
+    assert!(app.worker.is_none() && app.state.queue.messages().is_empty());
     let Item::Tool {
         result: Some(result),
         ..

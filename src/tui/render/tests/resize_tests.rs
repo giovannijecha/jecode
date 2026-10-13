@@ -125,7 +125,7 @@ fn resizing_during_streaming_then_tools_and_finalization_never_saves_provisional
     assert!(!step(&mut display, &mut screen, &state, settled).contains("\x1b[3J"));
     drain(&mut display, &mut screen, &state, settled);
     assert_eq!(state.editor, draft);
-    assert_eq!(state.queue.messages.len(), 1);
+    assert_eq!(state.queue.messages().len(), 1);
     finish(&mut state, "inspect-command", "captured output\n");
     step(&mut display, &mut screen, &state, settled);
     state.event(Event::Message {
@@ -188,7 +188,7 @@ fn a_second_resize_discards_unwritten_rows_and_a_large_replay_keeps_input_respon
         assert_eq!(transcript.matches(&format!("source-{index:04}")).count(), 1);
     }
     assert_eq!(state.editor.text, "kept draft");
-    assert_eq!(state.queue.messages.len(), 1);
+    assert_eq!(state.queue.messages().len(), 1);
     assert_clean_history(&screen);
     assert!(step(&mut display, &mut screen, &state, second_deadline).is_empty());
 }

@@ -47,7 +47,7 @@ fn streamed_tables_resize_and_finalize_without_saving_provisional_layouts() {
     assert!(!output.contains("LIVE"));
     assert!(!output.contains("|---|"));
     assert_eq!(state.editor.text, "kept draft");
-    assert_eq!(state.queue.messages.len(), 1);
+    assert_eq!(state.queue.messages().len(), 1);
     assert_clean_history(&screen);
     assert!(step(&mut display, &mut screen, &state, wide).is_empty());
 }

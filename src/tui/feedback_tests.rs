@@ -78,7 +78,7 @@ fn automatic_queue_dispatch_and_catalog_loading_keep_an_unread_error() {
             .notify_copy(Feedback::result(Kind::Error, "Copy error after queuing"));
         release.send(()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
-        while app.worker.is_some() || app.job.is_some() || !app.state.queue.messages.is_empty() {
+        while app.worker.is_some() || app.job.is_some() || !app.state.queue.messages().is_empty() {
             app.poll().unwrap();
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(5));

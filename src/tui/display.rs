@@ -239,7 +239,8 @@ mod tests {
         assert!(back_to_bottom_uses_alt_end(&state));
         state.history.cancel(&mut state.editor);
         state.queue.push("queued draft").unwrap();
-        state.queue.begin_edit(0, &mut state.editor).unwrap();
+        let slot = state.queue.slot(0).unwrap();
+        state.queue.begin_edit(slot, &mut state.editor).unwrap();
         assert!(back_to_bottom_uses_alt_end(&state));
         state.queue.cancel_edit(&mut state.editor);
         state.suggestions.panel = true;

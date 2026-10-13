@@ -38,6 +38,44 @@ fn finish(app: &mut App) {
         thread::sleep(Duration::from_millis(10));
     }
 }
+/// Polls until `ready` holds; the worker thread advances independently.
+pub(super) fn wait_until(app: &mut App, ready: impl Fn(&App) -> bool) {
+    let started = Instant::now();
+    while !ready(app) {
+        app.poll().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(6));
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+/// Conversation messages in transcript order, as `role: text`.
+pub(super) fn rows(app: &App) -> Vec<String> {
+    app.state
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            state::Item::Text {
+                kind: Kind::User,
+                text,
+            } => Some(format!("user: {text}")),
+            state::Item::Text {
+                kind: Kind::Assistant,
+                text,
+            } => Some(format!("assistant: {text}")),
+            _ => None,
+        })
+        .collect()
+}
+/// The content of the last message in a recorded request.
+pub(super) fn last_content(request: &crate::test_support::Request) -> String {
+    let messages = request.body.get("messages").unwrap().as_array().unwrap();
+    messages
+        .last()
+        .unwrap()
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap()
+        .into()
+}
 
 #[test]
 fn worker_results_previews_export_and_local_commands_use_the_same_conversation() {

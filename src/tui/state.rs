@@ -193,6 +193,14 @@ impl State {
                     activity.label = "Working";
                 }
             }
+            Event::InputHeld => {
+                self.status = "Waiting for the draft being edited…".into();
+                if let Some(activity) = &mut self.activity {
+                    activity.label = "Waiting for your edit";
+                }
+            }
+            // The application shows accepted input with its prompt history.
+            Event::Accepted { .. } => {}
             Event::Streaming { text } => {
                 if let Some(activity) = &mut self.activity {
                     activity.label = "Writing the response";

@@ -9,10 +9,12 @@ pub struct Worker {
     pub events: Receiver<Event>,
     task: Option<JoinHandle<(Agent, Result<(), String>)>>,
     cancellation: Cancellation,
+    inbox: crate::inbox::Inbox,
 }
 impl Worker {
     pub fn start(mut agent: Agent, prompt: crate::attachments::Prompt) -> Self {
         let cancellation = agent.cancellation();
+        let inbox = agent.inbox();
         cancellation.reset();
         let (sender, events) = mpsc::sync_channel(16);
         let token = cancellation.clone();
@@ -41,6 +43,7 @@ impl Worker {
             events,
             task: Some(task),
             cancellation,
+            inbox,
         }
     }
     pub fn finished(&self) -> bool {
@@ -53,14 +56,16 @@ impl Worker {
             .join()
             .map_err(|_| "Agent worker failed".into())
     }
+    /// Requests cancellation and wakes a turn waiting for a queued edit.
     pub fn cancel(&self) {
         self.cancellation.cancel();
+        self.inbox.wake();
     }
 }
 impl Drop for Worker {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
-            self.cancellation.cancel();
+            self.cancel();
             let _ = task.join();
         }
     }

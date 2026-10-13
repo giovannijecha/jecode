@@ -11,6 +11,7 @@ mod copy;
 mod effort;
 mod events;
 mod export;
+mod inbox;
 mod input;
 mod json;
 mod openrouter;

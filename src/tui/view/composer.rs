@@ -86,20 +86,18 @@ pub(super) fn render(
     } else {
         remaining.saturating_sub(bottom_count).min(8)
     };
-    let pending = state.queue.len();
+    let drafts = state.queue.drafts();
+    let pending = drafts.len();
     let visible = pending.min(queue_budget);
-    let entries = state
-        .queue
-        .messages
-        .iter()
-        .map(|prompt| (prompt.display(), "queued"))
-        .chain(
-            state
-                .queue
-                .paused
-                .iter()
-                .map(|draft| (draft.display(), "paused")),
-        );
+    let entries = drafts.into_iter().map(|(slot, text)| {
+        (
+            text,
+            match slot {
+                crate::tui::drafts::Slot::Queued(_) => "queued",
+                crate::tui::drafts::Slot::Paused(_) => "paused",
+            },
+        )
+    });
     for (index, (message, status)) in entries.take(visible).enumerate() {
         let first = message.lines().next().unwrap_or("");
         let preview = format!(
@@ -251,7 +249,10 @@ fn draft(
     lines.extend(input.lines);
     lines.push(Line::new(&border, style));
     if contextual {
-        let hints: &[&str] = if editing.is_some_and(|index| index >= state.queue.messages.len()) {
+        let hints: &[&str] = if matches!(
+            state.queue.editing(),
+            Some(crate::tui::drafts::Slot::Paused(_))
+        ) {
             &[
                 "Enter save · Ctrl+S send · Esc cancel",
                 "↵ save · ^S send · Esc",
@@ -259,13 +260,8 @@ fn draft(
             ]
         } else if editing.is_some() {
             &["Enter save · Esc cancel", "↵ save · Esc", "↵ · Esc"]
-        } else if state.activity.is_some() {
-            &[
-                "Enter queue · Ctrl+P/N history · Esc back",
-                "↵ queue · ^P/N · Esc",
-                "↵ · ^P/N · Esc",
-            ]
         } else {
+            // During work, a sent message joins the active turn.
             &[
                 "Enter send · Ctrl+P/N history · Esc back",
                 "↵ send · ^P/N · Esc",

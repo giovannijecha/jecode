@@ -1,3 +1,4 @@
+use super::tests::wait_until;
 use super::*;
 use crate::{
     config::{Settings, Store},
@@ -257,43 +258,65 @@ fn wrapped_command_arguments_follow_the_panel_width_and_keep_the_caret_after_esc
 }
 
 #[test]
-fn queued_prompts_and_local_commands_drain_in_order() {
+fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
     let directory = Directory::new();
-    let first = "data: {\"choices\":[{\"delta\":{\"content\":\"First.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+    let (release, gate) = std::sync::mpsc::channel();
     let fixture = HttpFixture::streaming(vec![
-        Response::Stream(vec![(Duration::from_millis(250), first.into())]),
+        Response::GatedStream {
+            head: "data: {\"choices\":[{\"delta\":{\"content\":\"First.\"},\"finish_reason\":null}]}\n\n".into(),
+            tail: "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(),
+            release: gate,
+        },
         Response::Json(200, completion("Second.", vec![])),
-        Response::Json(200, completion("Third.", vec![])),
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "first");
+    wait_until(&mut app, |app| {
+        app.state.activity.as_ref().unwrap().label == "Writing the response"
+    });
     submit(&mut app, "/help");
     submit(&mut app, "second\nline");
     submit(&mut app, "/export");
     submit(&mut app, "third");
-    assert_eq!(app.state.queue.messages.len(), 4);
+    assert_eq!(app.state.queue.messages().len(), 4);
     assert!(app.state.editor.text.is_empty());
-    wait(&mut app);
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| app.worker.is_none());
+    // Commands run after the turn, in submission order.
     assert!(app.state.information.is_some());
-    assert_eq!(app.state.queue.messages.len(), 3);
+    assert_eq!(app.state.queue.messages(), ["/export"]);
     key(&mut app, 27, 0);
     app.poll().unwrap();
     wait(&mut app);
+    assert!(app.state.queue.is_empty());
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 3);
-    for (request, prompt) in requests.iter().zip(["first", "second\nline", "third"]) {
-        let messages = request.body.get("messages").unwrap().as_array().unwrap();
-        assert_eq!(
-            messages
-                .last()
-                .unwrap()
-                .get("content")
-                .and_then(Value::as_str),
-            Some(prompt)
-        );
-        assert!(!request.body.encode().contains("\"content\":\"/help\""));
-    }
-    assert!(app.state.queue.messages.is_empty());
+    assert_eq!(requests.len(), 2);
+    let users: Vec<_> = requests[1]
+        .body
+        .get("messages")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .filter_map(|message| message.get("content").and_then(Value::as_str))
+        .collect();
+    assert_eq!(users, ["first", "second\nline", "third"]);
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.body.encode().contains("/help"))
+    );
+    assert_eq!(
+        super::tests::rows(&app),
+        [
+            "user: first",
+            "assistant: First.",
+            "user: second\nline",
+            "user: third",
+            "assistant: Second.",
+        ]
+    );
     assert!(
         app.state
             .rows()
@@ -348,7 +371,7 @@ fn stopping_pauses_fifo_drafts_and_preserves_the_separate_composer() {
             .collect::<Vec<_>>(),
         ["queued one", "queued two revised"]
     );
-    assert!(app.state.queue.messages.is_empty());
+    assert!(app.state.queue.messages().is_empty());
     assert!(app.state.activity.is_none());
     assert!(
         app.archive

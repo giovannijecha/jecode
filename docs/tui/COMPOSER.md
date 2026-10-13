@@ -166,8 +166,8 @@ Narrow panels use compact keyboard hints; `↵` means Enter and `^D` means Ctrl+
   in its original slot and returns to the list. Esc or Ctrl+C cancels the edit
   and returns to the list; Esc there closes it. Ctrl+D marks only the selected
   row for discard. Enter confirms, Esc cancels, and number keys never confirm.
-  Ctrl+S explicitly sends or queues a paused draft from the list or its editor
-  and restores the original main draft.
+  Ctrl+S explicitly sends a paused draft from the list or its editor and
+  restores the original main draft; during work the draft joins the active turn.
 - `/tmp` shows the session's temporary path, counts, size and retention policy
   in a temporary information panel.
   `/tmp clean` clears that area only when ready; it queues during generation.
@@ -210,7 +210,8 @@ They do not expire automatically. Up/Down scroll visual rows; Page Up/Down move
 one page and Home/End reach the ends. Keys and values align when space permits
 and stack in narrow windows. Esc, Ctrl+C or Enter closes the panel without
 sending the draft. Typing or editing returns to the draft and applies that input
-at its preserved caret. The queue waits while an information panel is open.
+at its preserved caret. Queued local commands wait while an information panel
+is open; ordinary messages still join the active turn.
 
 ## Activity and queue
 
@@ -235,25 +236,38 @@ The label and input caret stay static. Tool headers show textual status without
 animation. Temporary connection/provider failures retry automatically; recovery
 uses a temporary progress row. See [LONG_WORK.md](../usage/LONG_WORK.md#connection-recovery).
 
-The draft remains editable while working. Enter queues at most eight messages,
-clearing the input only on success. Queued previews appear oldest first above
+The draft remains editable while working. Enter holds at most eight pending
+messages, clearing the input only on success. Queued previews appear oldest first above
 notices/activity; the Drafts list replaces these previews while open. Multiline
 messages show their first line with `…`; short
 viewports keep the next message visible and put the visible range in the first
 preview's right-aligned `queued` label. Overflow adds no summary row. Narrow
 previews prioritize the next message over metadata.
 
-After a successful turn, messages run in FIFO order. Local commands run locally;
-prompts start new turns. An open selector, information panel or draft edit pauses
-queue consumption. Closing the panel resumes ordinary queued messages. `/drafts`
-also opens during work: edit an individual pending message with Enter, or use
-Ctrl+S to send or queue a paused draft explicitly. Alt+Down does not discard text.
+A message sent during a turn joins that turn before its next model request. The
+current response finishes and requested tools complete first; then every pending
+message enters the next request in submission order, as separate user messages
+with their text and attachments. A response without tool calls continues the
+same turn when messages are pending, so no completion notice appears between
+continuations. Each message appears in the conversation after the output that
+preceded it and before the response to it.
 
-Stopping or failing a turn moves unsent queued messages to separate Paused rows.
+While a pending message is open in the draft editor, it and later messages wait.
+If the turn would otherwise end, it stays open, showing `Waiting for your edit`,
+until the edit is saved or cancelled. Local commands stay queued and run locally
+in submission order once the turn ends, without holding back messages. An open
+selector, information panel or draft edit delays only those commands. `/drafts`
+also opens during work: edit or discard a message that has not joined the turn,
+or use Ctrl+S to send a paused draft into it. A message that has already joined
+can no longer be edited or discarded. Alt+Down does not discard text.
+
+Stopping or failing a turn moves messages that have not joined it to separate
+Paused rows; messages it already accepted stay in the conversation.
 The current composer stays separate, with its text and caret intact. Explicit
 resume has the same review state; paused messages never run automatically. The
 session store autosaves the composer, individual paused drafts, the queue and
-prompt history. Normal insertions are limited to 1 MiB. See
+prompt history. A message leaves the saved queue in the same save that adds it
+to the conversation. Normal insertions are limited to 1 MiB. See
 [SESSIONS.md](../usage/SESSIONS.md).
 
 A successful turn briefly shows its duration and tool count in the feedback
@@ -264,7 +278,7 @@ disappears after completion or cleanup.
 
 | Key | Action |
 | --- | --- |
-| Enter | Send while ready; queue while generating. |
+| Enter | Send while ready; while working, join the active turn before its next model request. |
 | Ctrl+J | Insert newline. |
 | Shift+Enter / Alt+Enter | Insert newline when the host reports distinct keys. |
 | Left / Right | Move by character. |
@@ -286,7 +300,7 @@ disappears after completion or cleanup.
 | Alt+V | Attach the clipboard image; Ctrl+V stays the host's text paste. |
 | File drop, `/attach PATH...` | Attach files at the caret. See [ATTACHMENTS.md](../usage/ATTACHMENTS.md). |
 | Ctrl+D in `/drafts` | Mark only the selected draft for discard; Enter confirms, Esc cancels. |
-| Ctrl+S in `/drafts` | Explicitly send or queue a paused draft from the list or its editor. |
+| Ctrl+S in `/drafts` | Explicitly send a paused draft from the list or its editor; during work it joins the active turn. |
 | `/terminal [ID]` | Open active processes or a process's output, including during work; Tab switches Output/Errors, End follows, Ctrl+D marks a stop and Enter confirms. |
 | `/terminal stop ID` | Request a stop for one process in the current conversation. |
 | Esc | Cancel a draft edit or close a panel first; while reading normally, return to the bottom; otherwise stop work. |

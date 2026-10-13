@@ -81,6 +81,7 @@ impl App {
             width: terminal.as_ref().map_or(80, |terminal| terminal.size.0),
             height: terminal.as_ref().map_or(24, |terminal| terminal.size.1),
             effort: agent.effort().name().into(),
+            queue: drafts::Queue::new(agent.inbox()),
             ..State::default()
         };
         let persistence = agent.sessions();
@@ -277,6 +278,8 @@ impl Drop for App {
         drop(self.copy_job.take());
         self.imports.clear();
         drop(self.worker.take());
+        // The worker may have accepted input whose event was never polled.
+        self.reconcile_accepted();
         drop(self.job.take());
         let deletion_error = self.finish_delete(true).err();
         self.persist_input(true);
@@ -306,6 +309,8 @@ mod delete_tests;
 mod feedback_tests;
 #[cfg(test)]
 mod interaction_tests;
+#[cfg(test)]
+mod intraturn_tests;
 #[cfg(test)]
 mod long_work_smoke;
 #[cfg(test)]

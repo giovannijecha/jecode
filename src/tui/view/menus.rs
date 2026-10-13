@@ -173,12 +173,12 @@ pub(super) fn selector(
             "Enter delete",
         ]
     } else if drafts {
-        let paused = menu.chosen().is_some_and(|choice| match choice {
-            crate::tui::selector::Choice::Draft(index) => {
-                menu.options[index].description == "Paused"
-            }
-            _ => false,
-        });
+        let paused = matches!(
+            menu.chosen(),
+            Some(crate::tui::selector::Choice::Draft(
+                crate::tui::drafts::Slot::Paused(_)
+            ))
+        );
         if paused {
             &[
                 "↑↓ move · Enter edit · Ctrl+S send · Ctrl+D discard · Esc close",

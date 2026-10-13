@@ -114,7 +114,8 @@ defaults. Settings apply to future `/new` conversations and launches; changing
 the key also updates authentication for the current conversation.
 
 Interactive stdin and stdout open the fullscreen TUI. The draft stays editable
-during work; Enter queues messages and Alt+Up opens pending drafts. Ctrl+J inserts
+during work; Enter sends a message into the active turn before its next model
+request, and Alt+Up opens pending drafts. Ctrl+J inserts
 a newline, Ctrl+P/N browses sent prompts without commands, and **Ctrl+Q quits**,
 cancelling active work and saving input in a saved session. Panels, draft edits
 and history recall receive Esc first. While reading, the blue Back to bottom
