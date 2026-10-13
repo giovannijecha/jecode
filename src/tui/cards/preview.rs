@@ -24,7 +24,7 @@ pub(super) fn render(
         return head(payload(error, BAD, columns));
     }
     match name {
-        "bash" => bash(result, columns, failed),
+        "bash" | "process" if result.get("processes").is_none() => bash(result, columns, failed),
         "read" => head(payload(field(result, "content"), BODY, columns)),
         "write" => head(payload(field(arguments, "content"), BODY, columns)),
         "edit" => edit(arguments, columns),
@@ -131,8 +131,17 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
             columns,
         ));
     }
-    if name == "bash" {
+    if matches!(name, "bash" | "process") {
         for stream in ["stdout", "stderr"] {
+            let skipped = result
+                .get(&format!("{stream}_skipped_bytes"))
+                .and_then(Value::as_usize)
+                .unwrap_or(0);
+            if skipped > 0 {
+                let notice =
+                    format!("{stream}: {skipped} earlier bytes not shown · full output saved.");
+                rows.extend(payload(&notice, WARNING, columns));
+            }
             if flag(result, &format!("{stream}_truncated")) {
                 let bytes = result
                     .get(&format!("{stream}_bytes"))

@@ -113,6 +113,8 @@ impl Agent {
             .transpose()?;
         self.client.set_model(model)?;
         self.client.set_effort(effort);
+        // The switch is committed; the previous conversation's processes end with it.
+        self.tools.stop_processes();
         self.clear();
         self.persistence = next;
         if let Some(handle) = &self.persistence {
@@ -162,6 +164,8 @@ impl Agent {
         let temporary = handle.store().temporary_area(&document.id)?;
         self.client.set_model(document.model)?;
         self.client.set_effort(document.effort);
+        // The switch is committed; historical process IDs never become live handles.
+        self.tools.stop_processes();
         *self.messages.lock().unwrap() = document.messages;
         *self.events.lock().unwrap() = document.events;
         self.compatible_from = document.compatible_from;
@@ -215,7 +219,8 @@ impl Agent {
         )?;
         let next = Handle::new(store, document, self.redactor.clone());
         let live_attachments = next.snapshot().input.attachment_ids();
-        let report = current.delete(&live_attachments)?;
+        // Validate deletion before stopping processes that write into its output.
+        let report = current.delete(&live_attachments, || self.tools.stop_processes())?;
         self.client.set_model(model)?;
         self.client.set_effort(effort);
         self.clear();

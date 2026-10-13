@@ -101,14 +101,14 @@ pub(super) fn spawn(
                 });
             }
             Ok(_) => {
-                let _ = super::terminate(&mut child);
+                let _ = terminate(&mut child);
                 let _ = handshake.join();
                 return Err(before_start("Could not start process: executable was not found or guardian initialization failed".into()));
             }
             Err(mpsc::RecvTimeoutError::Timeout)
                 if started.elapsed() < Duration::from_secs(5) && !cancellation.requested() => {}
             Err(_) => {
-                let _ = super::terminate(&mut child);
+                let _ = terminate(&mut child);
                 let _ = handshake.join();
                 return Err(before_start(if cancellation.requested() {
                     "Operation cancelled".into()
@@ -125,6 +125,61 @@ fn before_start(message: String) -> RunError {
         started: false,
         message,
     }
+}
+
+pub(super) fn terminate(child: &mut Child) -> Result<(), String> {
+    let mut cleanup = Command::new("kill");
+    cleanup
+        .args(["-KILL", "--", &format!("-{}", child.id())])
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let result = (|| {
+        let mut cleanup = cleanup
+            .spawn()
+            .map_err(|error| format!("Could not start process-group cleanup: {error}"))?;
+        let started = Instant::now();
+        let status = loop {
+            match cleanup.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if started.elapsed() < Duration::from_secs(2) => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Ok(None) => {
+                    let _ = cleanup.kill();
+                    let _ = cleanup.wait();
+                    return Err("Process-group cleanup did not finish; outcome is unknown".into());
+                }
+                Err(error) => {
+                    let _ = cleanup.kill();
+                    let _ = cleanup.wait();
+                    return Err(format!("Could not wait for process-group cleanup: {error}"));
+                }
+            }
+        };
+        if status.success() {
+            return Ok(());
+        }
+        let mut details = String::new();
+        if let Some(mut stderr) = cleanup.stderr.take() {
+            let _ = stderr.read_to_string(&mut details);
+        }
+        if details.contains("No such process") {
+            return Ok(());
+        }
+        Err(format!(
+            "Process-group cleanup failed (exit {}): {}; outcome is unknown",
+            status
+                .code()
+                .map_or("signal".into(), |code| code.to_string()),
+            details.trim()
+        ))
+    })();
+    if child.kill().is_ok() {
+        let _ = child.wait();
+    }
+    result
 }
 
 #[cfg(test)]

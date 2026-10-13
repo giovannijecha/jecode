@@ -137,6 +137,18 @@ chat uses the host's Ctrl+C exit behavior, with the same ownership cleanup.
 Resume retains an unknown outcome instead of repeating it. Jecode has no
 background worker service.
 
+For servers, watchers and long builds or tests, the model can pass `wait_ms` to
+`bash` and keep working while the command runs, then use `process` to poll its
+status and new output or stop it. These processes run under the same native
+boundary, belong to the conversation runtime rather than a turn, and end with
+`process stop`, app exit, a successful session switch or deletion of the live
+session; they are never restarted on resume. Stopping a turn interrupts only a
+wait, not an earlier persistent process. A running tool card shows `▶` and
+`running in background`; Jecode does not wake the model when a process changes.
+`/terminal` lists active background processes, shows their saved output and
+lets you request a stop without involving the model. See
+[Persistent processes](TOOLS.md#persistent-processes).
+
 If saving output or confirming process cleanup fails after a command has started,
 its result reports an unknown
 outcome and retains output references. The command may already have changed files;

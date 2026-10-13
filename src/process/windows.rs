@@ -277,3 +277,20 @@ fn read_handshake(stdout: &mut ChildStdout) -> Result<(), String> {
         String::from_utf8_lossy(&bytes)
     ))
 }
+
+pub(super) fn terminate(child: &mut Child) -> Result<(), String> {
+    if child
+        .try_wait()
+        .map_err(|error| format!("Could not inspect process supervisor: {error}"))?
+        .is_some()
+    {
+        return Ok(());
+    }
+    child
+        .kill()
+        .map_err(|error| format!("Could not stop process supervisor: {error}"))?;
+    child
+        .wait()
+        .map_err(|error| format!("Could not wait for process supervisor: {error}"))?;
+    Ok(())
+}

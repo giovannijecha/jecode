@@ -4,8 +4,10 @@
 
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-A personal terminal coding agent written in Rust, using OpenRouter and four tools:
-`read`, `write`, `edit` and `bash`. Tools execute directly in your project.
+A personal terminal coding agent written in Rust, using OpenRouter and five tools:
+`read`, `write`, `edit`, `bash` and `process`. Tools execute directly in your
+project; `bash` can leave servers, watchers and long builds running while the
+model keeps working, and `process` polls or stops them.
 
 Jecode uses one Cargo package and the Rust standard library. There are no
 external crates or third-party runtime libraries. Installed system
@@ -102,6 +104,8 @@ jecode setup
 | `/copy` | Choose the last completed response, a code block or a quote to copy. |
 | `/export` | Save the current conversation as JSON in the working directory. |
 | `/tmp [clean]` | Show session temporary files, or explicitly clear that area. |
+| `/terminal [ID]` | List active background processes or inspect saved output by ID. In the TUI, Ctrl+D marks a stop and Enter confirms; Esc or Ctrl+C cancels. |
+| `/terminal stop ID` | Request a stop for one background process. |
 | `/exit` | Quit after cancellation and cleanup of any active work. |
 
 `/clear` and `/setup` remain aliases for `/new` and `/settings`.

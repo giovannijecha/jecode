@@ -2,6 +2,7 @@ mod composer;
 mod information;
 mod menus;
 mod panel;
+mod processes;
 use super::{line::Line, state::State, text, theme::MUTED};
 
 pub struct Frame {
@@ -101,10 +102,15 @@ pub(super) fn lower(
     }
 }
 
+fn panel_open(state: &State) -> bool {
+    state.processes.is_some()
+        || state.selector.is_some()
+        || state.information.is_some()
+        || state.suggestions.panel
+}
+
 pub(super) fn chrome_height(state: &State) -> usize {
-    if state.height >= 12
-        && (state.selector.is_some() || state.information.is_some() || state.suggestions.panel)
-    {
+    if state.height >= 12 && panel_open(state) {
         state.height * 2 / 3
     } else {
         state.height
@@ -140,6 +146,34 @@ pub(super) fn input_width(width: usize, command_panel: bool) -> usize {
         columns
     };
     columns.saturating_sub(3).max(1)
+}
+
+pub(super) fn process_width(state: &State) -> usize {
+    panel::width(state.width.max(1))
+}
+
+/// Process list entries visible at once.
+pub(super) fn process_capacity(state: &State) -> usize {
+    processes::list_capacity(composer::information_height(state))
+}
+
+/// Total and visible rows of the open process stream.
+pub(super) fn process_log_rows(state: &State) -> (usize, usize) {
+    state.processes.as_ref().map_or((0, 0), |panel| {
+        processes::metrics(
+            panel,
+            process_width(state),
+            composer::information_height(state),
+        )
+    })
+}
+
+pub(super) fn log_row_starts(text: &str, width: usize) -> Vec<usize> {
+    processes::row_starts(text, width)
+}
+
+pub(super) fn log_row_at(starts: &[usize], anchor: usize) -> usize {
+    processes::row_at(starts, anchor)
 }
 
 pub(super) fn scroll_information(state: &mut State, code: u16) {

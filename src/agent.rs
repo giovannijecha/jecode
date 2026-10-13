@@ -118,6 +118,11 @@ impl Agent {
         self.cancellation.clone()
     }
 
+    /// Observes this conversation's persistent processes while a worker owns the agent.
+    pub fn processes(&self) -> crate::tools::processes::Observer {
+        self.tools.observe_processes(self.redactor.clone())
+    }
+
     pub fn run_turn(
         &mut self,
         prompt: impl Into<crate::attachments::Prompt>,
@@ -378,6 +383,8 @@ mod instruction_tests;
 mod long_work_tests;
 #[cfg(test)]
 mod persistence_tests;
+#[cfg(test)]
+mod process_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]

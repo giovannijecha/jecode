@@ -1,4 +1,4 @@
-use super::{fitted, information, menus, panel};
+use super::{fitted, information, menus, panel, processes};
 use crate::tui::{
     line::Line,
     state::State,
@@ -17,8 +17,7 @@ pub(super) fn render(
     height: usize,
     back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
-    let is_panel =
-        state.selector.is_some() || state.information.is_some() || state.suggestions.panel;
+    let is_panel = super::panel_open(state);
     let notice_rows = state
         .notice
         .as_ref()
@@ -42,7 +41,9 @@ pub(super) fn render(
     } else {
         0
     };
-    let (mut composer, mut cursor) = if let Some(info) = &state.information {
+    let (mut composer, mut cursor) = if let Some(panel) = &state.processes {
+        processes::render(panel, columns, height.saturating_sub(reserve))
+    } else if let Some(info) = &state.information {
         information::render(info, columns, height.saturating_sub(reserve))
     } else if let Some(selector) = &state.selector {
         menus::selector(selector, columns, height.saturating_sub(reserve))
@@ -374,7 +375,10 @@ fn commands(state: &State, columns: usize, height: usize) -> (Vec<Line>, Option<
         .position(|line| line.background == Some(SELECTED_BACKGROUND));
     let working = state.activity.is_some();
     let immediate = if state.suggestions.visible {
-        matches!(state.suggestions.chosen(), Some("/copy" | "/drafts"))
+        matches!(
+            state.suggestions.chosen(),
+            Some("/copy" | "/drafts" | "/terminal")
+        )
     } else {
         state
             .editor
@@ -382,7 +386,9 @@ fn commands(state: &State, columns: usize, height: usize) -> (Vec<Line>, Option<
             .split_whitespace()
             .next()
             .is_some_and(|name| {
-                name.eq_ignore_ascii_case("/copy") || name.eq_ignore_ascii_case("/drafts")
+                ["/copy", "/drafts", "/terminal"]
+                    .iter()
+                    .any(|command| name.eq_ignore_ascii_case(command))
             })
     };
     let action = if working && !immediate {

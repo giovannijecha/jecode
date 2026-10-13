@@ -91,6 +91,7 @@ impl App {
                 break;
             }
         }
+        dirty |= self.refresh_processes(false);
         Ok(dirty)
     }
 }
