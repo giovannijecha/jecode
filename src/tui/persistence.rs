@@ -1,4 +1,4 @@
-use super::{App, Feedback, Kind, drafts::Queue, editor::Editor, selector::Selector, state::Item};
+use super::{App, Feedback, Kind, editor::Editor, selector::Selector, state::Item};
 use crate::{
     events::Event,
     sessions::{Input, Record},
@@ -64,25 +64,26 @@ impl App {
         if self.deletion_job.is_some() {
             return;
         }
-        if let Some(handle) = &self.persistence {
-            let draft = super::drafts::draft;
-            let (queued, mut paused) = self.state.queue.snapshot(&self.state.editor);
+        let draft = super::drafts::draft;
+        let editor = &self.state.editor;
+        // Capturing also lets the agent accept the queued prompts, so it runs
+        // with or without session storage.
+        self.state.queue.capture(editor, |queued, mut paused| {
+            let Some(handle) = &self.persistence else {
+                return;
+            };
             if self.state.history.has_edited_recall() {
-                paused.push(draft(self.state.queue.draft(&self.state.editor)));
+                paused.push(draft(self.state.queue.draft(editor)));
             }
             handle.input(Input {
-                draft: draft(
-                    self.state
-                        .history
-                        .draft(self.state.queue.draft(&self.state.editor)),
-                ),
+                draft: draft(self.state.history.draft(self.state.queue.draft(editor))),
                 staged: handle.snapshot().input.staged,
                 queued,
                 paused,
                 previous: None,
                 history: self.state.history.snapshot(),
             });
-        }
+        });
     }
 
     pub(super) fn persist_input(&mut self, immediate: bool) -> bool {
@@ -159,18 +160,19 @@ impl App {
                 self.state.activity = None;
                 self.state.information = None;
                 self.state.clear_notice();
-                self.state.queue = Queue::default();
-                self.state.queue.paused = document
-                    .input
-                    .paused
-                    .iter()
-                    .map(|draft| {
-                        let mut editor = Editor::default();
-                        editor.set(draft.prompt());
-                        editor.cursor = draft.cursor;
-                        editor
-                    })
-                    .collect();
+                self.state.queue.reset(
+                    document
+                        .input
+                        .paused
+                        .iter()
+                        .map(|draft| {
+                            let mut editor = Editor::default();
+                            editor.set(draft.prompt());
+                            editor.cursor = draft.cursor;
+                            editor
+                        })
+                        .collect(),
+                );
                 self.state.effort = document.effort.name().into();
                 for record in document.records() {
                     match record {

@@ -16,7 +16,7 @@ Modules stay around 500 lines or fewer and split by responsibility:
 - `session/`, `session.rs`, `input.rs`, `console.rs`: CLI interaction and rendering.
 - `sessions/`, `agent/persistence.rs`: folder-scoped storage, checkpoints and recovery.
 - `scratch/`, `agent/temporary.rs`: session working files, ownership and explicit cleanup.
-- `tui/`: Windows and Unix terminal adapters, shared multiline editor, prompt history, message queue,
+- `tui/`: Windows and Unix terminal adapters, shared multiline editor, prompt history, pending drafts,
   selectors, conversation state, tool presentation, semantic theme, styled text,
   Markdown/code highlighting, cached transcript layout, resize scheduling,
   anchored scrolling, source reflow, commands and background
@@ -47,6 +47,11 @@ Modules stay around 500 lines or fewer and split by responsibility:
   Summary truncation learns an output allowance that survives resume, resets on
   a model/effort change and stays bounded by the current context and provider
   output limit; live prompt measurements remain separate from this resource state.
+- `inbox.rs`, `agent/input.rs`: prompts submitted during work. The TUI and the
+  agent share one locked inbox; ordinary messages join the active turn before
+  its next model request, saved in the same checkpoint that removes them from
+  the saved queue, while local commands wait for the TUI to run them when idle.
+  An entry open in the draft editor holds itself and later messages back.
 - `attachments/`: prompts with owned attachment elements, the session-bucket
   asset pool and its collection, media detection, dropped-path recognition,
   the native clipboard/conversion boundary (`capture.rs`) and request

@@ -7,14 +7,14 @@ fn five_identical_prompts_remain_five_distinct_paused_drafts() {
         queue.push("same prompt").unwrap();
     }
     queue.pause();
-    assert!(queue.messages.is_empty());
+    assert!(queue.messages().is_empty());
     assert_eq!(queue.len(), 5);
     assert_eq!(queue.paused.len(), 5);
     assert!(queue.paused.iter().all(|draft| draft.text == "same prompt"));
     let (queued, paused) = queue.snapshot(&Editor::default());
     assert!(queued.is_empty());
     assert_eq!(paused.len(), 5);
-    assert_eq!(queue.take(2).unwrap(), "same prompt");
+    assert_eq!(queue.take(Slot::Paused(2)).unwrap(), "same prompt");
     assert_eq!(queue.len(), 4);
 }
 
@@ -28,7 +28,9 @@ fn queue_edit_save_cancel_and_discard_affect_only_selected_slot() {
     editor.insert("unfinished composer");
     editor.cursor = 4;
 
-    queue.begin_edit(1, &mut editor).unwrap();
+    queue
+        .begin_edit(queue.slot(1).unwrap(), &mut editor)
+        .unwrap();
     assert_eq!(queue.edit_index(), Some(1));
     editor.replace("second revised".into());
     assert_eq!(queue.draft(&editor).text, "unfinished composer");
@@ -38,18 +40,17 @@ fn queue_edit_save_cancel_and_discard_affect_only_selected_slot() {
     assert!(queue.save_edit(&mut editor));
     assert_eq!(editor.text, "unfinished composer");
     assert_eq!(editor.cursor, 4);
-    assert_eq!(queue.messages[1], "second revised");
+    assert_eq!(queue.messages()[1], "second revised");
 
-    queue.begin_edit(0, &mut editor).unwrap();
+    queue
+        .begin_edit(queue.slot(0).unwrap(), &mut editor)
+        .unwrap();
     editor.replace("unsaved".into());
     assert!(queue.cancel_edit(&mut editor));
-    assert_eq!(queue.messages[0], "first");
+    assert_eq!(queue.messages()[0], "first");
     assert_eq!(editor.cursor, 4);
-    assert!(queue.discard(1));
-    assert_eq!(
-        queue.messages,
-        VecDeque::from(["first".into(), "third".into()])
-    );
+    assert!(queue.discard(queue.slot(1).unwrap()));
+    assert_eq!(queue.messages(), ["first", "third"]);
     assert_eq!(editor.text, "unfinished composer");
 }
 
@@ -65,14 +66,16 @@ fn pause_during_edit_preserves_slot_and_live_snapshot() {
     let mut editor = Editor::default();
     editor.insert("main draft");
     editor.cursor = 3;
-    queue.begin_edit(1, &mut editor).unwrap();
+    queue
+        .begin_edit(queue.slot(1).unwrap(), &mut editor)
+        .unwrap();
     editor.replace("live revision".into());
     editor.cursor = 5;
 
     queue.pause();
     assert_eq!(queue.edit_index(), Some(1));
     assert_eq!(queue.len(), 3);
-    assert!(queue.messages.is_empty());
+    assert!(queue.messages().is_empty());
     let (queued, paused) = queue.snapshot(&editor);
     assert!(queued.is_empty());
     assert_eq!(paused[0].text, "automatic one");
@@ -96,7 +99,9 @@ fn appending_automatic_message_keeps_paused_edit_in_its_original_slot() {
     queue.paused.push(paused);
     let mut editor = Editor::default();
     editor.insert("main");
-    queue.begin_edit(1, &mut editor).unwrap();
+    queue
+        .begin_edit(queue.slot(1).unwrap(), &mut editor)
+        .unwrap();
     editor.replace("paused revision".into());
     editor.cursor = 6;
 
@@ -111,6 +116,59 @@ fn appending_automatic_message_keeps_paused_edit_in_its_original_slot() {
     assert!(queue.save_edit(&mut editor));
     assert_eq!(queue.paused[2].text, "paused revision");
     assert_eq!(editor.text, "main");
+}
+
+#[test]
+fn accepted_messages_cannot_be_edited_or_discarded() {
+    let mut queue = Queue::default();
+    queue.push("first").unwrap();
+    queue.push("second").unwrap();
+    let first = queue.slot(0).unwrap();
+    let second = queue.slot(1).unwrap();
+    queue.capture(&Editor::default(), |_, _| ());
+    let accepted = queue.inbox().accept(|_, _| Ok(())).unwrap();
+    assert_eq!(accepted, ["first", "second"]);
+    let mut editor = Editor::default();
+    editor.insert("composer");
+    assert_eq!(
+        queue.begin_edit(first, &mut editor).unwrap_err(),
+        "This message was already sent."
+    );
+    assert_eq!(editor.text, "composer");
+    assert!(!queue.is_editing());
+    assert!(!queue.discard(second));
+    assert!(queue.is_empty());
+}
+
+#[test]
+fn an_edit_holds_later_messages_and_only_captured_ones_are_deliverable() {
+    let mut queue = Queue::default();
+    queue.push("first").unwrap();
+    queue.push("second").unwrap();
+    assert!(!queue.inbox().with(|entries| entries.ready()));
+    let mut editor = Editor::default();
+    queue
+        .begin_edit(queue.slot(1).unwrap(), &mut editor)
+        .unwrap();
+    editor.replace("second revised".into());
+    let (queued, _) = queue.snapshot(&editor);
+    assert_eq!(queued, ["first", "second revised"]);
+    let accepted = queue
+        .inbox()
+        .accept(|_, remaining| {
+            assert_eq!(remaining, ["second revised"]);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(accepted, ["first"]);
+    assert_eq!(queue.edit_index(), Some(0));
+
+    queue.push("third").unwrap();
+    queue.snapshot(&editor);
+    assert!(queue.inbox().accept(|_, _| Ok(())).unwrap().is_empty());
+    assert!(queue.save_edit(&mut editor));
+    let accepted = queue.inbox().accept(|_, _| Ok(())).unwrap();
+    assert_eq!(accepted, ["second revised", "third"]);
 }
 
 #[test]

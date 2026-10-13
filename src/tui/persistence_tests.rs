@@ -118,7 +118,7 @@ fn failed_queued_preparation_returns_all_unsent_work_in_order() {
     std::fs::set_permissions(&path, original).unwrap();
     assert!(result.unwrap());
     assert!(current.worker.is_none());
-    assert!(current.state.queue.messages.is_empty());
+    assert!(current.state.queue.messages().is_empty());
     assert_eq!(current.archive.messages.lock().unwrap().len(), 3);
     assert_eq!(current.state.editor.text, "current draft");
     assert_eq!(
@@ -171,10 +171,11 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
     first.state.editor.cursor = 5;
     first.state.queue.push("first queued").unwrap();
     first.state.queue.push("last queued").unwrap();
+    let slot = first.state.queue.slot(1).unwrap();
     first
         .state
         .queue
-        .begin_edit(1, &mut first.state.editor)
+        .begin_edit(slot, &mut first.state.editor)
         .unwrap();
     first.state.editor.insert(" revised");
     first.persist_input(true);
@@ -216,7 +217,7 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
             .collect::<Vec<_>>(),
         ["first queued", "last queued revised"]
     );
-    assert!(resumed.state.queue.messages.is_empty());
+    assert!(resumed.state.queue.messages().is_empty());
     assert!(resumed.worker.is_none());
     resumed.poll().unwrap();
     assert!(resumed.worker.is_none());
@@ -428,7 +429,7 @@ fn an_edited_history_recall_is_recovered_as_one_separate_paused_draft() {
     resumed.resume_session(&id);
     assert_eq!(resumed.state.editor, main);
     assert_eq!(resumed.state.queue.paused, [recall]);
-    assert!(resumed.state.queue.messages.is_empty());
+    assert!(resumed.state.queue.messages().is_empty());
     resumed.poll().unwrap();
     assert!(resumed.worker.is_none());
     assert_eq!(resumed.state.history.snapshot(), ["earlier prompt"]);

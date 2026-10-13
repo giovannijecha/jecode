@@ -143,23 +143,27 @@ send a second task to move
 them through the owned viewport. Scroll using the wheel and Page Up/Down, browse
 dispatched prompt history with Ctrl+P/N,
 use `/export` and `/help`, edit a multiline draft, then `/exit`. For the composer
-test, queue `/help` and another prompt during the first turn, select
+test, send `/help` and another prompt during the first turn (the prompt joins
+that turn; `/help` runs after it), select
 `fixture/model-11` and `high` with `/model`, run `/effort low`, open/close
 `/settings`, inspect a multiline draft, use `/export`, then `/exit`. The tests
 use synthetic keys, validate the exported conversation and check mode restoration.
-For the resize fixture, send a task, queue `/help` and a second task, resize while
+For the resize fixture, send a task, then `/help` and a second task, resize while
 waiting/streaming/running, then use `/export`, `/new`, `/settings` (Esc), `/help`
 and `/exit`. Confirm the draft survives, the selector fits a short window, and
 the active conversation and reading position return after a stable resize.
 
-For a manual draft check, start a request, queue two distinct messages and stop
-the turn so they become paused. Start another request and queue two more.
+For a manual draft check, start a request, send two distinct messages and stop
+the turn before its response ends so they become paused. Start another request
+and send two more.
 Open `/drafts` or press Alt+Up during work. Confirm queued rows precede paused
 rows and the main composer remains intact. Enter one row, edit it, then press
 Enter to save it in the same slot; repeat and use Esc to cancel an edit. Mark
 one row with Ctrl+D, cancel with Esc, then mark it again and confirm with Enter.
 Number keys must not confirm the discard. Press Ctrl+S on a paused draft to
-send or queue only that draft. Stop a turn or resume the session and confirm
+send only that draft into the active turn. Confirm a message sent during a
+response appears after it, before the next response, without a completion
+notice in between. Stop a turn or resume the session and confirm
 remaining unsent messages appear as separate Paused rows and do not run by
 themselves. Ctrl+P/N should show dispatched prompts, never local commands;
 Up/Down should move only through visual editor rows.

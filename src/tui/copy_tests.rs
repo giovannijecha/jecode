@@ -98,7 +98,7 @@ fn copy_during_work_is_immediate_and_keeps_its_snapshot_until_selection() {
             .iter()
             .any(|line| line.plain().contains("Esc closes menu"))
     );
-    assert!(app.state.queue.messages.is_empty());
+    assert!(app.state.queue.messages().is_empty());
     app.state.queue.push("/help").unwrap();
     app.state.editor.replace("draft kept".into());
     release.send(()).unwrap();
@@ -110,7 +110,7 @@ fn copy_during_work_is_immediate_and_keeps_its_snapshot_until_selection() {
     }
     assert!(app.copy_selector_open());
     assert_eq!(app.copy_targets[0].text, "Previous completed response");
-    assert_eq!(app.state.queue.messages.len(), 1);
+    assert_eq!(app.state.queue.messages().len(), 1);
     key(&mut app, 13, 0);
     app.poll().unwrap();
     assert_eq!(

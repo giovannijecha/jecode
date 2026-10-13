@@ -26,6 +26,12 @@ pub enum Event {
     Streaming {
         text: String,
     },
+    /// Messages submitted during the turn joined the conversation.
+    Accepted {
+        prompts: Vec<crate::attachments::Prompt>,
+    },
+    /// The turn waits for an edit that holds back a submitted message.
+    InputHeld,
     ToolStarted {
         id: String,
         name: String,

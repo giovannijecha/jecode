@@ -13,8 +13,14 @@ impl Agent {
         limits: Option<Limits>,
         events: &mut impl EventSink,
     ) -> Result<Completion, String> {
+        let mut retries = super::recovery::Retries::default();
         loop {
+            self.accept_input(events)?;
             self.compact_if_needed(limits, false, events)?;
+            if self.accept_input(events)? {
+                // Input arriving during summaries or tool previews can change the budget.
+                continue;
+            }
             events.emit(Event::Waiting {
                 model: self.redact(self.model()),
             })?;
@@ -42,7 +48,7 @@ impl Agent {
                 self.tools.attachments(),
                 self.client.inputs(),
             )?;
-            let result = self.complete_retry(&request, true, output_tokens, &mut |update| {
+            let mut emit = |update: Update| {
                 match &update {
                     Update::Text(text) => {
                         if let Some(persistence) = &persistence {
@@ -57,9 +63,19 @@ impl Agent {
                     _ => {}
                 }
                 events.emit(self.update_event(update))
-            });
+            };
+            let result = loop {
+                match self.complete_attempt(&request, true, output_tokens, &mut retries, &mut emit)
+                {
+                    // Rebuild the retry when submitted messages can join it.
+                    Ok(None) if self.inbox.with(|entries| entries.ready()) => break Ok(None),
+                    Ok(None) => {}
+                    result => break result,
+                }
+            };
             match result {
-                Ok(completion) => {
+                Ok(None) => {}
+                Ok(Some(completion)) => {
                     let input_end = self.messages.lock().unwrap().len();
                     self.context.observe(completion.usage.as_ref(), input_end);
                     self.context.calibrate(
@@ -69,6 +85,7 @@ impl Agent {
                     return Ok(completion);
                 }
                 Err(error) if error.kind == FailureKind::Context => {
+                    retries = super::recovery::Retries::default();
                     // Rejected projections cannot retain a density assumption.
                     self.context.calibration = None;
                     if let Some(persistence) = &self.persistence {
@@ -265,6 +282,8 @@ impl Agent {
     }
 }
 
+#[cfg(test)]
+mod input_tests;
 #[cfg(test)]
 mod summary_budget_tests;
 #[cfg(test)]

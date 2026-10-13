@@ -6,6 +6,13 @@ use crate::{
 };
 use std::time::Duration;
 
+/// Retry state shared by the attempts of one request.
+#[derive(Default)]
+pub(super) struct Retries {
+    attempt: usize,
+    empty_responses: usize,
+}
+
 impl Agent {
     pub(super) fn complete_retry(
         &self,
@@ -14,66 +21,84 @@ impl Agent {
         output_tokens: Option<usize>,
         emit: &mut impl FnMut(Update) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
-        let mut attempt = 0usize;
-        let mut empty_responses = 0usize;
+        let mut retries = Retries::default();
         loop {
-            if self.cancellation.requested() {
-                return Err("Operation cancelled".into());
+            if let Some(completion) =
+                self.complete_attempt(messages, tools, output_tokens, &mut retries, emit)?
+            {
+                return Ok(completion);
             }
-            let mut partial = String::new();
-            match self
-                .client
-                .sample(messages, tools, output_tokens, &mut |update| {
-                    if let Update::Text(text) = &update {
-                        partial = text.clone();
+        }
+    }
+
+    /// Sends one request. `None` means a temporary failure has been recorded
+    /// and waited out, so the caller may retry, with a rebuilt request if needed.
+    pub(super) fn complete_attempt(
+        &self,
+        messages: &[Value],
+        tools: bool,
+        output_tokens: Option<usize>,
+        retries: &mut Retries,
+        emit: &mut impl FnMut(Update) -> Result<(), String>,
+    ) -> Result<Option<Completion>, Failure> {
+        if self.cancellation.requested() {
+            return Err("Operation cancelled".into());
+        }
+        let mut partial = String::new();
+        match self
+            .client
+            .sample(messages, tools, output_tokens, &mut |update| {
+                if let Update::Text(text) = &update {
+                    partial = text.clone();
+                }
+                emit(update)
+            }) {
+            Ok(completion) => Ok(Some(completion)),
+            Err(error) if matches!(error.kind, FailureKind::Temporary | FailureKind::Empty) => {
+                if error.kind == FailureKind::Empty {
+                    retries.empty_responses += 1;
+                    if retries.empty_responses >= 3 {
+                        return Err(format!(
+                            "OpenRouter returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
+                            self.redact(&error.message)
+                        ).into());
                     }
-                    emit(update)
-                }) {
-                Ok(completion) => return Ok(completion),
-                Err(error) if matches!(error.kind, FailureKind::Temporary | FailureKind::Empty) => {
-                    if error.kind == FailureKind::Empty {
-                        empty_responses += 1;
-                        if empty_responses >= 3 {
-                            return Err(format!(
-                                "OpenRouter returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
-                                self.redact(&error.message)
-                            ).into());
-                        }
-                    }
-                    attempt = attempt.saturating_add(1);
-                    let delay = retry_delay(attempt, error.retry_after, cfg!(test));
+                }
+                retries.attempt = retries.attempt.saturating_add(1);
+                let attempt = retries.attempt;
+                let delay = retry_delay(attempt, error.retry_after, cfg!(test));
+                self.record_recovery(
+                    if tools {
+                        "completion"
+                    } else {
+                        "context_compaction"
+                    },
+                    attempt,
+                    delay,
+                    &error.message,
+                    &partial,
+                )?;
+                emit(Update::Retry {
+                    attempt,
+                    delay,
+                    error: self.redact(&error.message),
+                })?;
+                self.cancellation.wait(delay)?;
+                emit(Update::RetryFinished)?;
+                Ok(None)
+            }
+            Err(mut error) => {
+                error.message = self.redact(&error.message);
+                if error.kind == FailureKind::Context {
                     self.record_recovery(
-                        if tools {
-                            "completion"
-                        } else {
-                            "context_compaction"
-                        },
-                        attempt,
-                        delay,
+                        "context_rejected",
+                        0,
+                        Duration::ZERO,
                         &error.message,
                         &partial,
                     )?;
-                    emit(Update::Retry {
-                        attempt,
-                        delay,
-                        error: self.redact(&error.message),
-                    })?;
-                    self.cancellation.wait(delay)?;
-                    emit(Update::RetryFinished)?;
                 }
-                Err(mut error) => {
-                    error.message = self.redact(&error.message);
-                    if error.kind == FailureKind::Context {
-                        self.record_recovery(
-                            "context_rejected",
-                            0,
-                            Duration::ZERO,
-                            &error.message,
-                            &partial,
-                        )?;
-                    }
-                    return Err(error);
-                }
+                Err(error)
             }
         }
     }

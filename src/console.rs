@@ -52,7 +52,10 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                         "[reconnecting: attempt {attempt}, waiting {:.1}s] {error}",
                         delay.as_secs_f64()
                     ),
-                    Event::RecoveryFinished | Event::RequestDiscarded => return Ok(()),
+                    Event::RecoveryFinished
+                    | Event::RequestDiscarded
+                    | Event::Accepted { .. }
+                    | Event::InputHeld => return Ok(()),
                     Event::Maintenance { text } | Event::ContextCompacted { text } => {
                         format!("[context] {text}")
                     }

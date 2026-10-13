@@ -90,8 +90,10 @@ conversation is saved after a request is sent or its inherited drafts contain
 attachments; pending `--plain` attachments also move with it. Old autosave handles cannot
 recreate deleted history.
 
-During a turn, `/resume` joins the existing command queue. A stopped or failed
-turn leaves unsent commands as separate paused drafts for review. Confirmed file
+During a turn, `/resume` joins the existing command queue, while ordinary messages
+join the active turn before its next model request. A stopped or failed turn
+leaves unsent commands and messages that have not joined it as separate paused
+drafts for review. Confirmed file
 removal runs in the background with the selected row showing `Deleting…`; the list
 ignores selection/editing until removal finishes. It runs to completion,
 including when quitting with Ctrl+Q. Ownership and file types are checked before
@@ -112,12 +114,16 @@ preserves the original unsent composer. Submitting a recalled prompt restores it
 editing a recalled prompt also saves that edit as a separate paused draft if
 Jecode closes before submission.
 
+A message that joins a turn leaves the saved queue in the same save that adds it
+to the conversation, so a crash or failed save never leaves it in both places.
+If that save fails, the turn stops and the message stays unsent.
+
 On resume, unsent queued messages become separate Paused entries, oldest first;
 the composer keeps its own text and caret. A legacy withdrawn edit is also
 recovered as its own paused entry while the prior composer is restored. Repeated
 resume keeps entries distinct, even when their text is identical. Open `/drafts`
 or press Alt+Up to review them. Enter edits one in place; Ctrl+S explicitly
-sends or queues a paused draft. No paused message or local command runs
+sends a paused draft, into the active turn during work. No paused message or local command runs
 automatically after resume or an interruption.
 
 The line-based `--plain` chat restores the conversation and displays the

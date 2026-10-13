@@ -19,7 +19,10 @@ impl App {
             .map(|command| (command.name.into(), command.description.into()))
             .collect();
         details.extend([
-            ("Enter".into(), "Send · queue while working".into()),
+            (
+                "Enter".into(),
+                "Send · while working, joins the turn before its next model request".into(),
+            ),
             (
                 "Ctrl+J".into(),
                 "New line · Shift/Alt+Enter when supported".into(),
@@ -63,7 +66,7 @@ impl App {
             ),
             (
                 "Ctrl+S in /drafts".into(),
-                "Send or queue a paused draft".into(),
+                "Send a paused draft · joins the active turn while working".into(),
             ),
         ]);
         self.local_finish(Kind::Notice, "Commands and controls", details);
@@ -139,6 +142,8 @@ impl App {
             }
             self.state.history.submitted(&mut self.state.editor);
             self.edited();
+            // Saving the input records the message, which lets the agent accept it.
+            self.capture_input();
             return Ok(false);
         }
         self.state.history.submitted(&mut self.state.editor);

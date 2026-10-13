@@ -15,7 +15,7 @@ pub enum Choice {
     Setting(Setting),
     Session(usize),
     Copy(usize),
-    Draft(usize),
+    Draft(super::drafts::Slot),
 }
 pub struct OptionRow {
     pub name: String,
@@ -95,15 +95,16 @@ impl Selector {
     }
     pub fn drafts(queue: &super::drafts::Queue) -> Self {
         let options = queue
-            .messages
-            .iter()
-            .map(|prompt| (prompt.display(), "Queued"))
-            .chain(queue.paused.iter().map(|draft| (draft.display(), "Paused")))
-            .enumerate()
-            .map(|(index, (text, status))| OptionRow {
+            .drafts()
+            .into_iter()
+            .map(|(slot, text)| OptionRow {
                 name: crate::copy::preview(&text),
-                description: status.into(),
-                choice: Choice::Draft(index),
+                description: match slot {
+                    super::drafts::Slot::Queued(_) => "Queued",
+                    super::drafts::Slot::Paused(_) => "Paused",
+                }
+                .into(),
+                choice: Choice::Draft(slot),
             })
             .collect();
         Self::new("Drafts", Purpose::Drafts { delete: None }, options)

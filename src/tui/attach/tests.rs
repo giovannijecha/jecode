@@ -102,7 +102,7 @@ fn submit_keeps_the_draft_until_its_attachment_import_finishes() {
     key(&mut app, 13, 0);
     assert!(app.worker.is_none());
     assert_eq!(app.state.editor.text, "explain");
-    assert!(app.state.queue.messages.is_empty());
+    assert!(app.state.queue.messages().is_empty());
     assert!(notice(&app).contains("still importing"));
     release.send(()).unwrap();
     settle(&mut app);
@@ -312,14 +312,16 @@ fn an_import_that_finishes_after_a_session_change_is_not_inserted() {
 }
 
 #[test]
-fn a_message_queued_during_a_turn_keeps_its_attachment() {
+fn a_message_sent_during_a_turn_joins_it_with_its_attachment() {
     let home = Directory::new();
     let directory = Directory::new();
-    let slow = crate::test_support::Response::Stream(vec![
-        (Duration::from_millis(400), "data: {\"choices\":[{\"delta\":{\"content\":\"First.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into()),
-    ]);
+    let (release, gate) = std::sync::mpsc::channel();
     let fixture = HttpFixture::streaming(vec![
-        slow,
+        crate::test_support::Response::GatedStream {
+            head: "data: {\"choices\":[{\"delta\":{\"content\":\"First.\"},\"finish_reason\":null}]}\n\n".into(),
+            tail: "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(),
+            release: gate,
+        },
         crate::test_support::Response::Json(200, completion("Second.", vec![])),
     ]);
     let mut app = app(&home, &directory, &fixture.endpoint);
@@ -331,24 +333,39 @@ fn a_message_queued_during_a_turn_keeps_its_attachment() {
         app.poll().unwrap();
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(
-        app.worker.is_some(),
-        "the import finished while the turn ran"
-    );
+    // Send only once the first request is streaming, so the message joins the next one.
+    while !app
+        .state
+        .items
+        .iter()
+        .any(|item| matches!(item, crate::tui::state::Item::Streaming { .. }))
+    {
+        app.poll().unwrap();
+        thread::sleep(Duration::from_millis(5));
+    }
     key(&mut app, 13, 0);
-    assert_eq!(app.state.queue.messages.len(), 1);
-    assert_eq!(app.state.queue.messages[0].attachments.len(), 1);
-    settle(&mut app);
-    while !app.state.queue.messages.is_empty() || app.worker.is_some() {
+    assert_eq!(app.state.queue.messages().len(), 1);
+    assert_eq!(app.state.queue.messages()[0].attachments.len(), 1);
+    release.send(()).unwrap();
+    while app.worker.is_some() {
         settle(&mut app);
         app.poll().unwrap();
     }
+    assert!(app.state.queue.is_empty());
+    assert_eq!(app.state.history.snapshot().len(), 2);
+    assert_eq!(app.state.history.snapshot()[1].attachments.len(), 1);
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
-    let last = requests[1]
+    let messages = requests[1]
         .body
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    assert!(last.last().unwrap().encode().contains("image_url"));
+    let roles: Vec<_> = messages
+        .iter()
+        .filter_map(|message| message.get("role").and_then(Value::as_str))
+        .filter(|role| *role != "system")
+        .collect();
+    assert_eq!(roles, ["user", "assistant", "user"]);
+    assert!(messages.last().unwrap().encode().contains("image_url"));
 }

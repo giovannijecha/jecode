@@ -1,3 +1,4 @@
+use super::super::tests::{last_content, rows, wait_until};
 use super::super::*;
 use crate::{
     json::Value,
@@ -90,17 +91,17 @@ fn editing_and_discarding_one_of_five_equal_drafts_keeps_the_composer_separate()
     text(&mut app, " revised");
     key(&mut app, 13, 0);
     assert!(app.draft_menu_open());
-    assert_eq!(app.state.queue.messages.len(), 5);
-    assert_eq!(app.state.queue.messages[0], "same draft revised");
+    assert_eq!(app.state.queue.messages().len(), 5);
+    assert_eq!(app.state.queue.messages()[0], "same draft revised");
     assert_eq!(app.state.editor, original);
     key(&mut app, 68, 4);
     assert!(frame_text(&app).contains("Discard?"));
     key(&mut app, 13, 0);
-    assert_eq!(app.state.queue.messages.len(), 4);
+    assert_eq!(app.state.queue.messages().len(), 4);
     assert!(
         app.state
             .queue
-            .messages
+            .messages()
             .iter()
             .all(|draft| draft == "same draft")
     );
@@ -108,7 +109,7 @@ fn editing_and_discarding_one_of_five_equal_drafts_keeps_the_composer_separate()
     text(&mut app, " discarded edit");
     key(&mut app, 27, 0);
     assert!(app.draft_menu_open());
-    assert_eq!(app.state.queue.messages.len(), 4);
+    assert_eq!(app.state.queue.messages().len(), 4);
     assert_eq!(app.state.editor, original);
     key(&mut app, 27, 0);
     assert_eq!(app.state.editor, original);
@@ -144,7 +145,7 @@ fn numbered_choices_cancel_discard_marks_and_empty_drafts_panel_stays_open() {
 }
 
 #[test]
-fn fifo_automatic_sending_waits_for_the_draft_editor_and_keeps_prompt_only_history() {
+fn an_edited_draft_keeps_the_turn_open_and_joins_it_in_fifo_order_when_saved() {
     let directory = Directory::new();
     let (release, wait) = mpsc::channel();
     let fixture = HttpFixture::streaming(vec![
@@ -158,6 +159,7 @@ fn fifo_automatic_sending_waits_for_the_draft_editor_and_keeps_prompt_only_histo
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "active");
+    wait_for_response(&mut app);
     submit(&mut app, "queued one");
     submit(&mut app, "queued two");
     text(&mut app, "main draft");
@@ -169,22 +171,33 @@ fn fifo_automatic_sending_waits_for_the_draft_editor_and_keeps_prompt_only_histo
     key(&mut app, 13, 0);
     text(&mut app, " revised");
     release.send(()).unwrap();
-    finish(&mut app);
-    assert!(app.worker.is_none());
-    assert_eq!(app.state.queue.messages.len(), 2);
+    wait_until(&mut app, |app| {
+        app.state.status.starts_with("Waiting for the draft")
+    });
+    assert!(app.worker.is_some());
+    assert_eq!(app.state.queue.messages(), ["queued two"]);
     assert!(app.state.queue.is_editing());
+    assert_eq!(app.state.history.snapshot(), ["active", "queued one"]);
     key(&mut app, 13, 0);
-    app.poll().unwrap();
-    assert!(app.worker.is_none());
     assert!(app.draft_menu_open());
-    key(&mut app, 27, 0);
-    app.poll().unwrap();
     finish(&mut app);
+    key(&mut app, 27, 0);
     assert_eq!(app.state.editor, main);
     assert!(app.state.queue.is_empty());
     assert_eq!(
         app.state.history.snapshot(),
         ["active", "queued one", "queued two revised"]
+    );
+    assert_eq!(
+        rows(&app),
+        [
+            "user: active",
+            "assistant: First.",
+            "user: queued one",
+            "assistant: Second.",
+            "user: queued two revised",
+            "assistant: Third.",
+        ]
     );
     app.dispatch("/help".into()).unwrap();
     key(&mut app, 27, 0);
@@ -194,22 +207,7 @@ fn fifo_automatic_sending_waits_for_the_draft_editor_and_keeps_prompt_only_histo
     key(&mut app, 27, 0);
     assert_eq!(app.state.editor, main);
     let requests = fixture.finish();
-    let prompts: Vec<_> = requests
-        .iter()
-        .map(|request| {
-            request
-                .body
-                .get("messages")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .last()
-                .unwrap()
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap()
-        })
-        .collect();
+    let prompts: Vec<_> = requests.iter().map(last_content).collect();
     assert_eq!(prompts, ["active", "queued one", "queued two revised"]);
 }
 
@@ -250,7 +248,7 @@ fn a_paused_draft_can_be_edited_and_sent_explicitly_without_sending_the_main_dra
 }
 
 #[test]
-fn sending_a_paused_edit_during_work_appends_it_once_to_the_automatic_queue() {
+fn sending_a_paused_edit_during_work_joins_the_active_turn_once() {
     let directory = Directory::new();
     let (release, wait) = mpsc::channel();
     let fixture = HttpFixture::streaming(vec![
@@ -259,11 +257,11 @@ fn sending_a_paused_edit_during_work_appends_it_once_to_the_automatic_queue() {
             tail: "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(),
             release: wait,
         },
-        Response::Json(200, completion("Queued.", vec![])),
-        Response::Json(200, completion("Paused.", vec![])),
+        Response::Json(200, completion("Done.", vec![])),
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "active");
+    wait_for_response(&mut app);
     submit(&mut app, "already queued");
     let mut paused = editor::Editor::default();
     paused.replace("paused".into());
@@ -279,8 +277,8 @@ fn sending_a_paused_edit_during_work_appends_it_once_to_the_automatic_queue() {
     assert!(!app.state.queue.is_editing());
     assert!(app.state.queue.paused.is_empty());
     assert_eq!(
-        app.state.queue.messages,
-        std::collections::VecDeque::from(["already queued".into(), "paused revised".into(),])
+        app.state.queue.messages(),
+        ["already queued", "paused revised"]
     );
     assert_eq!(app.state.editor, main);
     assert_eq!(app.state.history.snapshot(), ["active"]);
@@ -292,7 +290,29 @@ fn sending_a_paused_edit_during_work_appends_it_once_to_the_automatic_queue() {
         ["active", "already queued", "paused revised"]
     );
     assert_eq!(app.state.editor, main);
-    assert_eq!(fixture.finish().len(), 3);
+    assert_eq!(
+        rows(&app),
+        [
+            "user: active",
+            "assistant: Active.",
+            "user: already queued",
+            "user: paused revised",
+            "assistant: Done.",
+        ]
+    );
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    let users: Vec<_> = requests[1]
+        .body
+        .get("messages")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .filter_map(|message| message.get("content").and_then(Value::as_str))
+        .collect();
+    assert_eq!(users, ["active", "already queued", "paused revised"]);
 }
 
 #[test]
@@ -309,6 +329,7 @@ fn sending_a_paused_edit_to_a_full_queue_keeps_the_live_edit_and_original_slot()
     }]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "active");
+    wait_for_response(&mut app);
     for i in 0..8 {
         app.state.queue.push(format!("queued {i}")).unwrap();
     }
@@ -326,7 +347,7 @@ fn sending_a_paused_edit_to_a_full_queue_keeps_the_live_edit_and_original_slot()
     text(&mut app, " revision");
     let edited = app.state.editor.clone();
     key(&mut app, 83, 4);
-    assert_eq!(app.state.queue.messages.len(), 8);
+    assert_eq!(app.state.queue.messages().len(), 8);
     assert_eq!(app.state.queue.paused[0].text, "paused");
     assert_eq!(app.state.queue.edit_index(), Some(8));
     assert_eq!(app.state.editor, edited);
@@ -345,7 +366,7 @@ fn sending_a_paused_edit_to_a_full_queue_keeps_the_live_edit_and_original_slot()
     key(&mut app, 67, 4);
     release.send(()).unwrap();
     finish(&mut app);
-    assert!(app.state.queue.messages.is_empty());
+    assert!(app.state.queue.messages().is_empty());
     assert_eq!(app.state.queue.paused.len(), 9);
     assert_eq!(app.state.editor, main);
     assert_eq!(fixture.finish().len(), 1);
@@ -366,6 +387,7 @@ fn interruption_while_editing_changes_the_slot_to_paused_without_replacing_the_c
     }]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "active");
+    wait_for_response(&mut app);
     submit(&mut app, "queued one");
     submit(&mut app, "queued two");
     text(&mut app, "main draft");
@@ -379,7 +401,7 @@ fn interruption_while_editing_changes_the_slot_to_paused_without_replacing_the_c
     let edited = app.state.editor.clone();
     release.send(()).unwrap();
     finish(&mut app);
-    assert!(app.state.queue.messages.is_empty());
+    assert!(app.state.queue.messages().is_empty());
     assert_eq!(app.state.queue.edit_index(), Some(1));
     assert_eq!(app.state.editor, edited);
     assert_eq!(app.state.queue.paused.len(), 2);

@@ -116,8 +116,8 @@ fn delete_current_resets_screen_and_context_preserves_unsent_work_and_cannot_res
         current
             .state
             .queue
-            .messages
-            .front()
+            .messages()
+            .first()
             .map(|prompt| prompt.text.as_str()),
         Some("follow-up kept")
     );
