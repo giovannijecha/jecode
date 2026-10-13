@@ -1,5 +1,6 @@
 mod attachment;
 mod files;
+mod processes;
 mod schema;
 mod shell;
 
@@ -20,6 +21,7 @@ pub struct Tools {
     outputs: crate::output::Store,
     temporary: Option<crate::scratch::Area>,
     attachments: Option<crate::attachments::Pool>,
+    processes: processes::Registry,
 }
 
 impl Tools {
@@ -38,6 +40,7 @@ impl Tools {
             bash: shell::find_bash()?,
             temporary: None,
             attachments: None,
+            processes: processes::Registry::default(),
         })
     }
 
@@ -76,6 +79,11 @@ impl Tools {
 
     pub fn attachments(&self) -> Option<&crate::attachments::Pool> {
         self.attachments.as_ref()
+    }
+
+    /// Stops the persistent processes of the conversation that is ending.
+    pub fn stop_processes(&self) {
+        self.processes.stop_all();
     }
 
     pub fn configure_temporary(&mut self, area: crate::scratch::Area) {
@@ -162,9 +170,11 @@ impl Tools {
                         cancellation,
                         &self.outputs,
                         temporary.as_deref(),
+                        &self.processes,
                     )
                     .unwrap_or_else(|error| Value::object([("error", Value::string(error))])))
                 }
+                "process" => self.processes.execute(&arguments, cancellation),
                 _ => Err(format!("Unknown tool: {name}")),
             }
         });

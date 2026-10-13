@@ -70,6 +70,27 @@ cause remains unknown. See [PLATFORMS.md](PLATFORMS.md) for the evidence and nat
 verification procedure, and [PERFORMANCE.md](PERFORMANCE.md) for repeatable
 session and Windows startup measurements.
 
+## Persistent process checks
+
+`tools::processes::tests` and `agent::process_tests` exercise persistent
+processes through real Bash commands in isolated directories. They cover a
+process running while other tools execute, output between polls and after exit,
+several concurrent processes, wait expiry without termination, a timeout
+enforced without polling, cancelled waits that keep the process, launch
+cancelled before start, stopping a background descendant, finished, unknown and
+invalid IDs and `wait_ms` values, synthetic secrets masked across live chunks,
+UTF-8 boundaries in bounded reads, and an unchanged foreground result. Agent
+fixtures check that processes survive turns and turn cancellation, persist after
+a failed resume or deletion validation, stop on `/new`, resume of another
+session, live-session deletion and drop, and that old IDs never resolve after
+resume. A failed stream read leaves both output cursors unchanged. The TUI card
+test checks the running-in-background marker. Build, all-target Clippy and the
+full suite passed on Windows `x86_64-pc-windows-gnullvm` and Linux
+`x86_64-unknown-linux-musl` under WSL with native tmpfs fixtures, using Rust
+1.95.0. Windows used Git Bash; Linux used the system Bash and bundled Rust LLD.
+Intel and Apple Silicon macOS passed all-target compilation and Clippy checks;
+macOS linking and native execution were not run.
+
 ## Native terminal checks
 
 The native Linux PTY fixture needs the system-provided util-linux `script` tool

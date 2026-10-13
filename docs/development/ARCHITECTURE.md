@@ -59,8 +59,17 @@ Modules stay around 500 lines or fewer and split by responsibility:
   the selected effort and declared model output maximum, bounded by remaining
   context space. Provider failures retain the underlying code, parameter and
   message after credential redaction and diagnostic length bounding.
-- `json.rs`, `process.rs`, `process/`, `output.rs`, `tools/`: owned JSON, cancellable foreground
-  processes, complete output storage and the four tools.
+- `json.rs`, `process.rs`, `process/`, `output.rs`, `tools/`: owned JSON, cancellable
+  supervised processes, complete output storage and the five tools.
+  `process::start_logged` launches a command and returns a `Started` handle;
+  `Started::supervise` runs the same wait, timeout, cancellation and cleanup
+  loop for foreground and persistent commands. `tools/processes.rs` is the
+  per-conversation registry: each persistent process has a monitor thread that
+  supervises it against its own stop token and records the outcome, while
+  `process` results read the saved, masked stream files from per-process byte
+  cursors. `Tools::stop_processes` and the registry's `Drop` stop and join every
+  process; the agent calls it before a successful session switch and before
+  deleting the live session, so the runtime owns lifetime, not the renderers.
   `tools/schema.rs` advertises meaningful numeric bounds, leaving read offsets
   without an artificial maximum; native argument parsing still validates them.
 

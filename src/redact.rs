@@ -18,16 +18,23 @@ impl Redactor {
             .flat_map(|(raw, escaped)| [raw.as_bytes(), escaped.as_bytes()])
             .filter(|pattern| !pattern.is_empty())
             .collect();
-        let hold = patterns
-            .iter()
-            .map(|pattern| pattern.len().saturating_sub(1))
-            .max()
-            .unwrap_or(0);
-        let safe = if finish {
-            bytes.len()
+        // Hold back only a trailing fragment that could still start a secret,
+        // so live readers see every byte that can no longer be masked.
+        let hold = if finish {
+            0
         } else {
-            bytes.len().saturating_sub(hold)
+            let longest = patterns.iter().map(|pattern| pattern.len()).max();
+            (1..=bytes.len().min(longest.unwrap_or(0).saturating_sub(1)))
+                .rev()
+                .find(|&length| {
+                    let suffix = &bytes[bytes.len() - length..];
+                    patterns
+                        .iter()
+                        .any(|pattern| pattern.len() > length && pattern.starts_with(suffix))
+                })
+                .unwrap_or(0)
         };
+        let safe = bytes.len() - hold;
         let mut consumed = 0;
         let mut result = Vec::new();
         while consumed < safe {

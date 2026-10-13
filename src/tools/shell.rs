@@ -13,11 +13,13 @@ pub(super) fn execute(
     cancellation: &Cancellation,
     outputs: &crate::output::Store,
     temporary: Option<&Path>,
+    processes: &super::processes::Registry,
 ) -> Result<Value, String> {
     let text = required_string(arguments, "command")?;
     if text.trim().is_empty() {
         return Err("command must not be empty".into());
     }
+    let wait = super::processes::wait_argument(arguments)?;
     let timeout = arguments
         .get("timeout_seconds")
         .map(|value| {
@@ -39,6 +41,32 @@ pub(super) fn execute(
             command.env(name, &temporary);
         }
     }
+    if let Some(wait) = wait {
+        let streams = [
+            super::processes::Stream {
+                path: outputs.resolve(&stdout_ref)?,
+                reference: stdout_ref,
+            },
+            super::processes::Stream {
+                path: outputs.resolve(&stderr_ref)?,
+                reference: stderr_ref,
+            },
+        ];
+        // The turn cancellation applies only to launch; the registry owns the process.
+        return match process::start_logged(
+            &mut command,
+            0,
+            cancellation,
+            [logs.stdout, logs.stderr],
+        ) {
+            Ok(started) => processes.adopt(text, streams, started, timeout, wait, cancellation),
+            Err(error) if !error.started => Err(error.message),
+            Err(error) => Ok(unknown_outcome(
+                &error.message,
+                streams.map(|s| s.reference),
+            )),
+        };
+    }
     let output = match process::run_logged(
         &mut command,
         timeout,
@@ -48,20 +76,7 @@ pub(super) fn execute(
     ) {
         Ok(output) => output,
         Err(error) if !error.started => return Err(error.message),
-        Err(error) => {
-            return Ok(Value::object([
-                (
-                    "error",
-                    Value::string(format!(
-                        "The command started but its result or output could not be retained: {}. Execution may already have changed the workspace; inspect it before repeating the command.",
-                        error.message
-                    )),
-                ),
-                ("outcome", Value::string("unknown")),
-                ("stdout_file", Value::string(stdout_ref)),
-                ("stderr_file", Value::string(stderr_ref)),
-            ]));
-        }
+        Err(error) => return Ok(unknown_outcome(&error.message, [stdout_ref, stderr_ref])),
     };
     Ok(Value::object([
         (
@@ -88,6 +103,20 @@ pub(super) fn execute(
         ("stderr_file", Value::string(stderr_ref)),
         ("capture", Value::string("tail")),
     ]))
+}
+
+fn unknown_outcome(message: &str, [stdout_ref, stderr_ref]: [String; 2]) -> Value {
+    Value::object([
+        (
+            "error",
+            Value::string(format!(
+                "The command started but its result or output could not be retained: {message}. Execution may already have changed the workspace; inspect it before repeating the command."
+            )),
+        ),
+        ("outcome", Value::string("unknown")),
+        ("stdout_file", Value::string(stdout_ref)),
+        ("stderr_file", Value::string(stderr_ref)),
+    ])
 }
 
 fn command(bash: &Path, root: &Path, text: &str) -> Command {
@@ -154,6 +183,7 @@ mod tests {
             cancellation,
             &crate::output::Store::new(root.join("logs"), crate::redact::Redactor::empty()),
             None,
+            &crate::tools::processes::Registry::default(),
         )
     }
 

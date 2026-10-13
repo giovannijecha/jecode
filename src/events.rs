@@ -53,6 +53,34 @@ pub fn tool_summary(name: &str, result: &Value) -> String {
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return format!("error: {error}");
     }
+    if name == "process"
+        && let Some(processes) = result.get("processes").and_then(Value::as_array)
+    {
+        let running = processes
+            .iter()
+            .filter(|process| process_status(process) == Some("running"))
+            .count();
+        return format!("{} processes, {running} running", processes.len());
+    }
+    if let Some(status) = process_status(result) {
+        return match status {
+            "running" | "stopping" => format!(
+                "{status} in background · {}",
+                result
+                    .get("process_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+            ),
+            "exited" => format!(
+                "exit {}",
+                result
+                    .get("exit_code")
+                    .map_or_else(|| "unknown".into(), Value::encode)
+            ),
+            "timed_out" => "timed out".into(),
+            status => status.into(),
+        };
+    }
     if name == "bash" {
         let mut summary = if result.get("cancelled") == Some(&Value::Bool(true)) {
             "cancelled".into()
@@ -84,7 +112,21 @@ pub fn tool_summary(name: &str, result: &Value) -> String {
     "complete".into()
 }
 
+/// The status of a persistent process result, if it is one.
+pub fn process_status(result: &Value) -> Option<&str> {
+    result
+        .get("process_id")
+        .and(result.get("status"))
+        .and_then(Value::as_str)
+}
+
 pub fn description(name: &str, arguments: &Value) -> String {
+    if name == "process" {
+        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        return format!("{} {}", field("action"), field("process_id"))
+            .trim_end()
+            .into();
+    }
     if name == "bash" {
         return arguments
             .get("command")

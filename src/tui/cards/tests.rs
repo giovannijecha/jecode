@@ -356,3 +356,43 @@ fn expanding_a_tool_removes_preview_metadata_and_shows_all_retained_content() {
         Some("first\nsecond\nthird\nlast")
     );
 }
+
+#[test]
+fn a_returned_call_shows_that_its_process_is_still_running() {
+    let running = Value::object([
+        ("process_id", Value::string("process-1-2-3")),
+        ("status", Value::string("running")),
+        ("stdout", Value::string("listening on 3000\n")),
+        ("stderr", Value::string("")),
+        ("stdout_skipped_bytes", Value::number(12)),
+    ]);
+    let arguments = Value::object([
+        ("command", Value::string("fixture-server")),
+        ("wait_ms", Value::number(0)),
+    ]);
+    let summary = crate::events::tool_summary("bash", &running);
+    assert_eq!(summary, "running in background · process-1-2-3");
+    let rows = render("bash", &arguments, &summary, Some(&running), true, 100);
+    let text = rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n");
+    assert!(
+        rows[0].plain().contains("▶ running in background"),
+        "{text}"
+    );
+    assert!(text.contains("listening on 3000"));
+    assert!(text.contains("stdout: 12 earlier bytes not shown"));
+
+    let exited = Value::object([
+        ("process_id", Value::string("process-1-2-3")),
+        ("status", Value::string("exited")),
+        ("exit_code", Value::number(1)),
+    ]);
+    let poll = Value::object([
+        ("action", Value::string("poll")),
+        ("process_id", Value::string("process-1-2-3")),
+    ]);
+    let summary = crate::events::tool_summary("process", &exited);
+    assert_eq!(summary, "exit 1");
+    let rows = render("process", &poll, &summary, Some(&exited), true, 100);
+    assert!(rows[0].plain().contains("process  poll process-1-2-3"));
+    assert!(rows[0].plain().contains("× exit 1"));
+}

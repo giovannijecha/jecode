@@ -19,7 +19,7 @@ pub(super) fn render(
         payload(error, BAD)
     } else {
         match name {
-            "bash" => {
+            "bash" | "process" if result.get("processes").is_none() => {
                 let mut rows = payload(field(result, "stdout"), BODY);
                 let stderr = field(result, "stderr");
                 if !stderr.is_empty() {

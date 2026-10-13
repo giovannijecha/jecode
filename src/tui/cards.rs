@@ -25,16 +25,21 @@ pub struct Tool<'a> {
 }
 
 pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
-    let stopped = tool.result.is_some_and(|value| flag(value, "cancelled"));
+    let process = tool.result.and_then(crate::events::process_status);
+    // A returned call whose persistent process is still alive.
+    let background = matches!(process, Some("running" | "stopping"));
+    let stopped =
+        tool.result.is_some_and(|value| flag(value, "cancelled")) || process == Some("stopped");
     let failed = tool.result.is_some_and(|value| {
         value.get("error").is_some()
             || flag(value, "timed_out")
-            || tool.name == "bash"
+            || process == Some("timed_out")
+            || matches!(tool.name, "bash" | "process")
                 && value
                     .get("exit_code")
                     .is_some_and(|code| code != &Value::number(0))
     });
-    let style = if tool.result.is_none() {
+    let style = if tool.result.is_none() || background {
         TOOL_ACCENT
     } else if stopped {
         WARNING
@@ -48,7 +53,9 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
     let mut status = Line::default();
     if tool.result.is_some() {
         status.push(
-            if stopped {
+            if background {
+                "▶ "
+            } else if stopped {
                 "■ "
             } else if failed {
                 "× "
@@ -77,15 +84,12 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
         TOOL_GUIDE
     };
     let continuation = if tool.last { "     " } else { "│    " };
-    let description = field(
-        tool.arguments,
-        if tool.name == "bash" {
-            "command"
-        } else {
-            "path"
-        },
-    );
-    let description = text::clean(description).replace('\n', " ↵ ");
+    let description = match tool.name {
+        "bash" => field(tool.arguments, "command").into(),
+        "process" => crate::events::description(tool.name, tool.arguments),
+        _ => field(tool.arguments, "path").into(),
+    };
+    let description = text::clean(&description).replace('\n', " ↵ ");
     let target_style = if tool.result.is_none() || tool.presentation.selected {
         TOOL_ACCENT
     } else {

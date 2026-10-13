@@ -379,6 +379,8 @@ mod long_work_tests;
 #[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]
+mod process_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod summary_tests;

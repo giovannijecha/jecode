@@ -70,7 +70,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run a foreground Bash command from the project working directory. stdin is closed. No timeout unless positive timeout_seconds is supplied. JECODE_TMP, TMPDIR, TEMP and TMP point to persistent session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references; full streams remain readable through them. Bash has normal system access; use finite foreground commands.",
+            "Run a Bash command in a new process from the project working directory. stdin is closed and no shell state carries over between commands. No timeout unless positive timeout_seconds is supplied; it is an execution deadline from command start. JECODE_TMP, TMPDIR, TEMP and TMP point to persistent session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references; full streams remain readable through them. With wait_ms (0 or more) the command becomes a persistent process: Jecode waits up to wait_ms for it to finish, then returns process_id and status (running, exited with exit_code, timed_out, stopped or unknown) with output as the process tool reports it. A running process keeps running after the wait, across tool calls and turns, until it exits, reaches timeout_seconds or is stopped; use it for servers, watchers and long builds or tests. Bash has normal system access.",
             Value::object([
                 ("command", string()),
                 (
@@ -80,8 +80,28 @@ pub fn definitions() -> Value {
                         ("minimum", Value::number(1)),
                     ]),
                 ),
+                ("wait_ms", integer(0, None)),
             ]),
             &["command"],
+        ),
+        tool(
+            "process",
+            "Manage persistent processes started by bash with wait_ms in this conversation. list returns every process_id with its command, status and output references; use it to recover IDs, for example after context compaction. poll returns the current status and the output saved since the previous bash or process result for that process, waiting up to wait_ms (default 0) for it to finish. stop requests termination of the process and its descendants and waits up to 10 seconds for the final status; if the wait expires or is interrupted it may return stopping, so poll to confirm completion. Each stream returns at most its last 64 KiB of new output: <stream>_offset is where the returned text starts in the saved stream, <stream>_next_offset is where the next result continues and <stream>_skipped_bytes counts earlier unread bytes left out; read <stream>_file with byte_offset to see them. exit_code appears only after the process exits. Empty output does not mean the process finished, is ready or is stalled; check status. Finished processes stay listed with their final status. Processes end when the conversation changes or Jecode exits and are never restarted; earlier IDs then return an error while saved output stays readable. wait_cancelled is true when the user interrupted the wait; it does not stop a running process or undo a previous stop request.",
+            Value::object([
+                (
+                    "action",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(["list", "poll", "stop"].map(Value::string).into()),
+                        ),
+                    ]),
+                ),
+                ("process_id", string()),
+                ("wait_ms", integer(0, None)),
+            ]),
+            &["action"],
         ),
     ])
 }
