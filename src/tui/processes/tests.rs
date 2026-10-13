@@ -135,6 +135,9 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
         observer
             .read(&id, 1, crate::tools::processes::Window::Tail)
             .is_ok_and(|page| page.text.ends_with("err\n"))
+            && observer
+                .read(&id, 0, crate::tools::processes::Window::Tail)
+                .is_ok_and(|page| page.text.ends_with("29999\n30000\n"))
     });
     // Bash may add startup warnings; retain the entire stream for comparison.
     let errors = observer

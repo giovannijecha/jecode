@@ -58,7 +58,13 @@ fn a_worker_viewer_uses_credentials_updated_before_the_turn() {
         .replace_client(OpenRouter::fixture(fixture.endpoint.clone()));
     submit(&mut app, "Continue");
     assert!(app.agent.is_none());
-    wait_until(&mut app, |_| directory.path().join("emitted-key").exists());
+    wait_until(&mut app, |app| {
+        directory.path().join("emitted-key").exists()
+            && app
+                .process_observer
+                .read(id, 0, crate::tools::processes::Window::Tail)
+                .is_ok_and(|page| page.end >= key.len() as u64)
+    });
     app.open_processes(id);
     let process = &panel(&app).processes[0];
     assert!(process.command.contains("[redacted]"));
