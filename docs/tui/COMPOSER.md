@@ -172,16 +172,21 @@ Narrow panels use compact keyboard hints; `↵` means Enter and `^D` means Ctrl+
   in a temporary information panel.
   `/tmp clean` clears that area only when ready; it queues during generation.
   Drafts, project files, saved output and conversation history are retained.
-- `/terminal [ID]` opens a read-only process panel immediately, even during a
-  turn: active processes first, then finished ones, with command, status and
-  exit code. Up/Down, Page Up/Down, Home/End and the wheel select a process;
-  Enter opens its output. In the output, Tab switches between Output and
-  Errors, scrolling up pauses following at that position and End resumes it.
-  Esc or Ctrl+C returns to the list, then closes the panel; neither stops the
+- `/terminal [ID]` opens a process panel immediately, even during a turn. The
+  list contains only active background processes; `/terminal ID` opens that
+  process's output directly, including after it finishes. Up/Down, Page Up/Down,
+  Home/End and the wheel select a process; Enter opens its output. In the
+  output, Tab switches between Output and Errors, scrolling up pauses following
+  at that position and End resumes it. Active processes show `running` until
+  termination is confirmed. The open output keeps its final status
+  and text visible when its process leaves the active list. Ctrl+D on a live
+  process opens a stop confirmation; Enter requests the stop and Esc or Ctrl+C
+  cancels it. `/terminal stop ID` also requests a stop explicitly. Esc or Ctrl+C
+  from output returns to the list, then closes the panel; closing never stops a
   process. Typing is ignored while the panel is open, and the draft, queue,
   prompt history and conversation position stay as they were. The panel
   refreshes four times a second and closes when the conversation changes. See
-  [Viewing processes](../usage/TOOLS.md#viewing-processes).
+  [Viewing and stopping processes](../usage/TOOLS.md#viewing-and-stopping-processes).
 - Local commands never add UI feedback to the transcript. Plain mode retains
   its command output.
 
@@ -282,7 +287,8 @@ disappears after completion or cleanup.
 | File drop, `/attach PATH...` | Attach files at the caret. See [ATTACHMENTS.md](../usage/ATTACHMENTS.md). |
 | Ctrl+D in `/drafts` | Mark only the selected draft for discard; Enter confirms, Esc cancels. |
 | Ctrl+S in `/drafts` | Explicitly send or queue a paused draft from the list or its editor. |
-| `/terminal [ID]` | Open the read-only process panel, including during work; Tab switches Output/Errors, End follows. |
+| `/terminal [ID]` | Open active processes or a process's output, including during work; Tab switches Output/Errors, End follows, Ctrl+D marks a stop and Enter confirms. |
+| `/terminal stop ID` | Request a stop for one process in the current conversation. |
 | Esc | Cancel a draft edit or close a panel first; while reading normally, return to the bottom; otherwise stop work. |
 | Ctrl+C | Cancel a draft edit or close a panel; otherwise stop work or clear a draft. Never exit. |
 | Ctrl+Q | Official exit shortcut: cancel and clean up active work, save input, then quit. |

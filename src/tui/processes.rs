@@ -1,5 +1,5 @@
-//! The `/terminal` panel: a read-only view of the conversation's persistent
-//! processes and their saved output. The registry stays in the core; this
+//! The `/terminal` panel: active background processes, saved output and manual
+//! stop requests. The registry stays in the core; this
 //! module keeps only what the panel shows and its own read positions.
 
 use super::{App, terminal::Key, text};
@@ -16,11 +16,13 @@ pub(super) struct Panel {
     pub processes: Vec<Process>,
     pub selected: usize,
     pub logs: Option<Logs>,
+    pub confirm_stop: Option<Process>,
     refreshed: Instant,
 }
 
 pub(super) struct Logs {
     pub id: String,
+    pub process: Option<Process>,
     pub stream: usize,
     pub views: [Stream; 2],
 }
@@ -103,29 +105,45 @@ impl Stream {
 impl Panel {
     pub fn new(processes: Vec<Process>) -> Self {
         Self {
-            processes,
+            processes: processes.into_iter().filter(Process::active).collect(),
             selected: 0,
             logs: None,
+            confirm_stop: None,
             refreshed: Instant::now(),
         }
     }
 
     /// Replaces the list, keeping the selected process by identity.
-    fn update(&mut self, processes: Vec<Process>) -> bool {
+    fn update(&mut self, mut processes: Vec<Process>) -> bool {
+        let mut changed = false;
+        if let Some(logs) = &mut self.logs {
+            let current = processes
+                .iter()
+                .find(|process| process.id == logs.id)
+                .cloned();
+            changed |= logs.process != current;
+            logs.process = current;
+        }
+        if let Some(confirm) = &mut self.confirm_stop
+            && let Some(current) = processes.iter().find(|process| process.id == confirm.id)
+        {
+            changed |= confirm != current;
+            *confirm = current.clone();
+        }
+        processes.retain(Process::active);
         let selected = self.processes.get(self.selected).map(|p| p.id.clone());
         self.selected = selected
             .and_then(|id| processes.iter().position(|process| process.id == id))
             .unwrap_or(self.selected)
             .min(processes.len().saturating_sub(1));
-        let changed = self.processes != processes;
+        changed |= self.processes != processes;
         self.processes = processes;
         changed
     }
 
     pub fn selected_process(&self) -> Option<&Process> {
-        let id = self.logs.as_ref().map(|logs| logs.id.as_str());
-        match id {
-            Some(id) => self.processes.iter().find(|process| process.id == id),
+        match &self.logs {
+            Some(logs) => logs.process.as_ref(),
             None => self.processes.get(self.selected),
         }
     }
@@ -142,14 +160,27 @@ impl App {
         self.state.suggestions.dismiss();
         self.state.processes = Some(Panel::new(vec![]));
         self.refresh_processes(true);
+        if self.state.processes.is_none() {
+            return;
+        }
+        if let Some(id) = crate::session::commands::terminal_stop_id(id) {
+            self.stop_process(id);
+            return;
+        }
         if id.is_empty() {
             return;
         }
-        let panel = self.state.processes.as_mut().unwrap();
-        match panel.processes.iter().position(|process| process.id == id) {
-            Some(index) => {
-                panel.selected = index;
-                self.open_logs();
+        let process = self
+            .process_observer
+            .processes()
+            .and_then(|processes| processes.into_iter().find(|process| process.id == id));
+        match process {
+            Some(process) => {
+                let panel = self.state.processes.as_mut().unwrap();
+                if let Some(index) = panel.processes.iter().position(|process| process.id == id) {
+                    panel.selected = index;
+                }
+                self.open_process_logs(process);
             }
             None => self.warn(&format!("No process {id} in this conversation")),
         }
@@ -196,22 +227,32 @@ impl App {
     }
 
     fn open_logs(&mut self) {
-        let Some(panel) = &mut self.state.processes else {
-            return;
-        };
-        let Some(process) = panel.processes.get(panel.selected) else {
-            return;
-        };
+        if let Some(process) = self
+            .state
+            .processes
+            .as_ref()
+            .and_then(|panel| panel.processes.get(panel.selected))
+            .cloned()
+        {
+            self.open_process_logs(process);
+        }
+    }
+
+    fn open_process_logs(&mut self, process: Process) {
         let mut logs = Logs {
             id: process.id.clone(),
+            process: Some(process),
             stream: 0,
             views: Default::default(),
         };
         follow(&self.process_observer, &mut logs);
-        panel.logs = Some(logs);
+        self.state.processes.as_mut().unwrap().logs = Some(logs);
     }
 
     pub(super) fn process_key(&mut self, key: Key) -> Result<bool, String> {
+        if self.process_control(key) {
+            return Ok(false);
+        }
         let Some(panel) = &mut self.state.processes else {
             return Ok(false);
         };
@@ -273,6 +314,9 @@ impl App {
         let Some(panel) = &mut self.state.processes else {
             return;
         };
+        if panel.confirm_stop.is_some() {
+            return;
+        }
         if panel.logs.is_some() {
             self.scroll_logs(amount.into());
         } else if amount < 0 {
@@ -412,6 +456,7 @@ fn follow(observer: &Observer, logs: &mut Logs) -> bool {
     }
 }
 
+mod control;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]

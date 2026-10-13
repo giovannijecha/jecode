@@ -68,7 +68,7 @@ impl Registry {
         Arc::clone(&self.scope.lock().unwrap())
     }
 
-    /// A read-only handle that never extends the conversation's processes.
+    /// A local handle that never extends the conversation's processes.
     pub(super) fn observer(&self, redactor: crate::redact::Redactor) -> Observer {
         Observer::new(Arc::downgrade(&self.scope.lock().unwrap()), redactor)
     }

@@ -4,7 +4,7 @@ impl App {
     pub(super) fn input(&mut self, decoded: Decoded) -> Result<bool, String> {
         let decoded = match decoded {
             // Terminals deliver a file drop as a paste of its paths.
-            // The process viewer is read-only; typed and pasted text never reaches the hidden draft.
+            // The process panel keeps typed and pasted text out of the hidden draft.
             Decoded::Text(_) | Decoded::Paste(_) if self.state.processes.is_some() => {
                 return Ok(false);
             }

@@ -37,15 +37,17 @@ fn open_output(app: &mut App, output: &str) {
         end: output.len() as u64,
         length: output.len() as u64,
     });
-    let mut panel = Panel::new(vec![Process {
+    let process = Process {
         id: "process-example".into(),
         command: "example".into(),
         status: "exited",
         exit_code: Some(0),
         error: None,
-    }]);
+    };
+    let mut panel = Panel::new(vec![]);
     panel.logs = Some(Logs {
         id: "process-example".into(),
+        process: Some(process),
         stream: 0,
         views: [stream, Stream::default()],
     });

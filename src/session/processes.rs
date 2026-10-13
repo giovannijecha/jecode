@@ -1,13 +1,27 @@
-//! Plain-chat `/terminal`: a local snapshot of this conversation's processes.
-//! It reads through the observer, so the model's next poll is unchanged.
+//! Plain-chat `/terminal`: local inspection and stop control for this conversation.
+//! It uses the observer, so the model's next poll is unchanged.
 
 use crate::agent::Agent;
+use crate::session::commands::terminal_stop_id;
 use crate::tools::processes::{Observer, Process, Window};
 use std::io::Write;
 
 pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> Result<(), String> {
     let observer = agent.processes();
-    let text = if arguments.is_empty() {
+    let text = if let Some(id) = terminal_stop_id(arguments) {
+        if id.is_empty() {
+            return Err("Usage: /terminal stop PROCESS_ID".into());
+        }
+        let process = observer.request_stop(id)?;
+        if process.active() {
+            format!(
+                "Stop requested for {}; awaiting final status.\n",
+                process.id
+            )
+        } else {
+            format!("{} · {}\n", process.id, process.label())
+        }
+    } else if arguments.is_empty() {
         list(&observer)
     } else {
         details(&observer, arguments)?
@@ -16,25 +30,24 @@ pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> 
 }
 
 fn list(observer: &Observer) -> String {
-    let processes = observer.processes().unwrap_or_default();
+    let processes: Vec<_> = observer
+        .processes()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(Process::active)
+        .collect();
     if processes.is_empty() {
-        return "No persistent processes in this conversation.\n".into();
+        return "No active background processes in this conversation.\n".into();
     }
-    let width = processes
-        .iter()
-        .map(|process| process.label().len())
-        .max()
-        .unwrap_or(0);
-    let mut text = format!("Persistent processes ({}):\n", processes.len());
+    let mut text = format!("Active background processes ({}):\n", processes.len());
     for process in &processes {
         text.push_str(&format!(
-            "  {}  {:width$}  {}\n",
+            "  {}  running  {}\n",
             process.id,
-            process.label(),
             single_line(&process.command)
         ));
     }
-    text.push_str("Use /terminal PROCESS_ID to show saved output.\n");
+    text.push_str("Use /terminal PROCESS_ID to show saved output, or /terminal stop PROCESS_ID to stop one.\n");
     text
 }
 

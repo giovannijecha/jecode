@@ -86,7 +86,7 @@ impl Tools {
         self.processes.stop_all();
     }
 
-    /// A read-only view of the current conversation's processes.
+    /// Local inspection and stop control for the current conversation's processes.
     pub fn observe_processes(&self, redactor: crate::redact::Redactor) -> processes::Observer {
         self.processes.observer(redactor)
     }

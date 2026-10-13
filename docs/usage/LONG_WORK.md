@@ -145,8 +145,8 @@ boundary, belong to the conversation runtime rather than a turn, and end with
 session; they are never restarted on resume. Stopping a turn interrupts only a
 wait, not an earlier persistent process. A running tool card shows `▶` and
 `running in background`; Jecode does not wake the model when a process changes.
-`/terminal` shows their current status and saved output to you, read-only and
-without involving the model. See
+`/terminal` lists active background processes, shows their saved output and
+lets you request a stop without involving the model. See
 [Persistent processes](TOOLS.md#persistent-processes).
 
 If saving output or confirming process cleanup fails after a command has started,

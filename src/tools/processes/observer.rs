@@ -1,4 +1,4 @@
-//! Read-only access to one conversation's processes for the user.
+//! Local inspection and stop control for one conversation's processes.
 //!
 //! Reads take caller-supplied byte windows over the saved, credential-masked
 //! streams, so they never advance the cursors behind the model's results.
@@ -87,6 +87,26 @@ impl Observer {
         let mut processes: Vec<_> = entries.iter().map(|entry| self.process(entry)).collect();
         processes.sort_by_key(|process| !process.active());
         Some(processes)
+    }
+
+    /// Requests a stop without waiting for supervision or reading model output.
+    /// A finished process returns its final state unchanged.
+    pub fn request_stop(&self, id: &str) -> Result<Process, String> {
+        let scope = self.scope.upgrade().ok_or(ENDED)?;
+        let entry = scope
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned()
+            .ok_or_else(|| {
+                self.redactor.text(&format!(
+                    "No process {id} belongs to this conversation runtime"
+                ))
+            })?;
+        entry.stop.cancel();
+        Ok(self.process(&entry))
     }
 
     /// Reads `window` of stream 0 (stdout) or 1 (stderr).

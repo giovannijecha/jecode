@@ -46,7 +46,7 @@ pub const COMMANDS: [Command; 12] = [
     },
     Command {
         name: "/terminal",
-        description: "Inspect this conversation's persistent processes and their output",
+        description: "Inspect or stop this conversation's background processes",
     },
     Command {
         name: "/drafts",
@@ -54,9 +54,19 @@ pub const COMMANDS: [Command; 12] = [
     },
 ];
 
-pub const HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands and keyboard controls\n/copy         Choose response, code or quote to copy\n/attach PATH  Attach files to the draft; dropped files attach too\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/terminal [ID] Inspect persistent processes and their saved output\n/drafts       Edit or discard pending drafts in the terminal interface\n/exit         Quit\n\nEnter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Cancel active work and quit\nCtrl+D        In /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
+pub const HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands and keyboard controls\n/copy         Choose response, code or quote to copy\n/attach PATH  Attach files to the draft; dropped files attach too\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/terminal [ID] Inspect active processes or saved output by ID\n/drafts       Edit or discard pending drafts in the terminal interface\n/exit         Quit\n\nEnter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Cancel active work and quit\nCtrl+D        In /terminal, mark stop; in /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
 
-pub const PLAIN_HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands\n/copy         Choose response, code or quote to copy\n/attach PATH  Attach files to the next message\n/attach --clear Discard staged files without sending\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/terminal [ID] List persistent processes, or show one process's saved output\n/exit         Quit\n\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
+pub const PLAIN_HELP: &str = "/new          Start a new conversation\n/resume [ID]  Resume or delete a conversation in this folder\n/model [ID]   Choose the model for this conversation\n/effort [NAME] Choose the reasoning effort\n/settings     Change saved defaults and the key\n/help         Show commands\n/copy         Choose response, code or quote to copy\n/attach PATH  Attach files to the next message\n/attach --clear Discard staged files without sending\n/export       Save this conversation as JSON in the working directory\n/tmp [clean]  Show temporary files, or explicitly clear this session's area\n/terminal [ID] List active processes, or show saved output by ID\n/terminal stop ID Request a stop for a background process\n/exit         Quit\n\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
+/// Returns the ID after a local `/terminal stop ID` action, including an empty
+/// ID when `stop` was supplied without an argument.
+pub fn terminal_stop_id(arguments: &str) -> Option<&str> {
+    let mut parts = arguments.trim().splitn(2, char::is_whitespace);
+    parts
+        .next()
+        .filter(|action| action.eq_ignore_ascii_case("stop"))
+        .map(|_| parts.next().unwrap_or("").trim())
+}
+
 #[derive(Clone, Debug)]
 pub struct Match {
     pub index: usize,
@@ -146,5 +156,15 @@ mod tests {
         assert_eq!(COMMANDS[suggestions("/mdl")[0].index].name, "/model");
         assert!(suggestions("/nonsense").is_empty());
         assert!(unknown("/modle").contains("/model"));
+    }
+
+    #[test]
+    fn terminal_stop_parser_preserves_the_remaining_id() {
+        assert_eq!(terminal_stop_id("stop process-1"), Some("process-1"));
+        assert_eq!(terminal_stop_id(" STOP \t process-1  "), Some("process-1"));
+        assert_eq!(terminal_stop_id("stop"), Some(""));
+        assert_eq!(terminal_stop_id("stop  "), Some(""));
+        assert_eq!(terminal_stop_id("stopping process-1"), None);
+        assert_eq!(terminal_stop_id("process-1"), None);
     }
 }

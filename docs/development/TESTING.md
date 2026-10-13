@@ -92,13 +92,19 @@ Intel and Apple Silicon macOS passed all-target compilation and Clippy checks;
 macOS linking and native execution were not run.
 
 Observer fixtures verify independent read cursors, bounded UTF-8 windows,
-credential masking across page boundaries and key changes, and invalidation
-without extending process lifetime. `/terminal` fixtures cover opening while
+credential masking across page boundaries and key changes, stop requests that
+terminate descendants without cancelling another process, idempotent
+finished IDs, masked unknown IDs, and invalidation without extending process
+lifetime. `/terminal` fixtures cover opening while
 the worker owns the agent, selection by process identity, separate streams,
 paused reading through pagination and resize, follow mode with incomplete
 UTF-8, narrow rendering, draft and queue preservation, and session changes.
-Plain-chat snapshots neutralize control characters and leave model output
-cursors untouched.
+Stop controls check confirmation and cancellation without cancelling a live turn, paused
+reading, final logs after removal from the list, and a target that exits while
+confirmation is open without stopping the next selected process.
+Plain-chat snapshots neutralize control characters, list active processes only,
+and leave model output cursors untouched. Plain-chat stop requests leave model
+history unchanged and keep saved output available for later polls.
 
 ## Native terminal checks
 

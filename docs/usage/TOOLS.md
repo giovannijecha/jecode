@@ -148,28 +148,31 @@ Resume never restarts commands: earlier IDs return an error that points to
 Jecode does not wake the model when a process changes; the model polls when it
 needs the state.
 
-### Viewing processes
+### Viewing and stopping processes
 
-`/terminal` lets you inspect the same processes without involving the model.
-It is read-only: it cannot start, stop or send input to a process, and it never
-calls `process poll`, so the model's next result still begins at its own
-cursor. Output comes from the same credential-masked files, read in bounded
-windows of at most 64 KiB each.
+`/terminal` lets you inspect and stop this conversation's background processes
+without involving the model. Inspection and stop requests never call `process
+poll`, so the model's next result still begins at its own cursor. Output comes
+from the same credential-masked files, read in bounded windows of at most 64 KiB
+each. A stop request returns immediately; the process stays in the active list
+with a running badge until supervision confirms its final outcome.
 
 In the TUI, `/terminal` opens a panel immediately, even while the model works,
-listing active processes first, then finished ones, with their command, status
-and exit code. Enter opens the selected process's output; Tab switches between
-Output (stdout) and Errors (stderr), which are separate saved streams. The view
+listing active processes. Enter opens the selected process's output; Tab switches
+between Output (stdout) and Errors (stderr), which are separate saved streams. The view
 follows new output at the bottom; scrolling up pauses it at that position and
-loads older output as needed, and End resumes following. Esc returns from the
-output to the list and closes the list; Ctrl+C does the same and never stops the
-process. `/terminal ID` opens one process's output directly. Finished processes
-remain viewable until the conversation ends; switching conversations closes the
-panel.
+loads older output as needed, and End resumes following. Ctrl+D marks the
+selected process to stop; Enter confirms. Esc or Ctrl+C cancels that mark or
+closes the panel. Neither key stops a process on its own. `/terminal ID` opens
+one process's output directly, including a finished process. Finished processes
+remain inspectable by ID until the conversation ends; switching conversations
+closes the panel. `/terminal stop ID` requests the same stop directly.
 
-In plain chat, `/terminal` prints the process list and `/terminal ID` prints a
-process's status with the last 64 KiB of each saved stream. Neither adds
-anything to the conversation or its history.
+In plain chat, `/terminal` lists only active processes, `/terminal ID` prints
+any known process's status with the last 64 KiB of each saved stream, and
+`/terminal stop ID` requests a stop and reports whether it is pending or already
+finished. These local actions add nothing to the model conversation or its
+history.
 
 ## Long-running turns
 

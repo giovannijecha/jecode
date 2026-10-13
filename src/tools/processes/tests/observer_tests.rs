@@ -14,6 +14,61 @@ fn listed(observer: &Observer, id: &str) -> Process {
 }
 
 #[test]
+fn local_stop_terminates_only_its_process_and_keeps_model_output_unread() {
+    let directory = Directory::new();
+    let tools = tools(&directory, Redactor::empty());
+    let observer = observer(&tools);
+    let (id, first) = start(&tools, HEARTBEAT);
+    let (other, other_first) = start(&tools, &format!("printf 'other\\n'; {}", gate("other_go")));
+    wait_for(|| {
+        observer.read(&id, 0, Window::Tail).unwrap().text == "ready\n"
+            && observer.read(&other, 0, Window::Tail).unwrap().text == "other\n"
+            && directory.path().join("heartbeat").exists()
+    });
+    let started = Instant::now();
+    let immediate = observer.request_stop(&id).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(immediate.id, id);
+    assert!(matches!(immediate.status, "stopping" | "stopped"));
+    assert!(listed(&observer, &other).active());
+    wait_for(|| listed(&observer, &id).status == "stopped");
+    assert!(heartbeat_stopped(&directory));
+    assert_eq!(observer.request_stop(&id).unwrap().status, "stopped");
+    let polled = process(&tools, "poll", &id, None);
+    assert_eq!(text(&first, "stdout") + &text(&polled, "stdout"), "ready\n");
+    assert_eq!(
+        number(&polled, "stdout_offset"),
+        number(&first, "stdout_next_offset")
+    );
+    assert_eq!(observer.read(&id, 0, Window::Tail).unwrap().text, "ready\n");
+    assert_eq!(listed(&observer, &other).status, "running");
+    release(&directory, "other_go");
+    wait_for(|| listed(&observer, &other).status == "exited");
+    let other_poll = process(&tools, "poll", &other, None);
+    assert_eq!(
+        text(&other_first, "stdout") + &text(&other_poll, "stdout"),
+        "other\n"
+    );
+}
+
+#[test]
+fn local_stop_masks_bad_ids_and_rejects_stale_scope() {
+    let directory = Directory::new();
+    let tools = tools(&directory, Redactor::empty());
+    let observer = tools.observe_processes(Redactor::new("fixture-secret-value".into()));
+    let finished = bash(&tools, "true", &[("wait_ms", Value::number(10_000))]);
+    let id = text(&finished, "process_id");
+    assert_eq!(observer.request_stop(&id).unwrap().label(), "exited 0");
+    let unknown = observer.request_stop("fixture-secret-value").unwrap_err();
+    assert!(unknown.contains("[redacted]"), "{unknown}");
+    assert!(!unknown.contains("fixture-secret-value"));
+    tools.stop_processes();
+    assert!(observer.request_stop(&id).unwrap_err().contains("ended"));
+    let next = tools.observe_processes(Redactor::empty());
+    assert!(next.request_stop(&id).is_err());
+}
+
+#[test]
 fn viewing_output_leaves_the_models_next_poll_unchanged() {
     let directory = Directory::new();
     let tools = tools(&directory, Redactor::empty());

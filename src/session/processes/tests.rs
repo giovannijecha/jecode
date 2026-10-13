@@ -49,11 +49,12 @@ fn plain_terminal_prints_locally_without_consuming_model_output() {
     );
     assert_eq!(
         printed(&agent, ""),
-        "No persistent processes in this conversation.\n"
+        "No active background processes in this conversation.\n"
     );
     turn(&mut agent, &launch, "Start");
     let observer = agent.processes();
     let id = observer.processes().unwrap()[0].id.clone();
+    assert!(printed(&agent, "").contains(&id));
     std::fs::write(directory.path().join("go"), "").unwrap();
     let started = Instant::now();
     while observer.processes().unwrap()[0].active() {
@@ -63,10 +64,9 @@ fn plain_terminal_prints_locally_without_consuming_model_output() {
     let messages = agent.archive().messages.lock().unwrap().len();
     let events = agent.archive().events.lock().unwrap().len();
 
-    let list = printed(&agent, "");
-    assert!(
-        list.contains(&format!("{id}  exited 4  until [ -e go ]")),
-        "{list}"
+    assert_eq!(
+        printed(&agent, ""),
+        "No active background processes in this conversation.\n"
     );
     let details = printed(&agent, &id);
     assert!(
@@ -123,5 +123,125 @@ fn plain_terminal_prints_locally_without_consuming_model_output() {
     assert_eq!(
         result.get("stdout_offset").and_then(Value::as_usize),
         Some(0)
+    );
+}
+
+#[test]
+fn plain_terminal_requests_stop_without_touching_history_or_poll_cursor() {
+    let directory = Directory::new();
+    let launch = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "bash-1",
+                    "bash",
+                    Value::object([
+                        (
+                            "command",
+                            Value::string(
+                                "printf 'ready\\n'; until [ -e go ]; do sleep 0.02; done",
+                            ),
+                        ),
+                        ("wait_ms", Value::number(0)),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("Started.", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(launch.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    turn(&mut agent, &launch, "Start");
+    let first = agent
+        .archive()
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|message| message.get("tool_call_id").and_then(Value::as_str) == Some("bash-1"))
+        .and_then(|message| message.get("content").and_then(Value::as_str))
+        .map(|content| crate::json::parse(content).unwrap())
+        .unwrap();
+    let observer = agent.processes();
+    let id = observer.processes().unwrap()[0].id.clone();
+    let started = Instant::now();
+    while observer.read(&id, 0, Window::Tail).unwrap().text != "ready\n" {
+        assert!(started.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let messages = agent.archive().messages.lock().unwrap().len();
+    let events = agent.archive().events.lock().unwrap().len();
+    let current = printed(&agent, &format!("STOP {id}"));
+    assert!(
+        current == format!("Stop requested for {id}; awaiting final status.\n")
+            || current == format!("{id} · stopped\n"),
+        "{current}"
+    );
+    let list = printed(&agent, "");
+    assert!(
+        list.contains(&format!("{id}  running"))
+            || list == "No active background processes in this conversation.\n",
+        "{list}"
+    );
+    assert!(!list.contains("stopping"), "{list}");
+    assert!(!agent.cancellation().requested());
+    assert_eq!(agent.archive().messages.lock().unwrap().len(), messages);
+    assert_eq!(agent.archive().events.lock().unwrap().len(), events);
+    assert_eq!(
+        print(&agent, "stop", &mut Vec::new()).unwrap_err(),
+        "Usage: /terminal stop PROCESS_ID"
+    );
+    while observer.processes().unwrap()[0].active() {
+        assert!(started.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        printed(&agent, ""),
+        "No active background processes in this conversation.\n"
+    );
+    assert!(printed(&agent, &id).contains("Output:\nready\n"));
+    assert_eq!(launch.finish().len(), 2);
+    let poll = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "poll-1",
+                    "process",
+                    Value::object([
+                        ("action", Value::string("poll")),
+                        ("process_id", Value::string(&id)),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("Polled.", vec![])),
+    ]);
+    turn(&mut agent, &poll, "Poll");
+    let result = agent
+        .archive()
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|message| message.get("tool_call_id").and_then(Value::as_str) == Some("poll-1"))
+        .and_then(|message| message.get("content").and_then(Value::as_str))
+        .map(|content| crate::json::parse(content).unwrap())
+        .unwrap();
+    let collected = first
+        .get("stdout")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+        + result.get("stdout").and_then(Value::as_str).unwrap_or("");
+    assert_eq!(collected, "ready\n");
+    assert_eq!(
+        result.get("stdout_offset").and_then(Value::as_usize),
+        first.get("stdout_next_offset").and_then(Value::as_usize)
     );
 }

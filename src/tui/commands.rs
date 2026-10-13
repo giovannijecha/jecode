@@ -51,7 +51,11 @@ impl App {
             ),
             (
                 "/terminal [ID]".into(),
-                "Enter output · Tab Output/Errors · End follows · Esc returns".into(),
+                "Enter output · Tab Output/Errors · End follows · Ctrl+D stop · Esc returns".into(),
+            ),
+            (
+                "Ctrl+D in /terminal".into(),
+                "Mark a process to stop · Enter confirms · Esc or Ctrl+C cancels".into(),
             ),
             (
                 "Ctrl+D in /resume or /drafts".into(),
