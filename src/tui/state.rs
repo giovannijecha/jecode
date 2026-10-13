@@ -80,6 +80,7 @@ pub struct State {
     pub copy_notice: Option<Feedback>,
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
+    pub processes: Option<super::processes::Panel>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -102,6 +103,7 @@ impl Default for State {
             copy_notice: None,
             information: None,
             selector: None,
+            processes: None,
         }
     }
 }
@@ -285,6 +287,7 @@ impl State {
         self.clear_notice();
         self.clear_copy_notice();
         self.information = None;
+        self.processes = None;
     }
     pub fn settled_len(&self) -> usize {
         self.items

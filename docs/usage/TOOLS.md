@@ -148,6 +148,29 @@ Resume never restarts commands: earlier IDs return an error that points to
 Jecode does not wake the model when a process changes; the model polls when it
 needs the state.
 
+### Viewing processes
+
+`/terminal` lets you inspect the same processes without involving the model.
+It is read-only: it cannot start, stop or send input to a process, and it never
+calls `process poll`, so the model's next result still begins at its own
+cursor. Output comes from the same credential-masked files, read in bounded
+windows of at most 64 KiB each.
+
+In the TUI, `/terminal` opens a panel immediately, even while the model works,
+listing active processes first, then finished ones, with their command, status
+and exit code. Enter opens the selected process's output; Tab switches between
+Output (stdout) and Errors (stderr), which are separate saved streams. The view
+follows new output at the bottom; scrolling up pauses it at that position and
+loads older output as needed, and End resumes following. Esc returns from the
+output to the list and closes the list; Ctrl+C does the same and never stops the
+process. `/terminal ID` opens one process's output directly. Finished processes
+remain viewable until the conversation ends; switching conversations closes the
+panel.
+
+In plain chat, `/terminal` prints the process list and `/terminal ID` prints a
+process's status with the last 64 KiB of each saved stream. Neither adds
+anything to the conversation or its history.
+
 ## Long-running turns
 
 There is no fixed turn duration, model-request count or tool-batch count. The model

@@ -103,13 +103,14 @@ directory/model/effort footer appear inside this panel.
 
 Without whitespace, the panel shows up to six command suggestions:
 `/new`, `/resume`, `/drafts`, `/model`, `/effort`, `/settings`,
-`/help`, `/copy`, `/export`, `/tmp`.
+`/help`, `/copy`, `/export`, `/tmp`, `/terminal`.
 Matching is case-insensitive; contiguous matches rank before scattered letters.
 
 Up/Down moves selection. Tab completes the command. Enter executes the selected
-command when idle; while working it queues the draft as written, except `/copy`
-and `/drafts`, which open immediately. Esc dismisses the panel without clearing
-text or moving the draft caret, including during work; editing can reopen it.
+command when idle; while working it queues the draft as written, except `/copy`,
+`/drafts` and `/terminal`, which open immediately. Esc dismisses the panel
+without clearing text or moving the draft caret, including during work; editing
+can reopen it.
 Adding whitespace closes suggestions while retaining command input in the panel.
 Unknown commands produce local
 errors and, for nearby misspellings, a correction suggestion. They never reach
@@ -171,6 +172,16 @@ Narrow panels use compact keyboard hints; `↵` means Enter and `^D` means Ctrl+
   in a temporary information panel.
   `/tmp clean` clears that area only when ready; it queues during generation.
   Drafts, project files, saved output and conversation history are retained.
+- `/terminal [ID]` opens a read-only process panel immediately, even during a
+  turn: active processes first, then finished ones, with command, status and
+  exit code. Up/Down, Page Up/Down, Home/End and the wheel select a process;
+  Enter opens its output. In the output, Tab switches between Output and
+  Errors, scrolling up pauses following at that position and End resumes it.
+  Esc or Ctrl+C returns to the list, then closes the panel; neither stops the
+  process. Typing is ignored while the panel is open, and the draft, queue,
+  prompt history and conversation position stay as they were. The panel
+  refreshes four times a second and closes when the conversation changes. See
+  [Viewing processes](../usage/TOOLS.md#viewing-processes).
 - Local commands never add UI feedback to the transcript. Plain mode retains
   its command output.
 
@@ -271,6 +282,7 @@ disappears after completion or cleanup.
 | File drop, `/attach PATH...` | Attach files at the caret. See [ATTACHMENTS.md](../usage/ATTACHMENTS.md). |
 | Ctrl+D in `/drafts` | Mark only the selected draft for discard; Enter confirms, Esc cancels. |
 | Ctrl+S in `/drafts` | Explicitly send or queue a paused draft from the list or its editor. |
+| `/terminal [ID]` | Open the read-only process panel, including during work; Tab switches Output/Errors, End follows. |
 | Esc | Cancel a draft edit or close a panel first; while reading normally, return to the bottom; otherwise stop work. |
 | Ctrl+C | Cancel a draft edit or close a panel; otherwise stop work or clear a draft. Never exit. |
 | Ctrl+Q | Official exit shortcut: cancel and clean up active work, save input, then quit. |

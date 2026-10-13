@@ -7,17 +7,53 @@ pub struct Redactor {
 }
 
 impl Redactor {
+    fn patterns(&self) -> Vec<&[u8]> {
+        self.secrets
+            .iter()
+            .flat_map(|(raw, escaped)| [raw.as_bytes(), escaped.as_bytes()])
+            .filter(|pattern| !pattern.is_empty())
+            .collect()
+    }
+
+    pub(crate) fn boundary_overlap(&self) -> Option<usize> {
+        self.patterns()
+            .iter()
+            .map(|pattern| pattern.len())
+            .max()
+            .map(|length| length - 1)
+    }
+
+    /// Masks matches that intersect a byte window. A match that began before
+    /// the window is omitted; its replacement belongs to the preceding page.
+    pub(crate) fn byte_window(&self, bytes: &[u8], start: usize, end: usize) -> Vec<u8> {
+        let patterns = self.patterns();
+        let mut result = Vec::new();
+        let mut index = 0;
+        while index < bytes.len() {
+            if let Some(pattern) = patterns
+                .iter()
+                .find(|pattern| bytes[index..].starts_with(pattern))
+            {
+                if (start..end).contains(&index) {
+                    result.extend_from_slice(b"[redacted]");
+                }
+                index += pattern.len();
+            } else {
+                if (start..end).contains(&index) {
+                    result.push(bytes[index]);
+                }
+                index += 1;
+            }
+        }
+        result
+    }
+
     pub fn empty() -> Self {
         Self { secrets: vec![] }
     }
 
     pub fn byte_prefix(&self, bytes: &[u8], finish: bool) -> (usize, Vec<u8>) {
-        let patterns: Vec<_> = self
-            .secrets
-            .iter()
-            .flat_map(|(raw, escaped)| [raw.as_bytes(), escaped.as_bytes()])
-            .filter(|pattern| !pattern.is_empty())
-            .collect();
+        let patterns = self.patterns();
         // Hold back only a trailing fragment that could still start a secret,
         // so live readers see every byte that can no longer be masked.
         let hold = if finish {

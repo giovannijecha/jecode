@@ -104,6 +104,7 @@ jecode setup
 | `/copy` | Choose the last completed response, a code block or a quote to copy. |
 | `/export` | Save the current conversation as JSON in the working directory. |
 | `/tmp [clean]` | Show session temporary files, or explicitly clear that area. |
+| `/terminal [ID]` | Inspect this conversation's persistent processes and their saved output, read-only. |
 | `/exit` | Quit after cancellation and cleanup of any active work. |
 
 `/clear` and `/setup` remain aliases for `/new` and `/settings`.

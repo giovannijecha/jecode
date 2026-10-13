@@ -239,7 +239,7 @@ fn cancelling_a_wait_preserves_the_process() {
     let launched = thread::scope(|scope| {
         // Interrupt only the wait: the process is registered once launched.
         scope.spawn(|| {
-            wait_for(|| !tools.processes.entries.lock().unwrap().is_empty());
+            wait_for(|| !tools.processes.scope().entries.lock().unwrap().is_empty());
             thread::sleep(Duration::from_millis(100));
             cancellation.cancel();
         });
@@ -454,3 +454,5 @@ fn foreground_bash_without_wait_keeps_its_result_shape() {
         Some(0)
     );
 }
+
+mod observer_tests;

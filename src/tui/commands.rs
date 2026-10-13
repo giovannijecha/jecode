@@ -50,6 +50,10 @@ impl App {
                 "Inspect tools · arrows select · Enter details · Esc returns".into(),
             ),
             (
+                "/terminal [ID]".into(),
+                "Enter output · Tab Output/Errors · End follows · Esc returns".into(),
+            ),
+            (
                 "Ctrl+D in /resume or /drafts".into(),
                 "Mark deletion · Enter confirms · Esc cancels".into(),
             ),
@@ -81,7 +85,7 @@ impl App {
         if (self.worker.is_none()
             || matches!(
                 self.state.suggestions.chosen(),
-                Some("/copy" | "/drafts" | "/attach")
+                Some("/copy" | "/drafts" | "/attach" | "/terminal")
             ))
             && self.state.suggestions.visible
             && prompt.attachments.is_empty()
@@ -117,6 +121,13 @@ impl App {
             self.capture_input();
             return Ok(false);
         }
+        if command && let Some(id) = terminal_arguments(&prompt.text) {
+            self.state.history.submitted(&mut self.state.editor);
+            self.edited();
+            self.capture_input();
+            self.open_processes(id);
+            return Ok(false);
+        }
         if self.worker.is_some() || self.deletion_job.is_some() {
             if let Err(error) = self.state.queue.push(prompt.clone()) {
                 self.warn(&error);
@@ -136,6 +147,10 @@ impl App {
         let command = prompt.attachments.is_empty() && prompt.text.trim_start().starts_with('/');
         if command && prompt.text.trim().eq_ignore_ascii_case("/drafts") {
             self.open_drafts();
+            return Ok(false);
+        }
+        if command && let Some(id) = terminal_arguments(&prompt.text) {
+            self.open_processes(id);
             return Ok(false);
         }
         if command && self.copy_command(&prompt.text) {
@@ -159,6 +174,7 @@ impl App {
             self.state
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());
+            self.process_observer = self.agent.as_ref().unwrap().processes();
             self.worker = Some(Worker::start(self.agent.take().unwrap(), prompt));
             self.state.status = "Starting...".into();
             return Ok(false);
@@ -372,4 +388,12 @@ fn attach_arguments(text: &str) -> Option<&str> {
     let text = text.trim_start();
     let (name, arguments) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
     name.eq_ignore_ascii_case("/attach").then_some(arguments)
+}
+
+/// The optional process ID of a `/terminal` command.
+fn terminal_arguments(text: &str) -> Option<&str> {
+    let text = text.trim();
+    let (name, arguments) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    name.eq_ignore_ascii_case("/terminal")
+        .then_some(arguments.trim())
 }

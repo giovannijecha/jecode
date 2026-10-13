@@ -1,6 +1,6 @@
 mod attachment;
 mod files;
-mod processes;
+pub mod processes;
 mod schema;
 mod shell;
 
@@ -84,6 +84,11 @@ impl Tools {
     /// Stops the persistent processes of the conversation that is ending.
     pub fn stop_processes(&self) {
         self.processes.stop_all();
+    }
+
+    /// A read-only view of the current conversation's processes.
+    pub fn observe_processes(&self, redactor: crate::redact::Redactor) -> processes::Observer {
+        self.processes.observer(redactor)
     }
 
     pub fn configure_temporary(&mut self, area: crate::scratch::Area) {

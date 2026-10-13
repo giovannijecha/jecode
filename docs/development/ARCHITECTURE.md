@@ -70,6 +70,12 @@ Modules stay around 500 lines or fewer and split by responsibility:
   cursors. `Tools::stop_processes` and the registry's `Drop` stop and join every
   process; the agent calls it before a successful session switch and before
   deleting the live session, so the runtime owns lifetime, not the renderers.
+  `tools/processes/observer.rs` gives `/terminal` a weak, read-only `Observer`
+  over that registry: it lists processes and reads bounded byte windows of the
+  saved streams without touching the cursors. Ending the conversation replaces
+  the registry's scope, so an observer can neither keep processes alive nor
+  see a later conversation's. `tui/processes.rs` keeps only the panel's own
+  read positions; `session/processes.rs` prints plain-chat snapshots.
   `tools/schema.rs` advertises meaningful numeric bounds, leaving read offsets
   without an artificial maximum; native argument parsing still validates them.
 

@@ -3,6 +3,7 @@ pub mod commands;
 mod copy;
 pub(crate) mod delete;
 mod persistence;
+mod processes;
 mod settings;
 pub(crate) mod temporary;
 pub use settings::SessionConfig;
@@ -102,6 +103,10 @@ fn chat_inner(
                 let previous = agent.sessions();
                 persistence::resume(agent, config, None, input, output, status)
                     .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
+            }
+            "/terminal" => processes::print(agent, "", output),
+            _ if line.starts_with("/terminal ") => {
+                processes::print(agent, line[10..].trim(), output)
             }
             "/tmp" => temporary::print(agent, "", output),
             _ if line.starts_with("/tmp ") => temporary::print(agent, line[5..].trim(), output),

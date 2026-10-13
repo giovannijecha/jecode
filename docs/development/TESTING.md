@@ -91,6 +91,15 @@ full suite passed on Windows `x86_64-pc-windows-gnullvm` and Linux
 Intel and Apple Silicon macOS passed all-target compilation and Clippy checks;
 macOS linking and native execution were not run.
 
+Observer fixtures verify independent read cursors, bounded UTF-8 windows,
+credential masking across page boundaries and key changes, and invalidation
+without extending process lifetime. `/terminal` fixtures cover opening while
+the worker owns the agent, selection by process identity, separate streams,
+paused reading through pagination and resize, follow mode with incomplete
+UTF-8, narrow rendering, draft and queue preservation, and session changes.
+Plain-chat snapshots neutralize control characters and leave model output
+cursors untouched.
+
 ## Native terminal checks
 
 The native Linux PTY fixture needs the system-provided util-linux `script` tool

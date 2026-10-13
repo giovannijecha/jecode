@@ -4,6 +4,10 @@ impl App {
     pub(super) fn input(&mut self, decoded: Decoded) -> Result<bool, String> {
         let decoded = match decoded {
             // Terminals deliver a file drop as a paste of its paths.
+            // The process viewer is read-only; typed and pasted text never reaches the hidden draft.
+            Decoded::Text(_) | Decoded::Paste(_) if self.state.processes.is_some() => {
+                return Ok(false);
+            }
             Decoded::Paste(text) => {
                 if self.state.selector.is_none()
                     && self.deletion_job.is_none()
@@ -90,6 +94,9 @@ impl App {
                 super::viewport::Scroll::End
             });
             return Ok(false);
+        }
+        if self.state.processes.is_some() {
+            return self.process_key(key);
         }
         if self.state.information.is_some() {
             if key.code == 27
@@ -238,7 +245,9 @@ impl App {
         if self.deletion_job.is_some() {
             return;
         }
-        if self.state.information.is_some() {
+        if self.state.processes.is_some() {
+            self.process_scroll(amount);
+        } else if self.state.information.is_some() {
             for _ in 0..amount.unsigned_abs().min(30) {
                 super::view::scroll_information(&mut self.state, if amount < 0 { 38 } else { 40 });
             }

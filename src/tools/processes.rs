@@ -4,6 +4,7 @@
 //! monitor thread owns it until completion, the execution timeout or a stop.
 //! Results read the saved, credential-masked streams from per-process
 //! cursors, so every byte is either returned or identified for `read`.
+//! An [`Observer`] reads the same streams without touching those cursors.
 
 use super::{OUTPUT_LIMIT, required_string};
 use crate::cancel::Cancellation;
@@ -17,10 +18,21 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+mod observer;
+#[cfg(test)]
+use observer::read_window;
+pub use observer::{Observer, Page, Process, Window};
+
 const STOP_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
 pub(super) struct Registry {
+    // Replaced when the conversation ends, so observers never see a later one.
+    scope: Mutex<Arc<Scope>>,
+}
+
+#[derive(Default)]
+struct Scope {
     entries: Mutex<Vec<Arc<Entry>>>,
 }
 
@@ -52,6 +64,15 @@ struct Outcome {
 }
 
 impl Registry {
+    fn scope(&self) -> Arc<Scope> {
+        Arc::clone(&self.scope.lock().unwrap())
+    }
+
+    /// A read-only handle that never extends the conversation's processes.
+    pub(super) fn observer(&self, redactor: crate::redact::Redactor) -> Observer {
+        Observer::new(Arc::downgrade(&self.scope.lock().unwrap()), redactor)
+    }
+
     /// Adopts a launched process, then waits up to `wait` for completion.
     pub(super) fn adopt(
         &self,
@@ -72,7 +93,11 @@ impl Registry {
             monitor: Mutex::new(None),
         });
         // Register before waiting so an interrupted wait leaves a discoverable process.
-        self.entries.lock().unwrap().push(Arc::clone(&entry));
+        self.scope()
+            .entries
+            .lock()
+            .unwrap()
+            .push(Arc::clone(&entry));
         let owner = Arc::clone(&entry);
         let monitor = thread::spawn(move || {
             let result = started.supervise(timeout, &owner.stop, &mut |_| Ok(()));
@@ -98,6 +123,7 @@ impl Registry {
         }
         let id = required_string(arguments, "process_id")?;
         let entry = self
+            .scope()
             .entries
             .lock()
             .unwrap()
@@ -120,7 +146,8 @@ impl Registry {
     }
 
     fn list(&self) -> Value {
-        let entries = self.entries.lock().unwrap();
+        let scope = self.scope();
+        let entries = scope.entries.lock().unwrap();
         Value::object([(
             "processes",
             Value::Array(
@@ -142,7 +169,8 @@ impl Registry {
 
     /// Stops every owned process and forgets them; used when the conversation ends.
     pub(super) fn stop_all(&self) {
-        let entries = std::mem::take(&mut *self.entries.lock().unwrap());
+        let scope = std::mem::take(&mut *self.scope.lock().unwrap());
+        let entries = std::mem::take(&mut *scope.entries.lock().unwrap());
         for entry in &entries {
             entry.stop.cancel();
         }
@@ -183,15 +211,18 @@ impl Entry {
         false
     }
 
-    fn status(&self, state: &State) -> BTreeMap<String, Value> {
-        let mut fields = BTreeMap::new();
-        fields.insert("process_id".into(), Value::string(&self.id));
-        let status = match &state.outcome {
+    fn status_name(&self, state: &State) -> &'static str {
+        match &state.outcome {
             Some(outcome) => outcome.status,
             None if self.stop.requested() => "stopping",
             None => "running",
-        };
-        fields.insert("status".into(), Value::string(status));
+        }
+    }
+
+    fn status(&self, state: &State) -> BTreeMap<String, Value> {
+        let mut fields = BTreeMap::new();
+        fields.insert("process_id".into(), Value::string(&self.id));
+        fields.insert("status".into(), Value::string(self.status_name(state)));
         if let Some(outcome) = &state.outcome {
             if outcome.status == "exited" {
                 fields.insert(

@@ -18,6 +18,7 @@ mod line;
 mod markdown;
 mod persistence;
 mod poll;
+mod processes;
 mod render;
 mod resize;
 mod selector;
@@ -66,6 +67,8 @@ struct App {
     deletion_job: Option<delete::Job>,
     imports: Vec<attach::Import>,
     settings_parent: Option<selector::Setting>,
+    /// Reads the current conversation's processes, including while a worker owns the agent.
+    process_observer: crate::tools::processes::Observer,
     #[cfg(test)]
     copied_text: Option<String>,
     #[cfg(test)]
@@ -83,6 +86,7 @@ impl App {
         let persistence = agent.sessions();
         let mut app = Self {
             archive: agent.archive(),
+            process_observer: agent.processes(),
             agent: Some(agent),
             worker: None,
             config,
@@ -189,6 +193,8 @@ fn run_inner(
                 .feedback_wait(now, app.renderer.wait(&app.state, now));
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
+            } else if app.state.processes.is_some() {
+                delay.min(processes::REFRESH)
             } else {
                 delay
             }
