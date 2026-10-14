@@ -179,6 +179,12 @@ Tests use isolated fixtures and synthetic credentials. See
 [development and testing](docs/development/TESTING.md) for platform coverage and
 native/manual checks.
 
+GitHub Actions runs Windows and Linux checks on the maintainer's local runners.
+macOS build and tests remain on GitHub's standard hosted runner. Required check
+names and the full platform matrix are preserved. Local jobs use fresh checkouts
+and one-job credentials; the host pre-job policy rejects fork code before steps.
+Local checks queue while the maintainer's PC is offline.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
