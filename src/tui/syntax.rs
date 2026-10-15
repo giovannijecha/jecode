@@ -19,6 +19,7 @@ enum Mode {
 }
 
 // A display lexer, not a parser. Unsupported languages remain ordinary text.
+#[derive(Clone)]
 pub struct Highlighter {
     language: Option<Language>,
     mode: Mode,

@@ -124,3 +124,91 @@ fn local_navigation_keeps_sequences_whole_near_the_end_of_a_large_draft() {
     }
     assert_eq!(editor.cursor, prefix);
 }
+
+fn assert_fresh_layout(editor: &Editor, width: usize) {
+    let labels = editor
+        .attachments
+        .iter()
+        .enumerate()
+        .map(|(index, attachment)| attachment.label(index + 1))
+        .collect::<Vec<_>>();
+    let expected = Layout::new(&editor.text, editor.cursor, width, &labels);
+    let actual = editor.layout(width);
+    assert_eq!(actual.cursor, expected.cursor);
+    assert_eq!(actual.rows.len(), expected.rows.len());
+    for (actual, expected) in actual.rows.iter().zip(&expected.rows) {
+        assert_eq!(actual.text, expected.text);
+        assert_eq!(actual.positions, expected.positions);
+        assert_eq!(actual.labels, expected.labels);
+    }
+}
+
+#[test]
+fn cached_layout_preserves_wrapping_after_edits_and_joined_glyphs() {
+    let mut editor = Editor::default();
+    for width in [4, 5, 12, 31] {
+        editor.replace(String::new());
+        for fragment in [
+            "abcd",
+            "e",
+            "\u{301}",
+            "\u{1f469}",
+            "\u{200d}",
+            "\u{1f4bb}",
+            "\n",
+            "\u{1f1ee}",
+            "\u{1f1f9}",
+            "\t",
+            "tail",
+        ] {
+            editor.insert(fragment);
+            assert_fresh_layout(&editor, width);
+        }
+        for _ in 0..8 {
+            editor.key(key(37, 0));
+            editor.key(key(8, 0));
+            assert_fresh_layout(&editor, width);
+        }
+        editor.cursor = 0;
+        editor.insert("start\n");
+        assert_fresh_layout(&editor, width);
+        editor.key(key(46, 4));
+        assert_fresh_layout(&editor, width);
+        editor.key(key(35, 4));
+        assert_fresh_layout(&editor, width);
+    }
+}
+
+#[test]
+fn cached_layout_tracks_attachment_labels_public_text_changes_and_cursor_moves() {
+    let mut editor = Editor::default();
+    editor.insert("prefix ");
+    editor.attach(Attachment {
+        id: "fixture".into(),
+        name: "old.txt".into(),
+        media: "text/plain".into(),
+        size: 0,
+        width: None,
+        height: None,
+        pages: None,
+    });
+    editor.insert(" tail");
+    assert_fresh_layout(&editor, 15);
+    editor.attachments[0].name = "renamed.txt".into();
+    assert_fresh_layout(&editor, 15);
+    editor.text.insert_str(0, "\x1b\t\r\n");
+    editor.cursor = editor.text.len();
+    assert_fresh_layout(&editor, 15);
+    for cursor in editor
+        .text
+        .char_indices()
+        .map(|(byte, _)| byte)
+        .collect::<Vec<_>>()
+    {
+        editor.cursor = cursor;
+        assert_fresh_layout(&editor, 15);
+    }
+    let clone = editor.clone();
+    assert_eq!(clone, editor);
+    assert_fresh_layout(&clone, 15);
+}

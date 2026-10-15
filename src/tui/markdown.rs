@@ -8,6 +8,7 @@ use super::{
     theme::{BODY, CODE_BACKGROUND, EMPHASIS, MUTED},
 };
 
+#[derive(Clone)]
 struct Fence {
     marker: u8,
     count: usize,
@@ -33,6 +34,10 @@ impl Rows {
     pub fn new(value: &str, columns: usize) -> Self {
         let mut value = text::clean(value);
         value.truncate(value.trim_end().len());
+        Self::from_clean(value, columns)
+    }
+
+    fn from_clean(value: String, columns: usize) -> Self {
         Self {
             value,
             position: 0,
@@ -40,6 +45,91 @@ impl Rows {
             fenced: None,
             table: None,
         }
+    }
+}
+
+// An append may change the last source line, turn the preceding line into a
+// setext heading or table, or extend an open table. Keep only the prefix before
+// that unstable region. A fence checkpoint carries its lexer state with it.
+pub(super) struct Stream {
+    raw: String,
+    rows: Rows,
+    trailing: String,
+    checkpoint: Checkpoint,
+    ready: bool,
+}
+
+struct Checkpoint {
+    position: usize,
+    rendered: usize,
+    fenced: Option<Fence>,
+}
+
+impl Stream {
+    pub fn new(value: &str, columns: usize) -> Self {
+        let mut cleaned = text::clean(value);
+        let trailing = cleaned.split_off(cleaned.trim_end().len());
+        let rows = Rows::from_clean(cleaned, columns);
+        Self {
+            raw: value.into(),
+            rows,
+            trailing,
+            checkpoint: Checkpoint {
+                position: 0,
+                rendered: 0,
+                fenced: None,
+            },
+            ready: false,
+        }
+    }
+
+    // Returns the number of previously rendered rows that remain valid.
+    pub fn update(&mut self, value: &str, columns: usize) -> Option<usize> {
+        if columns == self.rows.columns && value == self.raw {
+            return None;
+        }
+        if columns != self.rows.columns || !value.starts_with(&self.raw) {
+            *self = Self::new(value, columns);
+            return Some(0);
+        }
+        let suffix = text::clean(&value[self.raw.len()..]);
+        self.raw.clear();
+        self.raw.push_str(value);
+        self.rows.value.push_str(&self.trailing);
+        self.rows.value.push_str(&suffix);
+        self.trailing = self.rows.value.split_off(self.rows.value.trim_end().len());
+        self.rows.position = self.checkpoint.position;
+        self.rows.fenced = self.checkpoint.fenced.clone();
+        self.rows.table = None;
+        self.ready = false;
+        Some(self.checkpoint.rendered)
+    }
+
+    pub fn advance(&mut self, lines: &mut Vec<Line>, max_rows: usize) {
+        if self.ready {
+            return;
+        }
+        let mut budget = max_rows.max(1);
+        while budget > 0 {
+            let before = self.rows.table.is_none().then(|| Checkpoint {
+                position: self.rows.position,
+                rendered: lines.len(),
+                fenced: self.rows.fenced.clone(),
+            });
+            let Some(next) = self.rows.next() else {
+                self.ready = true;
+                break;
+            };
+            if let Some(before) = before {
+                self.checkpoint = before;
+            }
+            budget = budget.saturating_sub(next.len().max(1));
+            lines.extend(next);
+        }
+    }
+
+    pub fn ready(&self) -> bool {
+        self.ready
     }
 }
 

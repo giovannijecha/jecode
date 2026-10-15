@@ -5,6 +5,11 @@ Compilation is separate from native execution coverage. macOS runtime checks
 remain pending until a Mac is available. Run the commands below from the
 repository root unless a section states otherwise.
 
+The Windows input adapter uses the system `WaitForSingleObject` API on its console
+input handle. Windows signals that handle when input records are available; this
+avoids a fixed sleep before reading a key. See Microsoft's
+[low-level console input documentation](https://learn.microsoft.com/en-us/windows/console/low-level-console-input-functions).
+
 ## Fullscreen verification
 
 After the 2026-10-03 full-width and compact-navigation updates, the offline build,

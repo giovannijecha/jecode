@@ -100,19 +100,20 @@ impl<'a> Iterator for Glyphs<'a> {
     }
 }
 pub fn clean(text: &str) -> String {
-    text.replace("\r\n", "\n")
-        .chars()
-        .flat_map(|character| match character {
-            '\n' => "\n".chars().collect::<Vec<_>>(),
-            '\t' => "    ".chars().collect(),
-            '\r' => vec![],
-            '\x1b' => "[ESC]".chars().collect(),
+    let mut cleaned = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\n' => cleaned.push('\n'),
+            '\t' => cleaned.push_str("    "),
+            '\r' => {}
+            '\x1b' => cleaned.push_str("[ESC]"),
             character if character.is_control() || ('\u{7f}'..='\u{9f}').contains(&character) => {
-                vec!['�']
+                cleaned.push('�');
             }
-            character => vec![character],
-        })
-        .collect()
+            character => cleaned.push(character),
+        }
+    }
+    cleaned
 }
 pub fn clip(text: &str, columns: usize) -> String {
     let mut result = String::new();

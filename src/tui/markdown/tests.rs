@@ -2,6 +2,61 @@ use super::*;
 use crate::tui::theme::INLINE_CODE;
 
 #[test]
+fn streamed_appends_match_full_markdown_after_each_ambiguous_boundary() {
+    let chunks = [
+        "Paragraph",
+        "\n=",
+        "==\n| A | B |",
+        "\n|---|---|",
+        "\n| short | x |",
+        "\n| a much wider value | y |",
+        "\n\n```rust\n/*",
+        " open comment\ncontinued",
+        " */\nlet value = 3;\n```",
+        "\n- [x] done",
+        "\n",
+    ];
+    let mut source = String::new();
+    let mut stream = Stream::new("", 28);
+    let mut incremental = Vec::new();
+    for chunk in chunks {
+        source.push_str(chunk);
+        if let Some(keep) = stream.update(&source, 28) {
+            incremental.truncate(keep);
+        }
+        for _ in 0..100 {
+            stream.advance(&mut incremental, 4);
+            if stream.ready() {
+                break;
+            }
+        }
+        assert!(stream.ready(), "stream stalled after {chunk:?}");
+        assert_eq!(incremental, render(&source, 28), "after {chunk:?}");
+    }
+}
+
+#[test]
+fn streamed_replacement_and_trailing_whitespace_match_full_render() {
+    let mut stream = Stream::new("first  ", 16);
+    let mut lines = Vec::new();
+    stream.advance(&mut lines, 8);
+    for source in [
+        "first  more",
+        "first  more\r",
+        "first  more\r\nnext",
+        "other\ntext",
+    ] {
+        if let Some(keep) = stream.update(source, 16) {
+            lines.truncate(keep);
+        }
+        while !stream.ready() {
+            stream.advance(&mut lines, 8);
+        }
+        assert_eq!(lines, render(source, 16));
+    }
+}
+
+#[test]
 fn formats_messages_and_code_without_changing_the_source() {
     let source = "# Result\n**Passed** with `cargo test`.\n```rust\n    let x = 1;\n```";
     let rows = render(source, 60);

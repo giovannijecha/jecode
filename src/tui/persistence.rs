@@ -75,9 +75,9 @@ impl App {
             if self.state.history.has_edited_recall() {
                 paused.push(draft(self.state.queue.draft(editor)));
             }
-            handle.input(Input {
+            handle.capture_input(Input {
                 draft: draft(self.state.history.draft(self.state.queue.draft(editor))),
-                staged: handle.snapshot().input.staged,
+                staged: vec![],
                 queued,
                 paused,
                 previous: None,
@@ -90,14 +90,16 @@ impl App {
         if self.deletion_job.is_some() {
             return false;
         }
-        self.capture_input();
+        if immediate {
+            self.capture_input();
+        }
         let Some(handle) = &self.persistence else {
             return false;
         };
         let result = if immediate {
             handle.flush().map(|()| true)
         } else {
-            handle.flush_due()
+            handle.flush_due_background()
         };
         match result {
             Err(error) => {

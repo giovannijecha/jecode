@@ -104,20 +104,27 @@ function Send([JecodeConsole+Burst]$burst, [IO.StringWriter]$writer, [string]$te
 }
 function PasteText([IO.StringWriter]$writer) {
     $line = $writer.ToString().Trim()
-    if (-not $line.StartsWith('P|')) { return 'not a paste' }
+    if (-not $line.StartsWith('P|') -or ($line -split "`n").Length -ne 1) { return 'not one paste' }
     return -join ($line.Substring(2).Split(',') | ForEach-Object { [char][int]$_ })
 }
 $burst = New-Object JecodeConsole+Burst
 $writer = [IO.StringWriter]::new()
 Send $burst $writer '"C:\fixture\' 0
+Write-Output ($writer.ToString().Length -eq 0)
 Send $burst $writer 'beta.txt"' 10
+Write-Output ($writer.ToString().Length -eq 0)
 $burst.Idle($writer, 61)
 Write-Output ((PasteText $writer) -eq '"C:\fixture\beta.txt"')
 $burst = New-Object JecodeConsole+Burst
 $writer = [IO.StringWriter]::new()
 Send $burst $writer 'a' 0
+Write-Output ($writer.ToString().Trim() -eq 'K|0|0|97')
 Send $burst $writer "`r" 10
 $burst.Idle($writer, 61)
+Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
+$burst = New-Object JecodeConsole+Burst
+$writer = [IO.StringWriter]::new()
+Send $burst $writer "a`r" 0
 Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
 $burst = New-Object JecodeConsole+Burst
 $writer = [IO.StringWriter]::new()
@@ -128,6 +135,7 @@ Write-Output ((PasteText $writer) -eq "first`r`nsecond")
 $burst = New-Object JecodeConsole+Burst
 $writer = [IO.StringWriter]::new()
 Send $burst $writer 'ab' 0
+Write-Output ($writer.ToString().Length -eq 0)
 $shortcut = New-Object JecodeConsole+Record
 $shortcut.Type = 1; $shortcut.Down = 1; $shortcut.Key = 81
 $shortcut.Character = 17; $shortcut.Controls = 8
@@ -154,6 +162,19 @@ $burst = New-Object JecodeConsole+Burst
 $writer = [IO.StringWriter]::new()
 $burst.Emit($large, [uint32]$large.Length, $writer, 0)
 $burst.Idle($writer, 60)
+Write-Output $writer.ToString().Trim()
+$burst = New-Object JecodeConsole+Burst
+$writer = [IO.StringWriter]::new()
+$first = New-Object JecodeConsole+Record[] 8
+$second = New-Object JecodeConsole+Record[] 9
+[array]::Copy($large, 0, $first, 0, 8)
+[array]::Copy($large, 8, $second, 0, 9)
+$record = $large[16]; $record.Repeat = 65535; $second[8] = $record
+$burst.Emit($first, 8, $writer, 0)
+Write-Output ($writer.ToString().Length -eq 0)
+$burst.Emit($second, 9, $writer, 10)
+Write-Output ($writer.ToString().Length -eq 0)
+$burst.Idle($writer, 61)
 Write-Output $writer.ToString().Trim()
 "#;
     let output = process::run_observed(
@@ -185,10 +206,18 @@ Write-Output $writer.ToString().Trim()
             .collect::<Vec<_>>(),
         [
             "True",
+            "True",
+            "True",
+            "True",
             "K|0|0|97;K|13|0|13",
+            "K|0|0|97;K|13|0|13",
+            "True",
             "True",
             "P|97,98;K|81|4|17;W|-3",
             "I|overflow;K|0|0|97",
+            "I|overflow",
+            "True",
+            "True",
             "I|overflow",
         ]
     );
@@ -254,6 +283,97 @@ Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
             .lines()
             .collect::<Vec<_>>(),
         ["P|97,96,98", "K|70|1|0;K|105|0|0"]
+    );
+}
+
+#[test]
+fn native_typing_arrives_on_each_read_and_bulk_continues_across_reads() {
+    let script = format!(
+        "Add-Type -TypeDefinition @'\n{}\n'@\n",
+        include_str!("../terminal.cs")
+    ) + r#"
+function Send([JecodeConsole+Burst]$burst, [IO.StringWriter]$writer, [string]$text, [long]$time) {
+    $records = New-Object JecodeConsole+Record[] $text.Length
+    for ($index = 0; $index -lt $text.Length; $index++) {
+        $record = New-Object JecodeConsole+Record
+        $record.Type = 1; $record.Down = 1; $record.Repeat = 1
+        $record.Key = if ($text[$index] -eq [char]13) { 13 } else { 0 }
+        $record.Character = [uint16][char]$text[$index]
+        $records[$index] = $record
+    }
+    $burst.Emit($records, [uint32]$records.Length, $writer, $time)
+}
+$burst = New-Object JecodeConsole+Burst
+$writer = [IO.StringWriter]::new()
+for ($index = 0; $index -lt 10; $index++) {
+    Send $burst $writer 'a' ($index * 30)
+    $lines = @($writer.ToString().Trim() -split "`n")
+    if ($lines.Length -ne $index + 1 -or $lines[-1].Trim() -ne 'K|0|0|97') { throw 'typed key delayed' }
+}
+Send $burst $writer "`r" 300
+Write-Output (($writer.ToString().Trim() -split "`n")[-1].Trim() -eq 'K|13|0|13')
+$smile = [char]::ConvertFromUtf32(128578)
+$burst = New-Object JecodeConsole+Burst
+$writer = [IO.StringWriter]::new()
+Send $burst $writer $smile 0
+Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
+$burst = New-Object JecodeConsole+Burst
+$writer = [IO.StringWriter]::new()
+Send $burst $writer ($smile + "`r") 0
+Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
+$burst = New-Object JecodeConsole+Burst
+$writer = [IO.StringWriter]::new()
+Send $burst $writer 'first' 0
+Send $burst $writer "`r" 10
+Send $burst $writer "`nsecond" 20
+$burst.Idle($writer, 71)
+Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
+$burst = New-Object JecodeConsole+Burst
+$writer = [IO.StringWriter]::new()
+Send $burst $writer ([string][char]27) 0
+Send $burst $writer '[200~' 10
+Send $burst $writer "hi`r`n" 20
+Send $burst $writer ([char]::ConvertFromUtf32(128578)) 30
+Send $burst $writer ([string][char]27) 40
+Send $burst $writer '[20' 50
+Send $burst $writer '1~' 60
+Send $burst $writer "`r" 70
+Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
+"#;
+    let output = process::run_observed(
+        Command::new("powershell.exe").args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ]),
+        None,
+        Duration::from_secs(10),
+        4096,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        output.exit_code,
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        [
+            "True",
+            "K|0|0|55357;K|0|0|56898",
+            "K|0|0|55357;K|0|0|56898;K|13|0|13",
+            "P|102,105,114,115,116,13,10,115,101,99,111,110,100",
+            "K|0|0|27;P|91,50,48,48,126,104,105,13,10,55357,56898,27,91,50,48,49,126;K|13|0|13"
+        ]
     );
 }
 
