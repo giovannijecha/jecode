@@ -176,6 +176,9 @@ fn run_inner(
             }
             dirty = true;
         }
+        if dirty {
+            app.capture_input();
+        }
         dirty |= app.persist_input(false);
         if dirty || app.renderer.needs_draw(&app.state, Instant::now()) {
             app.renderer.draw(
@@ -192,6 +195,11 @@ fn run_inner(
             let delay = app
                 .state
                 .feedback_wait(now, app.renderer.wait(&app.state, now));
+            let delay = if app.worker.is_some() {
+                delay.min(Duration::from_millis(16))
+            } else {
+                delay
+            };
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
             } else if app.state.processes.is_some() {
@@ -315,6 +323,8 @@ mod intraturn_tests;
 mod long_work_smoke;
 #[cfg(test)]
 mod manual_tests;
+#[cfg(test)]
+mod measurement_tests;
 #[cfg(test)]
 mod persistence_smoke;
 #[cfg(test)]

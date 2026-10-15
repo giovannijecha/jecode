@@ -1,6 +1,8 @@
 use crate::attachments::MARKER;
 use crate::tui::text;
+use std::borrow::Cow;
 
+#[derive(Clone, Debug)]
 pub struct Row {
     pub text: String,
     pub positions: Vec<(usize, usize)>,
@@ -18,6 +20,7 @@ impl Row {
     }
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct Layout {
     pub rows: Vec<Row>,
     pub cursor: (usize, usize),
@@ -27,14 +30,26 @@ impl Layout {
     /// `labels` replace the attachment markers of `source`, in order. A label
     /// is one unit: the cursor and wrapping never split it.
     pub fn new(source: &str, cursor: usize, columns: usize, labels: &[String]) -> Self {
+        let mut layout = Self::default();
+        layout.reflow(source, 0, columns, labels);
+        layout.move_cursor(cursor);
+        layout
+    }
+
+    pub(super) fn reflow(&mut self, source: &str, row: usize, columns: usize, labels: &[String]) {
         let columns = columns.max(4);
-        let mut rows = vec![Row::new(0)];
+        let mut byte = self.rows.get(row).map_or(0, |row| row.positions[0].0);
+        self.rows.truncate(row);
+        self.rows.push(Row::new(byte));
         let mut cells = 0;
-        let mut byte = 0;
-        let mut label = 0;
-        for glyph in text::glyphs(source) {
+        let mut label = if labels.is_empty() {
+            0
+        } else {
+            source[..byte].chars().filter(|&ch| ch == MARKER).count()
+        };
+        for glyph in text::glyphs(&source[byte..]) {
             if glyph.text == "\n" {
-                rows.push(Row::new(byte + 1));
+                self.rows.push(Row::new(byte + 1));
                 cells = 0;
                 byte += 1;
                 continue;
@@ -43,16 +58,24 @@ impl Layout {
             let display = if marker {
                 label += 1;
                 let name = labels.get(label - 1).map_or("[Attachment]", String::as_str);
-                text::ellipsize(&text::clean(name).replace('\n', " "), columns)
+                Cow::Owned(text::ellipsize(
+                    &text::clean(name).replace('\n', " "),
+                    columns,
+                ))
+            } else if glyph.text.chars().any(char::is_control) {
+                Cow::Owned(text::clean(glyph.text))
             } else {
-                text::clean(glyph.text)
+                Cow::Borrowed(glyph.text)
             };
-            let size = text::cells(&display);
+            let size = match &display {
+                Cow::Borrowed(_) => glyph.cells,
+                Cow::Owned(value) => text::cells(value),
+            };
             if cells + size > columns {
-                rows.push(Row::new(byte));
+                self.rows.push(Row::new(byte));
                 cells = 0;
             }
-            let row = rows.last_mut().unwrap();
+            let row = self.rows.last_mut().unwrap();
             if marker {
                 row.labels
                     .push(row.text.len()..row.text.len() + display.len());
@@ -63,24 +86,24 @@ impl Layout {
             row.positions.push((byte, cells));
         }
         if cells >= columns {
-            rows.push(Row::new(source.len()));
+            self.rows.push(Row::new(source.len()));
         }
-        let location = rows
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(index, row)| {
-                row.positions
-                    .iter()
-                    .rev()
-                    .find(|(byte, _)| *byte <= cursor)
-                    .map(|(_, column)| (index, *column))
-            })
-            .unwrap_or((0, 0));
-        Self {
-            rows,
-            cursor: location,
-        }
+    }
+
+    pub(super) fn move_cursor(&mut self, cursor: usize) {
+        self.cursor = self.cursor_position(cursor);
+    }
+
+    pub(super) fn cursor_position(&self, cursor: usize) -> (usize, usize) {
+        let row = self
+            .rows
+            .partition_point(|row| row.positions[0].0 <= cursor)
+            .saturating_sub(1);
+        let positions = &self.rows[row].positions;
+        let position = positions
+            .partition_point(|(byte, _)| *byte <= cursor)
+            .saturating_sub(1);
+        (row, positions[position].1)
     }
 
     pub fn byte_at(&self, row: usize, column: usize) -> usize {

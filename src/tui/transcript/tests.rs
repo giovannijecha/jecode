@@ -140,3 +140,53 @@ fn a_single_long_markdown_block_yields_between_passes_and_keeps_fence_state() {
     assert!(code.paint(39).contains(crate::tui::theme::KEYWORD));
     assert_eq!(body.last().unwrap().plain(), "Final paragraph.");
 }
+
+#[test]
+fn selecting_a_tool_keeps_the_settled_transcript_ready() {
+    let mut state = State::default();
+    for index in 0..5_000 {
+        state.message(Kind::Assistant, &format!("Message {index}"));
+    }
+    state.event(Event::ToolStarted {
+        id: "tool".into(),
+        name: "read".into(),
+        arguments: Value::object([("path", Value::string("fixture.rs"))]),
+    });
+    state.event(Event::ToolFinished {
+        id: "tool".into(),
+        name: "read".into(),
+        summary: "complete".into(),
+        result: Value::object([("content", Value::string("contents"))]),
+    });
+    state.close_tools();
+    let tool = state.items.len() - 1;
+    let mut layout = Layout::default();
+    for _ in 0..100 {
+        layout.prepare(&state, 60, 64);
+        if layout.ready(&state) {
+            break;
+        }
+    }
+    assert!(layout.ready(&state));
+    let prior = layout.blocks[..tool + 1].to_vec();
+    state.select_tool(Some(tool));
+    layout.prepare(&state, 60, 64);
+    assert!(layout.ready(&state));
+    assert_eq!(layout.blocks[..tool + 1], prior);
+    assert!(
+        layout.blocks[tool + 1]
+            .iter()
+            .any(|line| line.background == Some(crate::tui::theme::TOOL_SELECTED))
+    );
+    state.toggle_tool();
+    layout.prepare(&state, 60, 64);
+    assert!(layout.ready(&state));
+    state.select_tool(None);
+    layout.prepare(&state, 60, 64);
+    assert!(layout.ready(&state));
+    assert!(
+        layout.blocks[tool + 1]
+            .iter()
+            .all(|line| line.background != Some(crate::tui::theme::TOOL_SELECTED))
+    );
+}

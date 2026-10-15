@@ -15,6 +15,30 @@ pub struct Frame {
     pub composer: usize,
 }
 
+pub(super) struct Chrome {
+    lines: Vec<Line>,
+    cursor: Option<(usize, usize)>,
+}
+
+impl Chrome {
+    pub fn capacity(&self, height: usize, has_content: bool) -> usize {
+        let available = height.saturating_sub(self.lines.len());
+        available.saturating_sub(usize::from(has_content && available >= 2))
+    }
+}
+
+pub(super) fn chrome(state: &State, model: &str, directory: &str, reading: bool) -> Chrome {
+    let (lines, cursor) = composer::render(
+        state,
+        model,
+        directory,
+        state.width.max(1),
+        chrome_height(state).min(state.height),
+        reading,
+    );
+    Chrome { lines, cursor }
+}
+
 #[cfg(test)]
 pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
     let mut history = state.rows();
@@ -58,25 +82,27 @@ pub fn composer_frame(state: &State, model: &str, directory: &str) -> Frame {
     }
 }
 
+#[cfg(test)]
 pub(super) fn lower(
     state: &State,
     model: &str,
     directory: &str,
-    mut live: Vec<Line>,
+    live: Vec<Line>,
     has_content: bool,
     height: usize,
     back_to_bottom: bool,
 ) -> Frame {
-    let columns = state.width.max(1);
-    let (mut chrome, cursor) = composer::render(
-        state,
-        model,
-        directory,
-        columns,
-        chrome_height(state).min(height),
-        back_to_bottom,
-    );
-    let available = height.saturating_sub(chrome.len());
+    let chrome = chrome(state, model, directory, back_to_bottom);
+    lower_with_chrome(live, has_content, height, chrome)
+}
+
+pub(super) fn lower_with_chrome(
+    mut live: Vec<Line>,
+    has_content: bool,
+    height: usize,
+    mut chrome: Chrome,
+) -> Frame {
+    let available = height.saturating_sub(chrome.lines.len());
     // Keep room for a content row as well as the gap. The gap belongs to the
     // temporary input area, so it never becomes saved history on its own.
     let separated = has_content && available >= 2;
@@ -89,8 +115,8 @@ pub(super) fn lower(
         live.push(Line::default());
     }
     let composer = live.len();
-    let cursor = cursor.map(|(row, column)| (composer + row, column));
-    live.append(&mut chrome);
+    let cursor = chrome.cursor.map(|(row, column)| (composer + row, column));
+    live.append(&mut chrome.lines);
     Frame {
         #[cfg(test)]
         header: vec![],
@@ -117,17 +143,9 @@ pub(super) fn chrome_height(state: &State) -> usize {
     }
 }
 
+#[cfg(test)]
 pub(super) fn capacity(state: &State, model: &str, directory: &str) -> usize {
-    let (chrome, _) = composer::render(
-        state,
-        model,
-        directory,
-        state.width.max(1),
-        chrome_height(state),
-        false,
-    );
-    let available = state.height.saturating_sub(chrome.len());
-    available.saturating_sub(usize::from(available >= 2))
+    chrome(state, model, directory, false).capacity(state.height, true)
 }
 
 pub(super) fn fitted(left: &str, right: &str, columns: usize) -> Line {

@@ -34,6 +34,11 @@ The script builds offline, installs the Rust executable in
 and the current terminal's PATH. It preserves other installations, including any
 older `jecode` command from Volta. Reopen other terminals to refresh their PATH.
 Run the same script after changing Jecode's source to update the installed binary.
+On Windows, the script prefers the installed pinned `x86_64-pc-windows-gnullvm`
+toolchain and its bundled linker, as used by CI. Otherwise it uses the selected
+Cargo toolchain, whose native linker must be available; MSVC needs the Visual C++
+Build Tools. GNU LLVM builds need Rust's `rust-mingw` component. Toolchain
+selection applies only to the installation command.
 
 Open the directory of the project you want to work on, then run:
 

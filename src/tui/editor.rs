@@ -1,19 +1,45 @@
+mod cache;
 mod layout;
 use super::terminal::Key;
 use super::text;
 use crate::attachments::{self, Attachment, MARKER, Prompt};
 pub use layout::Layout;
+use std::{cell::RefCell, rc::Rc};
 
 const LIMIT: usize = 1024 * 1024;
 
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Default, Debug)]
 pub struct Editor {
     pub text: String,
     pub cursor: usize,
     /// One per marker in `text`, in order. Only `attach` adds markers.
     pub attachments: Vec<Attachment>,
     goal: Option<usize>,
+    layout: RefCell<cache::Cache>,
 }
+
+impl Clone for Editor {
+    fn clone(&self) -> Self {
+        Self {
+            text: self.text.clone(),
+            cursor: self.cursor,
+            attachments: self.attachments.clone(),
+            goal: self.goal,
+            layout: RefCell::default(),
+        }
+    }
+}
+
+impl PartialEq for Editor {
+    fn eq(&self, other: &Self) -> bool {
+        self.text == other.text
+            && self.cursor == other.cursor
+            && self.attachments == other.attachments
+            && self.goal == other.goal
+    }
+}
+
+impl Eq for Editor {}
 
 impl Editor {
     pub fn insert(&mut self, text: &str) -> bool {
@@ -82,14 +108,16 @@ impl Editor {
         self.text.drain(start..end);
     }
 
-    pub fn layout(&self, columns: usize) -> Layout {
+    pub fn layout(&self, columns: usize) -> Rc<Layout> {
         let labels = self
             .attachments
             .iter()
             .enumerate()
             .map(|(index, attachment)| attachment.label(index + 1))
             .collect::<Vec<_>>();
-        Layout::new(&self.text, self.cursor, columns, &labels)
+        self.layout
+            .borrow_mut()
+            .get(&self.text, self.cursor, columns, labels)
     }
 
     pub fn viewport(&self, columns: usize, secret: bool) -> (String, usize) {

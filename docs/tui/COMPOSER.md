@@ -12,6 +12,13 @@ panels, draft edits, history recall and tool inspection receive Esc first, so
 use Alt+End in those contexts. Mouse selection is omitted; `/copy` retains
 original text.
 
+On Windows, isolated typed keys appear without waiting for a typing pause.
+Detected bulk paste stays together across native console reads, including
+multiline text and file drops; a bracketed paste finishes at its closing marker.
+An unmarked paste delivered entirely as isolated keystrokes is indistinguishable
+from typing. Draft layout follows text edits and keeps Unicode glyphs and
+attachment labels intact when wrapping or moving the cursor.
+
 Resize keeps the reading anchor, logical draft/caret, selector query/selection
 and queue. Source reflow begins after 75 ms without another dimension change;
 input and generation continue between layout passes. The main shell screen and

@@ -20,8 +20,6 @@ pub(super) struct Display {
     layout: Layout,
     viewport: Viewport,
     generation: Option<u64>,
-    pending: Vec<Vec<Line>>,
-    pending_key: Option<(u64, usize, usize)>,
     visible: Vec<Line>,
     working: bool,
 }
@@ -34,8 +32,6 @@ impl Display {
             layout: Layout::default(),
             viewport: Viewport::default(),
             generation: None,
-            pending: vec![],
-            pending_key: None,
             visible: vec![],
             working: true,
         }
@@ -78,8 +74,9 @@ impl Display {
     pub fn draw(&mut self, state: &State, model: &str, directory: &str) -> Result<(), String> {
         let output = self.update(state, model, directory, Instant::now());
         if !output.is_empty() {
-            write!(io::stdout(), "\x1b[?2026h{output}\x1b[?2026l")
-                .and_then(|_| io::stdout().flush())
+            let mut stdout = io::stdout().lock();
+            write!(stdout, "\x1b[?2026h{output}\x1b[?2026l")
+                .and_then(|_| stdout.flush())
                 .map_err(|error| format!("Could not draw terminal: {error}"))?;
         }
         Ok(())
@@ -98,28 +95,23 @@ impl Display {
         if self.generation != Some(state.generation) {
             self.viewport = Viewport::default();
             self.visible.clear();
-            self.pending_key = None;
             self.generation = Some(state.generation);
         }
         let columns = state.width;
-        let capacity = view::capacity(state, model, directory);
+        let was_reading = !self.viewport.following();
+        let mut chrome = view::chrome(state, model, directory, was_reading);
+        let capacity = chrome.capacity(state.height, true);
         let mut reading = false;
         let dragging = self.resize.pending() && !self.resize.take_due(now);
         if !dragging {
             self.layout.prepare(state, columns, LAYOUT_BLOCKS);
             self.working = !self.layout.ready(state);
             if !self.working {
-                let key = (state.revision, columns, self.layout.blocks.len());
-                let running = state.items[state.settled_len()..]
-                    .iter()
-                    .any(|item| matches!(item, super::state::Item::Tool { result: None, .. }));
-                if self.pending_key != Some(key) || running {
-                    self.pending = self.layout.pending_blocks(state);
-                    self.pending_key = Some(key);
-                }
-                let slice = self
-                    .viewport
-                    .view(&self.layout.blocks, &self.pending, capacity);
+                self.layout.prepare_pending(state, 256);
+                self.working = !self.layout.pending_ready(state);
+                let slice =
+                    self.viewport
+                        .view(&self.layout.blocks, self.layout.pending_blocks(), capacity);
                 self.visible = slice.lines;
                 reading = slice.reading;
             }
@@ -134,15 +126,10 @@ impl Display {
         if !self.viewport.following() {
             lines.truncate(capacity);
         }
-        let mut frame = view::lower(
-            state,
-            model,
-            directory,
-            lines,
-            true,
-            state.height,
-            !self.viewport.following(),
-        );
+        if was_reading == self.viewport.following() {
+            chrome = view::chrome(state, model, directory, !self.viewport.following());
+        }
+        let mut frame = view::lower_with_chrome(lines, true, state.height, chrome);
         if frame.composer >= 2 {
             let gap = &mut frame.live[frame.composer - 1];
             if reading || !self.viewport.following() {

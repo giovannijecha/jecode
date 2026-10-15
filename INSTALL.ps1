@@ -37,13 +37,41 @@ if (Test-Path -LiteralPath $ownerFile) {
 }
 
 Write-Host 'Building and installing Jecode locally (offline)...'
+$cargoArguments = @('install', '--path', $PSScriptRoot, '--locked', '--offline', '--root', $InstallRoot, '--force')
+$linkerVariable = 'CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER'
+$previousLinker = [Environment]::GetEnvironmentVariable($linkerVariable, 'Process')
 Push-Location -LiteralPath $PSScriptRoot
 try {
-    & cargo install --path $PSScriptRoot --locked --offline --root $InstallRoot --force
+    # Prefer the installed Windows toolchain used by CI. An unqualified channel
+    # otherwise resolves to rustup's default host, which may require Visual C++.
+    if (Get-Command rustup -ErrorAction SilentlyContinue) {
+        $toolchainFile = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'rust-toolchain.toml'))
+        $channel = [regex]::Match($toolchainFile, '(?m)^\s*channel\s*=\s*"([^"]+)"').Groups[1].Value
+        $windowsToolchain = "$channel-x86_64-pc-windows-gnullvm"
+        $installedToolchains = @(& rustup toolchain list)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not list the installed Rust toolchains.' }
+        if ($installedToolchains -match ('^' + [regex]::Escape($windowsToolchain) + '(\s|$)')) {
+            $sysroot = & rustup run $windowsToolchain rustc --print sysroot
+            if ($LASTEXITCODE -ne 0) { throw 'Could not locate the Windows Rust toolchain.' }
+            $bundledLinker = Join-Path $sysroot 'lib/rustlib/x86_64-pc-windows-gnullvm/bin/rust-lld.exe'
+            if (-not (Test-Path -LiteralPath $bundledLinker -PathType Leaf)) {
+                throw "The bundled Windows linker is missing from $windowsToolchain. Repair this Rust toolchain and retry."
+            }
+            [Environment]::SetEnvironmentVariable($linkerVariable, $bundledLinker, 'Process')
+            $cargoArguments = @('run', $windowsToolchain, 'cargo') + $cargoArguments + @('--target', 'x86_64-pc-windows-gnullvm')
+            Write-Host "Rust toolchain: $windowsToolchain (bundled linker)"
+            & rustup @cargoArguments
+        } else {
+            & cargo @cargoArguments
+        }
+    } else {
+        & cargo @cargoArguments
+    }
     if ($LASTEXITCODE -ne 0) {
         throw 'Cargo installation failed. The PATH was left unchanged.'
     }
 } finally {
+    [Environment]::SetEnvironmentVariable($linkerVariable, $previousLinker, 'Process')
     Pop-Location
 }
 [IO.File]::WriteAllText($ownerFile, $ownerValue + [Environment]::NewLine)

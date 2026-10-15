@@ -1,21 +1,33 @@
 use super::{Document, Input, Pending, Store, context, now, storage::Lease};
 use crate::{export::Archive, redact::Redactor};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 const SAVE_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
-pub struct Handle(Arc<Mutex<Live>>);
+pub struct Handle(Arc<Shared>);
+
+struct Shared {
+    live: Mutex<Live>,
+    io: Mutex<()>,
+    background_save: AtomicBool,
+    background_result: Mutex<Option<Result<(), String>>>,
+}
 
 struct Live {
     store: Store,
     document: Document,
-    lease: Option<Lease>,
+    lease: Option<Arc<Lease>>,
     redactor: Redactor,
     dirty: Option<Instant>,
     validated: context::Validation,
     deleted: bool,
+    revision: u64,
+    last_ui_input: Option<Input>,
 }
 
 pub enum Stage {
@@ -31,15 +43,22 @@ pub enum Stage {
 
 impl Handle {
     pub fn new(store: Store, document: Document, redactor: Redactor) -> Self {
-        Self(Arc::new(Mutex::new(Live {
-            store,
-            document,
-            lease: None,
-            redactor,
-            dirty: Some(Instant::now()),
-            validated: context::Validation::default(),
-            deleted: false,
-        })))
+        Self(Arc::new(Shared {
+            live: Mutex::new(Live {
+                store,
+                document,
+                lease: None,
+                redactor,
+                dirty: Some(Instant::now()),
+                validated: context::Validation::default(),
+                deleted: false,
+                revision: 0,
+                last_ui_input: None,
+            }),
+            io: Mutex::new(()),
+            background_save: AtomicBool::new(false),
+            background_result: Mutex::new(None),
+        }))
     }
 
     pub fn open(store: Store, id: &str, redactor: Redactor) -> Result<(Self, String), String> {
@@ -66,15 +85,22 @@ impl Handle {
         context::validate(&document)?;
         let interrupted = document.recover();
         context::validate(&document)?;
-        let handle = Self(Arc::new(Mutex::new(Live {
-            store,
-            document,
-            lease: Some(lease),
-            redactor,
-            dirty: Some(Instant::now()),
-            validated: context::Validation::default(),
-            deleted: false,
-        })));
+        let handle = Self(Arc::new(Shared {
+            live: Mutex::new(Live {
+                store,
+                document,
+                lease: Some(Arc::new(lease)),
+                redactor,
+                dirty: Some(Instant::now()),
+                validated: context::Validation::default(),
+                deleted: false,
+                revision: 0,
+                last_ui_input: None,
+            }),
+            io: Mutex::new(()),
+            background_save: AtomicBool::new(false),
+            background_result: Mutex::new(None),
+        }));
         handle.flush()?;
         Ok((
             handle,
@@ -95,17 +121,17 @@ impl Handle {
     }
 
     pub fn store(&self) -> Store {
-        self.0.lock().unwrap().store.clone()
+        self.0.live.lock().unwrap().store.clone()
     }
     pub fn snapshot(&self) -> Document {
-        self.0.lock().unwrap().document.clone()
+        self.0.live.lock().unwrap().document.clone()
     }
     pub fn id(&self) -> String {
-        self.0.lock().unwrap().document.id.clone()
+        self.0.live.lock().unwrap().document.id.clone()
     }
 
     pub fn active(&self) -> bool {
-        self.0.lock().unwrap().document.pending.active
+        self.0.live.lock().unwrap().document.pending.active
     }
 
     pub fn checkpoint(
@@ -117,7 +143,8 @@ impl Handle {
     ) -> Result<(), String> {
         let messages = archive.messages.lock().unwrap();
         let events = archive.events.lock().unwrap();
-        let mut live = self.0.lock().unwrap();
+        let _io = self.0.io.lock().unwrap();
+        let mut live = self.0.live.lock().unwrap();
         if live.deleted {
             return Err("This session was deleted; start a new conversation".into());
         }
@@ -152,6 +179,7 @@ impl Handle {
         if let Stage::Accept(queued) = &stage {
             // Accepted messages leave the queue in the same save that adds them.
             live.document.input.queued = queued.clone();
+            live.last_ui_input = None;
         }
         live.document.input = live.document.input.redacted(&live.redactor);
         live.document.effort = crate::effort::Effort::parse(&archive.effort)?;
@@ -171,63 +199,166 @@ impl Handle {
             Stage::Accept(_) | Stage::Preserve => {}
         }
         live.dirty.get_or_insert_with(Instant::now);
-        let result = live.save();
+        live.revision = live.revision.wrapping_add(1);
+        let revision = live.revision;
+        drop(live);
+        let result = self.save_locked_io();
         if result.is_err()
             && let Some((messages, events, pending, validated, input)) = preparation
         {
+            let mut live = self.0.live.lock().unwrap();
             live.document.messages.truncate(messages);
             live.document.events.truncate(events);
             live.document.pending = pending;
             live.validated = validated;
-            live.document.input = input;
+            if live.revision == revision {
+                live.document.input = input;
+            }
+            live.last_ui_input = None;
+            live.revision = live.revision.wrapping_add(1);
         }
         result
     }
 
     pub fn input(&self, input: Input) {
-        let mut live = self.0.lock().unwrap();
+        let mut live = self.0.live.lock().unwrap();
         if live.deleted {
             return;
         }
+        live.last_ui_input = None;
         let input = input.redacted(&live.redactor);
         if input != live.document.input {
             live.document.input = input;
             live.dirty.get_or_insert_with(Instant::now);
+            live.revision = live.revision.wrapping_add(1);
+        }
+    }
+
+    /// Capture composer state without copying the conversation or replacing
+    /// attachments staged by the line-based chat.
+    pub fn capture_input(&self, mut input: Input) {
+        let mut live = self.0.live.lock().unwrap();
+        if live.deleted || live.last_ui_input.as_ref() == Some(&input) {
+            return;
+        }
+        input.staged.clone_from(&live.document.input.staged);
+        let redacted = input.redacted(&live.redactor);
+        input.staged.clear();
+        live.last_ui_input = Some(input);
+        if redacted != live.document.input {
+            live.document.input = redacted;
+            live.dirty.get_or_insert_with(Instant::now);
+            live.revision = live.revision.wrapping_add(1);
         }
     }
 
     pub fn partial(&self, text: &str) -> Result<(), String> {
-        let mut live = self.0.lock().unwrap();
+        let mut live = self.0.live.lock().unwrap();
         if live.deleted {
             return Err("This session was deleted; start a new conversation".into());
         }
         let first = live.document.pending.partial.is_empty() && !text.is_empty();
         live.document.pending.partial = live.redactor.text(text);
         live.dirty.get_or_insert_with(Instant::now);
-        if first
+        live.revision = live.revision.wrapping_add(1);
+        let due = first
             || live
                 .dirty
-                .is_some_and(|since| since.elapsed() >= SAVE_INTERVAL)
-        {
-            live.save()?;
+                .is_some_and(|since| since.elapsed() >= SAVE_INTERVAL);
+        drop(live);
+        if due {
+            self.flush()?;
         }
         Ok(())
     }
 
-    pub fn flush_due(&self) -> Result<bool, String> {
-        let mut live = self.0.lock().unwrap();
-        if live
-            .dirty
-            .is_some_and(|since| since.elapsed() >= SAVE_INTERVAL)
-        {
-            live.save()?;
-            return Ok(true);
+    /// Poll the completed save and schedule a due save without waiting for disk I/O.
+    pub fn flush_due_background(&self) -> Result<bool, String> {
+        if let Some(result) = self.0.background_result.lock().unwrap().take() {
+            let dirty = self.0.live.lock().unwrap().dirty.is_some();
+            if let Err(error) = result
+                && dirty
+            {
+                return Err(error);
+            }
+            return Ok(!dirty);
         }
-        Ok(false)
+        if self.0.background_save.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        let due = self
+            .0
+            .live
+            .lock()
+            .unwrap()
+            .dirty
+            .is_some_and(|since| since.elapsed() >= SAVE_INTERVAL);
+        if !due || self.0.background_save.swap(true, Ordering::AcqRel) {
+            return Ok(false);
+        }
+        let handle = self.clone();
+        match std::thread::Builder::new()
+            .name("jecode-autosave".into())
+            .spawn(move || {
+                let result = handle.flush();
+                *handle.0.background_result.lock().unwrap() = Some(result);
+                handle.0.background_save.store(false, Ordering::Release);
+            }) {
+            Ok(_) => Ok(false),
+            Err(error) => {
+                self.0.background_save.store(false, Ordering::Release);
+                Err(format!("Could not start autosave: {error}"))
+            }
+        }
     }
 
     pub fn flush(&self) -> Result<(), String> {
-        self.0.lock().unwrap().save()
+        let _io = self.0.io.lock().unwrap();
+        self.save_locked_io()
+    }
+
+    fn save_locked_io(&self) -> Result<(), String> {
+        let (document, store, lease, revision, validated) = {
+            let mut live = self.0.live.lock().unwrap();
+            if live.deleted || live.dirty.is_none() {
+                return Ok(());
+            }
+            if !live.document.meaningful() && live.lease.is_none() {
+                live.dirty = None;
+                return Ok(());
+            }
+            // A failed attempt remains dirty, with a bounded interval before retry.
+            live.dirty = Some(Instant::now());
+            let mut validated = live.validated.clone();
+            context::validate_from(&live.document, &mut validated)?;
+            let mut document = live.document.clone();
+            document.updated = now();
+            (
+                document,
+                live.store.clone(),
+                live.lease.clone(),
+                live.revision,
+                validated,
+            )
+        };
+        let lease = match lease {
+            Some(lease) => lease,
+            None => {
+                let lease = Arc::new(store.create(&document.id)?);
+                self.0.live.lock().unwrap().lease = Some(lease.clone());
+                lease
+            }
+        };
+        let result = lease.save(&document);
+        if result.is_ok() {
+            let mut live = self.0.live.lock().unwrap();
+            live.validated = validated;
+            live.document.updated = document.updated;
+            if live.revision == revision {
+                live.dirty = None;
+            }
+        }
+        result
     }
 
     pub(crate) fn delete(
@@ -235,13 +366,14 @@ impl Handle {
         live_attachments: &std::collections::BTreeSet<String>,
         before_remove: impl FnOnce(),
     ) -> Result<super::DeleteReport, String> {
-        let mut live = self.0.lock().unwrap();
+        let _io = self.0.io.lock().unwrap();
+        let mut live = self.0.live.lock().unwrap();
         if live.deleted || live.document.pending.active {
             return Err("Session deletion requires an open, ready conversation".into());
         }
         live.store.deletion_scope()?;
         if live.lease.is_none() {
-            live.lease = Some(live.store.acquire(&live.document.id)?);
+            live.lease = Some(Arc::new(live.store.acquire(&live.document.id)?));
         }
         let removal = live.store.removal(&live.document)?;
         before_remove();
@@ -254,24 +386,5 @@ impl Handle {
     }
 }
 
-impl Live {
-    fn save(&mut self) -> Result<(), String> {
-        if self.deleted || self.dirty.is_none() {
-            return Ok(());
-        }
-        if !self.document.meaningful() && self.lease.is_none() {
-            self.dirty = None;
-            return Ok(());
-        }
-        // A failed attempt remains dirty, with a bounded interval before retry.
-        self.dirty = Some(Instant::now());
-        context::validate_from(&self.document, &mut self.validated)?;
-        self.document.updated = now();
-        if self.lease.is_none() {
-            self.lease = Some(self.store.create(&self.document.id)?);
-        }
-        self.lease.as_ref().unwrap().save(&self.document)?;
-        self.dirty = None;
-        Ok(())
-    }
-}
+#[cfg(test)]
+mod tests;

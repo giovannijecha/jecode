@@ -124,3 +124,122 @@ fn a_single_tall_table_cell_yields_while_emitting_wrapped_rows() {
         10_000
     );
 }
+
+#[test]
+fn live_stream_renders_a_bounded_prefix_and_discards_replaced_or_removed_text() {
+    let mut state = State::default();
+    let first = (0..600)
+        .map(|index| format!("Line {index}\n"))
+        .collect::<String>();
+    state.event(Event::Streaming { text: first });
+    let mut layout = Layout::default();
+    layout.prepare(&state, 40, 64);
+    layout.prepare_pending(&state, 32);
+    assert!(!layout.pending_ready(&state));
+    assert!(!layout.pending_blocks()[0].is_empty());
+    assert!(layout.pending_blocks()[0].len() <= 32);
+
+    let replacement = "# Replacement\nFinal response.";
+    state.event(Event::Streaming {
+        text: replacement.into(),
+    });
+    layout.prepare_pending(&state, 32);
+    assert!(layout.pending_ready(&state));
+    assert_eq!(
+        layout.pending_blocks()[0],
+        markdown::render(replacement, 40)
+    );
+
+    state.event(Event::RequestDiscarded);
+    layout.prepare(&state, 40, 64);
+    layout.prepare_pending(&state, 32);
+    assert!(layout.pending_ready(&state));
+    assert!(layout.pending_blocks().is_empty());
+}
+
+#[test]
+fn repeated_appends_keep_exactly_one_separator_and_match_finalized_rows() {
+    let mut state = State {
+        width: 40,
+        ..State::default()
+    };
+    state.message(Kind::User, "Explain the result.");
+    let mut layout = Layout::default();
+    for source in [
+        "First line",
+        "First line\nSecond",
+        "First line\nSecond line\nThird",
+        "First line\nSecond line\nThird line",
+    ] {
+        state.event(Event::Streaming {
+            text: source.into(),
+        });
+        complete(&mut layout, &state, 40);
+        for _ in 0..100 {
+            layout.prepare_pending(&state, 2);
+            if layout.pending_ready(&state) {
+                break;
+            }
+        }
+        assert!(layout.pending_ready(&state));
+        assert_eq!(
+            layout.pending_blocks()[0],
+            state.rows().last().unwrap().clone()
+        );
+        assert_eq!(layout.pending_blocks()[0][0].plain(), "");
+        assert_eq!(
+            layout.pending_blocks()[0]
+                .iter()
+                .filter(|line| line.plain().is_empty())
+                .count(),
+            1
+        );
+    }
+
+    let visible = layout.pending_blocks()[0].clone();
+    state.event(Event::Message {
+        text: "First line\nSecond line\nThird line".into(),
+    });
+    complete(&mut layout, &state, 40);
+    layout.prepare_pending(&state, 2);
+    assert!(layout.pending_blocks().is_empty());
+    assert_eq!(layout.blocks.last().unwrap(), &visible);
+
+    state.width = 20;
+    complete(&mut layout, &state, 20);
+    assert_eq!(layout.blocks.last().unwrap(), state.rows().last().unwrap());
+}
+
+#[test]
+fn replaced_stream_and_width_reset_retain_the_predecessor_separator() {
+    let mut state = State {
+        width: 40,
+        ..State::default()
+    };
+    state.message(Kind::User, "Request");
+    let mut layout = Layout::default();
+    for source in [
+        "Original response\nwith a second line",
+        "Replacement response",
+    ] {
+        state.event(Event::Streaming {
+            text: source.into(),
+        });
+        complete(&mut layout, &state, 40);
+        layout.prepare_pending(&state, 256);
+        assert!(layout.pending_ready(&state));
+        assert_eq!(
+            layout.pending_blocks()[0],
+            state.rows().last().unwrap().clone()
+        );
+    }
+    state.width = 20;
+    complete(&mut layout, &state, 20);
+    layout.prepare_pending(&state, 256);
+    assert!(layout.pending_ready(&state));
+    assert_eq!(
+        layout.pending_blocks()[0],
+        state.rows().last().unwrap().clone()
+    );
+    assert_eq!(layout.pending_blocks()[0][0].plain(), "");
+}

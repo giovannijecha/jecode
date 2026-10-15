@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 // Owned adapter for the documented Windows console ABI. Rust remains safe code.
@@ -34,6 +33,8 @@ public static class JecodeConsole {
     static extern bool GetNumberOfConsoleInputEvents(IntPtr handle, out uint count);
     [DllImport("kernel32.dll", EntryPoint = "ReadConsoleInputW", SetLastError = true)]
     static extern bool ReadConsoleInput(IntPtr handle, [Out] Record[] records, uint length, out uint count);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
     [StructLayout(LayoutKind.Sequential)]
     struct ScreenInfo {
         public short Width, Height, CursorX, CursorY;
@@ -108,8 +109,8 @@ public static class JecodeConsole {
         }
         WriteKeys(keys, writer, ref pasteBurst, ref lastText, now);
     }
-    // ReadConsoleInput can split one paste into several reads. Keep printable
-    // records together until the burst is quiet, then emit one paste event.
+    // A multi-character console read indicates bulk input. Hold only bulk
+    // records across reads so a pasted path or overflow remains one event.
     public sealed class Burst {
         const int Gap = 50;
         const int MaxUnits = 1024 * 1024 + 1;
@@ -119,48 +120,74 @@ public static class JecodeConsole {
         int printable;
         bool bulk;
         bool overflow;
+        int closingMarker;
+        const string EndMarker = "\x1b[201~";
 
         static bool Text(Record key) {
             int modifiers = Modifiers(key) & 5;
             return key.Character != 0 &&
                 (modifiers == 0 || (modifiers == 5 && key.Character >= 32));
         }
+        static bool SurrogatePair(Record high, Record low) {
+            return high.Character >= 0xd800 && high.Character <= 0xdbff &&
+                low.Character >= 0xdc00 && low.Character <= 0xdfff;
+        }
         static void WriteKey(Record key, TextWriter writer) {
             writer.WriteLine("K|" + key.Key + "|" + Modifiers(key) + "|" + key.Character);
+        }
+        bool EndsBracketedPaste(Record key) {
+            char character = (char)key.Character;
+            closingMarker = character == EndMarker[closingMarker] ? closingMarker + 1 :
+                character == EndMarker[0] ? 1 : 0;
+            if (closingMarker != EndMarker.Length) return false;
+            closingMarker = 0;
+            return true;
         }
         void WritePending(TextWriter writer) {
             if (overflow || pending.Count == MaxUnits) {
                 // Do not pass a truncated bracketed paste to the decoder: its
                 // closing marker may have been dropped with the suffix.
                 writer.WriteLine("I|overflow");
-            } else if (pending.Count > 1 && printable > 0) {
+                overflow = true;
+            } else if (bulk || (pending.Count > 1 && printable > 0)) {
                 var units = new List<string>(pending.Count);
                 foreach (Record key in pending) units.Add(key.Character.ToString());
                 writer.WriteLine("P|" + string.Join(",", units));
+                bulk = true;
             } else {
                 foreach (Record key in pending) WriteKey(key, writer);
             }
             pending.Clear();
             printable = 0;
-            bulk = false;
-            overflow = false;
         }
         public void Flush(TextWriter writer) {
             if (pending.Count == 0) return;
-            // A lone typed character followed by Enter is a submission. If a
-            // larger text batch preceded Enter, preserve it as paste content.
-            if (!bulk && !overflow && pending.Count == 2 &&
-                pending[0].Character >= 32 && pending[1].Key == 13 && pending[1].Character == 13) {
-                Record enter = pending[1];
-                pending.RemoveAt(1);
-                WritePending(writer);
-                WriteKey(enter, writer);
+            bool pair = pending.Count >= 2 && SurrogatePair(pending[0], pending[1]);
+            if (!bulk && !overflow && pending.Count == 2 && pair) {
+                foreach (Record key in pending) WriteKey(key, writer);
+                pending.Clear();
+                printable = 0;
+                return;
+            }
+            // One typed character (including a surrogate pair) and Enter are
+            // still separate keys when they share a console read.
+            bool oneCharacter = pending.Count == 2 && pending[0].Character >= 32 ||
+                pending.Count == 3 && pair;
+            Record last = pending[pending.Count - 1];
+            if (!bulk && !overflow && oneCharacter && last.Key == 13 && last.Character == 13) {
+                foreach (Record key in pending) WriteKey(key, writer);
+                pending.Clear();
+                printable = 0;
                 return;
             }
             WritePending(writer);
         }
         public void Idle(TextWriter writer, long now) {
-            if (pending.Count > 0 && now - lastText > Gap) Flush(writer);
+            if (now - lastText > Gap) {
+                Flush(writer);
+                bulk = false;
+                overflow = false;
+            }
         }
         public void Emit(Record[] records, uint count, TextWriter writer, long now) {
             Idle(writer, now);
@@ -170,6 +197,9 @@ public static class JecodeConsole {
                 int delta = Wheel(key);
                 if (delta != 0) {
                     Flush(writer);
+                    bulk = false;
+                    overflow = false;
+                    closingMarker = 0;
                     batchPrintable = 0;
                     wheel += delta;
                     int rows = -(wheel / 120) * 3;
@@ -183,17 +213,31 @@ public static class JecodeConsole {
                 for (int item = 0; item < repeat; item++) {
                     if (!text) {
                         Flush(writer);
+                        bulk = false;
+                        overflow = false;
+                        closingMarker = 0;
                         batchPrintable = 0;
                         WriteKey(key, writer);
                     } else {
-                        if (key.Character >= 32 && ++batchPrintable > 1) bulk = true;
-                        if (pending.Count < MaxUnits) pending.Add(key);
-                        else overflow = true;
+                        bool surrogateTail = pending.Count > 0 &&
+                            SurrogatePair(pending[pending.Count - 1], key);
+                        if (key.Character >= 32 && !surrogateTail && ++batchPrintable > 1) bulk = true;
+                        if (!overflow) {
+                            if (pending.Count < MaxUnits) pending.Add(key);
+                            else overflow = true;
+                        }
                         if (key.Character >= 32) printable++;
                         lastText = now;
+                        if (EndsBracketedPaste(key)) {
+                            Flush(writer);
+                            bulk = false;
+                            overflow = false;
+                            batchPrintable = 0;
+                        }
                     }
                 }
             }
+            if (!bulk) Flush(writer);
         }
     }
     public static void Restore(uint inputMode, uint outputMode, uint codePage) {
@@ -250,7 +294,10 @@ public static class JecodeConsole {
                         Check(ReadConsoleInput(input, records, (uint)records.Length, out count));
                         burst.Emit(records, count, writer, clock.ElapsedMilliseconds);
                     } else burst.Idle(writer, clock.ElapsedMilliseconds);
-                    Thread.Sleep(10);
+                    // A console input handle is signaled when records arrive.
+                    // The timeout still polls stop and size changes promptly.
+                    uint wait = WaitForSingleObject(input, 10);
+                    if (wait == 0xffffffffu) Check(false, "wait for input");
                 }
                 burst.Flush(writer);
             } finally {

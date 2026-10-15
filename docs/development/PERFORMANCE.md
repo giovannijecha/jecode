@@ -6,6 +6,60 @@ library and Windows system tools. No live OpenRouter requests or personal
 configuration are used by these opt-in probes. The separate harness audit below
 also records authorized live-model trials.
 
+## TUI responsiveness, 2026-10-15
+
+The Windows adapter now delivers isolated typed keys, including UTF-16 emoji,
+without waiting for a quiet period. Detected bulk paste remains atomic across
+console reads; bracketed-paste completion releases the batch immediately. The
+adapter waits on the console input handle, so a key wakes it without a polling
+sleep. The existing 50 ms quiet period applies only to detected bulk paste.
+
+Composer layout is cached by text, width and attachment labels. Edits reflow
+from the affected wrapped row, including the preceding glyph boundary, and
+cursor movement reuses the row positions. A frame constructs the composer once.
+Streaming Markdown retains the stable prefix and reparses the last source line
+or open table with bounded row passes. Tool focus and expansion invalidate only
+the affected settled cards.
+
+Input capture no longer clones the session document or repeats on idle ticks.
+Periodic saves serialize disk access in a background thread and release the
+document mutex before writing or syncing the journal. Explicit checkpoints and
+exit still flush synchronously. A save still clones its snapshot under the
+document mutex; this remaining cost is paid per save, rather than per UI tick.
+An individual very long Markdown source line can still exceed one row budget.
+
+The original revision `25fb62b` and the updated source were measured on Windows
+`x86_64-pc-windows-gnullvm`, Rust 1.95.0, with a 120 x 40 viewport. Each workload
+has three warmups and 21 samples, with two runs per variant in A/B/B/A order.
+Compilation and terminal writes are excluded; no provider requests or personal
+configuration are used. The table gives the range of the two run medians.
+
+| UI operation | Original | Updated |
+| --- | ---: | ---: |
+| Type at the end of a 256 KiB draft | 57.77–66.61 ms | 0.060–0.093 ms |
+| Append formatted text to a 256 KiB streamed response | 19.05–19.28 ms | 0.091–0.122 ms |
+| Select a settled tool among 5,000 history items | 69.41–70.52 ms | 0.047–0.062 ms |
+| Capture a short draft with 5,000 saved 4 KiB messages | 4.98–6.71 ms | 0.0004–0.0006 ms |
+| Scroll three rows in 5,000 cached history items | 0.089–0.132 ms | 0.089–0.124 ms |
+
+These are local UI costs, not keyboard-to-pixel latency or whole-turn speedup
+claims. The scroll experiment does not establish an improvement beyond run
+variation. Physical wheel and font rendering remain host-terminal checks.
+
+Reproduce the bounded updated-source probe:
+
+```text
+cargo test --locked --offline --release tui::measurement_tests::composer_stream_scroll_and_capture -- --exact --ignored --nocapture --test-threads=1
+```
+
+It prints individual samples and summaries in microseconds. Store captured output
+under the ignored `.tmp/` directory, and keep other builds and probes out of the
+timed runs.
+
+The Windows offline build, formatting, Clippy and ordinary tests passed
+(629 passed, 13 opt-in checks ignored). The explicit Windows ConPTY lifecycle
+fixture also passed. Linux and macOS were not executed for this change.
+
 ## Harness audit, 2026-10-04
 
 The local audit evidence is retained under ignored
