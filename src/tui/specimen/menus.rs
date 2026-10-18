@@ -3,7 +3,7 @@
 use crate::{
     copy::Target,
     effort::Effort,
-    openrouter::Model,
+    openrouter::{Charges, Endpoints, Model, Routing, endpoints::Endpoint, routing},
     sessions::Summary,
     tui::{
         line::Line,
@@ -101,6 +101,63 @@ fn sessions() -> Vec<Summary> {
     .collect()
 }
 
+const ROUTED: &str = "deepseek/deepseek-v4";
+
+/// Listed rates are already discounted; one endpoint lacks tools and one has no statistics yet.
+fn endpoints() -> Endpoints {
+    let endpoint = |tag: &str, prompt: f64, completion: f64, speed: Option<(f64, f64)>| Endpoint {
+        tag: tag.into(),
+        provider: None,
+        prompt: Some(prompt),
+        completion: Some(completion),
+        cache_read: Some(prompt / 10.0),
+        cache_write: None,
+        discount: None,
+        context: Some(163_840),
+        output: Some(32_768),
+        quantization: Some("fp8".into()),
+        tier: None,
+        status: Some(0),
+        uptime: Some(99.6),
+        throughput: speed.map(|(throughput, _)| throughput),
+        latency: speed.map(|(_, latency)| latency),
+        requests: speed.map(|_| 120),
+        parameters: Some(vec!["tools".into(), "reasoning".into()]),
+    };
+    Endpoints {
+        model: ROUTED.into(),
+        list: vec![
+            Endpoint {
+                discount: Some(0.2),
+                ..endpoint("deepinfra/fp8", 0.216, 0.72, Some((48.0, 900.0)))
+            },
+            endpoint("baidu/fp8", 0.27, 0.9, Some((61.0, 1200.0))),
+            Endpoint {
+                parameters: Some(vec!["reasoning".into()]),
+                quantization: Some("bf16".into()),
+                ..endpoint("lambda/bf16", 0.5, 1.5, Some((70.0, 600.0)))
+            },
+            endpoint("novita/fp8", 0.28, 1.0, Some((22.0, 2800.0))),
+            endpoint("chutes/fp8", 0.2, 0.8, None),
+        ],
+        fetched: std::time::Instant::now(),
+    }
+}
+
+fn routing(
+    columns: usize,
+    current: Routing,
+    defaults: bool,
+    listing: Option<&Endpoints>,
+    notes: Vec<String>,
+) -> State {
+    let entries = routing::entries(listing, &current, true);
+    selecting(
+        columns,
+        Selector::routing(ROUTED, defaults, entries, &current, notes),
+    )
+}
+
 fn states(columns: usize) -> Vec<(&'static str, State)> {
     let mut drafts = state(columns);
     drafts.queue.push("also update the README").unwrap();
@@ -125,6 +182,17 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     let mut key = Selector::key();
     key.editor.insert("example-key-input");
 
+    let listing = endpoints();
+    let legend = crate::tui::routing::LEGEND.to_owned();
+    let mut charges = Charges::default();
+    charges.record(
+        Some("DeepInfra"),
+        crate::json::parse(r#"{"cost":0.0031,"prompt_tokens_details":{"cached_tokens":12000}}"#)
+            .ok()
+            .as_ref(),
+    );
+    let served = charges.describe().unwrap();
+
     vec![
         ("Commands", command(columns, "/")),
         ("Commands · /co", command(columns, "/co")),
@@ -147,7 +215,44 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         (
             "Settings",
-            selecting(columns, Selector::settings(MODEL, Effort::High, 80)),
+            selecting(
+                columns,
+                Selector::settings(MODEL, Effort::High, 80, &crate::openrouter::Routing::Auto),
+            ),
+        ),
+        (
+            "Routing",
+            routing(
+                columns,
+                Routing::Auto,
+                false,
+                Some(&listing),
+                vec![legend.clone(), format!("Last turn · {served}")],
+            ),
+        ),
+        (
+            "Routing · pinned endpoint",
+            routing(
+                columns,
+                Routing::Endpoint("baidu/fp8".into()),
+                false,
+                Some(&listing),
+                vec![legend.clone()],
+            ),
+        ),
+        (
+            "Routing · listing unavailable",
+            routing(
+                columns,
+                Routing::Endpoint("baidu/fp8".into()),
+                false,
+                None,
+                vec!["Endpoint listing unavailable · OpenRouter returned HTTP 503".into()],
+            ),
+        ),
+        (
+            "Default routing",
+            routing(columns, Routing::Auto, true, Some(&listing), vec![legend]),
         ),
         (
             "Auto-compact at",

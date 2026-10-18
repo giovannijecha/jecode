@@ -160,7 +160,14 @@ fn native_console_fixture() {
     let response = (0..100)
         .map(|i| format!("Native row {i:03}\n"))
         .collect::<String>();
-    let fixture = HttpFixture::new(vec![(200, completion(&response, vec![]))]);
+    let listing = crate::json::parse(
+        r#"{"data":{"endpoints":[
+        {"tag":"one/fp8","status":0,"supported_parameters":["tools"]},
+        {"tag":"two/fp8","status":0,"supported_parameters":["tools"]}
+        ]}}"#,
+    )
+    .unwrap();
+    let fixture = HttpFixture::new(vec![(200, completion(&response, vec![])), (200, listing)]);
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let config = SessionConfig {
         store: Store::new(path.join("home")),
@@ -189,6 +196,8 @@ fn native_console_fixture() {
         format!("kept draft β🙂{} ", crate::attachments::MARKER)
     );
     assert_eq!(saved.input.draft.attachments[0].name, "drop me.txt");
-    assert_eq!(fixture.finish().len(), 1);
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].headers[0].starts_with("GET /models/fixture/model/endpoints "));
     println!("NATIVE_RESTORED");
 }

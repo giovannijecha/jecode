@@ -156,6 +156,16 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("Ask anything");
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native row 099");
+                // Routing at normal, narrow and short sizes; focus starts on the current row.
+                pty.Send("/routing"); Thread.Sleep(150); pty.Send("\r");
+                pty.Wait("Routing · fixture/model");
+                pty.Wait("current · no routing preferences");
+                pty.Wait("$/M input/output after discounts");
+                pty.Resize(40, 12); pty.Send("\x1b[A"); pty.Wait("Pinned to two/fp8");
+                pty.Resize(44, 6); pty.Send("\x1b[A"); pty.Wait("› 2. one/fp8");
+                // Esc closes quietly; the draft below only reaches an open composer.
+                pty.Send("\x1b"); Thread.Sleep(150);
+                pty.Resize(80, 24);
                 pty.Send("kept draft β🙂"); Thread.Sleep(150);
                 // Windows Terminal delivers a file drop as a paste of its quoted path.
                 pty.Send("\x1b[200~\"" + System.IO.Path.Combine(directory, "drop me.txt") + "\"\x1b[201~");

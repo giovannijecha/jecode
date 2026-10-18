@@ -161,3 +161,65 @@ fn model_command_preserves_context_and_does_not_change_saved_defaults() {
         4
     );
 }
+
+#[test]
+fn routing_command_offers_the_shared_choices_and_applies_from_the_next_request() {
+    let directory = Directory::new();
+    let listing = crate::json::parse(
+        r#"{"data":{"endpoints":[{"tag":"one/fp8","supported_parameters":["tools"],
+        "pricing":{"prompt":"0.0000003","completion":"0.0000012"}},
+        {"tag":"notools/x","supported_parameters":[]}]}}"#,
+    )
+    .unwrap();
+    let fixture = HttpFixture::new(vec![(200, listing), (200, response("Pinned."))]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.set_routing(crate::openrouter::Routing::Auto);
+    let mut config = SessionConfig {
+        store: Store::new(directory.path().join(".jecode")),
+        settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
+        bash: crate::tools::find_bash().unwrap(),
+    };
+    let mut input = Cursor::new("/routing\n9\n3\n2\nTask\n/exit\n");
+    let mut output = Vec::new();
+    chat(
+        &mut agent,
+        &mut config,
+        &mut input,
+        &mut output,
+        &mut Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        agent.routing(),
+        &crate::openrouter::Routing::Endpoint("one/fp8".into())
+    );
+    assert!(config.store.load().unwrap().is_none());
+    let output = String::from_utf8(output).unwrap();
+    for expected in [
+        "Routing for fixture/model",
+        "1. Auto — Best balance · current · native routing with fallbacks",
+        "2. one/fp8 · $0.3/$1.2",
+        "3. notools/x · no tools",
+        "Choose one of the displayed numbers.",
+        "notools/x does not accept tool calls, which every Jecode request includes; choose another.",
+        "Pinned to one/fp8 without fallbacks",
+        "Routing set to Endpoint one/fp8 · was Auto — Best balance · applies from the next request",
+    ] {
+        assert!(output.contains(expected), "missing {expected}:\n{output}");
+    }
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].headers[0].starts_with("GET /models/fixture/model/endpoints "));
+    assert_eq!(
+        requests[1]
+            .body
+            .get("provider")
+            .map(Value::encode)
+            .as_deref(),
+        Some(r#"{"allow_fallbacks":false,"order":["one/fp8"]}"#)
+    );
+}

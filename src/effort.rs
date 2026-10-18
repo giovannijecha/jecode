@@ -47,6 +47,11 @@ impl Effort {
             })
     }
 
+    /// Whether requests ask for reasoning explicitly, which endpoints must accept.
+    pub fn reasons(self) -> bool {
+        !matches!(self, Self::Default | Self::None)
+    }
+
     pub fn request(self) -> Option<Value> {
         (self != Self::Default).then(|| Value::object([("effort", Value::string(self.name()))]))
     }

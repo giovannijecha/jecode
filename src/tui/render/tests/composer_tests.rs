@@ -46,6 +46,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
             "fixture/model",
             crate::effort::Effort::High,
             80,
+            &crate::openrouter::Routing::Auto,
         ));
         update(&mut renderer, &mut screen, &mut state);
         assert!(screen.visible().contains("Settings · saved defaults"));
@@ -118,6 +119,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
         "fixture/model",
         crate::effort::Effort::Default,
         80,
+        &crate::openrouter::Routing::Auto,
     ));
     update(&mut renderer, &mut screen, &mut state);
     assert!(screen.visible().contains("Settings · saved defaults"));

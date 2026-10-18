@@ -47,13 +47,15 @@ open session reports an error instead of creating a
 second writer.
 
 Resuming restores the conversation, tool previews, local command results,
-model, effort and prompt history. It uses the current configured OpenRouter
+model, effort, routing and prompt history. It uses the current configured OpenRouter
 credential. `/settings` defaults remain the defaults for `/new`; they are not
-changed by a resume. No provider request or tool execution occurs on resume.
+changed by a resume. Conversations saved before routing existed resume with
+OpenRouter's default routing and send no routing preferences until `/routing`
+changes them. No provider request or tool execution occurs on resume.
 
 `/new` saves the preceding conversation and creates an independent session with
-the saved defaults. Unsent work moves with the active composer and pending
-drafts. The viewport and its source layout reset to the new conversation.
+the saved defaults, including the default model's saved routing. Unsent work
+moves with the active composer and pending drafts. The viewport and its source layout reset to the new conversation.
 Earlier saved conversations remain available through `/resume`; provider context
 and exports use the active
 session independently of its terminal layout.
@@ -82,8 +84,8 @@ remain outside this operation. Older flat output files have no reliable session
 owner and remain readable; references kept for that reason are reported.
 
 Deleting the current conversation opens a fresh one using the saved model/effort
-defaults. Its model context and prompt history are cleared. The TUI clears its
-owned conversation viewport; the shell screen and scrollback remain intact.
+defaults and that model's saved routing. Its model context and prompt history
+are cleared. The TUI clears its owned conversation viewport; the shell screen and scrollback remain intact.
 Other saved sessions remain available. The session
 list stays open over the fresh context; Esc returns to its composer. The unsent
 composer, FIFO queue and paused drafts stay with the new conversation. The new
@@ -176,7 +178,7 @@ refers to it any more; see [ATTACHMENTS.md](ATTACHMENTS.md#storage-and-retention
 New sessions use an owned append journal, `jecode.session.journal`, version 3,
 in `SESSION_ID.jsonl`. Files live under a stable folder bucket. The saved canonical directory is checked
 independently of the bucket name. Sessions contain timestamps, directory,
-model/effort, provider messages, local events, the provider compatibility
+model/effort, routing, provider messages, local events, the provider compatibility
 boundary, the compacted context view, unfinished-turn state and unsent input. They contain no configuration
 credential; configured keys are masked in recorded content.
 

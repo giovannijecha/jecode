@@ -15,6 +15,8 @@ pub struct Failure {
     pub kind: Kind,
     pub message: String,
     pub retry_after: Option<Duration>,
+    /// Charges reported even when the completion cannot be accepted.
+    pub charges: Option<super::Charges>,
 }
 
 impl Failure {
@@ -23,6 +25,7 @@ impl Failure {
             kind: Kind::Temporary,
             message: message.into(),
             retry_after: None,
+            charges: None,
         }
     }
     pub fn response(message: impl Into<String>) -> Self {
@@ -34,12 +37,14 @@ impl Failure {
                 kind: Kind::Empty,
                 message,
                 retry_after: None,
+                charges: None,
             }
         } else if message.contains("finish_reason: length") {
             Self {
                 kind: Kind::Length,
                 message,
                 retry_after: None,
+                charges: None,
             }
         } else {
             Self::from(message)
@@ -102,6 +107,7 @@ impl Failure {
                 }
             ),
             retry_after: None,
+            charges: None,
         }
     }
 }
@@ -177,6 +183,7 @@ impl From<String> for Failure {
             kind: Kind::Terminal,
             message,
             retry_after: None,
+            charges: None,
         }
     }
 }

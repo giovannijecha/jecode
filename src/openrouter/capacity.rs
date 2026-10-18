@@ -21,7 +21,7 @@ mod tests;
 impl OpenRouter {
     pub fn limits(&mut self) -> Result<Option<Limits>, Failure> {
         if let Some(limits) = self.limits {
-            return Ok(limits);
+            return Ok(self.router.limits(&self.model, limits));
         }
         let value = self.api.send(
             "GET",
@@ -70,12 +70,13 @@ impl OpenRouter {
             Some(Limits { context, output })
         });
         self.limits = Some(limits);
-        Ok(limits)
+        Ok(self.router.limits(&self.model, limits))
     }
 
-    /// Limits already read for this model, without contacting the catalog.
+    /// Limits already read for this model, narrowed to a pinned endpoint,
+    /// without contacting the catalog.
     pub fn known_limits(&self) -> Option<Limits> {
-        self.limits.flatten()
+        self.router.limits(&self.model, self.limits.flatten())
     }
 
     #[cfg(test)]

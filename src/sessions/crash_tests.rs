@@ -139,6 +139,7 @@ fn crash_child() {
             &agent.archive(),
             0,
             &crate::context::Context::default(),
+            &crate::openrouter::Routing::Default,
             Stage::Completion,
         )
         .unwrap();
@@ -156,6 +157,7 @@ fn crash_child() {
             &agent.archive(),
             0,
             &crate::context::Context::default(),
+            &crate::openrouter::Routing::Default,
             Stage::Tool("write".into()),
         )
         .unwrap();

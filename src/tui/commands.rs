@@ -257,12 +257,15 @@ impl App {
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
             "/settings" | "/setup" if arguments.is_empty() => {
+                let settings = &self.config.settings;
                 self.state.selector = Some(Selector::settings(
-                    &self.config.settings.model,
-                    self.config.settings.effort,
-                    self.config.settings.auto_compact,
+                    &settings.model,
+                    settings.effort,
+                    settings.auto_compact,
+                    &settings.routing_for(&settings.model),
                 ));
             }
+            "/routing" if arguments.is_empty() => self.open_routing(false),
             "/model" => {
                 if !arguments.is_empty()
                     && let Err(error) = crate::openrouter::validate_model(arguments)

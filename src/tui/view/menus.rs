@@ -87,8 +87,11 @@ pub(super) fn selector(
     } else {
         0
     };
-    // Padding and controls follow the options.
-    let available = height.saturating_sub(lines.len() + 3 + details);
+    // Padding and controls follow the options; help rows yield to three options.
+    let reserved = lines.len() + 3 + details;
+    let mut help = routing_help(menu, width);
+    help.truncate(height.saturating_sub(reserved + menu.filtered.len().clamp(1, 3)));
+    let available = height.saturating_sub(reserved + help.len());
     let limit = available.clamp(1, 8);
     let start = menu.selected.saturating_sub(limit - 1);
     let rows: Vec<_> = menu
@@ -164,6 +167,7 @@ pub(super) fn selector(
             MUTED,
         ));
     }
+    lines.extend(help);
     if details > 0 {
         lines.push(Line::new(
             "History, owned outputs and temporary files",
@@ -192,6 +196,27 @@ pub(super) fn selector(
     }
     priorities.extend([lines.len() - 1, 0]);
     panel::finish(lines, cursor, &priorities, columns, height)
+}
+
+/// What the focused routing does, in up to two rows, then one row per note.
+fn routing_help(menu: &Selector, width: usize) -> Vec<Line> {
+    let Purpose::Routing { notes, .. } = &menu.purpose else {
+        return vec![];
+    };
+    let help = menu.routing_help().unwrap_or_default();
+    let mut rows = Line::new(help, MUTED).wrap(width, true);
+    // Two rows at most; a cut second row ends with an ellipsis.
+    if rows.len() > 2 {
+        let first = rows[0].plain();
+        let rest = help
+            .strip_prefix(first.trim_end())
+            .unwrap_or(help)
+            .trim_start();
+        rows.truncate(1);
+        rows.push(Line::new(&text::ellipsize(rest, width), MUTED));
+    }
+    rows.extend(notes.iter().map(|note| Line::new(note, MUTED)));
+    rows
 }
 
 fn source_controls(menu: &Selector, deleting: bool, working: bool, width: usize) -> String {

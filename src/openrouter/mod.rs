@@ -1,14 +1,20 @@
 mod capacity;
 mod completion;
+pub mod endpoints;
 mod failure;
 mod headers;
 mod models;
+pub mod routing;
+mod served;
 mod stream;
 mod transport;
 
 pub use capacity::Limits;
+pub use endpoints::Endpoints;
 pub use failure::{Failure, Kind as FailureKind};
 pub use models::Model;
+pub use routing::{Router, Routing};
+pub use served::Charges;
 pub use stream::Update;
 
 use crate::cancel::Cancellation;
@@ -34,6 +40,7 @@ pub struct OpenRouter {
     summary_json: bool,
     /// The model's input modalities from the catalog; None when unknown.
     inputs: Option<Vec<String>>,
+    router: Router,
 }
 
 pub struct ToolCall {
@@ -47,6 +54,8 @@ pub struct Completion {
     pub text: String,
     pub calls: Vec<ToolCall>,
     pub usage: Option<Value>,
+    /// The serving provider's name, when the response reports it.
+    pub provider: Option<String>,
 }
 
 pub fn validate_key(key: &str) -> Result<(), String> {
@@ -135,6 +144,7 @@ impl OpenRouter {
             effort: Effort::Default,
             summary_json: false,
             inputs: None,
+            router: Router::new(Routing::Default),
         })
     }
 
@@ -174,11 +184,19 @@ impl OpenRouter {
         self.effort = effort;
     }
 
+    /// A different model drops endpoint metadata and never keeps an
+    /// endpoint pin, which names one model's endpoint.
     pub fn set_model(&mut self, model: String) -> Result<(), String> {
         validate_model(&model)?;
         if model != self.model {
             self.summary_json = false;
             self.inputs = None;
+            let session = self.router.session.take();
+            self.router = Router::new(match &self.router.routing {
+                Routing::Endpoint(_) => Routing::Auto,
+                routing => routing.clone(),
+            });
+            self.router.session = session;
             self.limits = if self.api.base_url.starts_with("http://127.0.0.1:") {
                 Some(Some(Limits {
                     context: usize::MAX,
@@ -190,6 +208,53 @@ impl OpenRouter {
         }
         self.model = model;
         Ok(())
+    }
+
+    pub fn routing(&self) -> &Routing {
+        &self.router.routing
+    }
+
+    pub fn router(&self) -> &Router {
+        &self.router
+    }
+
+    pub fn set_routing(&mut self, routing: Routing) {
+        self.router.routing = routing;
+    }
+
+    /// Keeps another client's routing and metadata, as when only the key changes.
+    pub fn set_router(&mut self, router: Router) {
+        self.router = router;
+    }
+
+    /// The conversation identifier Auto sends as `session_id`.
+    pub fn set_conversation(&mut self, id: Option<String>) {
+        self.router.session = id;
+    }
+
+    /// Endpoint metadata fetched elsewhere, such as by the routing selector.
+    pub fn offer_endpoints(&mut self, endpoints: Endpoints) {
+        if endpoints.model == self.model {
+            self.router.offer(endpoints);
+        }
+    }
+
+    /// Fetches endpoint metadata when routing needs it and the last listing
+    /// is stale. A failure leaves Auto to native routing and a pin to its tag.
+    pub fn refresh_endpoints(&mut self) {
+        let now = std::time::Instant::now();
+        if !self.router.needs_refresh(&self.model, now) {
+            return;
+        }
+        match self.api.endpoints(&self.model) {
+            Ok(endpoints) => self.router.offer(endpoints),
+            Err(_) => self.router.failed(&self.model, std::time::Instant::now()),
+        }
+    }
+
+    /// Whether the effort asks endpoints for reasoning support.
+    pub fn reasoning(&self) -> bool {
+        self.effort.reasons()
     }
 
     pub fn redact(&self, text: &str) -> String {
@@ -234,7 +299,7 @@ impl OpenRouter {
         if let Value::Object(fields) = &mut body {
             if with_tools {
                 fields.insert("tools".into(), tools::definitions());
-            } else if self.summary_json {
+            } else if self.summary_json && self.router.allows(&self.model, "response_format") {
                 fields.insert(
                     "response_format".into(),
                     Value::object([("type", Value::string("json_object"))]),
@@ -242,6 +307,10 @@ impl OpenRouter {
             }
             if let Some(tokens) = output_tokens {
                 fields.insert("max_completion_tokens".into(), Value::number(tokens));
+            }
+            let now = std::time::Instant::now();
+            for (key, value) in self.router.fields(&self.model, self.reasoning(), now) {
+                fields.insert(key.into(), value);
             }
         }
         if let Some(reasoning) = self.effort.request()
@@ -267,16 +336,37 @@ impl OpenRouter {
             .map_err(|error| {
                 let mut failure = stream.failure.clone().unwrap_or_else(|| error.clone());
                 failure.retry_after = failure.retry_after.or(error.retry_after);
-                self.api.sanitize_failure(failure)
+                failure.charges = stream.reported(None).or(failure.charges);
+                self.pin_hint(self.api.sanitize_failure(failure))
             })?;
-        if let Ok(value) = crate::json::parse(&response)
-            && api_error(&value).is_some()
+        let parsed = crate::json::parse(&response).ok();
+        let charges = stream.reported(parsed.as_ref());
+        if let Some(value) = &parsed
+            && api_error(value).is_some()
         {
-            return Err(self.api.failure(&value, 200));
+            let mut failure = self.api.failure(value, 200);
+            failure.charges = charges;
+            return Err(self.pin_hint(failure));
         }
-        stream
-            .finish(&response)
-            .map_err(|error| Failure::response(self.redact(&error)))
+        stream.finish(&response).map_err(|error| {
+            let mut failure = Failure::response(self.redact(&error));
+            failure.charges = charges;
+            failure
+        })
+    }
+
+    /// A pinned request has no fallback, so availability failures say how to change it.
+    fn pin_hint(&self, mut failure: Failure) -> Failure {
+        if let Routing::Endpoint(tag) = &self.router.routing
+            && matches!(failure.kind, FailureKind::Temporary | FailureKind::Terminal)
+            && failure.message != "Operation cancelled"
+        {
+            failure.message = format!(
+                "{} Pinned endpoint {tag} has no fallbacks; use /routing to choose Auto or another endpoint.",
+                failure.message.trim_end()
+            );
+        }
+        failure
     }
 
     #[cfg(test)]

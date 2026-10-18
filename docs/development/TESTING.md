@@ -30,7 +30,8 @@ settings cancellation, width/height changes, owner SIGKILL and failed-guardian
 cleanup. It compares the original and restored terminal modes. macOS `x86_64-apple-darwin` and
 `aarch64-apple-darwin` pass all-target compilation and Clippy checks; macOS linking and
 execution were not run. The isolated Windows ConPTY check drives Unicode input,
-wheel reports, Page Up/Down, prompt history and tiny/normal resize. Before UI
+wheel reports, Page Up/Down, prompt history, tiny/normal resize and the
+`/routing` selector at 80 x 24, 40 x 12 and 44 x 6. Before UI
 interaction it paints and reads every screen cell, including the bottom-right
 corner, to detect unintended wrapping or scrolling. It checks saved
 drafts, the exit summary and restoration of the original main screen, input/output
@@ -61,6 +62,17 @@ prioritize text over metadata. Tool checks cover header-only preview counts,
 expanded/collapsed details, retained stderr and capture-limit notices. Styled
 navigation previews were inspected at 80 and 40 columns. No fixture writes the
 user's configuration or contacts a real model provider.
+
+Routing fixtures serve deterministic endpoint listings and completions over
+loopback HTTP. They check the exact `provider` and `session_id` fields for Auto
+and pinned endpoints, summary requests, listing reuse, failed-listing retry,
+pin failure hints, reported charges, per-model saved defaults, resume, model
+switches, legacy sessions and configuration, the `--plain` choices and the TUI
+selector's loading, cancellation, stale results, blocked endpoints and failed
+saves. Selector layout is checked from 2 to 120 columns and 1 to 24 rows. The
+`specimen::menus` specimen paints the routing states at 80 and 44 columns.
+Whether the provider fields improve real latency, throughput or tool-call
+quality is not measured; that needs live, billable requests.
 
 Parallel fixture runs on WSL's shared Windows `/mnt/c` filesystem reproduced
 intermittent missing-file failures; native tmpfs checks pass. A standalone

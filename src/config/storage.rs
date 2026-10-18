@@ -85,6 +85,17 @@ impl Store {
         provider.insert("api_key".into(), Value::string(&settings.api_key));
         provider.insert("model".into(), Value::string(&settings.model));
         provider.insert("effort".into(), Value::string(settings.effort.name()));
+        if !settings.routing.is_empty() {
+            let routing = provider
+                .entry("routing".into())
+                .or_insert_with(|| Value::object([]));
+            let Value::Object(routing) = routing else {
+                return Err(self.invalid("openrouter.routing must be an object"));
+            };
+            for (model, preference) in &settings.routing {
+                routing.insert(model.clone(), preference.value());
+            }
+        }
         // Kept beside, not inside, the credentials and model object.
         let context = root
             .entry("context".into())

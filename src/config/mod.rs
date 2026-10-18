@@ -4,7 +4,8 @@ pub use storage::Store;
 
 use crate::effort::Effort;
 use crate::json::Value;
-use crate::openrouter::{validate_key, validate_model};
+use crate::openrouter::{Routing, validate_key, validate_model};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 // Deliberately no Debug implementation: settings contain a plaintext credential.
@@ -15,6 +16,8 @@ pub struct Settings {
     pub effort: Effort,
     /// `context.auto_compact_percent`: applies to every conversation, not only new ones.
     pub auto_compact: u8,
+    /// `openrouter.routing`: saved routing per model; models without an entry use Auto.
+    pub routing: BTreeMap<String, Routing>,
 }
 
 impl Settings {
@@ -28,7 +31,13 @@ impl Settings {
             model,
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
+            routing: BTreeMap::new(),
         })
+    }
+
+    /// The saved routing for `model`, or Auto, the recommended default.
+    pub fn routing_for(&self, model: &str) -> Routing {
+        self.routing.get(model).cloned().unwrap_or(Routing::Auto)
     }
 
     pub(super) fn parse(document: &Value) -> Result<Self, String> {
@@ -46,6 +55,22 @@ impl Settings {
         let mut settings = Self::new(api_key.into(), model.into())?;
         if let Some(value) = provider.get("effort") {
             settings.effort = Effort::parse(value.as_str().ok_or("Invalid openrouter.effort")?)?;
+        }
+        // Absent in older files. Entries this version cannot use are skipped
+        // here and kept in the file on save.
+        if let Some(routing) = provider.get("routing") {
+            let Value::Object(entries) = routing else {
+                return Err("openrouter.routing must be an object".into());
+            };
+            settings.routing = entries
+                .iter()
+                .filter(|(model, _)| validate_model(model).is_ok())
+                .filter_map(|(model, value)| {
+                    Routing::parse(value)
+                        .filter(|routing| *routing != Routing::Default)
+                        .map(|routing| (model.clone(), routing))
+                })
+                .collect();
         }
         // Configurations written before this preference load with the default.
         if let Some(context) = document.get("context") {

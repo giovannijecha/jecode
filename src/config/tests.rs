@@ -154,3 +154,79 @@ fn auto_compact_defaults_persists_beside_the_provider_and_rejects_invalid_values
     assert!(store.save(&settings("fixture/new")).is_err());
     assert_eq!(fs::read_to_string(store.path()).unwrap(), text);
 }
+
+#[test]
+fn routing_preferences_are_optional_per_model_and_keep_entries_this_version_skips() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    // Files written before routing existed load with Auto for every model.
+    fs::write(
+        store.path(),
+        r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#,
+    )
+    .unwrap();
+    let loaded = store.load().unwrap().unwrap();
+    assert!(loaded.routing.is_empty());
+    assert_eq!(loaded.routing_for("fixture/model"), Routing::Auto);
+    fs::write(
+        store.path(),
+        r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model","routing":{
+            "fixture/model":{"mode":"endpoint","endpoint":"deepinfra/fp8"},
+            "fixture/other":{"mode":"auto"},
+            "fixture/future":{"mode":"fastest","margin":2},
+            "fixture/legacy":{"mode":"default"},
+            "not a model":{"mode":"auto"}}}}"#,
+    )
+    .unwrap();
+    let mut loaded = store.load().unwrap().unwrap();
+    assert_eq!(
+        loaded.routing_for("fixture/model"),
+        Routing::Endpoint("deepinfra/fp8".into())
+    );
+    assert_eq!(loaded.routing.len(), 2);
+    assert_eq!(loaded.routing_for("fixture/future"), Routing::Auto);
+    assert_eq!(loaded.routing_for("fixture/legacy"), Routing::Auto);
+    loaded.routing.insert("fixture/model".into(), Routing::Auto);
+    loaded
+        .routing
+        .insert("fixture/third".into(), Routing::Endpoint("groq".into()));
+    store.save(&loaded).unwrap();
+    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    let routing = document.get("openrouter").unwrap().get("routing").unwrap();
+    assert_eq!(
+        routing.get("fixture/model").unwrap().encode(),
+        r#"{"mode":"auto"}"#
+    );
+    assert_eq!(
+        routing.get("fixture/third").unwrap().encode(),
+        r#"{"endpoint":"groq","mode":"endpoint"}"#
+    );
+    assert_eq!(
+        routing.get("fixture/future").unwrap().encode(),
+        r#"{"margin":2,"mode":"fastest"}"#
+    );
+    assert!(routing.get("not a model").is_some());
+    let reloaded = store.load().unwrap().unwrap();
+    assert_eq!(
+        reloaded.routing_for("fixture/third"),
+        Routing::Endpoint("groq".into())
+    );
+    // Saving without routing preferences leaves the file's entries alone.
+    store.save(&settings("fixture/model")).unwrap();
+    assert_eq!(store.load().unwrap().unwrap().routing.len(), 3);
+}
+
+#[test]
+fn malformed_routing_rejects_the_file_without_replacing_it() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let text = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model","routing":["auto"]}}"#;
+    fs::write(store.path(), text).unwrap();
+    let error = store.load().err().unwrap();
+    assert!(error.contains("openrouter.routing must be an object"));
+    assert!(!error.contains("isolated-fixture-key"));
+    let mut next = settings("fixture/model");
+    next.routing.insert("fixture/model".into(), Routing::Auto);
+    assert!(store.save(&next).is_err());
+    assert_eq!(fs::read_to_string(store.path()).unwrap(), text);
+}

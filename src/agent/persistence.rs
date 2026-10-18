@@ -10,11 +10,12 @@ impl Agent {
     pub fn enable_sessions(&mut self, home: &Path) -> Result<(), String> {
         if self.persistence.is_none() {
             let store = Store::new(home.to_path_buf(), self.tools.root())?;
-            let document = Document::new(
+            let mut document = Document::new(
                 self.tools.root().to_path_buf(),
                 self.model().into(),
                 self.effort(),
             )?;
+            document.routing = self.routing().clone();
             self.tools.configure_session_output(
                 store.output_directory(),
                 &document.id,
@@ -25,6 +26,7 @@ impl Agent {
             self.tools.configure_attachments(store.attachments());
             self.context.reset_usage();
             self.persistence = Some(Handle::new(store, document, self.redactor.clone()));
+            self.sync_conversation();
             self.checkpoint(Stage::Preserve)?;
         }
         Ok(())
@@ -51,9 +53,13 @@ impl Agent {
 
     pub(super) fn checkpoint(&self, stage: Stage) -> Result<(), String> {
         match &self.persistence {
-            Some(handle) => {
-                handle.checkpoint(&self.archive(), self.compatible_from, &self.context, stage)
-            }
+            Some(handle) => handle.checkpoint(
+                &self.archive(),
+                self.compatible_from,
+                &self.context,
+                self.routing(),
+                stage,
+            ),
             None => Ok(()),
         }
     }
@@ -84,13 +90,16 @@ impl Agent {
         Ok(())
     }
 
+    /// Starts a conversation with `model`'s saved routing preference.
     pub fn start_new(&mut self, model: String, effort: Effort) -> Result<(), String> {
         crate::openrouter::validate_model(&model)?;
         self.save_session()?;
+        let routing = self.preferred_routing(&model);
         let next = if let Some(old) = &self.persistence {
             let input = old.snapshot().input;
             let mut document =
                 Document::new(self.tools.root().to_path_buf(), model.clone(), effort)?;
+            document.routing = routing.clone();
             document.input = input.clone();
             document.messages = vec![self.system_message()];
             let next = Handle::new(old.store(), document, self.redactor.clone());
@@ -113,10 +122,12 @@ impl Agent {
             .transpose()?;
         self.client.set_model(model)?;
         self.client.set_effort(effort);
+        self.client.set_routing(routing);
         // The switch is committed; the previous conversation's processes end with it.
         self.tools.stop_processes();
         self.clear();
         self.persistence = next;
+        self.sync_conversation();
         if let Some(handle) = &self.persistence {
             self.tools.configure_session_output(
                 handle.store().output_directory(),
@@ -164,6 +175,9 @@ impl Agent {
         let temporary = handle.store().temporary_area(&document.id)?;
         self.client.set_model(document.model)?;
         self.client.set_effort(document.effort);
+        // The session's own routing; saved defaults are unchanged.
+        self.client.set_routing(document.routing);
+        *self.charges.lock().unwrap() = crate::openrouter::Charges::default();
         // The switch is committed; historical process IDs never become live handles.
         self.tools.stop_processes();
         *self.messages.lock().unwrap() = document.messages;
@@ -179,6 +193,7 @@ impl Agent {
         self.project_instructions.clear();
         self.cancellation.reset();
         self.persistence = Some(handle);
+        self.sync_conversation();
         let handle = self.persistence.as_ref().unwrap();
         self.tools.configure_session_output(
             handle.store().output_directory(),
@@ -207,7 +222,9 @@ impl Agent {
         }
         crate::openrouter::validate_model(&model)?;
         let store = current.store();
+        let routing = self.preferred_routing(&model);
         let mut document = Document::new(self.tools.root().to_path_buf(), model.clone(), effort)?;
+        document.routing = routing.clone();
         document.input = current.snapshot().input;
         document.input.history.clear();
         let temporary = store.temporary_area(&document.id)?;
@@ -223,9 +240,11 @@ impl Agent {
         let report = current.delete(&live_attachments, || self.tools.stop_processes())?;
         self.client.set_model(model)?;
         self.client.set_effort(effort);
+        self.client.set_routing(routing);
         self.clear();
         self.cancellation.reset();
         self.persistence = Some(next);
+        self.sync_conversation();
         self.tools.configure_output_store(outputs);
         self.tools.configure_temporary(temporary);
         Ok((report, true))

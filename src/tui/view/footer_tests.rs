@@ -107,7 +107,12 @@ fn short_viewports_keep_the_input_and_caret_before_the_footer() {
 #[test]
 fn open_panels_keep_the_footer_on_the_terminal_surface_when_space_permits() {
     for menu in [
-        Selector::settings("provider/model", Effort::Default, 80),
+        Selector::settings(
+            "provider/model",
+            Effort::Default,
+            80,
+            &crate::openrouter::Routing::Auto,
+        ),
         Selector::auto_compact(80),
     ] {
         let mut state = with_status(61_000, Some(100_000));

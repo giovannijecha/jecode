@@ -167,7 +167,12 @@ fn slash_commands_replace_the_composer_with_one_panel_and_a_distinct_selection()
 fn selectors_replace_all_composer_rows_but_keep_the_draft_and_mask_keys() {
     let mut state = State::default();
     state.editor.insert("private draft");
-    state.selector = Some(Selector::settings("provider/model", Effort::High, 80));
+    state.selector = Some(Selector::settings(
+        "provider/model",
+        Effort::High,
+        80,
+        &crate::openrouter::Routing::Auto,
+    ));
     let selection = frame(&state, "model", "directory");
     assert!(
         selection
