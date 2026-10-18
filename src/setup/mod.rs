@@ -62,6 +62,7 @@ fn configure_with(
     let mut settings = Settings::new(api_key, model)?;
     if let Some(current) = current {
         settings.auto_compact = current.auto_compact;
+        settings.routing = current.routing.clone();
         if current.model == settings.model {
             settings.effort = current.effort;
         }

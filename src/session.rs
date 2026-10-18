@@ -131,6 +131,7 @@ fn chat_inner(
             "/setup" | "/settings" => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");
             }),
+            "/routing" => config.change_routing(agent, input, output),
             "/effort" => config.change_effort(agent, None, input, output),
             _ if line.starts_with("/effort ") => {
                 config.change_effort(agent, Some(line[8..].trim()), input, output)

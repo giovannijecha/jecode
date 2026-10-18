@@ -31,10 +31,16 @@ impl App {
                     self.state.status = "Ready".into();
                     self.state.clear_progress();
                     if let Some(activity) = activity {
+                        // What responses reported, never the routing's intent.
+                        let served = agent
+                            .charges()
+                            .describe()
+                            .map(|served| format!(" · {}", agent.redact(&served)))
+                            .unwrap_or_default();
                         self.state.notify(Feedback::result(
                             Kind::Notice,
                             format!(
-                                "Complete · {} · {} {}",
+                                "Complete · {} · {} {}{served}",
                                 activity::duration(activity.started.elapsed()),
                                 activity.tools,
                                 if activity.tools == 1 { "tool" } else { "tools" }

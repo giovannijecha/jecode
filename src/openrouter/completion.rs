@@ -67,6 +67,7 @@ pub(super) fn parse_completion(value: Value) -> Result<Completion, String> {
         text,
         calls,
         usage: value.get("usage").cloned(),
+        provider: super::served::provider(&value),
     })
 }
 

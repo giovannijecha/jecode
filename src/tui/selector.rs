@@ -1,10 +1,15 @@
 use super::editor::Editor;
-use crate::{effort::Effort, openrouter::Model, session::commands::match_text};
+use crate::{
+    effort::Effort,
+    openrouter::{Model, Routing, routing::Entry},
+    session::commands::match_text,
+};
 
 #[derive(Clone, Copy)]
 pub enum Setting {
     Model,
     Effort,
+    Routing,
     AutoCompact,
     Key,
     Close,
@@ -13,6 +18,7 @@ pub enum Setting {
 pub enum Choice {
     Model(usize),
     Effort(Effort),
+    Routing(usize),
     Setting(Setting),
     Session(usize),
     Copy(usize),
@@ -38,6 +44,14 @@ pub enum Purpose {
         defaults: bool,
     },
     Settings,
+    /// Routing for the conversation, or the saved default for `model`.
+    Routing {
+        defaults: bool,
+        model: String,
+        entries: Vec<Entry>,
+        /// Muted rows after the focused choice's help.
+        notes: Vec<String>,
+    },
     Key,
     /// Percentage input for the automatic compaction threshold.
     AutoCompact,
@@ -195,7 +209,8 @@ impl Selector {
             .unwrap_or(0);
         menu
     }
-    pub fn settings(model: &str, effort: Effort, auto_compact: u8) -> Self {
+    /// `routing` is the default model's saved routing.
+    pub fn settings(model: &str, effort: Effort, auto_compact: u8, routing: &Routing) -> Self {
         Self::new(
             "Settings · saved defaults",
             Purpose::Settings,
@@ -209,6 +224,11 @@ impl Selector {
                     name: "Default effort".into(),
                     description: effort.name().into(),
                     choice: Choice::Setting(Setting::Effort),
+                },
+                OptionRow {
+                    name: "Default routing".into(),
+                    description: routing.label(),
+                    choice: Choice::Setting(Setting::Routing),
                 },
                 OptionRow {
                     name: "Auto-compact at".into(),
@@ -227,6 +247,55 @@ impl Selector {
                 },
             ],
         )
+    }
+    /// Focus starts on `current`, which the entries mark.
+    pub fn routing(
+        model: &str,
+        defaults: bool,
+        entries: Vec<Entry>,
+        current: &Routing,
+        notes: Vec<String>,
+    ) -> Self {
+        let options = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| OptionRow {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                choice: Choice::Routing(index),
+            })
+            .collect();
+        let focus = entries
+            .iter()
+            .position(|entry| entry.routing == *current)
+            .unwrap_or(0);
+        let title = format!(
+            "{} · {model}",
+            if defaults {
+                "Default routing"
+            } else {
+                "Routing"
+            }
+        );
+        let purpose = Purpose::Routing {
+            defaults,
+            model: model.into(),
+            entries,
+            notes,
+        };
+        let mut menu = Self::new(&title, purpose, options);
+        menu.selected = focus;
+        menu
+    }
+    /// The focused routing entry's help, when a routing menu is open.
+    pub fn routing_help(&self) -> Option<&str> {
+        let Purpose::Routing { entries, .. } = &self.purpose else {
+            return None;
+        };
+        match self.chosen()? {
+            Choice::Routing(index) => Some(&entries[index].help),
+            _ => None,
+        }
     }
     pub fn key() -> Self {
         Self::new("OpenRouter key", Purpose::Key, vec![])

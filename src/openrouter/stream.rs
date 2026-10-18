@@ -29,9 +29,24 @@ pub struct Stream {
     saw_data: bool,
     pub(super) failure: Option<super::Failure>,
     usage: Option<Value>,
+    provider: Option<String>,
 }
 
 impl Stream {
+    /// Billing survives malformed, truncated or interrupted completions.
+    pub(super) fn reported(&self, response: Option<&Value>) -> Option<super::Charges> {
+        if self.saw_data {
+            super::Charges::reported(self.provider.as_deref(), self.usage.as_ref())
+        } else {
+            response.and_then(|response| {
+                super::Charges::reported(
+                    super::served::provider(response).as_deref(),
+                    response.get("usage"),
+                )
+            })
+        }
+    }
+
     pub fn feed(
         &mut self,
         bytes: &[u8],
@@ -107,10 +122,13 @@ impl Stream {
                 ("message", message),
             ])]),
         )]);
-        if let Some(usage) = self.usage
-            && let Value::Object(fields) = &mut response
-        {
-            fields.insert("usage".into(), usage);
+        if let Value::Object(fields) = &mut response {
+            if let Some(usage) = self.usage {
+                fields.insert("usage".into(), usage);
+            }
+            if let Some(provider) = self.provider {
+                fields.insert("provider".into(), Value::string(provider));
+            }
         }
         parse_completion(response)
     }
@@ -132,8 +150,11 @@ impl Stream {
             self.failure = Some(super::Failure::api(&value, 200));
             return Err(format!("OpenRouter stream error: {error}"));
         }
-        if let Some(usage) = value.get("usage") {
+        if let Some(usage @ Value::Object(_)) = value.get("usage") {
             self.usage = Some(usage.clone());
+        }
+        if let Some(provider) = super::served::provider(&value) {
+            self.provider = Some(provider);
         }
         let choices = value
             .get("choices")

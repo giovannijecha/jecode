@@ -153,3 +153,65 @@ fn null_delta_fields_are_optional_and_missing_tool_indexes_are_rejected() {
             .contains("missing tool call indexes")
     );
 }
+
+#[test]
+fn the_serving_provider_and_reported_usage_survive_streaming() {
+    let mut wire = String::from(
+        "data: {\"provider\":\"Baidu\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+    );
+    wire.push_str(&delta(Value::object([]), Value::string("stop")));
+    wire.push_str(
+        "data: {\"provider\":\"Baidu\",\"choices\":[],\"usage\":{\"cost\":0.0004,\"prompt_tokens_details\":{\"cached_tokens\":64}}}\n\ndata: [DONE]\n\n",
+    );
+    let mut stream = Stream::default();
+    stream.feed(wire.as_bytes(), &mut |_| Ok(())).unwrap();
+    let completion = stream.finish(&wire).unwrap();
+    assert_eq!(completion.provider.as_deref(), Some("Baidu"));
+    let mut charges = crate::openrouter::Charges::default();
+    charges.record(completion.provider.as_deref(), completion.usage.as_ref());
+    assert_eq!(
+        charges.describe().unwrap(),
+        "Served by Baidu · $0.0004 charged · 64 cached"
+    );
+    let plain = parse_completion(
+        crate::json::parse(
+            r#"{"provider":"DeepInfra","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(plain.provider.as_deref(), Some("DeepInfra"));
+}
+
+#[test]
+fn routing_metadata_reports_only_the_selected_provider_for_json_and_streams() {
+    let metadata = r#"{"endpoints":{"available":[{"provider":"Unused","selected":false},{"provider":"Baidu","selected":true}]}}"#;
+    let response = format!(
+        r#"{{"choices":[{{"finish_reason":"stop","message":{{"role":"assistant","content":"ok"}}}}],"openrouter_metadata":{metadata}}}"#
+    );
+    assert_eq!(
+        parse_completion(crate::json::parse(&response).unwrap())
+            .unwrap()
+            .provider
+            .as_deref(),
+        Some("Baidu")
+    );
+    let wire = delta(
+        Value::object([("content", Value::string("ok"))]),
+        Value::string("stop"),
+    ) + "data: {\"choices\":[],\"usage\":{\"cost\":0.002}}\n\n"
+        + &format!(
+            "data: {{\"choices\":[],\"usage\":null,\"openrouter_metadata\":{metadata}}}\n\ndata: [DONE]\n\n"
+        );
+    let mut stream = Stream::default();
+    stream.feed(wire.as_bytes(), &mut |_| Ok(())).unwrap();
+    let completion = stream.finish(&wire).unwrap();
+    assert_eq!(completion.provider.as_deref(), Some("Baidu"));
+    assert_eq!(
+        completion
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.get("cost")),
+        Some(&Value::number(0.002))
+    );
+}

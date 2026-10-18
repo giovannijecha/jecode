@@ -23,6 +23,7 @@ mod poll;
 mod processes;
 mod render;
 mod resize;
+mod routing;
 mod selector;
 mod settings;
 mod state;
@@ -342,6 +343,8 @@ mod measurement_tests;
 mod persistence_smoke;
 #[cfg(test)]
 mod persistence_tests;
+#[cfg(test)]
+mod routing_tests;
 #[cfg(test)]
 mod session_menu_tests;
 #[cfg(test)]

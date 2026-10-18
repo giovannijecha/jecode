@@ -38,6 +38,7 @@ impl App {
             (Choice::Effort(effort), Purpose::Efforts { model, defaults }) => {
                 self.apply_selection(model.id.clone(), effort, *defaults)
             }
+            (Choice::Routing(index), Purpose::Routing { .. }) => self.choose_routing(menu, index),
             (Choice::Setting(setting), Purpose::Settings) => {
                 self.settings_parent = match setting {
                     Setting::Close => None,
@@ -53,6 +54,7 @@ impl App {
                         model: self.config.settings.model.clone(),
                         effort: None,
                     }),
+                    Setting::Routing => self.open_routing(true),
                     Setting::AutoCompact => {
                         self.state.selector =
                             Some(Selector::auto_compact(self.config.settings.auto_compact))
@@ -70,7 +72,12 @@ impl App {
         Ok(())
     }
 
-    fn finish_setting(&mut self, kind: Kind, result: &str, details: Vec<(String, String)>) {
+    pub(super) fn finish_setting(
+        &mut self,
+        kind: Kind,
+        result: &str,
+        details: Vec<(String, String)>,
+    ) {
         if self.settings_parent.is_some() && self.pending_command.is_none() {
             self.local_start("/settings");
         }
@@ -81,14 +88,19 @@ impl App {
     fn return_to_settings(&mut self) {
         if let Some(parent) = self.settings_parent.take() {
             let settings = &self.config.settings;
-            let mut menu =
-                Selector::settings(&settings.model, settings.effort, settings.auto_compact);
+            let mut menu = Selector::settings(
+                &settings.model,
+                settings.effort,
+                settings.auto_compact,
+                &settings.routing_for(&settings.model),
+            );
             menu.selected = match parent {
                 Setting::Model => 0,
                 Setting::Effort => 1,
-                Setting::AutoCompact => 2,
-                Setting::Key => 3,
-                Setting::Close => 4,
+                Setting::Routing => 2,
+                Setting::AutoCompact => 3,
+                Setting::Key => 4,
+                Setting::Close => 5,
             };
             self.state.selector = Some(menu);
         }
@@ -237,6 +249,7 @@ impl App {
                     }
                 }
             }
+            ResultValue::Endpoints(purpose, result) => self.show_routing(purpose, result),
             ResultValue::Key(key, result) => match result {
                 Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
                 Ok(()) => {

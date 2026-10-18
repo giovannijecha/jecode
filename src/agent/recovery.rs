@@ -45,15 +45,24 @@ impl Agent {
             return Err("Operation cancelled".into());
         }
         let mut partial = String::new();
-        match self
+        let result = self
             .client
             .sample(messages, tools, output_tokens, &mut |update| {
                 if let Update::Text(text) = &update {
                     partial = text.clone();
                 }
                 emit(update)
-            }) {
-            Ok(completion) => Ok(Some(completion)),
+            });
+        if let Err(error) = &result
+            && let Some(charges) = &error.charges
+        {
+            self.charges.lock().unwrap().extend(charges);
+        }
+        match result {
+            Ok(completion) => {
+                self.record_charges(&completion);
+                Ok(Some(completion))
+            }
             Err(error) if matches!(error.kind, FailureKind::Temporary | FailureKind::Empty) => {
                 if error.kind == FailureKind::Empty {
                     retries.empty_responses += 1;

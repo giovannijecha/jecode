@@ -33,6 +33,49 @@ fn historical_notes(agent: &Agent) {
 }
 
 #[test]
+fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
+    let charged = |mut response: Value, cost: f64| {
+        let Value::Object(fields) = &mut response else {
+            unreachable!()
+        };
+        fields.insert(
+            "usage".into(),
+            Value::object([("cost", Value::number(cost))]),
+        );
+        response
+    };
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, charged(truncated(), 0.004)),
+        (200, charged(completion(&candidate(), vec![]), 0.001)),
+    ]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.fixture_limits(24000, None);
+    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    historical_notes(&agent);
+    agent.prepare_turn("Inspect only").unwrap();
+    agent
+        .compact_if_needed(
+            Some(Limits {
+                context: 24000,
+                output: None,
+            }),
+            true,
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(agent.charges().requests, 2);
+    assert!((agent.charges().cost - 0.005).abs() < 1e-9);
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.body.get("tools").is_none())
+    );
+}
+
+#[test]
 fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
     let directory = Directory::new();
     let home = Directory::new();

@@ -1,6 +1,7 @@
 use super::{canonical, context, identifier, now, valid_id};
 use crate::attachments::{Attachment, Prompt};
-use crate::{effort::Effort, json::Value, openrouter::validate_model, redact::Redactor};
+use crate::openrouter::{Routing, validate_model};
+use crate::{effort::Effort, json::Value, redact::Redactor};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -209,6 +210,7 @@ pub struct Document {
     pub pending: Pending,
     pub input: Input,
     pub context: crate::context::Context,
+    pub routing: Routing,
 }
 
 impl Document {
@@ -228,6 +230,7 @@ impl Document {
             pending: Pending::default(),
             input: Input::default(),
             context: crate::context::Context::default(),
+            routing: Routing::Auto,
         })
     }
 
@@ -301,6 +304,7 @@ impl Document {
             ),
             ("input", self.input.value()),
             ("context", self.context.value()),
+            ("routing", self.routing.value()),
         ])
     }
 
@@ -359,6 +363,12 @@ impl Document {
             },
             input: Input::parse(required(value, "input")?)?,
             context: crate::context::Context::parse(value.get("context"))?,
+            // Sessions saved before routing existed, or with a mode this
+            // version does not know, keep sending no routing preferences.
+            routing: value
+                .get("routing")
+                .and_then(Routing::parse)
+                .unwrap_or(Routing::Default),
         };
         Ok(document)
     }

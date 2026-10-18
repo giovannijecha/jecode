@@ -22,6 +22,9 @@ pub struct Agent {
     auto_compact: u8,
     project_instructions: String,
     inbox: crate::inbox::Inbox,
+    /// Saved per-model routing; `None` leaves routing unset.
+    routing_preferences: Option<std::collections::BTreeMap<String, crate::openrouter::Routing>>,
+    charges: Mutex<crate::openrouter::Charges>,
 }
 
 impl Agent {
@@ -45,6 +48,8 @@ impl Agent {
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             project_instructions: String::new(),
             inbox: crate::inbox::Inbox::default(),
+            routing_preferences: None,
+            charges: Mutex::default(),
         };
         agent.clear();
         agent
@@ -79,18 +84,28 @@ impl Agent {
             self.context.summary_output_tokens = 0;
         }
         client.set_cancellation(self.cancellation.clone());
+        if changed_model {
+            client.set_routing(self.preferred_routing(client.model()));
+        } else {
+            client.set_router(self.client.router().clone());
+        }
         self.redactor.include(client.redactor());
         self.tools.include_credentials(self.redactor.clone());
         self.client = client;
+        self.sync_conversation();
         if changed_model {
             self.compatible_from = self.messages.lock().unwrap().len();
             self.context.reset_usage();
         }
     }
 
+    /// A different model takes its saved routing preference, or Auto; the
+    /// same model keeps the conversation's routing.
     pub fn set_model(&mut self, model: String) -> Result<(), String> {
         if model != self.model() {
+            let routing = self.preferred_routing(&model);
             self.client.set_model(model)?;
+            self.client.set_routing(routing);
             self.context.summary_output_tokens = 0;
             self.compatible_from = self.messages.lock().unwrap().len();
             self.context.reset_usage();
@@ -99,6 +114,7 @@ impl Agent {
     }
 
     pub fn clear(&mut self) {
+        *self.charges.lock().unwrap() = crate::openrouter::Charges::default();
         self.project_instructions.clear();
         self.prepared = None;
         self.context = crate::context::Context::default();
@@ -173,6 +189,7 @@ impl Agent {
             self.prepare_turn(prompt)?;
         }
         self.prepared = None;
+        self.prepare_routing()?;
         let limits = self.model_limits(events)?;
         self.emit_context(events)?;
         loop {
@@ -385,6 +402,7 @@ mod input;
 mod persistence;
 mod project_instructions;
 mod recovery;
+mod routing;
 mod summary;
 mod temporary;
 
@@ -412,6 +430,8 @@ mod persistence_tests;
 mod process_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod routing_tests;
 #[cfg(test)]
 mod summary_tests;
 #[cfg(test)]

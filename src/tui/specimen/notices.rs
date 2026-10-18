@@ -67,7 +67,12 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         Kind::Error,
         "Settings could not be saved: access is denied. (os error 5)",
     );
-    panel.selector = Some(Selector::settings(MODEL, crate::effort::Effort::High, 80));
+    panel.selector = Some(Selector::settings(
+        MODEL,
+        crate::effort::Effort::High,
+        80,
+        &crate::openrouter::Routing::Auto,
+    ));
 
     vec![
         (

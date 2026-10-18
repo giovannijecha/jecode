@@ -85,3 +85,50 @@ fn summary_json_is_negotiated_for_the_exact_model_and_never_applied_to_tool_turn
         assert!(requests[3].body.get("response_format").is_none());
     }
 }
+
+#[test]
+fn summaries_skip_json_output_only_on_a_pinned_endpoint_known_to_lack_it() {
+    let catalog = Value::object([(
+        "data",
+        Value::Array(vec![Value::object([
+            ("id", Value::string("fixture/model")),
+            ("context_length", Value::number(24000)),
+            (
+                "supported_parameters",
+                Value::Array(vec![Value::string("response_format")]),
+            ),
+        ])]),
+    )]);
+    let mut responses = vec![(200, catalog)];
+    responses.extend((0..3).map(|_| (200, completion("{}", vec![]))));
+    let fixture = HttpFixture::new(responses);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.limits = None;
+    client.limits().unwrap();
+    let listing = crate::json::parse(
+        r#"{"data":{"endpoints":[{"tag":"plain/one","supported_parameters":["tools"]},
+        {"tag":"json/two","supported_parameters":["tools","response_format"]}]}}"#,
+    )
+    .unwrap();
+    client.offer_endpoints(
+        crate::openrouter::endpoints::parse("fixture/model", &listing, std::time::Instant::now())
+            .unwrap(),
+    );
+    let messages = [Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("JSON")),
+    ])];
+    // Unlisted endpoints are not assumed to lack the parameter.
+    for tag in ["plain/one", "json/two", "unlisted/three"] {
+        client.set_routing(crate::openrouter::Routing::Endpoint(tag.into()));
+        client
+            .sample(&messages, false, Some(3000), &mut |_| Ok(()))
+            .unwrap();
+    }
+    let requests = fixture.finish();
+    let formats: Vec<_> = requests[1..]
+        .iter()
+        .map(|request| request.body.get("response_format").is_some())
+        .collect();
+    assert_eq!(formats, [false, true, true]);
+}

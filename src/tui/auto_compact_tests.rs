@@ -34,7 +34,7 @@ fn enter(app: &mut App) {
 
 fn open(app: &mut App) {
     app.dispatch("/settings".into()).unwrap();
-    app.input(Decoded::Text("3".into())).unwrap();
+    app.input(Decoded::Text("4".into())).unwrap();
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::AutoCompact));
 }
@@ -78,7 +78,7 @@ fn a_saved_threshold_applies_to_this_and_new_conversations() {
     assert_preference(&app, 55);
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::Settings));
-    assert_eq!(menu.selected, 2);
+    assert_eq!(menu.selected, 3);
     let rows = view::frame(&app.state, "fixture/model", "directory")
         .live
         .iter()
@@ -107,7 +107,7 @@ fn cancelling_or_a_failed_save_keeps_the_previous_threshold_active_and_saved() {
     app.close_selector();
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::Settings));
-    assert_eq!(menu.selected, 2);
+    assert_eq!(menu.selected, 3);
     assert_preference(&app, 80);
     app.close_selector();
     let path = app.config.store.path().to_path_buf();

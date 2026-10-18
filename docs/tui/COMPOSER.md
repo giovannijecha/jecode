@@ -119,9 +119,9 @@ command except `/copy`, `/drafts` and `/terminal`, which open immediately.
 Whitespace closes suggestions while retaining command input. Esc dismisses the
 panel without clearing text or moving the draft caret.
 
-Model, effort, settings, session, draft and copy selectors share the panel
-geometry. Up to eight options use numbers; larger lists have a separate search
-field and up to eight visible matches. An empty search field has a blank caret.
+Model, effort, routing, settings, session, draft and copy selectors share the
+panel geometry. Up to eight options use numbers; larger lists have a separate
+search field and up to eight visible matches. An empty search field has a blank caret.
 The title shows a visible range or compact match count when needed. Current
 values appear in descriptions, such as `· current` or `Current selection`.
 They are independent of keyboard focus.
@@ -134,8 +134,9 @@ caret and controls take priority over padding in short viewports.
 - `/model [ID]` selects a tool-capable model and then an effort; both apply
   together. `/effort [NAME]` can change effort directly. These choices affect
   this conversation and retain the original content/tool pairs.
-- `/settings` changes saved defaults, Auto-compact at or the OpenRouter key.
-  Default model and effort apply on `/new` and future launches. Key entry is
+- `/settings` changes saved defaults, Auto-compact at, Default routing or the
+  OpenRouter key. Default model and effort apply on `/new` and future launches;
+  default routing also applies on model switches. Key entry is
   masked, validated in the background and saved only on success. Esc in a child
   picker returns to settings.
 - **Auto-compact at** edits a whole percentage from 1 to 99 (default 80), with a
@@ -143,6 +144,16 @@ caret and controls take priority over padding in short viewports.
   an invalid entry shows a warning and keeps the panel and previous value. A
   successful save applies to this conversation and new ones and updates the
   footer; a failed save or Esc keeps the previous value.
+- `/routing` chooses Auto — Best balance or one endpoint for this conversation;
+  **Default routing** in settings saves the default model's choice. The panel
+  opens as `Loading endpoints…` while the listing is fetched; Esc cancels it.
+  Auto comes first, then endpoints with listed prices and 30-minute speed and
+  latency, those without tool calls last. `current ·` marks the routing in
+  effect, independently of focus. Below the options, up to two muted rows
+  explain the focused choice, then a legend and the last turn's serving provider
+  and reported cost; they yield to the options in short viewports and a cut help
+  row ends with `…`. Choosing an endpoint without tool calls warns and keeps the
+  panel. See [CONFIGURATION.md](../usage/CONFIGURATION.md#endpoint-routing).
 - `/resume [ID]` restores a saved conversation in this folder. Ctrl+D marks
   one for deletion. Deleting the current conversation starts fresh context while
   preserving unsent composer, queued and paused drafts. The list remains open.

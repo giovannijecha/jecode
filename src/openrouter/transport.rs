@@ -43,6 +43,9 @@ impl Api {
         if let Some(body) = body {
             config.push_str(&format!("header = \"Content-Type: application/json\"\nheader = \"Expect:\"\ndata-binary = {}\n", config_string(body)));
         }
+        if path == "/chat/completions" {
+            config.push_str("header = \"X-OpenRouter-Metadata: enabled\"\n");
+        }
         let url = format!("{}{path}", self.base_url);
         let mut command = Command::new(curl_executable());
         command

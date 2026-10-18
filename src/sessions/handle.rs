@@ -139,6 +139,7 @@ impl Handle {
         archive: &Archive,
         compatible_from: usize,
         context: &crate::context::Context,
+        routing: &crate::openrouter::Routing,
         stage: Stage,
     ) -> Result<(), String> {
         let messages = archive.messages.lock().unwrap();
@@ -185,6 +186,7 @@ impl Handle {
         live.document.effort = crate::effort::Effort::parse(&archive.effort)?;
         live.document.compatible_from = compatible_from;
         live.document.context = context.clone();
+        live.document.routing = routing.clone();
         match stage {
             Stage::Begin => {
                 live.document.pending = Pending {

@@ -66,6 +66,12 @@ fn native_curl_sends_json_and_bearer_auth() {
             .iter()
             .any(|header| header == "Authorization: Bearer isolated-fixture-key")
     );
+    assert!(
+        requests[0]
+            .headers
+            .iter()
+            .any(|header| header == "X-OpenRouter-Metadata: enabled")
+    );
 }
 
 #[test]
