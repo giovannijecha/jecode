@@ -195,14 +195,14 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
         assert!(!live(&app).contains("Selection cancelled"));
     }
     app.dispatch("/settings".into()).unwrap();
-    app.input(Decoded::Text("3".into())).unwrap();
+    app.input(Decoded::Text("4".into())).unwrap();
     key(&mut app, 27, 0);
     assert!(matches!(
         app.state.selector.as_ref().unwrap().purpose,
         selector::Purpose::Settings
     ));
     assert!(app.state.notice.is_none());
-    app.input(Decoded::Text("4".into())).unwrap();
+    app.input(Decoded::Text("5".into())).unwrap();
     assert!(app.state.selector.is_none());
     assert!(app.state.notice.is_none());
     assert_eq!(app.state.editor.text, "kept\ndraft");
@@ -307,7 +307,7 @@ fn catalog_and_key_validation_use_one_correct_loading_title() {
         .unwrap()
         .replace_client(OpenRouter::fixture(fixture.endpoint.clone()));
     app.dispatch("/settings".into()).unwrap();
-    app.input(Decoded::Text("3".into())).unwrap();
+    app.input(Decoded::Text("4".into())).unwrap();
     app.input(Decoded::Text("isolated-key".into())).unwrap();
     key(&mut app, 13, 0);
     assert_eq!(live(&app).matches("Checking OpenRouter key…").count(), 1);

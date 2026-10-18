@@ -220,3 +220,62 @@ fn recent_requests_stay_verbatim_newest_first_within_the_budget() {
     assert!(encoded.contains("Earlier requests are omitted"));
     assert!(encoded.contains("history:requests"));
 }
+
+#[test]
+fn the_displayed_percentage_reaches_the_threshold_exactly_with_the_budget() {
+    assert_eq!(threshold(24000, 80), 19200);
+    assert_eq!(threshold(1001, 80), 801);
+    assert_eq!(threshold(1, 1), 1);
+    assert!(threshold(usize::MAX, 99) < usize::MAX);
+    for (capacity, percent) in [(24000, 80), (1001, 80), (128_000, 1), (7, 99)] {
+        let budget = threshold(capacity, percent);
+        let status = |tokens| Status {
+            tokens,
+            capacity: Some(capacity),
+            auto_compact: percent,
+        };
+        assert!(status(budget).percent() >= Some(usize::from(percent)));
+        assert!(status(budget - 1).percent() < Some(usize::from(percent)));
+    }
+    let unknown = Status {
+        tokens: 5000,
+        capacity: None,
+        auto_compact: 80,
+    };
+    assert_eq!(unknown.percent(), None);
+    assert_eq!(
+        Status {
+            capacity: Some(0),
+            ..unknown
+        }
+        .percent(),
+        None
+    );
+    for (value, valid) in [
+        (0, false),
+        (1, true),
+        (99, true),
+        (100, false),
+        (356, false),
+    ] {
+        assert_eq!(auto_compact_percent(value).is_ok(), valid, "{value}");
+    }
+}
+
+#[test]
+fn the_effective_capacity_includes_a_learned_ceiling() {
+    let limits = Limits {
+        context: 24000,
+        output: Some(4096),
+    };
+    let mut context = Context::default();
+    assert_eq!(context.capacity(None), None);
+    assert_eq!(context.capacity(Some(limits)), Some(24000));
+    assert_eq!(context.budget(limits, 80), 19200);
+    context.ceiling = Some(12000);
+    assert_eq!(context.capacity(None), Some(12000));
+    assert_eq!(context.capacity(Some(limits)), Some(12000));
+    assert_eq!(context.budget(limits, 50), 6000);
+    context.ceiling = Some(30000);
+    assert_eq!(context.capacity(Some(limits)), Some(24000));
+}

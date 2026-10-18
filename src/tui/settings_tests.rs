@@ -59,7 +59,7 @@ fn validated_key_save_changes_authentication_preserves_context_and_never_display
     let mut app = app(&directory, &fixture);
     app.state.editor.insert("untouched draft");
     app.dispatch("/settings".into()).unwrap();
-    app.input(Decoded::Text("3".into())).unwrap();
+    app.input(Decoded::Text("4".into())).unwrap();
     app.input(Decoded::Text(key.into())).unwrap();
     let frame = view::frame(&app.state, "fixture/model", "directory");
     assert!(frame.live.iter().all(|line| !line.plain().contains(key)));
@@ -108,7 +108,7 @@ fn a_rejected_key_does_not_replace_saved_settings_or_the_current_client() {
     )]);
     let mut app = app(&directory, &fixture);
     app.dispatch("/settings".into()).unwrap();
-    app.input(Decoded::Text("3".into())).unwrap();
+    app.input(Decoded::Text("4".into())).unwrap();
     app.input(Decoded::Text("replacement-fixture-key".into()))
         .unwrap();
     enter(&mut app);
@@ -251,7 +251,7 @@ fn cancelling_settings_children_returns_to_settings_before_closing_the_manager()
         selector::Purpose::Settings
     ));
     assert_eq!(app.state.selector.as_ref().unwrap().selected, 0);
-    app.input(Decoded::Text("3".into())).unwrap();
+    app.input(Decoded::Text("4".into())).unwrap();
     app.input(Decoded::Text("unsaved-fixture-key".into()))
         .unwrap();
     app.close_selector();
@@ -259,7 +259,7 @@ fn cancelling_settings_children_returns_to_settings_before_closing_the_manager()
         app.state.selector.as_ref().unwrap().purpose,
         selector::Purpose::Settings
     ));
-    assert_eq!(app.state.selector.as_ref().unwrap().selected, 2);
+    assert_eq!(app.state.selector.as_ref().unwrap().selected, 3);
     let displayed = view::frame(&app.state, "fixture/model", "fixture")
         .live
         .iter()

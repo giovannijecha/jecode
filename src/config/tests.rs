@@ -98,3 +98,59 @@ fn config_paths_are_user_scoped_and_environment_pairs_are_explicit() {
         .is_some()
     );
 }
+
+#[test]
+fn auto_compact_defaults_persists_beside_the_provider_and_rejects_invalid_values() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"},"context":{"future":1}}"#;
+    fs::write(store.path(), legacy).unwrap();
+    let mut saved = store.load().unwrap().unwrap();
+    assert_eq!(saved.auto_compact, crate::context::AUTO_COMPACT_DEFAULT);
+    saved.auto_compact = 65;
+    store.save(&saved).unwrap();
+    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    let context = document.get("context").unwrap();
+    assert_eq!(
+        context.get("auto_compact_percent"),
+        Some(&Value::number(65))
+    );
+    assert_eq!(context.get("future"), Some(&Value::number(1)));
+    assert!(
+        document
+            .get("openrouter")
+            .unwrap()
+            .get("auto_compact_percent")
+            .is_none()
+    );
+    assert_eq!(store.load().unwrap().unwrap().auto_compact, 65);
+    let original = fs::read(store.path()).unwrap();
+    for invalid in [0, 100] {
+        saved.auto_compact = invalid;
+        assert!(store.save(&saved).unwrap_err().contains("1 to 99"));
+        assert_eq!(fs::read(store.path()).unwrap(), original);
+    }
+    for value in ["0", "100", "\"80\"", "80.5", "-1", "null"] {
+        let text = format!(
+            r#"{{"openrouter":{{"api_key":"isolated-fixture-key","model":"fixture/model"}},"context":{{"auto_compact_percent":{value}}}}}"#
+        );
+        fs::write(store.path(), &text).unwrap();
+        let error = store.load().err().unwrap();
+        assert!(error.contains("context.auto_compact_percent"), "{error}");
+        assert!(!error.contains("isolated-fixture-key"));
+        assert!(store.save(&settings("fixture/new")).is_err());
+        assert_eq!(fs::read_to_string(store.path()).unwrap(), text);
+    }
+    let text =
+        r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"},"context":80}"#;
+    fs::write(store.path(), text).unwrap();
+    assert!(
+        store
+            .load()
+            .err()
+            .unwrap()
+            .contains("context must be an object")
+    );
+    assert!(store.save(&settings("fixture/new")).is_err());
+    assert_eq!(fs::read_to_string(store.path()).unwrap(), text);
+}

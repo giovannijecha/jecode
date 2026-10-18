@@ -36,6 +36,12 @@ Modules stay around 500 lines or fewer and split by responsibility:
   `context/view.rs` keeps recent user requests verbatim after compaction within
   a byte budget and turns large older tool results into previews with history
   references.
+  `context.rs` derives one input budget from the configured Auto-compact
+  percentage of the effective window (catalog length lowered by any learned
+  ceiling); the trigger, previews, retained requests, summary sizing and fit
+  check share it. `agent/compaction.rs` emits `Event::Context` with the
+  next-request projection after capacity, message, tool and recovery changes;
+  the TUI footer renders it and the console ignores it.
   `agent/environment.rs` supplies the agent identity, working-directory/access
   facts and session temporary paths. Current projections leave the saved
   original system message unchanged.

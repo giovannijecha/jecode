@@ -53,6 +53,10 @@ impl App {
                         model: self.config.settings.model.clone(),
                         effort: None,
                     }),
+                    Setting::AutoCompact => {
+                        self.state.selector =
+                            Some(Selector::auto_compact(self.config.settings.auto_compact))
+                    }
                     Setting::Key => self.state.selector = Some(Selector::key()),
                     Setting::Close => {
                         self.local_finish_quiet(Kind::Notice, "Settings closed", vec![])
@@ -76,13 +80,15 @@ impl App {
 
     fn return_to_settings(&mut self) {
         if let Some(parent) = self.settings_parent.take() {
+            let settings = &self.config.settings;
             let mut menu =
-                Selector::settings(&self.config.settings.model, self.config.settings.effort);
+                Selector::settings(&settings.model, settings.effort, settings.auto_compact);
             menu.selected = match parent {
                 Setting::Model => 0,
                 Setting::Effort => 1,
-                Setting::Key => 2,
-                Setting::Close => 3,
+                Setting::AutoCompact => 2,
+                Setting::Key => 3,
+                Setting::Close => 4,
             };
             self.state.selector = Some(menu);
         }
@@ -130,6 +136,7 @@ impl App {
                     agent.set_effort(effort);
                     self.archive = agent.archive();
                     self.state.effort = effort.name().into();
+                    self.refresh_context();
                     self.finish_setting(
                         Kind::Notice,
                         &format!("Model set to {model} · {} · was {previous}", effort.name()),
@@ -248,6 +255,7 @@ impl App {
                             self.config.settings = settings;
                             self.archive = agent.archive();
                             self.catalog.clear();
+                            self.refresh_context();
                             self.finish_setting(
                                 Kind::Notice,
                                 "OpenRouter key validated and saved",
@@ -281,6 +289,46 @@ impl App {
                 self.state.selector = Some(menu);
                 self.job = Some(Job::key(api, key));
             }
+        }
+    }
+
+    /// Saves the threshold, then applies it to the active conversation. An
+    /// invalid value keeps the panel open; a failed save keeps both unchanged.
+    pub(super) fn save_auto_compact(&mut self) {
+        let text = &self.state.selector.as_ref().unwrap().editor.text;
+        let text = text.trim();
+        let percent = text
+            .strip_suffix('%')
+            .unwrap_or(text)
+            .trim_end()
+            .parse::<usize>()
+            .map_err(|_| "Auto-compact must be a whole percentage from 1 to 99".to_string())
+            .and_then(crate::context::auto_compact_percent);
+        let percent = match percent {
+            Ok(percent) => percent,
+            Err(error) => return self.warn(&format!("{error} · previous setting kept")),
+        };
+        self.state.selector = None;
+        let mut settings = self.config.settings.clone();
+        settings.auto_compact = percent;
+        match self.config.store.save(&settings) {
+            Ok(()) => {
+                let previous = self.config.settings.auto_compact;
+                self.config.settings = settings;
+                // /settings runs between turns, while the application holds the agent.
+                if let Some(agent) = &mut self.agent {
+                    agent.set_auto_compact(percent);
+                }
+                self.refresh_context();
+                self.finish_setting(
+                    Kind::Notice,
+                    &format!(
+                        "Auto-compact at {percent}% · was {previous}% · applies to this and new conversations"
+                    ),
+                    vec![],
+                );
+            }
+            Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
         }
     }
 }

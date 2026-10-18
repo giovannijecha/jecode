@@ -55,7 +55,8 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                     Event::RecoveryFinished
                     | Event::RequestDiscarded
                     | Event::Accepted { .. }
-                    | Event::InputHeld => return Ok(()),
+                    | Event::InputHeld
+                    | Event::Context(_) => return Ok(()),
                     Event::Maintenance { text } | Event::ContextCompacted { text } => {
                         format!("[context] {text}")
                     }

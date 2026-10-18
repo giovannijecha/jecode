@@ -5,6 +5,7 @@ use crate::{effort::Effort, openrouter::Model, session::commands::match_text};
 pub enum Setting {
     Model,
     Effort,
+    AutoCompact,
     Key,
     Close,
 }
@@ -38,6 +39,8 @@ pub enum Purpose {
     },
     Settings,
     Key,
+    /// Percentage input for the automatic compaction threshold.
+    AutoCompact,
     Loading,
     Sessions {
         current: Option<usize>,
@@ -192,7 +195,7 @@ impl Selector {
             .unwrap_or(0);
         menu
     }
-    pub fn settings(model: &str, effort: Effort) -> Self {
+    pub fn settings(model: &str, effort: Effort, auto_compact: u8) -> Self {
         Self::new(
             "Settings · saved defaults",
             Purpose::Settings,
@@ -206,6 +209,11 @@ impl Selector {
                     name: "Default effort".into(),
                     description: effort.name().into(),
                     choice: Choice::Setting(Setting::Effort),
+                },
+                OptionRow {
+                    name: "Auto-compact at".into(),
+                    description: format!("{auto_compact}% of the context window"),
+                    choice: Choice::Setting(Setting::AutoCompact),
                 },
                 OptionRow {
                     name: "OpenRouter key".into(),
@@ -222,6 +230,15 @@ impl Selector {
     }
     pub fn key() -> Self {
         Self::new("OpenRouter key", Purpose::Key, vec![])
+    }
+    pub fn auto_compact(current: u8) -> Self {
+        let mut menu = Self::new("Auto-compact at", Purpose::AutoCompact, vec![]);
+        menu.editor.set(current.to_string().into());
+        menu
+    }
+    /// Whether typed text goes to this panel's input row.
+    pub fn accepts_text(&self) -> bool {
+        self.searchable || matches!(self.purpose, Purpose::Key | Purpose::AutoCompact)
     }
     pub fn refresh(&mut self) {
         self.cancel_delete();

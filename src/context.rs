@@ -8,6 +8,44 @@ pub(crate) use view::excerpt;
 /// Introduces a compaction summary, which the same model wrote in an earlier context window.
 const SUMMARY_PREFIX: &str = "Another language model started this task and wrote the summary below. The work it did with tools is still in place: files, saved outputs and the original history. Build on it and avoid repeating finished work.";
 
+/// Share of the effective context window at which proactive reduction starts.
+pub const AUTO_COMPACT_DEFAULT: u8 = 80;
+
+/// Validates an automatic compaction percentage: a whole number from 1 to 99.
+pub fn auto_compact_percent(value: usize) -> Result<u8, String> {
+    u8::try_from(value)
+        .ok()
+        .filter(|percent| (1..=99).contains(percent))
+        .ok_or_else(|| "Auto-compact must be a whole percentage from 1 to 99".into())
+}
+
+/// Tokens at which `percent` of `capacity` is reached. Rounding up makes an
+/// estimate reach this budget exactly when its displayed percentage does.
+pub fn threshold(capacity: usize, percent: u8) -> usize {
+    let tokens = (capacity as u128 * u128::from(percent)).div_ceil(100);
+    usize::try_from(tokens).unwrap_or(usize::MAX).max(1)
+}
+
+/// The engine's projection of the next model request, for display.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Status {
+    /// Estimated input tokens of the next request.
+    pub tokens: usize,
+    /// Effective context window; None while the model's capacity is unknown.
+    pub capacity: Option<usize>,
+    /// Configured automatic reduction threshold, in percent.
+    pub auto_compact: u8,
+}
+
+impl Status {
+    /// Whole percentage of the effective window, rounded down.
+    pub fn percent(&self) -> Option<usize> {
+        let capacity = self.capacity.filter(|capacity| *capacity > 0)?;
+        let percent = self.tokens as u128 * 100 / capacity as u128;
+        Some(usize::try_from(percent).unwrap_or(usize::MAX))
+    }
+}
+
 /// A view of durable history. Compaction never deletes the source messages.
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -17,6 +55,7 @@ pub struct Context {
     pub input_tokens: Option<usize>,
     pub measured_end: usize,
     pub calibration: Option<(usize, usize)>,
+    /// Size of the last completion, kept in saved sessions; budgets do not use it.
     pub reply_tokens: usize,
     /// Output allowance learned from summary truncation, independent of live prompt usage.
     pub summary_output_tokens: usize,
@@ -300,15 +339,22 @@ impl Context {
                 .saturating_add(crate::tools::definitions().encode().len()),
         )
     }
-    pub fn budgets(&self, limits: Limits) -> (usize, usize) {
-        let capacity = self.ceiling.unwrap_or(limits.context).min(limits.context);
-        // Derive the reserve from this model's window and observed response size.
-        let reserve = (capacity / 8)
-            .max(self.reply_tokens.saturating_mul(2))
-            .min(capacity / 3)
-            .min(limits.output.unwrap_or(usize::MAX))
-            .max(1);
-        (capacity.saturating_sub(reserve), reserve)
+    /// The effective window: declared capacity lowered by any ceiling learned
+    /// from provider rejections, or that ceiling alone without catalog metadata.
+    pub fn capacity(&self, limits: Option<Limits>) -> Option<usize> {
+        match (self.ceiling, limits) {
+            (Some(ceiling), Some(limits)) => Some(ceiling.min(limits.context)),
+            (ceiling, limits) => ceiling.or(limits.map(|limits| limits.context)),
+        }
+    }
+
+    /// The input budget for proactive reduction: `percent` of the effective window.
+    /// Output allowance is calculated separately from the provider limits.
+    pub fn budget(&self, limits: Limits, percent: u8) -> usize {
+        threshold(
+            self.capacity(Some(limits)).unwrap_or(limits.context),
+            percent,
+        )
     }
 }
 pub fn portable(message: &Value) -> Value {

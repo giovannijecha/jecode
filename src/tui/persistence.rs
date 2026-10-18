@@ -238,6 +238,7 @@ impl App {
                 self.restore_staged();
                 self.local_start(&format!("/resume {id}"));
                 self.local_finish(Kind::Notice, &format!("Resumed {title} · {status}"), vec![]);
+                self.refresh_context();
                 self.state.changed();
             }
             Err(error) => {

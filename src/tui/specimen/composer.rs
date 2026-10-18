@@ -2,6 +2,7 @@
 // terminal: cargo test --locked --offline specimen::composer -- --ignored --nocapture
 use std::time::{Duration, Instant};
 
+use crate::context::Status;
 use crate::tui::{
     activity::Activity,
     feedback::Feedback,
@@ -16,10 +17,18 @@ const NARROW: usize = 44;
 const MODEL: &str = "anthropic/claude-sonnet-5.5";
 const DIRECTORY: &str = r"C:\Projects\example";
 
+/// The engine projection shown by the footer: 122,400 of 200,000 tokens.
+const STATUS: Status = Status {
+    tokens: 122_400,
+    capacity: Some(200_000),
+    auto_compact: 80,
+};
+
 fn state(columns: usize) -> State {
     State {
         width: columns,
         effort: "high".into(),
+        context: Some(STATUS),
         ..State::default()
     }
 }
@@ -76,8 +85,15 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         "Reconnecting · attempt 2 in 4.0s · connection reset by peer",
     ));
 
+    let mut unknown = state(columns);
+    unknown.context = Some(Status {
+        capacity: None,
+        ..STATUS
+    });
+
     vec![
         ("Idle", idle),
+        ("Context capacity unknown", unknown),
         ("Typing a long draft", typing),
         ("Working", work),
         ("Working with queued messages", queue),

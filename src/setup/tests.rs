@@ -198,3 +198,29 @@ fn eof_at_first_prompt_leaves_no_directory_or_config() {
     );
     assert!(!store.path().parent().unwrap().exists());
 }
+
+#[test]
+fn setup_keeps_the_auto_compact_preference_across_key_and_model_changes() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let mut settings =
+        Settings::new("isolated-fixture-key".into(), "fixture/original".into()).unwrap();
+    settings.auto_compact = 42;
+    store.save(&settings).unwrap();
+    let fixture = HttpFixture::new(vec![(200, key_response()), (200, key_response())]);
+    for (inputs, model) in [
+        (&["=fixture/new"][..], "fixture/new"),
+        (&[""][..], "fixture/original"),
+    ] {
+        let mut ui = Prompts::new(inputs, &["replacement-fixture-key"]);
+        let saved = configure_with(&store, Some(&settings), &mut ui, |_| {
+            Ok(Api::fixture(&fixture.endpoint))
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(saved.model, model);
+        assert_eq!(saved.auto_compact, 42);
+        assert_eq!(store.load().unwrap().unwrap().auto_compact, 42);
+    }
+    assert_eq!(fixture.finish().len(), 2);
+}

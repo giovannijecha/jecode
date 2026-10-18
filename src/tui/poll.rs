@@ -69,6 +69,7 @@ impl App {
             }
             self.archive = agent.archive();
             self.agent = Some(agent);
+            self.refresh_context();
             dirty = true;
         }
         dirty |= self.poll_copy();

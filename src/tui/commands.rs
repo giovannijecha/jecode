@@ -185,6 +185,7 @@ impl App {
             }
             self.state.history.record(&prompt);
             self.capture_input();
+            self.refresh_context();
             self.state
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());
@@ -230,6 +231,7 @@ impl App {
             self.persistence = agent.sessions();
             self.state.effort = agent.effort().name().into();
             self.state.clear();
+            self.refresh_context();
         }
         self.local_start(value);
         match name.as_str() {
@@ -258,6 +260,7 @@ impl App {
                 self.state.selector = Some(Selector::settings(
                     &self.config.settings.model,
                     self.config.settings.effort,
+                    self.config.settings.auto_compact,
                 ));
             }
             "/model" => {

@@ -114,7 +114,16 @@ impl App {
             clipboard_image: None,
         };
         app.session_hint();
+        app.refresh_context();
         app
+    }
+
+    /// Reads the engine's projection while the application holds the agent;
+    /// a running turn reports its own through events.
+    fn refresh_context(&mut self) {
+        if let Some(agent) = &self.agent {
+            self.state.context = Some(agent.context_status());
+        }
     }
 }
 
@@ -311,6 +320,8 @@ impl Drop for App {
 
 mod exit;
 
+#[cfg(test)]
+mod auto_compact_tests;
 #[cfg(test)]
 mod copy_tests;
 #[cfg(test)]

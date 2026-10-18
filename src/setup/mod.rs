@@ -60,10 +60,11 @@ fn configure_with(
         return cancelled(ui);
     };
     let mut settings = Settings::new(api_key, model)?;
-    if let Some(current) = current
-        && current.model == settings.model
-    {
-        settings.effort = current.effort;
+    if let Some(current) = current {
+        settings.auto_compact = current.auto_compact;
+        if current.model == settings.model {
+            settings.effort = current.effort;
+        }
     }
     store.save(&settings).map_err(|error| api.redact(&error))?;
     ui.message(&api.redact(&format!("Saved. Model: {}", settings.model)))?;

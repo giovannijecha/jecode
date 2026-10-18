@@ -104,7 +104,7 @@ jecode setup
 | `/attach PATH...` | Attach files to the draft; dropping files or Alt+V for a clipboard image does the same. |
 | `/model [ID]` | Choose the current conversation's model, then its effort. |
 | `/effort [NAME]` | Choose a supported reasoning effort for this conversation. |
-| `/settings` | Change the saved model, effort or OpenRouter key. |
+| `/settings` | Change the saved model, effort, Auto-compact threshold or OpenRouter key. |
 | `/help` | Show command and keyboard help. |
 | `/copy` | Choose the last completed response, a code block or a quote to copy. |
 | `/export` | Save the current conversation as JSON in the working directory. |
@@ -116,7 +116,10 @@ jecode setup
 `/clear` and `/setup` remain aliases for `/new` and `/settings`.
 Model and effort changes keep the conversation and do not overwrite saved
 defaults. Settings apply to future `/new` conversations and launches; changing
-the key also updates authentication for the current conversation.
+the key also updates authentication for the current conversation, and
+Auto-compact at (default 80%) also applies to the current conversation. The
+TUI footer shows the next request's estimated share of the context window
+beside that threshold, for example `Context ≈61% · Auto 80%`.
 
 Interactive stdin and stdout open the fullscreen TUI. The draft stays editable
 during work; Enter sends a message into the active turn before its next model

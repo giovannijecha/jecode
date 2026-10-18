@@ -17,12 +17,14 @@ fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent
         ("role", Value::string("assistant")),
         (
             "content",
-            Value::string("Recorded inspection data ".repeat(215)),
+            Value::string("Recorded inspection data ".repeat(120)),
         ),
     ]));
     let original = agent.messages.lock().unwrap().clone();
-    assert!(16635 + crate::context::bytes(&original[2..]) > 21000);
-    assert!(agent.context_estimate(&original) < 21000);
+    // Raw growth crosses the default 80% budget; the calibrated estimate does not.
+    let budget = crate::context::threshold(24000, crate::context::AUTO_COMPACT_DEFAULT);
+    assert!(16635 + crate::context::bytes(&original[2..]) > budget);
+    assert!(agent.context_estimate(&original) < budget);
     (agent, original)
 }
 
