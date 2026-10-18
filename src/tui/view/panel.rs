@@ -1,7 +1,7 @@
 use crate::tui::{
     line::Line,
     text,
-    theme::{MUTED, PROMPT, USER_BACKGROUND},
+    theme::{MUTED, STRONG, USER_SURFACE},
 };
 
 pub(super) fn position(start: usize, end: usize, total: usize) -> String {
@@ -17,7 +17,7 @@ pub(super) fn heading(title: &str, position: &str, columns: usize) -> Line {
     let badge = text::cells(position);
     let show = !position.is_empty() && badge + text::cells(&title).min(8) + 2 <= columns;
     let budget = if show { columns - badge - 2 } else { columns };
-    let mut line = Line::new(&text::ellipsize(&title, budget), PROMPT);
+    let mut line = Line::new(&text::ellipsize(&title, budget), STRONG);
     if show {
         line.push(
             &" ".repeat(columns - text::cells(&line.plain()) - badge),
@@ -26,14 +26,6 @@ pub(super) fn heading(title: &str, position: &str, columns: usize) -> Line {
         line.push(position, MUTED);
     }
     line
-}
-
-pub(super) fn hint<'a>(variants: &[&'a str], columns: usize) -> &'a str {
-    variants
-        .iter()
-        .copied()
-        .find(|value| text::cells(value) <= columns)
-        .unwrap_or_else(|| variants.last().copied().unwrap_or(""))
 }
 
 fn margin(columns: usize) -> usize {
@@ -48,7 +40,7 @@ pub(super) fn row(line: Line, columns: usize) -> Line {
     let mut line = line
         .shortened(width(columns))
         .indent(&" ".repeat(margin(columns)), MUTED);
-    line.background.get_or_insert(USER_BACKGROUND);
+    line.background.get_or_insert(USER_SURFACE);
     line
 }
 
@@ -83,7 +75,7 @@ pub(super) fn finish(
             .position(|&index| index == row)
             .map(|row| (row + padding, column + margin(columns)))
     });
-    let blank = || Line::default().on(USER_BACKGROUND);
+    let blank = || Line::default().on(USER_SURFACE);
     let mut output = Vec::new();
     if padding > 0 {
         output.push(blank());

@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::{
     state::Kind,
-    theme::{CURSOR, SELECTED_BACKGROUND, USER_BACKGROUND},
+    theme::{CURSOR, SELECTED_SURFACE, USER_SURFACE},
 };
 
 #[test]
@@ -17,7 +17,7 @@ fn tiny_widths_keep_the_software_caret_visible_and_restore_the_multiline_draft()
             let frame = frame(&state, "fixture/model", "fixture directory");
             let (row, column) = frame.cursor.unwrap();
             assert!(column < width, "caret must fit width {width}");
-            assert!(frame.live[row].paint(width).contains(CURSOR));
+            assert!(frame.live[row].paint(width).contains(&CURSOR.to_string()));
             assert!(frame.live.len() <= height);
             assert_eq!(state.editor, draft);
         }
@@ -40,14 +40,14 @@ fn short_command_suggestions_keep_the_selected_item_and_caret_in_view() {
         let frame = frame(&state, "fixture/model", "fixture directory");
         assert!(frame.live.len() <= height);
         let (row, _) = frame.cursor.unwrap();
-        assert!(frame.live[row].paint(state.width).contains(CURSOR));
         assert!(
-            frame
-                .live
-                .iter()
-                .any(|line| line.background == Some(SELECTED_BACKGROUND)
-                    && line.plain().contains(selected))
+            frame.live[row]
+                .paint(state.width)
+                .contains(&CURSOR.to_string())
         );
+        assert!(frame.live.iter().any(
+            |line| line.background == Some(SELECTED_SURFACE) && line.plain().contains(selected)
+        ));
         assert_eq!(state.editor.text, "/");
     }
 }
@@ -56,11 +56,11 @@ fn short_command_suggestions_keep_the_selected_item_and_caret_in_view() {
 fn single_line_previews_keep_styles_and_mark_hidden_columns_without_emitting_newlines() {
     let mut line = Line::new("● ", super::super::theme::GOOD);
     line.push("long command\ncontinued🙂", super::super::theme::ACCENT);
-    line.background = Some(USER_BACKGROUND);
+    line.background = Some(USER_SURFACE);
     let short = line.shortened(12);
     assert!(short.plain().ends_with('…'));
     assert!(!short.plain().contains('\n'));
-    assert_eq!(short.background, Some(USER_BACKGROUND));
+    assert_eq!(short.background, Some(USER_SURFACE));
     assert_eq!(short.spans[0].style, super::super::theme::GOOD);
     assert!(line.plain().contains('\n'));
     assert!(!line.shortened(80).plain().contains('\n'));

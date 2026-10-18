@@ -112,7 +112,7 @@ fn full_width_console(bash: &std::path::Path) {
         history: vec![],
         live: rows
             .iter()
-            .map(|row| crate::tui::line::Line::new(row, "0"))
+            .map(|row| crate::tui::line::Line::new(row, crate::tui::theme::BODY))
             .collect(),
         cursor: Some((height - 1, width - 1)),
         composer: height - 1,

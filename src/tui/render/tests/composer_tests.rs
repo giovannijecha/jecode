@@ -32,7 +32,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
         height: 10,
         ..State::default()
     };
-    state.message(Kind::Assistant, &"retained answer\n".repeat(20));
+    state.message(Kind::Assistant, &"retained answer  \n".repeat(20));
     let mut screen = Screen::new(state.width, state.height);
     let mut renderer = Renderer::new();
     update(&mut renderer, &mut screen, &mut state);
@@ -40,7 +40,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
         state.editor.replace(command.into());
         state.suggestions.refresh(command);
         let opened = update(&mut renderer, &mut screen, &mut state);
-        assert!(opened.contains(crate::tui::theme::USER_BACKGROUND));
+        assert!(opened.contains(&crate::tui::theme::USER_SURFACE.to_string()));
         assert!(screen.visible().contains("Commands"));
         state.selector = Some(Selector::settings(
             "fixture/model",
@@ -67,7 +67,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
             .rows()
             .iter()
             .flatten()
-            .filter(|line| line.plain() == "retained answer")
+            .filter(|line| line.plain().trim_end() == "retained answer")
             .count(),
         20
     );
@@ -84,7 +84,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
         height: 12,
         ..State::default()
     };
-    state.message(Kind::Assistant, &"retained paragraph\n".repeat(40));
+    state.message(Kind::Assistant, &"retained paragraph  \n".repeat(40));
     let mut screen = Screen::new(state.width, state.height);
     let mut renderer = Renderer::new();
     update(&mut renderer, &mut screen, &mut state);
@@ -92,7 +92,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
     state.queue.push("queued pending").unwrap();
     let mut streamed = String::new();
     for _ in 0..20 {
-        streamed.push_str("streamed paragraph\n");
+        streamed.push_str("streamed paragraph  \n");
         state.event(Event::Streaming {
             text: streamed.clone(),
         });
@@ -117,8 +117,9 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
         "fixture/model",
         crate::effort::Effort::Default,
     ));
-    let opened = update(&mut renderer, &mut screen, &mut state);
-    assert!(!opened.contains("streamed paragraph"));
+    update(&mut renderer, &mut screen, &mut state);
+    assert!(screen.visible().contains("Settings · saved defaults"));
+    assert!(screen.history.is_empty());
     state.selector = None;
     update(&mut renderer, &mut screen, &mut state);
     let transcript = screen.history.join("\n") + "\n" + &screen.visible();
@@ -128,7 +129,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
             .rows()
             .iter()
             .flatten()
-            .filter(|line| line.plain() == "retained paragraph")
+            .filter(|line| line.plain().trim_end() == "retained paragraph")
             .count(),
         40
     );
@@ -137,7 +138,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
             .rows()
             .iter()
             .flatten()
-            .filter(|line| line.plain() == "streamed paragraph")
+            .filter(|line| line.plain().trim_end() == "streamed paragraph")
             .count(),
         20
     );

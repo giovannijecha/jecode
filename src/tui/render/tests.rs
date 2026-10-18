@@ -143,7 +143,10 @@ fn full_width_rows_and_the_bottom_right_cell_never_scroll_or_leak_into_shell_his
         let mut frame = view::Frame {
             header: vec![],
             history: vec![],
-            live: rows.iter().map(|row| Line::new(row, "0")).collect(),
+            live: rows
+                .iter()
+                .map(|row| Line::new(row, crate::tui::theme::BODY))
+                .collect(),
             cursor: Some((height - 1, width - 1)),
             composer: height - 1,
         };
@@ -152,7 +155,7 @@ fn full_width_rows_and_the_bottom_right_cell_never_scroll_or_leak_into_shell_his
         assert_eq!(screen.visible(), rows.join("\n"));
         assert_eq!((screen.x, screen.y), (width - 1, height - 1));
         assert!(screen.history.is_empty());
-        frame.live[height - 1] = Line::new("X", "0");
+        frame.live[height - 1] = Line::new("X", crate::tui::theme::BODY);
         screen.feed(&renderer.paint(&frame, width, height));
         assert_eq!(screen.rows[0].iter().collect::<String>(), rows[0]);
         assert_eq!(

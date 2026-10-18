@@ -1,17 +1,16 @@
-use super::{field, flag};
+use super::{
+    diff::{self, Change},
+    field, flag,
+};
 use crate::json::Value;
 use crate::tui::{
     line::Line,
+    notice::{self, Level},
     text,
-    theme::{BAD, BODY, DIFF_ADDED_BACKGROUND, DIFF_REMOVED_BACKGROUND, GOOD, MUTED, WARNING},
+    theme::{BAD, BODY, MUTED, Style},
 };
 
 const ROWS: usize = 3;
-
-pub(super) struct Preview {
-    pub rows: Vec<Line>,
-    pub total: usize,
-}
 
 pub(super) fn render(
     name: &str,
@@ -21,21 +20,29 @@ pub(super) fn render(
     failed: bool,
 ) -> Preview {
     if let Some(error) = result.get("error").and_then(Value::as_str) {
-        return head(payload(error, BAD, columns));
+        return head(&payload(error, BAD, columns));
     }
     match name {
         "bash" | "process" if result.get("processes").is_none() => bash(result, columns, failed),
-        "read" => head(payload(field(result, "content"), BODY, columns)),
-        "write" => head(payload(field(arguments, "content"), BODY, columns)),
+        "read" => head(&payload(field(result, "content"), BODY, columns)),
+        "write" => head(&payload(field(arguments, "content"), BODY, columns)),
         "edit" => edit(arguments, columns),
-        _ => head(payload(&result.pretty(), BODY, columns)),
+        _ => head(&payload(&result.pretty(), BODY, columns)),
     }
 }
 
-fn head(mut rows: Vec<Line>) -> Preview {
-    let total = rows.len();
-    rows.truncate(ROWS);
-    Preview { rows, total }
+pub(super) struct Preview {
+    pub rows: Vec<Line>,
+    pub position: Option<String>,
+}
+
+fn selected(rows: Vec<Line>, total: usize) -> Preview {
+    let position = (total > rows.len()).then(|| format!("preview {} / {total}", rows.len()));
+    Preview { rows, position }
+}
+
+fn head(rows: &[Line]) -> Preview {
+    selected(rows.iter().take(ROWS).cloned().collect(), rows.len())
 }
 
 fn bash(result: &Value, columns: usize, failed: bool) -> Preview {
@@ -49,50 +56,58 @@ fn bash(result: &Value, columns: usize, failed: bool) -> Preview {
             columns,
         )
     };
-    let mut rows = Vec::new();
-    if failed && !stderr.is_empty() {
-        rows.extend(stderr.iter().take(ROWS).cloned());
-        rows.extend(tail(&stdout, ROWS - rows.len()));
+    // Failed stderr takes priority; recent stdout fills any remaining space.
+    let rows = if failed && !stderr.is_empty() {
+        let mut rows = stderr.iter().take(ROWS).cloned().collect::<Vec<_>>();
+        let room = ROWS - rows.len();
+        rows.extend(
+            stdout
+                .iter()
+                .skip(stdout.len().saturating_sub(room))
+                .cloned(),
+        );
+        rows
     } else {
-        rows.extend(tail(
-            &stdout,
-            if stderr.is_empty() { ROWS } else { ROWS - 1 },
-        ));
+        let budget = if stderr.is_empty() { ROWS } else { ROWS - 1 };
+        let mut rows = stdout
+            .iter()
+            .skip(stdout.len().saturating_sub(budget))
+            .cloned()
+            .collect::<Vec<_>>();
         rows.extend(stderr.iter().take(ROWS - rows.len()).cloned());
-    }
-    Preview {
-        rows,
-        total: stdout.len() + stderr.len(),
-    }
-}
-
-fn tail(rows: &[Line], count: usize) -> impl Iterator<Item = Line> + '_ {
-    rows.iter().skip(rows.len().saturating_sub(count)).cloned()
+        rows
+    };
+    selected(rows, stdout.len() + stderr.len())
 }
 
 fn edit(arguments: &Value, columns: usize) -> Preview {
-    let removed = diff(field(arguments, "old_text"), false, columns);
-    let added = diff(field(arguments, "new_text"), true, columns);
-    let removed_budget = if added.is_empty() {
+    let old = text::clean(field(arguments, "old_text"));
+    let new = text::clean(field(arguments, "new_text"));
+    let changes = diff::lines(&old, &new);
+    let removed = changes
+        .iter()
+        .take_while(|(change, _)| *change == Change::Removed)
+        .count();
+    let added = changes[removed..]
+        .iter()
+        .take_while(|(change, _)| *change == Change::Added)
+        .count();
+    let budget = if added == 0 {
         ROWS
-    } else if removed.len() > added.len() {
+    } else if removed > added {
         2
     } else {
         1
     };
-    let removed_count = removed.len().min(removed_budget);
-    let added_count = added.len().min(ROWS - removed_count);
-    let removed_count = removed.len().min(ROWS - added_count);
-    let rows = removed
+    let first = removed.min(budget);
+    let second = added.min(ROWS - first);
+    let first = removed.min(ROWS - second);
+    let rows = changes[..first]
         .iter()
-        .take(removed_count)
-        .chain(added.iter().take(added_count))
-        .cloned()
-        .collect::<Vec<_>>();
-    Preview {
-        rows,
-        total: removed.len() + added.len(),
-    }
+        .chain(&changes[removed..removed + second])
+        .map(|(change, line)| diff::row(*change, line).shortened(columns))
+        .collect();
+    selected(rows, changes.len())
 }
 
 pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
@@ -101,9 +116,9 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
         && result.get("offset") == Some(&Value::Null)
         && let Some(next) = result.get("next_byte_offset").and_then(Value::as_usize)
     {
-        rows.extend(payload(
+        rows.extend(notice::lines(
+            Level::Info,
             &format!("More file bytes available from byte {next}."),
-            MUTED,
             columns,
         ));
         return rows;
@@ -112,7 +127,8 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
         && let Some(next) = result.get("next_offset").and_then(Value::as_usize)
     {
         if flag(result, "partial_line") {
-            rows.extend(payload(
+            rows.extend(notice::lines(
+                Level::Info,
                 &format!(
                     "Line continues at byte {}.",
                     result
@@ -120,14 +136,13 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
                         .and_then(Value::as_usize)
                         .unwrap_or(0)
                 ),
-                MUTED,
                 columns,
             ));
             return rows;
         }
-        rows.extend(payload(
+        rows.extend(notice::lines(
+            Level::Info,
             &format!("More file lines available from line {next}."),
-            MUTED,
             columns,
         ));
     }
@@ -140,7 +155,7 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
             if skipped > 0 {
                 let notice =
                     format!("{stream}: {skipped} earlier bytes not shown · full output saved.");
-                rows.extend(payload(&notice, WARNING, columns));
+                rows.extend(notice::lines(Level::Warning, &notice, columns));
             }
             if flag(result, &format!("{stream}_truncated")) {
                 let bytes = result
@@ -157,14 +172,14 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
                 } else {
                     format!("{stream}: last {limit} of {bytes} bytes shown · full output saved.")
                 };
-                rows.extend(payload(&notice, WARNING, columns));
+                rows.extend(notice::lines(Level::Warning, &notice, columns));
             }
         }
     }
     rows
 }
 
-fn payload(value: &str, style: &'static str, columns: usize) -> Vec<Line> {
+fn payload(value: &str, style: Style, columns: usize) -> Vec<Line> {
     if value.is_empty() {
         return Vec::new();
     }
@@ -176,24 +191,5 @@ fn payload(value: &str, style: &'static str, columns: usize) -> Vec<Line> {
         .unwrap_or(&value)
         .split('\n')
         .map(|line| Line::new(line, style).shortened(columns))
-        .collect()
-}
-
-fn diff(value: &str, added: bool, columns: usize) -> Vec<Line> {
-    let value = text::clean(value);
-    value
-        .lines()
-        .map(|value| {
-            Line::new(
-                &format!("{} {value}", if added { "+" } else { "-" }),
-                if added { GOOD } else { BAD },
-            )
-            .on(if added {
-                DIFF_ADDED_BACKGROUND
-            } else {
-                DIFF_REMOVED_BACKGROUND
-            })
-            .shortened(columns)
-        })
         .collect()
 }

@@ -173,7 +173,8 @@ fn a_missing_tool_finish_event_is_reconciled_from_retained_protocol_results() {
             .rows()
             .iter()
             .flatten()
-            .any(|line| line.plain().contains("read  missing") && line.plain().contains("× failed"))
+            .any(|line| line.plain().contains("read  missing")
+                && line.plain().contains("× failed"))
     );
     assert!(
         view::frame(&app.state, "fixture", "directory")

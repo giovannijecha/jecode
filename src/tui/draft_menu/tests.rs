@@ -95,7 +95,7 @@ fn editing_and_discarding_one_of_five_equal_drafts_keeps_the_composer_separate()
     assert_eq!(app.state.queue.messages()[0], "same draft revised");
     assert_eq!(app.state.editor, original);
     key(&mut app, 68, 4);
-    assert!(frame_text(&app).contains("Discard?"));
+    assert!(frame_text(&app).contains("Enter discard · Esc cancel"));
     key(&mut app, 13, 0);
     assert_eq!(app.state.queue.messages().len(), 4);
     assert!(

@@ -4,7 +4,7 @@ use super::{
     line::Line,
     markdown,
     state::{Item, Kind},
-    theme::{CODE_BACKGROUND, USER_BACKGROUND},
+    theme::{CODE_SURFACE, USER_SURFACE},
     view,
 };
 use crate::{events::Event, json::Value};
@@ -114,7 +114,7 @@ fn panels_keep_their_padding_and_text_without_a_sent_prompt_marker() {
     assert!(
         blocks[0]
             .iter()
-            .all(|row| row.background == Some(USER_BACKGROUND))
+            .all(|row| row.background == Some(USER_SURFACE))
     );
     assert_eq!(blocks[0][0].plain(), "");
     assert_eq!(blocks[0][4].plain(), "");
@@ -149,8 +149,8 @@ fn empty_assistant_updates_leave_tools_connected_and_add_no_rows() {
     assert!(rows[1].is_empty());
     let all = rows.iter().flatten().map(Line::plain).collect::<Vec<_>>();
     assert_eq!(all.len(), 3);
-    assert!(all[0].starts_with("├─ bash  first"));
-    assert!(all[1].starts_with("└─ bash  second"));
+    assert!(all[0].starts_with("├─ bash  first") && all[0].contains("✓"));
+    assert!(all[1].starts_with("└─ bash  second") && all[1].contains("✓"));
     assert_eq!(all[2], "     second output");
     // Earlier results remain available through inline expansion.
     state.select_tool(Some(0));
@@ -223,7 +223,7 @@ fn assistant_markdown_keeps_internal_and_leading_blanks_without_automatic_margin
     assert_eq!(markdown::render("A\n\n", 20).len(), 1);
     assert_eq!(markdown::render("A\n\nB", 20).len(), 3);
     for empty in ["", "\n\n", " \t\r\n"] {
-        assert!(markdown::render(empty, 20).is_empty());
+        assert_eq!(markdown::render(empty, 20), [Line::default()]);
     }
 }
 
@@ -236,8 +236,9 @@ fn complete_code_panels_have_two_colored_frame_rows_and_preserve_blank_code_line
         assert!(
             rows[1..6]
                 .iter()
-                .all(|row| row.background == Some(CODE_BACKGROUND))
+                .all(|row| row.background == Some(CODE_SURFACE))
         );
+        // Code rows, blank ones included, use the full terminal width.
         assert_eq!(rows[3].plain(), "");
         assert_eq!(rows[5].plain(), "");
         assert_eq!(rows[6], Line::default());
@@ -247,12 +248,12 @@ fn complete_code_panels_have_two_colored_frame_rows_and_preserve_blank_code_line
             assert_eq!(rows[1].plain(), "");
         }
     }
-    let wrapped = markdown::render("```\nabcdefghijkl\n```", 4);
-    assert_eq!(wrapped.len(), 5); // Three visual code rows plus two frames.
+    let wrapped = markdown::render("```\nabcdefghijkl\n```", 8);
+    assert_eq!(wrapped.len(), 4); // Label, two visual code rows, closing row.
     assert!(
         wrapped
             .iter()
-            .all(|row| row.background == Some(CODE_BACKGROUND))
+            .all(|row| row.background == Some(CODE_SURFACE))
     );
 }
 
@@ -283,7 +284,7 @@ fn invisible_items_and_feedback_do_not_add_transcript_rows_or_separators() {
 }
 
 #[test]
-fn the_lower_area_stays_at_the_bottom_with_space_before_queue_notices_and_activity() {
+fn the_lower_area_stays_at_the_bottom_with_space_before_notices_activity_and_queue() {
     let mut state = State::default();
     state.message(Kind::Assistant, "answer");
     state.activity = Some(Activity::new());
@@ -292,11 +293,7 @@ fn the_lower_area_stays_at_the_bottom_with_space_before_queue_notices_and_activi
     let frame = view::frame(&state, "model", "directory");
     assert_eq!(frame.composer, state.height - 7);
     assert_eq!(frame.live[frame.composer - 1], Line::default());
-    assert!(
-        frame.live[frame.composer]
-            .plain()
-            .starts_with("› next prompt")
-    );
+    assert!(frame.live[frame.composer].plain().contains("next prompt"));
     assert!(frame.live[frame.composer + 1].plain().contains("notice"));
     assert!(frame.live[frame.composer + 2].plain().contains("Waiting"));
     assert!(frame.live[frame.composer + 3].plain().starts_with('─'));

@@ -14,6 +14,11 @@ fn streamed_appends_match_full_markdown_after_each_ambiguous_boundary() {
         " open comment\ncontinued",
         " */\nlet value = 3;\n```",
         "\n- [x] done",
+        "\n\nsoft",
+        " wrap\nacross *two",
+        "\nlines*  ",
+        "\nafter a break\n> quoted",
+        "\n> more",
         "\n",
     ];
     let mut source = String::new();
@@ -86,7 +91,7 @@ fn list_items_keep_their_marker_and_hanging_indentation_when_wrapped() {
         rows[0]
             .spans
             .iter()
-            .any(|span| span.text == "One" && span.style == EMPHASIS)
+            .any(|span| span.text == "One" && span.style == EMPHASIS.bold())
     );
 }
 
@@ -156,7 +161,7 @@ fn quotes_and_narrow_code_preserve_visible_content_and_widths() {
         assert!(rows[0].plain().starts_with("│ A"));
         let code: String = rows
             .iter()
-            .skip_while(|row| row.plain() != "rust")
+            .filter(|row| row.background == Some(CODE_SURFACE))
             .skip(1)
             .take_while(|row| !row.plain().is_empty())
             .map(Line::plain)
@@ -179,7 +184,7 @@ fn headings_tasks_and_inline_formatting_keep_their_visible_text() {
             "│ old and docs (https://example.test/a)"
         ]
     );
-    assert_eq!(rows[1].spans[0].style, EMPHASIS);
+    assert_eq!(rows[1].spans[0].style, EMPHASIS.bold());
     assert_eq!(render("## C#\nLiteral snake_case", 60)[0].plain(), "C#");
     assert!(source.contains("~~old~~"));
 }
@@ -199,4 +204,77 @@ fn partial_table_delimiters_remain_visible_until_a_valid_table_exists() {
             .collect::<Vec<_>>(),
         ["A   B", "──  ──"]
     );
+}
+
+#[test]
+fn source_lines_keep_individual_rows_and_inline_scope() {
+    let source = "One *two\nthree* four\nfive  \nsix\\\nseven\n- item\n  more\n# Next";
+    let rows = render(source, 80);
+    let plain: Vec<_> = rows.iter().map(Line::plain).collect();
+    assert_eq!(
+        plain,
+        [
+            "One *two",
+            "three* four",
+            "five  ",
+            "six\\",
+            "seven",
+            "• item",
+            "  more",
+            "Next"
+        ]
+    );
+    assert_eq!(rows[0].origin.unwrap().line, 0);
+    assert_eq!(rows[1].origin.unwrap().line, 9);
+    let plain = |source, columns| {
+        render(source, columns)
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        plain("first line\nsecond line", 12),
+        ["first line", "second line"]
+    );
+    assert_eq!(
+        plain("text\n| A | B |\n|---|---|", 80),
+        ["text", "A   B", "──  ──"]
+    );
+}
+
+#[test]
+fn quotes_repeat_a_muted_bar_and_keep_each_source_line() {
+    let rows = render("> one\n> two\nafter", 80);
+    let plain: Vec<_> = rows.iter().map(Line::plain).collect();
+    assert_eq!(plain, ["│ one", "│ two", "after"]);
+    assert_eq!(rows[0].spans[0].style, MUTED);
+    assert!(rows[0].spans.iter().all(|span| span.style == MUTED));
+    let wrapped: Vec<_> = render("> alpha beta gamma", 10)
+        .iter()
+        .map(Line::plain)
+        .collect();
+    assert_eq!(wrapped, ["│ alpha", "│ beta", "│ gamma"]);
+}
+
+#[test]
+fn code_uses_the_full_width_and_code_surface() {
+    let rows = render("```text\nabcdefghij\n```", 10);
+    let plain: Vec<_> = rows.iter().map(Line::plain).collect();
+    assert_eq!(plain, ["text", "abcdefghij", ""]);
+    assert!(rows.iter().all(|row| row.background == Some(CODE_SURFACE)));
+}
+
+#[test]
+fn empty_prose_and_blank_code_lines_match_source_rows() {
+    let empty = render("", 40);
+    assert_eq!(empty.len(), 1);
+    assert_eq!(empty[0].plain(), "");
+    assert_eq!(empty[0].origin.unwrap().line, 0);
+
+    let code = render("```rust\n\n```", 40);
+    assert_eq!(
+        code.iter().map(Line::plain).collect::<Vec<_>>(),
+        ["rust", "", ""]
+    );
+    assert!(code.iter().all(|row| row.background == Some(CODE_SURFACE)));
 }

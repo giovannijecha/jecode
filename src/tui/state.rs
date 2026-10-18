@@ -150,7 +150,7 @@ impl State {
                 self.notify(Feedback::progress(
                     Kind::Warning,
                     format!(
-                        "Reconnecting · attempt {attempt} · waiting {:.1}s · {error}",
+                        "Reconnecting · attempt {attempt} in {:.1}s · {error}",
                         delay.as_secs_f64()
                     ),
                 ));

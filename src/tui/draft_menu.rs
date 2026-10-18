@@ -14,7 +14,7 @@ impl App {
 
     pub(super) fn open_drafts(&mut self) {
         if self.state.queue.is_editing() {
-            self.warn("Save this draft with Enter or cancel with Esc first.");
+            self.warn("Save this draft with enter or cancel with esc first.");
             return;
         }
         self.state.history.cancel(&mut self.state.editor);

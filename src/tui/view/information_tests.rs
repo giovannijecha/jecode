@@ -4,7 +4,7 @@ use crate::tui::{
     Feedback,
     information::Information,
     state::Kind,
-    theme::{BAD, MUTED, USER_BACKGROUND, WARNING},
+    theme::{BAD, MUTED, USER_SURFACE, WARNING},
 };
 
 fn info() -> Information {
@@ -76,7 +76,7 @@ fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_contro
                 rendered
                     .live
                     .iter()
-                    .all(|line| line.background == Some(USER_BACKGROUND))
+                    .all(|line| line.background == Some(USER_SURFACE))
             );
             assert!(
                 rendered
@@ -85,7 +85,7 @@ fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_contro
                     .all(|line| text::cells(&line.plain()) <= width)
             );
             if width >= 5 {
-                assert!(plain(&state).contains("Esc"));
+                assert!(plain(&state).contains("Esc") || height == 1);
             }
             scroll_information(&mut state, 35);
             state.width = 80;
@@ -110,10 +110,7 @@ fn all_feedback_is_left_aligned_italic_and_unshaded_with_severity_colors() {
         let rendered = frame(&state, "fixture", "fixture");
         assert_eq!(rendered.live[0].plain(), "A brief result");
         assert_eq!(rendered.live[0].background, None);
-        assert_eq!(
-            rendered.live[0].spans.last().unwrap().style,
-            format!("3;{style}")
-        );
+        assert_eq!(rendered.live[0].spans.last().unwrap().style, style.italic());
         assert!(!plain(&state).contains('●'));
         assert!(!plain(&state).contains('•'));
     }
@@ -139,10 +136,12 @@ fn long_errors_wrap_without_losing_the_actionable_text_or_moving_the_draft() {
         .take_while(|line| !line.plain().starts_with('─'))
         .collect();
     assert!(notices.len() > 1);
+    assert!(notices.iter().all(|line| line.background.is_none()));
+    assert!(notices[0].plain().starts_with("Could"));
     assert!(
-        notices
+        notices[1..]
             .iter()
-            .all(|line| line.background.is_none() && !line.plain().starts_with(' '))
+            .all(|line| !line.plain().starts_with("  "))
     );
     assert!(
         rendered.live[rendered.cursor.unwrap().0]

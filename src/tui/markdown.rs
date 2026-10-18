@@ -5,7 +5,7 @@ use super::{
     line::Line,
     syntax::Highlighter,
     text,
-    theme::{BODY, CODE_BACKGROUND, EMPHASIS, MUTED},
+    theme::{BODY, CODE_SURFACE, EMPHASIS, MUTED, Style},
 };
 
 #[derive(Clone)]
@@ -28,6 +28,7 @@ pub(super) struct Rows {
     columns: usize,
     fenced: Option<Fence>,
     table: Option<table::Table>,
+    empty_pending: bool,
 }
 
 impl Rows {
@@ -38,12 +39,14 @@ impl Rows {
     }
 
     fn from_clean(value: String, columns: usize) -> Self {
+        let empty_pending = value.is_empty();
         Self {
             value,
             position: 0,
             columns: columns.max(2),
             fenced: None,
             table: None,
+            empty_pending,
         }
     }
 }
@@ -101,6 +104,7 @@ impl Stream {
         self.rows.position = self.checkpoint.position;
         self.rows.fenced = self.checkpoint.fenced.clone();
         self.rows.table = None;
+        self.rows.empty_pending = self.rows.value.is_empty();
         self.ready = false;
         Some(self.checkpoint.rendered)
     }
@@ -137,6 +141,10 @@ impl Iterator for Rows {
     type Item = Vec<Line>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.empty_pending {
+            self.empty_pending = false;
+            return Some(vec![Line::default().at_source(0)]);
+        }
         if let Some(table) = &mut self.table {
             if let Some(lines) = table.step(&self.value) {
                 return Some(lines);
@@ -162,7 +170,7 @@ impl Iterator for Rows {
                 .take_while(|&byte| byte == fence.marker)
                 .count();
             if count >= fence.count && trimmed[count..].trim().is_empty() {
-                output.push(Line::default().on(CODE_BACKGROUND).at_source(origin));
+                output.push(Line::default().on(CODE_SURFACE).at_source(origin));
                 self.fenced = None;
             } else {
                 output.extend(
@@ -178,7 +186,7 @@ impl Iterator for Rows {
         if let Some((marker, count, label)) = opening_fence(source) {
             output.push(
                 Line::new(&text::ellipsize(label, columns), MUTED)
-                    .on(CODE_BACKGROUND)
+                    .on(CODE_SURFACE)
                     .at_source(origin),
             );
             self.fenced = Some(Fence {
@@ -201,15 +209,14 @@ impl Iterator for Rows {
             output.push(Line::new(&"─".repeat(columns), MUTED).at_source(origin));
         } else if (1..=6).contains(&heading) && trimmed.as_bytes().get(heading) == Some(&b' ') {
             output.extend(
-                inline::render(heading_body(&trimmed[heading + 1..]), EMPHASIS)
+                inline::render(heading_body(&trimmed[heading + 1..]), EMPHASIS.bold())
                     .at_source(origin)
                     .wrap(columns, true),
             );
-        } else if let Some(quote) = trimmed.strip_prefix('>') {
-            let quote = quote.strip_prefix(' ').unwrap_or(quote);
+        } else if let Some(quote) = quoted(trimmed) {
             output.extend(prefixed(
                 quote,
-                &format!("{indentation}│ "),
+                (&format!("{indentation}│ "), MUTED),
                 columns,
                 true,
                 MUTED,
@@ -219,7 +226,7 @@ impl Iterator for Rows {
             let (marker, body) = task_item(marker, body);
             output.extend(prefixed(
                 body,
-                &format!("{indentation}{marker}"),
+                (&format!("{indentation}{marker}"), MUTED),
                 columns,
                 false,
                 BODY,
@@ -232,7 +239,7 @@ impl Iterator for Rows {
             {
                 self.position = next;
                 output.extend(
-                    inline::render(source, EMPHASIS)
+                    inline::render(trimmed, EMPHASIS.bold())
                         .at_source(origin)
                         .wrap(columns, true),
                 );
@@ -246,6 +253,11 @@ impl Iterator for Rows {
         }
         Some(output)
     }
+}
+
+fn quoted(value: &str) -> Option<&str> {
+    let quote = value.strip_prefix('>')?;
+    Some(quote.strip_prefix(' ').unwrap_or(quote))
 }
 
 fn heading_body(value: &str) -> &str {
@@ -327,10 +339,10 @@ fn list_item(value: &str) -> Option<(&str, &str)> {
 
 fn prefixed(
     value: &str,
-    prefix: &str,
+    (prefix, marker): (&str, Style),
     columns: usize,
     repeat: bool,
-    base: &'static str,
+    base: Style,
     origin: usize,
 ) -> Vec<Line> {
     let width = text::cells(prefix);
@@ -348,7 +360,7 @@ fn prefixed(
                 } else {
                     &continuation
                 },
-                MUTED,
+                marker,
             )
             .wrap(columns, false)
         })

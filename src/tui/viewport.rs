@@ -84,6 +84,7 @@ impl Viewport {
             })
             .min(total.saturating_sub(1));
         let mut following = self.anchor.is_none();
+        let scrolled = !self.requests.is_empty();
         for request in self.requests.drain(..) {
             match request {
                 Scroll::Rows(amount) => {
@@ -136,10 +137,17 @@ impl Viewport {
         }
         if height > 0 && !following && first < blocks.len() {
             let row = top - starts[first];
+            let shown = blocks[first].get(row).and_then(|line| line.origin);
+            // Reflow keeps the reading position, so a row inside a long
+            // paragraph survives repeated resizes; only scrolling moves it.
+            let origin = match self.anchor {
+                Some(anchor) if !scrolled && anchor.block == first => anchor.origin.or(shown),
+                _ => shown,
+            };
             self.anchor = Some(Anchor {
                 block: first,
                 row,
-                origin: blocks[first].get(row).and_then(|line| line.origin),
+                origin,
             });
         } else if following {
             self.anchor = None;

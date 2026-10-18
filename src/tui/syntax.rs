@@ -1,6 +1,6 @@
 use super::{
     line::Line,
-    theme::{CODE_BACKGROUND, CODE_NUMBER, CODE_STRING, CODE_TEXT, KEYWORD, MUTED},
+    theme::{CODE_NUMBER, CODE_STRING, CODE_SURFACE, CODE_TEXT, KEYWORD, MUTED, Style},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,9 +47,9 @@ impl Highlighter {
 
     pub fn line(&mut self, value: &str) -> Line {
         let Some(language) = self.language else {
-            return Line::new(value, CODE_TEXT).on(CODE_BACKGROUND);
+            return Line::new(value, CODE_TEXT).on(CODE_SURFACE);
         };
-        let mut line = Line::default().on(CODE_BACKGROUND);
+        let mut line = Line::default().on(CODE_SURFACE);
         let mut position = 0;
         while position < value.len() {
             let tail = &value[position..];
@@ -85,7 +85,7 @@ impl Highlighter {
         line
     }
 
-    fn token(&mut self, value: &str, position: usize, language: Language) -> (usize, &'static str) {
+    fn token(&mut self, value: &str, position: usize, language: Language) -> (usize, Style) {
         let tail = &value[position..];
         let first = tail.chars().next().unwrap();
         if language == Language::Rust && tail.starts_with("//")

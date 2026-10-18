@@ -3,14 +3,12 @@ use crate::tui::theme::{ACCENT, BODY, CURSOR};
 
 #[test]
 fn the_block_caret_keeps_its_background_inside_a_full_width_panel() {
-    use crate::tui::theme::USER_BACKGROUND;
-    let line = Line::new("città", BODY)
-        .on(USER_BACKGROUND)
-        .caret(2, CURSOR);
+    use crate::tui::theme::USER_SURFACE;
+    let line = Line::new("città", BODY).on(USER_SURFACE).caret(2, CURSOR);
     let painted = line.paint(12);
     assert!(painted.contains(&format!("\x1b[{CURSOR}mt")));
-    assert!(painted.contains(&format!("\x1b[{USER_BACKGROUND}mci")));
-    assert!(painted.contains(&format!("\x1b[{USER_BACKGROUND}m{}", " ".repeat(7))));
+    assert!(painted.contains(&format!("\x1b[{USER_SURFACE}mci")));
+    assert!(painted.contains(&format!("\x1b[{USER_SURFACE}m{}", " ".repeat(7))));
     assert_eq!(visible(&painted).trim_end(), "città");
 }
 

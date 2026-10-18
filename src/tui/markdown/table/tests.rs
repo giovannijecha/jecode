@@ -26,13 +26,13 @@ fn clean_columns_use_visual_widths_and_preserve_inline_styles() {
         rows[2]
             .spans
             .iter()
-            .any(|span| span.text == "café" && span.style == EMPHASIS)
+            .any(|span| span.text == "café" && span.style == EMPHASIS.bold())
     );
     assert!(
         rows[3]
             .spans
             .iter()
-            .any(|span| span.text == "done" && span.style.contains('3'))
+            .any(|span| span.text == "done" && span.style == crate::tui::theme::BODY.italic())
     );
     assert!(source.contains("**café**"));
 }

@@ -2,11 +2,12 @@ use super::panel;
 use crate::{
     session::commands::COMMANDS,
     tui::{
+        hint,
         line::Line,
         selector::{Purpose, Selector},
         suggestions::Suggestions,
         text,
-        theme::{ACCENT, BAD, CURSOR, MUTED, PROMPT, SELECTED_BACKGROUND},
+        theme::{ACCENT, BAD, CURSOR, MUTED, SELECTED_SURFACE, STRONG, Style},
     },
 };
 
@@ -16,24 +17,29 @@ pub(super) fn suggestions(menu: &Suggestions, columns: usize, limit: usize) -> (
     }
     let limit = limit.clamp(1, 6);
     let start = menu.selected.saturating_sub(limit - 1);
-    let lines = menu
+    let rows: Vec<_> = menu
         .matches
         .iter()
         .enumerate()
-        .skip(start)
-        .take(limit)
         .map(|(index, matched)| {
             let command = &COMMANDS[matched.index];
-            option(
-                command.name,
-                command.description,
-                &matched.positions,
-                &[],
-                index == menu.selected,
-                ("", false),
-                columns,
-            )
+            Row {
+                name: command.name,
+                description: command.description,
+                matched: &matched.positions,
+                description_matches: &[],
+                description_style: MUTED,
+                number: String::new(),
+                selected: index == menu.selected,
+                deleting: false,
+            }
         })
+        .collect();
+    let lines = rows
+        .iter()
+        .skip(start)
+        .take(limit)
+        .map(|row| row.line(columns))
         .collect();
     (
         lines,
@@ -66,7 +72,7 @@ pub(super) fn selector(
             .editor
             .viewport(width.saturating_sub(text::cells(prefix)), secret);
         let mut line = Line::new(prefix, ACCENT);
-        line.push(&value, PROMPT);
+        line.push(&value, STRONG);
         let column = text::cells(prefix) + caret;
         line = line.caret(column, CURSOR);
         cursor = Some((lines.len(), column));
@@ -81,39 +87,40 @@ pub(super) fn selector(
     } else {
         0
     };
+    // Padding and controls follow the options.
     let available = height.saturating_sub(lines.len() + 3 + details);
     let limit = available.clamp(1, 8);
     let start = menu.selected.saturating_sub(limit - 1);
+    let rows: Vec<_> = menu
+        .filtered
+        .iter()
+        .enumerate()
+        .map(|(position, hit)| {
+            let value = &menu.options[hit.index];
+            Row {
+                name: &value.name,
+                description: &value.description,
+                matched: &hit.name,
+                description_matches: &hit.description,
+                description_style: MUTED,
+                number: if deleting == Some(hit.index) && !working {
+                    if drafts { "Discard? " } else { "Delete? " }.into()
+                } else if menu.searchable {
+                    String::new()
+                } else {
+                    format!("{}. ", position + 1)
+                },
+                selected: position == menu.selected,
+                deleting: deleting == Some(hit.index),
+            }
+        })
+        .collect();
     let mut selected = None;
-    for (position, hit) in menu.filtered.iter().enumerate().skip(start).take(limit) {
-        if position == menu.selected {
+    for row in rows.iter().skip(start).take(limit) {
+        if row.selected {
             selected = Some(lines.len());
         }
-        let value = &menu.options[hit.index];
-        let number = if deleting == Some(hit.index) {
-            if working {
-                String::new()
-            } else {
-                if drafts {
-                    "Discard? ".into()
-                } else {
-                    "Delete? ".into()
-                }
-            }
-        } else if menu.searchable {
-            String::new()
-        } else {
-            format!("{}. ", position + 1)
-        };
-        lines.push(option(
-            &value.name,
-            &value.description,
-            &hit.name,
-            &hit.description,
-            position == menu.selected,
-            (&number, deleting == Some(hit.index)),
-            width,
-        ));
+        lines.push(row.line(width));
     }
     if menu.options.is_empty() && matches!(menu.purpose, Purpose::Sessions { .. }) {
         selected = Some(lines.len());
@@ -152,86 +159,8 @@ pub(super) fn selector(
             lines.push(Line::new("New conversation · unsent input kept", MUTED));
         }
     }
-    let controls: &[&str] = if menu.options.is_empty()
-        && matches!(
-            menu.purpose,
-            Purpose::Sessions { .. } | Purpose::Drafts { .. }
-        ) {
-        &["Esc close", "Esc"]
-    } else if working {
-        &["Ctrl+Q quit after cleanup", "Ctrl+Q quit", "Ctrl+Q"]
-    } else if deleting.is_some() && drafts {
-        &[
-            "Enter discard · Esc cancel · Ctrl+D cancel",
-            "Enter discard · Esc cancel",
-            "↵ discard · Esc",
-        ]
-    } else if deleting.is_some() {
-        &[
-            "Enter delete · Esc cancel · Ctrl+D cancel",
-            "Enter delete · Esc cancel",
-            "Enter delete",
-        ]
-    } else if drafts {
-        let paused = matches!(
-            menu.chosen(),
-            Some(crate::tui::selector::Choice::Draft(
-                crate::tui::drafts::Slot::Paused(_)
-            ))
-        );
-        if paused {
-            &[
-                "↑↓ move · Enter edit · Ctrl+S send · Ctrl+D discard · Esc close",
-                "↑↓ · Enter edit · ^S send · ^D discard · Esc",
-                "↵ edit · ^S send · ^D discard · Esc",
-                "↵ · ^S · ^D · Esc",
-            ]
-        } else {
-            &[
-                "↑↓ move · Enter edit · Ctrl+D discard · Esc close",
-                "↑↓ · Enter edit · ^D discard · Esc",
-                "↵ edit · ^D discard · Esc",
-                "↵ · ^D · Esc",
-            ]
-        }
-    } else if matches!(menu.purpose, Purpose::Sessions { .. }) {
-        if menu.searchable {
-            &[
-                "↑↓ move · Enter resume · Ctrl+D delete · Esc close",
-                "↑↓ · Enter · Ctrl+D delete · Esc",
-                "↵ · ^D · Esc",
-            ]
-        } else {
-            &[
-                "↑↓ move · Enter resume · Ctrl+D delete · 1–8 choose · Esc close",
-                "↑↓ · Enter · Ctrl+D delete · Esc",
-                "↵ · ^D · Esc",
-            ]
-        }
-    } else if matches!(menu.purpose, Purpose::Key) {
-        &[
-            "Enter validate and save · Esc close · key stored in plain text",
-            "Enter save · Esc close · plain text key",
-            "Enter save · Esc",
-            "↵ · Esc",
-        ]
-    } else if matches!(menu.purpose, Purpose::Loading) {
-        &["Esc close", "Esc"]
-    } else if menu.searchable {
-        &[
-            "↑↓ move · Enter select · Esc close",
-            "↑↓ · Enter · Esc",
-            "↑↓ · ↵ · Esc",
-        ]
-    } else {
-        &[
-            "↑↓ move · Enter select · 1–8 choose · Esc close",
-            "↑↓ · Enter · 1–8 · Esc",
-            "↑↓ · ↵ · Esc",
-        ]
-    };
     lines.push(Line::new(
-        panel::hint(controls, width),
+        &source_controls(menu, deleting.is_some(), working, width),
         if deleting.is_some() { BAD } else { MUTED },
     ));
     let mut priorities = Vec::new();
@@ -251,60 +180,145 @@ pub(super) fn selector(
     panel::finish(lines, cursor, &priorities, columns, height)
 }
 
-fn option(
-    name: &str,
-    description: &str,
-    matched: &[usize],
-    description_matches: &[usize],
-    selected: bool,
-    number: (&str, bool),
-    columns: usize,
-) -> Line {
-    let (number, deleting) = number;
-    let mut line = Line::new(
-        if selected { "› " } else { "  " },
-        if deleting {
-            BAD
-        } else if selected {
-            ACCENT
+fn source_controls(menu: &Selector, deleting: bool, working: bool, width: usize) -> String {
+    let variants: &[&str] = if matches!(menu.purpose, Purpose::Sessions { .. }) {
+        if menu.options.is_empty() {
+            &["Esc close", "Esc"]
+        } else if working {
+            &["Ctrl+Q quit after cleanup", "Ctrl+Q quit", "Ctrl+Q"]
+        } else if deleting {
+            &[
+                "Enter delete · Esc cancel · Ctrl+D cancel",
+                "Enter delete · Esc cancel",
+                "Enter delete",
+            ]
+        } else if menu.searchable {
+            &[
+                "↑↓ move · Enter resume · Ctrl+D delete · Esc close",
+                "↑↓ · Enter · Ctrl+D delete · Esc",
+                "↵ · ^D · Esc",
+            ]
         } else {
-            MUTED
-        },
-    );
-    line.push(number, if deleting { BAD } else { MUTED });
-    let name = text::ellipsize(&text::clean(name), columns.saturating_sub(5));
-    for (position, character) in name.chars().enumerate() {
-        line.push(
-            &character.to_string(),
-            if deleting {
-                BAD
-            } else if matched.contains(&position) {
-                ACCENT
-            } else {
-                PROMPT
-            },
+            &[
+                "↑↓ move · Enter resume · Ctrl+D delete · 1–8 choose · Esc close",
+                "↑↓ · Enter · Ctrl+D delete · Esc",
+                "↵ · ^D · Esc",
+            ]
+        }
+    } else if matches!(menu.purpose, Purpose::Drafts { .. }) {
+        if menu.options.is_empty() {
+            &["Esc close", "Esc"]
+        } else if deleting {
+            &[
+                "Enter discard · Esc cancel · Ctrl+D cancel",
+                "Enter discard · Esc cancel",
+                "↵ discard · Esc",
+            ]
+        } else if matches!(
+            menu.chosen(),
+            Some(crate::tui::selector::Choice::Draft(
+                crate::tui::drafts::Slot::Paused(_)
+            ))
+        ) {
+            &[
+                "↑↓ move · Enter edit · Ctrl+S send · Ctrl+D discard · Esc close",
+                "↑↓ · Enter edit · ^S send · ^D discard · Esc",
+                "↵ edit · ^S send · ^D discard · Esc",
+                "↵ · ^S · ^D · Esc",
+            ]
+        } else {
+            &[
+                "↑↓ move · Enter edit · Ctrl+D discard · Esc close",
+                "↑↓ · Enter edit · ^D discard · Esc",
+                "↵ edit · ^D discard · Esc",
+                "↵ · ^D · Esc",
+            ]
+        }
+    } else if matches!(menu.purpose, Purpose::Key) {
+        &[
+            "Enter validate and save · Esc close · key stored in plain text",
+            "Enter save · Esc · key stored in plain text",
+            "↵ · Esc · key stored in plain text",
+            "Enter save · Esc",
+            "↵ · Esc",
+        ]
+    } else if matches!(menu.purpose, Purpose::Loading) {
+        &["Esc close", "Esc"]
+    } else {
+        if menu.searchable {
+            &[
+                "↑↓ move · Enter select · Esc close",
+                "↑↓ · Enter · Esc",
+                "↑↓ · ↵ · Esc",
+            ]
+        } else {
+            &[
+                "↑↓ move · Enter select · 1–8 choose · Esc close",
+                "↑↓ · Enter · 1–8 · Esc",
+                "↑↓ · ↵ · Esc",
+            ]
+        }
+    };
+    hint::choose(variants, width)
+}
+
+/// One option of a command or selector list.
+pub(super) struct Row<'a> {
+    pub name: &'a str,
+    pub description: &'a str,
+    pub matched: &'a [usize],
+    pub description_matches: &'a [usize],
+    pub description_style: Style,
+    pub number: String,
+    pub selected: bool,
+    pub deleting: bool,
+}
+
+const DESCRIPTION: usize = 16;
+
+impl Row<'_> {
+    pub(super) fn line(&self, columns: usize) -> Line {
+        // A marked name turns red; its description keeps the source role.
+        let tone = |style| if self.deleting { BAD } else { style };
+        let mut line = Line::new(
+            if self.selected { "› " } else { "  " },
+            tone(if self.selected { ACCENT } else { MUTED }),
         );
-    }
-    let used = text::cells(&line.plain());
-    if columns > used + 4 {
-        let gap = (16usize.saturating_sub(used))
-            .max(2)
-            .min(columns - used - 1);
-        line.push(&" ".repeat(gap), MUTED);
-        let description = text::ellipsize(&text::clean(description), columns - used - gap);
-        for (index, character) in description.chars().enumerate() {
+        line.push(&self.number, tone(MUTED));
+        let room = columns.saturating_sub(5);
+        let name = text::ellipsize(&text::clean(self.name), room);
+        for (position, character) in name.chars().enumerate() {
             line.push(
                 &character.to_string(),
-                if description_matches.contains(&index) {
+                tone(if self.matched.contains(&position) {
                     ACCENT
                 } else {
-                    MUTED
-                },
+                    STRONG
+                }),
             );
         }
+        let used = text::cells(&line.plain());
+        if columns > used + 4 {
+            let gap = DESCRIPTION
+                .saturating_sub(used)
+                .max(2)
+                .min(columns - used - 1);
+            line.push(&" ".repeat(gap), MUTED);
+            let description = text::ellipsize(&text::clean(self.description), columns - used - gap);
+            for (index, character) in description.chars().enumerate() {
+                line.push(
+                    &character.to_string(),
+                    if self.description_matches.contains(&index) {
+                        ACCENT
+                    } else {
+                        self.description_style
+                    },
+                );
+            }
+        }
+        if self.selected {
+            line.background = Some(SELECTED_SURFACE);
+        }
+        line
     }
-    if selected {
-        line.background = Some(SELECTED_BACKGROUND);
-    }
-    line
 }

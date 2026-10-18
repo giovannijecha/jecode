@@ -5,6 +5,7 @@ fn rust_keywords_numbers_strings_and_comments_keep_the_original_code() {
     let source = r#"let widget = 40; println!("fn 40"); // let"#;
     let row = Highlighter::new("rust").line(source);
     assert_eq!(row.plain(), source);
+    assert_eq!(row.background, Some(CODE_SURFACE));
     assert!(
         row.spans
             .iter()
@@ -61,6 +62,7 @@ fn nested_comments_and_raw_strings_continue_across_lines_and_end_cleanly() {
         .collect();
     for (row, source) in rows.iter().zip(sources) {
         assert_eq!(row.plain(), source);
+        assert_eq!(row.background, Some(CODE_SURFACE));
     }
     assert!(rows[1].spans.iter().all(|span| span.style == MUTED));
     assert!(

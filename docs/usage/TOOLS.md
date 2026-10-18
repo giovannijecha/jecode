@@ -155,15 +155,17 @@ without involving the model. Inspection and stop requests never call `process
 poll`, so the model's next result still begins at its own cursor. Output comes
 from the same credential-masked files, read in bounded windows of at most 64 KiB
 each. A stop request returns immediately; the process stays in the active list
-with a running badge until supervision confirms its final outcome.
+until supervision confirms its final outcome. The registry reports `stopping`
+while the TUI's active status column continues to show `running`.
 
 In the TUI, `/terminal` opens a panel immediately, even while the model works,
-listing active processes. Enter opens the selected process's output; Tab switches
-between Output (stdout) and Errors (stderr), which are separate saved streams. The view
-follows new output at the bottom; scrolling up pauses it at that position and
-loads older output as needed, and End resumes following. Ctrl+D marks the
-selected process to stop; Enter confirms. Esc or Ctrl+C cancels that mark or
-closes the panel. Neither key stops a process on its own. `/terminal ID` opens
+listing active processes by status and command. Enter opens the selected process's
+output; Tab switches between Output (stdout) and Errors (stderr), which are
+separate saved streams. The view follows new output at the bottom; scrolling up
+pauses it at that position and loads older output as needed, and End resumes
+following. Ctrl+D opens a confirmation naming the selected or open process; Enter
+confirms. Esc or Ctrl+C cancels the confirmation or closes the panel. Neither key
+stops a process on its own. `/terminal ID` opens
 one process's output directly, including a finished process. Finished processes
 remain inspectable by ID until the conversation ends; switching conversations
 closes the panel. `/terminal stop ID` requests the same stop directly.

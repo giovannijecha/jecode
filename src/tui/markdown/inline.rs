@@ -1,26 +1,21 @@
 use crate::tui::{
     line::Line,
-    theme::{
-        EMPHASIS, INLINE_CODE, ITALIC, ITALIC_STRIKE, ITALIC_STRONG, ITALIC_STRONG_STRIKE, LINK,
-        LINK_DESTINATION, LINK_ITALIC, LINK_ITALIC_STRIKE, LINK_ITALIC_STRONG,
-        LINK_ITALIC_STRONG_STRIKE, LINK_STRIKE, LINK_STRONG, LINK_STRONG_STRIKE, STRIKE,
-        STRONG_STRIKE,
-    },
+    theme::{BODY, EMPHASIS, INLINE_CODE, LINK, LINK_DESTINATION, Style},
 };
 
-const STRONG: u8 = 1;
+const BOLD: u8 = 1;
 const SLANT: u8 = 2;
 const DELETED: u8 = 4;
 const LINKED: u8 = 8;
 const MAX_DEPTH: usize = 8;
 
-pub fn render(value: &str, base: &'static str) -> Line {
+pub fn render(value: &str, base: Style) -> Line {
     let mut parser = Parser {
         line: Line::default(),
         // Failed opening markers must not repeatedly scan an arbitrarily long suffix.
         search_left: value.len().saturating_mul(16),
     };
-    parser.segment(value, base, u8::from(base == EMPHASIS) * STRONG, 0);
+    parser.segment(value, base, u8::from(base == EMPHASIS.bold()) * BOLD, 0);
     parser.line
 }
 
@@ -30,7 +25,7 @@ struct Parser {
 }
 
 impl Parser {
-    fn segment(&mut self, value: &str, base: &'static str, flags: u8, depth: usize) {
+    fn segment(&mut self, value: &str, base: Style, flags: u8, depth: usize) {
         let mut position = 0;
         while position < value.len() {
             let Some(offset) = value[position..].find(['\\', '\u{0060}', '*', '_', '~', '['])
@@ -99,8 +94,8 @@ impl Parser {
                     let added = match (marker, width) {
                         (b'~', _) => DELETED,
                         (_, 1) => SLANT,
-                        (_, 2) => STRONG,
-                        _ => STRONG | SLANT,
+                        (_, 2) => BOLD,
+                        _ => BOLD | SLANT,
                     };
                     self.segment(content, base, flags | added, depth + 1);
                     position = start + width + end + width;
@@ -270,25 +265,28 @@ fn inside_word(before: Option<char>, after: Option<char>) -> bool {
     before.is_some_and(char::is_alphanumeric) && after.is_some_and(char::is_alphanumeric)
 }
 
-fn style(base: &'static str, flags: u8) -> &'static str {
-    match flags {
-        0 => base,
-        STRONG => EMPHASIS,
-        SLANT => ITALIC,
-        3 => ITALIC_STRONG,
-        DELETED => STRIKE,
-        5 => STRONG_STRIKE,
-        6 => ITALIC_STRIKE,
-        7 => ITALIC_STRONG_STRIKE,
-        LINKED => LINK,
-        9 => LINK_STRONG,
-        10 => LINK_ITALIC,
-        11 => LINK_ITALIC_STRONG,
-        12 => LINK_STRIKE,
-        13 => LINK_STRONG_STRIKE,
-        14 => LINK_ITALIC_STRIKE,
-        _ => LINK_ITALIC_STRONG_STRIKE,
+fn style(base: Style, flags: u8) -> Style {
+    if flags == 0 {
+        return base;
     }
+    // Links keep their colour; bold text takes the strong role; other marks inherit.
+    let mut style = if flags & LINKED != 0 {
+        LINK
+    } else if flags & BOLD != 0 {
+        EMPHASIS
+    } else {
+        BODY
+    };
+    if flags & BOLD != 0 {
+        style = style.bold();
+    }
+    if flags & SLANT != 0 {
+        style = style.italic();
+    }
+    if flags & DELETED != 0 {
+        style = style.strike();
+    }
+    style
 }
 
 #[cfg(test)]

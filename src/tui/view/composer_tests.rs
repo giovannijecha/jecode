@@ -7,7 +7,7 @@ use crate::{
     tui::{
         activity::Activity,
         selector::Selector,
-        theme::{ACCENT, CURSOR, MUTED, PROMPT, SELECTED_BACKGROUND, USER_BACKGROUND},
+        theme::{ACCENT, CURSOR, MUTED, SELECTED_SURFACE, STRONG, USER_SURFACE},
     },
 };
 
@@ -99,7 +99,7 @@ fn active_borders_are_gray_and_queued_messages_precede_notices_and_activity() {
     assert!(frame.live[0].plain().starts_with("› one…"));
     assert!(frame.live[0].plain().ends_with("queued"));
     assert!(frame.live[1].plain().contains("queue notice"));
-    assert!(frame.live[2].plain().contains("Thinking"));
+    assert!(frame.live[2].plain().starts_with("••••  Thinking  ·  "));
     let borders: Vec<_> = frame
         .live
         .iter()
@@ -122,24 +122,24 @@ fn slash_commands_replace_the_composer_with_one_panel_and_a_distinct_selection()
     state.suggestions.refresh(&state.editor.text);
     let frame = frame(&state, "model", "directory");
     assert!(frame.live[3].plain().contains("/model"));
-    assert_eq!(frame.live[3].background, Some(SELECTED_BACKGROUND));
+    assert_eq!(frame.live[3].background, Some(SELECTED_SURFACE));
     assert!(
         frame.live[3]
             .paint(state.width)
-            .contains(SELECTED_BACKGROUND)
+            .contains(&SELECTED_SURFACE.to_string())
     );
     assert!(
         frame
             .live
             .iter()
-            .all(|line| matches!(line.background, Some(USER_BACKGROUND | SELECTED_BACKGROUND)))
+            .all(|line| matches!(line.background, Some(USER_SURFACE | SELECTED_SURFACE)))
     );
     assert!(!frame.live.iter().any(|line| line.plain().contains('─')));
     assert!(
         frame.live[2]
             .spans
             .iter()
-            .any(|span| span.style == PROMPT && span.text.contains("/mo"))
+            .any(|span| span.style == STRONG && span.text.contains("/mo"))
     );
     assert!(
         frame.live[3]
@@ -196,4 +196,65 @@ fn selectors_replace_all_composer_rows_but_keep_the_draft_and_mask_keys() {
     );
     assert!(key.live.iter().any(|row| row.plain().contains("********")));
     assert_eq!(state.editor.text, "private draft");
+}
+
+#[test]
+fn draft_contexts_add_a_hint_row_and_retain_the_directory_footer() {
+    let mut state = State {
+        activity: Some(Activity::new()),
+        ..State::default()
+    };
+    state.queue.push("queued fix").unwrap();
+    state.queue.push("later fix").unwrap();
+    let slot = state.queue.slot(0).unwrap();
+    state.queue.begin_edit(slot, &mut state.editor).unwrap();
+    let rows: Vec<_> = frame(&state, "model", "dir")
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect();
+    // The activity row, the later message, then the composer's four rows: the
+    // edited message leaves the queue previews while it is open.
+    assert_eq!(rows.len(), 7, "{rows:#?}");
+    assert!(rows[0].starts_with("› later fix") && rows[0].ends_with("queued"));
+    assert!(rows[1].starts_with("••••  ") && rows[1].contains("Esc cancels edit"));
+    assert!(rows[2].starts_with("─ Editing draft 1/2 "));
+    assert_eq!(rows[5], "Enter save · Esc cancel");
+    assert!(rows[6].starts_with("dir"));
+    assert!(rows[6].ends_with("model · default"));
+    assert!(rows[3].starts_with("› queued fix"));
+
+    let mut state = State {
+        activity: Some(Activity::new()),
+        tool_focus: Some(0),
+        ..State::default()
+    };
+    state.editor.insert("draft");
+    let rows: Vec<_> = frame(&state, "model", "dir")
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect();
+    assert_eq!(rows.len(), 6, "{rows:#?}");
+    assert!(rows[0].contains("Esc returns"));
+    assert!(rows[1].starts_with("Tools · ↑↓ select · Enter details · Esc returns"));
+    assert!(rows[5].ends_with("model · default"));
+}
+
+#[test]
+fn a_reconnect_is_a_notice_above_an_activity_row_that_keeps_its_timer() {
+    let mut state = State {
+        activity: Some(Activity::new()),
+        ..State::default()
+    };
+    state.notice = Some(crate::tui::Feedback::progress(
+        Kind::Warning,
+        "Reconnecting · attempt 2 in 4.0s",
+    ));
+    let frame = frame(&state, "model", "dir");
+    assert_eq!(frame.live.len(), 6);
+    assert_eq!(frame.live[0].plain(), "Reconnecting · attempt 2 in 4.0s");
+    let activity = frame.live[1].plain();
+    assert!(activity.starts_with("••••  Waiting for the model  ·  "));
+    assert!(activity.ends_with("Esc stops"));
 }

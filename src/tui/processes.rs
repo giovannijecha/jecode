@@ -238,6 +238,7 @@ impl App {
         }
     }
 
+    /// Opens retained output without changing the model's read cursors.
     fn open_process_logs(&mut self, process: Process) {
         let mut logs = Logs {
             id: process.id.clone(),

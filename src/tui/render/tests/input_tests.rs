@@ -19,7 +19,7 @@ fn app(directory: &Directory) -> App {
     app.state.message(
         Kind::Assistant,
         &(0..100)
-            .map(|i| format!("Row {i:03}\n"))
+            .map(|i| format!("Row {i:03}  \n"))
             .collect::<String>(),
     );
     app.state.history.record("first prompt");
@@ -96,7 +96,7 @@ fn streaming_and_panels_keep_the_reading_position_and_new_resets_it() {
     paint(&mut app, &mut screen);
     let top = screen.rows[0].clone();
     app.state.event(Event::Streaming {
-        text: "New streamed tail\n".repeat(40),
+        text: "New streamed tail  \n".repeat(40),
     });
     paint(&mut app, &mut screen);
     assert_eq!(screen.rows[0], top);
@@ -153,7 +153,7 @@ fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priorit
     key(&mut app, 33, 0);
     paint(&mut app, &mut screen);
     assert!(screen.visible().contains("Back to bottom · esc"));
-    assert!(screen.visible().contains("Esc bottom"));
+    assert!(screen.visible().contains("Esc returns"));
     key(&mut app, 27, 0);
     paint(&mut app, &mut screen);
     assert!(!screen.visible().contains("Back to bottom"));
@@ -163,7 +163,7 @@ fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priorit
     paint(&mut app, &mut screen);
     app.open_drafts();
     paint(&mut app, &mut screen);
-    assert!(screen.visible().contains("Back to bottom · Alt+End"));
+    assert!(screen.visible().contains("Back to bottom · alt+end"));
     key(&mut app, 27, 0);
     paint(&mut app, &mut screen);
     assert!(!app.draft_menu_open());

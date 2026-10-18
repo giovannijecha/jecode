@@ -50,7 +50,7 @@ fn the_list_excludes_finished_commands_and_keeps_an_open_final_log() {
     assert!(
         frame(&app)
             .join("\n")
-            .contains("No active background processes")
+            .contains("No active background processes in this conversation")
     );
     assert_eq!(fixture.finish().len(), 2);
 }

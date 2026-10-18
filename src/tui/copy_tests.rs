@@ -92,12 +92,10 @@ fn copy_during_work_is_immediate_and_keeps_its_snapshot_until_selection() {
     app.state.editor.replace("/copy".into());
     key(&mut app, 13, 0);
     assert!(app.copy_selector_open());
-    assert!(
-        super::view::frame(&app.state, "fixture/model", "fixture")
-            .live
-            .iter()
-            .any(|line| line.plain().contains("Esc closes menu"))
-    );
+    // The open menu names Esc in its controls, so the activity row does not.
+    let live = super::view::frame(&app.state, "fixture/model", "fixture").live;
+    assert!(live.iter().any(|line| line.plain().contains("Esc close")));
+    assert!(!live.iter().any(|line| line.plain().contains("esc to stop")));
     assert!(app.state.queue.messages().is_empty());
     app.state.queue.push("/help").unwrap();
     app.state.editor.replace("draft kept".into());

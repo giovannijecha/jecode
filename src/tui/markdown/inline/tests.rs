@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::theme::{BODY, INLINE_CODE};
 
-fn spans(value: &str) -> Vec<(String, &'static str)> {
+fn spans(value: &str) -> Vec<(String, Style)> {
     render(value, BODY)
         .spans
         .into_iter()
@@ -15,28 +15,28 @@ fn common_emphasis_and_strike_combine_without_dropping_text() {
         spans("A *soft* _quiet_ **loud** __firm__ ~~old~~ ***both***."),
         vec![
             ("A ".into(), BODY),
-            ("soft".into(), ITALIC),
+            ("soft".into(), BODY.italic()),
             (" ".into(), BODY),
-            ("quiet".into(), ITALIC),
+            ("quiet".into(), BODY.italic()),
             (" ".into(), BODY),
-            ("loud".into(), EMPHASIS),
+            ("loud".into(), EMPHASIS.bold()),
             (" ".into(), BODY),
-            ("firm".into(), EMPHASIS),
+            ("firm".into(), EMPHASIS.bold()),
             (" ".into(), BODY),
-            ("old".into(), STRIKE),
+            ("old".into(), BODY.strike()),
             (" ".into(), BODY),
-            ("both".into(), ITALIC_STRONG),
+            ("both".into(), EMPHASIS.bold().italic()),
             (".".into(), BODY),
         ]
     );
     assert_eq!(
         spans("**bold _and italic_** / ~~gone *softly*~~"),
         vec![
-            ("bold ".into(), EMPHASIS),
-            ("and italic".into(), ITALIC_STRONG),
+            ("bold ".into(), EMPHASIS.bold()),
+            ("and italic".into(), EMPHASIS.bold().italic()),
             (" / ".into(), BODY),
-            ("gone ".into(), STRIKE),
-            ("softly".into(), ITALIC_STRIKE),
+            ("gone ".into(), BODY.strike()),
+            ("softly".into(), BODY.italic().strike()),
         ]
     );
 }
@@ -48,7 +48,10 @@ fn code_spans_override_markers_and_escapes_protect_punctuation() {
             "**bold \\*star\\* and \\\u{0060}tick\\\u{0060}** / \u{0060}*raw* \\_ \\[link](x)\u{0060}"
         ),
         vec![
-            ("bold *star* and \u{0060}tick\u{0060}".into(), EMPHASIS),
+            (
+                "bold *star* and \u{0060}tick\u{0060}".into(),
+                EMPHASIS.bold()
+            ),
             (" / ".into(), BODY),
             ("*raw* \\_ \\[link](x)".into(), INLINE_CODE),
         ]
@@ -63,7 +66,7 @@ fn links_keep_destinations_visible_and_style_labels() {
         vec![
             ("See ".into(), BODY),
             ("the ".into(), LINK),
-            ("notes".into(), LINK_ITALIC),
+            ("notes".into(), LINK.italic()),
             (" (".into(), BODY),
             ("https://example.test/a_(b)".into(), LINK_DESTINATION),
             (") today.".into(), BODY),

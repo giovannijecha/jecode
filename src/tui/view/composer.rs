@@ -1,12 +1,11 @@
 use super::{fitted, information, menus, panel, processes};
 use crate::tui::{
+    hint,
     line::Line,
+    notice,
     state::State,
     text,
-    theme::{
-        ACCENT, BODY, CURSOR, FEEDBACK_ERROR, FEEDBACK_NOTICE, FEEDBACK_WARNING, MUTED, PROMPT,
-        SELECTED_BACKGROUND,
-    },
+    theme::{ACCENT, BODY, CURSOR, MUTED, SELECTED_SURFACE, STRONG, Style},
 };
 
 pub(super) fn render(
@@ -28,13 +27,7 @@ pub(super) fn render(
         .map_or_else(Vec::new, |notice| feedback(notice, columns));
     let bottom_count = notice_rows.len()
         + copy_rows.len()
-        + usize::from(
-            state.activity.is_some()
-                && !state
-                    .notice
-                    .as_ref()
-                    .is_some_and(|notice| notice.in_progress()),
-        )
+        + usize::from(state.activity.is_some())
         + usize::from(state.tool_focus.is_some());
     let reserve = if is_panel {
         bottom_count.min(height.saturating_sub(3))
@@ -76,6 +69,7 @@ pub(super) fn render(
             line
         }
     };
+    // Pending drafts precede the feedback and activity chrome.
     let mut extra = Vec::new();
     let draft_menu = state
         .selector
@@ -86,7 +80,8 @@ pub(super) fn render(
     } else {
         remaining.saturating_sub(bottom_count).min(8)
     };
-    let drafts = state.queue.drafts();
+    let mut drafts = state.queue.drafts();
+    drafts.retain(|(slot, _)| Some(*slot) != state.queue.editing());
     let pending = drafts.len();
     let visible = pending.min(queue_budget);
     let entries = drafts.into_iter().map(|(slot, text)| {
@@ -123,34 +118,24 @@ pub(super) fn render(
         extra.push(extra_row(row));
     }
     extra.extend(notice_rows);
-    if let Some(activity) = &state.activity
-        && !state
-            .notice
-            .as_ref()
-            .is_some_and(|notice| notice.in_progress())
-    {
-        let menu_open = is_panel;
-        extra.push(extra_row(activity.line(
-            extra_columns,
-            if menu_open {
-                "Esc closes menu"
-            } else if state.queue.is_editing() {
-                "Esc cancels edit"
-            } else if state.history.is_browsing() || state.tool_focus.is_some() {
-                "Esc returns"
-            } else if back_to_bottom {
-                "Esc bottom"
-            } else {
-                "Esc stops"
-            },
-        )));
+    if let Some(activity) = &state.activity {
+        let escape = if is_panel {
+            "Esc closes menu"
+        } else if state.queue.is_editing() {
+            "Esc cancels edit"
+        } else if state.history.is_browsing() || state.tool_focus.is_some() || back_to_bottom {
+            "Esc returns"
+        } else {
+            "Esc stops"
+        };
+        extra.push(extra_row(activity.line(extra_columns, escape)));
     }
     extra.extend(copy_rows);
     if state.tool_focus.is_some() {
         extra.push(extra_row(
             Line::new(
                 "Tools · ↑↓ select · Enter details · Esc returns",
-                super::super::theme::TOOL_DIM,
+                crate::tui::theme::TOOL_DIM,
             )
             .shortened(extra_columns),
         ));
@@ -163,33 +148,42 @@ pub(super) fn render(
     (extra, cursor.map(|(row, col)| (row + offset, col)))
 }
 
+/// Key hints for the current draft context, shown in place of the directory.
+fn hints(state: &State) -> Option<&'static [&'static str]> {
+    if matches!(
+        state.queue.editing(),
+        Some(crate::tui::drafts::Slot::Paused(_))
+    ) {
+        Some(&[
+            "Enter save · Ctrl+S send · Esc cancel",
+            "↵ save · ^S send · Esc",
+            "↵ · ^S · Esc",
+        ])
+    } else if state.queue.is_editing() {
+        Some(&["Enter save · Esc cancel", "↵ save · Esc", "↵ · Esc"])
+    } else if state.history.is_browsing() {
+        Some(&[
+            "Enter send · Ctrl+P/N history · Esc back",
+            "↵ send · ^P/N · Esc",
+            "↵ · ^P/N · Esc",
+        ])
+    } else {
+        None
+    }
+}
+
 fn feedback(notice: &crate::tui::feedback::Feedback, columns: usize) -> Vec<Line> {
-    let style = match notice.kind {
-        crate::tui::state::Kind::Error => FEEDBACK_ERROR,
-        crate::tui::state::Kind::Warning => FEEDBACK_WARNING,
-        _ => FEEDBACK_NOTICE,
-    };
-    Line::new(&text::clean(&notice.text), style)
-        .wrap(columns, true)
-        .into_iter()
-        .map(|line| line.shortened(columns))
-        .collect()
+    notice::lines(notice.kind.into(), &notice.text, columns)
 }
 
 pub(super) fn information_height(state: &State) -> usize {
     let columns = state.width.max(1);
-    let feedback_rows = [&state.notice, &state.copy_notice]
+    let feedback_rows = [state.notice.as_ref(), state.copy_notice.as_ref()]
         .into_iter()
         .flatten()
         .map(|notice| feedback(notice, columns).len())
         .sum::<usize>();
-    let activity = usize::from(
-        state.activity.is_some()
-            && !state
-                .notice
-                .as_ref()
-                .is_some_and(|notice| notice.in_progress()),
-    );
+    let activity = usize::from(state.activity.is_some());
     let height = super::chrome_height(state);
     height.saturating_sub((feedback_rows + activity).min(height.saturating_sub(3)))
 }
@@ -208,7 +202,7 @@ fn draft(
     };
     let border = "─".repeat(columns);
     let editing = state.queue.edit_index();
-    let contextual = editing.is_some() || state.history.is_browsing();
+    let contextual = state.queue.is_editing() || state.history.is_browsing();
     let limit = height.saturating_sub(2 + usize::from(columns >= 7) + usize::from(contextual));
     let input = input(state, columns, style, BODY, limit);
     let badge = text::cells(&input.position);
@@ -249,34 +243,15 @@ fn draft(
     lines.extend(input.lines);
     lines.push(Line::new(&border, style));
     if contextual {
-        let hints: &[&str] = if matches!(
-            state.queue.editing(),
-            Some(crate::tui::drafts::Slot::Paused(_))
-        ) {
-            &[
-                "Enter save · Ctrl+S send · Esc cancel",
-                "↵ save · ^S send · Esc",
-                "↵ · ^S · Esc",
-            ]
-        } else if editing.is_some() {
-            &["Enter save · Esc cancel", "↵ save · Esc", "↵ · Esc"]
-        } else {
-            // During work, a sent message joins the active turn.
-            &[
-                "Enter send · Ctrl+P/N history · Esc back",
-                "↵ send · ^P/N · Esc",
-                "↵ · ^P/N · Esc",
-            ]
-        };
-        lines.push(Line::new(panel::hint(hints, columns), MUTED));
+        lines.push(Line::new(
+            &hint::choose(hints(state).unwrap_or(&[]), columns),
+            MUTED,
+        ));
     }
     if columns >= 7 {
+        let model = format!("{model} · {}", state.effort);
         let directory = directory.strip_prefix(r"\\?\").unwrap_or(directory);
-        lines.push(fitted(
-            directory,
-            &format!("{model} · {}", state.effort),
-            columns,
-        ));
+        lines.push(fitted(directory, &model, columns));
     }
     (lines, Some((input.cursor.0 + 1, input.cursor.1)))
 }
@@ -287,13 +262,7 @@ struct Input {
     position: String,
 }
 
-fn input(
-    state: &State,
-    columns: usize,
-    style: &'static str,
-    foreground: &'static str,
-    limit: usize,
-) -> Input {
+fn input(state: &State, columns: usize, style: Style, foreground: Style, limit: usize) -> Input {
     if columns < 7 {
         // At extreme widths the editor gets the entire row, including its caret.
         // The logical draft/caret are unchanged and regain multiline layout later.
@@ -350,8 +319,8 @@ fn input(
 
 fn commands(state: &State, columns: usize, height: usize) -> (Vec<Line>, Option<(usize, usize)>) {
     let width = panel::width(columns);
-    let reserve = 2 + usize::from(height >= 5) * 2 + usize::from(state.suggestions.visible);
-    let input = input(state, width, ACCENT, PROMPT, height.saturating_sub(reserve));
+    let reserve = 2 + usize::from(height >= 5) + usize::from(state.suggestions.visible);
+    let input = input(state, width, ACCENT, STRONG, height.saturating_sub(reserve));
     let mut lines = vec![panel::heading("Commands", &input.position, width)];
     lines.extend(input.lines);
     let cursor = Some((input.cursor.0 + 1, input.cursor.1));
@@ -368,7 +337,7 @@ fn commands(state: &State, columns: usize, height: usize) -> (Vec<Line>, Option<
     }
     let selected = lines
         .iter()
-        .position(|line| line.background == Some(SELECTED_BACKGROUND));
+        .position(|line| line.background == Some(SELECTED_SURFACE));
     let working = state.activity.is_some();
     let immediate = if state.suggestions.visible {
         matches!(
@@ -392,21 +361,22 @@ fn commands(state: &State, columns: usize, height: usize) -> (Vec<Line>, Option<
     } else {
         "run"
     };
-    let escape = "close";
     let controls = if state.suggestions.visible && !state.suggestions.matches.is_empty() {
-        format!("↑↓ move · Tab complete · Enter {action} · Esc {escape}")
+        vec![
+            format!("↑↓ move · Tab complete · Enter {action} · Esc close"),
+            format!("↑↓ · Tab · Enter {action} · Esc close"),
+            "Enter · Esc".into(),
+            "↵ · Esc".into(),
+        ]
     } else {
-        format!("Enter {action} · Esc {escape}")
+        vec![
+            format!("Enter {action} · Esc close"),
+            "Enter · Esc".into(),
+            "↵ · Esc".into(),
+        ]
     };
-    let compact = if state.suggestions.visible && !state.suggestions.matches.is_empty() {
-        format!("↑↓ · Tab · Enter {action} · Esc {escape}")
-    } else {
-        format!("Enter {action} · Esc {escape}")
-    };
-    lines.push(Line::new(
-        panel::hint(&[&controls, &compact, "Enter · Esc", "↵ · Esc"], width),
-        MUTED,
-    ));
+    let variants: Vec<&str> = controls.iter().map(String::as_str).collect();
+    lines.push(Line::new(&hint::choose(&variants, width), MUTED));
     let mut priorities = vec![cursor.map_or(1, |(row, _)| row)];
     priorities.extend(selected);
     priorities.extend([lines.len() - 1, 0]);

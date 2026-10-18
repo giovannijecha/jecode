@@ -30,7 +30,7 @@ fn render(source: Source<'_>, context: &mut Rows, columns: usize) -> Vec<Line> {
 
 pub(super) fn header(columns: usize) -> Vec<Line> {
     let mut title = Line::new(">_ ", ACCENT);
-    title.push("Jecode", EMPHASIS);
+    title.push("Jecode", EMPHASIS.bold());
     let mut lines = title.wrap(columns, true);
     lines.push(Line::default());
     lines
@@ -106,10 +106,12 @@ impl Layout {
             let item = source(state, self.blocks.len());
             let previous = self.context;
             if self.partial.is_none()
-                && let Source::Item(Item::Text {
+                && let Source::Item(item) = &item
+                && item.is_visible()
+                && let Item::Text {
                     kind: Kind::Assistant,
                     text,
-                }) = &item
+                } = item
             {
                 self.partial = Some(Partial {
                     markdown: markdown::Rows::new(text, columns),
@@ -164,7 +166,9 @@ impl Layout {
             }
             let mut context = self.context;
             for (index, item) in state.items[start..].iter().enumerate() {
-                if let Item::Streaming { text } = item {
+                if let Item::Streaming { text } = item
+                    && item.is_visible()
+                {
                     if self
                         .pending_stream
                         .as_ref()
@@ -194,6 +198,13 @@ impl Layout {
                     let mut marker = vec![Line::default()];
                     context.finish(item, &mut marker);
                 } else {
+                    if self
+                        .pending_stream
+                        .as_ref()
+                        .is_some_and(|stream| stream.index == index)
+                    {
+                        self.pending_stream = None;
+                    }
                     let lines = context.render(item, self.columns);
                     if index < self.pending.len() {
                         self.pending[index] = lines;
@@ -205,7 +216,7 @@ impl Layout {
             self.pending.truncate(state.items.len() - start);
             if !state.items[start..]
                 .iter()
-                .any(|item| matches!(item, Item::Streaming { .. }))
+                .any(|item| matches!(item, Item::Streaming { .. }) && item.is_visible())
             {
                 self.pending_stream = None;
             }

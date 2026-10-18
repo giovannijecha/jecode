@@ -9,6 +9,7 @@ mod draft_menu;
 mod drafts;
 mod editor;
 mod feedback;
+mod hint;
 mod information;
 mod input;
 mod inspection;
@@ -16,6 +17,7 @@ mod jobs;
 mod keys;
 mod line;
 mod markdown;
+mod notice;
 mod persistence;
 mod poll;
 mod processes;
@@ -337,5 +339,7 @@ mod settings_tests;
 mod shortcut_tests;
 #[cfg(test)]
 mod spacing_tests;
+#[cfg(test)]
+mod specimen;
 #[cfg(test)]
 mod tests;

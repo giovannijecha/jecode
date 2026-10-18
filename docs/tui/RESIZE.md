@@ -20,7 +20,9 @@ an open selector or information panel first. Mouse clicks and selection are not
 implemented; `/copy` copies original completed text.
 
 A reading anchor identifies a conversation block, source line and character in
-its displayed text. Rewrapping maps it to the visual row containing that point.
+its displayed text. Rewrapping maps it to the visual row containing that point,
+and the point holds until the next scroll, so repeated resizes inside a long
+paragraph return to the same row.
 Generated tool previews fall back to their row within the card. An increased
 height can leave blank space below an anchored page rather than changing its
 reading point. Menus and temporary information share the lower area; on taller

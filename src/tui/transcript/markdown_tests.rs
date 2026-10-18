@@ -136,8 +136,11 @@ fn live_stream_renders_a_bounded_prefix_and_discards_replaced_or_removed_text() 
     layout.prepare(&state, 40, 64);
     layout.prepare_pending(&state, 32);
     assert!(!layout.pending_ready(&state));
-    assert!(!layout.pending_blocks()[0].is_empty());
-    assert!(layout.pending_blocks()[0].len() <= 32);
+    // A pass emits a bounded number of complete source lines.
+    let prefix: Vec<_> = layout.pending_blocks()[0].iter().map(Line::plain).collect();
+    assert_eq!(&prefix[..2], ["Line 0", "Line 1"]);
+    assert!(prefix.len() <= 32);
+    assert!(!prefix.iter().any(|line| line == "Line 599"));
 
     let replacement = "# Replacement\nFinal response.";
     state.event(Event::Streaming {
@@ -155,6 +158,39 @@ fn live_stream_renders_a_bounded_prefix_and_discards_replaced_or_removed_text() 
     layout.prepare_pending(&state, 32);
     assert!(layout.pending_ready(&state));
     assert!(layout.pending_blocks().is_empty());
+}
+
+#[test]
+fn empty_stream_snapshot_emits_no_phantom_row_before_visible_text() {
+    let mut state = State::default();
+    state.message(Kind::User, "Prompt");
+    state.event(Event::Streaming {
+        text: " \n ".into(),
+    });
+    assert_eq!(state.items.len(), 1);
+
+    // A retained empty snapshot can also arrive from an older session.
+    state.items.push(Item::Streaming {
+        text: " \n ".into(),
+    });
+    let mut layout = Layout::default();
+    complete(&mut layout, &state, 40);
+    layout.prepare_pending(&state, 32);
+    assert!(layout.pending_ready(&state));
+    assert_eq!(layout.pending_blocks(), &[Vec::<Line>::new()]);
+
+    state.event(Event::Streaming {
+        text: "Answer".into(),
+    });
+    layout.prepare_pending(&state, 32);
+    assert!(layout.pending_ready(&state));
+    assert_eq!(
+        layout.pending_blocks()[0]
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>(),
+        ["", "Answer"]
+    );
 }
 
 #[test]
