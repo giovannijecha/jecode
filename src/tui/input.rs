@@ -4,10 +4,12 @@ impl App {
     pub(super) fn input(&mut self, decoded: Decoded) -> Result<bool, String> {
         let decoded = match decoded {
             // Terminals deliver a file drop as a paste of its paths.
-            // The process panel keeps typed and pasted text out of the hidden draft.
-            Decoded::Text(_) | Decoded::Paste(_) if self.state.processes.is_some() => {
+            // The process panel keeps typed and pasted text out of the hidden
+            // draft.
+            Decoded::Text(_) if self.state.processes.is_some() => {
                 return Ok(false);
             }
+            Decoded::Paste(_) if self.state.processes.is_some() => return Ok(false),
             Decoded::Paste(text) => {
                 if self.state.selector.is_none()
                     && self.deletion_job.is_none()
@@ -209,7 +211,7 @@ impl App {
             80 | 78 if key.ctrl() => {
                 if self.state.queue.is_editing() {
                     self.warn(
-                        "Save this draft with Enter or cancel with Esc before browsing history.",
+                        "Save this draft with enter or cancel with esc before browsing history.",
                     );
                     return Ok(false);
                 }

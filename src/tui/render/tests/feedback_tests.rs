@@ -10,7 +10,7 @@ fn feedback_and_information_panels_are_erased_and_never_return_in_resized_histor
         height: 12,
         ..State::default()
     };
-    state.message(Kind::Assistant, &"Saved conversation row\n".repeat(30));
+    state.message(Kind::Assistant, &"Saved conversation row  \n".repeat(30));
     state.items.push(Item::Local {
         command: "/help".into(),
         result: Some("Historical help output".into()),

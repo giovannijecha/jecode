@@ -45,16 +45,24 @@ Supported display syntax includes:
   by the visible destination in parentheses. Rendering does not open links.
 - Unordered and numbered list items with hanging indentation; task markers
   `[ ]`, `[x]` and `[X]` appear as unchecked or checked boxes.
-- Explicit quote lines, horizontal rules and matching backtick or tilde fences.
-  Rust, Bash and JSON fences have light syntax highlighting.
+- Quote lines with a `FAINT` `│` bar and `MUTED` text, horizontal rules
+  and matching backtick or tilde fences. Rust, Bash and JSON fences have light
+  syntax highlighting.
 - Backslash escapes for punctuation. Unmatched formatting markers remain visible.
 
+Each source line remains separate and wraps within the terminal width.
+Consecutive prose, list and quote lines are not joined into paragraphs;
+formatting applies within a source line. Explicit blank rows remain visible.
+Setext heading pairs, tables and fenced code retain their block structure.
+
+Code panels use the full width, with the language label and code at the left
+edge. Completed fences add one coloured bottom row; open fences do not.
 Unsupported code languages stay plain. The highlighter is a display lexer,
 not a syntax validator.
 
-This is a display subset, rather than a complete CommonMark/GFM parser.
-Paragraph continuation, deeply nested block containers, reference links,
-images, HTML, entities and mathematics have no specialized rendering. Unsupported
+This is a display subset, rather than a complete CommonMark/GFM parser. Paragraph
+continuation, lazy quote continuation, deeply nested block containers, reference links, images,
+HTML, entities and mathematics have no specialized rendering. Unsupported
 syntax remains visible as text. Terminal controls are sanitized for display.
 
 ## Width and responsiveness
@@ -74,11 +82,14 @@ snapshot. See [RESIZE.md](RESIZE.md) for source reflow and budgets.
 
 ## Verification
 
-Synthetic tests cover clean columns and alignment, escaped pipes, missing and
-surplus cells, narrow wrapping and vertical fields, styles, literal fences,
-partial delimiters, long tables and tall cells. Integration fixtures exercise
+Synthetic tests cover separate source lines and quotes, full-width code panels,
+clean columns and alignment, escaped pipes, missing and surplus cells, narrow
+wrapping and vertical fields, styles, literal fences, partial delimiters, long
+tables and tall cells. Integration fixtures exercise
 cumulative streaming, finalization and narrow/wide reconstruction through the
 transcript and VT screen model. They preserve source, draft and queue and check
 that provisional layouts leave no duplicate rows in the owned viewport or the
 caller's native scrollback. Reading anchors keep wrapped text across resize,
-including multiline table headers.
+including multiline table headers. The messages specimen
+(`cargo test specimen::messages -- --ignored --nocapture`) prints a
+conversation with every block at wide and narrow widths.

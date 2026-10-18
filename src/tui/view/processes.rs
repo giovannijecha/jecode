@@ -1,10 +1,11 @@
 use super::panel;
 use crate::tools::processes::Process;
 use crate::tui::{
+    hint,
     line::Line,
     processes::{Logs, Panel, STREAMS},
     text,
-    theme::{ACCENT, BAD, BODY, GOOD, MUTED, PROMPT, SELECTED_BACKGROUND, WARNING},
+    theme::{ACCENT, BAD, BODY, GOOD, MUTED, SELECTED_SURFACE, Style, WARNING},
 };
 
 pub(super) fn render(
@@ -13,16 +14,20 @@ pub(super) fn render(
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let width = panel::width(columns);
-    let (lines, priorities) = match (&panel.confirm_stop, &panel.logs) {
-        (Some(process), _) => confirm_stop(process, width),
-        (None, Some(logs)) => output(panel, logs, width, height),
-        (None, None) => list(panel, width, height),
+    let (lines, mut priorities) = if let Some(process) = &panel.confirm_stop {
+        confirmation(process, width)
+    } else if let Some(logs) = &panel.logs {
+        output(panel, logs, width, height)
+    } else {
+        list(panel, width, height)
     };
+    // Below the catalog's row budgets, keep the confirmation recognizable.
+    if height == 1 && panel.confirm_stop.is_some() {
+        priorities.insert(0, 0);
+    }
     panel::finish(lines, None, &priorities, columns, height)
 }
 
-/// Rows left for list entries or log text once the heading, details, hint
-/// and padding fit.
 fn capacity(height: usize, fixed: usize) -> usize {
     height.saturating_sub(fixed + 3).max(1)
 }
@@ -31,9 +36,39 @@ pub(in crate::tui) fn list_capacity(height: usize) -> usize {
     capacity(height, 1)
 }
 
+fn confirmation(process: &Process, width: usize) -> (Vec<Line>, Vec<usize>) {
+    let live = process.active();
+    let controls = if live {
+        &["Enter stop · Esc cancel", "↵ stop · Esc", "↵ · Esc", "↵"][..]
+    } else {
+        &[
+            "Already finished · Enter back · Esc cancel",
+            "Finished · Enter back",
+            "↵ back · Esc",
+            "↵",
+        ][..]
+    };
+    let lines = vec![
+        panel::heading(
+            if live {
+                "Stop process?"
+            } else {
+                "Process finished"
+            },
+            "",
+            width,
+        ),
+        Line::new(&single_line(&process.command), crate::tui::theme::STRONG).shortened(width),
+        Line::new(&display_status(process), status_style(process)).shortened(width),
+        Line::new(&process.id, MUTED).shortened(width),
+        Line::new(&hint::choose(controls, width), MUTED),
+    ];
+    (lines, vec![1, 4, 0, 3, 2])
+}
+
 fn list(panel: &Panel, width: usize, height: usize) -> (Vec<Line>, Vec<usize>) {
     let total = panel.processes.len();
-    let limit = list_capacity(height);
+    let limit = capacity(height, 1);
     let start = panel.selected.saturating_sub(limit - 1);
     let end = (start + limit).min(total);
     let mut lines = vec![panel::heading(
@@ -44,7 +79,7 @@ fn list(panel: &Panel, width: usize, height: usize) -> (Vec<Line>, Vec<usize>) {
     let labels = panel
         .processes
         .iter()
-        .map(|process| text::cells(&display_label(process)))
+        .map(|process| text::cells(&display_status(process)))
         .max()
         .unwrap_or(0);
     let mut selected = None;
@@ -53,47 +88,36 @@ fn list(panel: &Panel, width: usize, height: usize) -> (Vec<Line>, Vec<usize>) {
         if chosen {
             selected = Some(lines.len());
         }
+        let label = display_status(process);
         let mut line = Line::new(
-            if width == 1 {
-                if chosen { "›" } else { " " }
-            } else if chosen {
-                "› "
-            } else {
-                "  "
-            },
+            if chosen { "› " } else { "  " },
             if chosen { ACCENT } else { MUTED },
         );
-        if width == 1 {
-            if chosen {
-                line.background = Some(SELECTED_BACKGROUND);
-            }
-            lines.push(line);
-            continue;
-        }
-        let label = display_label(process);
         line.push(&label, status_style(process));
-        line.push(&" ".repeat(labels - text::cells(&label) + 2), MUTED);
-        let room = width.saturating_sub(text::cells(&line.plain()));
         line.push(
-            &text::ellipsize(&single_line(&process.command), room),
-            PROMPT,
+            &" ".repeat(labels.saturating_sub(text::cells(&label)) + 2),
+            MUTED,
+        );
+        line.push(
+            &text::ellipsize(
+                &single_line(&process.command),
+                width.saturating_sub(text::cells(&line.plain())),
+            ),
+            crate::tui::theme::STRONG,
         );
         if chosen {
-            line.background = Some(SELECTED_BACKGROUND);
+            line.background = Some(SELECTED_SURFACE);
         }
         lines.push(line);
     }
     if total == 0 {
+        selected = Some(lines.len());
         lines.push(Line::new(
-            if width == 1 {
-                "∅"
-            } else {
-                "No active background processes in this conversation"
-            },
+            "No active background processes in this conversation",
             MUTED,
         ));
     }
-    let controls: &[&str] = if total == 0 {
+    let variants: &[&str] = if total == 0 {
         &["Esc close", "Esc"]
     } else {
         &[
@@ -104,50 +128,16 @@ fn list(panel: &Panel, width: usize, height: usize) -> (Vec<Line>, Vec<usize>) {
             "^D",
         ]
     };
-    lines.push(Line::new(panel::hint(controls, width), MUTED));
-    let mut priorities: Vec<usize> = selected.or((total == 0).then_some(1)).into_iter().collect();
-    priorities.extend([lines.len() - 1, 0]);
-    (lines, priorities)
-}
-
-fn confirm_stop(process: &Process, width: usize) -> (Vec<Line>, Vec<usize>) {
-    let active = process.active();
-    let mut lines = vec![panel::heading(
-        if width == 1 {
-            if active { "?" } else { "✓" }
-        } else if active {
-            "Stop process?"
-        } else {
-            "Process finished"
-        },
-        "",
-        width,
-    )];
-    lines.push(Line::new(&single_line(&process.command), PROMPT).shortened(width));
-    lines.push(Line::new(&display_label(process), status_style(process)).shortened(width));
-    lines.push(Line::new(&process.id, MUTED).shortened(width));
-    let controls: &[&str] = if active {
-        &["Enter stop · Esc cancel", "↵ stop · Esc", "↵ · Esc", "↵"]
-    } else {
-        &[
-            "Already finished · Enter back · Esc cancel",
-            "Finished · Enter back",
-            "↵ back · Esc",
-            "↵",
-        ]
-    };
-    lines.push(Line::new(panel::hint(controls, width), MUTED));
-    let priorities = if width == 1 {
-        vec![0, 4, 2, 3, 1]
-    } else {
-        vec![1, 4, 0, 3, 2]
-    };
+    lines.push(Line::new(&hint::choose(variants, width), MUTED));
+    let mut priorities: Vec<usize> = selected.into_iter().collect();
+    priorities.push(lines.len() - 1);
+    priorities.push(0);
     (lines, priorities)
 }
 
 fn header(process: Option<&Process>, logs: &Logs, width: usize) -> Vec<Line> {
     let mut status = match process {
-        Some(process) => Line::new(&display_label(process), status_style(process)),
+        Some(process) => Line::new(&display_status(process), status_style(process)),
         None => Line::new("unavailable", BAD),
     };
     status.push(&format!(" · {}", logs.id), MUTED);
@@ -155,7 +145,6 @@ fn header(process: Option<&Process>, logs: &Logs, width: usize) -> Vec<Line> {
     if let Some(error) = process.and_then(|process| process.error.as_deref()) {
         lines.push(Line::new(&single_line(error), BAD).shortened(width));
     }
-    let view = &logs.views[logs.stream];
     let mut tabs = Line::default();
     for (index, name) in STREAMS.into_iter().enumerate() {
         if index > 0 {
@@ -163,7 +152,11 @@ fn header(process: Option<&Process>, logs: &Logs, width: usize) -> Vec<Line> {
         }
         tabs.push(name, if index == logs.stream { ACCENT } else { MUTED });
     }
-    let mode = if view.follow { "following" } else { "paused" };
+    let mode = if logs.views[logs.stream].follow {
+        "following"
+    } else {
+        "paused"
+    };
     let used = text::cells(&tabs.plain());
     if used + text::cells(mode) + 2 <= width {
         tabs.push(&" ".repeat(width - used - text::cells(mode)), MUTED);
@@ -285,56 +278,56 @@ fn output(panel: &Panel, logs: &Logs, width: usize, height: usize) -> (Vec<Line>
             .take(end - offset)
             .take(remaining),
     );
-    let other = STREAMS[1 - logs.stream];
     let live = process.is_some_and(Process::active);
-    let controls = if view.follow && live {
-        [
-            format!("↑↓ PgUp/PgDn scroll · Home start · Tab {other} · Ctrl+D stop · Esc back"),
-            format!("↑↓ scroll · Tab {other} · ^D stop · Esc back"),
-            "↑↓ · Tab · ^D · Esc".into(),
-            "^D · Esc".into(),
-        ]
-    } else if view.follow {
-        [
-            format!("↑↓ PgUp/PgDn scroll · Home start · Tab {other} · Esc back"),
-            format!("↑↓ scroll · Tab {other} · Esc back"),
-            "↑↓ · Tab · Esc".into(),
-            "Esc".into(),
-        ]
+    let other = STREAMS[1 - logs.stream];
+    let variants = if view.follow {
+        if live {
+            vec![
+                format!("↑↓ PgUp/PgDn scroll · Home start · Tab {other} · Ctrl+D stop · Esc back"),
+                format!("↑↓ scroll · Tab {other} · ^D stop · Esc back"),
+                "↑↓ · Tab · ^D · Esc".into(),
+                "^D · Esc".into(),
+            ]
+        } else {
+            vec![
+                format!("↑↓ PgUp/PgDn scroll · Home start · Tab {other} · Esc back"),
+                format!("↑↓ scroll · Tab {other} · Esc back"),
+                "↑↓ · Tab · Esc".into(),
+                "Esc".into(),
+            ]
+        }
     } else if live {
-        [
+        vec![
             format!("↑↓ PgUp/PgDn scroll · End follow · Tab {other} · Ctrl+D stop · Esc back"),
             format!("↑↓ scroll · End follow · Tab {other} · ^D stop · Esc back"),
             "↑↓ · End · ^D · Esc".into(),
             "^D · Esc".into(),
         ]
     } else {
-        [
+        vec![
             format!("↑↓ PgUp/PgDn scroll · End follow · Tab {other} · Esc back"),
             format!("↑↓ scroll · End follow · Tab {other} · Esc back"),
             "↑↓ · End · Tab · Esc".into(),
             "Esc".into(),
         ]
     };
-    let controls: Vec<&str> = controls.iter().map(String::as_str).collect();
-    lines.push(Line::new(panel::hint(&controls, width), MUTED));
-    let tabs = body - 1;
-    let priorities = vec![body, 0, tabs, lines.len() - 1, 1];
+    let refs: Vec<&str> = variants.iter().map(String::as_str).collect();
+    lines.push(Line::new(&hint::choose(&refs, width), MUTED));
+    let hint = lines.len() - 1;
+    let priorities = vec![body, 0, body - 1, hint, 1];
     (lines, priorities)
 }
 
-fn status_style(process: &Process) -> &'static str {
-    if process.active() {
-        return GOOD;
-    }
+fn status_style(process: &Process) -> Style {
     match (process.status, process.exit_code) {
+        ("running" | "stopping", _) => GOOD,
         ("timed_out", _) => WARNING,
         ("exited", Some(0)) | ("stopped", _) => MUTED,
         _ => BAD,
     }
 }
 
-fn display_label(process: &Process) -> String {
+fn display_status(process: &Process) -> String {
     if process.active() {
         "running".into()
     } else {

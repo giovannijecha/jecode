@@ -162,9 +162,9 @@ fn back_to_bottom_line(columns: usize, alt_end: bool) -> Line {
         "↓",
     ];
     const ALT_END_LABELS: [&str; 4] = [
-        " ↓ Back to bottom · Alt+End ",
-        " ↓ Bottom · Alt+End ",
-        " ↓ Alt+End ",
+        " ↓ Back to bottom · alt+end ",
+        " ↓ Bottom · alt+end ",
+        " ↓ alt+end ",
         "↓",
     ];
     let labels = if alt_end { ALT_END_LABELS } else { ESC_LABELS };
@@ -178,7 +178,7 @@ fn back_to_bottom_line(columns: usize, alt_end: bool) -> Line {
         line.spans.push(Span {
             text: label.into(),
             style: super::theme::ACCENT,
-            background: Some(super::theme::TOOL_SELECTED),
+            background: Some(super::theme::SELECTED_SURFACE),
         });
     }
     line
@@ -188,7 +188,7 @@ fn back_to_bottom_line(columns: usize, alt_end: bool) -> Line {
 mod tests {
     use super::*;
     use crate::tui::state::Kind;
-    use crate::tui::theme::{ACCENT, BODY, TOOL_SELECTED};
+    use crate::tui::theme::{ACCENT, BODY, SELECTED_SURFACE};
 
     #[test]
     fn back_to_bottom_badge_is_centered_and_uses_the_blue_palette() {
@@ -200,8 +200,11 @@ mod tests {
         assert_eq!(line.spans[0].style, BODY);
         assert_eq!(line.spans[0].background, None);
         assert_eq!(line.spans[1].style, ACCENT);
-        assert_eq!(line.spans[1].background, Some(TOOL_SELECTED));
-        assert!(line.paint(40).contains(&format!("\x1b[{TOOL_SELECTED}m")));
+        assert_eq!(line.spans[1].background, Some(SELECTED_SURFACE));
+        assert!(
+            line.paint(40)
+                .contains(&format!("\x1b[{SELECTED_SURFACE}m"))
+        );
     }
 
     #[test]
@@ -214,7 +217,7 @@ mod tests {
         }
         assert_eq!(back_to_bottom_line(1, false).plain(), "↓");
         assert_eq!(back_to_bottom_line(7, false).plain(), " ↓ esc ");
-        assert_eq!(back_to_bottom_line(11, true).plain(), " ↓ Alt+End ");
+        assert_eq!(back_to_bottom_line(11, true).plain(), " ↓ alt+end ");
     }
 
     #[test]
@@ -238,7 +241,7 @@ mod tests {
         assert!(
             back_to_bottom_line(40, true)
                 .plain()
-                .contains("Back to bottom · Alt+End")
+                .contains("Back to bottom · alt+end")
         );
     }
 
@@ -263,7 +266,7 @@ mod tests {
         state.message(
             Kind::Assistant,
             &(0..60)
-                .map(|index| format!("Row {index:02}\n"))
+                .map(|index| format!("Row {index:02}  \n"))
                 .collect::<String>(),
         );
         let mut display = Display::new((state.width, state.height));
@@ -276,7 +279,7 @@ mod tests {
         state.history.record("saved prompt");
         state.history.navigate(&mut state.editor, true);
         let contextual = display.update(&state, "fixture/model", "fixture directory", now);
-        assert!(contextual.contains("Back to bottom · Alt+End"));
+        assert!(contextual.contains("Back to bottom · alt+end"));
         assert!(display.back_to_bottom());
         let following = display.update(&state, "fixture/model", "fixture directory", now);
         assert!(!following.contains("Back to bottom"));

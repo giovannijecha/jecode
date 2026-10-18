@@ -1,19 +1,19 @@
 use super::{
     text,
-    theme::{CURSOR, INLINE_CODE},
+    theme::{BODY, INLINE_CODE, Style, Surface},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
     pub text: String,
-    pub style: &'static str,
-    pub background: Option<&'static str>,
+    pub style: Style,
+    pub background: Option<Surface>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Line {
     pub spans: Vec<Span>,
-    pub background: Option<&'static str>,
+    pub background: Option<Surface>,
     pub origin: Option<Origin>,
 }
 
@@ -31,7 +31,7 @@ pub struct Origin {
     pub character: usize,
 }
 
-type StyledChar = (char, &'static str, Option<&'static str>);
+type StyledChar = (char, Style, Option<Surface>);
 
 struct StyledGlyph {
     start: usize,
@@ -52,7 +52,7 @@ pub(in crate::tui) struct Wrapped {
     start: usize,
     columns: usize,
     words: bool,
-    background: Option<&'static str>,
+    background: Option<Surface>,
     empty_pending: bool,
     origin: Option<Origin>,
 }
@@ -62,15 +62,15 @@ impl Line {
         self.origin = Some(Origin { line, character: 0 });
         self
     }
-    pub fn new(value: &str, style: &'static str) -> Self {
+    pub fn new(value: &str, style: Style) -> Self {
         let mut line = Self::default();
         line.push(value, style);
         line
     }
-    pub fn push(&mut self, value: &str, style: &'static str) {
+    pub fn push(&mut self, value: &str, style: Style) {
         self.push_span(value, style, None);
     }
-    fn push_span(&mut self, value: &str, style: &'static str, background: Option<&'static str>) {
+    fn push_span(&mut self, value: &str, style: Style, background: Option<Surface>) {
         if value.is_empty() {
             return;
         }
@@ -90,7 +90,7 @@ impl Line {
     pub fn plain(&self) -> String {
         self.spans.iter().map(|span| span.text.as_str()).collect()
     }
-    pub fn indent(mut self, prefix: &str, style: &'static str) -> Self {
+    pub fn indent(mut self, prefix: &str, style: Style) -> Self {
         self.spans.insert(
             0,
             Span {
@@ -101,19 +101,19 @@ impl Line {
         );
         self
     }
-    pub fn gutter(mut self, prefix: &str, style: &'static str) -> Self {
+    pub fn gutter(mut self, prefix: &str, style: Style) -> Self {
         // A tree guide inherits the terminal surface, even beside shaded diffs.
         self.spans.insert(
             0,
             Span {
                 text: prefix.into(),
                 style,
-                background: Some("49"),
+                background: Some(Surface::TERMINAL),
             },
         );
         self
     }
-    pub fn on(mut self, background: &'static str) -> Self {
+    pub fn on(mut self, background: Surface) -> Self {
         self.background = Some(background);
         self
     }
@@ -147,12 +147,7 @@ impl Line {
             .collect();
         StyledLine { characters, glyphs }
     }
-    fn push_glyph(
-        &mut self,
-        characters: &[StyledChar],
-        glyph: &StyledGlyph,
-        style: Option<&'static str>,
-    ) {
+    fn push_glyph(&mut self, characters: &[StyledChar], glyph: &StyledGlyph, style: Option<Style>) {
         for &(character, original, background) in &characters[glyph.start..glyph.end] {
             let mut utf8 = [0; 4];
             self.push_span(
@@ -183,7 +178,7 @@ impl Line {
             return line;
         }
         let mut cells = 0;
-        let mut style = "0";
+        let mut style = BODY;
         let mut background = None;
         for glyph in &styled.glyphs {
             if cells + glyph.cells > columns - 1 {
@@ -201,7 +196,7 @@ impl Line {
         line.push_span("…", style, background);
         line
     }
-    pub fn caret(&self, column: usize, style: &'static str) -> Self {
+    pub fn caret(&self, column: usize, style: Style) -> Self {
         let mut line = Self {
             background: self.background,
             ..Self::default()
@@ -218,7 +213,7 @@ impl Line {
             cells += glyph.cells;
         }
         if !covered && cells <= column {
-            line.push(&" ".repeat(column - cells), "0");
+            line.push(&" ".repeat(column - cells), BODY);
             line.push(" ", style);
         }
         line
@@ -239,7 +234,7 @@ impl Line {
             output.push_str(&format!("\x1b[0m\x1b[{}m", span.style));
             // The software caret carries its own background, even inside a panel.
             if let Some(background) = span.background.or(self.background)
-                && span.style != CURSOR
+                && !span.style.has_fill()
             {
                 output.push_str(&format!("\x1b[{background}m"));
             }

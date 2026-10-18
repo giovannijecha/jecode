@@ -1,10 +1,10 @@
-use super::field;
+use super::{diff, field};
 use crate::{
     json::Value,
     tui::{
         line::Line,
         text,
-        theme::{BAD, BODY, DIFF_ADDED_BACKGROUND, DIFF_REMOVED_BACKGROUND, GOOD, MUTED},
+        theme::{BAD, BODY, MUTED, Style},
     },
 };
 
@@ -31,16 +31,12 @@ pub(super) fn render(
             "read" => payload(field(result, "content"), BODY),
             "write" => payload(field(arguments, "content"), BODY),
             "edit" => {
-                let mut rows = Vec::new();
-                for (key, marker, color, background) in [
-                    ("old_text", "- ", BAD, DIFF_REMOVED_BACKGROUND),
-                    ("new_text", "+ ", GOOD, DIFF_ADDED_BACKGROUND),
-                ] {
-                    for source in text::clean(field(arguments, key)).lines() {
-                        rows.push(Line::new(&format!("{marker}{source}"), color).on(background));
-                    }
-                }
-                rows
+                let old = text::clean(field(arguments, "old_text"));
+                let new = text::clean(field(arguments, "new_text"));
+                diff::lines(&old, &new)
+                    .into_iter()
+                    .map(|(change, line)| diff::row(change, line))
+                    .collect()
             }
             _ => payload(&result.pretty(), BODY),
         }
@@ -51,7 +47,7 @@ pub(super) fn render(
         .collect()
 }
 
-fn payload(value: &str, style: &'static str) -> Vec<Line> {
+fn payload(value: &str, style: Style) -> Vec<Line> {
     if value.is_empty() {
         return Vec::new();
     }

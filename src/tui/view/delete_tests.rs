@@ -4,7 +4,7 @@ use crate::{
     tui::{
         selector::{Purpose, Selector},
         state::Kind,
-        theme::{BAD, SELECTED_BACKGROUND},
+        theme::{BAD, SELECTED_SURFACE},
     },
 };
 
@@ -36,15 +36,21 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("Resume · current folder"));
-    assert!(rendered.contains("Delete? Saved request 3"));
-    assert!(rendered.contains("current ·"));
+    // The marked row keeps its place and names the pending deletion.
+    let marked = full
+        .live
+        .iter()
+        .find(|line| line.plain().contains("› Delete? Saved request 3"))
+        .unwrap();
+    let name = marked.spans.iter().find(|span| span.text.contains("Saved"));
+    assert_eq!(name.unwrap().style, BAD);
     assert!(rendered.contains("owned outputs and temporary files"));
     assert!(rendered.contains("New conversation · unsent input kept"));
     assert!(rendered.contains("Enter delete · Esc cancel"));
     assert!(
         full.live
             .iter()
-            .any(|line| line.background == Some(SELECTED_BACKGROUND)
+            .any(|line| line.background == Some(SELECTED_SURFACE)
                 && line.spans.iter().any(|span| span.style == BAD))
     );
     for width in [8, 18, 40, 80] {
@@ -63,14 +69,18 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
                 fitted
                     .live
                     .iter()
-                    .any(|line| line.background == Some(SELECTED_BACKGROUND))
+                    .any(|line| line.background == Some(SELECTED_SURFACE))
             );
             if width >= 18 && height >= 2 {
                 assert!(
                     fitted
                         .live
                         .iter()
-                        .any(|line| line.plain().contains("Enter delete"))
+                        .any(|line| line.plain().contains(if width >= 25 {
+                            "Enter delete"
+                        } else {
+                            "Enter"
+                        }))
                 );
             }
             assert_eq!(state.editor.text, "kept draft");

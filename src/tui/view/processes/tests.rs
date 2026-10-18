@@ -3,15 +3,15 @@ use super::*;
 fn process(status: &'static str) -> Process {
     Process {
         id: "process-1".into(),
-        command: "printf secret-masked".into(),
+        command: "printf catalog".into(),
         status,
         exit_code: None,
         error: None,
     }
 }
 
-fn visible(panel: &Panel, columns: usize, height: usize) -> String {
-    render(panel, columns, height)
+fn plain(panel: &Panel, width: usize, height: usize) -> String {
+    render(panel, width, height)
         .0
         .iter()
         .map(Line::plain)
@@ -20,55 +20,73 @@ fn visible(panel: &Panel, columns: usize, height: usize) -> String {
 }
 
 #[test]
-fn empty_list_prioritizes_its_message_at_one_row() {
-    let panel = Panel::new(vec![]);
-    assert!(visible(&panel, 80, 8).contains("No active background processes in this conversation"));
-    assert!(visible(&panel, 80, 1).contains("No active background processes"));
-    assert_eq!(visible(&panel, 1, 1), "∅");
-}
-
-#[test]
-fn stop_confirmation_shows_target_and_finished_transition() {
+fn one_row_stop_confirmation_keeps_its_action_visible() {
     let mut panel = Panel::new(vec![process("running")]);
     panel.confirm_stop = Some(process("running"));
-    let active = visible(&panel, 80, 8);
-    for detail in [
-        "Stop process?",
-        "printf secret-masked",
-        "running",
-        "process-1",
-        "Enter stop · Esc cancel",
-    ] {
-        assert!(active.contains(detail), "{detail}\n{active}");
-    }
-    assert_eq!(visible(&panel, 1, 1), "?");
-    assert!(visible(&panel, 10, 2).contains("↵"));
-    let short = visible(&panel, 80, 2);
-    assert!(short.contains("printf secret-masked"), "{short}");
-    assert!(short.contains("Enter stop · Esc cancel"), "{short}");
-
-    panel.confirm_stop = Some(process("exited"));
-    let finished = visible(&panel, 80, 8);
-    assert!(finished.contains("Process finished"), "{finished}");
-    assert!(
-        finished.contains("Already finished · Enter back"),
-        "{finished}"
-    );
-    assert!(!finished.contains("Enter stop"), "{finished}");
-    assert_eq!(visible(&panel, 1, 1), "✓");
-    let short = visible(&panel, 80, 2);
-    assert!(short.contains("printf secret-masked"), "{short}");
-    assert!(short.contains("Enter back · Esc cancel"), "{short}");
+    assert_eq!(plain(&panel, 40, 1), "  Stop process?");
 }
 
 #[test]
-fn active_list_keeps_stop_hint_and_selected_row_in_narrow_space() {
-    let panel = Panel::new(vec![process("running")]);
-    let regular = visible(&panel, 80, 8);
-    assert!(regular.contains("Ctrl+D stop"), "{regular}");
-    assert_eq!(visible(&panel, 1, 1), "›");
+fn source_list_has_status_column_command_and_empty_message() {
+    let active = plain(&Panel::new(vec![process("running")]), 80, 8);
+    assert!(active.contains("Background processes"));
+    assert!(active.contains("› running  printf catalog"), "{active}");
+    assert!(active.contains("Ctrl+D stop · Esc close"), "{active}");
+    let empty = plain(&Panel::new(vec![]), 80, 8);
+    assert!(empty.contains("No active background processes in this conversation"));
+    assert!(empty.contains("Esc close"));
+}
 
-    let stopping = visible(&Panel::new(vec![process("stopping")]), 80, 8);
-    assert!(stopping.contains("running"), "{stopping}");
-    assert!(!stopping.contains("stopping"), "{stopping}");
+#[test]
+fn stop_confirmation_replaces_list_or_output_and_names_target() {
+    let mut panel = Panel::new(vec![process("running")]);
+    panel.confirm_stop = Some(process("running"));
+    let confirmation = plain(&panel, 80, 8);
+    assert!(confirmation.contains("Stop process?"));
+    assert!(confirmation.contains("printf catalog"));
+    assert!(confirmation.contains("running"));
+    assert!(confirmation.contains("process-1"));
+    assert!(confirmation.contains("Enter stop · Esc cancel"));
+    assert!(!confirmation.contains("Background processes"));
+    panel.logs = Some(Logs {
+        id: "process-1".into(),
+        process: Some(process("running")),
+        stream: 0,
+        views: Default::default(),
+    });
+    assert_eq!(plain(&panel, 80, 8), confirmation);
+    panel.confirm_stop = Some(process("exited"));
+    let finished = plain(&panel, 80, 8);
+    assert!(finished.contains("Process finished"));
+    assert!(finished.contains("Already finished · Enter back · Esc cancel"));
+}
+
+#[test]
+fn output_header_shows_status_id_streams_and_follow_mode() {
+    let mut panel = Panel::new(vec![process("running")]);
+    panel.logs = Some(Logs {
+        id: "process-1".into(),
+        process: Some(process("running")),
+        stream: 1,
+        views: Default::default(),
+    });
+    let view = plain(&panel, 80, 10);
+    assert!(view.contains("printf catalog"));
+    assert!(view.contains("running · process-1"));
+    assert!(view.contains("Output  Errors"));
+    assert!(view.contains("following"));
+    assert!(view.contains("No output yet"));
+    let rows = render(&panel, 80, 10).0;
+    let tabs = rows
+        .iter()
+        .find(|row| row.plain().contains("Output  Errors"))
+        .unwrap();
+    assert_eq!(
+        tabs.spans
+            .iter()
+            .find(|span| span.text == "Errors")
+            .unwrap()
+            .style,
+        ACCENT
+    );
 }

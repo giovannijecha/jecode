@@ -7,7 +7,7 @@ use crate::{
     tui::{
         selector::Selector,
         state::Kind,
-        theme::{CURSOR, SELECTED_BACKGROUND, USER_BACKGROUND},
+        theme::{CURSOR, SELECTED_SURFACE, USER_SURFACE},
     },
 };
 
@@ -57,14 +57,14 @@ fn every_menu_has_the_same_padded_surface_without_composer_borders_or_draft_text
         assert_eq!(frame.live.first().unwrap().plain(), "");
         assert_eq!(frame.live.last().unwrap().plain(), "");
         assert!(frame.live.iter().all(|line| {
-            matches!(line.background, Some(USER_BACKGROUND | SELECTED_BACKGROUND))
+            matches!(line.background, Some(USER_SURFACE | SELECTED_SURFACE))
                 && !line.plain().contains('─')
                 && !line.plain().contains("kept private draft")
                 && !line.plain().contains("isolated-fixture-key")
         }));
         if let Some((row, column)) = frame.cursor {
             let line = &frame.live[row];
-            assert!(line.paint(state.width).contains(CURSOR));
+            assert!(line.paint(state.width).contains(&CURSOR.to_string()));
             assert!(column < state.width);
         }
         assert_eq!(state.editor, draft);
@@ -84,7 +84,7 @@ fn slash_arguments_keep_the_panel_and_escape_restores_the_draft_and_caret() {
         commands
             .live
             .iter()
-            .all(|line| line.background == Some(USER_BACKGROUND))
+            .all(|line| line.background == Some(USER_SURFACE))
     );
     assert!(
         commands
@@ -160,10 +160,7 @@ fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_res
                 assert!(
                     frame.live.iter().all(|line| {
                         text::cells(&line.plain()) <= width
-                            && matches!(
-                                line.background,
-                                Some(USER_BACKGROUND | SELECTED_BACKGROUND)
-                            )
+                            && matches!(line.background, Some(USER_SURFACE | SELECTED_SURFACE))
                     }),
                     "{width}x{height}"
                 );
@@ -173,7 +170,7 @@ fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_res
                     let (row, column) = frame.cursor.unwrap();
                     assert!(row < frame.live.len());
                     assert!(column < width, "caret must fit {width}x{height}");
-                    assert!(frame.live[row].paint(width).contains(CURSOR));
+                    assert!(frame.live[row].paint(width).contains(&CURSOR.to_string()));
                 }
                 assert_eq!(state.editor, draft);
             }
@@ -204,7 +201,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
         frame
             .live
             .iter()
-            .any(|line| line.background == Some(SELECTED_BACKGROUND))
+            .any(|line| line.background == Some(SELECTED_SURFACE))
     );
     assert_eq!(state.selector.as_ref().unwrap().selected, original);
     state.height = 24;
@@ -265,19 +262,68 @@ fn narrow_panels_keep_the_keyboard_controls_readable_instead_of_cutting_the_foot
     let controls = resume
         .live
         .iter()
-        .find(|line| line.plain().contains("Ctrl+D"))
+        .find(|line| line.plain().contains("Ctrl+D") || line.plain().contains("^D"))
         .unwrap()
         .plain();
-    assert!(controls.contains("Enter"));
-    assert!(controls.contains("delete"));
+    assert!(controls.contains("Enter") || controls.contains('↵'));
     assert!(controls.contains("Esc"));
     assert!(!controls.contains('…'));
     state.width = 60;
     state.selector = Some(Selector::key());
     let key = frame(&state, "fixture/model", "directory");
+    assert!(key.live.iter().any(
+        |line| line.plain().contains("key stored in plain text") && !line.plain().contains('…')
+    ));
+}
+
+#[test]
+fn options_use_per_row_descriptions_and_source_current_wording() {
+    let models: Vec<_> = [
+        ("fixture/a", "Short description"),
+        ("fixture/a-longer-identifier", "Long description"),
+        ("fixture/b", "Middle description"),
+    ]
+    .into_iter()
+    .map(|(id, name)| Model {
+        id: id.into(),
+        name: name.into(),
+        ..model(0)
+    })
+    .collect();
+    let mut state = State {
+        width: 80,
+        height: 30,
+        ..State::default()
+    };
+    state.selector = Some(Selector::models(&models, false, "fixture/b"));
+    let rows: Vec<_> = frame(&state, "fixture/model", "directory")
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect();
+    let options: Vec<_> = rows.iter().filter(|row| row.contains("fixture/")).collect();
+    assert_eq!(options.len(), 3, "{rows:#?}");
+    // Each row begins its description after its own name.
+    let starts: Vec<_> = options
+        .iter()
+        .zip(["Short d", "Long d", "Middle d"])
+        .map(|(row, description)| text::cells(&row[..row.find(description).unwrap()]))
+        .collect();
+    assert!(starts[0] < starts[1], "{rows:#?}");
+    assert!(options[2].contains("fixture/b"));
+    assert!(!rows.iter().any(|row| row.contains('✓')));
+
+    // Too narrow for both: names stay whole and descriptions give way.
+    state.width = 40;
+    let rows: Vec<_> = frame(&state, "fixture/model", "directory")
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect();
     assert!(
-        key.live
-            .iter()
-            .any(|line| line.plain().contains("plain text key") && !line.plain().contains('…'))
+        rows.iter()
+            .any(|row| row.contains("fixture/a-longer-identifier")),
+        "{rows:#?}"
     );
+    assert!(rows.iter().any(|row| row.contains("Short")), "{rows:#?}");
 }

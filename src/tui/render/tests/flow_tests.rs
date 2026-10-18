@@ -35,7 +35,11 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
     assert!(seconds >= 12.0);
     assert!(!header.contains('•'));
     assert_eq!(visible.matches("••••").count(), 1);
-    assert!(visible.lines().any(|line| line.starts_with("••••  ")));
+    assert!(
+        visible
+            .lines()
+            .any(|line| line.starts_with("••••  Running tools  ·  "))
+    );
     assert_eq!(state.revision, revision);
 
     finish(&mut state, "fixture command", "done");
@@ -65,7 +69,7 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     state.message(
         Kind::Assistant,
         &(0..50)
-            .map(|i| format!("Later paragraph {i:02}.\n"))
+            .map(|i| format!("Later paragraph {i:02}.  \n"))
             .collect::<String>(),
     );
     let mut screen = Screen::new(state.width, state.height);

@@ -5,7 +5,7 @@ use crate::tui::{
     cards,
     line::Line,
     markdown, text,
-    theme::{PROMPT, USER_BACKGROUND},
+    theme::{STRONG, USER_SURFACE},
 };
 
 #[cfg(test)]
@@ -37,19 +37,19 @@ impl Rows {
                 kind: Kind::User,
                 text,
             } => {
-                let mut line = Line::new(&text::clean(text), PROMPT).at_source(0);
-                line.background = Some(USER_BACKGROUND);
+                let mut line = Line::new(&text::clean(text), STRONG).at_source(0);
+                line.background = Some(USER_SURFACE);
                 let mut lines = vec![Line {
-                    background: Some(USER_BACKGROUND),
+                    background: Some(USER_SURFACE),
                     ..Line::default()
                 }];
                 lines.extend(
                     line.wrap(columns.saturating_sub(4), true)
                         .into_iter()
-                        .map(|line| line.indent("  ", PROMPT)),
+                        .map(|line| line.indent("  ", STRONG)),
                 );
                 lines.push(Line {
-                    background: Some(USER_BACKGROUND),
+                    background: Some(USER_SURFACE),
                     ..Line::default()
                 });
                 lines

@@ -97,14 +97,20 @@ impl Selector {
         let options = queue
             .drafts()
             .into_iter()
-            .map(|(slot, text)| OptionRow {
-                name: crate::copy::preview(&text),
-                description: match slot {
-                    super::drafts::Slot::Queued(_) => "Queued",
-                    super::drafts::Slot::Paused(_) => "Paused",
+            .map(|(slot, text)| {
+                let mut name = crate::copy::preview(&text);
+                if text.trim().contains('\n') && !name.ends_with('…') {
+                    name.push('…');
                 }
-                .into(),
-                choice: Choice::Draft(slot),
+                OptionRow {
+                    name,
+                    description: match slot {
+                        super::drafts::Slot::Queued(_) => "Queued",
+                        super::drafts::Slot::Paused(_) => "Paused",
+                    }
+                    .into(),
+                    choice: Choice::Draft(slot),
+                }
             })
             .collect();
         Self::new("Drafts", Purpose::Drafts { delete: None }, options)
@@ -122,15 +128,11 @@ impl Selector {
                 .enumerate()
                 .map(|(index, session)| OptionRow {
                     name: session.title.clone(),
-                    description: format!(
-                        "{}{}",
-                        if session.id == current {
-                            "current · "
-                        } else {
-                            ""
-                        },
+                    description: if session.id == current {
+                        format!("current · {}", session.description())
+                    } else {
                         session.description()
-                    ),
+                    },
                     choice: Choice::Session(index),
                 })
                 .collect(),
@@ -147,15 +149,11 @@ impl Selector {
             .enumerate()
             .map(|(index, model)| OptionRow {
                 name: model.id.clone(),
-                description: format!(
-                    "{}{}",
-                    model.name,
-                    if model.id == current {
-                        " · current"
-                    } else {
-                        ""
-                    }
-                ),
+                description: if model.id == current {
+                    format!("{} · current", model.name)
+                } else {
+                    model.name.clone()
+                },
                 choice: Choice::Model(index),
             })
             .collect();

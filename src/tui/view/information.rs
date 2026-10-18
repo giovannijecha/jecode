@@ -1,5 +1,5 @@
 use super::panel;
-use crate::tui::{information::Information, line::Line, text, theme::MUTED};
+use crate::tui::{hint, information::Information, line::Line, text, theme::MUTED};
 
 fn rows(info: &Information, width: usize) -> Vec<Line> {
     let labels = info
@@ -16,18 +16,16 @@ fn rows(info: &Information, width: usize) -> Vec<Line> {
         if aligned {
             let prefix = labels + 2;
             for (index, row) in Line::new(&value, MUTED)
-                .wrap(width - prefix, true)
+                .wrap(width.saturating_sub(prefix).max(1), true)
                 .into_iter()
                 .enumerate()
             {
-                rows.push(row.indent(
-                    &if index == 0 {
-                        format!("{label}{}", " ".repeat(prefix - text::cells(&label)))
-                    } else {
-                        " ".repeat(prefix)
-                    },
-                    MUTED,
-                ));
+                let indent = if index == 0 {
+                    format!("{label}{}", " ".repeat(prefix - text::cells(&label)))
+                } else {
+                    " ".repeat(prefix)
+                };
+                rows.push(row.indent(&indent, MUTED));
             }
         } else {
             rows.extend(Line::new(&label, MUTED).wrap(width, true));
@@ -47,18 +45,18 @@ pub(super) fn render(
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let width = panel::width(columns);
-    let rows = rows(info, width);
+    let all = rows(info, width);
     let limit = capacity(height);
-    let offset = info.offset.min(rows.len().saturating_sub(limit));
-    let end = (offset + limit).min(rows.len());
+    let offset = info.offset.min(all.len().saturating_sub(limit));
+    let end = (offset + limit).min(all.len());
     let mut lines = vec![panel::heading(
         &info.title,
-        &panel::position(offset, end, rows.len()),
+        &panel::position(offset, end, all.len()),
         width,
     )];
-    lines.extend(rows.into_iter().skip(offset).take(limit));
+    lines.extend(all.into_iter().skip(offset).take(limit));
     lines.push(Line::new(
-        panel::hint(
+        &hint::choose(
             &[
                 "↑↓ scroll · PgUp/PgDn page · Esc close · type to return",
                 "↑↓ · PgUp/PgDn · Esc close · type to return",
@@ -70,13 +68,8 @@ pub(super) fn render(
         ),
         MUTED,
     ));
-    panel::finish(
-        lines,
-        None,
-        &[end.saturating_sub(offset) + 1, 0],
-        columns,
-        height,
-    )
+    let hint = lines.len() - 1;
+    panel::finish(lines, None, &[hint, 0], columns, height)
 }
 
 pub(in crate::tui) fn scroll(info: &mut Information, code: u16, columns: usize, height: usize) {

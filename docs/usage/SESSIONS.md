@@ -39,8 +39,9 @@ update, with their first request as the title, age, model and identifier. A
 legacy draft-only session uses its draft as the title. No model call generates titles.
 
 The selector replaces the composer. Up to eight options use the numbered menu;
-larger lists use the existing searchable menu. Arrows and Enter select, 1–8
-choose a numbered option, and Esc closes it. Ctrl+D marks the selected row for
+larger lists use the existing searchable menu. Arrows and Enter select, number
+keys choose a numbered option, and Esc closes it. The current conversation is
+named with `current ·` in its description. Ctrl+D marks the selected row for
 deletion (see below). Its search text remains separate from the draft. An already
 open session reports an error instead of creating a
 second writer.
@@ -60,7 +61,7 @@ session independently of its terminal layout.
 ## Delete
 
 In `/resume`, press Ctrl+D on the selected row to mark it for deletion. The row
-shows `Delete?` and the same list shows the confirmation controls. Enter confirms;
+turns red in place and the same list shows the confirmation controls. Enter confirms;
 Esc/Ctrl+C or Ctrl+D cancels the mark while keeping the list open. A second Esc
 closes the list and keeps the draft. Moving to another row or editing the search
 also cancels the mark; numbered shortcuts never confirm deletion.

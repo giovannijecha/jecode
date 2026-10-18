@@ -11,65 +11,70 @@ use crate::{
     session::commands::{self, COMMANDS},
 };
 
+/// The `/help` rows: every command, then the keyboard controls.
+pub(super) fn help_details() -> Vec<(String, String)> {
+    let mut details: Vec<(String, String)> = COMMANDS
+        .iter()
+        .map(|command| (command.name.into(), command.description.into()))
+        .collect();
+    details.extend([
+        (
+            "Enter".into(),
+            "Send · while working, joins the turn before its next model request".into(),
+        ),
+        (
+            "Ctrl+J".into(),
+            "New line · Shift/Alt+Enter when supported".into(),
+        ),
+        (
+            "Alt+Up · /drafts".into(),
+            "Open pending drafts · edit or discard one message".into(),
+        ),
+        (
+            "Ctrl+P/N".into(),
+            "Sent prompt history · commands are excluded".into(),
+        ),
+        (
+            "PgUp/PgDn · mouse wheel".into(),
+            "Scroll conversation · new output keeps your reading position".into(),
+        ),
+        (
+            "Alt+Home/End".into(),
+            "Conversation start / follow latest output · Esc returns to bottom".into(),
+        ),
+        (
+            "Esc · Ctrl+C".into(),
+            "Stop work · close panel / clear draft".into(),
+        ),
+        ("Ctrl+Q".into(), "Cancel work and quit".into()),
+        (
+            "Alt+T".into(),
+            "Inspect tools · arrows select · Enter details · Esc returns".into(),
+        ),
+        (
+            "/terminal [ID]".into(),
+            "Enter output · Tab Output/Errors · End follows · Ctrl+D stop · Esc returns".into(),
+        ),
+        (
+            "Ctrl+D in /terminal".into(),
+            "Mark a process to stop · Enter confirms · Esc or Ctrl+C cancels".into(),
+        ),
+        (
+            "Ctrl+D in /resume or /drafts".into(),
+            "Mark deletion · Enter confirms · Esc cancels".into(),
+        ),
+        (
+            "Ctrl+S in /drafts".into(),
+            "Send a paused draft · joins the active turn while working".into(),
+        ),
+    ]);
+    details
+}
+
 impl App {
     pub(super) fn help(&mut self) {
         self.local_start("/help");
-        let mut details: Vec<(String, String)> = COMMANDS
-            .iter()
-            .map(|command| (command.name.into(), command.description.into()))
-            .collect();
-        details.extend([
-            (
-                "Enter".into(),
-                "Send · while working, joins the turn before its next model request".into(),
-            ),
-            (
-                "Ctrl+J".into(),
-                "New line · Shift/Alt+Enter when supported".into(),
-            ),
-            (
-                "Alt+Up · /drafts".into(),
-                "Open pending drafts · edit or discard one message".into(),
-            ),
-            (
-                "Ctrl+P/N".into(),
-                "Sent prompt history · commands are excluded".into(),
-            ),
-            (
-                "PgUp/PgDn · mouse wheel".into(),
-                "Scroll conversation · new output keeps your reading position".into(),
-            ),
-            (
-                "Alt+Home/End".into(),
-                "Conversation start / follow latest output · Esc returns to bottom".into(),
-            ),
-            (
-                "Esc · Ctrl+C".into(),
-                "Stop work · close panel / clear draft".into(),
-            ),
-            ("Ctrl+Q".into(), "Cancel work and quit".into()),
-            (
-                "Alt+T".into(),
-                "Inspect tools · arrows select · Enter details · Esc returns".into(),
-            ),
-            (
-                "/terminal [ID]".into(),
-                "Enter output · Tab Output/Errors · End follows · Ctrl+D stop · Esc returns".into(),
-            ),
-            (
-                "Ctrl+D in /terminal".into(),
-                "Mark a process to stop · Enter confirms · Esc or Ctrl+C cancels".into(),
-            ),
-            (
-                "Ctrl+D in /resume or /drafts".into(),
-                "Mark deletion · Enter confirms · Esc cancels".into(),
-            ),
-            (
-                "Ctrl+S in /drafts".into(),
-                "Send a paused draft · joins the active turn while working".into(),
-            ),
-        ]);
-        self.local_finish(Kind::Notice, "Commands and controls", details);
+        self.local_finish(Kind::Notice, "Commands and controls", help_details());
     }
 
     pub(super) fn submit(&mut self) -> Result<bool, String> {
@@ -79,7 +84,7 @@ impl App {
         }
         if self.state.queue.is_editing() {
             if self.state.editor.prompt().is_empty() {
-                self.warn("The draft is empty. Esc cancels; discard it in /drafts.");
+                self.warn("The draft is empty. esc cancels; discard it in /drafts.");
             } else {
                 self.finish_draft_edit(true);
             }

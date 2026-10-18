@@ -102,6 +102,30 @@ fn a_width_change_rebuilds_rows_from_source_and_a_height_change_keeps_the_same_l
 }
 
 #[test]
+fn retained_invisible_assistant_keeps_a_single_separator_between_visible_messages() {
+    let mut state = State::default();
+    state.message(Kind::Assistant, "First");
+    state.items.push(Item::Text {
+        kind: Kind::Assistant,
+        text: " \n ".into(),
+    });
+    state.message(Kind::Assistant, "Second");
+    let mut layout = Layout::default();
+    layout.prepare(&state, 40, 64);
+    assert!(layout.ready(&state));
+    assert_eq!(
+        layout.blocks[1].iter().map(Line::plain).collect::<Vec<_>>(),
+        ["First"]
+    );
+    assert!(layout.blocks[2].is_empty());
+    assert_eq!(
+        layout.blocks[3].iter().map(Line::plain).collect::<Vec<_>>(),
+        ["", "Second"]
+    );
+    assert_eq!(layout.blocks[1..], state.rows());
+}
+
+#[test]
 fn a_single_long_markdown_block_yields_between_passes_and_keeps_fence_state() {
     let mut state = State::default();
     let text = format!(
@@ -137,7 +161,10 @@ fn a_single_long_markdown_block_yields_between_passes_and_keeps_fence_state() {
         .iter()
         .find(|line| line.plain() == "let value = 1;")
         .unwrap();
-    assert!(code.paint(39).contains(crate::tui::theme::KEYWORD));
+    assert!(
+        code.paint(39)
+            .contains(&crate::tui::theme::KEYWORD.to_string())
+    );
     assert_eq!(body.last().unwrap().plain(), "Final paragraph.");
 }
 
@@ -176,7 +203,7 @@ fn selecting_a_tool_keeps_the_settled_transcript_ready() {
     assert!(
         layout.blocks[tool + 1]
             .iter()
-            .any(|line| line.background == Some(crate::tui::theme::TOOL_SELECTED))
+            .any(|line| line.background == Some(crate::tui::theme::TOOL_SELECTED_SURFACE))
     );
     state.toggle_tool();
     layout.prepare(&state, 60, 64);
@@ -187,6 +214,6 @@ fn selecting_a_tool_keeps_the_settled_transcript_ready() {
     assert!(
         layout.blocks[tool + 1]
             .iter()
-            .all(|line| line.background != Some(crate::tui::theme::TOOL_SELECTED))
+            .all(|line| line.background != Some(crate::tui::theme::TOOL_SELECTED_SURFACE))
     );
 }

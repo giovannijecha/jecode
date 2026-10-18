@@ -32,7 +32,11 @@ fn composer_position_tracks_the_caret_and_wrapping_without_changing_the_draft() 
         let (row, column) = frame.cursor.unwrap();
         assert!((1..=5).contains(&row));
         assert!(column < state.width);
-        assert!(frame.live[row].paint(state.width).contains(CURSOR));
+        assert!(
+            frame.live[row]
+                .paint(state.width)
+                .contains(&CURSOR.to_string())
+        );
         assert_eq!(state.editor.text, original);
     }
     state.editor.replace("x".repeat(14));

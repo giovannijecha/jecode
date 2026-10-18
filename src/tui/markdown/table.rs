@@ -2,7 +2,7 @@ use super::{horizontal_rule, inline, list_item, opening_fence};
 use crate::tui::{
     line::{Line, Wrapped},
     text,
-    theme::{BODY, EMPHASIS, MUTED},
+    theme::{BODY, EMPHASIS, MUTED, Style},
 };
 use std::collections::VecDeque;
 
@@ -103,10 +103,10 @@ impl Table {
             self.end = Some(self.scan.min(value.len()));
             self.fit();
             if !self.stacked {
-                self.active = Some(self.start_row(&self.headers, EMPHASIS, false));
+                self.active = Some(self.start_row(&self.headers, EMPHASIS.bold(), false));
                 self.rule = true;
             } else if self.emission >= self.end() {
-                self.active = Some(self.start_row(&self.headers, EMPHASIS, false));
+                self.active = Some(self.start_row(&self.headers, EMPHASIS.bold(), false));
             }
             return Some(self.take_rows());
         }
@@ -223,7 +223,7 @@ impl Table {
         }
     }
 
-    fn start_row(&self, cells: &[String], style: &'static str, labeled: bool) -> Row {
+    fn start_row(&self, cells: &[String], style: Style, labeled: bool) -> Row {
         if self.stacked {
             Row::Stacked {
                 cells: cells
@@ -232,7 +232,7 @@ impl Table {
                     .map(|(cell, header)| {
                         let mut line = Line::default();
                         if labeled {
-                            append(&mut line, &inline::render(header, EMPHASIS));
+                            append(&mut line, &inline::render(header, EMPHASIS.bold()));
                             line.push(": ", MUTED);
                         }
                         append(&mut line, &inline::render(cell, style));
@@ -331,7 +331,7 @@ fn alignment(value: &str) -> Option<Alignment> {
     })
 }
 
-fn block_start(source: &str) -> bool {
+pub(super) fn block_start(source: &str) -> bool {
     let source = source.trim_start();
     let heading = source.bytes().take_while(|byte| *byte == b'#').count();
     source.starts_with('>')

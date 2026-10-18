@@ -1,285 +1,183 @@
 # Composer and conversation controls
 
-The shared Windows, Linux and macOS interface opens fullscreen in the terminal's
-alternate buffer. One conversation column scrolls above a composer fixed at the
-bottom. Page Up/Down and the mouse wheel browse Jecode's conversation; Up/Down
-move within the draft outside panels and tool inspection. Alt+Home goes to the
-beginning and Alt+End resumes following new output, including while a panel is
-open. Reading older content pauses following until the viewport returns to the
-bottom. A centered blue Back to bottom badge appears above the composer while
-reading older content. Esc returns to the latest output during normal reading;
-panels, draft edits, history recall and tool inspection receive Esc first, so
-use Alt+End in those contexts. Mouse selection is omitted; `/copy` retains
-original text.
+The shared Windows, Linux and macOS TUI uses the terminal's alternate buffer.
+One conversation column scrolls above the lower area. The lower area contains
+pending drafts, feedback, activity, inspection controls and the composer, or
+an open command, selector, information or process panel.
 
-On Windows, isolated typed keys appear without waiting for a typing pause.
-Detected bulk paste stays together across native console reads, including
-multiline text and file drops; a bracketed paste finishes at its closing marker.
-An unmarked paste delivered entirely as isolated keystrokes is indistinguishable
-from typing. Draft layout follows text edits and keeps Unicode glyphs and
-attachment labels intact when wrapping or moving the cursor.
+Page Up/Down and the mouse wheel browse the conversation. Reading older content
+pauses following new output. Alt+Home reaches the start and Alt+End follows the
+latest output, including through open panels. A blue Back to bottom badge marks
+paused reading. Esc returns to the bottom during ordinary reading; panels,
+draft editing, history and tool inspection receive Esc first.
 
-Resize keeps the reading anchor, logical draft/caret, selector query/selection
-and queue. Source reflow begins after 75 ms without another dimension change;
-input and generation continue between layout passes. The main shell screen and
-native scrollback are preserved. Exit restores them before printing a short
-summary and, for a saved conversation, its resume command. `--plain` remains the
-line-oriented alternative. See [RESIZE.md](RESIZE.md).
+Resize preserves the reading anchor, logical draft/caret, selector query and
+selection, and queued drafts. Reflow starts after 75 ms without another size
+change; generation and input continue between layout passes. Exit restores the
+caller's main screen, scrollback and terminal modes, then prints a short summary
+and saved-session resume command. `--plain` keeps the line-oriented CLI.
+See [RESIZE.md](RESIZE.md).
 
 ## Conversation spacing
 
-Visible conversation blocks have one neutral blank separator between them and
-no separator before the first block. An entire connected tool tree is one block:
-headers, previews, diffs, capture notices and successive calls are adjacent.
-Explicit blank output lines keep their indentation within the preview limit;
-one terminating output newline does not add an extra row.
-UI feedback and local command output occupy no transcript rows, including after
-resume, and add no separators. Their audit records remain in saved sessions and
-JSON exports. Feedback and requested information use the temporary lower area.
+Visible blocks have one neutral separator, with none before the first block.
+A connected tool tree is one block: successive headers and previews remain
+adjacent. Empty assistant updates do not create blocks or close a tool tree.
+Local command results and feedback use temporary UI rows rather than transcript
+rows; audit records remain available in saved sessions and exports.
 
-Sent requests have one blank row above and below their text, both on the user
-panel background. They have no `›` marker. A request with N visual text rows
-occupies N + 2 rows. These colored padding rows are additional to the neutral
-separator: user/assistant transitions have two blank rows between written
-content, and two adjacent user panels have three.
+User messages have a two-cell indent, their own literal line breaks and one
+coloured padding row above and below. Assistant Markdown keeps source line
+breaks and explicit blank rows. Blocks have no automatic vertical margins.
+Fenced code occupies the full row width: a language row, code rows and, after
+a closing fence, one coloured blank row. An open fence has no closing row.
+See [MARKDOWN.md](MARKDOWN.md).
 
-Assistant blocks have no vertical padding. Headings, paragraphs, lists, quotes
-and wrapped continuation rows have no automatic margins. Explicit initial and
-internal blank rows are retained, including repeated blank rows. Horizontal
-rules occupy one row. A complete fenced code panel has one language row, N
-visual code rows and one empty bottom row, all on the code background. Without
-a language, its top row is empty too. Blank code rows retain the code background;
-blank Markdown rows outside the fence stay neutral.
-
-Assistant text is cleaned for display and trimmed at the end before rendering;
-raw conversation/export content is unchanged. Empty or whitespace-only assistant
-updates occupy no rows and leave a tool tree open. Streaming updates grow the
-same block and finalization preserves its layout.
-
-Normally one neutral blank row separates visible conversation content from the
-entire lower area: queue, notices, activity and composer/selector. Those lower
-rows have no extra separators between them. The gap belongs to the lower area
-and contains the reading/reflow hint when needed. With less than two rows available
-above the lower area, it is omitted to keep the input and some context reachable.
+One neutral row normally separates the visible conversation from the lower
+area. Below two available rows it is omitted to keep context and input reachable.
+The lower area does not add internal spacer rows except a component's own
+padding, contextual hint or footer.
 
 ## Draft and footer
 
-The idle composer has four rows: full-width top border, input, bottom border,
-and a gray directory/model/effort footer. Both borders and the `›` marker are blue
-at rest and gray during generation. Ordinary draft text inherits the terminal
-foreground. The gray placeholder is `Ask anything…`.
+The idle composer has four rows: a full-width top rule, input, bottom rule and
+directory/model/effort footer. The rules and `›` marker use blue at rest and gray
+during work. Entered text inherits the terminal foreground; the empty draft
+shows the gray `Ask anything…` placeholder.
 
-The software caret is a static light block over the character at the insertion
-position. At the end it highlights a space; when empty it highlights the
-placeholder's `A`. The terminal's native cursor stays hidden until exit.
-Palette values are in [THEME.md](THEME.md).
+A static light software caret covers the character at the insertion position,
+or a space at the end. Empty drafts put it over the placeholder's first letter.
+The terminal's native cursor stays hidden until exit.
 
-Newlines and soft wrapping count as visual rows. The composer shows up to five
-consecutive rows around the caret. Longer drafts scroll this window without
-pinning the first row or inserting hidden-line notices into the text. A muted
-visible-range indicator sits in the top border only when part of the draft is
-outside the window:
+At most five consecutive visual rows follow the caret through long drafts.
+Newlines and soft wrapping both count as visual rows. The top rule names the
+visible range only while some draft text is hidden. It can also name draft
+editing, prompt history or pending drafts. Attachment labels are indivisible
+editing units; the editor preserves Unicode glyph clusters.
+
+Editing a queued/paused draft and browsing prompt history add a separate hint
+row above the ordinary footer. The directory, model and effort remain visible
+when space permits:
 
 ```text
-────────────────────────────── 3–7 / 7 ─
-› line 3
-  line 4
-  line 5
-  line 6
-  line 7█
-────────────────────────────────────────
-C:\project               model · default
+─ Editing draft 2/2 ──────────────────────────────────────
+› Plan for the follow-up:█
+─────────────────────────────────────────────────────────
+Enter save · Ctrl+S send · Esc cancel
+C:\project                                   model · high
 ```
 
-The indicator counts visual rows, including wrapping, and updates with the
-caret and terminal size. Short windows show fewer consecutive rows; narrow
-windows omit the indicator before reducing space for editing. Hidden text stays
-in the draft. Directory text is shortened with `…` to leave
-room for the model and effort on one footer row. Very small viewports retain the
-input/caret and show fewer supporting rows as necessary.
+Directory text shortens to leave the model and effort on the right. Tiny
+terminals drop supporting rows and retain the input/caret. Windows console
+input handles typing immediately and groups detected multiline paste across
+native reads. Ctrl+J is the portable newline; Shift/Alt+Enter depend on the host.
 
 ## Commands and selectors
 
-Typing a leading `/` replaces the bordered composer with a shaded command panel.
-Command input and suggestions share the same surface as menu titles, search,
-options and controls. The background matches sent user messages, with two-cell
-side margins and one colored padding row above/below when space permits.
-The selected row uses a lighter background and blue `›`; command text is light,
-matching letters are blue and descriptions are gray. No composer borders or
-directory/model/effort footer appear inside this panel.
+A leading `/` opens a shaded command panel in place of the bordered composer.
+Its title, input, suggestions and controls share the user surface. Panels have
+two-cell side margins from 12 columns and coloured top/bottom padding when it
+fits. The selected row uses a lighter surface and blue `›`; matches are blue,
+option names light and descriptions gray. Descriptions follow each row's name,
+with a small aligned minimum column when space permits. Long names take priority.
 
-Without whitespace, the panel shows up to six command suggestions:
-`/new`, `/resume`, `/drafts`, `/model`, `/effort`, `/settings`,
-`/help`, `/copy`, `/export`, `/tmp`, `/terminal`.
-Matching is case-insensitive; contiguous matches rank before scattered letters.
+Command suggestions show up to six matches. Matching is case-insensitive and
+ranks contiguous matches before scattered letters. Up/Down selects, Tab completes
+the name, and Enter runs it when idle. During work, Enter queues the written
+command except `/copy`, `/drafts` and `/terminal`, which open immediately.
+Whitespace closes suggestions while retaining command input. Esc dismisses the
+panel without clearing text or moving the draft caret.
 
-Up/Down moves selection. Tab completes the command. Enter executes the selected
-command when idle; while working it queues the draft as written, except `/copy`,
-`/drafts` and `/terminal`, which open immediately. Esc dismisses the panel
-without clearing text or moving the draft caret, including during work; editing
-can reopen it.
-Adding whitespace closes suggestions while retaining command input in the panel.
-Unknown commands produce local
-errors and, for nearby misspellings, a correction suggestion. They never reach
-the model. `/clear`, `/setup`, `/exit` and `/quit` remain compatibility commands.
+Model, effort, settings, session, draft and copy selectors share the panel
+geometry. Up to eight options use numbers; larger lists have a separate search
+field and up to eight visible matches. An empty search field has a blank caret.
+The title shows a visible range or compact match count when needed. Current
+values appear in descriptions, such as `· current` or `Current selection`.
+They are independent of keyboard focus.
 
-Model, effort, settings, session, draft and copy selectors use the same shaded panel.
-Titles and optional visible ranges share one row, with muted metadata aligned
-right, as in `Model` and `1–8 / 376`. Search or masked key input uses a separate
-row below. Their search
-text/caret is separate from the draft. Eight options or fewer use numbered menus:
-arrows/Enter or a number selects directly. Larger lists use search, up to eight
-visible options. Filtered lists whose results all fit show a compact match count
-in the title; unfiltered lists whose options all fit show no count. Hidden-option
-notices consume no additional rows. Command suggestions and `/help` or `/tmp`
-use the same visible-range format; multiline command input takes priority in
-the command title. Very narrow headings omit metadata to keep the title readable.
-Esc cancels
-without applying a partial selection or losing the draft. Within `/settings`,
-it returns from a child picker to the settings menu; Esc at that menu closes it.
-Small viewports drop padding and reduce visible options, retaining the caret,
-selected row and controls before supporting rows. Pending deletion prioritizes
-the marked row and confirmation controls. Feedback stays above the panel on the
-terminal surface.
-Narrow panels use compact keyboard hints; `↵` means Enter and `^D` means Ctrl+D.
+Deletion/discard marks the selected name red with `Delete?` or `Discard?`;
+descriptions stay gray and the selected surface remains. Enter confirms,
+Esc cancels, and searching or navigating cancels the mark. The selected row,
+caret and controls take priority over padding in short viewports.
 
-- `/model [ID]` selects a tool-capable model, then an effort. Both apply together
-  after the effort choice. `/effort [NAME]` also accepts a direct effort.
-- Efforts are limited to the catalog's declared capabilities; `default` leaves
-  reasoning settings to the provider. It does not claim an unknown model uses
-  `high`. Mandatory reasoning models do not offer `none`.
-- `/model` and `/effort` affect this conversation only. Content and tool pairs
-  remain in context; old provider-specific reasoning stays in the export across
-  model changes. Sessions also retain the compatibility boundary for explicit
-  resume. Automatic context compaction preserves the original conversation.
-- `/settings` changes the saved default model/effort or OpenRouter key. Defaults
-  take effect on `/new` and future launches; the current footer stays unchanged.
-  Key input is masked, validated in the background and saved only on success.
-  Changes and failed actions return to the refreshed settings menu with feedback;
-  cancelled child pickers return silently. Use Close or Esc to leave it. Standalone `/model`
-  and `/effort` selections still return directly to the conversation.
-- `/resume [ID]` restores a saved session in the current folder. Its list includes
-  the current conversation after its first sent request; empty launches and
-  unsent input do not create a row. Ctrl+D marks the selected row for deletion, Enter
-  confirms and Esc cancels the mark in the same list. Search or navigation also
-  cancels the mark. Deletion keeps the list open, including when it becomes empty
-  or the current conversation is deleted. Current deletion starts a fresh context
-  with unsent composer, queue and paused drafts kept; Esc returns to that composer.
-  File removal runs in the background; Ctrl+Q waits for it to finish.
-- `/drafts` or Alt+Up opens pending drafts immediately, even during a turn. The
-  main composer and caret are preserved. Queued messages appear first, followed
-  by paused drafts; identical text remains in separate rows. Enter opens the
-  selected item in the composer with `Editing draft N/M`. Enter saves the edit
-  in its original slot and returns to the list. Esc or Ctrl+C cancels the edit
-  and returns to the list; Esc there closes it. Ctrl+D marks only the selected
-  row for discard. Enter confirms, Esc cancels, and number keys never confirm.
-  Ctrl+S explicitly sends a paused draft from the list or its editor and
-  restores the original main draft; during work the draft joins the active turn.
-- `/tmp` shows the session's temporary path, counts, size and retention policy
-  in a temporary information panel.
-  `/tmp clean` clears that area only when ready; it queues during generation.
-  Drafts, project files, saved output and conversation history are retained.
-- `/terminal [ID]` opens a process panel immediately, even during a turn. The
-  list contains only active background processes; `/terminal ID` opens that
-  process's output directly, including after it finishes. Up/Down, Page Up/Down,
-  Home/End and the wheel select a process; Enter opens its output. In the
-  output, Tab switches between Output and Errors, scrolling up pauses following
-  at that position and End resumes it. Active processes show `running` until
-  termination is confirmed. The open output keeps its final status
-  and text visible when its process leaves the active list. Ctrl+D on a live
-  process opens a stop confirmation; Enter requests the stop and Esc or Ctrl+C
-  cancels it. `/terminal stop ID` also requests a stop explicitly. Esc or Ctrl+C
-  from output returns to the list, then closes the panel; closing never stops a
-  process. Typing is ignored while the panel is open, and the draft, queue,
-  prompt history and conversation position stay as they were. The panel
-  refreshes four times a second and closes when the conversation changes. See
-  [Viewing and stopping processes](../usage/TOOLS.md#viewing-and-stopping-processes).
-- Local commands never add UI feedback to the transcript. Plain mode retains
-  its command output.
+- `/model [ID]` selects a tool-capable model and then an effort; both apply
+  together. `/effort [NAME]` can change effort directly. These choices affect
+  this conversation and retain the original content/tool pairs.
+- `/settings` changes saved defaults or the OpenRouter key. Defaults apply on
+  `/new` and future launches. Key entry is masked, validated in the background
+  and saved only on success. Esc in a child picker returns to settings.
+- `/resume [ID]` restores a saved conversation in this folder. Ctrl+D marks
+  one for deletion. Deleting the current conversation starts fresh context while
+  preserving unsent composer, queued and paused drafts. The list remains open.
+- `/drafts` or Alt+Up opens pending drafts during a turn too. Queued rows precede
+  paused rows. Enter edits one; Ctrl+D marks discard; Ctrl+S explicitly sends a
+  paused draft. The main composer and caret survive every operation.
+- `/copy` selects completed original response text, code or quotes, preserving
+  original line breaks and indentation. Its feedback has an independent slot.
+- Unknown commands report local errors and possible spelling corrections.
+  `/clear`, `/setup`, `/exit` and `/quit` remain compatibility commands.
 
 ## Feedback and information
 
-Notices share the panels' `#282E39` background and two-cell indent, with no dot.
-Information and successful results use gray text; warnings use gold and errors
-use red. Long text wraps within the available width. Brief results, previous
-session hints, copy results and turn summaries disappear after five seconds or
-when editing starts. Errors remain until the next user action. Copy feedback
-has an independent slot so it does not replace an unrelated session error.
-Closing or cancelling a selector adds no confirmation.
+Notices are italic text at the terminal's left edge on the inherited background:
+muted for results, gold for warnings and red for errors. They have no added
+severity glyph and wrap by words. Brief notices disappear after five seconds
+or when editing starts. Errors remain until the next user action. Progress
+remains until its operation clears or replaces it. Copy feedback remains
+independent of other notices. None of these rows enter saved transcript layout.
 
-Loading appears once in the operation's title, and ends with the operation.
-Connection recovery and maintenance use one temporary progress row in place of
-the ordinary activity row. Notifications never become conversation rows, including
-during resize, and old UI messages are not replayed on resume.
+`/help` and `/tmp` replace the composer with an information panel. Their muted
+label/value rows align when the longest label fits comfortably; otherwise labels
+and values stack at full content width. `/help` lists commands followed by keys.
+The title shows the visible range. Up/Down scrolls, Page Up/Down pages and
+Home/End reaches either end. Esc, Ctrl+C or Enter closes without sending;
+typing returns to the preserved draft and applies that input.
 
-`/help` and `/tmp` information replace the composer with the same shaded panel.
-They do not expire automatically. Up/Down scroll visual rows; Page Up/Down move
-one page and Home/End reach the ends. Keys and values align when space permits
-and stack in narrow windows. Esc, Ctrl+C or Enter closes the panel without
-sending the draft. Typing or editing returns to the draft and applies that input
-at its preserved caret. Queued local commands wait while an information panel
-is open; ordinary messages still join the active turn.
+## Processes
+
+`/terminal [ID]` opens active processes or saved output, including during a turn.
+The list uses a status column followed by the command, with the usual focus
+marker and selected surface. Enter opens the selected process. The output view
+shows the command title, status/id, then Output/Errors controls and follow mode.
+The active stream is blue. Tab switches streams; arrows, Page Up/Down and the
+wheel browse output; End follows the tail. Draft and queue remain intact.
+
+Ctrl+D opens a dedicated stop confirmation naming the command, status and id.
+Enter stops that process and its descendants; Esc or Ctrl+C cancels. A process
+that exits while confirmation is open becomes an already-finished confirmation.
+At one row high, the confirmation title remains visible. `/terminal stop ID`
+requests the same local stop directly. Model-side output cursors remain separate
+from panel inspection.
 
 ## Activity and queue
 
-An activity row appears above the draft or menu content during a turn. Within
-command/menu panels it shares their background:
+A turn shows four fixed blue bullets, a bold phase label, elapsed time and a
+right-aligned Esc hint when it fits. The brightness wave advances every 120 ms.
+Elapsed time spans the entire turn, with tenths below a minute and `1m 04s`
+afterward. Waiting, thinking, tools and streamed text reflect actual events.
+The caret, label and tool headers do not animate.
 
 ```text
-••••  Thinking  ·  3.2s                            Esc stops
-───────────────────────────────────────────────────────────
+› Also check the process panel.                            queued
+••••  Running tools  ·  12.4s                         Esc stops
+──────────────────────────────────────────────────────────────
 › next draft█
-───────────────────────────────────────────────────────────
-C:\project                                     model · high
+──────────────────────────────────────────────────────────────
+C:\project                                        model · high
 ```
 
-`Waiting for the model` means a model request is pending, `Thinking` requires a
-real reasoning event, `Running tools` follows tool execution and `Writing the
-response` follows streamed text. The timer spans the entire
-turn, including waits and tools: tenths of a second below a minute, then `1m 04s`.
-Four identical round bullets start at the leftmost conversation column. A blue
-brightness wave advances every 120 ms without moving or changing their glyphs.
-The label and input caret stay static. Tool headers show textual status without
-animation. Temporary connection/provider failures retry automatically; recovery
-uses a temporary progress row. See [LONG_WORK.md](../usage/LONG_WORK.md#connection-recovery).
+Queue previews precede the feedback/activity rows and show the first logical
+line, adding `…` for multiline text. Short viewports keep the next message
+visible, with range metadata when it fits. An open Drafts list replaces those
+previews. Tool inspection adds its own controls above the composer.
 
-The draft remains editable while working. Enter holds at most eight pending
-messages, clearing the input only on success. Queued previews appear oldest first above
-notices/activity; the Drafts list replaces these previews while open. Multiline
-messages show their first line with `…`; short
-viewports keep the next message visible and put the visible range in the first
-preview's right-aligned `queued` label. Overflow adds no summary row. Narrow
-previews prioritize the next message over metadata.
-
-A message sent during a turn joins that turn before its next model request. The
-current response finishes and requested tools complete first; then every pending
-message enters the next request in submission order, as separate user messages
-with their text and attachments. A response without tool calls continues the
-same turn when messages are pending, so no completion notice appears between
-continuations. Each message appears in the conversation after the output that
-preceded it and before the response to it.
-
-While a pending message is open in the draft editor, it and later messages wait.
-If the turn would otherwise end, it stays open, showing `Waiting for your edit`,
-until the edit is saved or cancelled. Local commands stay queued and run locally
-in submission order once the turn ends, without holding back messages. An open
-selector, information panel or draft edit delays only those commands. `/drafts`
-also opens during work: edit or discard a message that has not joined the turn,
-or use Ctrl+S to send a paused draft into it. A message that has already joined
-can no longer be edited or discarded. Alt+Down does not discard text.
-
-Stopping or failing a turn moves messages that have not joined it to separate
-Paused rows; messages it already accepted stay in the conversation.
-The current composer stays separate, with its text and caret intact. Explicit
-resume has the same review state; paused messages never run automatically. The
-session store autosaves the composer, individual paused drafts, the queue and
-prompt history. A message leaves the saved queue in the same save that adds it
-to the conversation. Normal insertions are limited to 1 MiB. See
-[SESSIONS.md](../usage/SESSIONS.md).
-
-A successful turn briefly shows its duration and tool count in the feedback
-area. Errors and interruption remain in the journal/export. The animated row
-disappears after completion or cleanup.
+The draft remains editable while working. Enter holds up to eight pending
+messages, clearing input only on success. Ordinary messages join the current
+turn before its next model request; local commands wait until that turn ends.
+Stopping or failing pauses messages that have not joined the turn. Explicit
+resume also requires reviewing paused drafts; they never run automatically.
+Autosave preserves the composer, queue, paused drafts and dispatched prompt
+history. A successful turn briefly shows elapsed time and tool count.
 
 ## Editing keys
 
