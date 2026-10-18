@@ -1,4 +1,4 @@
-use super::{fitted, information, menus, panel, processes};
+use super::{fitted, footer, information, menus, panel, processes};
 use crate::tui::{
     hint,
     line::Line,
@@ -34,17 +34,28 @@ pub(super) fn render(
     } else {
         0
     };
+    let panel_height = height.saturating_sub(reserve);
+    let footer_rows = if is_panel {
+        footer::panel_rows(state, panel_height)
+    } else {
+        0
+    };
+    let panel_height = panel_height - footer_rows;
     let (mut composer, mut cursor) = if let Some(panel) = &state.processes {
-        processes::render(panel, columns, height.saturating_sub(reserve))
+        processes::render(panel, columns, panel_height)
     } else if let Some(info) = &state.information {
-        information::render(info, columns, height.saturating_sub(reserve))
+        information::render(info, columns, panel_height)
     } else if let Some(selector) = &state.selector {
-        menus::selector(selector, columns, height.saturating_sub(reserve))
+        menus::selector(selector, columns, panel_height)
     } else if state.suggestions.panel {
-        commands(state, columns, height.saturating_sub(reserve))
+        commands(state, columns, panel_height)
     } else {
         draft(state, model, directory, columns, height)
     };
+    if footer_rows > 0 {
+        // The footer stays on the terminal surface below an open panel.
+        composer.push(footer::line(state, model, directory, columns));
+    }
     if composer.len() > height {
         // On very short terminals retain the input/caret rather than overflow the viewport.
         let focus = cursor.map_or(0, |(row, _)| row);
@@ -185,7 +196,8 @@ pub(super) fn information_height(state: &State) -> usize {
         .sum::<usize>();
     let activity = usize::from(state.activity.is_some());
     let height = super::chrome_height(state);
-    height.saturating_sub((feedback_rows + activity).min(height.saturating_sub(3)))
+    let height = height.saturating_sub((feedback_rows + activity).min(height.saturating_sub(3)));
+    height - footer::panel_rows(state, height)
 }
 
 fn draft(
@@ -249,9 +261,7 @@ fn draft(
         ));
     }
     if columns >= 7 {
-        let model = format!("{model} · {}", state.effort);
-        let directory = directory.strip_prefix(r"\\?\").unwrap_or(directory);
-        lines.push(fitted(directory, &model, columns));
+        lines.push(footer::line(state, model, directory, columns));
     }
     (lines, Some((input.cursor.0 + 1, input.cursor.1)))
 }

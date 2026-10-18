@@ -101,6 +101,9 @@ The activity row uses four fixed blue bullets, a bold label, elapsed time and a
 right-aligned Esc hint when the whole hint fits. The wave advances every 120 ms;
 the label and caret stay static. Queue previews precede notices and activity.
 Contextual draft hints occupy their own row above the directory/model footer.
+The footer's context indicator (`Context ≈61% · Auto 80%`) uses the same muted
+footer text; it adds no color, surface or icon, and stays on the terminal
+surface below an open panel.
 See [COMPOSER.md](COMPOSER.md) for controls, lifetimes and queue behaviour.
 
 ## Verification

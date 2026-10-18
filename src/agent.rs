@@ -18,6 +18,8 @@ pub struct Agent {
     persistence: Option<crate::sessions::Handle>,
     prepared: Option<crate::attachments::Prompt>,
     context: crate::context::Context,
+    /// User preference, not session state: resumed conversations use the current value.
+    auto_compact: u8,
     project_instructions: String,
     inbox: crate::inbox::Inbox,
 }
@@ -40,6 +42,7 @@ impl Agent {
             persistence: None,
             prepared: None,
             context: crate::context::Context::default(),
+            auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             project_instructions: String::new(),
             inbox: crate::inbox::Inbox::default(),
         };
@@ -171,6 +174,7 @@ impl Agent {
         }
         self.prepared = None;
         let limits = self.model_limits(events)?;
+        self.emit_context(events)?;
         loop {
             if self.cancellation.requested() {
                 return Err("Operation cancelled".into());
@@ -190,11 +194,14 @@ impl Agent {
                 self.cancel_calls(&completion.calls);
                 return Err(error);
             }
-            if !completion.text.is_empty()
-                && let Err(error) = events.emit(Event::Message {
+            let shown = if completion.text.is_empty() {
+                Ok(())
+            } else {
+                events.emit(Event::Message {
                     text: self.redact(&completion.text),
                 })
-            {
+            };
+            if let Err(error) = shown.and_then(|()| self.emit_context(events)) {
                 self.cancel_calls(&completion.calls);
                 return Err(error);
             }
@@ -233,12 +240,15 @@ impl Agent {
                     self.cancel_calls(&completion.calls[index + 1..]);
                     return Err(error);
                 }
-                if let Err(error) = events.emit(Event::ToolFinished {
-                    id: self.redact(&call.id),
-                    name: self.redact(&call.name),
-                    summary: self.redact(&tool_summary(&call.name, &result)),
-                    result: self.redactor.value(&result),
-                }) {
+                if let Err(error) = events
+                    .emit(Event::ToolFinished {
+                        id: self.redact(&call.id),
+                        name: self.redact(&call.name),
+                        summary: self.redact(&tool_summary(&call.name, &result)),
+                        result: self.redactor.value(&result),
+                    })
+                    .and_then(|()| self.emit_context(events))
+                {
                     self.cancel_calls(&completion.calls[index + 1..]);
                     return Err(error);
                 }
@@ -382,6 +392,8 @@ mod temporary;
 mod attachment_tests;
 #[cfg(test)]
 mod compaction_tests;
+#[cfg(test)]
+mod context_status_tests;
 #[cfg(test)]
 mod context_tests;
 #[cfg(test)]

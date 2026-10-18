@@ -24,6 +24,11 @@ fn state(columns: usize) -> State {
         width: columns,
         height: 30,
         effort: "high".into(),
+        context: Some(crate::context::Status {
+            tokens: 122_400,
+            capacity: Some(200_000),
+            auto_compact: 80,
+        }),
         ..State::default()
     }
 }
@@ -142,7 +147,11 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         (
             "Settings",
-            selecting(columns, Selector::settings(MODEL, Effort::High)),
+            selecting(columns, Selector::settings(MODEL, Effort::High, 80)),
+        ),
+        (
+            "Auto-compact at",
+            selecting(columns, Selector::auto_compact(80)),
         ),
         ("OpenRouter key", selecting(columns, key)),
         ("Loading", selecting(columns, Selector::loading())),

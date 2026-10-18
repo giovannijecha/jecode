@@ -66,6 +66,7 @@ impl Store {
     pub fn save(&self, settings: &Settings) -> Result<(), String> {
         super::validate_key(&settings.api_key)?;
         super::validate_model(&settings.model)?;
+        crate::context::auto_compact_percent(settings.auto_compact.into())?;
         let existing = self.document()?;
         // A malformed existing file is never replaced by setup or a model change.
         if let Some(document) = &existing {
@@ -84,6 +85,17 @@ impl Store {
         provider.insert("api_key".into(), Value::string(&settings.api_key));
         provider.insert("model".into(), Value::string(&settings.model));
         provider.insert("effort".into(), Value::string(settings.effort.name()));
+        // Kept beside, not inside, the credentials and model object.
+        let context = root
+            .entry("context".into())
+            .or_insert_with(|| Value::object([]));
+        let Value::Object(context) = context else {
+            return Err(self.invalid("context must be an object"));
+        };
+        context.insert(
+            "auto_compact_percent".into(),
+            Value::number(settings.auto_compact),
+        );
         let encoded = format!("{}\n", document.pretty());
         if encoded.len() > CONFIG_LIMIT {
             return Err(self.invalid("Configuration exceeds 64 KiB"));

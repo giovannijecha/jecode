@@ -92,6 +92,7 @@ fn launch(
         client.set_effort(settings.effort);
     }
     let mut agent = Agent::new(client, tools);
+    agent.set_auto_compact(settings.auto_compact);
     agent.enable_sessions(store.path().parent().expect("configuration directory"))?;
     let attachments = agent.import_attachments(
         &attachments

@@ -68,7 +68,38 @@ C:\project                                   model · high
 ```
 
 Directory text shortens to leave the model and effort on the right. Tiny
-terminals drop supporting rows and retain the input/caret. Windows console
+terminals drop supporting rows and retain the input/caret.
+
+### Context indicator
+
+The footer's right group leads with the engine's context projection, in the
+same muted footer style:
+
+```text
+C:\project              Context ≈61% · Auto 80% · model · high
+```
+
+`≈61%` is the estimated input of the next model request as a share of the
+effective context window, including any ceiling learned from provider
+rejections; `<1%` marks a small nonzero share. `Auto 80%` is the configured
+**Auto-compact at** threshold. Unsubmitted draft text is not counted. While the
+model's capacity is unknown, at startup before the catalog is read and after a
+model change or key replacement, the indicator reads `Context unknown` and never
+shows a percentage or a previous model's value.
+
+The indicator follows the engine: capacity becoming known, accepted input,
+completions with their usage, tool results, previews, compaction, provider
+context recovery, settings changes, new and resumed conversations, and model
+switches. After compaction it shows the reduced estimate. It stays visible during
+work.
+
+As width shrinks, the directory keeps up to 12 cells; then the indicator drops
+`Auto 80%`, then shortens to `≈61%` (`Context ?` when unknown) and finally the
+model text is ellipsized after it. Open panels keep the footer below their
+shaded surface when the panel has at least ten rows; shorter panels give that
+row to their input, selection and controls.
+
+Windows console
 input handles typing immediately and groups detected multiline paste across
 native reads. Ctrl+J is the portable newline; Shift/Alt+Enter depend on the host.
 
@@ -103,9 +134,15 @@ caret and controls take priority over padding in short viewports.
 - `/model [ID]` selects a tool-capable model and then an effort; both apply
   together. `/effort [NAME]` can change effort directly. These choices affect
   this conversation and retain the original content/tool pairs.
-- `/settings` changes saved defaults or the OpenRouter key. Defaults apply on
-  `/new` and future launches. Key entry is masked, validated in the background
-  and saved only on success. Esc in a child picker returns to settings.
+- `/settings` changes saved defaults, Auto-compact at or the OpenRouter key.
+  Default model and effort apply on `/new` and future launches. Key entry is
+  masked, validated in the background and saved only on success. Esc in a child
+  picker returns to settings.
+- **Auto-compact at** edits a whole percentage from 1 to 99 (default 80), with a
+  help row noting that higher values leave less room for output. Enter saves;
+  an invalid entry shows a warning and keeps the panel and previous value. A
+  successful save applies to this conversation and new ones and updates the
+  footer; a failed save or Esc keeps the previous value.
 - `/resume [ID]` restores a saved conversation in this folder. Ctrl+D marks
   one for deletion. Deleting the current conversation starts fresh context while
   preserving unsent composer, queued and paused drafts. The list remains open.

@@ -59,14 +59,14 @@ fn cancelling_a_worker_with_a_full_stream_channel_cannot_block_shutdown() {
         Tools::new(directory.path()).unwrap(),
     );
     let worker = Worker::start(agent, "stream".into());
-    assert!(matches!(
-        worker.events.recv_timeout(Duration::from_secs(3)).unwrap(),
-        Event::Waiting { .. }
-    ));
-    assert!(matches!(
-        worker.events.recv_timeout(Duration::from_secs(3)).unwrap(),
-        Event::Streaming { .. }
-    ));
+    let next = || loop {
+        match worker.events.recv_timeout(Duration::from_secs(3)).unwrap() {
+            Event::Context(_) => {}
+            event => break event,
+        }
+    };
+    assert!(matches!(next(), Event::Waiting { .. }));
+    assert!(matches!(next(), Event::Streaming { .. }));
     thread::sleep(Duration::from_millis(100));
     assert!(!worker.finished());
     let started = Instant::now();

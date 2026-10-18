@@ -29,6 +29,7 @@ impl SessionConfig {
             )?;
             client.set_effort(agent.effort());
             agent.replace_client(client);
+            agent.set_auto_compact(settings.auto_compact);
             self.settings = settings;
             writeln!(
                 output,

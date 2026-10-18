@@ -8,6 +8,25 @@ use crate::{
 };
 
 impl Agent {
+    /// Applies from the next model request of the active conversation.
+    pub fn set_auto_compact(&mut self, percent: u8) {
+        self.auto_compact = percent;
+    }
+
+    /// The projected next request against the effective window, for display.
+    pub fn context_status(&self) -> context::Status {
+        let messages = self.messages.lock().unwrap();
+        context::Status {
+            tokens: self.context_estimate(&messages),
+            capacity: self.context.capacity(self.client.known_limits()),
+            auto_compact: self.auto_compact,
+        }
+    }
+
+    pub(super) fn emit_context(&self, events: &mut impl EventSink) -> Result<(), String> {
+        events.emit(Event::Context(self.context_status()))
+    }
+
     pub(super) fn next_completion(
         &mut self,
         limits: Option<Limits>,
@@ -21,6 +40,7 @@ impl Agent {
                 // Input arriving during summaries or tool previews can change the budget.
                 continue;
             }
+            self.emit_context(events)?;
             events.emit(Event::Waiting {
                 model: self.redact(self.model()),
             })?;
@@ -98,6 +118,7 @@ impl Agent {
                         .ceiling
                         .unwrap_or_else(|| limits.map_or(estimate, |limits| limits.context));
                     self.context.ceiling = Some(ceiling.min(estimate).saturating_mul(3) / 4);
+                    self.emit_context(events)?;
                     if !self.compact_if_needed(limits, true, events)? {
                         return Err(format!(
                             "{} The context could not be reduced; the original session is preserved.",
@@ -138,7 +159,16 @@ impl Agent {
             },
             None => return Ok(false),
         };
-        let (input_budget, _) = self.context.budgets(limits);
+        // One configured budget triggers reduction, sizes previews and the
+        // retained view, and checks the result. Provider rejections force it.
+        let input_budget = self.context.budget(limits, self.auto_compact);
+        let budget_text = format!(
+            "the auto-compact budget ({}% of {} tokens)",
+            self.auto_compact,
+            self.context
+                .capacity(Some(limits))
+                .unwrap_or(limits.context)
+        );
         if !forced && estimate < input_budget {
             return Ok(false);
         }
@@ -215,7 +245,9 @@ impl Agent {
         );
         let limit = input_budget.saturating_sub(fixed).min(input_budget / 2);
         if limit < 512 {
-            return Err("The original user requests and system instructions exceed the available context. The original session is preserved; choose a model with more context.".into());
+            return Err(format!(
+                "The original user requests and system instructions leave no room for a summary within {budget_text}. The original session and previous context are preserved; raise Auto-compact at in /settings or choose a model with more context."
+            ));
         }
         let transcript = original[self.context.from..end]
             .iter()
@@ -253,7 +285,9 @@ impl Agent {
             .saturating_add(self.request_environment().len())
             >= input_budget
         {
-            return Err("The summary and original user requests do not fit the available context; the previous context and original session are preserved".into());
+            return Err(format!(
+                "The summary and original user requests do not fit {budget_text}; the previous context and original session are preserved. Raise Auto-compact at in /settings or choose a model with more context."
+            ));
         }
         let after_bytes = self.context_bytes(&self.projected_context(&next, &original));
         drop(original);

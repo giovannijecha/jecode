@@ -240,8 +240,9 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
     state.selector = Some(Selector::settings(
         "fixture/model",
         crate::effort::Effort::Default,
+        80,
     ));
-    state.selector.as_mut().unwrap().selected = 3;
+    state.selector.as_mut().unwrap().selected = 4;
     let mut screen = Screen::new(state.width, state.height);
     let mut display = Display::new((state.width, state.height));
     step(&mut display, &mut screen, &state, now);
@@ -253,8 +254,8 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
             &state,
             now + Duration::from_millis(75),
         );
-        assert!(screen.visible().contains("4. Close"));
-        assert_eq!(state.selector.as_ref().unwrap().selected, 3);
+        assert!(screen.visible().contains("5. Close"));
+        assert_eq!(state.selector.as_ref().unwrap().selected, 4);
         assert_eq!(state.editor, draft);
     }
     let models: Vec<_> = (0..12)

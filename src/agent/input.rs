@@ -16,6 +16,7 @@ impl Agent {
             return Ok(false);
         }
         events.emit(Event::Accepted { prompts })?;
+        self.emit_context(events)?;
         Ok(true)
     }
 
@@ -29,6 +30,7 @@ impl Agent {
             {
                 Boundary::Accepted(prompts) => {
                     events.emit(Event::Accepted { prompts })?;
+                    self.emit_context(events)?;
                     return Ok(true);
                 }
                 Boundary::Closed => return Ok(false),

@@ -66,7 +66,7 @@ pub(super) fn selector(
     let secret = matches!(menu.purpose, Purpose::Key);
     let mut lines = vec![panel::heading(heading, "", width)];
     let mut cursor = None;
-    if menu.searchable || secret {
+    if menu.accepts_text() {
         let prefix = if width < 7 { "" } else { "› " };
         let (value, caret) = menu
             .editor
@@ -150,6 +150,20 @@ pub(super) fn selector(
         );
     }
     lines[0] = panel::heading(heading, &position, width);
+    if matches!(menu.purpose, Purpose::AutoCompact) {
+        lines.push(Line::new(
+            &hint::choose(
+                &[
+                    "1–99% of the context window · higher values leave less room for output",
+                    "1–99% of the context window · less output room when higher",
+                    "1–99% of the context window",
+                    "1–99%",
+                ],
+                width,
+            ),
+            MUTED,
+        ));
+    }
     if details > 0 {
         lines.push(Line::new(
             "History, owned outputs and temporary files",
@@ -240,6 +254,13 @@ fn source_controls(menu: &Selector, deleting: bool, working: bool, width: usize)
             "Enter save · Esc · key stored in plain text",
             "↵ · Esc · key stored in plain text",
             "Enter save · Esc",
+            "↵ · Esc",
+        ]
+    } else if matches!(menu.purpose, Purpose::AutoCompact) {
+        &[
+            "Enter save · Esc close · applies to this and new conversations",
+            "Enter save · Esc · applies to this and new conversations",
+            "Enter save · Esc close",
             "↵ · Esc",
         ]
     } else if matches!(menu.purpose, Purpose::Loading) {

@@ -408,7 +408,9 @@ fn interrupted_result_display_keeps_completed_work_and_cancels_remaining_calls()
     let error = agent
         .run_turn("Write both files.", &mut |event| {
             let failed = matches!(event, Event::ToolFinished { .. });
-            observed.push(event);
+            if !matches!(event, Event::Context(_)) {
+                observed.push(event);
+            }
             if failed {
                 Err("fixture display failure".into())
             } else {

@@ -73,8 +73,19 @@ impl OpenRouter {
         Ok(limits)
     }
 
+    /// Limits already read for this model, without contacting the catalog.
+    pub fn known_limits(&self) -> Option<Limits> {
+        self.limits.flatten()
+    }
+
     #[cfg(test)]
     pub fn fixture_limits(&mut self, context: usize, output: Option<usize>) {
         self.limits = Some(Some(Limits { context, output }));
+    }
+
+    /// A catalog entry without a context length.
+    #[cfg(test)]
+    pub fn fixture_unknown_limits(&mut self) {
+        self.limits = Some(None);
     }
 }

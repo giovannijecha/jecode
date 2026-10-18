@@ -81,6 +81,8 @@ pub struct State {
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
+    /// The engine's latest projection for the footer; None renders no indicator.
+    pub context: Option<crate::context::Status>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -104,6 +106,7 @@ impl Default for State {
             information: None,
             selector: None,
             processes: None,
+            context: None,
         }
     }
 }
@@ -201,6 +204,7 @@ impl State {
             }
             // The application shows accepted input with its prompt history.
             Event::Accepted { .. } => {}
+            Event::Context(status) => self.context = Some(status),
             Event::Streaming { text } => {
                 if let Some(activity) = &mut self.activity {
                     activity.label = "Writing the response";

@@ -57,8 +57,22 @@ Calibration survives resume, resets on a model change and is discarded after a
 provider context rejection or a response without valid prompt-token usage. An
 unmeasured response cannot pair an older token count with a newer request size.
 It is an estimate rather than an exact tokenizer;
-provider rejection still invokes context recovery. The reply reserve derives from the selected model's
-window and observed completion size. It is not a fixed token ceiling for jobs.
+provider rejection still invokes context recovery.
+
+The input budget is the **Auto-compact at** percentage (default 80%, see
+[CONFIGURATION.md](CONFIGURATION.md#automatic-compaction-threshold)) of the
+effective window: the catalog `context_length`, lowered by any ceiling learned
+from a provider context rejection. The same budget triggers reduction, sizes
+tool previews, the retained recent requests and the summary, and checks that the
+reduced request fits. Output allowances remain a separate calculation. The
+budget is checked before each model request, so a large tool result can cross it
+until the next check. It is not a fixed token ceiling for jobs.
+
+The TUI footer shows this projection as `Context ≈61% · Auto 80%`: the
+estimated input of the next model request as a share of the effective window,
+beside the threshold. Unsubmitted draft text is not included. Before the
+model's capacity is known, including after a model change, it shows
+`Context unknown` rather than a percentage.
 
 Ordinary tool turns and continuity requests keep the selected reasoning effort.
 When the exact model catalog declares an output maximum, Jecode requests that
@@ -70,8 +84,9 @@ requests retain their adaptive context-based allowance. A truncated ordinary
 response reports the model, effort and requested output allowance, preserving
 completed tool results without executing incomplete calls.
 
-Before the view fills the input budget, Jecode first turns large older tool
-outputs into explicit context previews with `history_reference`; new tool
+When the projected request reaches the input budget, Jecode first turns large
+older tool outputs into explicit context previews with `history_reference`; this
+alone can bring the request below the threshold without a summary. New tool
 results remain complete until another compaction, and the original stored
 results are never replaced by previews. When that is not enough, Jecode
 summarizes everything since the previous compaction with the **same selected
@@ -93,7 +108,14 @@ the oldest are left out with a note pointing to `history:N`. A provider context
 rejection halves the transcript share and retries; a truncated summary doubles
 the output allowance, always leaving a quarter of the window for transcript
 input. A provider context rejection can also reduce the learned capacity and
-trigger compaction even when catalog metadata is unavailable.
+trigger compaction before the configured threshold, even when catalog metadata
+is unavailable.
+
+When the system instructions and original user requests leave no room for a
+useful summary within the budget, or the summary does not fit it, the turn
+stops with a resource error naming the budget. The original history and the
+previous context are preserved, and no further compaction is attempted until
+the next turn; raise Auto-compact at or choose a model with more context.
 
 The summary must reduce the request view and be saved before work continues. An
 empty, interrupted or unsaved summary leaves the previous view available and

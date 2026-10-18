@@ -13,6 +13,8 @@ pub struct Settings {
     pub api_key: String,
     pub model: String,
     pub effort: Effort,
+    /// `context.auto_compact_percent`: applies to every conversation, not only new ones.
+    pub auto_compact: u8,
 }
 
 impl Settings {
@@ -25,6 +27,7 @@ impl Settings {
             api_key,
             model,
             effort: Effort::Default,
+            auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
         })
     }
 
@@ -43,6 +46,19 @@ impl Settings {
         let mut settings = Self::new(api_key.into(), model.into())?;
         if let Some(value) = provider.get("effort") {
             settings.effort = Effort::parse(value.as_str().ok_or("Invalid openrouter.effort")?)?;
+        }
+        // Configurations written before this preference load with the default.
+        if let Some(context) = document.get("context") {
+            if !matches!(context, Value::Object(_)) {
+                return Err("context must be an object".into());
+            }
+            if let Some(value) = context.get("auto_compact_percent") {
+                settings.auto_compact = value
+                    .as_usize()
+                    .ok_or_else(|| "Auto-compact must be a whole percentage from 1 to 99".into())
+                    .and_then(crate::context::auto_compact_percent)
+                    .map_err(|error| format!("Invalid context.auto_compact_percent: {error}"))?;
+            }
         }
         Ok(settings)
     }

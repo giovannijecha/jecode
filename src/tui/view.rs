@@ -1,4 +1,5 @@
 mod composer;
+mod footer;
 mod information;
 mod menus;
 mod panel;
@@ -205,6 +206,8 @@ pub(super) fn scroll_information(state: &mut State, code: u16) {
 mod composer_tests;
 #[cfg(test)]
 mod delete_tests;
+#[cfg(test)]
+mod footer_tests;
 #[cfg(test)]
 mod information_tests;
 #[cfg(test)]

@@ -47,7 +47,7 @@ impl App {
                     if selector.cancel_delete() && !selector.searchable {
                         return Ok(false);
                     }
-                    if selector.searchable || matches!(selector.purpose, Purpose::Key) {
+                    if selector.accepts_text() {
                         if !selector.editor.insert(&text) {
                             self.warn("Input exceeds 1 MiB. Insertion rejected.");
                         } else {
@@ -277,11 +277,13 @@ impl App {
             13 if !key.shift() && !key.alt() && !key.ctrl() => {
                 if matches!(menu.purpose, Purpose::Key) {
                     self.save_key();
+                } else if matches!(menu.purpose, Purpose::AutoCompact) {
+                    self.save_auto_compact();
                 } else if let Some(choice) = menu.chosen() {
                     self.choose(choice)?;
                 }
             }
-            _ if menu.searchable || matches!(menu.purpose, Purpose::Key) => {
+            _ if menu.accepts_text() => {
                 let before = menu.editor.text.clone();
                 menu.editor.key(key);
                 if before != menu.editor.text {

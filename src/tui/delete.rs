@@ -65,6 +65,7 @@ impl App {
         self.persistence = agent.sessions();
         self.archive = agent.archive();
         self.agent = Some(agent);
+        self.refresh_context();
         match result {
             Ok((report, current)) => {
                 if current {

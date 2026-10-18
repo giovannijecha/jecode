@@ -32,6 +32,8 @@ pub enum Event {
     },
     /// The turn waits for an edit that holds back a submitted message.
     InputHeld,
+    /// The projected next request changed: input, usage, tools, reduction or capacity.
+    Context(crate::context::Status),
     ToolStarted {
         id: String,
         name: String,
