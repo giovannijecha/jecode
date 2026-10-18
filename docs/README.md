@@ -1,40 +1,37 @@
 # Documentation
 
-Start with the [project README](../README.md) for installation, first launch and
-daily commands. This directory contains the detailed guides.
-
-Cargo commands and repository scripts in these guides run from the repository
-root. Runtime `jecode` commands run from the project directory you want to work
-on; saved sessions belong to that directory.
+Start with the [project README](../README.md) for installation and first launch.
+Runtime commands run from your project directory. Cargo commands and repository
+scripts run from the Jecode repository root.
 
 ## Usage
 
-| Guide | Contents |
+| Task | Guide |
 | --- | --- |
-| [Configuration](usage/CONFIGURATION.md) | Saved settings, model/effort overrides and environment variables. |
-| [Project instructions](usage/PROJECT_INSTRUCTIONS.md) | Automatic launch-directory `JECODE.md`, per-request snapshots and precedence. |
-| [Tools](usage/TOOLS.md) | File operations, Bash execution, output references and native cleanup. |
-| [Saved sessions](usage/SESSIONS.md) | Explicit resume, unsent input, deletion and storage format. |
-| [Export](usage/EXPORT.md) | Manual JSON snapshots, retained evidence and output limits. |
-| [Attachments](usage/ATTACHMENTS.md) | File drops, clipboard images, `/attach`, provider delivery, storage and native requirements. |
-| [Temporary files](usage/TEMPORARY.md) | Session working areas, tool paths, retention and explicit cleanup. |
-| [Long-running work](usage/LONG_WORK.md) | Connection recovery, context compaction and practical boundaries. |
-| [Copy](usage/COPY.md) | Response/code/quote selection and clipboard delivery. |
+| Choose a model, reasoning effort or endpoint; edit defaults | [Configuration](usage/CONFIGURATION.md) |
+| Supply project rules with `JECODE.md` | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
+| Understand file tools, command output and background processes | [Tools](usage/TOOLS.md) |
+| Resume, recover or delete a conversation | [Saved sessions](usage/SESSIONS.md) |
+| Add files and clipboard images | [Attachments](usage/ATTACHMENTS.md) |
+| Copy an answer or code block | [Copy](usage/COPY.md) |
+| Save a conversation snapshot | [Export](usage/EXPORT.md) |
+| Inspect or clear session working files | [Temporary files](usage/TEMPORARY.md) |
+| Understand retries, compaction and retained history | [Long-running work](usage/LONG_WORK.md) |
 
 ## Terminal interface
 
-| Guide | Contents |
+| Reference | Contents |
 | --- | --- |
-| [Composer and controls](tui/COMPOSER.md) | Drafts, commands, selectors, feedback, queue and keyboard controls. |
-| [Markdown](tui/MARKDOWN.md) | Supported response syntax, tables, Unicode widths and display limits. |
-| [Scrolling and resize](tui/RESIZE.md) | Reading anchors, source reflow and terminal restoration. |
-| [Theme and tool cards](tui/THEME.md) | Palette, inline tool trees, status, previews and inspection. |
+| [Composer and controls](tui/COMPOSER.md) | Editing, keyboard shortcuts, commands, selectors and pending messages. |
+| [Markdown](tui/MARKDOWN.md) | Supported syntax, code blocks, tables and display limits. |
+| [Scrolling and resize](tui/RESIZE.md) | Reading position, reflow and terminal restoration. |
+| [Theme and tool cards](tui/THEME.md) | Semantic colors, components and tool presentation. |
 
 ## Development
 
-| Guide | Contents |
+| Reference | Contents |
 | --- | --- |
-| [Architecture](development/ARCHITECTURE.md) | Source modules, native process/terminal boundaries and provider transport. |
-| [Development and testing](development/TESTING.md) | Offline checks, executed platform coverage and native/manual fixtures. |
-| [Platform verification](development/PLATFORMS.md) | Detailed Windows/Linux evidence and the pending native macOS procedure. |
-| [Performance](development/PERFORMANCE.md) | Reproducible session-history and Windows process-start measurements. |
+| [Architecture](development/ARCHITECTURE.md) | Module map, agent flow, persistence and native boundaries. |
+| [Development and testing](development/TESTING.md) | Offline checks, isolated fixtures and manual smoke tests. |
+| [Platform verification](development/PLATFORMS.md) | Native test commands, local coverage and host checks. |
+| [Performance](development/PERFORMANCE.md) | Recorded measurements, methodology and current benchmark commands. |

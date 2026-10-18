@@ -2,178 +2,131 @@
 
 [![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
 
-[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+A terminal coding agent written in Rust. Jecode connects to OpenRouter and works
+in your project through five tools: `read`, `write`, `edit`, `bash` and `process`.
+It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
-A personal terminal coding agent written in Rust, using OpenRouter and five tools:
-`read`, `write`, `edit`, `bash` and `process`. Tools execute directly in your
-project; `bash` can leave servers, watchers and long builds running while the
-model keeps working, and `process` polls or stops them.
+One Cargo package, the Rust standard library, no external crates. Installed system
+tools provide HTTPS, Bash execution and native terminal support.
 
-Jecode uses one Cargo package and the Rust standard library. There are no
-external crates or third-party runtime libraries. Installed system
-executables provide HTTPS, Bash, process supervision and terminal input.
+## Install
 
-## Start on Windows
+Build from this repository with Rust 1.95.0 and a native linker.
 
-You need Windows 10 or newer, Rust 1.95.0 with its native linker, Git Bash and
-HTTPS-enabled curl.
-Jecode discovers Git Bash automatically and uses Windows' installed curl.
-Windows execution uses installed Windows PowerShell and .NET's built-in
-`Add-Type` compiler for an owned process supervisor, compiled once per source
-version and reused from the user-scoped cache. The interactive interface
-also uses Windows console APIs.
+| Platform | System requirements |
+| --- | --- |
+| Windows 10+ | Git Bash, HTTPS-enabled curl, Windows PowerShell with `Add-Type`. |
+| Linux / macOS | `bash`, HTTPS-enabled `curl`, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
 
-From this repository in PowerShell, install once:
+The TUI uses 24-bit color. On macOS, install Apple's Command Line Tools for the
+native linker. See [platform verification](docs/development/PLATFORMS.md) for
+executed coverage and checks that still need a native host.
+
+### Windows
+
+From the repository root in PowerShell:
 
 ```powershell
 .\INSTALL.ps1
 ```
 
-The script builds offline, installs the Rust executable in
-`%LOCALAPPDATA%\Jecode\bin` and puts that directory first in your personal PATH
-and the current terminal's PATH. It preserves other installations, including any
-older `jecode` command from Volta. Reopen other terminals to refresh their PATH.
-Run the same script after changing Jecode's source to update the installed binary.
-On Windows, the script prefers the installed pinned `x86_64-pc-windows-gnullvm`
-toolchain and its bundled linker, as used by CI. Otherwise it uses the selected
-Cargo toolchain, whose native linker must be available; MSVC needs the Visual C++
-Build Tools. GNU LLVM builds need Rust's `rust-mingw` component. Toolchain
-selection applies only to the installation command.
+This builds offline, installs to `%LOCALAPPDATA%\Jecode\bin` and adds that directory
+first in your user PATH. The current terminal is ready immediately; reopen other
+terminals to refresh their PATH. Run the script again after source updates.
 
-Open the directory of the project you want to work on, then run:
+The installer prefers the installed `1.95.0-x86_64-pc-windows-gnullvm` toolchain
+and its bundled linker; it needs Rust's `rust-mingw` component. Other toolchains
+use their configured native linker; MSVC needs the Visual C++ Build Tools.
 
-```powershell
-jecode
-jecode --plain
-```
+### Linux / macOS
 
-## Start on Linux and macOS
-
-You need Rust 1.95.0 with a native linker, plus HTTPS-enabled `curl`, `bash`,
-`kill`, `mkfifo`, `rm` and `rmdir` on PATH. The TUI also needs `stty`, `/dev/tty`
-and a VT-compatible terminal.
-On macOS, the native linker is supplied by Apple's Command Line
-Tools. From this repository in a shell:
+From the repository root in a shell:
 
 ```sh
 sh INSTALL.sh
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/jecode/bin:$PATH"
-jecode
 ```
 
-The script builds offline and installs under
-`${XDG_DATA_HOME:-$HOME/.local/share}/jecode`. Add the PATH line to your shell's
-configuration to use the command in future terminals. Run the same script to
-update this installation. An optional absolute install root supports isolated
-installations: `sh INSTALL.sh /absolute/path`.
-
-Windows, Linux and macOS share the same multiline TUI, including the editor,
-message queue, selectors, streaming and saved sessions. Single prompts, pipes
-and `--plain` retain the line-based CLI. Linux installation and TUI execution
-have been tested in WSL; macOS has been compile-checked for Intel and Apple Silicon,
-with native terminal verification still required.
+Add the PATH line to your shell configuration for future terminals. Run the same
+script to update. An absolute install root is also accepted:
+`sh INSTALL.sh /absolute/path`.
 
 ## First launch
 
-The first launch guides you through three steps:
-
-1. Paste your [OpenRouter API key](https://openrouter.ai/settings/keys). Input is hidden.
-2. Search for a model by name and choose a number. Only tool-capable models are
-   listed, with input/output prices per million tokens when available. No model is
-   selected automatically. You can also enter `=provider/model-id` directly.
-3. Jecode saves your settings and opens a conversation. Type a task and press Enter.
-
-The key is checked with OpenRouter before saving. Setup does not send a paid chat
-completion. Type `/cancel` to leave setup without replacing your settings.
-
-## Daily use
+Open the project directory you want Jecode to work in, then run:
 
 ```text
 jecode
+```
+
+1. Paste your [OpenRouter API key](https://openrouter.ai/settings/keys); input is hidden.
+2. Choose a tool-capable model from the searchable list, or enter `=provider/model-id`.
+3. Type a task and press Enter.
+
+Setup validates the key without sending a paid chat completion. `/cancel` leaves
+setup without replacing existing settings. The key and defaults are stored in
+plaintext at `~/.jecode/config.json`.
+
+## Work in a project
+
+The draft stays editable during a turn. Enter sends a follow-up before the next
+model request; Ctrl+J inserts a newline. Ctrl+Q quits and saves input in an existing
+saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard shortcuts.
+
+| Command | Purpose |
+| --- | --- |
+| `/new` | Start a fresh conversation with saved defaults. |
+| `/resume [ID]` | Choose a saved conversation from this project. |
+| `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
+| `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
+| `/settings` | Edit saved defaults and the OpenRouter key. |
+| `/help` | Show commands and controls. |
+
+Use [`JECODE.md`](docs/usage/PROJECT_INSTRUCTIONS.md) in the launch directory for
+project rules. Jecode reads it before each new user request.
+
+Conversations autosave under `~/.jecode/sessions/`. To resume, run
+`jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)
+for unsent input, interruption and deletion.
+
+Jecode runs tools with your system permissions. Its working directory is not a
+sandbox. Provider requests send conversation content and supported attachments to
+OpenRouter and the selected provider; see [security](SECURITY.md).
+
+## CLI and pipes
+
+Run these from the project directory after setup:
+
+```powershell
 jecode "Explain the structure of this project"
 jecode --model provider/model-id "Check this change"
 jecode --attach report.pdf "Summarize this report"
-jecode setup
-```
-
-| Command in chat | Action |
-| --- | --- |
-| `/new` | Start a new conversation using the saved defaults. |
-| `/resume [ID]` | Resume a conversation; Ctrl+D in the list marks it for deletion, Enter confirms. |
-| `/drafts` | Review pending messages; edit one with Enter, discard with Ctrl+D, or send a paused draft with Ctrl+S. |
-| `/attach PATH...` | Attach files to the draft; dropping files or Alt+V for a clipboard image does the same. |
-| `/model [ID]` | Choose the current conversation's model, then its effort. |
-| `/effort [NAME]` | Choose a supported reasoning effort for this conversation. |
-| `/settings` | Change the saved model, effort, Auto-compact threshold or OpenRouter key. |
-| `/help` | Show command and keyboard help. |
-| `/copy` | Choose the last completed response, a code block or a quote to copy. |
-| `/export` | Save the current conversation as JSON in the working directory. |
-| `/tmp [clean]` | Show session temporary files, or explicitly clear that area. |
-| `/terminal [ID]` | List active background processes or inspect saved output by ID. In the TUI, Ctrl+D marks a stop and Enter confirms; Esc or Ctrl+C cancels. |
-| `/terminal stop ID` | Request a stop for one background process. |
-| `/exit` | Quit after cancellation and cleanup of any active work. |
-
-`/clear` and `/setup` remain aliases for `/new` and `/settings`.
-Model and effort changes keep the conversation and do not overwrite saved
-defaults. Settings apply to future `/new` conversations and launches; changing
-the key also updates authentication for the current conversation, and
-Auto-compact at (default 80%) also applies to the current conversation. The
-TUI footer shows the next request's estimated share of the context window
-beside that threshold, for example `Context ≈61% · Auto 80%`.
-
-Interactive stdin and stdout open the fullscreen TUI. The draft stays editable
-during work; Enter sends a message into the active turn before its next model
-request, and Alt+Up opens pending drafts. Ctrl+J inserts
-a newline, Ctrl+P/N browses sent prompts without commands, and **Ctrl+Q quits**,
-cancelling active work and saving input in a saved session. Panels, draft edits
-and history recall receive Esc first. While reading, the blue Back to bottom
-badge offers Esc to follow the latest output; otherwise Esc stops work. Ctrl+C
-stops work when no panel, edit or history recall has priority. Page Up/Down and
-the mouse wheel scroll the conversation; Alt+Home/End jumps to its start/latest
-output and Alt+T inspects tools.
-See [composer and controls](docs/tui/COMPOSER.md) for the full keyboard reference.
-
-Use `jecode --plain` for line-based chat. Single prompts and redirected input/output
-use the CLI: progress goes to stderr and answers go to stdout. End-of-input exits
-line-based chat. Use `--plain` if the native terminal adapter is unavailable.
-Options precede the prompt; use `--` before a prompt starting with `-` or a
-command word used as a task. From your project directory, a piped task looks like:
-
-```powershell
 'Explain this project' | jecode
+jecode --plain
 ```
 
-Piped tasks require existing configuration and never start interactive setup.
-Failed tasks exit with code 1; invalid arguments exit with code 2. `--help` and
-`--version` need no configuration or native tools.
+Replace `provider/model-id` and `report.pdf` with your model and file. Options
+precede the prompt; use `--` when the prompt starts with `-` or a command word
+such as `resume`. Single prompts and pipes write answers to stdout and progress
+to stderr. Piped input requires existing configuration.
 
-Add [`JECODE.md`](docs/usage/PROJECT_INSTRUCTIONS.md) to the directory where you
-run Jecode for project instructions. It is read before each new user request;
-changes apply on the next request, including after resuming a saved session.
-
-Settings live in `~/.jecode/config.json`; the OpenRouter key is stored in plain
-text. Conversations autosave from their first sent request under
-`~/.jecode/sessions/`. Resume explicitly from the same project directory:
-
-```text
-jecode resume
-jecode resume SESSION_ID
-jecode --plain resume SESSION_ID
-```
+`--plain` opens line-based chat and also works without the native TUI adapter.
+Task failures exit with code 1; invalid arguments use code 2. `--help` and
+`--version` need no configuration.
 
 ## Documentation
 
-The [documentation index](docs/README.md) groups the detailed guides:
+The [documentation index](docs/README.md) links the usage guides and technical references.
 
-| Area | Start here |
-| --- | --- |
-| Usage | [Configuration](docs/usage/CONFIGURATION.md), [project instructions](docs/usage/PROJECT_INSTRUCTIONS.md), [tools](docs/usage/TOOLS.md) and [sessions](docs/usage/SESSIONS.md). |
-| Terminal interface | [Composer and controls](docs/tui/COMPOSER.md), [Markdown](docs/tui/MARKDOWN.md) and [theme/tool cards](docs/tui/THEME.md). |
-| Development | [Architecture](docs/development/ARCHITECTURE.md) and [testing](docs/development/TESTING.md). |
+- [Configuration](docs/usage/CONFIGURATION.md): models, effort, routing and environment overrides.
+- [Tools](docs/usage/TOOLS.md): file operations, foreground commands and persistent processes.
+- [Attachments](docs/usage/ATTACHMENTS.md), [copy](docs/usage/COPY.md) and [export](docs/usage/EXPORT.md).
+- [Architecture](docs/development/ARCHITECTURE.md) and [development checks](docs/development/TESTING.md).
 
 ## Development
 
-Run from this repository with the pinned Rust 1.95.0 toolchain:
+From the repository root with the pinned toolchain and native linker. On Windows,
+see [toolchain selection](docs/development/TESTING.md#windows-toolchain):
 
 ```text
 cargo build --locked --offline
@@ -182,17 +135,7 @@ cargo clippy --locked --offline --all-targets -- -D warnings
 cargo test --locked --offline
 ```
 
-`cargo run --locked --offline` starts the development binary without installation.
-Tests use isolated fixtures and synthetic credentials. See
-[development and testing](docs/development/TESTING.md) for platform coverage and
-native/manual checks.
+`cargo run --locked --offline` starts the development binary. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change.
 
-GitHub Actions runs Windows and Linux checks on the maintainer's local runners.
-macOS build and tests remain on GitHub's standard hosted runner. Required check
-names and the full platform matrix are preserved. Local jobs use fresh checkouts
-and one-job credentials; the host pre-job policy rejects fork code before steps.
-Local checks queue while the maintainer's PC is offline.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+MIT license. See [LICENSE](LICENSE).

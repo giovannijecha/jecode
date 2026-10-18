@@ -11,14 +11,9 @@ in [README.md](README.md). Jecode uses one Cargo package, the Rust standard
 library and original project code. Do not add external crates, copied
 implementations or third-party runtime libraries.
 
-Run the applicable checks from the repository root:
-
-```text
-cargo build --locked --offline
-cargo fmt --all -- --check
-cargo clippy --locked --offline --all-targets -- -D warnings
-cargo test --locked --offline
-```
+Run the [normal checks](docs/development/TESTING.md#normal-checks) from the
+repository root. The testing guide also covers Windows linker selection,
+focused checks and native terminal fixtures.
 
 Use isolated fixtures for provider, process, clipboard and session checks.
 Never include real keys, configuration, transcripts or personal attachments
@@ -31,10 +26,9 @@ Write code, comments, documentation and commit messages in English. Preserve
 the CLI and terminal interfaces. Keep modules cohesive and around 500 lines
 or fewer; split by responsibility when necessary.
 
-CI runs the standard gates on Windows, Linux and macOS. On Windows it uses
-the pinned gnullvm host and Rust's bundled `rust-lld` linker with the
-`rust-mingw` component. A passing job covers the executed tests; ignored
-native checks and physical terminal interactions remain separate verification.
+CI runs the standard checks on Windows, Linux and macOS; see
+[CI](docs/development/TESTING.md#ci) for runner requirements. State which
+platforms you tested and identify any native or manual checks still needed.
 
 Submit changes through a pull request to `main`. Explain the problem,
 resulting behavior, tests actually run and relevant limitations. The

@@ -1,186 +1,152 @@
 # Architecture
 
-Jecode uses one Cargo package, the Rust standard library and original owned code.
-The agent loop stays independent of terminal rendering; CLI and TUI consume its
-events through their own interfaces.
+Jecode is one Cargo package built from the Rust standard library and original
+project code. The agent owns conversation state and tool execution; CLI and TUI
+consume its events. Terminal rendering stays outside the agent loop.
 
 ## Modules
 
-Paths below are relative to `src/`.
+Paths are relative to `src/`.
 
-Modules stay around 500 lines or fewer and split by responsibility:
+| Area | Modules |
+| --- | --- |
+| Entry and setup | `main.rs`, `cli.rs`, `bootstrap.rs`, `setup/` |
+| Settings and model effort | `config/`, `effort.rs` |
+| Agent and context | `agent.rs`, `agent/`, `context.rs`, `context/`, `events.rs` |
+| Input during a turn | `inbox.rs`, `agent/input.rs` |
+| Tools and output | `tools/`, `process.rs`, `process/`, `output.rs`, `output/` |
+| Saved conversations | `sessions/`, `agent/persistence.rs` |
+| Temporary working files | `scratch/`, `agent/temporary.rs` |
+| Attachments | `attachments/`, `tools/attachment.rs` |
+| OpenRouter | `openrouter/` |
+| Interfaces | `session.rs`, `session/`, `console.rs`, `tui/` |
+| Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs` |
 
-- `main.rs`, `cli.rs`, `bootstrap.rs`: dispatch, arguments and startup.
-- `config/`, `effort.rs`: user paths, settings, reasoning effort and atomic storage.
-- `setup/`: guided key input and model selection.
-- `session/`, `session.rs`, `input.rs`, `console.rs`: CLI interaction and rendering.
-- `sessions/`, `agent/persistence.rs`: folder-scoped storage, checkpoints and recovery.
-- `scratch/`, `agent/temporary.rs`: session working files, ownership and explicit cleanup.
-- `tui/`: Windows and Unix terminal adapters, shared multiline editor, prompt history, pending drafts,
-  selectors, conversation state, tool presentation, semantic theme, styled text,
-  Markdown/code highlighting, cached transcript layout, resize scheduling,
-  anchored scrolling, source reflow, commands and background
-  workers. Each responsibility has its own module.
-- `agent.rs`, `agent/`, `context.rs`, `context/`, `events.rs`: conversation/tool loop,
-  recovery, context projection and compaction independent of rendering. Jecode
-  helps the model through tools, context and history; it adds no completion
-  gates, repeated-command refusals or output validation.
-  `agent/history.rs` exposes read-only paginated original messages, the ordered
-  user requests and the current summary through the existing read tool.
-  `context/source.rs` derives each message's role, originating user request and
-  matching tool call from original history; summaries and history reads share it.
-  Tool ownership follows the original call even when a later user request intervenes.
-  `agent/summary.rs` folds the newest source-labelled transcript records that
-  fit into one plain-text handoff written by the same model, in a single request
-  that also carries the original user requests and the previous summary.
-  `context/view.rs` keeps recent user requests verbatim after compaction within
-  a byte budget and turns large older tool results into previews with history
-  references.
-  `context.rs` derives one input budget from the configured Auto-compact
-  percentage of the effective window (catalog length lowered by any learned
-  ceiling); the trigger, previews, retained requests, summary sizing and fit
-  check share it. `agent/compaction.rs` emits `Event::Context` with the
-  next-request projection after capacity, message, tool and recovery changes;
-  the TUI footer renders it and the console ignores it.
-  `agent/environment.rs` supplies the agent identity, working-directory/access
-  facts and session temporary paths. Current projections leave the saved
-  original system message unchanged.
-  `agent/project_instructions.rs` loads the launch-directory `JECODE.md` before
-  each user request and keeps one snapshot for the turn. The current system
-  projection includes its rules independently of compaction and saved history;
-  changed rules invalidate direct prompt measurements while keeping conservative
-  token calibration and the learned context ceiling.
-  Summary truncation learns an output allowance that survives resume, resets on
-  a model/effort change and stays bounded by the current context and provider
-  output limit; live prompt measurements remain separate from this resource state.
-- `inbox.rs`, `agent/input.rs`: prompts submitted during work. The TUI and the
-  agent share one locked inbox; ordinary messages join the active turn before
-  its next model request, saved in the same checkpoint that removes them from
-  the saved queue, while local commands wait for the TUI to run them when idle.
-  An entry open in the draft editor holds itself and later messages back.
-- `attachments/`: prompts with owned attachment elements, the session-bucket
-  asset pool and its collection, media detection, dropped-path recognition,
-  the native clipboard/conversion boundary (`capture.rs`) and request
-  materialization (`provider.rs`), which builds image/file parts and manifests
-  only when a request is sent. `tools/attachment.rs` serves `attachment:ID` reads.
-- `export.rs`, `redact.rs`, `cancel.rs`: conversation snapshots, key masking and
-  cooperative cancellation shared with the native process runner.
-- `openrouter/`: provider API, completion parsing, incremental SSE streaming, model
-  capabilities and HTTPS transport. Ordinary turns and continuity requests use
-  the selected effort and declared model output maximum, bounded by remaining
-  context space. Provider failures retain the underlying code, parameter and
-  message after credential redaction and diagnostic length bounding.
-- `json.rs`, `process.rs`, `process/`, `output.rs`, `tools/`: owned JSON, cancellable
-  supervised processes, complete output storage and the five tools.
-  `process::start_logged` launches a command and returns a `Started` handle;
-  `Started::supervise` runs the same wait, timeout, cancellation and cleanup
-  loop for foreground and persistent commands. `tools/processes.rs` is the
-  per-conversation registry: each persistent process has a monitor thread that
-  supervises it against its own stop token and records the outcome, while
-  `process` results read the saved, masked stream files from per-process byte
-  cursors. `Tools::stop_processes` and the registry's `Drop` stop and join every
-  process; the agent calls it before a successful session switch and before
-  deleting the live session, so the runtime owns lifetime, not the renderers.
-  `tools/processes/observer.rs` gives `/terminal` a weak `Observer` over that
-  registry: it lists processes, reads bounded byte windows without touching
-  the model's cursors, and requests a stop through the entry's own cancellation
-  token without joining its monitor. Ending the conversation replaces the
-  registry's scope, so an observer can neither keep processes alive nor see a
-  later conversation's. `tui/processes.rs` keeps only the panel's own read
-  positions; `session/processes.rs` prints plain-chat snapshots and stop status.
-  `tools/schema.rs` advertises meaningful numeric bounds, leaving read offsets
-  without an artificial maximum; native argument parsing still validates them.
+## Request lifecycle
+
+1. `bootstrap.rs` resolves configuration, working directory and execution mode.
+   Interactive stdin/stdout selects the TUI; prompts, pipes and `--plain` use the CLI.
+2. The agent records the request and snapshots the launch directory's `JECODE.md`.
+   That snapshot applies throughout the turn, including after compaction.
+3. The context layer projects the active conversation for OpenRouter. The client
+   streams text, reasoning fields and tool calls through agent events.
+4. The agent saves tool boundaries, executes calls and records their results.
+   Follow-up messages from the shared inbox join before the next model request.
+5. Completion, cancellation or failure checkpoints the conversation. The interface
+   renders the result and keeps unsent input available.
+
+The harness supplies tools, context and history. It adds no completion gates,
+repeated-command refusals or model-output validation.
+
+### Context and compaction
+
+`context.rs` derives the input budget from the Auto-compact percentage and the
+effective model window, lowered when a provider rejection reveals a smaller
+ceiling. The trigger, result previews, retained requests and summary sizing use
+that budget. Prompt estimates calibrate from provider usage when available.
+
+`agent/summary.rs` asks the same model for a plain-text handoff containing the
+previous summary, original user requests and the newest transcript records that
+fit. Older omitted records remain readable. A learned summary output allowance
+survives resume and resets when the model or effort changes.
+
+`context/view.rs` preserves recent user requests verbatim within its byte budget
+and replaces large older tool results with previews and history references.
+`context/source.rs` tracks original roles, user requests and tool ownership;
+`agent/history.rs` exposes paged original messages through `read`.
+
+The current environment and project instructions are projected separately from
+the original saved system message. Compaction changes the active context without
+rewriting original history. `Event::Context` carries the next-request estimate
+to the TUI footer. See [long-running work](../usage/LONG_WORK.md) for user-visible behavior.
+
+### Input and persistent processes
+
+The TUI and agent share a locked inbox. Accepting a follow-up into the active turn
+and removing it from the saved queue happen in the same checkpoint. Local commands
+wait for the interface to become idle. Editing a pending entry holds that entry
+and later messages back.
+
+`process::start_logged` creates a command handle; `Started::supervise` owns its
+timeout, cancellation, output and cleanup. Foreground and persistent commands use
+that same path. Each persistent process has a monitor thread and its own stop token
+in the conversation's `tools/processes.rs` registry.
+
+`/terminal` observes this registry through a weak handle with separate output
+cursors. It cannot keep a process alive. Successful conversation switches, live
+session deletion and agent drop stop and join registered processes. See
+[tools](../usage/TOOLS.md) for the model-facing contract.
+
+## Session storage
+
+`sessions/` stores conversations in buckets derived from the canonical project
+directory. Loading also validates the directory recorded in the journal.
+Exclusive writer leases prevent two agents from updating the same session;
+summary caches accelerate listing without replacing journal validation.
+
+New `SESSION_ID.jsonl` files use `jecode.session.journal`, version 3. Each synced,
+newline-terminated transaction appends messages and events with changed metadata
+and input. Streaming text uses UTF-8-safe prefix/suffix updates. Unchanged state
+is omitted; previous messages remain intact.
+
+Checkpoints surround provider and tool work. The first streamed text is saved
+immediately; later streaming updates and TUI input use a 250 ms save interval.
+Periodic saves serialize disk access in a worker; explicit checkpoints and clean
+exit flush synchronously.
+
+| Condition | Recovery |
+| --- | --- |
+| Failed append | Attempt rollback to the last acknowledged journal length; require reopening if rollback fails. |
+| Torn final transaction | Preserve incomplete bytes separately and recover the preceding complete checkpoint. |
+| Corrupt complete transaction | Report the error and leave the file unchanged. |
+| Version 2 journal | Read existing records and append version 3 continuations. |
+| Version 1 snapshot | Migrate on explicit resume, retaining the original snapshot and backup. |
+
+Session-owned output and temporary directories have ownership markers. Attachments
+share a pool within the project bucket and are collected when no saved session
+references them. Operational details live in [sessions](../usage/SESSIONS.md),
+[temporary files](../usage/TEMPORARY.md) and [attachments](../usage/ATTACHMENTS.md).
 
 ## Native boundaries
 
-The native boundary is installed executables launched via `std::process::Command`.
+Rust launches installed executables through `std::process::Command`. Owned Bash,
+PowerShell and C# helpers provide native functionality without Rust crates or
+unsafe Rust FFI.
 
-### Unix processes
+| Boundary | Implementation and requirements |
+| --- | --- |
+| Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. |
+| Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
+| Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
+| Unix terminal | Bash and `stty` save terminal modes, read `/dev/tty` and restore the terminal through a guardian. Requires a VT-compatible terminal. |
 
-Unix commands start in their own process group. An owned Bash guardian watches
-a private owner pipe before the target runs; no target inherits that control
-pipe. The guardian keeps the group ID reserved and uses Bash's builtin kill on
-owner loss. Normal completion drains captured output, then ends ownership and
-stops any remaining members, including background children with redirected
-output. Children that create another group/session remain outside this boundary.
-For command stdin, `mkfifo` creates a 0600 pipe inside a 0700 system temporary
-directory. Rust opens it without blocking, unlinks it once the target has opened
-the reader, and sends binary input with cancellation-aware writes. Input bytes
-are not saved as a temporary data file. Bash startup files and inherited shell
-tracing options are disabled for the guardian. This boundary requires Bash,
-mkfifo, rm/rmdir and native kill; it adds no Rust crate or unsafe FFI.
-See [POSIX FIFO open behavior](https://pubs.opengroup.org/onlinepubs/007904875/functions/open.html)
-and [Apple open(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/open.2.html).
+Process guardians stop owned descendants on cancellation, timeout or owner loss.
+Unix children that create another process group or session leave that cleanup
+boundary. A command interrupted without a recorded result has an unknown outcome
+on resume.
 
-### Unix terminal
+The TUI uses the alternate screen, 24-bit color and changed-row VT painting.
+Native adapters normalize wheel input, enable bracketed paste and restore modes,
+the cursor and the previous shell screen on exit or owner loss. Simultaneous loss
+of the Unix owner and guardian can prevent restoration. `--plain` bypasses the TUI
+adapter; see [scrolling and resize](../tui/RESIZE.md).
 
-Bash and `stty` provide Unix terminal mode control. An owned Bash guardian saves
-the original modes and restores them when its private control pipe closes,
-including when Jecode disappears. Rust reads `/dev/tty` with a 100 ms terminal
-read timeout, parses UTF-8 and bounded VT key sequences, and polls `stty size`
-every 200 ms. Signals and XON/XOFF are disabled while editing, so Ctrl+C/Ctrl+Q
-reach the application. Bracketed paste inserts multiline text without submitting
-or invoking shortcuts. The guardian enables fullscreen, paste and wheel reports
-before startup input is read. It disables those reports, leaves the alternate
-screen, shows the cursor and ends synchronized output when its owner disappears.
-No Bash startup file is loaded and no cursor-position query is needed. Normal
-exit restores terminal modes and the previous shell screen.
-If the guardian fails, input shutdown also releases a reader whose terminal has
-returned to canonical mode. A simultaneous forced loss of the owner and guardian
-or disappearance of the terminal cannot guarantee restoration.
-Bash also supplies hidden API-key input.
-See [POSIX terminal input](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap11.html),
-[GNU stty](https://www.gnu.org/software/coreutils/manual/html_node/stty-invocation.html)
-and [xterm control sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html).
-
-### Windows processes
-
-On Windows, an owned PowerShell/C#
-supervisor uses Win32 Job Objects, assigns the target atomically at process
-creation and exchanges completion status through a local named pipe. Its Job
-handle stays outside the target tree. This boundary requires Windows 10 or newer
-and applies to both TUI and plain execution. Windows PowerShell compiles the
-owned supervisor once per source version into `~/.jecode/cache/process/`;
-later commands launch that executable directly. Compilation is bounded and
-cancellable, and the original PowerShell path remains a fallback. Measured
-startup costs are recorded in [PERFORMANCE.md](PERFORMANCE.md). See Microsoft's
-[Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
-and [process creation attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute).
-
-### Windows terminal
-
-The Windows TUI embeds an owned PowerShell
-script and C# adapter using Win32 console APIs. It opens `CONIN$` for keyboard
-and wheel records, samples geometry with `GetConsoleScreenBufferInfo`,
-and sends complete geometry events through a local named pipe.
-Shutdown uses a separate stdin pipe so it cannot wait behind a blocked event read.
-Input/output modes and the output code page are saved and restored. The TUI uses
-UTF-8 output temporarily. PowerShell and its `Add-Type` capability
-must be available; `--plain` avoids the console adapter. Rendering uses terminal VT
-sequences in the alternate screen buffer and requires 24-bit RGB color support.
-Jecode owns conversation scrolling and repaints changed visible rows by absolute
-position. Native wheel records on Windows and SGR wheel reports on Unix are
-normalized into row scrolling. The native guardian enters and leaves fullscreen,
-including when the owner's private pipe closes unexpectedly. Width changes
-reflow retained source in bounded passes without erasing shell scrollback.
-Per-write synchronized output reduces intermediate
-painting on supporting terminal hosts.
-The composer paints its own steady block caret; the native cursor is hidden
-during the TUI and shown again when leaving it.
-See Microsoft's [console input API](https://learn.microsoft.com/en-us/windows/console/readconsoleinput)
-and [VT sequence reference](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences).
+Native fixture commands and host-specific checks are in [platform verification](PLATFORMS.md).
 
 ## Provider transport
 
-Credentials and request bodies reach curl through stdin, with default curl
-configuration disabled and TLS certificate validation enabled. Production requests use the fixed HTTPS OpenRouter API;
-loopback endpoints are available only in tests.
+`openrouter/` uses the fixed HTTPS OpenRouter API. Requests and credentials reach
+curl through stdin with curl's default configuration disabled and TLS certificate
+validation enabled. Test builds can use loopback endpoints.
 
-Protocol references: [chat completions](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request),
-[tool calling](https://openrouter.ai/docs/guides/features/tool-calling),
-[streaming](https://openrouter.ai/docs/api_reference/streaming),
-[reasoning tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
-[model catalog](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
-and [key validation](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key).
-Assistant content, tool calls and ordered reasoning fields are retained for
-follow-up tool interactions with the same model.
+The client preserves assistant content, tool calls and ordered reasoning fields
+for compatible follow-up requests. It applies the selected model, effort and
+endpoint routing to ordinary and summary requests. Provider diagnostics retain
+the underlying code, parameter and message after credential masking and length
+bounding. See [configuration](../usage/CONFIGURATION.md) for routing and overrides.
+
+Auto routing keeps OpenRouter fallbacks. With enough fresh comparable endpoint
+statistics, it requests throughput near or above half the median and first-token
+latency near or below twice the median. These are soft preferences. A specific
+endpoint disables fallbacks and requires a compatible listing within its freshness
+window before the turn starts.

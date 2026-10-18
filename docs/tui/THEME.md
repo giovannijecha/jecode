@@ -1,125 +1,83 @@
-# Jecode theme
+# TUI theme
 
-The native TUI uses semantic colour roles and explicit component surfaces.
-Ordinary text and the conversation background inherit the terminal defaults.
-The renderer emits true-colour VT sequences; the terminal host supplies the
-font, glyph metrics and support for bold, italic, underline and strike.
-The implementation lives in [theme.rs](../../src/tui/theme.rs).
+Jecode's interactive TUI is designed for a dark terminal. It inherits the
+terminal's ordinary text and background, then applies semantic foreground
+roles and component surfaces. It emits true-color VT styling; the terminal
+chooses the font and controls how bold, italic, underline, and strikethrough
+appear. The palette and style aliases live in
+[`theme.rs`](../../src/tui/theme.rs).
 
 ## Colour roles
 
-| Role | Colour | Use |
+| Role | Colour | Current use |
 | --- | --- | --- |
-| `BODY` | Inherited | Assistant prose, draft text and tool output |
-| `EMPHASIS` | `#DCE4F0` | Bold welcome name, tool names, activity label and Markdown emphasis |
-| `STRONG` | `#E2E8F0` | User text, panel titles, menu names and Markdown headings |
-| `CODE_TEXT` | `#C9D1D9` | Unhighlighted code |
-| `MUTED` | `#9AA4B2` | Descriptions, footers, information rows, quotes and notices |
-| `TOOL_DIM` | `#879AAA` | Activity timer and tool inspection hint |
-| `FAINT` | `#455769` | Tool guides and quote bars |
-| `ACCENT` | `#7AA2F7` | `>_`, composer rules, focus, search matches, links and inline code |
-| `TOOL_ACCENT` | `#99B8D4` | Running or selected tool targets and guides |
-| `KEYWORD` | `#BB9AF7` | Code keywords |
-| `GOOD` | `#9ECE6A` | Successful tools, code strings and additions |
-| `BAD` | `#EF8B8B` | Failed tools, destructive row names and removals |
-| `WARNING` | `#E0AF68` | Warnings, cancellations and code numbers |
+| `BODY` | Inherited | Assistant prose, draft text, tool output. |
+| `STRONG` | `#E2E8F0` | User text, panel titles, menu names. |
+| `EMPHASIS` | `#DCE4F0` | Tool names, activity labels, Markdown headings and strong text. |
+| `CODE_TEXT` | `#C9D1D9` | Unhighlighted fenced code. |
+| `MUTED` | `#9AA4B2` | Descriptions, footer, quotes, information and neutral notices. |
+| `TOOL_DIM` | `#879AAA` | Tool inspection hint and activity time. |
+| `FAINT` | `#455769` | Decorative tool guides, below text contrast. |
+| `ACCENT` | `#7AA2F7` | Jecode mark, composer rules, focus, matches, links and inline code. |
+| `TOOL_ACCENT` | `#99B8D4` | Active or selected tool targets and guides. |
+| `KEYWORD` | `#BB9AF7` | Code keywords. |
+| `GOOD` | `#9ECE6A` | Successful tools, added lines and code strings. |
+| `BAD` | `#EF8B8B` | Failed tools, destructive choices and removed lines. |
+| `WARNING` | `#E0AF68` | Warnings, stopped tools and code numbers. |
 
-Component aliases derive from these roles. Weight and slant are applied where
-used: tool names use `EMPHASIS.bold()`, while feedback uses italic status text.
-Panel titles and Markdown headings use `STRONG` without added bold.
+Weight and slant are applied by the component: tool names and Markdown
+headings are bold, while notices are italic. Links use the accent with
+underline. The palette does not replace the terminal's global colors.
 
 ## Surfaces
 
-| Surface | Colour | Use |
+| Surface | Colour | Current use |
 | --- | --- | --- |
-| Terminal | Inherited | Conversation and notices |
-| `USER_SURFACE` | `#282E39` | Sent requests and command, selector, information and process panels |
-| `SELECTED_SURFACE` | `#353D4B` | Selected menu and process rows; back-to-bottom badge |
-| `INSET_SURFACE` | `#202933` | Running tool headers |
-| `TOOL_SELECTED_SURFACE` | `#2A3848` | Inspected tool headers |
-| `CODE_SURFACE` | `#20252C` | Fenced code |
-| `DIFF_ADDED_SURFACE` | `#1E2E23` | Added replacement lines |
-| `DIFF_REMOVED_SURFACE` | `#312026` | Removed replacement lines |
-| `CURSOR` | `#1A1B26` on `#C0CAF5` | Static software caret |
+| Terminal | Inherited | Conversation and notices. |
+| `USER_SURFACE` | `#282E39` | Sent requests and command, selector, information and process panels. |
+| `SELECTED_SURFACE` | `#353D4B` | Selected menu/process rows and Back to bottom badge. |
+| `INSET_SURFACE` | `#202933` | Running tool headers. |
+| `TOOL_SELECTED_SURFACE` | `#2A3848` | Inspected tool headers. |
+| `CODE_SURFACE` | `#20252C` | Fenced code. |
+| `DIFF_ADDED_SURFACE` | `#1E2E23` | Added replacement lines in edit previews. |
+| `DIFF_REMOVED_SURFACE` | `#312026` | Removed replacement lines in edit previews. |
+| `CURSOR` | `#1A1B26` on `#C0CAF5` | Software caret, including in shaded panels. |
 
-Tool guides explicitly restore the terminal background beside shaded headers
-and diff lines. The caret keeps its own fill inside every component.
-Colours are designed for a dark terminal; inherited text and background depend
-on the host. The palette does not impose a global terminal theme.
+## Conversation and tool cards
 
-## Conversation and tools
+The conversation has one neutral row between visible blocks. Sent user
+messages have a two-cell indent and shaded padding; assistant Markdown
+preserves source lines and blank rows. Fenced code spans the full row width.
+See [Markdown responses](MARKDOWN.md) for the display subset.
 
-One neutral row separates visible blocks. User messages have a two-cell indent
-and a coloured blank row above and below. Assistant text has no automatic
-vertical margins. Code starts at the left edge, including its language row;
-completed fences add one coloured blank row at the bottom.
-
-Tool headers read left to right as the branch, bold name and target, followed
-by a status glyph, outcome and elapsed time. At 72 columns and wider, status
-and time align on the right; narrower headers wrap the target and put status
-on its own row. The glyph is `✓` for success, `×` for failure, `■` for a stop,
-`▶` for background work, and blank while running. Durations remain visible,
-including completed calls below one second.
+Tool calls form an inline tree. Each header has a branch, bold tool name,
+target, status, and elapsed time. At widths of 72 columns or more, outcome
+and time align to the right; on narrower screens, the target wraps and the
+status gets its own row. Running cards use the inset surface. Success is
+green, failure red, stopped work gold, and background work uses the tool
+accent. The selected card uses its own blue-gray surface.
 
 The latest call previews up to three output rows. Earlier successful calls
-collapse; failures and cancellations keep their preview. Header metadata can
-show the retained preview extent when space permits. Bash uses the stdout tail
-and gives stderr priority on failure. Reads and writes use the beginning.
-Edit cards show removed text followed by added text, with replacement surfaces;
-they do not calculate an additional contextual diff or hunk coordinates.
-Expanded details show the retained content. Capture limits, partial reads and
-errors remain visible. Presentation never changes model input or saved results.
+collapse; failures and stops keep their preview. Bash previews favor recent
+stdout, with failed stderr first. Read and write previews begin at the start
+of their content. Edit previews show removed then added text on separate
+surfaces. Expanding a card shows retained details, including capture limits
+and errors. These display choices do not alter model input or saved results.
 
-Alt+T selects the latest tool, arrows navigate calls, Enter toggles details
-and Esc returns. The inspection controls have a separate `TOOL_DIM` row above
-the composer. Selected headers use the tool selection surface, not the menu
-selection surface.
+`Alt+T` enters tool inspection, arrows choose a call, `Enter` toggles details,
+and `Esc` returns to the draft. See [Composer and controls](COMPOSER.md) for
+the complete interaction map and [Tools](../usage/TOOLS.md) for tool behavior.
 
-## Panels, controls and feedback
+## Panels and feedback
 
-Panels share the user surface, two-cell side margins from 12 columns and
-optional top/bottom padding. A title and visible range share a row. Menu option
-descriptions start after that row's name; search matches use the accent.
-The current model, effort or conversation is named in its description.
-Deletion changes the row's name and `Delete?` or `Discard?` prefix while its
-description remains muted. The selected surface remains in place.
+Commands, selectors, information, and process views share the user surface.
+At 12 columns or wider, content has two-cell side margins. The selected row
+uses a lighter surface and accent focus marker; current values are identified
+in descriptions rather than by focus alone. Delete and discard confirmations
+turn the target name red until confirmed or canceled.
 
-Hints use each component's compact title-cased vocabulary, such as
-`↑↓ move · Enter select · Esc close`, and choose a shorter complete variant
-when space runs out. Numbered selector shortcuts remain available for lists of
-up to eight options. Process rows use a status column and command instead of
-selector numbering. Stopping a process opens a dedicated confirmation panel.
-
-Notices are italic text at the terminal's left edge, without severity prefixes:
-muted for information, gold for warnings and red for errors. They wrap by words
-and retain their explicit line breaks. Information panels use muted labels and
-values in one column pair when possible, or stacked rows on narrow terminals.
-The process output view shows status/id, then stream controls and follow mode;
-the active stream is accented.
-
-The activity row uses four fixed blue bullets, a bold label, elapsed time and a
-right-aligned Esc hint when the whole hint fits. The wave advances every 120 ms;
-the label and caret stay static. Queue previews precede notices and activity.
-Contextual draft hints occupy their own row above the directory/model footer.
-The footer's context indicator (`Context ≈61% · Auto 80%`) uses the same muted
-footer text; it adds no color, surface or icon, and stays on the terminal
-surface below an open panel.
-See [COMPOSER.md](COMPOSER.md) for controls, lifetimes and queue behaviour.
-
-## Verification
-
-Ignored specimen tests paint the native component renderers:
-
-```text
-cargo test specimen::specimen -- --ignored --nocapture
-cargo test specimen::tools -- --ignored --nocapture
-cargo test specimen::composer -- --ignored --nocapture
-cargo test specimen::menus -- --ignored --nocapture
-cargo test specimen::messages -- --ignored --nocapture
-cargo test specimen::notices -- --ignored --nocapture
-cargo test specimen::panels -- --ignored --nocapture
-```
-
-Layout tests check styles, surfaces, wrapping, focus, previews and small
-viewports. Native terminal checks cover input, resizing and restoration;
-font-specific glyph appearance remains a terminal-host concern.
+Notices sit on the terminal background at the left edge: italic muted text
+for information, gold for warnings, and red for errors. The activity line
+uses four animated dots, a bold phase label, and muted elapsed time. Queue
+previews appear above notices and activity. The context indicator stays in
+the muted footer style, including below an open panel.
