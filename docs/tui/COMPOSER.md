@@ -1,281 +1,126 @@
 # Composer and conversation controls
 
-The shared Windows, Linux and macOS TUI uses the terminal's alternate buffer.
-One conversation column scrolls above the lower area. The lower area contains
-pending drafts, feedback, activity, inspection controls and the composer, or
-an open command, selector, information or process panel.
+The interactive TUI keeps one conversation above an editable composer. Enter
+sends a draft when idle. During a turn, it accepts the draft for the active
+turn before the next model request; commands that cannot run during a turn wait
+until it ends. Up to eight messages can be pending. The draft clears only after
+Jecode accepts it.
 
-Page Up/Down and the mouse wheel browse the conversation. Reading older content
-pauses following new output. Alt+Home reaches the start and Alt+End follows the
-latest output, including through open panels. A blue Back to bottom badge marks
-paused reading. Esc returns to the bottom during ordinary reading; panels,
-draft editing, history and tool inspection receive Esc first.
-
-Resize preserves the reading anchor, logical draft/caret, selector query and
-selection, and queued drafts. Reflow starts after 75 ms without another size
-change; generation and input continue between layout passes. Exit restores the
-caller's main screen, scrollback and terminal modes, then prints a short summary
-and saved-session resume command. `--plain` keeps the line-oriented CLI.
-See [RESIZE.md](RESIZE.md).
-
-## Conversation spacing
-
-Visible blocks have one neutral separator, with none before the first block.
-A connected tool tree is one block: successive headers and previews remain
-adjacent. Empty assistant updates do not create blocks or close a tool tree.
-Local command results and feedback use temporary UI rows rather than transcript
-rows; audit records remain available in saved sessions and exports.
-
-User messages have a two-cell indent, their own literal line breaks and one
-coloured padding row above and below. Assistant Markdown keeps source line
-breaks and explicit blank rows. Blocks have no automatic vertical margins.
-Fenced code occupies the full row width: a language row, code rows and, after
-a closing fence, one coloured blank row. An open fence has no closing row.
-See [MARKDOWN.md](MARKDOWN.md).
-
-One neutral row normally separates the visible conversation from the lower
-area. Below two available rows it is omitted to keep context and input reachable.
-The lower area does not add internal spacer rows except a component's own
-padding, contextual hint or footer.
-
-## Draft and footer
-
-The idle composer has four rows: a full-width top rule, input, bottom rule and
-directory/model/effort footer. The rules and `›` marker use blue at rest and gray
-during work. Entered text inherits the terminal foreground; the empty draft
-shows the gray `Ask anything…` placeholder.
-
-A static light software caret covers the character at the insertion position,
-or a space at the end. Empty drafts put it over the placeholder's first letter.
-The terminal's native cursor stays hidden until exit.
-
-At most five consecutive visual rows follow the caret through long drafts.
-Newlines and soft wrapping both count as visual rows. The top rule names the
-visible range only while some draft text is hidden. It can also name draft
-editing, prompt history or pending drafts. Attachment labels are indivisible
-editing units; the editor preserves Unicode glyph clusters.
-
-Editing a queued/paused draft and browsing prompt history add a separate hint
-row above the ordinary footer. The directory, model and effort remain visible
-when space permits:
-
-```text
-─ Editing draft 2/2 ──────────────────────────────────────
-› Plan for the follow-up:█
-─────────────────────────────────────────────────────────
-Enter save · Ctrl+S send · Esc cancel
-C:\project                                   model · high
-```
-
-Directory text shortens to leave the model and effort on the right. Tiny
-terminals drop supporting rows and retain the input/caret.
-
-### Context indicator
-
-The footer's right group leads with the engine's context projection, in the
-same muted footer style:
-
-```text
-C:\project              Context ≈61% · Auto 80% · model · high
-```
-
-`≈61%` is the estimated input of the next model request as a share of the
-effective context window, including any ceiling learned from provider
-rejections; `<1%` marks a small nonzero share. `Auto 80%` is the configured
-**Auto-compact at** threshold. Unsubmitted draft text is not counted. While the
-model's capacity is unknown, at startup before the catalog is read and after a
-model change or key replacement, the indicator reads `Context unknown` and never
-shows a percentage or a previous model's value.
-
-The indicator follows the engine: capacity becoming known, accepted input,
-completions with their usage, tool results, previews, compaction, provider
-context recovery, settings changes, new and resumed conversations, and model
-switches. After compaction it shows the reduced estimate. It stays visible during
-work.
-
-As width shrinks, the directory keeps up to 12 cells; then the indicator drops
-`Auto 80%`, then shortens to `≈61%` (`Context ?` when unknown) and finally the
-model text is ellipsized after it. Open panels keep the footer below their
-shaded surface when the panel has at least ten rows; shorter panels give that
-row to their input, selection and controls.
-
-Windows console
-input handles typing immediately and groups detected multiline paste across
-native reads. Ctrl+J is the portable newline; Shift/Alt+Enter depend on the host.
-
-## Commands and selectors
-
-A leading `/` opens a shaded command panel in place of the bordered composer.
-Its title, input, suggestions and controls share the user surface. Panels have
-two-cell side margins from 12 columns and coloured top/bottom padding when it
-fits. The selected row uses a lighter surface and blue `›`; matches are blue,
-option names light and descriptions gray. Descriptions follow each row's name,
-with a small aligned minimum column when space permits. Long names take priority.
-
-Command suggestions show up to six matches. Matching is case-insensitive and
-ranks contiguous matches before scattered letters. Up/Down selects, Tab completes
-the name, and Enter runs it when idle. During work, Enter queues the written
-command except `/copy`, `/drafts` and `/terminal`, which open immediately.
-Whitespace closes suggestions while retaining command input. Esc dismisses the
-panel without clearing text or moving the draft caret.
-
-Model, effort, routing, settings, session, draft and copy selectors share the
-panel geometry. Up to eight options use numbers; larger lists have a separate
-search field and up to eight visible matches. An empty search field has a blank caret.
-The title shows a visible range or compact match count when needed. Current
-values appear in descriptions, such as `· current` or `Current selection`.
-They are independent of keyboard focus.
-
-Deletion/discard marks the selected name red with `Delete?` or `Discard?`;
-descriptions stay gray and the selected surface remains. Enter confirms,
-Esc cancels, and searching or navigating cancels the mark. The selected row,
-caret and controls take priority over padding in short viewports.
-
-- `/model [ID]` selects a tool-capable model and then an effort; both apply
-  together. `/effort [NAME]` can change effort directly. These choices affect
-  this conversation and retain the original content/tool pairs.
-- `/settings` changes saved defaults, Auto-compact at, Default routing or the
-  OpenRouter key. Default model and effort apply on `/new` and future launches;
-  default routing also applies on model switches. Key entry is
-  masked, validated in the background and saved only on success. Esc in a child
-  picker returns to settings.
-- **Auto-compact at** edits a whole percentage from 1 to 99 (default 80), with a
-  help row noting that higher values leave less room for output. Enter saves;
-  an invalid entry shows a warning and keeps the panel and previous value. A
-  successful save applies to this conversation and new ones and updates the
-  footer; a failed save or Esc keeps the previous value.
-- `/routing` chooses Auto — Best balance or one endpoint for this conversation;
-  **Default routing** in settings saves the default model's choice. The panel
-  opens as `Loading endpoints…` while the listing is fetched; Esc cancels it.
-  Auto comes first, then endpoints with listed prices and 30-minute speed and
-  latency, those without tool calls last. `current ·` marks the routing in
-  effect, independently of focus. Below the options, up to two muted rows
-  explain the focused choice, then a legend and the last turn's serving provider
-  and reported cost; they yield to the options in short viewports and a cut help
-  row ends with `…`. Choosing an endpoint without tool calls warns and keeps the
-  panel. See [CONFIGURATION.md](../usage/CONFIGURATION.md#endpoint-routing).
-- `/resume [ID]` restores a saved conversation in this folder. Ctrl+D marks
-  one for deletion. Deleting the current conversation starts fresh context while
-  preserving unsent composer, queued and paused drafts. The list remains open.
-- `/drafts` or Alt+Up opens pending drafts during a turn too. Queued rows precede
-  paused rows. Enter edits one; Ctrl+D marks discard; Ctrl+S explicitly sends a
-  paused draft. The main composer and caret survive every operation.
-- `/copy` selects completed original response text, code or quotes, preserving
-  original line breaks and indentation. Its feedback has an independent slot.
-- Unknown commands report local errors and possible spelling corrections.
-  `/clear`, `/setup`, `/exit` and `/quit` remain compatibility commands.
-
-## Feedback and information
-
-Notices are italic text at the terminal's left edge on the inherited background:
-muted for results, gold for warnings and red for errors. They have no added
-severity glyph and wrap by words. Brief notices disappear after five seconds
-or when editing starts. Errors remain until the next user action. Progress
-remains until its operation clears or replaces it. Copy feedback remains
-independent of other notices. None of these rows enter saved transcript layout.
-
-`/help` and `/tmp` replace the composer with an information panel. Their muted
-label/value rows align when the longest label fits comfortably; otherwise labels
-and values stack at full content width. `/help` lists commands followed by keys.
-The title shows the visible range. Up/Down scrolls, Page Up/Down pages and
-Home/End reaches either end. Esc, Ctrl+C or Enter closes without sending;
-typing returns to the preserved draft and applies that input.
-
-## Processes
-
-`/terminal [ID]` opens active processes or saved output, including during a turn.
-The list uses a status column followed by the command, with the usual focus
-marker and selected surface. Enter opens the selected process. The output view
-shows the command title, status/id, then Output/Errors controls and follow mode.
-The active stream is blue. Tab switches streams; arrows, Page Up/Down and the
-wheel browse output; End follows the tail. Draft and queue remain intact.
-
-Ctrl+D opens a dedicated stop confirmation naming the command, status and id.
-Enter stops that process and its descendants; Esc or Ctrl+C cancels. A process
-that exits while confirmation is open becomes an already-finished confirmation.
-At one row high, the confirmation title remains visible. `/terminal stop ID`
-requests the same local stop directly. Model-side output cursors remain separate
-from panel inspection.
-
-## Activity and queue
-
-A turn shows four fixed blue bullets, a bold phase label, elapsed time and a
-right-aligned Esc hint when it fits. The brightness wave advances every 120 ms.
-Elapsed time spans the entire turn, with tenths below a minute and `1m 04s`
-afterward. Waiting, thinking, tools and streamed text reflect actual events.
-The caret, label and tool headers do not animate.
-
-```text
-› Also check the process panel.                            queued
-••••  Running tools  ·  12.4s                         Esc stops
-──────────────────────────────────────────────────────────────
-› next draft█
-──────────────────────────────────────────────────────────────
-C:\project                                        model · high
-```
-
-Queue previews precede the feedback/activity rows and show the first logical
-line, adding `…` for multiline text. Short viewports keep the next message
-visible, with range metadata when it fits. An open Drafts list replaces those
-previews. Tool inspection adds its own controls above the composer.
-
-The draft remains editable while working. Enter holds up to eight pending
-messages, clearing input only on success. Ordinary messages join the current
-turn before its next model request; local commands wait until that turn ends.
-Stopping or failing pauses messages that have not joined the turn. Explicit
-resume also requires reviewing paused drafts; they never run automatically.
-Autosave preserves the composer, queue, paused drafts and dispatched prompt
-history. A successful turn briefly shows elapsed time and tool count.
+Use `Ctrl+J` for a newline. `Shift+Enter` and `Alt+Enter` also work when the
+terminal reports them as distinct keys. Pasted text keeps its line breaks.
+The caret follows long drafts through at most five visible rows; the top rule
+shows a range when some text is hidden. Attachment labels are edited as one
+unit. See [Attachments](../usage/ATTACHMENTS.md) for file drops, `/attach`,
+and clipboard images.
 
 ## Editing keys
 
 | Key | Action |
 | --- | --- |
-| Enter | Send while ready; while working, join the active turn before its next model request. |
-| Ctrl+J | Insert newline. |
-| Shift+Enter / Alt+Enter | Insert newline when the host reports distinct keys. |
-| Left / Right | Move by character. |
-| Ctrl+Left / Right | Move by word. |
-| Home / End, Ctrl+A / E | Start/end of the logical line. |
-| Ctrl+Home / End | Start/end of the entire draft. |
-| Up / Down | Move between visual rows in the editor. |
-| Ctrl+P / N | Browse up to 50 dispatched prompts when no menu is open; commands are excluded. |
-| Page Up / Down, mouse wheel | Scroll the conversation; an open information panel/menu receives wheel events. |
-| Alt+Home / End | Conversation beginning / follow latest output, including through panels. |
-| Alt+T | Enter or leave tool inspection; opens the newest call. |
-| Up / Down during inspection | Select the previous/next tool; reveal its header when outside the viewport. |
-| Enter during inspection | Expand or collapse retained details without sending the draft. |
-| Esc / Tab during inspection | Return to the draft, leaving active work running. |
-| Backspace / Delete | Delete before/after the caret. An attachment element is removed whole. |
-| Ctrl+Backspace / Delete, Ctrl+W | Delete by word as reported by the host. |
-| Ctrl+U | Delete back to the logical line start. |
-| Alt+Up, `/drafts` | Open the pending drafts list, including during work. |
-| Alt+V | Attach the clipboard image; Ctrl+V stays the host's text paste. |
-| File drop, `/attach PATH...` | Attach files at the caret. See [ATTACHMENTS.md](../usage/ATTACHMENTS.md). |
-| Ctrl+D in `/drafts` | Mark only the selected draft for discard; Enter confirms, Esc cancels. |
-| Ctrl+S in `/drafts` | Explicitly send a paused draft from the list or its editor; during work it joins the active turn. |
-| `/terminal [ID]` | Open active processes or a process's output, including during work; Tab switches Output/Errors, End follows, Ctrl+D marks a stop and Enter confirms. |
-| `/terminal stop ID` | Request a stop for one process in the current conversation. |
-| Esc | Cancel a draft edit or close a panel first; while reading normally, return to the bottom; otherwise stop work. |
-| Ctrl+C | Cancel a draft edit or close a panel; otherwise stop work or clear a draft. Never exit. |
-| Ctrl+Q | Official exit shortcut: cancel and clean up active work, save input, then quit. |
-| F1 | Open temporary command/keyboard help while idle. |
+| `Enter` | Send the draft, or accept it during a turn. |
+| `Ctrl+J` | Insert a newline. |
+| `Left` / `Right`, `Ctrl+Left` / `Ctrl+Right` | Move by character or word. |
+| `Up` / `Down` | Move between visual rows of the draft. |
+| `Home` / `End`, `Ctrl+A` / `Ctrl+E` | Move to the start or end of the logical line. |
+| `Ctrl+Home` / `Ctrl+End` | Move to the start or end of the whole draft. |
+| `Backspace` / `Delete` | Delete before or after the caret; remove an attachment whole. |
+| `Ctrl+Backspace` / `Ctrl+Delete`, `Ctrl+W` | Delete by word when the terminal reports the shortcut. |
+| `Ctrl+U` | Delete to the start of the logical line. |
+| `Ctrl+P` / `Ctrl+N` | Browse up to 50 sent prompts; commands are excluded. |
+| `Alt+V` | Attach the clipboard image. `Ctrl+V` remains the terminal's text paste. |
+| `Alt+Up` | Open pending drafts. |
+| `Alt+T` | Inspect the latest tool call. |
+| `Ctrl+Q` | Cancel active work, save input, and quit. |
 
-Ctrl+O remains inactive. Typing or editing leaves tool inspection and applies
-that input to the preserved draft/caret. Page keys and the wheel keep browsing
-the conversation during inspection. Prompt-history browsing
-preserves the unsent draft and caret. Submitting a recalled prompt restores that
-original composer; editing a recalled prompt also keeps its original for
-recovery as a separate paused draft after a restart. Paste preserves newlines
-and tabs; a native Windows console text burst is treated as paste, so an
-extremely fast Enter may insert a
-newline and require another Enter to send. Ctrl+J is the reliable newline key.
-Unix terminals use bracketed paste markers to distinguish pasted text from keys.
-Use a terminal with bracketed paste support for multiline pastes. Unix raw mode
-disables XON/XOFF so Ctrl+Q reaches Jecode. Arrow/function/modifier keys use VT
-sequences; terminal host bindings may intercept them, and legacy terminals may
-report Shift+Enter exactly like Enter. Standalone Esc has a 150 ms ambiguity
-window to distinguish it from a multi-byte key sequence.
-Terminal host bindings may consume other combinations before Jecode sees them.
-Cell widths are approximated for common Unicode; complex emoji can differ from
-the terminal's actual grapheme rendering.
+Prompt history preserves the unsent draft and caret. `Esc` leaves history and
+returns to that draft. While inspecting tools, `Up`/`Down` selects calls,
+`Enter` expands or collapses retained details, and `Esc` or `Tab` returns to
+the composer. Typing also leaves inspection and edits the saved draft.
+
+## Activity and queue
+
+The activity line names the current phase and elapsed time. While a turn is
+running, the composer stays editable. Pending messages appear above it as
+`queued`; Jecode accepts ordinary messages before the active turn's next model
+request. Most local commands wait for the turn to finish; `/copy`, `/drafts`,
+`/attach`, and `/terminal` open immediately. If the turn stops or fails,
+messages that have not joined it become `paused` and require review.
+
+Open `/drafts` or press `Alt+Up` to review pending messages, even during a
+turn. Queued drafts appear before paused ones. `Enter` edits the selected
+draft; in the editor, `Enter` saves the edit and `Esc` cancels it. `Ctrl+S`
+sends a paused draft explicitly, including from its editor. `Ctrl+D` marks a
+draft for discard; `Enter` confirms and `Esc` cancels. Queued drafts already
+set for automatic sending cannot be sent again with `Ctrl+S`.
+
+Jecode saves the composer, pending drafts, and sent-prompt history with the
+conversation. Resuming a session never sends paused drafts automatically.
+See [Sessions](../usage/SESSIONS.md) for persistence and resume behavior, and
+[Long work](../usage/LONG_WORK.md) for turn recovery and compaction.
+
+## Commands and selectors
+
+Type `/` to see command suggestions. `Up`/`Down` selects a suggestion,
+`Tab` completes its name, and `Enter` runs it when idle. Adding a space keeps
+the command text but closes suggestions. `Esc` closes the suggestion panel
+without clearing the draft. `/help` lists the available commands and keys;
+`F1` opens the same help while idle.
+
+Selectors use `Up`/`Down` and `Enter`. Lists with at most eight options also
+accept number keys; larger lists provide a search field. `Esc` closes a
+selector, or first cancels a pending delete/discard confirmation. Current
+values remain marked independently of the highlighted row.
+
+- `/model [ID]` chooses a model and effort for this conversation;
+  `/effort [NAME]` changes effort directly.
+- `/routing` chooses automatic or a specific endpoint for this conversation.
+  See [Configuration](../usage/CONFIGURATION.md#endpoint-routing).
+- `/settings` edits saved defaults, automatic compaction threshold, routing,
+  and the OpenRouter key. See [Configuration](../usage/CONFIGURATION.md).
+- `/resume [ID]` opens saved conversations in this folder. In the list,
+  `Ctrl+D` marks one for deletion; `Enter` confirms and `Esc` cancels. See
+  [Sessions](../usage/SESSIONS.md).
+- `/copy` selects completed response text, code, or quotes. See
+  [Copy](../usage/COPY.md).
+- `/drafts` opens the pending drafts list.
+- `/terminal [ID]` opens active processes or saved output.
+
+An unknown command reports an error with a spelling suggestion when one is
+available. `/help` also shows the commands omitted from this quick reference.
+
+## Processes
+
+In `/terminal`, select a process with `Up`/`Down` and open it with `Enter`.
+The output view has Output and Errors streams: `Tab` switches streams,
+the arrows, page keys, and wheel browse, and `End` follows the tail. `Ctrl+D`
+opens a stop confirmation for the selected process; `Enter` confirms and
+`Esc` or `Ctrl+C` cancels. `/terminal stop ID` requests the same stop directly.
+The composer and pending drafts remain available after the panel closes.
+See [Tools](../usage/TOOLS.md) for process behavior.
+
+## Reading, closing, and feedback
+
+`Page Up`/`Page Down` and the mouse wheel browse the conversation. Scrolling
+up holds the reading position while new output arrives. `Alt+Home` goes to
+the start; `Alt+End` follows the latest output. `Esc` returns to the bottom
+while reading, but closes an open panel, draft edit, history, or tool
+inspection first. At the bottom, `Esc` stops active work. `Ctrl+C` also stops
+work, closes a panel, or clears an idle draft; it never exits. See
+[Scrolling and resize](RESIZE.md) for reflow and terminal restoration.
+
+Notices appear near the composer: muted results, gold warnings, and red
+errors. Short notices clear after a few seconds or on input; errors remain
+until the next action. Copy feedback has its own slot. These notices do not
+become conversation messages.
+
+The footer shows the working directory, model, effort, and a projected context
+share when capacity is known. `Context unknown` means there is no reliable
+capacity yet. `Auto 80%` denotes the configured automatic compaction
+threshold, not the current usage. Unsent draft text is excluded from the
+projection. See [Configuration](../usage/CONFIGURATION.md) for model and
+compaction settings.
+
+Terminal shortcuts can be intercepted by the host. On Unix, a terminal with
+bracketed paste support distinguishes multiline paste from key presses. On
+Windows, a very fast Enter following a pasted burst may be treated as a pasted
+newline; press Enter again to send.

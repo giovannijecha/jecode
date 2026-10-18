@@ -12,31 +12,23 @@ bucket uses the existing canonical project identity. An ownership record checks
 both project and session before files are used or cleared. The area is created
 on first use; its metadata is excluded from file and size counts.
 
-## Choose where verification files belong
+## Put disposable files here
 
-Keep source code, durable tests and reusable project verification in the project.
-Follow its existing test conventions and use checks proportional to the change.
-Put one-off verification scripts, tools or dependencies installed solely for a
-check, their configuration, and check-only fixtures, logs, reports, screenshots
-and browser traces in the active session area. Use `tmp:` with file tools or
-quoted `$JECODE_TMP` paths in Bash. Add lasting test infrastructure only when
-future project use or an explicit user request justifies it. Honor explicit
-user or project output requirements.
+Keep source code and reusable tests in the project. Put one-off verification
+scripts, fixtures, logs, reports, screenshots and browser traces in the active
+session area. Use `tmp:` with file tools or quoted `$JECODE_TMP` paths in Bash.
+Honor explicit user or project output requirements.
 
-Set generated-output paths explicitly: `TMPDIR`, `TEMP` and `TMP` only affect
-programs that use them and do not redirect arbitrary output. Before finishing,
-inspect files you created, move your disposable leftovers into the session area
-and preserve preexisting user files and necessary project deliverables. This is
-model guidance; Jecode does not classify or move files automatically.
+Set output paths explicitly: `TMPDIR`, `TEMP` and `TMP` affect only programs
+that use them. Jecode does not move or classify files automatically.
 
 ## Use from file and shell tools
 
-`read`, `write` and `edit` accept `tmp:relative/path` in the active session area:
+`read`, `write` and `edit` accept `tmp:relative/path` in the active session area.
+For example, a `write` call can use these arguments:
 
-```text
-write path: tmp:probes/check.sh
-read  path: tmp:probes/check.sh
-edit  path: tmp:probes/check.sh
+```json
+{"path": "tmp:probes/check.sh", "content": "printf 'ok\\n'\n"}
 ```
 
 `write` creates parent directories for temporary paths. Project writes retain
@@ -52,7 +44,7 @@ pointing to this session area. Use quoted paths:
 
 ```bash
 bash "$JECODE_TMP/probes/check.sh"
-some-command > "$JECODE_TMP/report.txt"
+printf 'probe\n' > "$JECODE_TMP/report.txt"
 created=$(mktemp "$TMPDIR/check.XXXXXXXXXX")
 ```
 
@@ -68,9 +60,8 @@ Programs that generate files beside their inputs need explicit output paths.
 Bash keeps normal system access; providing an area does not redirect arbitrary
 writes or make it a sandbox.
 
-The tool contracts and each model request describe the active area. This remains
-available after context compaction and when older saved conversations resume;
-the original provider history is not rewritten to update these instructions.
+The tool contracts and each model request describe the active area, including
+after context compaction and resume.
 
 ## Retention and explicit cleanup
 
@@ -90,29 +81,12 @@ sessions open in another process. See [SESSIONS.md](SESSIONS.md#delete).
 
 Cleanup is available only when the session is ready. In the TUI, a command
 submitted during generation joins the existing FIFO queue. A stopped/failed
-turn returns queued commands to the draft instead of executing them.
-Before deleting anything, Jecode checks the entire area for links, junctions and
-special files and saves a cleanup-intent event. Cleanup success or failure is
-also recorded. An interrupted cleanup remains identifiable after resume and is
-never retried automatically. A filesystem error during deletion can leave a
-partially cleared area; errors remain visible.
+turn leaves unprocessed commands as paused drafts for review.
+Before deleting, Jecode rejects links, junctions and special files and saves
+a cleanup-intent event. Cleanup success or failure is also recorded. An
+interrupted cleanup is never retried automatically. If cleanup fails or Jecode
+stops during it, run `/tmp` and inspect the area before relying on old `tmp:`
+references or retrying `/tmp clean`; some files may already be gone.
 
-The next model request includes the latest cleanup status alongside the current
-area instructions, even after compaction. Temporary maintenance stays separate
-from original provider messages and is included in session/export events.
-
-The TUI shows requested `/tmp` information without a command echo. Successful
-cleanup acknowledgements remain hidden, like other local command confirmations.
-Plain chat prints both information and cleanup results.
-
-## Verification
-
-Executed Windows checks cover all four tools, Git Bash `mktemp`, native Windows
-child temporaries, paths containing spaces, folder/session boundaries, explicit
-resume and interruption, cleanup/save failures, retained complete output,
-junction rejection, legacy context, queued TUI commands and plain chat. Linux
-checks under WSL with native tmpfs fixtures exercise the shared tools, Bash temporary files, folder/session
-boundaries, interruption, resume and cleanup. Native Windows child paths,
-junctions and queued TUI commands have Windows-specific coverage. GitHub Actions
-runs the shared test suite on native Windows, Linux and macOS; ignored clipboard
-and interactive terminal checks still require a suitable native host.
+The next model request includes the latest cleanup status, even after
+compaction. Cleanup events also appear in exports.

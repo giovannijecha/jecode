@@ -1,6 +1,23 @@
 # Development and testing
 
-Run Cargo commands from the repository root with the pinned Rust 1.95.0 toolchain.
+Run these commands from the repository root with Rust 1.95.0, pinned by
+`rust-toolchain.toml`. Install the native tools listed in the [README](../../README.md#install).
+
+## Windows toolchain
+
+MSVC builds need the Visual C++ linker on PATH. To use the installed GNU LLVM
+toolchain instead, open PowerShell at the repository root and select its bundled
+linker for this terminal:
+
+```powershell
+$env:RUSTUP_TOOLCHAIN = '1.95.0-x86_64-pc-windows-gnullvm'
+$taskSysroot = rustc --print sysroot
+$env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = "$taskSysroot\lib\rustlib\x86_64-pc-windows-gnullvm\bin\rust-lld.exe"
+```
+
+This requires the pinned GNU LLVM toolchain with its `rust-mingw` component.
+The [Windows installer](../../README.md#windows) selects it automatically when
+available; that selection applies only to the install command.
 
 ## Normal checks
 
@@ -11,177 +28,85 @@ cargo clippy --locked --offline --all-targets -- -D warnings
 cargo test --locked --offline
 ```
 
-For development without installation, run `cargo run --locked --offline` from this
-repository. To use the development binary in another project, invoke its absolute
-path. `sh INSTALL.sh` provides the corresponding Linux/macOS installation.
+All four commands must exit successfully. Ignored tests require an explicit
+invocation; a normal test run does not establish their coverage.
 
-## Platform coverage
+Tests use original Rust fixtures, synthetic credentials, isolated directories
+under `target` and loopback HTTP. They exercise installed curl and Bash without
+contacting OpenRouter or reading personal configuration.
 
-Tests use synthetic credentials and isolated directories under `target`, exercising
-installed curl and Bash against a loopback HTTP server. They make no real OpenRouter
-requests. Executed coverage: Windows `x86_64-pc-windows-gnullvm` and Linux
-`x86_64-unknown-linux-musl` under WSL Ubuntu with native tmpfs fixtures, using
-Rust 1.95.0. Windows checks
-use curl 8.21.0 and Git Bash 5.3.9. Linux checks also cover installation, CLI
-startup, process-group cleanup and the shared TUI/editor/selector/queue suites.
-An isolated Linux PTY fixture exercises real terminal byte input, UTF-8 and
-bracketed multiline paste, idle/active Ctrl+C, Ctrl+Q with saved input and resume,
-settings cancellation, width/height changes, owner SIGKILL and failed-guardian
-cleanup. It compares the original and restored terminal modes. macOS `x86_64-apple-darwin` and
-`aarch64-apple-darwin` pass all-target compilation and Clippy checks; macOS linking and
-execution were not run. The isolated Windows ConPTY check drives Unicode input,
-wheel reports, Page Up/Down, prompt history, tiny/normal resize and the
-`/routing` selector at 80 x 24, 40 x 12 and 44 x 6. Before UI
-interaction it paints and reads every screen cell, including the bottom-right
-corner, to detect unintended wrapping or scrolling. It checks saved
-drafts, the exit summary and restoration of the original main screen, input/output
-modes and output code page. Separate scenarios kill the Jecode owner and the
-terminal guardian to check cleanup and recovery. These fixtures use loopback HTTP
-and synthetic credentials. The shared TUI tests also cover queued prompts, menus,
-tool ordering, streamed updates, `/new`, resume, exports and source reflow.
-Renderer/state checks cover message distinction, composer placement, word wrapping,
-Markdown fences and hanging lists, code highlighting, tool previews, capture
-notices, stable tree branches, delayed tool completion, local commands, draft and
-selector growth, queue recovery, exact spacing between visible blocks/panels,
-stream finalization, interrupted reflow, bounded long-block layout, reading anchors,
-follow-tail behavior, tiny input/selection viewports and preservation of the caller's
-main screen and scrollback. Full-width screen fixtures check every column,
-bottom-right painting and clearing a previously filled last cell. Styled fullscreen
-previews were inspected at 80 x 24
-and 40 x 12. Physical mouse-wheel/touchpad gestures and font rendering in the chosen
-terminal host are separate manual checks.
-Live OpenRouter authentication is outside these synthetic tests.
-Development uses local Git; publishing is outside the current scope.
+## Run a focused check
 
-Navigation fixtures check continuous five-row drafts at the start, middle and
-end, visual wrapping, shorter viewports, border-range updates and removal when
-all text fits. Selector ranges follow navigation, filtering and empty results;
-command panels reuse their title for input or suggestion ranges. Queue overflow
-keeps the next message visible without a summary row, and narrow previews
-prioritize text over metadata. Tool checks cover header-only preview counts,
-expanded/collapsed details, retained stderr and capture-limit notices. Styled
-navigation previews were inspected at 80 and 40 columns. No fixture writes the
-user's configuration or contacts a real model provider.
-
-Routing fixtures serve deterministic endpoint listings and completions over
-loopback HTTP. They check the exact `provider` and `session_id` fields for Auto
-and pinned endpoints, summary requests, listing reuse, failed-listing retry,
-pin failure hints, reported charges, per-model saved defaults, resume, model
-switches, legacy sessions and configuration, the `--plain` choices and the TUI
-selector's loading, cancellation, stale results, blocked endpoints and failed
-saves. Selector layout is checked from 2 to 120 columns and 1 to 24 rows. The
-`specimen::menus` specimen paints the routing states at 80 and 44 columns.
-Whether the provider fields improve real latency, throughput or tool-call
-quality is not measured; that needs live, billable requests.
-
-Parallel fixture runs on WSL's shared Windows `/mnt/c` filesystem reproduced
-intermittent missing-file failures; native tmpfs checks pass. A standalone
-standard-library save/read probe did not reproduce them. A retained fixture
-confirmed that opening could fail even while the file was present; the specific
-cause remains unknown. See [PLATFORMS.md](PLATFORMS.md) for the evidence and native Mac
-verification procedure, and [PERFORMANCE.md](PERFORMANCE.md) for repeatable
-session and Windows startup measurements.
-
-## Persistent process checks
-
-`tools::processes::tests` and `agent::process_tests` exercise persistent
-processes through real Bash commands in isolated directories. They cover a
-process running while other tools execute, output between polls and after exit,
-several concurrent processes, wait expiry without termination, a timeout
-enforced without polling, cancelled waits that keep the process, launch
-cancelled before start, stopping a background descendant, finished, unknown and
-invalid IDs and `wait_ms` values, synthetic secrets masked across live chunks,
-UTF-8 boundaries in bounded reads, and an unchanged foreground result. Agent
-fixtures check that processes survive turns and turn cancellation, persist after
-a failed resume or deletion validation, stop on `/new`, resume of another
-session, live-session deletion and drop, and that old IDs never resolve after
-resume. A failed stream read leaves both output cursors unchanged. The TUI card
-test checks the running-in-background marker. Build, all-target Clippy and the
-full suite passed on Windows `x86_64-pc-windows-gnullvm` and Linux
-`x86_64-unknown-linux-musl` under WSL with native tmpfs fixtures, using Rust
-1.95.0. Windows used Git Bash; Linux used the system Bash and bundled Rust LLD.
-Intel and Apple Silicon macOS passed all-target compilation and Clippy checks;
-macOS linking and native execution were not run.
-
-Observer fixtures verify independent read cursors, bounded UTF-8 windows,
-credential masking across page boundaries and key changes, stop requests that
-terminate descendants without cancelling another process, idempotent
-finished IDs, masked unknown IDs, and invalidation without extending process
-lifetime. `/terminal` fixtures cover opening while
-the worker owns the agent, selection by process identity, separate streams,
-paused reading through pagination and resize, follow mode with incomplete
-UTF-8, narrow rendering, draft and queue preservation, and session changes.
-Stop controls check confirmation and cancellation without cancelling a live turn, paused
-reading, final logs after removal from the list, and a target that exits while
-confirmation is open without stopping the next selected process.
-Plain-chat snapshots neutralize control characters, list active processes only,
-and leave model output cursors untouched. Plain-chat stop requests leave model
-history unchanged and keep saved output available for later polls.
-
-## Native terminal checks
-
-The native Linux PTY fixture needs the system-provided util-linux `script` tool
-for development verification; the application does not use it. Run native checks
-explicitly on the matching platform:
+Pass a test-name filter after the Cargo options:
 
 ```text
-cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
-cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline agent::routing_tests::
+cargo test --locked --offline tools::processes::tests::
+cargo test --locked --offline sessions::journal_tests::
 ```
 
-The attachment boundary has two ignored checks. The conversion check writes
-synthetic BMP fixtures and runs on Windows, WSL with interop, or macOS. The
-clipboard check reads the real clipboard without changing it and prints only
-the image size or the outcome:
+Check the reported test count: a successful command that matched no tests has not
+verified the change. Use `-- --list` to inspect available names.
+
+| Change | Relevant checks |
+| --- | --- |
+| Agent/context/provider | Tests beside `agent/`, `context/` and `openrouter/`; use loopback responses. |
+| Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
+| Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
+| TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
+
+Run the applicable normal checks after focused verification. Keep credentials,
+logs, screenshots and temporary drivers out of tracked files; use ignored `.tmp/`
+or `target` directories.
+
+## Development binary and installation
 
 ```text
-cargo test --locked --offline attachments::capture::tests::native_conversion_bounds_unsupported_images -- --exact --ignored --nocapture
-cargo test --locked --offline attachments::capture::tests::native_clipboard_read_reports_its_outcome -- --exact --ignored --nocapture
+cargo run --locked --offline -- --help
+cargo run --locked --offline
 ```
 
-## Manual Windows console checks
+The first command checks CLI startup without configuration. The second opens the
+application with normal user configuration. To work in a different project,
+invoke the built executable there by its absolute path.
 
-The manual Windows console smoke tests use local HTTP fixtures and are ignored
-by the normal test command. Run the relevant fixture in an interactive terminal:
+To check the Windows installer without changing PATH, choose a disposable install
+root in PowerShell:
+
+```powershell
+.\INSTALL.ps1 -InstallRoot "$PWD\.tmp\install-check" -NoPath
+& "$PWD\.tmp\install-check\bin\jecode.exe" --version
+```
+
+The Unix installer accepts an absolute root: `sh INSTALL.sh /absolute/test/root`.
+Both installers build offline and print the installed executable's version.
+
+## Native and manual checks
+
+[Platform verification](PLATFORMS.md) contains native ConPTY/PTY commands,
+local coverage and physical host checks. Use those fixtures for input, resize,
+terminal restoration and owner-loss changes. They use synthetic conversations.
+
+Windows also has interactive smoke fixtures. Run one at a time in a real console:
 
 ```text
-cargo test --locked --offline interactive_windows_smoke -- --ignored --nocapture
-cargo test --locked --offline composer_windows_smoke -- --ignored --nocapture
-cargo test --locked --offline resize_windows_smoke -- --ignored --nocapture
+cargo test --locked --offline tui::manual_tests::composer_windows_smoke -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::manual_tests::resize_windows_smoke -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::persistence_smoke::sessions_windows_smoke -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::long_work_smoke::long_work_windows_smoke -- --exact --ignored --nocapture --test-threads=1
 ```
 
-For the tool/history test, enter one task and inspect compact tool cards, then
-send a second task to move
-them through the owned viewport. Scroll using the wheel and Page Up/Down, browse
-dispatched prompt history with Ctrl+P/N,
-use `/export` and `/help`, edit a multiline draft, then `/exit`. For the composer
-test, send `/help` and another prompt during the first turn (the prompt joins
-that turn; `/help` runs after it), select
-`fixture/model-11` and `high` with `/model`, run `/effort low`, open/close
-`/settings`, inspect a multiline draft, use `/export`, then `/exit`. The tests
-use synthetic keys, validate the exported conversation and check mode restoration.
-For the resize fixture, send a task, then `/help` and a second task, resize while
-waiting/streaming/running, then use `/export`, `/new`, `/settings` (Esc), `/help`
-and `/exit`. Confirm the draft survives, the selector fits a short window, and
-the active conversation and reading position return after a stable resize.
+Follow each fixture's printed prompts; these tests wait for keyboard interaction.
+Do not run private child fixtures directly. Opt-in timing probes are documented
+in [performance](PERFORMANCE.md).
 
-For a manual draft check, start a request, send two distinct messages and stop
-the turn before its response ends so they become paused. Start another request
-and send two more.
-Open `/drafts` or press Alt+Up during work. Confirm queued rows precede paused
-rows and the main composer remains intact. Enter one row, edit it, then press
-Enter to save it in the same slot; repeat and use Esc to cancel an edit. Mark
-one row with Ctrl+D, cancel with Esc, then mark it again and confirm with Enter.
-Number keys must not confirm the discard. Press Ctrl+S on a paused draft to
-send only that draft into the active turn. Confirm a message sent during a
-response appears after it, before the next response, without a completion
-notice in between. Stop a turn or resume the session and confirm
-remaining unsent messages appear as separate Paused rows and do not run by
-themselves. Ctrl+P/N should show dispatched prompts, never local commands;
-Up/Down should move only through visual editor rows.
+## CI
 
-For conversation navigation, scroll away from the latest output and check the
-centered blue Back to bottom badge above the composer. Esc returns to the bottom
-while reading normally. With a panel, draft edit, history recall or tool
-inspection active, Esc handles that context first; Alt+End returns to the
-bottom directly. Alt+Home/End should work through panels.
+[CI.yml](../../.github/workflows/CI.yml) defines the normal checks for Windows,
+Linux and macOS. Windows and Linux use maintainer-hosted local runners; macOS uses
+GitHub's hosted runner. The required checks are `Rust (Windows)`, `Rust (Linux)`
+and `Rust (macOS)`.
+
+Local runners use fresh checkouts and one-job credentials, with a host policy
+rejecting fork code before workflow steps. Their jobs queue while the maintainer's
+PC is offline. A queued or skipped job is not a successful verification.

@@ -1,40 +1,29 @@
 # Export a conversation
 
-Type `/export` to create a unique `JECODE-SESSION-<timestamp>-<process>-<counter>.json`
-in the session's working directory. Existing files are never overwritten. Each
-export is a snapshot of the current conversation, including the system prompt,
-user messages, retained assistant content and reasoning fields, tool calls and
-tool results. Streaming reconstructs the assistant message from ordered deltas.
-Model/settings changes preserve this evidence; /new starts a new export context.
-Conversations autosave from their first sent request; opening, drafting and local
-commands alone do not create a saved session. Use `/resume` or
-`jecode resume` from the same project folder to continue one. See [SESSIONS.md](SESSIONS.md)
-for recovery and deletion behavior; exports retain their separate snapshot format.
-In the `/resume` list, Ctrl+D marks the selected row for deletion, Enter confirms
-and Esc cancels. The current conversation is included after its first sent request;
-deleting it keeps unsent
-draft/queue input and starts a fresh context while the list stays open. Empty
-launches and unsent input alone never add a current row. Use Esc to return to
-the composer, including after deleting the last session. Project files and manual exports remain.
+Type `/export` in the active conversation. Jecode writes a new
+`JECODE-SESSION-<timestamp>-<process>-<counter>.json` in that conversation's
+working directory; it never overwrites an existing file. `/new` starts a
+separate export context. An export is a snapshot for inspection or sharing,
+not a file that `jecode resume` can open. Use [saved sessions](SESSIONS.md) to
+continue work.
 
-## Format and retained evidence
+The JSON uses `format: "jecode.conversation"` and `format_version: 1`. It
+includes the Jecode version, export time, model, effort, working directory,
+provider `messages` and local `events`. Messages retain the system prompt,
+user messages, completed assistant content and reasoning fields, tool calls
+and results. Events retain local command results, compaction summaries,
+recovery and turn errors, including incomplete streamed text. An export taken
+during an operation can contain a tool call whose result has not arrived yet.
+Unsent composer text and paused drafts are not included.
 
-The JSON contains `format: "jecode.conversation"`, `format_version: 1`, the Jecode
-version, export time in Unix milliseconds, model, effort, working directory,
-`messages` and `events`. Events record local command results, compaction summaries,
-request recovery and turn errors,
-including partial streamed text, separately from provider messages.
-Tool results remain their original JSON-encoded `content` strings, paired with
-`tool_call_id`, matching the provider conversation. Local commands, screen
-formatting and UI notifications are not model messages. An export taken during
-an operation can include a call whose result has not arrived yet.
+The configured Jecode API key is masked, but other conversation content is
+retained. Review the export before sharing it. Bash tool results contain the
+last 64 KiB of each output stream and references to the complete streams in
+the personal session store; those files are not embedded in the JSON. See
+[TOOLS.md](TOOLS.md) for output references.
 
-The configured Jecode API key is masked in the export; other session content is
-retained. Bash results include the last 64 KiB of each stream and references to
-complete output saved separately in the folder's personal session bucket. These
-files are not embedded in the export. File reads include their range and
-continuation offsets. Follow those indicators when interpreting an exported
-session.
-
-Attached files are copied into a `.attachments` folder beside the JSON and
-listed in its `attachments` array; see [ATTACHMENTS.md](ATTACHMENTS.md#export).
+Attachments referenced by the conversation, including PDF annotation images,
+are copied into a `.attachments` folder beside the JSON and listed with
+relative paths in the top-level `attachments` array. If an attachment cannot
+be copied, Jecode does not write the export. See
+[ATTACHMENTS.md](ATTACHMENTS.md#export).

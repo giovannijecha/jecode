@@ -1,95 +1,64 @@
 # Markdown responses
 
-The TUI renders model responses using original Rust code and the standard
-library. Rendering is separate from the agent loop. Messages retain their
-original Markdown in the conversation, archive, `/copy` and `/export`; plain
-mode and single-prompt output also keep the original text.
+The TUI styles a practical subset of Markdown in assistant responses. The
+original response text remains available in the conversation archive,
+`/copy`, and `/export`; single-prompt and `--plain` output also use the
+original text. Terminal styling does not change what the model said.
+
+## Supported display syntax
+
+| Source | Terminal display |
+| --- | --- |
+| `#` through `######`, or a one-line Setext heading | Emphasized heading text. Optional closing hashes are removed. |
+| `**strong**`, `__strong__`, `*italic*`, `_italic_`, `~~strike~~` | Styled text; styles can combine. |
+| Matching backtick runs | Inline code with literal spaces and punctuation. |
+| `[label](destination)` | Styled label followed by the visible destination in parentheses. Jecode does not open it. |
+| `-`, `*`, `+`, or numbered list items | A hanging indent when the item wraps. `[ ]` and `[x]`/`[X]` render as task boxes. |
+| `>` quote lines | A muted quote with a vertical guide. |
+| Three or more matching backticks or tildes | A full-width code panel with a language label. |
+| Three or more matching `-`, `*`, or `_` markers | A horizontal rule. |
+
+Fenced `rust`/`rs`, `bash`/`sh`/`shell`, and `json` code gets light syntax
+highlighting. Other languages remain readable plain code. Highlighting is
+for display, not syntax validation. An unfinished fence stays open while a
+response streams.
+
+Each source line remains a separate display line, wrapping to fit the
+terminal. Explicit blank lines remain visible. Consecutive prose lines are
+not merged into paragraphs. Backslash escapes protect ASCII punctuation;
+unmatched formatting markers stay visible as text.
 
 ## Tables
 
-A pipe-separated header followed by a matching dash delimiter becomes a table
-with clean columns, two spaces between columns and a rule below the header.
-There are no enclosing borders. Optional outer pipes and left, center and right
-alignment markers are supported. Use `\|` for a literal pipe, including inside
-an inline code span.
+A pipe-separated header followed by a matching dash delimiter becomes a
+borderless table. Optional outer pipes and left, center, and right alignment
+markers work:
 
 ```markdown
-| Dimension | Rating | Note |
-| :--- | :---: | --- |
-| Speed | High | Direct tools |
-| Maintenance | Good | Small owned modules |
+| Item | State | Count |
+| :--- | :---: | ---: |
+| Build | Ready | 3 |
 ```
 
-Widths follow the visible contents of the current response snapshot. Cells wrap
-when their natural widths exceed the terminal width. When usable columns cannot
-fit, each row becomes a sequence of `Header: value` fields. Widening the terminal
-reconstructs the columns from source. Missing body cells remain empty; surplus
-body cells stay visible in the final column instead of being discarded.
+Use `\|` for a literal pipe in a cell, including inside inline code. Cells
+wrap when needed. If columns cannot fit, each body row becomes a sequence of
+`Header: value` fields; widening the terminal reconstructs the columns from
+the original text. Missing cells stay empty. Extra cells remain visible in
+the last column. An invalid delimiter stays ordinary text.
 
-A blank line or a new heading, list, quote, rule or code fence ends a table.
-Tables inside code fences stay literal. An invalid delimiter stays ordinary
-text. During streaming, a table can change widths as cells arrive; these layouts
-remain provisional until the message completes.
+A blank line or a new heading, list, quote, rule, or code fence ends a table.
+Tables inside code fences stay literal. A table's widths may shift while its
+response is streaming and settle when the message completes.
 
-## Text and blocks
+## Display limits
 
-Supported display syntax includes:
+This is a display subset of Markdown, not a complete CommonMark or GFM
+parser. Lazy quote continuation, deeply nested block containers, reference
+links, images, HTML, entities, and math have no special rendering. Their
+source remains visible. Links show their destination but are not clickable
+through Jecode. Terminal control characters are sanitized for display.
 
-- ATX headings (`#` through `######`), optional closing hashes, and single-line
-  Setext headings with an `=` or `-` underline.
-- Strong emphasis with `**` or `__`, italic emphasis with `*` or `_`, combined
-  emphasis and strikethrough with `~~`.
-- Inline code with matching backtick runs. Its text and spaces stay literal,
-  including when the line wraps.
-- Inline links in the form `[label](destination)`. The styled label is followed
-  by the visible destination in parentheses. Rendering does not open links.
-- Unordered and numbered list items with hanging indentation; task markers
-  `[ ]`, `[x]` and `[X]` appear as unchecked or checked boxes.
-- Quote lines with a `FAINT` `│` bar and `MUTED` text, horizontal rules
-  and matching backtick or tilde fences. Rust, Bash and JSON fences have light
-  syntax highlighting.
-- Backslash escapes for punctuation. Unmatched formatting markers remain visible.
-
-Each source line remains separate and wraps within the terminal width.
-Consecutive prose, list and quote lines are not joined into paragraphs;
-formatting applies within a source line. Explicit blank rows remain visible.
-Setext heading pairs, tables and fenced code retain their block structure.
-
-Code panels use the full width, with the language label and code at the left
-edge. Completed fences add one coloured bottom row; open fences do not.
-Unsupported code languages stay plain. The highlighter is a display lexer,
-not a syntax validator.
-
-This is a display subset, rather than a complete CommonMark/GFM parser. Paragraph
-continuation, lazy quote continuation, deeply nested block containers, reference links, images,
-HTML, entities and mathematics have no specialized rendering. Unsupported
-syntax remains visible as text. Terminal controls are sanitized for display.
-
-## Width and responsiveness
-
-Widths account for common combining accents, wide CJK characters, emoji
-modifiers, flags, keycaps and emoji joined with a zero-width joiner. These groups
-remain whole during wrapping, clipping, caret drawing and ordinary cursor edits.
-The width model is approximate: the terminal and font determine the final glyphs.
-Italic and strikethrough also depend on the terminal's style support.
-
-Settled table layout measures one source row per iterator step, then emits at
-most 32 wrapped visual rows per step. A long cell retains wrap state between
-steps rather than allocating all its visual rows at once. Measurement and
-emission count toward the transcript's layout allowance. Parsing an individual
-source row remains linear in its input size; live previews render the current
-snapshot. See [RESIZE.md](RESIZE.md) for source reflow and budgets.
-
-## Verification
-
-Synthetic tests cover separate source lines and quotes, full-width code panels,
-clean columns and alignment, escaped pipes, missing and surplus cells, narrow
-wrapping and vertical fields, styles, literal fences, partial delimiters, long
-tables and tall cells. Integration fixtures exercise
-cumulative streaming, finalization and narrow/wide reconstruction through the
-transcript and VT screen model. They preserve source, draft and queue and check
-that provisional layouts leave no duplicate rows in the owned viewport or the
-caller's native scrollback. Reading anchors keep wrapped text across resize,
-including multiline table headers. The messages specimen
-(`cargo test specimen::messages -- --ignored --nocapture`) prints a
-conversation with every block at wide and narrow widths.
+Common combining marks, wide CJK characters, and emoji sequences stay
+together when wrapping. Exact glyph width, italics, and strikethrough depend
+on the terminal and font. Resize reflows the display from source; see
+[Scrolling and resize](RESIZE.md).
