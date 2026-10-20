@@ -92,7 +92,9 @@ fn composer_stream_scroll_and_capture() {
     }
 
     let mut state = state();
+    state.begin_tool_turn();
     tool(&mut state);
+    state.finish_tool_turn();
     for index in 0..5000 {
         state.message(
             if index % 2 == 0 {
@@ -109,10 +111,8 @@ fn composer_stream_scroll_and_capture() {
         display.scroll(Scroll::Rows(-3));
         drain(&mut display, &state)
     });
-    let mut selected = false;
-    samples("select_tool", 5000, || {
-        selected = !selected;
-        state.select_tool(selected.then_some(0));
+    samples("toggle_tools", 5000, || {
+        state.toggle_tools();
         drain(&mut display, &state)
     });
 

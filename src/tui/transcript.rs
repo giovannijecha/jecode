@@ -46,7 +46,6 @@ pub(super) struct Layout {
     contexts: Vec<Rows>,
     generation: Option<u64>,
     tools: u64,
-    selected_tool: Option<usize>,
     partial: Option<Partial>,
     pending: Vec<Vec<Line>>,
     pending_start: usize,
@@ -73,7 +72,6 @@ impl Layout {
             self.context = Rows::default();
             self.generation = Some(state.generation);
             self.tools = state.tool_revision;
-            self.selected_tool = state.tool_focus;
             self.partial = None;
             self.pending.clear();
             self.pending_revision = None;
@@ -81,22 +79,21 @@ impl Layout {
             self.columns = columns;
         }
         if self.tools != state.tool_revision {
-            for index in [
-                self.selected_tool,
-                state
-                    .tool_focus
-                    .filter(|&index| Some(index) != self.selected_tool),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                let block = index + 1;
-                if block < self.blocks.len() {
-                    let mut context = self.contexts[block];
-                    self.blocks[block] = render(source(state, block), &mut context, columns);
-                }
+            // A resize can defer drawing across several toggles or a new turn.
+            // Rebuild from the first item if more than one change was missed.
+            let block = if self.tools.wrapping_add(1) == state.tool_revision {
+                state.tool_details.changed_from + 1
+            } else {
+                1
+            };
+            if block < self.blocks.len() {
+                self.context = self.contexts[block];
+                self.blocks.truncate(block);
+                self.contexts.truncate(block);
             }
-            self.selected_tool = state.tool_focus;
+            self.partial = None;
+            self.pending_revision = None;
+            self.pending_stream = None;
             self.tools = state.tool_revision;
         }
         let end = state.settled_len() + 1;
@@ -132,8 +129,8 @@ impl Layout {
                     break;
                 }
                 let mut lines = self.partial.take().unwrap().lines;
-                if let Source::Item(item) = item {
-                    self.context.finish(item, &mut lines);
+                if matches!(item, Source::Item(_)) {
+                    self.context.finish(&mut lines);
                 }
                 lines
             } else {
@@ -176,11 +173,11 @@ impl Layout {
                     {
                         self.pending_stream = Some(PendingStream {
                             index,
-                            prefix: usize::from(context.previous.is_some()),
+                            prefix: usize::from(context.previous),
                             markdown: markdown::Stream::new(text, self.columns),
                         });
                         let mut lines = Vec::new();
-                        if context.previous.is_some() {
+                        if context.previous {
                             lines.push(Line::default());
                         }
                         if index < self.pending.len() {
@@ -196,7 +193,7 @@ impl Layout {
                     // A stream is normally last, but a later pending item still
                     // needs the same separator context as full Rows::render.
                     let mut marker = vec![Line::default()];
-                    context.finish(item, &mut marker);
+                    context.finish(&mut marker);
                 } else {
                     if self
                         .pending_stream

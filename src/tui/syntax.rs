@@ -3,11 +3,15 @@ use super::{
     theme::{CODE_NUMBER, CODE_STRING, CODE_SURFACE, CODE_TEXT, KEYWORD, MUTED, Style},
 };
 
+mod markup;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Language {
     Rust,
     Shell,
     Json,
+    Javascript,
+    Markup,
 }
 
 #[derive(Clone, Copy)]
@@ -23,6 +27,7 @@ enum Mode {
 pub struct Highlighter {
     language: Option<Language>,
     mode: Mode,
+    markup: markup::Markup,
 }
 
 impl Highlighter {
@@ -37,25 +42,46 @@ impl Highlighter {
             "rust" | "rs" => Some(Language::Rust),
             "bash" | "sh" | "shell" => Some(Language::Shell),
             "json" => Some(Language::Json),
+            "javascript" | "js" | "mjs" | "cjs" | "jsx" | "typescript" | "ts" | "tsx" => {
+                Some(Language::Javascript)
+            }
+            "xml" | "html" | "svg" => Some(Language::Markup),
             _ => None,
         };
         Self {
             language,
             mode: Mode::Plain,
+            markup: markup::Markup::default(),
         }
+    }
+
+    pub fn for_path(path: &str) -> Self {
+        Self::new(
+            std::path::Path::new(path)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or(""),
+        )
     }
 
     pub fn line(&mut self, value: &str) -> Line {
         let Some(language) = self.language else {
             return Line::new(value, CODE_TEXT).on(CODE_SURFACE);
         };
+        if language == Language::Markup {
+            return self.markup.line(value);
+        }
         let mut line = Line::default().on(CODE_SURFACE);
         let mut position = 0;
         while position < value.len() {
             let tail = &value[position..];
             let (length, style) = match self.mode {
                 Mode::Quote(delimiter) => {
-                    let (length, closed) = quote_end(tail, delimiter, delimiter != '\'');
+                    let (length, closed) = quote_end(
+                        tail,
+                        delimiter,
+                        delimiter != '\'' || language == Language::Javascript,
+                    );
                     if closed {
                         self.mode = Mode::Plain;
                     }
@@ -88,14 +114,14 @@ impl Highlighter {
     fn token(&mut self, value: &str, position: usize, language: Language) -> (usize, Style) {
         let tail = &value[position..];
         let first = tail.chars().next().unwrap();
-        if language == Language::Rust && tail.starts_with("//")
+        if matches!(language, Language::Rust | Language::Javascript) && tail.starts_with("//")
             || language == Language::Shell
                 && first == '#'
                 && (position == 0 || value[..position].ends_with(char::is_whitespace))
         {
             return (tail.len(), MUTED);
         }
-        if language == Language::Rust && tail.starts_with("/*") {
+        if matches!(language, Language::Rust | Language::Javascript) && tail.starts_with("/*") {
             let (length, depth) = comment_end(&tail[2..], 1);
             self.mode = if depth == 0 {
                 Mode::Plain
@@ -116,8 +142,15 @@ impl Highlighter {
                 return (length, CODE_STRING);
             }
         }
-        if first == '"' || language == Language::Shell && first == '\'' {
-            let (length, closed) = quote_end(&tail[1..], first, first != '\'');
+        if first == '"'
+            || language == Language::Shell && first == '\''
+            || language == Language::Javascript && matches!(first, '\'' | '`')
+        {
+            let (length, closed) = quote_end(
+                &tail[1..],
+                first,
+                first != '\'' || language == Language::Javascript,
+            );
             if !closed {
                 self.mode = Mode::Quote(first);
             }
@@ -196,6 +229,54 @@ impl Highlighter {
                         | "while"
                 ),
                 Language::Json => matches!(word, "true" | "false" | "null"),
+                Language::Javascript => matches!(
+                    word,
+                    "async"
+                        | "await"
+                        | "break"
+                        | "case"
+                        | "catch"
+                        | "class"
+                        | "const"
+                        | "continue"
+                        | "debugger"
+                        | "default"
+                        | "delete"
+                        | "do"
+                        | "else"
+                        | "export"
+                        | "extends"
+                        | "false"
+                        | "finally"
+                        | "for"
+                        | "from"
+                        | "function"
+                        | "if"
+                        | "import"
+                        | "in"
+                        | "instanceof"
+                        | "interface"
+                        | "let"
+                        | "new"
+                        | "null"
+                        | "of"
+                        | "return"
+                        | "static"
+                        | "super"
+                        | "switch"
+                        | "this"
+                        | "throw"
+                        | "true"
+                        | "try"
+                        | "type"
+                        | "typeof"
+                        | "undefined"
+                        | "var"
+                        | "void"
+                        | "while"
+                        | "yield"
+                ),
+                Language::Markup => false,
             };
             return (length, if keyword { KEYWORD } else { CODE_TEXT });
         }

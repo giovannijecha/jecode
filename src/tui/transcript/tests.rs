@@ -62,7 +62,7 @@ fn layout_work_is_bounded_and_finalization_appends_the_original_stream_only_once
 }
 
 #[test]
-fn a_finished_tool_stays_live_until_the_tree_branch_is_settled() {
+fn a_finished_tool_stays_live_until_bookkeeping_is_settled_without_visual_change() {
     let mut state = State::default();
     state.event(Event::ToolStarted {
         id: "one".into(),
@@ -78,11 +78,23 @@ fn a_finished_tool_stays_live_until_the_tree_branch_is_settled() {
     let mut layout = Layout::default();
     layout.prepare(&state, 39, 64);
     assert_eq!(layout.blocks.len(), 1);
-    assert!(layout.pending(&state)[0].plain().starts_with("├─"));
+    assert!(
+        layout.pending(&state)[0]
+            .plain()
+            .starts_with("● Read(fixture.rs)")
+    );
+    let pending = layout.pending(&state).to_vec();
     state.close_tools();
     layout.prepare(&state, 39, 64);
     assert_eq!(layout.blocks.len(), 2);
-    assert!(layout.blocks[1][0].plain().starts_with("└─"));
+    assert_eq!(layout.blocks[1], pending);
+    assert!(matches!(
+        state.items[0],
+        Item::Tool {
+            last: Some(true),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -169,11 +181,12 @@ fn a_single_long_markdown_block_yields_between_passes_and_keeps_fence_state() {
 }
 
 #[test]
-fn selecting_a_tool_keeps_the_settled_transcript_ready() {
+fn toggling_tool_details_keeps_the_settled_transcript_ready() {
     let mut state = State::default();
     for index in 0..5_000 {
         state.message(Kind::Assistant, &format!("Message {index}"));
     }
+    state.begin_tool_turn();
     state.event(Event::ToolStarted {
         id: "tool".into(),
         name: "read".into(),
@@ -186,6 +199,7 @@ fn selecting_a_tool_keeps_the_settled_transcript_ready() {
         result: Value::object([("content", Value::string("contents"))]),
     });
     state.close_tools();
+    state.finish_tool_turn();
     let tool = state.items.len() - 1;
     let mut layout = Layout::default();
     for _ in 0..100 {
@@ -196,24 +210,17 @@ fn selecting_a_tool_keeps_the_settled_transcript_ready() {
     }
     assert!(layout.ready(&state));
     let prior = layout.blocks[..tool + 1].to_vec();
-    state.select_tool(Some(tool));
+    let compact_tool = layout.blocks[tool + 1].clone();
+    state.toggle_tools();
     layout.prepare(&state, 60, 64);
     assert!(layout.ready(&state));
     assert_eq!(layout.blocks[..tool + 1], prior);
-    assert!(
-        layout.blocks[tool + 1]
-            .iter()
-            .any(|line| line.background == Some(crate::tui::theme::TOOL_SELECTED_SURFACE))
-    );
-    state.toggle_tool();
+    assert!(state.tool_details.expanded);
+    assert_ne!(layout.blocks[tool + 1], compact_tool);
+    state.toggle_tools();
     layout.prepare(&state, 60, 64);
     assert!(layout.ready(&state));
-    state.select_tool(None);
-    layout.prepare(&state, 60, 64);
-    assert!(layout.ready(&state));
-    assert!(
-        layout.blocks[tool + 1]
-            .iter()
-            .all(|line| line.background != Some(crate::tui::theme::TOOL_SELECTED_SURFACE))
-    );
+    assert!(!state.tool_details.expanded);
+    assert_eq!(layout.blocks[..tool + 1], prior);
+    assert_eq!(layout.blocks[tool + 1], compact_tool);
 }

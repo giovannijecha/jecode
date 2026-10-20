@@ -48,8 +48,8 @@ pub(super) fn help_details() -> Vec<(String, String)> {
         ),
         ("Ctrl+Q".into(), "Cancel work and quit".into()),
         (
-            "Alt+T".into(),
-            "Inspect tools · arrows select · Enter details · Esc returns".into(),
+            "Ctrl+O".into(),
+            "Expand/collapse the last finished turn's tools".into(),
         ),
         (
             "/terminal [ID]".into(),
@@ -186,6 +186,8 @@ impl App {
             self.state.history.record(&prompt);
             self.capture_input();
             self.refresh_context();
+            self.state.begin_tool_turn();
+            self.renderer.scroll(super::viewport::Scroll::End);
             self.state
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());

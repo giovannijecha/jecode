@@ -11,8 +11,6 @@ pub const EMPHASIS: Style = Style::rgb(220, 228, 240); // #DCE4F0
 pub const CODE_TEXT: Style = Style::rgb(201, 209, 217); // #C9D1D9
 pub const MUTED: Style = Style::rgb(154, 164, 178); // #9AA4B2
 pub const TOOL_DIM: Style = Style::rgb(135, 154, 170); // #879AAA
-// Decorative only: below text contrast, so guides and rules, never words.
-pub const FAINT: Style = Style::rgb(69, 87, 105); // #455769
 
 // Interaction and outcome.
 pub const ACCENT: Style = Style::rgb(122, 162, 247); // #7AA2F7
@@ -24,9 +22,7 @@ pub const WARNING: Style = Style::rgb(224, 175, 104); // #E0AF68
 
 // Catalog surfaces; code and tool selection keep their own fills.
 pub const USER_SURFACE: Surface = Surface::rgb(40, 46, 57); // #282E39
-pub const INSET_SURFACE: Surface = Surface::rgb(32, 41, 51); // #202933
 pub const SELECTED_SURFACE: Surface = Surface::rgb(53, 61, 75); // #353D4B
-pub const TOOL_SELECTED_SURFACE: Surface = Surface::rgb(42, 56, 72); // #2A3848
 pub const CODE_SURFACE: Surface = Surface::rgb(32, 37, 44); // #20252C
 pub const DIFF_ADDED_SURFACE: Surface = Surface::rgb(30, 46, 35); // #1E2E23
 pub const DIFF_REMOVED_SURFACE: Surface = Surface::rgb(49, 32, 38); // #312026
@@ -164,7 +160,6 @@ mod tests {
         assert_eq!(EMPHASIS.to_string(), "38;2;220;228;240");
         assert_eq!(TOOL_DIM.to_string(), "38;2;135;154;170");
         assert_eq!(SELECTED_SURFACE.to_string(), "48;2;53;61;75");
-        assert_eq!(TOOL_SELECTED_SURFACE.to_string(), "48;2;42;56;72");
         assert_eq!(CODE_SURFACE.to_string(), "48;2;32;37;44");
         assert_eq!(Surface::TERMINAL.to_string(), "49");
     }

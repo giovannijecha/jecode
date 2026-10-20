@@ -178,7 +178,7 @@ fn worker_results_previews_export_and_local_commands_use_the_same_conversation()
 }
 
 #[test]
-fn one_tool_per_model_request_keeps_one_tree_and_the_next_turn_preserves_it() {
+fn one_tool_per_model_request_keeps_each_read_and_the_next_turn_preserves_it() {
     let directory = Directory::new();
     fs::write(
         directory.path().join("fixture.txt"),
@@ -216,16 +216,26 @@ fn one_tool_per_model_request_keeps_one_tree_and_the_next_turn_preserves_it() {
         .iter()
         .flatten()
         .map(line::Line::plain)
-        .filter(|row| row.starts_with("├─ read") || row.starts_with("└─ read"))
+        .filter(|row| row.starts_with("● Read("))
         .collect::<Vec<_>>();
     assert_eq!(headers.len(), 3);
     for (index, header) in headers.iter().enumerate() {
-        assert!(header.starts_with(if index == 2 {
-            "└─ read  fixture.txt"
-        } else {
-            "├─ read  fixture.txt"
-        }));
-        assert!(header.contains(&format!("✓ lines {}–{}", index + 1, index + 1)));
+        assert_eq!(*header, "● Read(fixture.txt)");
+        assert!(
+            settled[index + 1]
+                .iter()
+                .any(|row| row.plain().contains(&format!(
+                    "⎿ Read 1 line · lines {}–{}",
+                    index + 1,
+                    index + 1
+                )))
+        );
+        let file_line = format!("{}: {}", index + 1, ["first", "second", "third"][index]);
+        assert!(
+            !settled[index + 1]
+                .iter()
+                .any(|row| row.plain().contains(&file_line))
+        );
     }
     assert_eq!(
         view::frame(&app.state, "fixture", "folder").history.len(),
@@ -454,7 +464,7 @@ fn interactive_windows_smoke() {
                 ),
             ),
             (200, completion(
-                "# Tool fixture completed\nThe tool tree stays compact.\n\n```rust\nlet value = 1;\n\nprintln!(\"verified\");\n```\n\nSend a second task to inspect conversation scrolling.",
+                "# Tool fixture completed\nThe tool output stays compact.\n\n```rust\nlet value = 1;\n\nprintln!(\"verified\");\n```\n\nSend a second task to inspect conversation scrolling.",
                 vec![])),
             (200, completion(
                 &format!("# Fixture verified\n\nAll four tools returned captured results.\nOne fixture command intentionally exited with **code 7**.\n\n- Inspect the compact tool previews above.\n- Scroll the conversation with the wheel or Page Up/Down.\n- Browse prompt history with Up/Down.\n\n```rust\nfn fixture() {{\n    let max_requests = 40;\n    println!(\"verified\"); // display fixture\n}}\n```\n\n{}",

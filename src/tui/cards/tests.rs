@@ -1,422 +1,489 @@
-use std::time::Duration;
-
 use super::*;
-use crate::tui::theme::{DIFF_REMOVED_SURFACE, TOOL_SELECTED_SURFACE};
+use crate::tui::theme::{BODY, DIFF_ADDED_SURFACE, KEYWORD};
 
-fn draw<'a>(
-    name: &'a str,
-    arguments: &'a Value,
-    result: Option<&'a Value>,
+fn draw(
+    name: &str,
+    arguments: &Value,
+    result: Option<&Value>,
+    change: Option<&Change>,
     columns: usize,
-    last: bool,
-    preview: bool,
-    presentation: &'a Presentation,
+    presentation: &Presentation,
 ) -> Vec<Line> {
-    super::render(
+    render(
         Tool {
             name,
             arguments,
-            summary: "wrote 20 bytes",
+            summary: "complete",
             result,
-            last,
-            preview,
+            change,
             presentation,
         },
         columns,
     )
 }
-
-fn command(value: &str) -> Value {
-    Value::object([("command", Value::string(value))])
+fn plain(rows: &[Line]) -> String {
+    rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n")
 }
-
-fn lines(rows: &[Line]) -> Vec<String> {
-    rows.iter().map(Line::plain).collect()
+fn args(key: &str, value: &str) -> Value {
+    Value::object([(key, Value::string(value))])
 }
-
-#[test]
-fn wide_status_is_right_aligned_and_preview_extent_fits_the_header() {
-    let arguments = command("cargo test");
-    let result = Value::object([
-        ("stdout", Value::string("earlier\nfirst\nsecond\nlast")),
-        ("exit_code", Value::number(0)),
-    ]);
-    let presentation = Presentation {
-        elapsed: Some(Duration::from_millis(8400)),
-        ..Presentation::default()
-    };
-    let rows = draw(
-        "bash",
-        &arguments,
-        Some(&result),
-        90,
-        false,
-        true,
-        &presentation,
-    );
-    let plain = lines(&rows);
-    assert!(plain[0].starts_with("├─ bash  cargo test"));
-    assert!(plain[0].ends_with("✓ exit 0  ·  8.4s · preview 3 / 4"));
-    assert_eq!(text::cells(&plain[0]), 89);
-    assert_eq!(&plain[1..], ["│    first", "│    second", "│    last"]);
-    assert!(
-        rows[0]
-            .spans
-            .iter()
-            .any(|span| span.text == "bash  " && span.style == EMPHASIS.bold())
-    );
-    assert!(
-        rows[0]
-            .spans
-            .iter()
-            .any(|span| span.text.starts_with("✓ ") && span.style == GOOD)
-    );
-    assert_eq!(rows[0].spans[0].style, FAINT);
+fn ok() -> Value {
+    Value::object([("exit_code", Value::number(0))])
 }
 
 #[test]
-fn narrow_header_wraps_the_target_and_moves_status_to_its_own_row() {
-    let arguments = command("first second third fourth fifth sixth seventh");
-    let result = Value::object([("exit_code", Value::number(0))]);
+fn title_and_result_are_left_aligned_without_a_tree_or_status_column() {
     let rows = draw(
         "bash",
-        &arguments,
-        Some(&result),
-        30,
-        true,
-        true,
+        &args("command", "cargo test"),
+        Some(&ok()),
+        None,
+        80,
         &Presentation::default(),
     );
     assert_eq!(
-        lines(&rows),
-        [
-            "└─ bash  first second third fo",
-            "   urth fifth sixth seventh",
-            "     ✓ exit 0",
-        ]
+        rows.iter().map(Line::plain).collect::<Vec<_>>(),
+        ["● Bash(cargo test)", "  ⎿ Exit 0"]
     );
-    assert!(rows.iter().all(|row| text::cells(&row.plain()) <= 30));
+    assert_eq!(rows[0].spans[0].style, GOOD);
+    assert!(
+        rows[0]
+            .spans
+            .iter()
+            .any(|span| span.text == "Bash(" && span.style == EMPHASIS.bold())
+    );
+    assert!(rows[0].background.is_none());
 }
 
 #[test]
-fn status_changes_rows_at_the_catalog_boundary_and_keeps_short_durations() {
-    let arguments = command("cargo test");
-    let result = Value::object([("exit_code", Value::number(0))]);
-    let presentation = Presentation {
-        elapsed: Some(Duration::from_millis(100)),
-        ..Presentation::default()
-    };
-    let narrow = draw(
-        "bash",
-        &arguments,
-        Some(&result),
-        71,
-        true,
-        true,
-        &presentation,
-    );
-    let wide = draw(
-        "bash",
-        &arguments,
-        Some(&result),
-        72,
-        true,
-        true,
-        &presentation,
-    );
-    assert_eq!(narrow.len(), 2);
-    assert!(narrow[1].plain().starts_with("     ✓ exit 0  ·  0.1s"));
-    assert_eq!(wide.len(), 1);
-    assert!(wide[0].plain().ends_with("✓ exit 0  ·  0.1s"));
-    assert_eq!(wide[0].origin.unwrap().line, 0);
-}
-
-#[test]
-fn statuses_keep_separate_glyph_and_outcome_colors() {
-    let arguments = command("fixture");
-    let cases = [
-        (None, "running", "", TOOL_ACCENT),
-        (
-            Some(Value::object([("exit_code", Value::number(0))])),
-            "exit 0",
-            "✓ ",
-            GOOD,
-        ),
-        (
-            Some(Value::object([("exit_code", Value::number(7))])),
-            "exit 7",
-            "× ",
-            BAD,
-        ),
-        (
-            Some(Value::object([("cancelled", Value::Bool(true))])),
-            "cancelled",
-            "■ ",
-            WARNING,
-        ),
-        (
-            Some(Value::object([("timed_out", Value::Bool(true))])),
-            "timed out",
-            "× ",
-            BAD,
-        ),
-    ];
-    for (result, outcome, glyph, style) in cases {
+fn wrapped_titles_retain_long_unicode_commands_and_fit_narrow_views() {
+    let command = "cargo test --locked --offline -- test_é_東京_🦀 --nocapture";
+    for columns in [20, 40, 80, 120] {
         let rows = draw(
             "bash",
-            &arguments,
-            result.as_ref(),
-            90,
-            true,
-            true,
+            &args("command", command),
+            Some(&ok()),
+            None,
+            columns,
+            &Presentation {
+                expanded: Some(true),
+                ..Presentation::default()
+            },
+        );
+        let title: String = rows
+            .iter()
+            .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
+            .map(|row| row.plain().chars().skip(2).collect::<String>())
+            .collect();
+        assert_eq!(title, format!("Bash({command})"));
+        assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
+    }
+    for columns in 2..20 {
+        let rows = draw(
+            "read",
+            &args("path", command),
+            Some(&ok()),
+            None,
+            columns,
             &Presentation::default(),
         );
-        let header = &rows[0];
-        assert!(header.plain().ends_with(&format!("{glyph}{outcome}")));
-        assert!(
-            header
-                .spans
-                .iter()
-                .any(|span| span.text.contains(outcome) && span.style == style)
-        );
+        assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
     }
 }
 
 #[test]
-fn failed_preview_prioritizes_stderr_then_recent_stdout() {
-    let arguments = command("cargo build");
+fn compact_long_lines_stay_bounded_and_expansion_retains_the_tail() {
+    let text = format!("{}END", "界x".repeat(8_000));
+    let arguments = args("command", &text);
     let result = Value::object([
-        ("stdout", Value::string("earlier\nlatest")),
-        ("stderr", Value::string("first error\nsecond error")),
-        ("exit_code", Value::number(101)),
-    ]);
-    let rows = draw(
-        "bash",
-        &arguments,
-        Some(&result),
-        90,
-        true,
-        true,
-        &Presentation::default(),
-    );
-    let plain = lines(&rows);
-    assert!(plain[0].ends_with("× exit 101 · preview 3 / 4"));
-    assert_eq!(
-        &plain[1..],
-        [
-            "     stderr: first error",
-            "     second error",
-            "     latest"
-        ]
-    );
-    assert!(!plain.iter().any(|row| row.contains("earlier")));
-    assert!(rows[1].spans.iter().any(|span| span.style == BAD));
-}
-
-#[test]
-fn retained_tail_and_capture_notice_are_distinct() {
-    let arguments = command("fixture");
-    let result = Value::object([
-        (
-            "stdout",
-            Value::string("first\nsecond\nthird\nfourth\nlast"),
-        ),
         ("exit_code", Value::number(0)),
-        ("stdout_bytes", Value::number(70000)),
-        ("stdout_truncated", Value::Bool(true)),
-        ("output_limit_bytes", Value::number(65536)),
+        ("stdout", Value::string(&text)),
     ]);
-    let rows = draw(
-        "bash",
-        &arguments,
-        Some(&result),
-        100,
-        true,
-        true,
-        &Presentation::default(),
-    );
-    let plain = lines(&rows).join("\n");
-    assert!(rows[0].plain().ends_with("✓ exit 0 · preview 3 / 5"));
-    assert!(plain.contains("third\n     fourth\n     last"));
-    assert!(plain.contains("capture truncated: 65536 of 70000 bytes retained"));
-    assert!(!plain.contains("first\n"));
-    assert_eq!(
-        result.get("stdout").and_then(Value::as_str),
-        Some("first\nsecond\nthird\nfourth\nlast")
-    );
+    for columns in [20, 40, 80] {
+        let compact = draw(
+            "bash",
+            &arguments,
+            Some(&result),
+            None,
+            columns,
+            &Presentation::default(),
+        );
+        assert!(compact.len() <= 7);
+        assert!(plain(&compact).contains('…'));
+        assert!(!plain(&compact).contains("END"));
+        let expanded = draw(
+            "bash",
+            &arguments,
+            Some(&result),
+            None,
+            columns,
+            &Presentation {
+                expanded: Some(true),
+                ..Presentation::default()
+            },
+        );
+        assert!(plain(&expanded).contains("END"));
+        assert!(expanded.len() > compact.len());
+    }
 }
 
 #[test]
-fn read_preview_keeps_first_rows_and_next_offset_notice() {
-    let arguments = Value::object([
-        ("path", Value::string("fixture.rs")),
-        ("offset", Value::number(4)),
-    ]);
+fn running_states_stay_explicit_without_a_selection_mode() {
+    let rows = draw(
+        "bash",
+        &args("command", "cargo build"),
+        None,
+        None,
+        80,
+        &Presentation::default(),
+    );
+    assert!(rows[0].background.is_none());
+    assert_eq!(rows[0].spans[0].style, TOOL_ACCENT);
+    assert!(plain(&rows).contains("⎿ Running…"));
+    assert!(rows[1..].iter().all(|row| row.background.is_none()));
+}
+
+#[test]
+fn read_expansion_preserves_numbered_source_and_syntax() {
     let result = Value::object([
         (
             "content",
-            Value::string("4: one\n5: two\n6: three\n7: four"),
+            Value::string("41: pub fn login() {\n42:     let limit = 10;\n"),
         ),
-        ("lines_returned", Value::number(4)),
-        ("next_offset", Value::number(8)),
+        ("offset", Value::number(41)),
+        ("lines_returned", Value::number(2)),
+    ]);
+    let arguments = args("path", "src/auth.rs");
+    let compact = draw(
+        "read",
+        &arguments,
+        Some(&result),
+        None,
+        80,
+        &Presentation::default(),
+    );
+    assert_eq!(compact.len(), 2);
+    assert!(plain(&compact).contains("Read 2 lines · lines 41–42"));
+    let rows = draw(
+        "read",
+        &arguments,
+        Some(&result),
+        None,
+        40,
+        &Presentation {
+            expanded: Some(true),
+            ..Presentation::default()
+        },
+    );
+    assert!(plain(&rows).contains("41   pub fn login()"));
+    assert!(
+        rows.iter()
+            .flat_map(|row| &row.spans)
+            .any(|span| span.style == KEYWORD && span.text == "pub")
+    );
+    assert!(!plain(&rows).contains("41:"));
+    assert!(rows.iter().all(|row| text::cells(&row.plain()) <= 40));
+}
+
+#[test]
+fn byte_reads_do_not_invent_line_numbers() {
+    let arguments = Value::object([
+        ("path", Value::string("output:s1:c1:stdout")),
+        ("byte_offset", Value::number(16)),
+    ]);
+    let result = Value::object([
+        ("offset", Value::Null),
+        ("byte_offset", Value::number(16)),
+        ("bytes_returned", Value::number(5)),
+        ("content", Value::string("hello")),
     ]);
     let rows = draw(
         "read",
         &arguments,
         Some(&result),
-        100,
-        true,
-        true,
-        &Presentation::default(),
+        None,
+        80,
+        &Presentation {
+            expanded: Some(true),
+            ..Presentation::default()
+        },
     );
-    let plain = lines(&rows).join("\n");
-    assert!(rows[0].plain().ends_with("✓ lines 4–7 · preview 3 / 4"));
-    assert!(plain.contains("4: one"));
-    assert!(!plain.contains("7: four"));
-    assert!(plain.contains("More file lines available from line 8"));
-    assert!(!plain.contains("lines_returned"));
+    assert!(plain(&rows).contains("Read 5 bytes · bytes 16–20"));
+    assert_eq!(rows.last().unwrap().plain(), "    hello");
 }
 
 #[test]
-fn edit_preview_uses_raw_replacement_and_balances_both_sides() {
-    let arguments = Value::object([
-        ("path", Value::string("fixture.rs")),
-        (
-            "old_text",
-            Value::string("old one\nold two\nold three\nold four\n"),
-        ),
-        ("new_text", Value::string("new one\nnew two\n")),
-    ]);
-    let result = Value::object([("bytes_written", Value::number(20))]);
-    let rows = draw(
-        "edit",
-        &arguments,
-        Some(&result),
-        90,
-        false,
-        true,
-        &Presentation::default(),
-    );
-    let plain = lines(&rows);
-    assert!(plain[0].ends_with("✓ wrote 20 bytes"));
-    assert_eq!(
-        &plain[1..],
-        ["│    - old one", "│    - old two", "│    + new one"]
-    );
-    assert!(
-        !plain
-            .iter()
-            .any(|row| row.contains("@@") || row.contains("+2 -4"))
-    );
-    let painted = rows[1].paint(90);
-    let (guide, content) = painted.split_once("│    ").unwrap();
-    assert!(!guide.contains(&DIFF_REMOVED_SURFACE.to_string()));
-    assert!(content.contains(&DIFF_REMOVED_SURFACE.to_string()));
-}
-
-#[test]
-fn expanded_edit_preserves_every_source_line_and_failed_edit_shows_error() {
-    let arguments = Value::object([
-        ("path", Value::string("fixture.rs")),
-        ("old_text", Value::string("same\nold\n")),
-        ("new_text", Value::string("same\nnew\n")),
-    ]);
-    let result = Value::object([("bytes_written", Value::number(20))]);
-    let expanded = Presentation {
-        expanded: Some(true),
-        ..Presentation::default()
-    };
-    let rows = draw(
-        "edit",
-        &arguments,
-        Some(&result),
-        90,
-        true,
-        false,
-        &expanded,
-    );
-    assert_eq!(
-        &lines(&rows)[1..],
-        ["     - same", "     - old", "     + same", "     + new"]
-    );
-    assert_eq!(rows[1].origin.unwrap().line, 1);
-    assert_eq!(rows[4].origin.unwrap().line, 4);
-    let error = Value::object([("error", Value::string("permission denied"))]);
-    let rows = draw(
-        "edit",
-        &arguments,
-        Some(&error),
-        90,
-        true,
-        true,
-        &Presentation::default(),
-    );
-    let plain = lines(&rows).join("\n");
-    assert!(plain.contains("permission denied"));
-    assert!(!plain.contains("- old") && !plain.contains("+ new"));
-}
-
-#[test]
-fn selection_and_explicit_collapse_affect_only_card_presentation() {
-    let arguments = command("fixture");
+fn failed_commands_prioritize_errors_and_expand_both_streams() {
     let result = Value::object([
-        ("stdout", Value::string("first\nsecond\nthird\nlast")),
-        ("exit_code", Value::number(0)),
+        ("stdout", Value::string("compiled one\ncompiled two\n")),
+        (
+            "stderr",
+            Value::string((1..=8).map(|n| format!("error {n}\n")).collect::<String>()),
+        ),
+        ("exit_code", Value::number(101)),
     ]);
-    let selected = Presentation {
-        selected: true,
-        expanded: Some(false),
-        ..Presentation::default()
-    };
-    let rows = draw("bash", &arguments, Some(&result), 90, true, true, &selected);
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].background, Some(TOOL_SELECTED_SURFACE));
-    assert!(
-        rows[0]
-            .spans
-            .iter()
-            .any(|span| span.text.contains("fixture") && span.style == TOOL_ACCENT)
+    let arguments = args("command", "cargo build");
+    let compact = draw(
+        "bash",
+        &arguments,
+        Some(&result),
+        None,
+        80,
+        &Presentation::default(),
     );
-    let expanded = Presentation {
-        expanded: Some(true),
-        ..Presentation::default()
-    };
+    let text = plain(&compact);
+    assert!(
+        text.contains("Failed · Exit 101")
+            && text.contains("error 1")
+            && text.contains("4 more output lines")
+    );
+    assert!(!text.contains("compiled one"));
     let rows = draw(
         "bash",
         &arguments,
         Some(&result),
-        90,
-        true,
-        false,
-        &expanded,
+        None,
+        80,
+        &Presentation {
+            expanded: Some(true),
+            ..Presentation::default()
+        },
     );
-    assert_eq!(rows.len(), 5);
-    assert!(lines(&rows).join("\n").contains("first"));
-    assert!(!rows[0].plain().contains("preview"));
+    let text = plain(&rows);
+    assert!(
+        text.contains("stderr")
+            && text.contains("stdout")
+            && text.contains("error 8")
+            && text.contains("compiled one")
+    );
+    assert!(
+        rows.iter()
+            .flat_map(|row| &row.spans)
+            .any(|span| span.text == "compiled one" && span.style == BODY)
+    );
 }
 
 #[test]
-fn narrow_cards_bound_lines_and_clean_controls() {
-    let arguments = command("printf very-long-command");
+fn capture_notices_survive_collapse_and_expansion() {
     let result = Value::object([
-        (
-            "stdout",
-            Value::string("\x1b[3Jlong output that exceeds the available columns"),
-        ),
+        ("stdout", Value::string("old\nfirst\n\nlast\n")),
         ("exit_code", Value::number(0)),
+        ("stdout_truncated", Value::Bool(true)),
+        ("stdout_bytes", Value::number(90000)),
+        ("output_limit_bytes", Value::number(65536)),
+        ("stdout_file", Value::string("output:s1:c1:stdout")),
     ]);
-    for width in [18, 24, 40] {
+    for expanded in [None, Some(false), Some(true)] {
         let rows = draw(
             "bash",
+            &args("command", "cargo test"),
+            Some(&result),
+            None,
+            80,
+            &Presentation {
+                expanded,
+                ..Presentation::default()
+            },
+        );
+        let text = plain(&rows);
+        assert!(text.contains("last") && text.contains("full output saved"));
+        assert_eq!(text.contains("    old"), expanded == Some(true));
+        assert_eq!(text.contains("1 more output line"), expanded != Some(true));
+    }
+}
+
+#[test]
+fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
+    let change = Change::between(
+        Some("fn login() {\n    old();\n}\n"),
+        "fn login() {\n    new();\n    save();\n}\n",
+    )
+    .unwrap();
+    let arguments = args("path", "src/auth.rs");
+    let initial = draw(
+        "edit",
+        &arguments,
+        Some(&ok()),
+        Some(&change),
+        80,
+        &Presentation::default(),
+    );
+    assert!(plain(&initial).contains("● Update(src/auth.rs)\n  ⎿ Added 2 lines, removed 1 line"));
+    assert!(
+        initial
+            .iter()
+            .any(|row| row.background == Some(DIFF_ADDED_SURFACE))
+    );
+    let collapsed = draw(
+        "edit",
+        &arguments,
+        Some(&ok()),
+        Some(&change),
+        80,
+        &Presentation {
+            expanded: Some(false),
+            ..Presentation::default()
+        },
+    );
+    assert_eq!(initial, collapsed);
+    let failed = Value::object([(
+        "error",
+        Value::string("File is read-only; its content was not changed"),
+    )]);
+    let rows = draw(
+        "edit",
+        &arguments,
+        Some(&failed),
+        Some(&change),
+        80,
+        &Presentation::default(),
+    );
+    assert!(!plain(&rows).contains("new();") && !plain(&rows).contains("Added 2"));
+    assert!(plain(&rows).contains("Failed · File is read-only"));
+}
+
+#[test]
+fn old_sessions_keep_snippet_diffs_without_fake_file_coordinates_or_eof() {
+    let arguments = Value::object([
+        ("path", Value::string("legacy.rs")),
+        ("old_text", Value::string("same\nold")),
+        ("new_text", Value::string("same\nnew")),
+    ]);
+    let rows = draw(
+        "edit",
+        &arguments,
+        Some(&ok()),
+        None,
+        80,
+        &Presentation::default(),
+    );
+    let text = plain(&rows);
+    assert!(
+        text.contains("Added 1 line, removed 1 line")
+            && text.contains("Original file coordinates unavailable.")
+    );
+    assert!(
+        !text.contains("No newline at end of file")
+            && !text.contains("1 −")
+            && !text.contains("1 +")
+    );
+    assert_eq!(text.matches("same").count(), 1);
+}
+
+#[test]
+fn process_states_and_lists_name_their_actual_outcomes() {
+    let arguments = Value::object([
+        ("action", Value::string("poll")),
+        ("process_id", Value::string("p1")),
+    ]);
+    for (status, expected) in [
+        ("running", "Running in background · p1"),
+        ("stopping", "Stopping · p1"),
+        ("stopped", "Stopped · p1"),
+        ("unknown", "Status unknown · p1"),
+    ] {
+        let result = Value::object([
+            ("process_id", Value::string("p1")),
+            ("status", Value::string(status)),
+        ]);
+        let rows = draw(
+            "process",
             &arguments,
             Some(&result),
-            width,
-            true,
-            true,
+            None,
+            80,
             &Presentation::default(),
         );
-        assert!(rows.iter().all(|row| text::cells(&row.plain()) <= width));
-        assert!(rows.iter().all(|row| !row.plain().contains('\x1b')));
-        assert!(rows.last().unwrap().plain().ends_with('…'));
+        assert_eq!(rows[0].plain(), "● Process(poll p1)");
+        assert!(plain(&rows).contains(expected));
     }
+    let list = Value::object([(
+        "processes",
+        Value::Array(vec![Value::object([
+            ("process_id", Value::string("p1")),
+            ("status", Value::string("running")),
+            ("command", Value::string("cargo check")),
+        ])]),
+    )]);
+    let rows = draw(
+        "process",
+        &arguments,
+        Some(&list),
+        None,
+        80,
+        &Presentation::default(),
+    );
+    assert!(
+        plain(&rows).contains("1 process · 1 running")
+            && plain(&rows).contains("p1  running  cargo check")
+    );
+}
+
+#[test]
+fn non_text_attachments_keep_their_view_and_expandable_metadata() {
+    let arguments = args("path", "attachment:fixture");
+    for (view, summary) in [("image", "Opened image"), ("pdf", "Opened PDF")] {
+        let result = Value::object([
+            ("view", Value::string(view)),
+            (
+                "note",
+                Value::string("The attachment follows in the next user message."),
+            ),
+        ]);
+        for expanded in [false, true] {
+            let rows = draw(
+                "read",
+                &arguments,
+                Some(&result),
+                None,
+                80,
+                &Presentation {
+                    expanded: Some(expanded),
+                    ..Presentation::default()
+                },
+            );
+            let text = plain(&rows);
+            assert!(text.contains(summary) && !text.contains("Read 0 lines"));
+            assert_eq!(text.contains("next user message"), expanded);
+        }
+    }
+    let binary = Value::object([("attachment", Value::object([]))]);
+    let rows = draw(
+        "read",
+        &arguments,
+        Some(&binary),
+        None,
+        80,
+        &Presentation::default(),
+    );
+    assert!(plain(&rows).contains("Attachment available"));
+}
+
+#[test]
+fn empty_creations_and_unavailable_previous_content_are_honest() {
+    let arguments = Value::object([
+        ("path", Value::string("notes.txt")),
+        ("content", Value::string("hello\n")),
+    ]);
+    let rows = draw(
+        "write",
+        &arguments,
+        Some(&ok()),
+        None,
+        80,
+        &Presentation::default(),
+    );
+    assert!(plain(&rows).contains("Wrote 1 line · previous content unavailable"));
+    assert!(rows.iter().all(|row| row.background.is_none()));
+    let change = Change::between(None, "").unwrap();
+    let rows = draw(
+        "write",
+        &arguments,
+        Some(&ok()),
+        Some(&change),
+        80,
+        &Presentation::default(),
+    );
+    assert_eq!(rows.len(), 2);
+    assert!(plain(&rows).contains("Created an empty file"));
 }

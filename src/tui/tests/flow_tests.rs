@@ -30,33 +30,28 @@ fn tool(app: &mut App, id: &str, output: &str) {
 }
 
 #[test]
-fn tool_inspection_preserves_the_draft_and_source_and_returns_to_editing() {
+fn tool_toggle_preserves_the_draft_and_source_and_returns_to_editing() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
+    app.state.begin_tool_turn();
     tool(&mut app, "first", "one\n\nthree\nfour\nfive\n");
     tool(&mut app, "second", "second output");
     app.state.message(Kind::Assistant, "Between groups.");
     tool(&mut app, "third", "third output");
     app.state.close_tools();
+    app.state.finish_tool_turn();
     app.state.editor.insert("kept draft");
     let caret = app.state.editor.cursor;
     let generation = app.state.generation;
-    assert!(
-        !app.state
-            .rows()
-            .iter()
-            .flatten()
-            .any(|row| row.plain().contains("five"))
-    );
+    let compact = app.state.rows()[0]
+        .iter()
+        .map(|row| row.plain())
+        .collect::<Vec<_>>();
+    assert!(compact.iter().any(|row| row.contains("five")));
+    assert!(!compact.iter().any(|row| row.trim() == "one"));
 
-    key(&mut app, 84, 1); // Alt+T opens the newest tool.
-    assert_eq!(app.state.tool_focus, Some(3));
-    key(&mut app, 38, 0); // Text between groups is skipped.
-    assert_eq!(app.state.tool_focus, Some(1));
-    key(&mut app, 38, 0);
-    assert_eq!(app.state.tool_focus, Some(0));
-    key(&mut app, 13, 0);
+    key(&mut app, 79, 4); // Ctrl+O expands every tool in the completed turn.
     let rows: Vec<_> = app
         .state
         .rows()
@@ -64,8 +59,9 @@ fn tool_inspection_preserves_the_draft_and_source_and_returns_to_editing() {
         .flatten()
         .map(|row| row.plain())
         .collect();
-    assert!(rows.iter().any(|row| row == "│    five"));
-    assert!(rows.iter().any(|row| row == "│    "));
+    assert!(rows.iter().any(|row| row == "    one"));
+    assert!(rows.iter().any(|row| row == "    "));
+    assert!(rows.iter().any(|row| row == "    third output"));
     assert_eq!(app.state.generation, generation);
     assert_eq!(app.state.editor.text, "kept draft");
     assert_eq!(app.state.editor.cursor, caret);
@@ -82,41 +78,37 @@ fn tool_inspection_preserves_the_draft_and_source_and_returns_to_editing() {
         Some("one\n\nthree\nfour\nfive\n")
     );
 
-    key(&mut app, 9, 0); // Tab returns without sending or completing the draft.
-    assert!(app.state.tool_focus.is_none());
-    key(&mut app, 84, 1);
-    key(&mut app, 37, 0); // Editing keys return to the composer.
-    assert!(app.state.tool_focus.is_none());
+    key(&mut app, 79, 4);
+    assert!(!app.state.tool_details.expanded);
+    assert_eq!(app.state.editor.text, "kept draft");
+    key(&mut app, 37, 0);
     assert_eq!(app.state.editor.cursor, caret - 1);
-    key(&mut app, 84, 1);
     app.input(Decoded::Text("!".into())).unwrap();
-    assert!(app.state.tool_focus.is_none());
     assert_eq!(app.state.editor.text, "kept draf!t");
     app.state.editor.replace("/he".into());
     app.edited();
-    key(&mut app, 84, 1);
-    key(&mut app, 27, 0);
     key(&mut app, 9, 0);
     assert_eq!(app.state.editor.text, "/help");
     assert!(fixture.finish().is_empty());
 }
 
 #[test]
-fn leaving_tool_inspection_does_not_cancel_a_running_turn_or_lose_its_draft() {
+fn control_o_during_a_running_turn_does_not_cancel_it_or_lose_its_draft() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion("Finished.", vec![]))]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "A fixture turn.");
     tool(&mut app, "fixture tool", "retained result");
     app.state.editor.insert("next draft");
-    key(&mut app, 84, 1);
-    key(&mut app, 27, 0);
-    assert!(app.state.tool_focus.is_none());
+    key(&mut app, 79, 4);
+    assert!(!app.state.tool_details.expanded);
     assert!(app.worker.is_some());
     assert!(!app.state.activity.as_ref().unwrap().stopping);
     assert_eq!(app.state.editor.text, "next draft");
     finish(&mut app);
     assert_eq!(app.state.status, "Ready");
     assert_eq!(app.state.editor.text, "next draft");
+    key(&mut app, 79, 4);
+    assert!(app.state.tool_details.expanded);
     assert_eq!(fixture.finish().len(), 1);
 }

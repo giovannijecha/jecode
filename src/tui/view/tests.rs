@@ -84,7 +84,7 @@ fn pending_tools_and_following_notices_remain_live_until_the_result_arrives() {
         pending
             .live
             .iter()
-            .any(|line| line.plain().contains("running"))
+            .any(|line| line.plain().contains("⎿ Running…"))
     );
     assert!(
         pending
@@ -125,7 +125,7 @@ fn help_uses_a_temporary_panel_and_keeps_the_draft() {
     ));
     let open = frame(&state, "fixture", "folder");
     assert!(!text(&open).lines().any(|row| row.trim() == "/help"));
-    assert!(!text(&open).contains("└─"));
+    assert!(!text(&open).contains("● Bash("));
     assert!(text(&open).contains("Commands and controls"));
     assert!(text(&open).contains("/export"));
     assert!(text(&open).contains("PgUp/PgDn and wheel"));
@@ -169,7 +169,7 @@ fn the_live_area_and_caret_fit_small_windows_without_truncating_the_draft() {
 }
 
 #[test]
-fn a_finished_card_stays_live_until_its_final_branch_is_known() {
+fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
     let mut state = State::default();
     state.event(Event::ToolStarted {
         id: "fixture".into(),
@@ -188,7 +188,7 @@ fn a_finished_card_stays_live_until_its_final_branch_is_known() {
         provisional
             .live
             .iter()
-            .any(|line| line.plain().starts_with("├─ bash"))
+            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
     );
     state.event(Event::Waiting {
         model: "fixture".into(),
@@ -199,11 +199,27 @@ fn a_finished_card_stays_live_until_its_final_branch_is_known() {
         waiting
             .live
             .iter()
-            .any(|line| line.plain().starts_with("├─ bash"))
+            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
     );
     state.message(Kind::Assistant, "Finished.");
     let settled = frame(&state, "fixture", "folder");
     assert_eq!(settled.history.len(), 2);
-    assert!(settled.history[0][0].plain().starts_with("└─ bash"));
+    assert!(
+        settled.history[0][0]
+            .plain()
+            .starts_with("● Bash(fixture-command)")
+    );
+    assert_eq!(
+        settled.history[0],
+        provisional.live[provisional
+            .live
+            .iter()
+            .position(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .unwrap()..]
+            .iter()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>()
+    );
     assert_eq!(settled.composer, state.height - 4);
 }

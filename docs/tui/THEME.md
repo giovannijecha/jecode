@@ -13,13 +13,12 @@ appear. The palette and style aliases live in
 | --- | --- | --- |
 | `BODY` | Inherited | Assistant prose, draft text, tool output. |
 | `STRONG` | `#E2E8F0` | User text, panel titles, menu names. |
-| `EMPHASIS` | `#DCE4F0` | Tool names, activity labels, Markdown headings and strong text. |
+| `EMPHASIS` | `#DCE4F0` | Tool titles, activity labels, Markdown headings and strong text. |
 | `CODE_TEXT` | `#C9D1D9` | Unhighlighted fenced code. |
 | `MUTED` | `#9AA4B2` | Descriptions, footer, quotes, information and neutral notices. |
-| `TOOL_DIM` | `#879AAA` | Tool inspection hint and activity time. |
-| `FAINT` | `#455769` | Decorative tool guides, below text contrast. |
+| `TOOL_DIM` | `#879AAA` | Expanded tool elapsed time and activity time. |
 | `ACCENT` | `#7AA2F7` | Jecode mark, composer rules, focus, matches, links and inline code. |
-| `TOOL_ACCENT` | `#99B8D4` | Active or selected tool targets and guides. |
+| `TOOL_ACCENT` | `#99B8D4` | Running and background tool markers. |
 | `KEYWORD` | `#BB9AF7` | Code keywords. |
 | `GOOD` | `#9ECE6A` | Successful tools, added lines and code strings. |
 | `BAD` | `#EF8B8B` | Failed tools, destructive choices and removed lines. |
@@ -36,11 +35,9 @@ underline. The palette does not replace the terminal's global colors.
 | Terminal | Inherited | Conversation and notices. |
 | `USER_SURFACE` | `#282E39` | Sent requests and command, selector, information and process panels. |
 | `SELECTED_SURFACE` | `#353D4B` | Selected menu/process rows and Back to bottom badge. |
-| `INSET_SURFACE` | `#202933` | Running tool headers. |
-| `TOOL_SELECTED_SURFACE` | `#2A3848` | Inspected tool headers. |
 | `CODE_SURFACE` | `#20252C` | Fenced code. |
-| `DIFF_ADDED_SURFACE` | `#1E2E23` | Added replacement lines in edit previews. |
-| `DIFF_REMOVED_SURFACE` | `#312026` | Removed replacement lines in edit previews. |
+| `DIFF_ADDED_SURFACE` | `#1E2E23` | Added file lines, including new files. |
+| `DIFF_REMOVED_SURFACE` | `#312026` | Removed file lines. |
 | `CURSOR` | `#1A1B26` on `#C0CAF5` | Software caret, including in shaded panels. |
 
 ## Conversation and tool cards
@@ -50,23 +47,43 @@ messages have a two-cell indent and shaded padding; assistant Markdown
 preserves source lines and blank rows. Fenced code spans the full row width.
 See [Markdown responses](MARKDOWN.md) for the display subset.
 
-Tool calls form an inline tree. Each header has a branch, bold tool name,
-target, status, and elapsed time. At widths of 72 columns or more, outcome
-and time align to the right; on narrower screens, the target wraps and the
-status gets its own row. Running cards use the inset surface. Success is
-green, failure red, stopped work gold, and background work uses the tool
-accent. The selected card uses its own blue-gray surface.
+Every call uses `● Tool(target)` and an indented `⎿` result. The display
+names are Read, Update (the `edit` tool), Write, Bash and Process. Titles
+wrap with a two-cell indent; result continuations and output use four cells.
+Compact titles and individual output lines wrap through at most three rows;
+an ellipsis marks clipped text, which expansion retains in full.
+One neutral row separates calls. Success is green, failure red, stopped work
+gold, and running/background work uses the tool accent.
 
-The latest call previews up to three output rows. Earlier successful calls
-collapse; failures and stops keep their preview. Bash previews favor recent
-stdout, with failed stderr first. Read and write previews begin at the start
-of their content. Edit previews show removed then added text on separate
-surfaces. Expanding a card shows retained details, including capture limits
-and errors. These display choices do not alter model input or saved results.
+Read starts with its returned range; expansion reveals numbered source.
+Image and PDF attachments state their view; expansion reveals attachment metadata.
+Bash and Process keep a recent three-line preview; failed commands prioritize
+up to six error lines. Expansion retains both stdout and stderr. Capture
+limits remain visible in either state. Completed previews stay visible when
+the next call starts. Elapsed time stays in the running result or expanded
+details, without a right-aligned status column.
 
-`Alt+T` enters tool inspection, arrows choose a call, `Enter` toggles details,
-and `Esc` returns to the draft. See [Composer and controls](COMPOSER.md) for
-the complete interaction map and [Tools](../usage/TOOLS.md) for tool behavior.
+Update and Write show contextual diffs with three surrounding source lines,
+original coordinates on removals and resulting coordinates on additions and
+context. Syntax colors remain above full-row red/green surfaces. Wrapped code
+keeps an empty number gutter. Up to 14 logical diff rows remain open; larger
+changes preview both sides of the first hunk and state the hidden row count.
+Expansion reveals all retained hunks; collapse restores the preview. Empty
+creations, no-op edits, final newlines and line-ending conversions have
+explicit text. Failed file calls never display a success diff.
+
+Captured changes persist as local session events, outside provider messages
+and tool results. Replay uses those captured coordinates and content, without
+rereading the file. Old sessions show replacement snippets without inventing
+file coordinates; writes with unavailable previous text use a neutral content
+preview. Size and alignment limits also use this fallback without affecting
+the file operation. See [Tools](../usage/TOOLS.md) for the execution boundary.
+
+`Ctrl+O` expands or collapses every call in the latest finished execution turn.
+Opening scrolls to its first tool; closing returns to the final answer. It is
+ignored while a turn runs, and a new accepted prompt resets the old expansion.
+No tool title opens details individually. See [Composer and controls](COMPOSER.md)
+for the complete interaction map and [Tools](../usage/TOOLS.md) for tool behavior.
 
 ## Panels and feedback
 

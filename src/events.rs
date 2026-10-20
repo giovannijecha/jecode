@@ -45,6 +45,10 @@ pub enum Event {
         summary: String,
         result: Value,
     },
+    ToolChanged {
+        id: String,
+        change: crate::file_change::Change,
+    },
 }
 
 pub trait EventSink {

@@ -153,9 +153,6 @@ impl App {
     /// Opens the panel; `id` opens that process's output directly.
     pub(super) fn open_processes(&mut self, id: &str) {
         self.sync_process_observer();
-        if self.state.tool_focus.is_some() {
-            self.state.select_tool(None);
-        }
         self.state.information = None;
         self.state.suggestions.dismiss();
         self.state.processes = Some(Panel::new(vec![]));

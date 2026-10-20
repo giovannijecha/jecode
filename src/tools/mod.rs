@@ -15,6 +15,11 @@ use std::path::{Path, PathBuf};
 
 pub(super) const OUTPUT_LIMIT: usize = 64 * 1024;
 
+pub struct Execution {
+    pub result: Value,
+    pub change: Option<crate::file_change::Change>,
+}
+
 pub struct Tools {
     root: PathBuf,
     bash: PathBuf,
@@ -132,58 +137,87 @@ impl Tools {
         self.execute_with_cancel(name, arguments, &Cancellation::default())
     }
 
+    #[cfg(test)]
     pub fn execute_with_cancel(
         &self,
         name: &str,
         arguments: &str,
         cancellation: &Cancellation,
     ) -> Value {
-        let result = json::parse(arguments).and_then(|arguments| {
-            if !matches!(arguments, Value::Object(_)) {
-                return Err("Tool arguments must be a JSON object".into());
-            }
-            match name {
-                "read" => {
-                    let path = required_string(&arguments, "path")?;
-                    if attachment::is_reference(path) {
-                        attachment::read(self.attachments.as_ref(), path, &arguments, cancellation)
-                    } else if crate::output::is_reference(path) {
-                        files::read_page(&self.outputs.resolve(path)?, &arguments, cancellation)
-                    } else {
-                        let (root, arguments) = self.file_arguments(&arguments, false)?;
-                        files::read(&root, &arguments, cancellation)
+        self.execute_with_change(name, arguments, cancellation)
+            .result
+    }
+
+    pub fn execute_with_change(
+        &self,
+        name: &str,
+        arguments: &str,
+        cancellation: &Cancellation,
+    ) -> Execution {
+        let result: Result<(Value, Option<crate::file_change::Change>), String> =
+            json::parse(arguments).and_then(|arguments| {
+                if !matches!(arguments, Value::Object(_)) {
+                    return Err("Tool arguments must be a JSON object".into());
+                }
+                match name {
+                    "read" => {
+                        let path = required_string(&arguments, "path")?;
+                        if attachment::is_reference(path) {
+                            attachment::read(
+                                self.attachments.as_ref(),
+                                path,
+                                &arguments,
+                                cancellation,
+                            )
+                            .map(|value| (value, None))
+                        } else if crate::output::is_reference(path) {
+                            files::read_page(&self.outputs.resolve(path)?, &arguments, cancellation)
+                                .map(|value| (value, None))
+                        } else {
+                            let (root, arguments) = self.file_arguments(&arguments, false)?;
+                            files::read(&root, &arguments, cancellation).map(|value| (value, None))
+                        }
                     }
-                }
-                "write" | "edit" => {
-                    let (root, arguments) = self.file_arguments(&arguments, name == "write")?;
-                    if name == "write" {
-                        files::write(&root, &arguments)
-                    } else {
-                        files::edit(&root, &arguments)
+                    "write" | "edit" => {
+                        let (root, arguments) = self.file_arguments(&arguments, name == "write")?;
+                        if name == "write" {
+                            files::write_with_change(&root, &arguments)
+                        } else {
+                            files::edit_with_change(&root, &arguments)
+                        }
                     }
+                    "bash" => {
+                        let temporary = self
+                            .temporary
+                            .as_ref()
+                            .map(|area| area.ensure())
+                            .transpose()?;
+                        Ok((
+                            shell::execute(
+                                &self.bash,
+                                &self.root,
+                                &arguments,
+                                cancellation,
+                                &self.outputs,
+                                temporary.as_deref(),
+                                &self.processes,
+                            )
+                            .unwrap_or_else(|error| {
+                                Value::object([("error", Value::string(error))])
+                            }),
+                            None,
+                        ))
+                    }
+                    "process" => self
+                        .processes
+                        .execute(&arguments, cancellation)
+                        .map(|value| (value, None)),
+                    _ => Err(format!("Unknown tool: {name}")),
                 }
-                "bash" => {
-                    let temporary = self
-                        .temporary
-                        .as_ref()
-                        .map(|area| area.ensure())
-                        .transpose()?;
-                    Ok(shell::execute(
-                        &self.bash,
-                        &self.root,
-                        &arguments,
-                        cancellation,
-                        &self.outputs,
-                        temporary.as_deref(),
-                        &self.processes,
-                    )
-                    .unwrap_or_else(|error| Value::object([("error", Value::string(error))])))
-                }
-                "process" => self.processes.execute(&arguments, cancellation),
-                _ => Err(format!("Unknown tool: {name}")),
-            }
-        });
-        result.unwrap_or_else(|error| Value::object([("error", Value::string(error))]))
+            });
+        let (result, change) =
+            result.unwrap_or_else(|error| (Value::object([("error", Value::string(error))]), None));
+        Execution { result, change }
     }
 }
 

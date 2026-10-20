@@ -18,6 +18,7 @@ struct Call {
     name: &'static str,
     arguments: Value,
     result: Option<Value>,
+    change: Option<crate::file_change::Change>,
     presentation: Presentation,
 }
 
@@ -30,6 +31,7 @@ fn finished(name: &'static str, arguments: Value, result: Value, milliseconds: u
         name,
         arguments,
         result: Some(result),
+        change: None,
         presentation: Presentation {
             elapsed: Some(Duration::from_millis(milliseconds)),
             ..Presentation::default()
@@ -45,6 +47,43 @@ fn command(value: &str) -> Value {
     Value::object([("command", text(value))])
 }
 
+fn update() -> Call {
+    let old = "    let limit = 10;\n";
+    let new = "    let limit = LOGIN_LIMIT;\n    let window = LOGIN_WINDOW;\n";
+    let before = format!(
+        "{}pub fn login() {{\n{old}    check(limit);\n}}\n",
+        "// Login limits.\n".repeat(39)
+    );
+    let after = before.replace(old, new);
+    let mut call = finished(
+        "edit",
+        Value::object([
+            ("path", text("src/routes/auth.rs")),
+            ("old_text", text(old)),
+            ("new_text", text(new)),
+        ]),
+        Value::object([("bytes_written", Value::number(after.len()))]),
+        4,
+    );
+    call.change = crate::file_change::Change::between(Some(&before), &after);
+    call
+}
+
+fn write() -> Call {
+    let content = "use app::limiter;\n\n#[test]\nfn blocks_after_ten_attempts() {\n}\n";
+    let mut call = finished(
+        "write",
+        Value::object([
+            ("path", text("tests/limiter.rs")),
+            ("content", text(content)),
+        ]),
+        Value::object([("bytes_written", Value::number(content.len()))]),
+        3,
+    );
+    call.change = crate::file_change::Change::between(None, content);
+    call
+}
+
 fn sequence() -> Vec<Call> {
     vec![
         finished(
@@ -57,24 +96,12 @@ fn sequence() -> Vec<Call> {
                         "1: use crate::session::Session;\n2:\n3: pub fn login(request: Request) {\n",
                     ),
                 ),
-                ("lines_returned", Value::number(84)),
+                ("lines_returned", Value::number(3)),
                 ("offset", Value::number(1)),
             ]),
             12,
         ),
-        finished(
-            "edit",
-            Value::object([
-                ("path", text("src/routes/auth.rs")),
-                ("old_text", text("    let limit = 10;\n")),
-                (
-                    "new_text",
-                    text("    let limit = LOGIN_LIMIT;\n    let window = LOGIN_WINDOW;\n"),
-                ),
-            ]),
-            Value::object([("bytes_written", Value::number(2310))]),
-            4,
-        ),
+        update(),
         finished(
             "bash",
             command("cargo test --locked limiter"),
@@ -93,18 +120,7 @@ fn sequence() -> Vec<Call> {
             ]),
             8400,
         ),
-        finished(
-            "write",
-            Value::object([
-                ("path", text("tests/limiter.rs")),
-                (
-                    "content",
-                    text("use app::limiter;\n\n#[test]\nfn blocks_after_ten_attempts() {\n}\n"),
-                ),
-            ]),
-            Value::object([("bytes_written", Value::number(412))]),
-            3,
-        ),
+        write(),
         finished(
             "bash",
             command("cargo test --locked limiter"),
@@ -140,8 +156,9 @@ fn long() -> Call {
 fn states() -> Vec<(&'static str, Call)> {
     let mut running = Call {
         name: "bash",
-        arguments: command("npm run build"),
+        arguments: command("cargo build --locked"),
         result: None,
+        change: None,
         presentation: Presentation::live(),
     };
     running.presentation.started = Instant::now().checked_sub(Duration::from_millis(2400));
@@ -153,12 +170,12 @@ fn states() -> Vec<(&'static str, Call)> {
                 "content",
                 text("1: pub struct Limiter {\n2:     attempts: u32,\n"),
             ),
-            ("lines_returned", Value::number(40)),
+            ("lines_returned", Value::number(2)),
             ("offset", Value::number(1)),
         ]),
         9,
     );
-    selected.presentation.selected = true;
+    selected.presentation.expanded = Some(true);
     let mut expanded = sequence().remove(1);
     expanded.presentation.expanded = Some(true);
     vec![
@@ -227,12 +244,12 @@ fn states() -> Vec<(&'static str, Call)> {
         ),
         ("Long command", long()),
         ("Edit preview", sequence().remove(1)),
-        ("Selected", selected),
+        ("Expanded read", selected),
         ("Expanded details", expanded),
     ]
 }
 
-fn card(call: &Call, last: bool, preview: bool, columns: usize) -> Vec<Line> {
+fn card(call: &Call, columns: usize) -> Vec<Line> {
     let summary = call
         .result
         .as_ref()
@@ -244,24 +261,28 @@ fn card(call: &Call, last: bool, preview: bool, columns: usize) -> Vec<Line> {
             arguments: &call.arguments,
             summary: &summary,
             result: call.result.as_ref(),
-            last,
-            preview,
+            change: call.change.as_ref(),
             presentation: &call.presentation,
         },
         columns,
     )
 }
 
-// One turn as the transcript shows it: only the latest call keeps a preview.
+// The completed diff remains visible when another tool starts.
 fn turn(rows: &mut Vec<(Line, usize)>, columns: usize) {
     let calls = sequence();
     for line in markdown::render("I'll add a login limiter and test it.", columns) {
         rows.push((line, columns));
     }
     rows.push((Line::default(), columns));
-    for (index, call) in [&calls[0], calls.last().unwrap()].into_iter().enumerate() {
-        let last = index == 1;
-        for line in card(call, last, last, columns) {
+    for (index, call) in [&calls[0], &calls[1], calls.last().unwrap()]
+        .into_iter()
+        .enumerate()
+    {
+        if index > 0 {
+            rows.push((Line::default(), columns));
+        }
+        for line in card(call, columns) {
             rows.push((line, columns));
         }
     }
@@ -285,7 +306,7 @@ fn tools() {
     heading(&mut rows, "Tool cards  ·  states");
     for (title, call) in states() {
         rows.push((Line::new(title, MUTED), WIDE));
-        for line in card(&call, true, true, WIDE) {
+        for line in card(&call, WIDE) {
             rows.push((line, WIDE));
         }
         rows.push((Line::default(), WIDE));
@@ -297,12 +318,12 @@ fn tools() {
     turn(&mut rows, NARROW);
     rows.push((Line::default(), NARROW));
     rows.push((Line::new("Long command", MUTED), NARROW));
-    for line in card(&long(), true, true, NARROW) {
+    for line in card(&long(), NARROW) {
         rows.push((line, NARROW));
     }
     for columns in [71, 72] {
         heading(&mut rows, &format!("Tool header  ·  {columns} columns"));
-        for line in card(&long(), true, true, columns) {
+        for line in card(&long(), columns) {
             rows.push((line, columns));
         }
     }

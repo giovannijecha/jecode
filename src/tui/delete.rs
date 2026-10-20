@@ -70,6 +70,7 @@ impl App {
             Ok((report, current)) => {
                 if current {
                     self.cancel_copy();
+                    self.state.reset_tool_details();
                     self.state.items.clear();
                     self.state.editor = self.state.history.draft(&self.state.editor).clone();
                     self.state.history = History::default();

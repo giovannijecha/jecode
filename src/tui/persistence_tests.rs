@@ -179,9 +179,11 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
         .unwrap();
     first.state.editor.insert(" revised");
     first.persist_input(true);
+    assert!(first.state.items.iter().any(|item| matches!(item, state::Item::Tool { name, change: Some(change), .. } if name == "write" && change.created && change.added == 1)));
     let id = first.persistence.as_ref().unwrap().id();
     drop(first);
     assert_eq!(fixture.finish().len(), 2);
+    std::fs::write(directory.path().join("file.txt"), "changed after save").unwrap();
     let mut resumed = app(&home, &directory, "http://127.0.0.1:1/chat/completions");
     assert!(resumed.state.items.is_empty());
     assert_eq!(resumed.archive.messages.lock().unwrap().len(), 1);
@@ -223,7 +225,7 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
     assert!(resumed.worker.is_none());
     assert_eq!(
         std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
-        "original"
+        "changed after save"
     );
     assert!(resumed.state.items.iter().any(|item| matches!(item, state::Item::Tool { name, result: Some(_), last: Some(true), .. } if name == "write")));
     assert!(resumed.state.items.iter().any(|item| matches!(item, state::Item::Local { command, details, .. } if command == "/help" && details.iter().any(|(key, _)| key == "/resume"))));
@@ -236,7 +238,10 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rows.contains("Answer preserved"));
-    assert!(rows.contains("write  "));
+    assert!(rows.contains("● Write(file.txt)"));
+    assert!(rows.contains("⎿ Added 1 line, removed 0 lines"));
+    assert!(rows.contains("original"));
+    assert!(resumed.state.items.iter().any(|item| matches!(item, state::Item::Tool { name, change: Some(change), .. } if name == "write" && change.created && change.added == 1)));
     assert!(
         resumed
             .state

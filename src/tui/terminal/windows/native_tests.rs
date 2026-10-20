@@ -6,14 +6,19 @@ use crate::{
     openrouter::OpenRouter,
     process,
     session::SessionConfig,
-    test_support::{Directory, HttpFixture, completion},
+    test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
 };
 
 #[test]
 #[ignore = "requires Windows ConPTY for an isolated native console check"]
 fn native_windows_fullscreen_controls_and_terminal_lifetime() {
-    for scenario in ["interactive", "owner-death", "guardian-loss"] {
+    for scenario in [
+        "interactive",
+        "delete-current",
+        "owner-death",
+        "guardian-loss",
+    ] {
         let directory = Directory::new();
         let script = format!(
             "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', '{}')\n",
@@ -125,6 +130,72 @@ fn full_width_console(bash: &std::path::Path) {
     drop(terminal);
 }
 
+fn tool_cards_console(bash: &std::path::Path) {
+    use crate::{events::Event, json::Value, tui::state::State};
+    let terminal = Terminal::open(bash).unwrap();
+    let (width, height) = terminal.size;
+    let mut state = State {
+        width,
+        height,
+        ..State::default()
+    };
+    state.event(Event::ToolStarted {
+        id: "update".into(),
+        name: "edit".into(),
+        arguments: Value::object([("path", Value::string("src/limit.rs"))]),
+    });
+    state.event(Event::ToolChanged {
+        id: "update".into(),
+        change: crate::file_change::Change::between(
+            Some("let limit = 10;\n"),
+            "let limit = LOGIN_LIMIT;\n",
+        )
+        .unwrap(),
+    });
+    state.event(Event::ToolFinished {
+        id: "update".into(),
+        name: "edit".into(),
+        summary: "wrote file".into(),
+        result: Value::object([("bytes_written", Value::number(25))]),
+    });
+    state.event(Event::ToolStarted {
+        id: "verify".into(),
+        name: "bash".into(),
+        arguments: Value::object([("command", Value::string("cargo test --locked --offline"))]),
+    });
+    let rows: Vec<_> = state.rows().into_iter().flatten().collect();
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().contains("1 −  let limit = 10;"))
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().contains("1 +  let limit = LOGIN_LIMIT;"))
+    );
+    let expected: String = (0..height)
+        .map(|index| {
+            let text = rows.get(index).map_or_else(String::new, |row| row.plain());
+            format!(
+                "{text}{}",
+                " ".repeat(width.saturating_sub(crate::tui::text::cells(&text)))
+            )
+        })
+        .collect();
+    let frame = crate::tui::view::Frame {
+        header: vec![],
+        history: vec![],
+        live: rows,
+        cursor: None,
+        composer: height - 1,
+    };
+    let output = crate::tui::render::Renderer::new().paint(&frame, width, height);
+    write!(io::stdout(), "{output}").unwrap();
+    io::stdout().flush().unwrap();
+    let snapshot = probe();
+    assert_eq!(snapshot.lines().nth(1).unwrap(), expected);
+    drop(terminal);
+}
+
 #[test]
 #[ignore = "private child fixture of the native Windows ConPTY check"]
 fn native_console_fixture() {
@@ -154,7 +225,29 @@ fn native_console_fixture() {
         println!("NATIVE_GUARDIAN_RESTORED");
         return;
     }
+    if scenario == "delete-current" {
+        let fixture = HttpFixture::new(vec![(200, completion("Native completed.", vec![]))]);
+        let settings =
+            Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+        let config = SessionConfig {
+            store: Store::new(path.join("home")),
+            settings,
+            bash,
+        };
+        config.store.save(&config.settings).unwrap();
+        let agent = Agent::new(
+            OpenRouter::fixture(fixture.endpoint.clone()),
+            Tools::new(&path).unwrap(),
+        );
+        crate::tui::run(agent, config, Default::default()).unwrap();
+        restored(&path);
+        assert_eq!(fixture.finish().len(), 1);
+        println!("NATIVE_DELETE_RESTORED");
+        return;
+    }
     full_width_console(&bash);
+    restored(&path);
+    tool_cards_console(&bash);
     restored(&path);
     std::fs::write(path.join("drop me.txt"), "dropped through ConPTY").unwrap();
     let response = (0..100)
@@ -167,7 +260,37 @@ fn native_console_fixture() {
         ]}}"#,
     )
     .unwrap();
-    let fixture = HttpFixture::new(vec![(200, completion(&response, vec![])), (200, listing)]);
+    let content = (0..30)
+        .map(|line| format!("native detail {line:02}\n"))
+        .collect::<String>();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![
+                    tool_call(
+                        "native-read",
+                        "read",
+                        crate::json::Value::object([(
+                            "path",
+                            crate::json::Value::string("drop me.txt"),
+                        )]),
+                    ),
+                    tool_call(
+                        "native-write",
+                        "write",
+                        crate::json::Value::object([
+                            ("path", crate::json::Value::string("native-tool.txt")),
+                            ("content", crate::json::Value::string(content)),
+                        ]),
+                    ),
+                ],
+            ),
+        ),
+        (200, completion(&response, vec![])),
+        (200, listing),
+    ]);
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let config = SessionConfig {
         store: Store::new(path.join("home")),
@@ -197,7 +320,7 @@ fn native_console_fixture() {
     );
     assert_eq!(saved.input.draft.attachments[0].name, "drop me.txt");
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 2);
-    assert!(requests[1].headers[0].starts_with("GET /models/fixture/model/endpoints "));
+    assert_eq!(requests.len(), 3);
+    assert!(requests[2].headers[0].starts_with("GET /models/fixture/model/endpoints "));
     println!("NATIVE_RESTORED");
 }

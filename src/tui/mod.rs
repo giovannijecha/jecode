@@ -357,3 +357,5 @@ mod spacing_tests;
 mod specimen;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tool_details_tests;

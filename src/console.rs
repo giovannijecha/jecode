@@ -21,7 +21,10 @@ impl<'a, O: Write, E: Write> Console<'a, O, E> {
 impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
     fn emit(&mut self, event: Event) -> Result<(), String> {
         let result = match event {
-            Event::Reasoning | Event::Working | Event::Streaming { .. } => return Ok(()),
+            Event::Reasoning
+            | Event::Working
+            | Event::Streaming { .. }
+            | Event::ToolChanged { .. } => return Ok(()),
             Event::Message { text } => {
                 writeln!(self.output, "{text}").and_then(|_| self.output.flush())
             }
@@ -63,7 +66,8 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                     Event::Message { .. }
                     | Event::Reasoning
                     | Event::Working
-                    | Event::Streaming { .. } => unreachable!(),
+                    | Event::Streaming { .. }
+                    | Event::ToolChanged { .. } => unreachable!(),
                 };
                 writeln!(self.status, "{text}").and_then(|_| self.status.flush())
             }

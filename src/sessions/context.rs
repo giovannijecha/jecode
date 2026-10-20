@@ -96,6 +96,17 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
             return Err("Saved event is outside the conversation".into());
         }
         match string(event, "type")? {
+            "turn_start" => {
+                let index = integer(event, "after_message")? as usize;
+                if messages
+                    .get(index)
+                    .and_then(|message| message.get("role"))
+                    .and_then(Value::as_str)
+                    != Some("user")
+                {
+                    return Err("Turn start has no user request".into());
+                }
+            }
             "local_command" => {
                 string(event, "command")?;
                 string(event, "result")?;
@@ -114,6 +125,21 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
             }
             "temporary_cleanup" => {
                 string(event, "result")?;
+            }
+            "tool_change" => {
+                let index = integer(event, "after_message")? as usize;
+                let Some(message) = index.checked_sub(1).and_then(|index| messages.get(index))
+                else {
+                    return Err("File change has no tool result".into());
+                };
+                if string(message, "role")? != "tool"
+                    || string(message, "tool_call_id")? != string(event, "tool_call_id")?
+                {
+                    return Err("File change does not match its tool result".into());
+                }
+                crate::file_change::Change::from_value(
+                    event.get("change").ok_or("Missing file change")?,
+                )?;
             }
             _ => return Err("Unsupported saved conversation event".into()),
         }

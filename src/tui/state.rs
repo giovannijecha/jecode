@@ -40,6 +40,7 @@ pub enum Item {
         arguments: Value,
         summary: String,
         result: Option<Value>,
+        change: Option<Box<crate::file_change::Change>>,
         last: Option<bool>,
         presentation: Presentation,
     },
@@ -68,7 +69,7 @@ pub struct State {
     pub generation: u64,
     pub revision: u64,
     pub tool_revision: u64,
-    pub tool_focus: Option<usize>,
+    pub tool_details: tools::ToolDetails,
     pub width: usize,
     pub height: usize,
     pub effort: String,
@@ -93,7 +94,7 @@ impl Default for State {
             generation: 0,
             revision: 0,
             tool_revision: 0,
-            tool_focus: None,
+            tool_details: tools::ToolDetails::default(),
             width: 80,
             height: 24,
             effort: "default".into(),
@@ -132,6 +133,7 @@ impl State {
             Event::Streaming { .. }
                 | Event::Message { .. }
                 | Event::ToolStarted { .. }
+                | Event::ToolChanged { .. }
                 | Event::ToolFinished { .. }
         ) {
             self.changed();
@@ -250,9 +252,15 @@ impl State {
                     arguments,
                     summary: "running".into(),
                     result: None,
+                    change: None,
                     last: None,
                     presentation: Presentation::live(),
                 });
+            }
+            Event::ToolChanged { id, change } => {
+                if let Some(Item::Tool { change: captured, .. }) = self.items.iter_mut().rev().find(|item| matches!(item, Item::Tool { id: current, result: None, .. } if *current == id)) {
+                    *captured = Some(Box::new(change));
+                }
             }
             Event::ToolFinished {
                 id,
@@ -292,7 +300,7 @@ impl State {
         self.finish_stream();
         self.close_tools();
         self.items.clear();
-        self.tool_focus = None;
+        self.tool_details = tools::ToolDetails::default();
         self.generation = self.generation.wrapping_add(1);
         self.changed();
         self.status = "Ready".into();

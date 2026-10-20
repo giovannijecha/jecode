@@ -19,7 +19,6 @@ const FOREGROUNDS: &[(&str, &[(&str, Style)])] = &[
             ("CODE_TEXT", CODE_TEXT),
             ("MUTED", MUTED),
             ("TOOL_DIM", TOOL_DIM),
-            ("FAINT", FAINT),
         ],
     ),
     (
@@ -39,8 +38,6 @@ const FOREGROUNDS: &[(&str, &[(&str, Style)])] = &[
 const BACKGROUNDS: &[(&str, Surface)] = &[
     ("USER_SURFACE", USER_SURFACE),
     ("SELECTED_SURFACE", SELECTED_SURFACE),
-    ("INSET_SURFACE", INSET_SURFACE),
-    ("TOOL_SELECTED_SURFACE", TOOL_SELECTED_SURFACE),
     ("CODE_SURFACE", CODE_SURFACE),
     ("DIFF_ADDED_SURFACE", DIFF_ADDED_SURFACE),
     ("DIFF_REMOVED_SURFACE", DIFF_REMOVED_SURFACE),
@@ -167,7 +164,7 @@ fn palette(rows: &mut Vec<Line>) {
         for (name, style) in *roles {
             let mut line = Line::new(&format!("    {name:<14}{:<10}", rgb(*style)), MUTED);
             line.push("███  Sample text  ", *style);
-            for background in [USER_SURFACE, SELECTED_SURFACE, INSET_SURFACE] {
+            for background in [USER_SURFACE, SELECTED_SURFACE] {
                 on(&mut line, " Sample text ", *style, background);
                 line.push("  ", BODY);
             }
@@ -181,7 +178,6 @@ fn palette(rows: &mut Vec<Line>) {
         for (sample, style) in [
             ("Text", STRONG),
             ("Muted", MUTED),
-            ("Faint", FAINT),
             ("Accent", ACCENT),
             ("Good", GOOD),
             ("Bad", BAD),

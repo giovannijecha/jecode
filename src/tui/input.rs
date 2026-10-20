@@ -35,9 +35,6 @@ impl App {
                 return Ok(false);
             }
             Decoded::Text(text) | Decoded::Paste(text) => {
-                if self.state.tool_focus.is_some() {
-                    self.state.select_tool(None);
-                }
                 if self.deletion_job.is_some() && self.state.selector.is_some() {
                     return Ok(false);
                 }
@@ -97,6 +94,9 @@ impl App {
             });
             return Ok(false);
         }
+        if self.inspect_key(key) {
+            return Ok(false);
+        }
         if self.state.processes.is_some() {
             return self.process_key(key);
         }
@@ -113,9 +113,6 @@ impl App {
                 return Ok(false);
             }
             self.state.information = None;
-        }
-        if self.state.selector.is_none() && self.inspect_key(key) {
-            return Ok(false);
         }
         if self.state.queue.is_editing() && (key.code == 27 || key.ctrl() && key.code == 67) {
             self.finish_draft_edit(false);

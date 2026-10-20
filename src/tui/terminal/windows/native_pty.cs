@@ -127,11 +127,12 @@ public sealed class JecodeTestPty : IDisposable {
         byte[] bytes = Encoding.UTF8.GetBytes(text);
         input.Write(bytes, 0, bytes.Length); input.Flush();
     }
-    public void Wait(string text) {
+    public int Mark() { lock (gate) { return received.Length; } }
+    public void Wait(string text, int after = 0) {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         while (clock.ElapsedMilliseconds < 20000) {
             lock (gate) {
-                string plain = System.Text.RegularExpressions.Regex.Replace(received.ToString(), "\x1b\\[[0-?]*[ -/]*[@-~]", "");
+                string plain = System.Text.RegularExpressions.Regex.Replace(received.ToString(after, received.Length - after), "\x1b\\[[0-?]*[ -/]*[@-~]", "");
                 if (plain.Contains(text)) return;
             }
             Thread.Sleep(10);
@@ -156,6 +157,11 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("Ask anything");
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native row 099");
+                pty.Wait("Complete ·");
+                int expanded = pty.Mark(); pty.Send("\x0f");
+                pty.Wait("native detail 09", expanded);
+                int collapsed = pty.Mark(); pty.Send("\x0f");
+                pty.Wait("Native row 099", collapsed);
                 // Routing at normal, narrow and short sizes; focus starts on the current row.
                 pty.Send("/routing"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Routing · fixture/model");
@@ -181,9 +187,31 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Send("\x1b[A"); Thread.Sleep(100); pty.Send("\x1b[B");
                 pty.Resize(40, 12); pty.Resize(5, 2); pty.Resize(80, 24);
                 pty.Send("\x11");
-                pty.Wait("Jecode closed: 1 prompts, 0 tools");
+                pty.Wait("Jecode closed: 1 prompts, 2 tools");
                 pty.Wait("Resume: jecode resume");
                 pty.Wait("NATIVE_RESTORED");
+                pty.Finish(true);
+            } else if (scenario == "delete-current") {
+                pty.Wait("Ask anything");
+                pty.Send("/resume"); Thread.Sleep(150); pty.Send("\r");
+                pty.Wait("No saved conversations");
+                int initiallyEmpty = pty.Mark(); pty.Send("\x1b");
+                pty.Wait("Ask anything", initiallyEmpty);
+                pty.Send("native delete request"); Thread.Sleep(150); pty.Send("\r");
+                pty.Wait("Native completed.");
+                int openSaved = pty.Mark(); pty.Send("/resume"); Thread.Sleep(150); pty.Send("\r");
+                pty.Wait("native delete request", openSaved);
+                int confirmDelete = pty.Mark(); pty.Send("\x04");
+                pty.Wait("Delete?", confirmDelete);
+                int deleted = pty.Mark(); pty.Send("\r");
+                pty.Wait("No saved conversations", deleted);
+                int afterDelete = pty.Mark(); pty.Send("\x1b");
+                pty.Wait("Ask anything", afterDelete);
+                int noTools = pty.Mark(); pty.Send("\x0f");
+                pty.Send("still in composer");
+                pty.Wait("still in composer", noTools);
+                pty.Send("\x11");
+                pty.Wait("NATIVE_DELETE_RESTORED");
                 pty.Finish(true);
             } else if (scenario == "owner-death") {
                 pty.Wait("NATIVE_OWNER_READY");

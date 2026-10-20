@@ -14,7 +14,7 @@ Paths are relative to `src/`.
 | Settings and model effort | `config/`, `effort.rs` |
 | Agent and context | `agent.rs`, `agent/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
-| Tools and output | `tools/`, `process.rs`, `process/`, `output.rs`, `output/` |
+| Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments | `attachments/`, `tools/attachment.rs` |
@@ -37,6 +37,15 @@ Paths are relative to `src/`.
 
 The harness supplies tools, context and history. It adds no completion gates,
 repeated-command refusals or model-output validation.
+
+File writes and exact edits capture contextual changes at execution time.
+`file_change.rs` owns their text alignment and serializable hunks, independently
+of terminal rendering. A local `tool_change` event is saved with the tool-result
+checkpoint and replayed to the TUI; it is excluded from provider messages and
+context estimates. The model-facing tool result remains unchanged.
+Optional capture bounds input size and alignment work; unavailable diffs never
+reject an otherwise valid write or edit. Local `turn_start` events preserve
+execution-turn grouping across queued follow-ups and resume.
 
 ### Context and compaction
 

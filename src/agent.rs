@@ -251,9 +251,31 @@ impl Agent {
                     self.cancel_calls(&completion.calls[index..]);
                     return Err(error);
                 }
-                let result = self.execute_tool(call);
-                self.tool_result(call, &result);
+                let outcome = self.execute_tool_with_change(call);
+                let result = &outcome.result;
+                self.tool_result(call, result);
+                let change = outcome.change.map(|change| change.redacted(&self.redactor));
+                if let Some(change) = &change {
+                    self.events.lock().unwrap().push(Value::object([
+                        ("type", Value::string("tool_change")),
+                        (
+                            "after_message",
+                            Value::number(self.messages.lock().unwrap().len()),
+                        ),
+                        ("tool_call_id", Value::string(self.redact(&call.id))),
+                        ("change", change.value()),
+                    ]));
+                }
                 if let Err(error) = self.checkpoint(crate::sessions::Stage::ToolFinished) {
+                    self.cancel_calls(&completion.calls[index + 1..]);
+                    return Err(error);
+                }
+                if let Some(change) = change
+                    && let Err(error) = events.emit(Event::ToolChanged {
+                        id: self.redact(&call.id),
+                        change,
+                    })
+                {
                     self.cancel_calls(&completion.calls[index + 1..]);
                     return Err(error);
                 }
@@ -261,8 +283,8 @@ impl Agent {
                     .emit(Event::ToolFinished {
                         id: self.redact(&call.id),
                         name: self.redact(&call.name),
-                        summary: self.redact(&tool_summary(&call.name, &result)),
-                        result: self.redactor.value(&result),
+                        summary: self.redact(&tool_summary(&call.name, result)),
+                        result: self.redactor.value(result),
                     })
                     .and_then(|()| self.emit_context(events))
                 {

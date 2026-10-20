@@ -29,13 +29,21 @@ and clipboard images.
 | `Ctrl+P` / `Ctrl+N` | Browse up to 50 sent prompts; commands are excluded. |
 | `Alt+V` | Attach the clipboard image. `Ctrl+V` remains the terminal's text paste. |
 | `Alt+Up` | Open pending drafts. |
-| `Alt+T` | Inspect the latest tool call. |
+| `Ctrl+O` | Expand or collapse every tool in the latest finished execution turn. |
 | `Ctrl+Q` | Cancel active work, save input, and quit. |
 
 Prompt history preserves the unsent draft and caret. `Esc` leaves history and
-returns to that draft. While inspecting tools, `Up`/`Down` selects calls,
-`Enter` expands or collapses retained details, and `Esc` or `Tab` returns to
-the composer. Typing also leaves inspection and edits the saved draft.
+returns to that draft. `Ctrl+O` is ignored during generation and becomes
+available when the worker ends, including after a stop or error. It opens all
+tools from that turn and moves the view to its first tool; pressing it again
+restores the normal previews and returns to the final answer. A finished turn
+without tools has no toggle, and earlier turns are never substituted. Typing
+an unsent draft keeps details open. Accepting a new user prompt collapses the
+old details until the new turn finishes.
+Expansion is temporary. Resumed sessions start compact and retain execution-turn
+boundaries, including messages accepted during generation. Legacy sessions use
+the last saved request block for the toggle. The shortcut is listed in `/help`;
+it adds no persistent composer hint.
 
 ## Activity and queue
 
@@ -103,8 +111,8 @@ See [Tools](../usage/TOOLS.md) for process behavior.
 `Page Up`/`Page Down` and the mouse wheel browse the conversation. Scrolling
 up holds the reading position while new output arrives. `Alt+Home` goes to
 the start; `Alt+End` follows the latest output. `Esc` returns to the bottom
-while reading, but closes an open panel, draft edit, history, or tool
-inspection first. At the bottom, `Esc` stops active work. `Ctrl+C` also stops
+while reading, but closes an open panel, draft edit, or history first. At the
+bottom, `Esc` stops active work. `Ctrl+C` also stops
 work, closes a panel, or clears an idle draft; it never exits. See
 [Scrolling and resize](RESIZE.md) for reflow and terminal restoration.
 

@@ -23,6 +23,19 @@ and `edit` reject read-only files and replace accepted files through a sibling
 temporary file. Content must be UTF-8 text without NUL bytes; binary or invalid
 UTF-8 reads fail.
 
+The interactive TUI shows Read, Update (`edit`), Write, Bash and Process in one
+inline format. Successful file changes retain a numbered contextual diff,
+including Write on an existing text file. These display records stay in local
+session history and survive resume without changing model-facing tool results.
+Diff capture is optional: inputs above 1 MiB or 20,000 lines, and expensive
+alignments, use a neutral content preview. These display limits never reject
+a valid file modification.
+Short diffs stay open when another tool starts. After the execution turn ends,
+`Ctrl+O` expands every call from that turn, including long diffs and retained
+output; another `Ctrl+O` restores the normal previews. The shortcut is ignored
+during generation and does nothing when the latest finished turn has no tools.
+See [TUI theme](../tui/THEME.md) for presentation and controls.
+
 `read` uses one-based `offset` (default 1) and `limit` (default 200, maximum
 2,000 lines). Pages are also capped at 64 KiB. Continue with `next_offset`; for
 a line split by the byte cap, use `next_byte_offset` as `byte_offset`.

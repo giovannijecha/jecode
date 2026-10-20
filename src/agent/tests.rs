@@ -144,6 +144,29 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
         assert!(events.contains(&format!("[tool: {name}]")));
     }
     assert!(events.contains("[bash: exit 0]"));
+    let archive = agent.archive().document();
+    let changes: Vec<_> = archive
+        .get("events")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("tool_change"))
+        .collect();
+    assert_eq!(changes.len(), 2);
+    assert_eq!(
+        changes[0].get("tool_call_id").and_then(Value::as_str),
+        Some("write_1")
+    );
+    assert_eq!(
+        changes[1].get("tool_call_id").and_then(Value::as_str),
+        Some("edit_1")
+    );
+    for change in changes {
+        let change = crate::file_change::Change::from_value(change.get("change").unwrap()).unwrap();
+        assert_eq!(change.added, 1);
+        assert_eq!(change.removed, usize::from(!change.created));
+    }
     let requests = fixture.finish();
     let second = requests[1]
         .body
@@ -169,6 +192,10 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
     assert_eq!(result.get("stdout").unwrap().as_str(), Some("after\n"));
     assert_eq!(result.get("exit_code").unwrap().as_usize(), Some(0));
     for request in &requests {
+        let body = request.body.encode();
+        for local_field in ["tool_change", "old_line", "hunks"] {
+            assert!(!body.contains(local_field));
+        }
         assert_eq!(
             request.body.get("tools").unwrap().as_array().unwrap().len(),
             5
@@ -444,6 +471,10 @@ fn interrupted_result_display_keeps_completed_work_and_cancels_remaining_calls()
                     ("path", Value::string("completed.txt")),
                     ("content", Value::string("done"))
                 ]),
+            },
+            Event::ToolChanged {
+                id: "completed".into(),
+                change: crate::file_change::Change::between(None, "done").unwrap(),
             },
             Event::ToolFinished {
                 id: "completed".into(),

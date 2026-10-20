@@ -6,7 +6,12 @@ use crate::{
 };
 
 impl Agent {
+    #[cfg(test)]
     pub(super) fn execute_tool(&self, call: &ToolCall) -> Value {
+        self.execute_tool_with_change(call).result
+    }
+
+    pub(super) fn execute_tool_with_change(&self, call: &ToolCall) -> crate::tools::Execution {
         if call.name == "read"
             && let Ok(arguments) = json::parse(&call.arguments)
             && arguments
@@ -14,12 +19,16 @@ impl Agent {
                 .and_then(Value::as_str)
                 .is_some_and(|path| path.starts_with("history:"))
         {
-            return self
+            let result = self
                 .read_history(&arguments)
                 .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
+            return crate::tools::Execution {
+                result,
+                change: None,
+            };
         }
         self.tools
-            .execute_with_cancel(&call.name, &call.arguments, &self.cancellation)
+            .execute_with_change(&call.name, &call.arguments, &self.cancellation)
     }
 
     fn read_history(&self, arguments: &Value) -> Result<Value, String> {

@@ -11,6 +11,7 @@ mod copy;
 mod effort;
 mod events;
 mod export;
+mod file_change;
 mod inbox;
 mod input;
 mod json;
