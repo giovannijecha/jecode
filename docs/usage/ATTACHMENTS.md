@@ -68,13 +68,21 @@ scope, with these references adding access to the stored copies.
 
 ## Storage and retention
 
+The model can also use `read` on an image or PDF in the project or the current
+`tmp:` area. Jecode recognizes the file's contents, imports a copy into this
+same pool and returns its `attachment:ID` reference. It then sends the visual
+content on the next request, just as for `read attachment:ID`. No composer
+attachment is needed. The normal file-tool path boundaries still apply.
+
 Copies live in the project's session bucket, under
 `~/.jecode/sessions/<project>/attachments/`. Each asset has metadata and an
 exact-byte copy; converted images can also have a provider view. Changes to
 the original file do not change its copy. Drafts, plain-chat staging, queued
 and paused messages, prompt history and saved messages retain their elements
-across cancellation, session switches, restarts and crash recovery. PDF
-annotation images are stored here too.
+across cancellation, session switches, restarts and crash recovery. Tool results
+that reference imported images or PDFs also retain their copies. Cleaning the
+temporary area removes its originals, not these saved copies. PDF annotation
+images are stored here too.
 
 An asset is removed only when no saved session in the bucket refers to it.
 On TUI exit, collection gives unreferenced imports a 10-minute grace period

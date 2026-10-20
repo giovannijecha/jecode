@@ -48,12 +48,20 @@ preserves source lines and blank rows. Fenced code spans the full row width.
 See [Markdown responses](MARKDOWN.md) for the display subset.
 
 Every call uses `● Tool(target)` and an indented `⎿` result. The display
-names are Read, Update (the `edit` tool), Write, Bash and Process. Titles
+names are Read, Skill (a `read` of a skill's `SKILL.md`), Update (the `edit`
+tool), Write, Bash and Process. A successful skill load uses the same green
+marker; a failed read keeps the error state. Titles
 wrap with a two-cell indent; result continuations and output use four cells.
 Compact titles and individual output lines wrap through at most three rows;
 an ellipsis marks clipped text, which expansion retains in full.
 One neutral row separates calls. Success is green, failure red, stopped work
 gold, and running/background work uses the tool accent.
+
+Tool cards retain the result reported when a call returned. A Bash launch says
+`Started in background · ID`; a running Process check says
+`Running at last check · ID`. The tool accent identifies background work at
+that point, rather than a live status indicator. `/terminal` shows the current
+active processes and removes them from its list when they finish.
 
 Read starts with its returned range; expansion reveals numbered source.
 Image and PDF attachments state their view; expansion reveals attachment metadata.

@@ -9,7 +9,7 @@
 pub mod annotations;
 pub mod base64;
 pub mod capture;
-mod media;
+pub(crate) mod media;
 pub mod paths;
 mod pool;
 pub mod provider;

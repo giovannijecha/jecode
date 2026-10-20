@@ -36,8 +36,10 @@ their existing parent-directory requirement. Absolute paths inside the same
 temporary area are accepted too, including Git Bash `/c/...` paths on Windows.
 Other sessions and configuration directories are not extra file-tool roots.
 Traversal, ownership metadata paths, links and Windows junctions are rejected
-within temporary paths. The file tools continue to read/write UTF-8 text;
-Bash can create other file types in the area.
+within temporary paths. `write` and `edit` use UTF-8 text. `read` also recognizes
+images and PDFs and shows them to the model through a saved attachment copy;
+its returned `attachment:ID` remains readable after temporary cleanup. Bash
+can create other file types in the area. See [Attachments](ATTACHMENTS.md).
 
 Bash starts in the project and receives `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP`
 pointing to this session area. Use quoted paths:

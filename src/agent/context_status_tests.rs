@@ -190,7 +190,7 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
 #[test]
 fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
     let directory = Directory::new();
-    let prompt = "original objective ".repeat(750);
+    let prompt = "original objective ".repeat(1500);
     let fixture = HttpFixture::new(vec![
         (
             400,

@@ -127,8 +127,9 @@ model for one launch without editing defaults; a different model starts at
 `default` effort and uses that model's saved routing choice. `jecode setup`
 always manages the personal file.
 
-`JECODE_HOME` selects an absolute configuration directory, including sessions
-and temporary storage, and `JECODE_BASH` selects the Bash executable. These are
+`JECODE_HOME` selects an absolute configuration directory, including sessions,
+temporary storage and the personal [skill library](SKILLS.md), and `JECODE_BASH`
+selects the Bash executable. These are
 useful for isolated development.
 
 `/model`, `/effort` and `/routing` change the conversation without changing

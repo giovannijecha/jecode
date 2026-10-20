@@ -75,14 +75,20 @@ pub fn tool_summary(name: &str, result: &Value) -> String {
         return format!("{} processes, {running} running", processes.len());
     }
     if let Some(status) = process_status(result) {
+        let id = result
+            .get("process_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         return match status {
-            "running" | "stopping" => format!(
-                "{status} in background · {}",
-                result
-                    .get("process_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
+            "running" => format!(
+                "{} · {id}",
+                if name == "bash" {
+                    "started in background"
+                } else {
+                    "running at last check"
+                }
             ),
+            "stopping" => format!("stopping in background · {id}"),
             "exited" => format!(
                 "exit {}",
                 result

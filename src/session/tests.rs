@@ -23,6 +23,86 @@ fn response(text: &str) -> Value {
 }
 
 #[test]
+fn skills_command_lists_local_catalog_and_skips_malformed_entries_without_an_api_request() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let skills = home.path().join("skills");
+    std::fs::create_dir_all(skills.join("review")).unwrap();
+    std::fs::create_dir_all(skills.join("broken")).unwrap();
+    std::fs::write(
+        skills.join("review/SKILL.md"),
+        "---\nname: review\ndescription: Inspect a change.\n---\n\n# Review\n",
+    )
+    .unwrap();
+    std::fs::write(skills.join("broken/SKILL.md"), "missing frontmatter").unwrap();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    let mut config = SessionConfig {
+        store: Store::new(home.path().to_path_buf()),
+        settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
+        bash: crate::tools::find_bash().unwrap(),
+    };
+    let mut output = Vec::new();
+    let mut status = Vec::new();
+    chat(
+        &mut agent,
+        &mut config,
+        &mut Cursor::new("/skills\n/skills extra\n/exit\n"),
+        &mut output,
+        &mut status,
+        Vec::new(),
+    )
+    .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("1 available skill · 1 skipped"), "{output}");
+    assert!(output.contains("review  Inspect a change."), "{output}");
+    assert!(output.contains("Skipped"), "{output}");
+    assert!(output.contains("Unknown command"), "{output}");
+    assert!(status.is_empty(), "{}", String::from_utf8_lossy(&status));
+    assert!(
+        agent
+            .archive()
+            .messages
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|message| { message.get("role").and_then(Value::as_str) == Some("system") })
+    );
+}
+
+#[test]
+fn skills_command_explains_an_empty_catalog() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    let mut config = SessionConfig {
+        store: Store::new(home.path().to_path_buf()),
+        settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
+        bash: crate::tools::find_bash().unwrap(),
+    };
+    let mut output = Vec::new();
+    chat(
+        &mut agent,
+        &mut config,
+        &mut Cursor::new("/skills\n/exit\n"),
+        &mut output,
+        &mut Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("No skills installed.")
+    );
+}
+
+#[test]
 fn interactive_session_recovers_from_api_errors_and_can_clear_history() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![

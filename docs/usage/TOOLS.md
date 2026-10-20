@@ -8,7 +8,7 @@ Tool errors return as results so the model can correct the call.
 
 | Tool | Required arguments | Optional arguments | Result or constraint |
 | --- | --- | --- | --- |
-| `read` | `path` | `offset`, `limit`, `byte_offset` | Reads a page of UTF-8 text, saved output, history or an attachment. |
+| `read` | `path` | `offset`, `limit`, `byte_offset` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
 | `edit` | `path`, `old_text`, `new_text` | — | Replaces exactly one nonempty match; returns `bytes_written`. A missing or ambiguous match leaves the file unchanged. |
 | `bash` | `command` | `timeout_seconds`, `wait_ms` | Runs a Bash command from the project directory. With `wait_ms`, it returns a persistent `process_id`. |
@@ -20,8 +20,14 @@ Project file paths resolve within the working directory, including existing
 symbolic links. Project paths passed to `read`, `write` and `edit` cannot cross
 that boundary. A new project file needs an existing parent directory. `write`
 and `edit` reject read-only files and replace accepted files through a sibling
-temporary file. Content must be UTF-8 text without NUL bytes; binary or invalid
-UTF-8 reads fail.
+temporary file. Writes, edits and text reads use UTF-8 without NUL bytes.
+
+Images and PDFs in the project or the current `tmp:` area are recognized from
+their contents and shown to the model on the next request, using the same
+[delivery rules as attachments](ATTACHMENTS.md#what-the-model-receives).
+The result returns an `attachment:ID` reference to a session-owned copy. Read
+that reference to revisit it after the original changes, temporary cleanup or
+session resume. Other binary or invalid UTF-8 file reads still fail.
 
 The interactive TUI shows Read, Update (`edit`), Write, Bash and Process in one
 inline format. Successful file changes retain a numbered contextual diff,
@@ -36,12 +42,13 @@ output; another `Ctrl+O` restores the normal previews. The shortcut is ignored
 during generation and does nothing when the latest finished turn has no tools.
 See [TUI theme](../tui/THEME.md) for presentation and controls.
 
-`read` uses one-based `offset` (default 1) and `limit` (default 200, maximum
+Text reads use one-based `offset` (default 1) and `limit` (default 200, maximum
 2,000 lines). Pages are also capped at 64 KiB. Continue with `next_offset`; for
 a line split by the byte cap, use `next_byte_offset` as `byte_offset`.
 `byte_offset` is zero-based, takes precedence over `offset` and returns
 unnumbered text with a byte range. `total_lines` appears at EOF in line mode.
-These are page limits, not a file-size limit.
+These are page limits, not a file-size limit. Paging arguments do not crop
+images or PDFs.
 
 The `path` argument also accepts these read-only references:
 
@@ -50,13 +57,14 @@ The `path` argument also accepts these read-only references:
 | `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | Complete saved Bash stream, including text omitted from a result preview. Older `output:OUTPUT_ID:stdout` and `:stderr` references also work. |
 | `history:N` | Original message at zero-based index `N`. A `context_truncated` result includes its `history_reference`. |
 | `history:requests` / `history:memory` | Ordered original user requests / current compaction summary. |
+| `skill:NAME` / `skill:NAME/relative/path` | A personal skill's `SKILL.md` / a resource inside that skill. See [Skills](SKILLS.md). |
 | `attachment:ID` | An attached text file, or a re-shown image/PDF; other binaries return their local path. See [Attachments](ATTACHMENTS.md#what-the-model-receives). |
 
 History pages remain available after compaction and resume and exclude
 provider-specific reasoning fields. Reading a tool result can also return
 `request_history_reference` for the original tool call, including exact `write`
 content. Indexed pages identify the source role and originating request/call.
-Known credentials are masked. History, attachments and saved output cannot be
+Known credentials are masked. History, skills, attachments and saved output cannot be
 changed with `write` or `edit`.
 
 For disposable files, use `tmp:relative/path` with the file tools. Its parent
@@ -89,6 +97,10 @@ that many milliseconds and returns a `process_id` plus status; `wait_ms: 0`
 returns immediately. Expiring the wait does not stop the process. There is no
 PTY or later stdin input. An optional `timeout_seconds` remains a separate
 deadline from launch.
+
+Tool results describe the state when the call returned. The TUI labels a Bash
+launch `Started in background` and a running Process check `Running at last
+check`; these cards are snapshots. Use `/terminal` for the current active list.
 
 `process` actions are:
 

@@ -12,6 +12,7 @@ mod page;
 pub(super) use page::read_page;
 pub(crate) use page::read_text_page;
 
+#[cfg(test)]
 pub(super) fn read(
     root: &Path,
     arguments: &Value,

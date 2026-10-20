@@ -93,8 +93,8 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
 #[test]
 fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt() {
     let directory = Directory::new();
-    // Keep this unknown-capacity rejection larger than the current tool contract.
-    let prompt = "original objective ".repeat(750);
+    // Leave summary room after a rejection of the native prompt and tool contract.
+    let prompt = "original objective ".repeat(1500);
     let fixture = HttpFixture::new(vec![
         (
             400,

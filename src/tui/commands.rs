@@ -215,6 +215,22 @@ impl App {
             self.help();
             return Ok(false);
         }
+        if name == "/skills" && arguments.is_empty() {
+            self.local_start("/skills");
+            match self.agent.as_mut().unwrap().skills() {
+                Ok(skills) => {
+                    let (result, details) = commands::skills_catalog(
+                        skills
+                            .into_iter()
+                            .map(|skill| (skill.name, skill.description)),
+                        self.agent.as_ref().unwrap().skill_warnings(),
+                    );
+                    self.local_finish(Kind::Notice, &result, details);
+                }
+                Err(error) => self.local_finish(Kind::Error, &error, vec![]),
+            }
+            return Ok(false);
+        }
         if name == "/resume" {
             self.capture_input();
             if arguments.is_empty() {
@@ -340,7 +356,9 @@ impl App {
             .and_then(|index| self.state.items.get(index))
             .is_some_and(|item| {
                 matches!(item, Item::Local { command, .. }
-                if command.eq_ignore_ascii_case("/help") || command.eq_ignore_ascii_case("/tmp"))
+                if command.eq_ignore_ascii_case("/help")
+                    || command.eq_ignore_ascii_case("/tmp")
+                    || command.eq_ignore_ascii_case("/skills"))
             });
         if information && matches!(kind, Kind::Notice) && !details.is_empty() {
             if self

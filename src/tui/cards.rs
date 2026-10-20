@@ -183,7 +183,11 @@ fn status_summary(status: Status) -> Style {
 }
 
 fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
+    let skill = (tool.name == "read")
+        .then(|| skill_name(field(tool.arguments, "path")))
+        .flatten();
     let name = match tool.name {
+        "read" if skill.is_some() => "Skill",
         "read" => "Read",
         "write" => "Write",
         "edit" => "Update",
@@ -194,7 +198,7 @@ fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
         "process" => crate::events::description(tool.name, tool.arguments),
-        _ => field(tool.arguments, "path").into(),
+        _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
     let mut title = Line::new(&format!("{name}("), EMPHASIS.bold()).at_source(0);
     title.push(&text::clean(&target).replace('\n', " ↵ "), EMPHASIS);
@@ -251,7 +255,10 @@ fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {
     if let Some(status) = crate::events::process_status(result) {
         let id = field(result, "process_id");
         match status {
-            "running" => return format!("Running in background · {id}"),
+            "running" if tool.name == "bash" => {
+                return format!("Started in background · {id}");
+            }
+            "running" => return format!("Running at last check · {id}"),
             "stopping" => return format!("Stopping · {id}"),
             "stopped" => return format!("Stopped · {id}"),
             "unknown" => return format!("Status unknown · {id}"),
@@ -276,6 +283,9 @@ fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {
                 }
             )
         }
+        "read" if skill_name(field(tool.arguments, "path")).is_some() => {
+            format!("Loaded skill · {}", read_summary(tool.arguments, result))
+        }
         "read" => read_summary(tool.arguments, result),
         "write" => {
             let count = content::payload(field(tool.arguments, "content")).len();
@@ -286,6 +296,12 @@ fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {
         }
         _ => tool.summary.into(),
     }
+}
+
+fn skill_name(path: &str) -> Option<&str> {
+    let name = path.strip_prefix("skill:")?;
+    let name = name.strip_suffix("/SKILL.md").unwrap_or(name);
+    (!name.is_empty() && !name.contains('/')).then_some(name)
 }
 
 fn read_summary(arguments: &Value, result: &Value) -> String {
@@ -374,5 +390,7 @@ fn field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
+#[cfg(test)]
+mod skill_tests;
 #[cfg(test)]
 mod tests;

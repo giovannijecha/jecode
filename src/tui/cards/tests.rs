@@ -377,7 +377,7 @@ fn process_states_and_lists_name_their_actual_outcomes() {
         ("process_id", Value::string("p1")),
     ]);
     for (status, expected) in [
-        ("running", "Running in background · p1"),
+        ("running", "Running at last check · p1"),
         ("stopping", "Stopping · p1"),
         ("stopped", "Stopped · p1"),
         ("unknown", "Status unknown · p1"),

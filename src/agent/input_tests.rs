@@ -282,7 +282,7 @@ fn a_retry_is_rebuilt_with_messages_sent_while_it_waited() {
 #[test]
 fn messages_sent_during_compaction_join_the_request_after_it() {
     let directory = Directory::new();
-    let prompt = "original objective ".repeat(750);
+    let prompt = "original objective ".repeat(1500);
     let fixture = HttpFixture::new(vec![
         (
             400,
@@ -326,6 +326,7 @@ fn saved_agent(home: &Directory, directory: &Directory, fixture: &HttpFixture) -
 
 #[test]
 fn a_failed_save_keeps_accepted_input_pending_and_out_of_the_conversation() {
+    let pending_prompt = "pending-input-after-failed-save";
     let home = Directory::new();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion("First.", vec![]))]);
@@ -343,7 +344,7 @@ fn a_failed_save_keeps_accepted_input_pending_and_out_of_the_conversation() {
     let inbox = agent.inbox();
     let result = agent.run_turn("start", &mut |event| {
         if matches!(event, Event::Message { .. }) {
-            send(&inbox, &["late"]);
+            send(&inbox, &[pending_prompt]);
             let mut permissions = original.clone();
             permissions.set_readonly(true);
             std::fs::set_permissions(&path, permissions).unwrap();
@@ -354,9 +355,9 @@ fn a_failed_save_keeps_accepted_input_pending_and_out_of_the_conversation() {
     std::fs::set_permissions(&path, original).unwrap();
     assert_eq!(inbox.with(|entries| entries.len()), 1);
     assert!(inbox.with(|entries| entries.unacknowledged().is_empty()));
-    assert!(!agent.archive().document().encode().contains("late"));
+    assert!(!agent.archive().document().encode().contains(pending_prompt));
     agent.save_session().unwrap();
-    assert!(!handle.snapshot().value().encode().contains("late"));
+    assert!(!handle.snapshot().value().encode().contains(pending_prompt));
     fixture.finish();
 }
 

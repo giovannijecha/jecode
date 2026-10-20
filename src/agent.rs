@@ -21,6 +21,8 @@ pub struct Agent {
     /// User preference, not session state: resumed conversations use the current value.
     auto_compact: u8,
     project_instructions: String,
+    skills: crate::skills::Library,
+    used_skills: std::collections::BTreeSet<String>,
     inbox: crate::inbox::Inbox,
     /// Saved per-model routing; `None` leaves routing unset.
     routing_preferences: Option<std::collections::BTreeMap<String, crate::openrouter::Routing>>,
@@ -47,6 +49,8 @@ impl Agent {
             context: crate::context::Context::default(),
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             project_instructions: String::new(),
+            skills: crate::skills::Library::default(),
+            used_skills: std::collections::BTreeSet::new(),
             inbox: crate::inbox::Inbox::default(),
             routing_preferences: None,
             charges: Mutex::default(),
@@ -116,6 +120,7 @@ impl Agent {
     pub fn clear(&mut self) {
         *self.charges.lock().unwrap() = crate::openrouter::Charges::default();
         self.project_instructions.clear();
+        self.used_skills.clear();
         self.prepared = None;
         self.context = crate::context::Context::default();
         self.compatible_from = 0;
@@ -304,6 +309,14 @@ impl Agent {
                 Value::string(self.redactor.value(result).encode()),
             ),
         ]));
+        if let Some(reference) = result.get("skill_reference").and_then(Value::as_str)
+            && let Ok((name, _)) = crate::skills::parse_reference(reference)
+        {
+            self.used_skills.insert(name.to_owned());
+            // The dynamic system projection now includes the skill reference.
+            self.context.input_tokens = None;
+            self.context.measured_end = 0;
+        }
     }
 
     fn cancel_calls(&mut self, calls: &[ToolCall]) {
@@ -425,6 +438,7 @@ mod persistence;
 mod project_instructions;
 mod recovery;
 mod routing;
+mod skills;
 mod summary;
 mod temporary;
 
@@ -445,6 +459,8 @@ mod input_tests;
 #[cfg(test)]
 mod instruction_tests;
 #[cfg(test)]
+mod local_read_tests;
+#[cfg(test)]
 mod long_work_tests;
 #[cfg(test)]
 mod persistence_tests;
@@ -454,6 +470,8 @@ mod process_tests;
 mod recovery_tests;
 #[cfg(test)]
 mod routing_tests;
+#[cfg(test)]
+mod skills_tests;
 #[cfg(test)]
 mod summary_tests;
 #[cfg(test)]

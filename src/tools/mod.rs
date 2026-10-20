@@ -117,6 +117,9 @@ impl Tools {
         if path.starts_with("history:") {
             return Err("Session history is read-only and must be read through the agent".into());
         }
+        if path.starts_with("skill:") {
+            return Err("Personal skills are read-only and must be read through the agent".into());
+        }
         let absolute = self
             .temporary
             .as_ref()
@@ -175,7 +178,13 @@ impl Tools {
                                 .map(|value| (value, None))
                         } else {
                             let (root, arguments) = self.file_arguments(&arguments, false)?;
-                            files::read(&root, &arguments, cancellation).map(|value| (value, None))
+                            attachment::read_file(
+                                self.attachments.as_ref(),
+                                &root,
+                                &arguments,
+                                cancellation,
+                            )
+                            .map(|value| (value, None))
                         }
                     }
                     "write" | "edit" => {
@@ -247,5 +256,7 @@ fn optional_number(
     Ok(number)
 }
 
+#[cfg(test)]
+mod local_read_tests;
 #[cfg(test)]
 mod tests;

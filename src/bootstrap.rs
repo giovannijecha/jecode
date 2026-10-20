@@ -95,7 +95,13 @@ fn launch(
     agent.set_auto_compact(settings.auto_compact);
     agent.set_routing_preferences(settings.routing.clone());
     agent.set_routing(settings.routing_for(agent.model()));
-    agent.enable_sessions(store.path().parent().expect("configuration directory"))?;
+    let config_home = store.path().parent().expect("configuration directory");
+    if let Err(error) = std::fs::create_dir_all(config_home.join("skills")) {
+        // The optional library must not prevent ordinary work. Its scan also
+        // reports unreadable or malformed entries in the catalog.
+        eprintln!("Could not create personal skills library: {error}");
+    }
+    agent.enable_sessions(config_home)?;
     let attachments = agent.import_attachments(
         &attachments
             .iter()

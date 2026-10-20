@@ -9,6 +9,7 @@ use std::path::Path;
 impl Agent {
     pub fn enable_sessions(&mut self, home: &Path) -> Result<(), String> {
         if self.persistence.is_none() {
+            self.skills.configure(home);
             let store = Store::new(home.to_path_buf(), self.tools.root())?;
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
@@ -80,6 +81,7 @@ impl Agent {
             return Err("A prompt is already prepared".into());
         }
         self.refresh_project_instructions()?;
+        self.refresh_skills();
         let before = self.messages.lock().unwrap().len();
         let previous_events = self.events.lock().unwrap().len();
         self.events.lock().unwrap().push(Value::object([
@@ -187,6 +189,7 @@ impl Agent {
         // The switch is committed; historical process IDs never become live handles.
         self.tools.stop_processes();
         *self.messages.lock().unwrap() = document.messages;
+        self.rebuild_used_skills();
         *self.events.lock().unwrap() = document.events;
         self.compatible_from = document.compatible_from;
         self.context = document.context;
