@@ -75,6 +75,7 @@ impl App {
             }
             self.archive = agent.archive();
             self.agent = Some(agent);
+            self.state.finish_tool_turn();
             self.refresh_context();
             dirty = true;
         }

@@ -90,21 +90,21 @@ fn streaming_finalization_updates_the_same_visible_message_and_cursor() {
 #[test]
 fn out_of_order_tool_results_remain_in_source_order_and_never_duplicate_cards() {
     let mut state = State::default();
+    state.begin_tool_turn();
     start(&mut state, "first");
     start(&mut state, "second");
     finish(&mut state, "second", "second output");
     finish(&mut state, "first", "first output");
     state.close_tools();
-    state.select_tool(Some(0));
-    state.toggle_tool();
-    state.select_tool(None);
+    state.finish_tool_turn();
+    state.toggle_tools();
     let mut screen = Screen::new(state.width, state.height);
     let mut renderer = Renderer::new();
     update(&mut renderer, &mut screen, &mut state);
     let visible = screen.visible();
     assert!(visible.find("first output").unwrap() < visible.find("second output").unwrap());
     assert_eq!(visible.matches("first output").count(), 1);
-    assert!(visible.contains("└─ bash  second"));
+    assert!(visible.contains("● Bash(second)"));
     assert!(screen.history.is_empty());
 }
 

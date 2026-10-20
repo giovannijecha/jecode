@@ -6,6 +6,7 @@ use crate::{
 use std::collections::HashMap;
 
 pub enum Record {
+    TurnStart,
     Text {
         role: String,
         text: String,
@@ -16,6 +17,7 @@ pub enum Record {
         arguments: Value,
         summary: String,
         result: Value,
+        change: Option<crate::file_change::Change>,
     },
     Local {
         command: String,
@@ -39,9 +41,10 @@ impl Document {
             }
         }
         let mut calls = HashMap::new();
+        let mut latest_tool = None;
         for (index, events) in events.into_iter().enumerate() {
             for event in events {
-                append_event(&mut records, event);
+                append_event(&mut records, event, latest_tool);
             }
             let Some(message) = self.messages.get(index) else {
                 break;
@@ -68,12 +71,14 @@ impl Document {
                 let name = string(function, "name").unwrap();
                 let arguments = string(function, "arguments").unwrap();
                 let result = json::parse(string(message, "content").unwrap()).unwrap();
+                latest_tool = Some(records.len());
                 records.push(Record::Tool {
                     id: id.into(),
                     name: name.into(),
                     arguments: json::parse(arguments).unwrap_or_else(|_| Value::string(arguments)),
                     summary: tool_summary(name, &result),
                     result,
+                    change: None,
                 });
             }
         }
@@ -81,8 +86,9 @@ impl Document {
     }
 }
 
-fn append_event(records: &mut Vec<Record>, event: &Value) {
+fn append_event(records: &mut Vec<Record>, event: &Value, latest_tool: Option<usize>) {
     match event.get("type").and_then(Value::as_str) {
+        Some("turn_start") => records.push(Record::TurnStart),
         Some("local_command")
             if event.get("receipt").and_then(Value::as_str) != Some("report_delivery") =>
         {
@@ -129,6 +135,24 @@ fn append_event(records: &mut Vec<Record>, event: &Value) {
                     .into(),
                 text: string(event, "error").unwrap().into(),
             });
+        }
+        Some("tool_change") => {
+            let Some(id) = event.get("tool_call_id").and_then(Value::as_str) else {
+                return;
+            };
+            // Validation ties the event to the immediately preceding tool message.
+            // Local events may have appended other records at the same boundary.
+            if let Some(Record::Tool {
+                id: candidate,
+                change,
+                ..
+            }) = latest_tool.and_then(|index| records.get_mut(index))
+                && candidate == id
+            {
+                *change = event
+                    .get("change")
+                    .and_then(|value| crate::file_change::Change::from_value(value).ok());
+            }
         }
         _ => {}
     }

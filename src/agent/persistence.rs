@@ -81,9 +81,15 @@ impl Agent {
         }
         self.refresh_project_instructions()?;
         let before = self.messages.lock().unwrap().len();
+        let previous_events = self.events.lock().unwrap().len();
+        self.events.lock().unwrap().push(Value::object([
+            ("type", Value::string("turn_start")),
+            ("after_message", Value::number(before)),
+        ]));
         self.messages.lock().unwrap().push(prompt.message());
         if let Err(error) = self.checkpoint(Stage::Begin) {
             self.messages.lock().unwrap().truncate(before);
+            self.events.lock().unwrap().truncate(previous_events);
             return Err(error);
         }
         self.prepared = Some(prompt);

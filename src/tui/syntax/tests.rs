@@ -148,3 +148,59 @@ fn unlabelled_and_unsupported_languages_stay_readable_plain_text() {
         assert!(row.spans.iter().all(|span| span.style == CODE_TEXT));
     }
 }
+
+#[test]
+fn file_extensions_select_js_and_markup_without_changing_source_text() {
+    let source = "export const label = 'it\\'s ready'; // keep the source";
+    let row = Highlighter::for_path("site/test/architecture.test.mjs").line(source);
+    assert_eq!(row.plain(), source);
+    assert!(
+        row.spans
+            .iter()
+            .any(|span| span.text == "export" && span.style == KEYWORD)
+    );
+    assert!(
+        row.spans
+            .iter()
+            .any(|span| span.text == "'it\\'s ready'" && span.style == CODE_STRING)
+    );
+    assert!(
+        row.spans
+            .iter()
+            .any(|span| span.text == "// keep the source" && span.style == MUTED)
+    );
+    let source = "<urlset xmlns=\"https://example.test/schema\">";
+    let row = Highlighter::for_path("site/sitemap.xml").line(source);
+    assert_eq!(row.plain(), source);
+    assert!(
+        row.spans
+            .iter()
+            .any(|span| span.text == "xmlns" && span.style == KEYWORD)
+    );
+    assert!(row.spans.iter().any(|span| span.text == "\"https://example.test/schema\"" && span.style == CODE_STRING));
+}
+
+#[test]
+fn markup_comments_and_attributes_keep_multiline_state() {
+    let mut lexer = Highlighter::new("html");
+    assert_eq!(lexer.line("<!-- first").plain(), "<!-- first");
+    let row = lexer.line("<tag> --> <a href=\"first");
+    assert!(
+        row.spans
+            .iter()
+            .any(|span| span.text == "<tag> -->" && span.style == MUTED)
+    );
+    let source = "second\">value</a>";
+    let row = lexer.line(source);
+    assert_eq!(row.plain(), source);
+    assert!(
+        row.spans
+            .iter()
+            .any(|span| span.text == "second\"" && span.style == CODE_STRING)
+    );
+    assert!(
+        row.spans
+            .iter()
+            .any(|span| span.text.contains("value") && span.style == CODE_TEXT)
+    );
+}

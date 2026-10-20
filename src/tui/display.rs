@@ -151,7 +151,6 @@ fn back_to_bottom_uses_alt_end(state: &State) -> bool {
         || state.selector.is_some()
         || state.suggestions.panel
         || state.information.is_some()
-        || state.tool_focus.is_some()
 }
 
 fn back_to_bottom_line(columns: usize, alt_end: bool) -> Line {
@@ -236,8 +235,8 @@ mod tests {
         state.suggestions.panel = true;
         assert!(back_to_bottom_uses_alt_end(&state));
         state.suggestions.panel = false;
-        state.tool_focus = Some(0);
-        assert!(back_to_bottom_uses_alt_end(&state));
+        state.tool_details.expanded = true;
+        assert!(!back_to_bottom_uses_alt_end(&state));
         assert!(
             back_to_bottom_line(40, true)
                 .plain()

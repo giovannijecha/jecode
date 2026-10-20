@@ -70,7 +70,7 @@ fn block_transitions_have_one_neutral_separator_plus_their_own_panel_padding() {
         (Tool, Assistant, 1),
         (Assistant, Assistant, 1),
         (User, User, 3),
-        (Tool, Tool, 1), // Separate, closed trees.
+        (Tool, Tool, 1), // Every tool block has one external separator.
     ];
     for width in [12, 40, 80] {
         for (before, after, expected) in cases {
@@ -126,10 +126,11 @@ fn panels_keep_their_padding_and_text_without_a_sent_prompt_marker() {
 }
 
 #[test]
-fn empty_assistant_updates_leave_tools_connected_and_add_no_rows() {
+fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
     let mut state = State::default();
+    state.begin_tool_turn();
     start(&mut state, "first");
-    finish(&mut state, "first", "one\n\nthree\n");
+    finish(&mut state, "first", "one\n\nthree\nfour\nfive\n");
     let original = state.rows();
     for text in ["", " ", "\r\n\t"] {
         state.event(Event::Streaming { text: text.into() });
@@ -145,24 +146,29 @@ fn empty_assistant_updates_leave_tools_connected_and_add_no_rows() {
     start(&mut state, "second");
     finish(&mut state, "second", "second output\n");
     state.close_tools();
+    state.finish_tool_turn();
     let rows = state.rows();
     assert!(rows[1].is_empty());
-    let all = rows.iter().flatten().map(Line::plain).collect::<Vec<_>>();
-    assert_eq!(all.len(), 3);
-    assert!(all[0].starts_with("├─ bash  first") && all[0].contains("✓"));
-    assert!(all[1].starts_with("└─ bash  second") && all[1].contains("✓"));
-    assert_eq!(all[2], "     second output");
-    // Earlier results remain available through inline expansion.
-    state.select_tool(Some(0));
-    state.toggle_tool();
-    state.select_tool(None);
+    assert!(rows[0][0].plain().starts_with("● Bash(first)"));
+    assert!(rows[0][1].plain().contains("⎿ Exit 0"));
+    assert!(rows[0].iter().any(|row| row.plain() == "    five"));
+    assert!(!rows[0].iter().any(|row| row.plain() == "    one"));
+    assert_eq!(rows[2][0], Line::default());
+    assert!(rows[2][1].plain().starts_with("● Bash(second)"));
+    assert!(rows[2].iter().any(|row| row.plain() == "    second output"));
+    // Earlier results remain available when the completed turn expands.
+    state.toggle_tools();
     let expanded = state
         .rows()
         .into_iter()
         .flatten()
         .map(|row| row.plain())
         .collect::<Vec<_>>();
-    assert_eq!(&expanded[1..4], &["│    one", "│    ", "│    three"]);
+    let first_output = expanded.iter().position(|row| row == "    one").unwrap();
+    assert_eq!(
+        &expanded[first_output..first_output + 3],
+        &["    one", "    ", "    three"]
+    );
     let response = "\n\nanswer\n \n";
     state.event(Event::Streaming {
         text: response.into(),
@@ -186,9 +192,9 @@ fn compact_tool_output_keeps_actual_trailing_empty_rows_without_adding_a_termina
         finish(&mut state, "fixture", output);
         state.close_tools();
         let rows = state.rows();
-        assert_eq!(rows[0].len(), count + 1);
-        assert_eq!(rows[0][1].plain(), "     line");
-        assert!(rows[0][2..].iter().all(|row| row.plain() == "     "));
+        assert_eq!(rows[0].len(), count + 2);
+        assert_eq!(rows[0][2].plain(), "    line");
+        assert!(rows[0][3..].iter().all(|row| row.plain() == "    "));
         let Item::Tool {
             result: Some(result),
             ..

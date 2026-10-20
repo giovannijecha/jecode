@@ -25,10 +25,7 @@ pub(super) fn render(
         .copy_notice
         .as_ref()
         .map_or_else(Vec::new, |notice| feedback(notice, columns));
-    let bottom_count = notice_rows.len()
-        + copy_rows.len()
-        + usize::from(state.activity.is_some())
-        + usize::from(state.tool_focus.is_some());
+    let bottom_count = notice_rows.len() + copy_rows.len() + usize::from(state.activity.is_some());
     let reserve = if is_panel {
         bottom_count.min(height.saturating_sub(3))
     } else {
@@ -134,7 +131,7 @@ pub(super) fn render(
             "Esc closes menu"
         } else if state.queue.is_editing() {
             "Esc cancels edit"
-        } else if state.history.is_browsing() || state.tool_focus.is_some() || back_to_bottom {
+        } else if state.history.is_browsing() || back_to_bottom {
             "Esc returns"
         } else {
             "Esc stops"
@@ -142,15 +139,6 @@ pub(super) fn render(
         extra.push(extra_row(activity.line(extra_columns, escape)));
     }
     extra.extend(copy_rows);
-    if state.tool_focus.is_some() {
-        extra.push(extra_row(
-            Line::new(
-                "Tools · ↑↓ select · Enter details · Esc returns",
-                crate::tui::theme::TOOL_DIM,
-            )
-            .shortened(extra_columns),
-        ));
-    }
     if extra.len() > remaining {
         extra.drain(..extra.len() - remaining);
     }

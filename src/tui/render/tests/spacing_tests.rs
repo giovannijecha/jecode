@@ -46,8 +46,9 @@ fn stream_updates_and_finalization_keep_one_block_and_one_gap_without_replaying_
 }
 
 #[test]
-fn a_blank_model_request_does_not_close_the_native_tool_tree_or_insert_a_separator() {
+fn a_blank_model_request_adds_no_rows_between_tool_blocks() {
     let mut state = State::default();
+    state.begin_tool_turn();
     let mut screen = Screen::new(state.width, state.height);
     let mut renderer = Renderer::new();
     start(&mut state, "first");
@@ -64,9 +65,8 @@ fn a_blank_model_request_does_not_close_the_native_tool_tree_or_insert_a_separat
     start(&mut state, "second");
     finish(&mut state, "second", "second output\n");
     state.close_tools();
-    state.select_tool(Some(0));
-    state.toggle_tool();
-    state.select_tool(None);
+    state.finish_tool_turn();
+    state.toggle_tools();
     update(&mut renderer, &mut screen, &mut state);
     let visible = screen.visible();
     let rows = visible.lines().collect::<Vec<_>>();
@@ -74,11 +74,20 @@ fn a_blank_model_request_does_not_close_the_native_tool_tree_or_insert_a_separat
         .iter()
         .position(|row| row.contains("first output"))
         .unwrap();
-    assert!(rows[first + 1].starts_with("└─ bash  second"));
-    assert_eq!(rows[first + 3].trim(), "");
+    let second = rows
+        .iter()
+        .position(|row| row.starts_with("● Bash(second)"))
+        .unwrap();
+    assert!(second > first + 1);
+    assert_eq!(rows[second - 1].trim(), "");
+    assert!(rows[second + 1].contains("⎿ Exit 0"));
+    assert!(rows[second + 2].contains("second output"));
     let border = rows.iter().position(|row| row.starts_with('─')).unwrap();
+    assert!(!visible.contains("Ctrl+O"));
+    assert!(border > second + 4);
+    assert!(rows[second + 3].contains("Elapsed "));
     assert!(
-        rows[first + 3..border]
+        rows[second + 4..border]
             .iter()
             .all(|row| row.trim().is_empty())
     );

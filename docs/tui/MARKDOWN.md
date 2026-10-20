@@ -18,8 +18,9 @@ original text. Terminal styling does not change what the model said.
 | Three or more matching backticks or tildes | A full-width code panel with a language label. |
 | Three or more matching `-`, `*`, or `_` markers | A horizontal rule. |
 
-Fenced `rust`/`rs`, `bash`/`sh`/`shell`, and `json` code gets light syntax
-highlighting. Other languages remain readable plain code. Highlighting is
+Fenced Rust, shell, JSON, JavaScript/TypeScript and XML/HTML code gets light
+syntax highlighting. Common file extensions select the same display lexer
+inside tool output. Other languages remain readable plain code. Highlighting is
 for display, not syntax validation. An unfinished fence stays open while a
 response streams.
 

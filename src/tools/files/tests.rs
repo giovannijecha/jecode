@@ -16,6 +16,76 @@ fn arguments(entries: &[(&str, &str)]) -> Value {
 }
 
 #[test]
+fn file_change_is_captured_only_after_successful_text_modification() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let (result, created) = write_with_change(
+        &root,
+        &arguments(&[("path", "source.txt"), ("content", "one\ntwo\n")]),
+    )
+    .unwrap();
+    assert_eq!(result.get("bytes_written"), Some(&Value::number(8)));
+    let created = created.unwrap();
+    assert!(created.created);
+    assert_eq!((created.added, created.removed), (2, 0));
+    let (_, edit_change) = edit_with_change(
+        &root,
+        &arguments(&[
+            ("path", "source.txt"),
+            ("old_text", "two"),
+            ("new_text", "three"),
+        ]),
+    )
+    .unwrap();
+    let edit_change = edit_change.unwrap();
+    assert_eq!((edit_change.added, edit_change.removed), (1, 1));
+    let (mismatch, change) = edit_with_change(
+        &root,
+        &arguments(&[
+            ("path", "source.txt"),
+            ("old_text", "missing"),
+            ("new_text", "x"),
+        ]),
+    )
+    .unwrap();
+    assert!(mismatch.get("error").is_some());
+    assert!(change.is_none());
+}
+
+#[test]
+fn replacing_binary_content_keeps_write_available_without_claiming_a_creation() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    fs::write(root.join("binary"), [0, 255]).unwrap();
+    let (result, change) = write_with_change(
+        &root,
+        &arguments(&[("path", "binary"), ("content", "text\n")]),
+    )
+    .unwrap();
+    assert_eq!(result.get("bytes_written"), Some(&Value::number(5)));
+    assert!(change.is_none());
+    assert_eq!(fs::read_to_string(root.join("binary")).unwrap(), "text\n");
+}
+
+#[test]
+fn oversized_previous_text_does_not_prevent_a_write_or_claim_a_diff() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    fs::write(root.join("large.txt"), "x".repeat(MAX_DIFF_BYTES + 1)).unwrap();
+    let (result, change) = write_with_change(
+        &root,
+        &arguments(&[("path", "large.txt"), ("content", "replacement\n")]),
+    )
+    .unwrap();
+    assert_eq!(result.get("bytes_written"), Some(&Value::number(12)));
+    assert!(change.is_none());
+    assert_eq!(
+        fs::read_to_string(root.join("large.txt")).unwrap(),
+        "replacement\n"
+    );
+}
+
+#[test]
 fn reads_ranges_with_original_line_endings_and_replaces_atomically() {
     let directory = Directory::new();
     let root = fs::canonicalize(directory.path()).unwrap();

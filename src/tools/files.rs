@@ -1,5 +1,5 @@
 use super::required_string;
-use crate::json::Value;
+use crate::{file_change::MAX_DIFF_BYTES, json::Value};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -21,17 +21,38 @@ pub(super) fn read(
     read_page(&path, arguments, cancellation)
 }
 
+#[cfg(test)]
 pub(super) fn write(root: &Path, arguments: &Value) -> Result<Value, String> {
-    let path = writable_path(root, required_string(arguments, "path")?)?;
-    let content = required_string(arguments, "content")?;
-    replace_file(&path, content)?;
-    Ok(Value::object([(
-        "bytes_written",
-        Value::number(content.len()),
-    )]))
+    write_with_change(root, arguments).map(|(result, _)| result)
 }
 
+pub(super) fn write_with_change(
+    root: &Path,
+    arguments: &Value,
+) -> Result<(Value, Option<crate::file_change::Change>), String> {
+    let path = writable_path(root, required_string(arguments, "path")?)?;
+    let content = required_string(arguments, "content")?;
+    // A write may replace non-text data; inability to read it cannot reject
+    // an operation that was previously allowed.
+    let previous = previous_text(&path, content.len());
+    replace_file(&path, content)?;
+    let change =
+        previous.and_then(|old| crate::file_change::Change::between(old.as_deref(), content));
+    Ok((
+        Value::object([("bytes_written", Value::number(content.len()))]),
+        change,
+    ))
+}
+
+#[cfg(test)]
 pub(super) fn edit(root: &Path, arguments: &Value) -> Result<Value, String> {
+    edit_with_change(root, arguments).map(|(result, _)| result)
+}
+
+pub(super) fn edit_with_change(
+    root: &Path,
+    arguments: &Value,
+) -> Result<(Value, Option<crate::file_change::Change>), String> {
     let path = existing_path(root, required_string(arguments, "path")?)?;
     let old = required_string(arguments, "old_text")?;
     let new = required_string(arguments, "new_text")?;
@@ -40,26 +61,52 @@ pub(super) fn edit(root: &Path, arguments: &Value) -> Result<Value, String> {
     }
     let content = read_text(&path)?;
     let Some(position) = content.find(old) else {
-        return Ok(mismatch::result(
-            &content,
-            "old_text was not found; use exact current text from the supplied file context or read the file",
+        return Ok((
+            mismatch::result(
+                &content,
+                "old_text was not found; use exact current text from the supplied file context or read the file",
+            ),
+            None,
         ));
     };
     // Include overlapping matches, which are ambiguous too.
     let next = position + content[position..].chars().next().unwrap().len_utf8();
     if content[next..].contains(old) {
-        return Ok(mismatch::result(
-            &content,
-            "old_text occurs more than once; include more exact surrounding text from the supplied file context or read the file",
+        return Ok((
+            mismatch::result(
+                &content,
+                "old_text occurs more than once; include more exact surrounding text from the supplied file context or read the file",
+            ),
+            None,
         ));
     }
-    let mut updated = content;
+    let mut updated = content.clone();
     updated.replace_range(position..position + old.len(), new);
     replace_file(&path, &updated)?;
-    Ok(Value::object([(
-        "bytes_written",
-        Value::number(updated.len()),
-    )]))
+    let change = crate::file_change::Change::between(Some(&content), &updated);
+    Ok((
+        Value::object([("bytes_written", Value::number(updated.len()))]),
+        change,
+    ))
+}
+
+fn previous_text(path: &Path, updated_bytes: usize) -> Option<Option<String>> {
+    if updated_bytes > MAX_DIFF_BYTES {
+        return None;
+    }
+    match fs::metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(None),
+        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_DIFF_BYTES as u64 => {}
+        _ => return None,
+    }
+    let mut previous = String::new();
+    // Bound the read too: another writer may grow the file after metadata.
+    fs::File::open(path)
+        .ok()?
+        .take(MAX_DIFF_BYTES as u64 + 1)
+        .read_to_string(&mut previous)
+        .ok()?;
+    (previous.len() <= MAX_DIFF_BYTES && !previous.contains('\0')).then_some(Some(previous))
 }
 
 pub(super) fn existing_path(root: &Path, value: &str) -> Result<PathBuf, String> {

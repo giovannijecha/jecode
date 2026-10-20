@@ -2,17 +2,13 @@ use super::{
     activity,
     line::Line,
     text,
-    theme::{
-        BAD, BODY, EMPHASIS, FAINT, GOOD, INSET_SURFACE, MUTED, Style, TOOL_ACCENT,
-        TOOL_SELECTED_SURFACE, WARNING,
-    },
+    theme::{BAD, EMPHASIS, GOOD, MUTED, Style, TOOL_ACCENT, TOOL_DIM, WARNING},
 };
-use crate::json::Value;
+use crate::{file_change::Change, json::Value};
 
-mod details;
+mod content;
 mod diff;
 mod presentation;
-mod preview;
 pub use presentation::Presentation;
 
 pub struct Tool<'a> {
@@ -20,13 +16,10 @@ pub struct Tool<'a> {
     pub arguments: &'a Value,
     pub summary: &'a str,
     pub result: Option<&'a Value>,
-    pub last: bool,
-    pub preview: bool,
+    pub change: Option<&'a Change>,
     pub presentation: &'a Presentation,
 }
 
-// The outcome glyph keeps a fixed column after the tree branch, so outcomes
-// read down the left edge. A running call has none yet.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Status {
     Running,
@@ -52,20 +45,11 @@ impl Status {
             || matches!(tool.name, "bash" | "process")
                 && result
                     .get("exit_code")
-                    .is_some_and(|code| code != &Value::number(0))
+                    .is_some_and(|code| code != &Value::number(0) && code != &Value::Null)
         {
             Self::Failed
         } else {
             Self::Done
-        }
-    }
-    fn glyph(self) -> &'static str {
-        match self {
-            Self::Running => "",
-            Self::Background => "▶ ",
-            Self::Stopped => "■ ",
-            Self::Failed => "× ",
-            Self::Done => "✓ ",
         }
     }
     fn style(self) -> Style {
@@ -78,215 +62,309 @@ impl Status {
     }
 }
 
+pub(super) struct Body {
+    rows: Vec<Line>,
+    hidden: usize,
+    unit: &'static str,
+}
+
+impl Body {
+    fn new(rows: Vec<Line>) -> Self {
+        Self {
+            rows,
+            hidden: 0,
+            unit: "output lines",
+        }
+    }
+}
+
 pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
     let status = Status::of(&tool);
-    let width = columns.saturating_sub(5).max(1);
-    let continuation = if tool.last { "     " } else { "│    " };
-    let (body, position) = output(
-        &tool,
-        width,
-        matches!(status, Status::Stopped | Status::Failed),
-    );
-    let mut rows = header(&tool, status, columns, position.as_deref())
-        .into_iter()
-        .map(|row| surface(row, &tool).shortened(columns))
-        .collect::<Vec<_>>();
-    let mut source_line = 1;
-    rows.extend(body.into_iter().map(|mut row| {
-        if let Some(origin) = row.origin {
-            source_line = source_line.max(origin.line + 1);
+    let expanded = tool.presentation.expanded == Some(true);
+    // Old conversations retain replacement arguments but have no file snapshot.
+    // Their coordinates stay absent rather than being reconstructed from disk.
+    let legacy = (tool.change.is_none() && tool.name == "edit" && status == Status::Done)
+        .then(|| {
+            let mut change = Change::between(
+                Some(field(tool.arguments, "old_text")),
+                field(tool.arguments, "new_text"),
+            )?;
+            for entry in change.hunks.iter_mut().flatten() {
+                entry.old_line = None;
+                entry.new_line = None;
+                entry.no_newline = false;
+            }
+            change.ending_change = None;
+            change.final_newline = None;
+            Some(change)
+        })
+        .flatten();
+    let change = tool
+        .change
+        .or(legacy.as_ref())
+        .filter(|_| status == Status::Done);
+    let mut rows = header(&tool, status, columns);
+    let summary = preview(
+        Line::new(&outcome(&tool, change), status_summary(status)),
+        columns.saturating_sub(4),
+        expanded,
+    )
+    .plain();
+    rows.extend(wrapped(
+        &summary,
+        status_summary(status),
+        columns,
+        1,
+        "  ⎿ ",
+        "    ",
+        true,
+    ));
+    if let Some(result) = tool.result {
+        let mut body = if result.get("error").is_some() {
+            Body::new(Vec::new())
+        } else if let Some(change) = change {
+            diff::render(change, field(tool.arguments, "path"), columns, expanded)
         } else {
-            row = row.at_source(source_line);
-            source_line += 1;
+            content::render(
+                tool.name,
+                tool.arguments,
+                result,
+                columns,
+                status == Status::Failed,
+                expanded,
+            )
+        };
+        if body.hidden > 0 {
+            let origin = body
+                .rows
+                .iter()
+                .filter_map(|line| line.origin)
+                .map(|origin| origin.line)
+                .max()
+                .unwrap_or(2)
+                + 1;
+            let unit = if body.hidden == 1 {
+                body.unit.strip_suffix('s').unwrap_or(body.unit)
+            } else {
+                body.unit
+            };
+            body.rows.extend(wrapped(
+                &format!("… {} more {unit}", body.hidden),
+                MUTED,
+                columns,
+                origin,
+                "    ",
+                "    ",
+                true,
+            ));
         }
-        row.gutter(continuation, FAINT).shortened(columns)
-    }));
+        rows.extend(body.rows);
+        rows.extend(content::notices(tool.name, result, columns));
+    }
+    if expanded && let Some(elapsed) = tool.presentation.duration() {
+        rows.extend(wrapped(
+            &format!("Elapsed {}", activity::duration(elapsed)),
+            TOOL_DIM,
+            columns,
+            usize::MAX - 1,
+            "    ",
+            "    ",
+            true,
+        ));
+    }
     rows
 }
 
-fn status_line(tool: &Tool<'_>, status: Status, width: usize) -> Line {
-    let mut line = Line::new(status.glyph(), status.style());
-    line.push(
-        &text::ellipsize(&text::clean(&outcome(tool)), (width / 2).max(12)),
-        status.style(),
-    );
-    if let Some(elapsed) = tool.presentation.duration() {
-        line.push(
-            &format!("  ·  {}", activity::duration(elapsed)),
-            status.style(),
-        );
+fn status_summary(status: Status) -> Style {
+    match status {
+        Status::Failed | Status::Stopped => status.style(),
+        _ => MUTED,
     }
-    line
 }
 
-// The catalog keeps status at the right edge above 72 columns. Narrow cards
-// wrap the full target under the name and put status on a separate row.
-fn header(tool: &Tool<'_>, status: Status, columns: usize, position: Option<&str>) -> Vec<Line> {
-    let guide = if tool.result.is_none() || tool.presentation.selected {
-        TOOL_ACCENT
-    } else {
-        FAINT
-    };
-    let branch = if tool.last { "└─ " } else { "├─ " };
-    let continuation = if tool.last { "     " } else { "│    " };
-    let wrapped = if tool.last { "   " } else { "│  " };
-    let target_style = if tool.result.is_none() || tool.presentation.selected {
-        TOOL_ACCENT
-    } else {
-        BODY
+fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
+    let name = match tool.name {
+        "read" => "Read",
+        "write" => "Write",
+        "edit" => "Update",
+        "bash" => "Bash",
+        "process" => "Process",
+        other => other,
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
         "process" => crate::events::description(tool.name, tool.arguments),
         _ => field(tool.arguments, "path").into(),
     };
-    let target = text::clean(&target).replace('\n', " ↵ ");
-    let mut status_line = status_line(tool, status, columns.saturating_sub(5));
-    if let Some(position) = position
-        && text::cells(&status_line.plain()) + text::cells(position) + 3
-            <= columns.saturating_sub(5)
-    {
-        status_line.push(&format!(" · {position}"), MUTED);
-    }
-    let mut command =
-        Line::new(&format!("{}  ", text::clean(tool.name)), EMPHASIS.bold()).at_source(0);
-    if columns < 72 {
-        command.push(&target, target_style);
-        let mut rows = command
-            .wrap(columns.saturating_sub(3).max(1), false)
-            .into_iter()
-            .enumerate()
-            .map(|(index, line)| {
-                line.gutter(if index == 0 { branch } else { wrapped }, guide)
-                    .shortened(columns)
-            })
-            .collect::<Vec<_>>();
-        rows.push(status_line.gutter(continuation, FAINT).shortened(columns));
-        rows
-    } else {
-        let mut row = command.gutter(branch, guide);
-        let budget = columns
-            .saturating_sub(text::cells(&row.plain()) + text::cells(&status_line.plain()) + 3);
-        row.push(&text::ellipsize(&target, budget), target_style);
-        row.push(
-            &" ".repeat(
-                columns.saturating_sub(
-                    text::cells(&row.plain()) + text::cells(&status_line.plain()) + 1,
-                ),
-            ),
-            MUTED,
+    let mut title = Line::new(&format!("{name}("), EMPHASIS.bold()).at_source(0);
+    title.push(&text::clean(&target).replace('\n', " ↵ "), EMPHASIS);
+    title.push(")", EMPHASIS.bold());
+    preview(
+        title,
+        columns.saturating_sub(2),
+        tool.presentation.expanded == Some(true),
+    )
+    .wrap(columns.saturating_sub(2).max(1), false)
+    .into_iter()
+    .enumerate()
+    .map(|(index, row)| {
+        row.gutter(if index == 0 { "● " } else { "  " }, status.style())
+            .shortened(columns)
+    })
+    .collect()
+}
+
+fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {
+    let Some(result) = tool.result else {
+        return tool.presentation.duration().map_or_else(
+            || "Running…".into(),
+            |elapsed| format!("Running… · {}", activity::duration(elapsed)),
         );
-        row.spans.extend(status_line.spans);
-        vec![row.shortened(columns)]
-    }
-}
-
-fn output(tool: &Tool<'_>, columns: usize, failed: bool) -> (Vec<Line>, Option<String>) {
-    let Some(result) = tool.result else {
-        return (Vec::new(), None);
     };
-    let (mut rows, position) = match tool.presentation.expanded {
-        Some(true) => (
-            details::render(tool.name, tool.arguments, result, columns, failed),
-            None,
-        ),
-        Some(false) => (Vec::new(), None),
-        None if tool.preview || failed => {
-            let preview = preview::render(tool.name, tool.arguments, result, columns, failed);
-            let position = if tool.name == "edit" {
-                None
+    if let Some(error) = result.get("error").and_then(Value::as_str) {
+        return format!("Failed · {}", text::clean(error));
+    }
+    if flag(result, "cancelled") {
+        return "Cancelled".into();
+    }
+    if flag(result, "timed_out") || crate::events::process_status(result) == Some("timed_out") {
+        return tool.presentation.duration().map_or_else(
+            || "Timed out".into(),
+            |elapsed| format!("Timed out after {}", activity::duration(elapsed)),
+        );
+    }
+    if let Some(processes) = result.get("processes").and_then(Value::as_array) {
+        let running = processes
+            .iter()
+            .filter(|item| crate::events::process_status(item) == Some("running"))
+            .count();
+        return format!(
+            "{} {} · {running} running",
+            processes.len(),
+            if processes.len() == 1 {
+                "process"
             } else {
-                preview.position
-            };
-            (preview.rows, position)
-        }
-        None => (Vec::new(), None),
-    };
-    rows.extend(preview::notices(tool.name, result, columns));
-    (rows, position)
-}
-
-fn surface(mut line: Line, tool: &Tool<'_>) -> Line {
-    if tool.presentation.selected {
-        line.background = Some(TOOL_SELECTED_SURFACE);
-    } else if tool.result.is_none() {
-        line.background = Some(INSET_SURFACE);
-    }
-    line
-}
-fn outcome(tool: &Tool<'_>) -> String {
-    let Some(result) = tool.result else {
-        return "running".into();
-    };
-    if result.get("error").is_some() {
-        return "failed".into();
+                "processes"
+            }
+        );
     }
     if let Some(status) = crate::events::process_status(result) {
-        return match status {
-            "running" => format!("background · {}", field(result, "process_id")),
-            "stopping" => format!("stopping · {}", field(result, "process_id")),
-            _ => tool.summary.into(),
-        };
+        let id = field(result, "process_id");
+        match status {
+            "running" => return format!("Running in background · {id}"),
+            "stopping" => return format!("Stopping · {id}"),
+            "stopped" => return format!("Stopped · {id}"),
+            "unknown" => return format!("Status unknown · {id}"),
+            _ => {}
+        }
+    }
+    if let Some(change) = change {
+        return diff::summary(change);
     }
     match tool.name {
-        "bash" if flag(result, "cancelled") => "cancelled".into(),
-        "bash" if flag(result, "timed_out") => "timed out".into(),
-        "bash" => format!(
-            "exit {}",
-            result
+        "bash" | "process" => {
+            let code = result
                 .get("exit_code")
-                .map_or_else(|| "unknown".into(), Value::encode)
-        ),
-        "read" => range(tool.arguments, result).unwrap_or_else(|| tool.summary.into()),
-        "write" => lines(field(tool.arguments, "content")),
-        "edit" => tool.summary.into(),
+                .filter(|value| **value != Value::Null)
+                .map_or_else(|| "unknown".into(), Value::encode);
+            format!(
+                "{}Exit {code}",
+                if Status::of(tool) == Status::Failed {
+                    "Failed · "
+                } else {
+                    ""
+                }
+            )
+        }
+        "read" => read_summary(tool.arguments, result),
+        "write" => {
+            let count = content::payload(field(tool.arguments, "content")).len();
+            format!(
+                "Wrote {count} {} · previous content unavailable",
+                plural(count)
+            )
+        }
         _ => tool.summary.into(),
     }
 }
 
-/// The returned part of a read: bytes for byte pages, otherwise lines.
-fn range(arguments: &Value, result: &Value) -> Option<String> {
-    if arguments.get("byte_offset").is_some() {
-        let start = result
-            .get("byte_offset")
-            .and_then(Value::as_usize)
-            .unwrap_or(0);
+fn read_summary(arguments: &Value, result: &Value) -> String {
+    if let Some(view) = result.get("view").and_then(Value::as_str) {
+        return format!("Opened {}", if view == "pdf" { "PDF" } else { view });
+    }
+    if result.get("attachment").is_some() && result.get("content").is_none() {
+        return "Attachment available".into();
+    }
+    if arguments.get("byte_offset").is_some() || result.get("offset") == Some(&Value::Null) {
         let count = result
             .get("bytes_returned")
             .and_then(Value::as_usize)
             .unwrap_or(0);
-        return Some(if count == 0 {
-            "no bytes returned".into()
+        let start = result
+            .get("byte_offset")
+            .and_then(Value::as_usize)
+            .unwrap_or(0);
+        return if count == 0 {
+            "Read 0 bytes".into()
         } else {
-            format!("bytes {start}–{}", start.saturating_add(count - 1))
-        });
+            format!(
+                "Read {count} bytes · bytes {start}–{}",
+                start.saturating_add(count - 1)
+            )
+        };
     }
-    let count = result.get("lines_returned").and_then(Value::as_usize)?;
+    let count = result
+        .get("lines_returned")
+        .and_then(Value::as_usize)
+        .unwrap_or_else(|| content::payload(field(result, "content")).len());
     let start = result
         .get("offset")
         .or_else(|| arguments.get("offset"))
         .and_then(Value::as_usize)
         .unwrap_or(1);
-    Some(if count == 0 {
-        "no lines returned".into()
+    if count == 0 {
+        "Read 0 lines".into()
     } else {
-        format!("lines {start}–{}", start.saturating_add(count - 1))
-    })
+        format!(
+            "Read {count} {} · lines {start}–{}",
+            plural(count),
+            start.saturating_add(count - 1)
+        )
+    }
 }
 
-/// A written file's size in the rows its preview counts.
-fn lines(content: &str) -> String {
-    let content = text::clean(content);
-    match content
-        .strip_suffix('\n')
-        .unwrap_or(&content)
-        .split('\n')
-        .count()
-    {
-        _ if content.is_empty() => "empty".into(),
-        1 => "1 line".into(),
-        count => format!("{count} lines"),
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "line" } else { "lines" }
+}
+
+fn preview(line: Line, width: usize, expanded: bool) -> Line {
+    if expanded {
+        line
+    } else {
+        // A wide glyph can leave one unused cell at each wrap boundary.
+        line.shortened(width.saturating_sub(1).max(1).saturating_mul(3))
     }
+}
+
+fn wrapped(
+    value: &str,
+    style: Style,
+    columns: usize,
+    source: usize,
+    first: &str,
+    rest: &str,
+    words: bool,
+) -> Vec<Line> {
+    Line::new(value, style)
+        .at_source(source)
+        .wrap(columns.saturating_sub(text::cells(first)).max(1), words)
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| {
+            row.gutter(if index == 0 { first } else { rest }, MUTED)
+                .shortened(columns)
+        })
+        .collect()
 }
 
 fn flag(value: &Value, key: &str) -> bool {

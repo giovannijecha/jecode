@@ -6,7 +6,6 @@ pub struct Presentation {
     pub started: Option<Instant>,
     pub elapsed: Option<Duration>,
     pub expanded: Option<bool>,
-    pub selected: bool,
 }
 
 impl Presentation {

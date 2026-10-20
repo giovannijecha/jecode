@@ -1,5 +1,10 @@
 use super::*;
-use crate::{effort::Effort, json::Value, redact::Redactor, test_support::Directory};
+use crate::{
+    effort::Effort,
+    json::Value,
+    redact::Redactor,
+    test_support::{Directory, tool_call},
+};
 use std::{fs, io::Write};
 
 fn message(role: &str, text: &str) -> Value {
@@ -24,6 +29,41 @@ fn fixture() -> (Directory, Directory, Store, Document) {
         message("user", "Original request"),
     ];
     (directory, home, store, doc)
+}
+
+#[test]
+fn tool_change_survives_journal_and_replays_without_entering_tool_result() {
+    let (_directory, _home, store, mut doc) = fixture();
+    let change = crate::file_change::Change::between(Some("old\n"), "new\n").unwrap();
+    doc.messages.push(Value::object([
+        ("role", Value::string("assistant")),
+        (
+            "tool_calls",
+            Value::Array(vec![tool_call("call-1", "edit", Value::object([]))]),
+        ),
+    ]));
+    doc.messages.push(Value::object([
+        ("role", Value::string("tool")),
+        ("tool_call_id", Value::string("call-1")),
+        ("content", Value::string("{\"bytes_written\":4}")),
+    ]));
+    doc.events.push(Value::object([
+        ("type", Value::string("tool_change")),
+        ("after_message", Value::number(doc.messages.len())),
+        ("tool_call_id", Value::string("call-1")),
+        ("change", change.value()),
+    ]));
+    let lease = store.create(&doc.id).unwrap();
+    lease.save(&doc).unwrap();
+    drop(lease);
+    let (handle, _) = Handle::open(store, &doc.id, Redactor::empty()).unwrap();
+    let restored = handle.snapshot();
+    assert_eq!(
+        restored.messages[3].get("content").and_then(Value::as_str),
+        Some("{\"bytes_written\":4}")
+    );
+    assert!(matches!(restored.records().last(),
+        Some(Record::Tool { change: Some(actual), .. }) if actual == &change));
 }
 
 #[test]

@@ -75,8 +75,25 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     history.history.navigate(&mut history.editor, true);
 
     let mut inspection = state(columns);
-    working(&mut inspection, "Running tools", 6.0);
-    inspection.tool_focus = Some(0);
+    inspection.begin_tool_turn();
+    inspection.event(crate::events::Event::ToolStarted {
+        id: "read".into(),
+        name: "read".into(),
+        arguments: crate::json::Value::object([(
+            "path",
+            crate::json::Value::string("src/main.rs"),
+        )]),
+    });
+    inspection.event(crate::events::Event::ToolFinished {
+        id: "read".into(),
+        name: "read".into(),
+        summary: "Read 1 line".into(),
+        result: crate::json::Value::object([(
+            "content",
+            crate::json::Value::string("1: fn main() {}"),
+        )]),
+    });
+    inspection.finish_tool_turn();
 
     let mut reconnecting = state(columns);
     working(&mut reconnecting, "Waiting", 64.0);
@@ -99,7 +116,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ("Working with queued messages", queue),
         ("Editing a queued message", editing),
         ("Prompt history", history),
-        ("Tool inspection", inspection),
+        ("Completed turn tools", inspection),
         ("Reconnecting", reconnecting),
     ]
 }

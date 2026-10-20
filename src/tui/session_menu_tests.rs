@@ -41,6 +41,79 @@ fn delete(app: &mut App, id: &str) {
     app.finish_delete(true).unwrap();
 }
 
+fn escape(app: &mut App) -> bool {
+    app.input(Decoded::Key(terminal::Key {
+        code: 27,
+        character: 0,
+        modifiers: 0,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn escape_from_empty_resume_after_deleting_current_returns_to_composer() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut current = app(&home, &project);
+    seed(&current, "Delete the only conversation");
+    current.state.begin_tool_turn();
+    current
+        .state
+        .message(Kind::User, "Delete the only conversation");
+    current.state.message(Kind::Assistant, "Completed.");
+    current.state.finish_tool_turn();
+    let id = current.persistence.as_ref().unwrap().id();
+    current.state.editor.insert("kept draft");
+    current.open_sessions();
+    delete(&mut current, &id);
+    assert!(current.saved_sessions.is_empty());
+    assert!(current.state.selector.as_ref().unwrap().options.is_empty());
+    assert!(current.state.tool_details.turn.is_none());
+
+    assert!(!escape(&mut current));
+    assert!(current.state.selector.is_none());
+    assert!(!current.exit_requested);
+    assert_eq!(current.state.editor.text, "kept draft");
+    assert!(!current.state.tool_details_available());
+    assert!(
+        !current
+            .input(Decoded::Key(terminal::Key {
+                code: 79,
+                character: 0,
+                modifiers: 4,
+            }))
+            .unwrap()
+    );
+    current.poll().unwrap();
+    assert!(!current.exit_requested);
+    let visible = view::frame(&current.state, "fixture/model", "fixture")
+        .live
+        .iter()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(visible.contains("kept draft"));
+    assert!(!visible.contains("No saved conversations"));
+}
+
+#[test]
+fn escape_from_initially_empty_resume_returns_to_composer() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut current = app(&home, &project);
+    current.state.editor.insert("kept draft");
+    current.open_sessions();
+    assert!(current.saved_sessions.is_empty());
+    assert!(current.state.selector.as_ref().unwrap().options.is_empty());
+
+    assert!(!escape(&mut current));
+    assert!(current.state.selector.is_none());
+    assert!(!current.exit_requested);
+    assert_eq!(current.state.editor.text, "kept draft");
+    current.poll().unwrap();
+    assert!(!current.exit_requested);
+}
+
 #[test]
 fn a_fresh_launch_and_unsent_work_never_count_as_a_session_in_resume() {
     let home = Directory::new();

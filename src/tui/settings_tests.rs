@@ -168,14 +168,16 @@ fn a_missing_tool_finish_event_is_reconciled_from_retained_protocol_results() {
         .unwrap();
     app.state.settle_tools(&agent.archive());
     app.state.close_tools();
-    assert!(
-        app.state
-            .rows()
-            .iter()
-            .flatten()
-            .any(|line| line.plain().contains("read  missing")
-                && line.plain().contains("× failed"))
-    );
+    let rows = app.state.rows();
+    let tool = rows
+        .iter()
+        .find(|block| {
+            block
+                .iter()
+                .any(|line| line.plain().contains("● Read(missing)"))
+        })
+        .unwrap();
+    assert!(tool.iter().any(|line| line.plain().contains("⎿ Failed ·")));
     assert!(
         view::frame(&app.state, "fixture", "directory")
             .live

@@ -176,8 +176,13 @@ impl App {
                         .collect(),
                 );
                 self.state.effort = document.effort.name().into();
+                let mut turn_recorded = false;
                 for record in document.records() {
                     match record {
+                        Record::TurnStart => {
+                            self.state.begin_tool_turn();
+                            turn_recorded = true;
+                        }
                         Record::Text { role, text } => match role.as_str() {
                             "user" => self.state.message(Kind::User, &text),
                             "assistant" => self.state.message(Kind::Assistant, &text),
@@ -189,12 +194,19 @@ impl App {
                             arguments,
                             summary,
                             result,
+                            change,
                         } => {
                             self.state.event(Event::ToolStarted {
                                 id: id.clone(),
                                 name: name.clone(),
                                 arguments,
                             });
+                            if let Some(change) = change {
+                                self.state.event(Event::ToolChanged {
+                                    id: id.clone(),
+                                    change,
+                                });
+                            }
                             self.state.event(Event::ToolFinished {
                                 id,
                                 name,
@@ -224,6 +236,11 @@ impl App {
                 }
                 self.state.close_tools();
                 // Saved records do not contain execution timings.
+                if turn_recorded {
+                    self.state.finish_tool_turn();
+                } else {
+                    self.state.restore_tool_turn();
+                }
                 for item in &mut self.state.items {
                     if let Item::Tool { presentation, .. } = item {
                         presentation.started = None;

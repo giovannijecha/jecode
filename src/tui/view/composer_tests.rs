@@ -231,7 +231,6 @@ fn draft_contexts_add_a_hint_row_and_retain_the_directory_footer() {
 
     let mut state = State {
         activity: Some(Activity::new()),
-        tool_focus: Some(0),
         ..State::default()
     };
     state.editor.insert("draft");
@@ -240,10 +239,10 @@ fn draft_contexts_add_a_hint_row_and_retain_the_directory_footer() {
         .iter()
         .map(Line::plain)
         .collect();
-    assert_eq!(rows.len(), 6, "{rows:#?}");
-    assert!(rows[0].contains("Esc returns"));
-    assert!(rows[1].starts_with("Tools · ↑↓ select · Enter details · Esc returns"));
-    assert!(rows[5].ends_with("model · default"));
+    assert_eq!(rows.len(), 5, "{rows:#?}");
+    assert!(rows[0].contains("Esc stops"));
+    assert!(rows[2].contains("draft"));
+    assert!(rows[4].ends_with("model · default"));
 }
 
 #[test]

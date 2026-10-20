@@ -22,8 +22,7 @@ impl State {
 
 #[derive(Default, Clone, Copy)]
 pub(in crate::tui) struct Rows {
-    // None: no visible predecessor. true: the preceding tool tree continues.
-    pub previous: Option<bool>,
+    pub previous: bool,
 }
 
 impl Rows {
@@ -64,7 +63,7 @@ impl Rows {
                 arguments,
                 summary,
                 result,
-                last,
+                change,
                 presentation,
                 ..
             } => cards::render(
@@ -73,30 +72,22 @@ impl Rows {
                     arguments,
                     summary,
                     result: result.as_ref(),
-                    last: last.unwrap_or(false),
-                    preview: *last != Some(false),
+                    change: change.as_deref(),
                     presentation,
                 },
                 columns,
             ),
         };
         let mut lines = lines;
-        self.finish(item, &mut lines);
+        self.finish(&mut lines);
         lines
     }
-    pub fn finish(&mut self, item: &Item, lines: &mut Vec<Line>) {
+    pub fn finish(&mut self, lines: &mut Vec<Line>) {
         if !lines.is_empty() {
-            let continuing = matches!(item, Item::Tool { .. }) && self.previous == Some(true);
-            if self.previous.is_some() && !continuing {
+            if self.previous {
                 lines.insert(0, Line::default());
             }
-            self.previous = Some(matches!(
-                item,
-                Item::Tool {
-                    last: Some(false),
-                    ..
-                }
-            ));
+            self.previous = true;
         }
     }
 }

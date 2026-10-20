@@ -107,6 +107,7 @@ pub(super) fn resume(
     let document = agent.sessions().unwrap().snapshot();
     for record in document.records() {
         match record {
+            Record::TurnStart => {}
             Record::Text { role, text } => {
                 if role == "user" {
                     writeln!(output, "\n> {text}")

@@ -129,7 +129,7 @@ pub(super) fn lower_with_chrome(
     }
 }
 
-fn panel_open(state: &State) -> bool {
+pub(super) fn panel_open(state: &State) -> bool {
     state.processes.is_some()
         || state.selector.is_some()
         || state.information.is_some()
