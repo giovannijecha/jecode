@@ -81,6 +81,7 @@ saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard sh
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
 | `/settings` | Edit saved defaults and the OpenRouter key. |
 | `/init` | Inspect this project and create or update its `JECODE.md`. |
+| `/skills` | List personal skills available to the model. |
 | `/help` | Show commands and controls. |
 | `/exit` | Quit when the active turn finishes. |
 
@@ -88,6 +89,10 @@ Use [`JECODE.md`](docs/usage/PROJECT_INSTRUCTIONS.md) for project rules, or ask
 `/init` to help write it. Jecode reads instruction files in the launch directory
 and its subdirectories before each new turn. Each file applies to its own
 directory and descendants; instructions above the launch directory are excluded.
+
+Keep reusable workflows in [`~/.jecode/skills`](docs/usage/SKILLS.md). Jecode
+shows their names and descriptions to the model, which reads a skill when it
+fits the task. `/skills` lists the library without making a model request.
 
 Conversations autosave under `~/.jecode/sessions/`. To resume, run
 `jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)

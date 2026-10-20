@@ -23,6 +23,7 @@ mod scratch;
 mod session;
 mod sessions;
 mod setup;
+mod skills;
 mod tools;
 mod tui;
 

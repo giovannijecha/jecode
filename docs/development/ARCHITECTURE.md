@@ -14,6 +14,7 @@ Paths are relative to `src/`.
 | Settings and model effort | `config/`, `effort.rs` |
 | Agent and context | `agent.rs`, `agent/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
+| Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
@@ -66,8 +67,12 @@ and replaces large older tool results with previews and history references.
 `context/source.rs` tracks original roles, user requests and tool ownership;
 `agent/history.rs` exposes paged original messages through `read`.
 
-The current environment and project instructions are projected separately from
-the original saved system message. Compaction changes the active context without
+The native communication and behavior instructions live in `agent/PROMPT.md`
+and are compiled into the application. The current environment, project
+instructions and personal skill catalog are projected separately from
+the original saved system message. Skill bodies are read on demand through the
+agent's `read` dispatch, alongside history references; terminal presentation
+remains in the TUI. Compaction changes the active context without
 rewriting original history. `Event::Context` carries the next-request estimate
 to the TUI footer. See [long-running work](../usage/LONG_WORK.md) for user-visible behavior.
 

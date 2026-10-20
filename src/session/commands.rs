@@ -17,7 +17,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 15] = [
+pub const COMMANDS: [Command; 16] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -65,6 +65,12 @@ pub const COMMANDS: [Command; 15] = [
         description: "Show commands and keyboard controls",
         tui_usage: "/help",
         plain_usage: Some("/help"),
+    },
+    Command {
+        name: "/skills",
+        description: "List available personal skills",
+        tui_usage: "/skills",
+        plain_usage: Some("/skills"),
     },
     Command {
         name: "/export",
@@ -128,6 +134,33 @@ pub fn help(tui: bool) -> String {
     rows.push(String::new());
     rows.push(if tui { TUI_CONTROLS } else { PLAIN_CONTROLS }.into());
     rows.join("\n")
+}
+
+pub fn skills_catalog(
+    skills: impl IntoIterator<Item = (String, String)>,
+    warnings: &[String],
+) -> (String, Vec<(String, String)>) {
+    let mut details: Vec<_> = skills.into_iter().collect();
+    let count = details.len();
+    let result = match (count, warnings.len()) {
+        (0, 0) => "No skills installed.".to_owned(),
+        (0, skipped) => format!("No valid skills found · {skipped} skipped"),
+        (count, 0) => format!(
+            "{count} available {}",
+            if count == 1 { "skill" } else { "skills" }
+        ),
+        (count, skipped) => format!(
+            "{count} available {} · {skipped} skipped",
+            if count == 1 { "skill" } else { "skills" }
+        ),
+    };
+    details.extend(
+        warnings
+            .iter()
+            .cloned()
+            .map(|warning| ("Skipped".into(), warning)),
+    );
+    (result, details)
 }
 
 pub fn split(text: &str) -> Option<(&str, &str)> {
@@ -285,5 +318,35 @@ mod tests {
         assert!(help(false).contains("Attach files to the next message"));
         assert!(!help(false).contains("Alt+V"));
         assert!(help(true).contains("Alt+V"));
+        assert!(help(true).contains("/skills"));
+        assert!(help(false).contains("/skills"));
+    }
+
+    #[test]
+    fn skills_catalog_explains_empty_valid_and_skipped_entries() {
+        assert_eq!(
+            skills_catalog([], &[]),
+            ("No skills installed.".into(), vec![])
+        );
+        assert_eq!(
+            skills_catalog([], &["invalid metadata".into()]),
+            (
+                "No valid skills found · 1 skipped".into(),
+                vec![("Skipped".into(), "invalid metadata".into())]
+            )
+        );
+        assert_eq!(
+            skills_catalog(
+                [("review".into(), "Inspect a change".into())],
+                &["broken skill".into()]
+            ),
+            (
+                "1 available skill · 1 skipped".into(),
+                vec![
+                    ("review".into(), "Inspect a change".into()),
+                    ("Skipped".into(), "broken skill".into())
+                ]
+            )
+        );
     }
 }

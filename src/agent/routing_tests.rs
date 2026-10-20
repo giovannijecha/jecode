@@ -103,8 +103,8 @@ fn auto_sends_the_conversation_id_and_preferences_and_lists_endpoints_once_per_w
 #[test]
 fn a_pin_reaches_summary_requests_and_its_failures_say_how_to_change_it() {
     let directory = Directory::new();
-    // Keep this unknown-capacity rejection larger than the current tool contract.
-    let prompt = "original objective ".repeat(750);
+    // Leave summary room after a rejection of the native prompt and tool contract.
+    let prompt = "original objective ".repeat(1500);
     let fixture = HttpFixture::new(vec![
         (200, listing()),
         (

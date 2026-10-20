@@ -27,6 +27,20 @@ impl Agent {
                 change: None,
             };
         }
+        if call.name == "read"
+            && let Ok(arguments) = json::parse(&call.arguments)
+            && let Some(path) = arguments.get("path").and_then(Value::as_str)
+            && path.starts_with("skill:")
+        {
+            let result = self
+                .skills
+                .read(path, &arguments, &self.cancellation)
+                .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
+            return crate::tools::Execution {
+                result,
+                change: None,
+            };
+        }
         self.tools
             .execute_with_change(&call.name, &call.arguments, &self.cancellation)
     }

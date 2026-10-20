@@ -96,6 +96,26 @@ fn chat_inner(
                 );
                 writeln!(output, "{}", commands::help(false)).map_err(|error| error.to_string())
             }
+            ("/skills", "") => agent.skills().and_then(|skills| {
+                let (result, details) = commands::skills_catalog(
+                    skills
+                        .into_iter()
+                        .map(|skill| (skill.name, skill.description)),
+                    agent.skill_warnings(),
+                );
+                agent.record_local_details("/skills", &result, "notice", &details);
+                writeln!(output, "{}", agent.redact(&result)).map_err(|error| error.to_string())?;
+                for (name, description) in details {
+                    writeln!(
+                        output,
+                        "{}  {}",
+                        agent.redact(&name),
+                        agent.redact(&description)
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            }),
             ("/copy", "") => copy::print(agent, input, output),
             ("/drafts", "") => writeln!(
                 output,
