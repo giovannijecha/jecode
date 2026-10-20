@@ -14,8 +14,6 @@ use crate::console::Console;
 use crate::input::read_line;
 use std::io::{BufRead, Write};
 
-pub use commands::HELP;
-
 /// A line-based chat whose first message carries `staged` attachments.
 pub fn chat(
     agent: &mut Agent,
@@ -75,47 +73,48 @@ fn chat_inner(
             return agent.save_session();
         };
         let line = line.trim();
-        let result = match line {
-            "" if staged.is_empty() => continue,
-            _ if attach::command(line).is_some() => {
+        if line.is_empty() && staged.is_empty() {
+            continue;
+        }
+        let (name, arguments) = commands::split(line).unwrap_or(("", ""));
+        let name = commands::canonical(name).to_ascii_lowercase();
+        let result = match (name.as_str(), arguments) {
+            ("/attach", _) => {
                 attach::stage(agent, attach::command(line).unwrap(), &mut staged, output)
             }
-            "/exit" => return agent.save_session(),
-            "/help" => {
+            ("/exit", "") => return agent.save_session(),
+            ("/help", "") => {
                 agent.record_local_details(
                     "/help",
                     "Commands and controls",
                     "notice",
                     &commands::COMMANDS
                         .iter()
-                        .map(|command| (command.name.into(), command.description.into()))
+                        .filter(|command| command.plain_usage.is_some())
+                        .map(|command| (command.name.into(), command.description(false).into()))
                         .collect::<Vec<_>>(),
                 );
-                writeln!(output, "{}", commands::PLAIN_HELP).map_err(|error| error.to_string())
+                writeln!(output, "{}", commands::help(false)).map_err(|error| error.to_string())
             }
-            "/copy" => copy::print(agent, input, output),
-            "/drafts" => writeln!(
+            ("/copy", "") => copy::print(agent, input, output),
+            ("/drafts", "") => writeln!(
                 output,
                 "Pending drafts are managed in the fullscreen terminal interface."
             )
             .map_err(|error| error.to_string()),
-            "/resume" => {
+            ("/resume", "") => {
                 let previous = agent.sessions();
                 persistence::resume(agent, config, None, input, output, status)
                     .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
             }
-            "/terminal" => processes::print(agent, "", output),
-            _ if line.starts_with("/terminal ") => {
-                processes::print(agent, line[10..].trim(), output)
-            }
-            "/tmp" => temporary::print(agent, "", output),
-            _ if line.starts_with("/tmp ") => temporary::print(agent, line[5..].trim(), output),
-            _ if line.starts_with("/resume ") => {
+            ("/terminal", _) => processes::print(agent, arguments, output),
+            ("/tmp", _) => temporary::print(agent, arguments, output),
+            ("/resume", _) => {
                 let previous = agent.sessions();
-                persistence::resume(agent, config, Some(line[8..].trim()), input, output, status)
+                persistence::resume(agent, config, Some(arguments), input, output, status)
                     .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
             }
-            "/export" => agent.archive().save().and_then(|path| {
+            ("/export", "") => agent.archive().save().and_then(|path| {
                 agent.record_local(
                     "/export",
                     &format!("Exported conversation to {}", path.display()),
@@ -123,24 +122,24 @@ fn chat_inner(
                 writeln!(output, "Exported conversation to {}", path.display())
                     .map_err(|error| error.to_string())
             }),
-            "/clear" | "/new" => {
+            ("/new", "") => {
                 agent.start_new(config.settings.model.clone(), config.settings.effort)?;
                 agent.record_local("/new", "New conversation · saved defaults applied");
                 writeln!(output, "Conversation cleared.").map_err(|error| error.to_string())
             }
-            "/setup" | "/settings" => config.configure(agent, input, output).map(|()| {
+            ("/settings", "") => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");
             }),
-            "/routing" => config.change_routing(agent, input, output),
-            "/effort" => config.change_effort(agent, None, input, output),
-            _ if line.starts_with("/effort ") => {
-                config.change_effort(agent, Some(line[8..].trim()), input, output)
+            ("/routing", "") => config.change_routing(agent, input, output),
+            ("/effort", "") => config.change_effort(agent, None, input, output),
+            ("/effort", _) => config.change_effort(agent, Some(arguments), input, output),
+            ("/model", "") => config.change_model(agent, None, input, output),
+            ("/model", _) => config.change_model(agent, Some(arguments), input, output),
+            ("/init", "") => {
+                let prompt = Prompt::plain(commands::INIT_PROMPT);
+                agent.run_turn(prompt, &mut Console::new(output, status))
             }
-            "/model" => config.change_model(agent, None, input, output),
-            _ if line.starts_with("/model ") => {
-                config.change_model(agent, Some(line[7..].trim()), input, output)
-            }
-            _ if line.starts_with('/') => {
+            (name, _) if name.starts_with('/') => {
                 agent.record_local_details(line, &commands::unknown(line), "error", &[]);
                 writeln!(output, "Unknown command. Use /help to see commands.")
                     .map_err(|error| error.to_string())

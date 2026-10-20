@@ -112,3 +112,72 @@ fn control_o_during_a_running_turn_does_not_cancel_it_or_lose_its_draft() {
     assert!(app.state.tool_details.expanded);
     assert_eq!(fixture.finish().len(), 1);
 }
+
+#[test]
+fn queued_exit_waits_for_completion_and_quit_alias_uses_the_same_path() {
+    for command in ["/exit", "/QuIt"] {
+        let directory = Directory::new();
+        let fixture = HttpFixture::new(vec![(200, completion("Finished.", vec![]))]);
+        let mut app = app(&directory, &fixture);
+        submit(&mut app, "Finish the request");
+        submit(&mut app, command);
+        assert!(!app.exit_requested);
+        assert_eq!(app.state.queue.messages()[0].text, command);
+        finish(&mut app);
+        assert!(app.exit_requested);
+        assert!(rows(&app).iter().any(|row| row == "assistant: Finished."));
+        assert_eq!(fixture.finish().len(), 1);
+    }
+}
+
+#[test]
+fn queued_exit_pauses_when_the_active_turn_fails() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        401,
+        Value::object([(
+            "error",
+            Value::object([("message", Value::string("Fixture rejection"))]),
+        )]),
+    )]);
+    let mut app = app(&directory, &fixture);
+    submit(&mut app, "Fail the request");
+    submit(&mut app, "/exit");
+    finish(&mut app);
+    assert!(!app.exit_requested);
+    assert_eq!(app.state.queue.paused[0].text, "/exit");
+    assert!(app.state.queue.messages().is_empty());
+    assert_eq!(fixture.finish().len(), 1);
+}
+
+#[test]
+fn queued_init_starts_after_the_active_turn_and_keeps_its_visible_name() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, completion("First complete.", vec![])),
+        (200, completion("Instructions inspected.", vec![])),
+    ]);
+    let mut app = app(&directory, &fixture);
+    submit(&mut app, "First task");
+    submit(&mut app, "/init");
+    assert_eq!(app.state.queue.messages()[0].text, "/init");
+    finish(&mut app);
+    assert!(rows(&app).iter().any(|row| row == "user: /init"));
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(last_content(&requests[0]), "First task");
+    assert!(last_content(&requests[1]).starts_with("/init\n\n"));
+}
+
+#[test]
+fn init_stays_retryable_when_project_instructions_cannot_be_read() {
+    let directory = Directory::new();
+    fs::write(directory.path().join("JECODE.md"), [0xff, 0xfe]).unwrap();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    submit(&mut app, "/init");
+    assert!(app.worker.is_none());
+    assert_eq!(app.state.queue.paused[0].text, "/init");
+    assert!(app.state.notice.as_ref().unwrap().text.contains("UTF-8"));
+    assert!(fixture.finish().is_empty());
+}

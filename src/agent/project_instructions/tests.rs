@@ -21,26 +21,92 @@ fn system(request: &Request) -> &str {
 }
 
 #[test]
-fn only_the_launch_directory_file_is_loaded_and_utf8_bom_is_accepted() {
+fn only_files_inside_launch_root_are_loaded_and_utf8_bom_is_accepted() {
     let directory = Directory::new();
     let project = directory.path().join("project");
     fs::create_dir_all(project.join("src")).unwrap();
     fs::write(directory.path().join(FILE_NAME), "Parent rules").unwrap();
     fs::write(project.join("src").join(FILE_NAME), "Child rules").unwrap();
+    fs::write(project.join("src").join("AGENTS.md"), "Ignored agent rules").unwrap();
     for name in ["RULES.md", "INSTRUCTIONS.md"] {
         fs::write(project.join(name), "Other project rules").unwrap();
     }
     let root = fs::canonicalize(project).unwrap();
-    assert!(load(&root).unwrap().is_empty());
+    let loaded = load(&root).unwrap();
+    assert!(loaded.contains("Source: src/JECODE.md\nDirectory scope: src and its descendants"));
+    assert!(loaded.contains("Child rules"));
+    assert!(!loaded.contains("Parent rules"));
+    assert!(!loaded.contains("Ignored agent rules"));
     let path = root.join(FILE_NAME);
     fs::write(&path, "\u{feff}# Project\r\nKeep café names.\r\n").unwrap();
-    assert_eq!(load(&root).unwrap(), "# Project\r\nKeep café names.\r\n");
+    let loaded = load(&root).unwrap();
+    assert!(loaded.starts_with("Source: JECODE.md\nDirectory scope: the entire project tree\n\n# Project\r\nKeep café names.\r\n"));
+    assert!(loaded.contains("Child rules"));
     for empty in ["", "\u{feff} \r\n\t"] {
         fs::write(&path, empty).unwrap();
-        assert!(load(&root).unwrap().is_empty());
+        assert!(load(&root).unwrap().contains("Child rules"));
     }
     fs::write(path, "x".repeat(BYTE_LIMIT)).unwrap();
-    assert_eq!(load(&root).unwrap().len(), BYTE_LIMIT);
+    assert!(load(&root).unwrap_err().contains("combined 64 KiB"));
+}
+
+#[test]
+fn nested_sections_are_parent_first_and_keep_literal_references() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    for path in ["z", "a/deep", ".git/hooks", "target"] {
+        fs::create_dir_all(root.join(path)).unwrap();
+    }
+    fs::write(root.join(FILE_NAME), "Root @missing.md").unwrap();
+    fs::write(root.join("a/JECODE.md"), "A instructions").unwrap();
+    fs::write(root.join("a/deep/JECODE.md"), "Deep instructions").unwrap();
+    fs::write(root.join("z/JECODE.md"), "Z instructions").unwrap();
+    fs::write(
+        root.join("target/JECODE.md"),
+        "Ignored by Git, still loaded",
+    )
+    .unwrap();
+    fs::write(root.join(".git/hooks/JECODE.md"), "Git metadata rules").unwrap();
+    fs::write(root.join("AGENTS.md"), "AGENTS rules").unwrap();
+    let loaded = load(&root).unwrap();
+    let positions = [
+        "Source: JECODE.md",
+        "Source: a/JECODE.md",
+        "Source: a/deep/JECODE.md",
+        "Source: target/JECODE.md",
+        "Source: z/JECODE.md",
+    ]
+    .map(|source| loaded.find(source).unwrap());
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(loaded.contains("Root @missing.md"));
+    assert!(loaded.contains("Ignored by Git, still loaded"));
+    assert!(!loaded.contains("Git metadata rules"));
+    assert!(!loaded.contains("AGENTS rules"));
+}
+
+#[test]
+fn nested_invalid_files_and_aggregate_overflow_fail_before_history_changes() {
+    let directory = Directory::new();
+    let child = directory.path().join("src");
+    fs::create_dir(&child).unwrap();
+    let root_file = directory.path().join(FILE_NAME);
+    let child_file = child.join(FILE_NAME);
+    fs::write(&root_file, "r".repeat(BYTE_LIMIT / 2 + 1)).unwrap();
+    fs::write(&child_file, "c".repeat(BYTE_LIMIT / 2)).unwrap();
+    let fixture = HttpFixture::new(vec![]);
+    let mut agent = agent(&directory, &fixture);
+    let original = agent.messages.lock().unwrap().clone();
+    let error = agent.prepare_turn("Inspect").unwrap_err();
+    assert!(error.contains("combined 64 KiB"), "{error}");
+    assert!(error.contains("src"), "{error}");
+    assert_eq!(*agent.messages.lock().unwrap(), original);
+    fs::remove_file(&root_file).unwrap();
+    fs::write(&child_file, [0xff, 0xfe]).unwrap();
+    let error = agent.prepare_turn("Inspect").unwrap_err();
+    assert!(error.contains("src"), "{error}");
+    assert!(error.contains("UTF-8"), "{error}");
+    assert_eq!(*agent.messages.lock().unwrap(), original);
+    assert!(fixture.finish().is_empty());
 }
 
 #[test]
@@ -77,6 +143,7 @@ fn invalid_files_stop_preparation_without_adding_history_or_contacting_the_model
 #[test]
 fn each_turn_keeps_one_snapshot_and_the_next_turn_reloads_creation_edits_and_deletion() {
     let directory = Directory::new();
+    fs::create_dir(directory.path().join("src")).unwrap();
     fs::write(directory.path().join("note.txt"), "A note").unwrap();
     let fixture = HttpFixture::new(vec![
         (200, completion("Before instructions", vec![])),
@@ -98,7 +165,7 @@ fn each_turn_keeps_one_snapshot_and_the_next_turn_reloads_creation_edits_and_del
     let mut agent = agent(&directory, &fixture);
     let original_system = agent.messages.lock().unwrap()[0].clone();
     agent.run_turn("First request", &mut |_| Ok(())).unwrap();
-    let path = directory.path().join(FILE_NAME);
+    let path = directory.path().join("src").join(FILE_NAME);
     fs::write(&path, "Original project rules").unwrap();
     let mut edited = false;
     agent
@@ -120,6 +187,8 @@ fn each_turn_keeps_one_snapshot_and_the_next_turn_reloads_creation_edits_and_del
     assert!(!system(&requests[0]).contains("Project instructions from"));
     for request in &requests[1..3] {
         assert!(system(request).contains("Original project rules"));
+        assert!(system(request).contains("Source: src/JECODE.md"));
+        assert!(system(request).contains("Directory scope: src and its descendants"));
         assert!(!system(request).contains("Revised project rules"));
         assert_eq!(
             system(request).matches("Project instructions from").count(),
@@ -180,10 +249,30 @@ fn changed_rules_invalidate_measurements_and_unchanged_rules_keep_them() {
 }
 
 #[test]
+fn source_edits_invalidate_measurements_even_if_redacted_projection_is_identical() {
+    let directory = Directory::new();
+    let path = directory.path().join(FILE_NAME);
+    fs::write(&path, "isolated-fixture-key").unwrap();
+    let fixture = HttpFixture::new(vec![]);
+    let mut agent = agent(&directory, &fixture);
+    agent.refresh_project_instructions().unwrap();
+    let projected = agent.redact(&agent.project_instructions);
+    agent.context.input_tokens = Some(1000);
+    agent.context.measured_end = 1;
+    fs::write(&path, "[redacted]").unwrap();
+    agent.refresh_project_instructions().unwrap();
+    assert_eq!(agent.redact(&agent.project_instructions), projected);
+    assert_eq!(agent.context.input_tokens, None);
+    assert_eq!(agent.context.measured_end, 0);
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn resumed_sessions_reload_current_rules_without_rewriting_original_history() {
     let directory = Directory::new();
     let home = Directory::new();
-    let path = directory.path().join(FILE_NAME);
+    fs::create_dir(directory.path().join("src")).unwrap();
+    let path = directory.path().join("src").join(FILE_NAME);
     fs::write(&path, "Earlier project rules").unwrap();
     let fixture = HttpFixture::new(vec![
         (200, completion("First answer", vec![])),
@@ -226,7 +315,9 @@ fn resumed_sessions_reload_current_rules_without_rewriting_original_history() {
 fn live_requests_keep_the_rules_after_context_compaction() {
     let directory = Directory::new();
     let home = Directory::new();
-    fs::write(directory.path().join(FILE_NAME), "Compaction project rules").unwrap();
+    fs::create_dir(directory.path().join("src")).unwrap();
+    let instruction = directory.path().join("src").join(FILE_NAME);
+    fs::write(&instruction, "Compaction project rules").unwrap();
     let fixture = HttpFixture::new(vec![
         (
             400,
@@ -253,6 +344,7 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     let result = agent.run_turn(&prompt, &mut |event| {
         if let Event::Maintenance { ref text } = event {
             notices.push(text.clone());
+            fs::write(&instruction, "Changed during compaction").unwrap();
         }
         if matches!(event, Event::Recovering { .. }) {
             return Err("Unexpected fixture request".into());
@@ -269,11 +361,14 @@ fn live_requests_keep_the_rules_after_context_compaction() {
             .collect::<Vec<_>>()
     );
     assert!(agent.context.from > 1);
+    assert!(!notices.is_empty());
     assert!(!agent.context.summary.is_empty());
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
     assert_eq!(requests.len(), 3);
     for request in [&requests[0], &requests[2]] {
         assert!(system(request).contains("Compaction project rules"));
+        assert!(!system(request).contains("Changed during compaction"));
+        assert!(system(request).contains("Source: src/JECODE.md"));
         assert!(system(request).contains(&temporary));
         assert!(system(request).contains("useful durable tests"));
         assert!(system(request).contains("one-off verification"));
@@ -361,31 +456,4 @@ fn an_unreadable_file_stops_the_request_and_can_be_retried_after_unlocking() {
     let requests = fixture.finish();
     assert_eq!(requests.len(), 1);
     assert!(system(&requests[0]).contains("Unlocked project rules"));
-}
-
-#[cfg(unix)]
-#[test]
-fn instruction_symlinks_must_resolve_inside_the_launch_directory() {
-    use std::os::unix::fs::symlink;
-
-    let directory = Directory::new();
-    let outside = Directory::new();
-    let root = fs::canonicalize(directory.path()).unwrap();
-    let target = root.join("RULES.md");
-    fs::write(&target, "Linked project rules").unwrap();
-    let path = root.join(FILE_NAME);
-    symlink(&target, &path).unwrap();
-    assert_eq!(load(&root).unwrap(), "Linked project rules");
-    fs::remove_file(&path).unwrap();
-    let target = outside.path().join("RULES.md");
-    fs::write(&target, "Outside project rules").unwrap();
-    symlink(fs::canonicalize(target).unwrap(), &path).unwrap();
-    assert!(
-        load(&root)
-            .unwrap_err()
-            .contains("inside the working directory")
-    );
-    fs::remove_file(&path).unwrap();
-    symlink(root.join("MISSING.md"), path).unwrap();
-    assert!(load(&root).unwrap_err().contains("Could not resolve"));
 }

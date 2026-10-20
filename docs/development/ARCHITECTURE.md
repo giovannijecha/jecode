@@ -26,8 +26,10 @@ Paths are relative to `src/`.
 
 1. `bootstrap.rs` resolves configuration, working directory and execution mode.
    Interactive stdin/stdout selects the TUI; prompts, pipes and `--plain` use the CLI.
-2. The agent records the request and snapshots the launch directory's `JECODE.md`.
-   That snapshot applies throughout the turn, including after compaction.
+2. The agent snapshots `JECODE.md` files in the launch directory and its real
+   subdirectories before recording the request. Each file carries its directory
+   scope; the combined snapshot applies throughout the turn, including after
+   compaction. Parent directories are never searched.
 3. The context layer projects the active conversation for OpenRouter. The client
    streams text, reasoning fields and tool calls through agent events.
 4. The agent saves tool boundaries, executes calls and records their results.

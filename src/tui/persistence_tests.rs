@@ -8,6 +8,8 @@ use crate::{
 };
 use std::{thread, time::Instant};
 
+mod command_tests;
+
 fn app(home: &Directory, directory: &Directory, endpoint: &str) -> App {
     let mut agent = Agent::new(
         OpenRouter::fixture(endpoint.into()),

@@ -92,6 +92,11 @@ values remain marked independently of the highlighted row.
   [Copy](../usage/COPY.md).
 - `/drafts` opens the pending drafts list.
 - `/terminal [ID]` opens active processes or saved output.
+- `/init` asks the current model to inspect the project and create or update the
+  launch directory's `JECODE.md`. See [Project instructions](../usage/PROJECT_INSTRUCTIONS.md).
+- `/exit` quits after the current turn. Its hidden alias `/quit` follows the same
+  queue and pause rules as other drafts. `Ctrl+Q` quits immediately, stopping any
+  active work. A stopped or failed turn pauses an already queued `/exit` too.
 
 An unknown command reports an error with a spelling suggestion when one is
 available. `/help` also shows the commands omitted from this quick reference.

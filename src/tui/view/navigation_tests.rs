@@ -164,7 +164,8 @@ fn command_panels_show_suggestion_or_multiline_position_in_the_title() {
     state.editor.insert("/");
     state.suggestions.refresh(&state.editor.text);
     let commands = composer_frame(&state, "model", "directory");
-    assert!(commands.live[1].plain().contains("1–6 / 13"));
+    let title = format!("1–6 / {}", crate::session::commands::COMMANDS.len());
+    assert!(commands.live[1].plain().contains(&title));
     state
         .editor
         .replace("/tmp clean\none\ntwo\nthree\nfour\nfive\nsix".into());

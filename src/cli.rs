@@ -101,14 +101,14 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, St
 }
 
 pub fn print_help() {
-    let interaction = "Without PROMPT, open the fullscreen TUI or read one task from piped stdin.\n--plain uses a line-based chat. TUI: Ctrl+Q quits; Ctrl+C stops work.\nWheel and PgUp/PgDn scroll the conversation; Up/Down browse prompt history.";
+    let interaction = "Without PROMPT, open the fullscreen TUI or read one task from piped stdin.\n--plain uses a line-based chat. TUI: Ctrl+Q quits; Ctrl+C stops work.\nWheel and PgUp/PgDn scroll the conversation; Ctrl+P/N browse prompt history.";
     #[cfg(windows)]
     let requirements = "Requires Windows 10+, HTTPS-enabled curl, Git Bash and installed Windows PowerShell/.NET.\nThe Windows TUI also uses console APIs.";
     #[cfg(not(windows))]
     let requirements = "Requires HTTPS-enabled curl, Bash and kill on PATH.\nThe Unix TUI also requires stty and a VT terminal with /dev/tty.";
     println!(
         "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nKey, default model and effort live in plain text in ~/.jecode/config.json.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\n\nTools: read, write, edit, bash, process (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory; JECODE_BASH selects Bash.",
-        crate::session::HELP,
+        crate::session::commands::help(true),
     );
 }
 
