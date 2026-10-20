@@ -15,7 +15,7 @@ use crate::{
 pub(super) fn help_details() -> Vec<(String, String)> {
     let mut details: Vec<(String, String)> = COMMANDS
         .iter()
-        .map(|command| (command.name.into(), command.description.into()))
+        .map(|command| (command.name.into(), command.description(true).into()))
         .collect();
     details.extend([
         (
@@ -159,6 +159,10 @@ impl App {
 
     pub(super) fn dispatch(&mut self, prompt: Prompt) -> Result<bool, String> {
         let command = prompt.attachments.is_empty() && prompt.text.trim_start().starts_with('/');
+        let init = command
+            && commands::split(&prompt.text).is_some_and(|(name, arguments)| {
+                name.eq_ignore_ascii_case("/init") && arguments.is_empty()
+            });
         if command && prompt.text.trim().eq_ignore_ascii_case("/drafts") {
             self.open_drafts();
             return Ok(false);
@@ -177,8 +181,13 @@ impl App {
         self.capture_input();
         self.state.clear_notice();
         self.state.information = None;
-        if !command {
-            if let Err(error) = self.agent.as_mut().unwrap().prepare_turn(&prompt) {
+        if !command || init {
+            let execution = if init {
+                Prompt::plain(commands::INIT_PROMPT)
+            } else {
+                prompt.clone()
+            };
+            if let Err(error) = self.agent.as_mut().unwrap().prepare_turn(&execution) {
                 self.state.message(Kind::Error, &error);
                 self.keep_failed_prompt(prompt);
                 return Ok(false);
@@ -192,16 +201,14 @@ impl App {
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());
             self.process_observer = self.agent.as_ref().unwrap().processes();
-            self.worker = Some(Worker::start(self.agent.take().unwrap(), prompt));
+            self.worker = Some(Worker::start(self.agent.take().unwrap(), execution));
             self.state.status = "Starting...".into();
             return Ok(false);
         }
         let value = prompt.text.trim();
-        let (name, arguments) = value
-            .split_once(char::is_whitespace)
-            .map_or((value, ""), |(name, args)| (name, args.trim()));
-        let name = name.to_ascii_lowercase();
-        if matches!(name.as_str(), "/exit" | "/quit") && arguments.is_empty() {
+        let (name, arguments) = commands::split(value).unwrap();
+        let name = commands::canonical(name).to_ascii_lowercase();
+        if name == "/exit" && arguments.is_empty() {
             return Ok(true);
         }
         if name == "/help" && arguments.is_empty() {
@@ -217,7 +224,7 @@ impl App {
             }
             return Ok(false);
         }
-        if matches!(name.as_str(), "/new" | "/clear") && arguments.is_empty() {
+        if name == "/new" && arguments.is_empty() {
             self.cancel_copy();
             let result = self.agent.as_mut().unwrap().start_new(
                 self.config.settings.model.clone(),
@@ -242,7 +249,7 @@ impl App {
                 Ok(report) => self.local_finish(Kind::Notice, &report.message, report.details),
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
-            "/new" | "/clear" if arguments.is_empty() => self.local_finish(
+            "/new" if arguments.is_empty() => self.local_finish(
                 Kind::Notice,
                 "New conversation · saved defaults applied",
                 vec![],
@@ -258,7 +265,7 @@ impl App {
                 ),
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
-            "/settings" | "/setup" if arguments.is_empty() => {
+            "/settings" if arguments.is_empty() => {
                 let settings = &self.config.settings;
                 self.state.selector = Some(Selector::settings(
                     &settings.model,

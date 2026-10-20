@@ -223,3 +223,108 @@ fn routing_command_offers_the_shared_choices_and_applies_from_the_next_request()
         Some(r#"{"allow_fallbacks":false,"order":["one/fp8"]}"#)
     );
 }
+
+#[test]
+fn plain_quit_alias_is_local_and_accepts_mixed_case() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let mut config = SessionConfig {
+        store: Store::new(directory.path().join(".jecode")),
+        settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
+        bash: crate::tools::find_bash().unwrap(),
+    };
+    let mut output = Vec::new();
+    chat(
+        &mut agent,
+        &mut config,
+        &mut Cursor::new("/HeLp\n/QuIt\nThis must not be sent\n"),
+        &mut output,
+        &mut Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("/init"));
+    assert!(output.contains("/exit"));
+    assert!(!output.contains("/quit"));
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn init_runs_a_model_tool_turn_for_root_project_instructions() {
+    let directory = Directory::new();
+    let path = directory.path().join("JECODE.md");
+    std::fs::write(&path, "# Existing\n\nKeep this verified rule.\n").unwrap();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            crate::test_support::completion(
+                "I checked the existing project instructions.",
+                vec![crate::test_support::tool_call(
+                    "update-instructions",
+                    "write",
+                    Value::object([
+                        ("path", Value::string("JECODE.md")),
+                        (
+                            "content",
+                            Value::string(
+                                "# Existing\n\nKeep this verified rule.\n\n# Commands\n\nRun cargo test.\n",
+                            ),
+                        ),
+                    ]),
+                )],
+            ),
+        ),
+        (200, response("Updated root JECODE.md.")),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let mut config = SessionConfig {
+        store: Store::new(directory.path().join(".jecode")),
+        settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
+        bash: crate::tools::find_bash().unwrap(),
+    };
+    let mut output = Vec::new();
+    chat(
+        &mut agent,
+        &mut config,
+        &mut Cursor::new("/InIt\n/exit\n"),
+        &mut output,
+        &mut Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("Keep this verified rule.")
+    );
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("Updated root JECODE.md.")
+    );
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    let messages = requests[0]
+        .body
+        .get("messages")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    let request = messages
+        .last()
+        .unwrap()
+        .get("content")
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert!(request.starts_with("/init\n\n"));
+    assert!(request.contains("update only the root JECODE.md"));
+}

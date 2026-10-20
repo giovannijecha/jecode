@@ -80,10 +80,14 @@ saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard sh
 | `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
 | `/settings` | Edit saved defaults and the OpenRouter key. |
+| `/init` | Inspect this project and create or update its `JECODE.md`. |
 | `/help` | Show commands and controls. |
+| `/exit` | Quit when the active turn finishes. |
 
-Use [`JECODE.md`](docs/usage/PROJECT_INSTRUCTIONS.md) in the launch directory for
-project rules. Jecode reads it before each new user request.
+Use [`JECODE.md`](docs/usage/PROJECT_INSTRUCTIONS.md) for project rules, or ask
+`/init` to help write it. Jecode reads instruction files in the launch directory
+and its subdirectories before each new turn. Each file applies to its own
+directory and descendants; instructions above the launch directory are excluded.
 
 Conversations autosave under `~/.jecode/sessions/`. To resume, run
 `jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)

@@ -9,7 +9,7 @@ scripts run from the Jecode repository root.
 | Task | Guide |
 | --- | --- |
 | Choose a model, reasoning effort or endpoint; edit defaults | [Configuration](usage/CONFIGURATION.md) |
-| Supply project rules with `JECODE.md` | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
+| Initialize project rules and scope `JECODE.md` files | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
 | Understand file tools, command output and background processes | [Tools](usage/TOOLS.md) |
 | Resume, recover or delete a conversation | [Saved sessions](usage/SESSIONS.md) |
 | Add files and clipboard images | [Attachments](usage/ATTACHMENTS.md) |

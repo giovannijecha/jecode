@@ -184,6 +184,9 @@ impl App {
                             turn_recorded = true;
                         }
                         Record::Text { role, text } => match role.as_str() {
+                            "user" if text == crate::session::commands::INIT_PROMPT => {
+                                self.state.message(Kind::User, "/init");
+                            }
                             "user" => self.state.message(Kind::User, &text),
                             "assistant" => self.state.message(Kind::Assistant, &text),
                             _ => {}
