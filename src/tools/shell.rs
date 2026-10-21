@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+#[cfg(all(test, windows))]
+mod windows_tests;
+
 pub(super) fn execute(
     bash: &Path,
     root: &Path,
@@ -33,14 +36,7 @@ pub(super) fn execute(
     let logs = outputs.create()?;
     let stdout_ref = logs.stdout_ref;
     let stderr_ref = logs.stderr_ref;
-    let mut command = command(bash, root, text);
-    command.env_remove("JECODE_TMP");
-    if let Some(temporary) = temporary {
-        let temporary = crate::scratch::environment_path(temporary);
-        for name in ["JECODE_TMP", "TMPDIR", "TEMP", "TMP"] {
-            command.env(name, &temporary);
-        }
-    }
+    let mut command = command(bash, root, text, temporary);
     if let Some(wait) = wait {
         let streams = [
             super::processes::Stream {
@@ -119,7 +115,15 @@ fn unknown_outcome(message: &str, [stdout_ref, stderr_ref]: [String; 2]) -> Valu
     ])
 }
 
-fn command(bash: &Path, root: &Path, text: &str) -> Command {
+fn command(bash: &Path, root: &Path, text: &str, temporary: Option<&Path>) -> Command {
+    // Git Bash shares its TEMP-derived /tmp mount across live MSYS processes.
+    // Initialize it from the inherited environment before exporting a session
+    // path that can disappear when that session is deleted.
+    #[cfg(windows)]
+    let script =
+        temporary.map(|_| format!("export TEMP=\"$JECODE_TMP\" TMP=\"$JECODE_TMP\"\n{text}"));
+    #[cfg(windows)]
+    let text = script.as_deref().unwrap_or(text);
     let mut command = Command::new(bash);
     command.args(["--noprofile", "--norc"]);
     command
@@ -128,7 +132,16 @@ fn command(bash: &Path, root: &Path, text: &str) -> Command {
         .env_remove("OPENROUTER_API_KEY")
         .env_remove("BASH_ENV")
         .env_remove("ENV")
+        .env_remove("JECODE_TMP")
         .env("TERM", "dumb");
+    if let Some(temporary) = temporary {
+        let temporary = crate::scratch::environment_path(temporary);
+        command
+            .env("JECODE_TMP", &temporary)
+            .env("TMPDIR", &temporary);
+        #[cfg(not(windows))]
+        command.env("TEMP", &temporary).env("TMP", &temporary);
+    }
     command
 }
 
@@ -256,7 +269,7 @@ mod tests {
     fn shell_does_not_inherit_the_api_key_or_startup_script() {
         let directory = Directory::new();
         let bash = find_bash().unwrap();
-        let command = command(&bash, directory.path(), "true");
+        let command = command(&bash, directory.path(), "true", None);
         for variable in ["OPENROUTER_API_KEY", "BASH_ENV", "ENV"] {
             assert!(
                 command

@@ -41,7 +41,7 @@ images and PDFs and shows them to the model through a saved attachment copy;
 its returned `attachment:ID` remains readable after temporary cleanup. Bash
 can create other file types in the area. See [Attachments](ATTACHMENTS.md).
 
-Bash starts in the project and receives `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP`
+Shell commands run in the project with `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP`
 pointing to this session area. Use quoted paths:
 
 ```bash
@@ -53,6 +53,11 @@ created=$(mktemp "$TMPDIR/check.XXXXXXXXXX")
 Pass an explicit template to `mktemp` to use the session area on every platform.
 macOS can use its native user temporary directory instead of `TMPDIR` when no
 template is supplied.
+
+On Windows, Git Bash initializes its shared `/tmp` mount from the inherited
+environment before Jecode exports the session's `TEMP` and `TMP`. Deleting a
+session therefore cannot leave another live shell's `/tmp` pointing to that
+removed session area.
 
 Git Bash can normalize temporary environment paths into its `/c/...` notation;
 native Windows child programs receive paths usable by Windows APIs. Jecode does
