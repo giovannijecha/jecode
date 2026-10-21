@@ -31,7 +31,8 @@ fn controls_and_terminal_lifetime() {
     terminal.wait("Commands and controls");
     terminal.send(b"/settings\r");
     let settings = terminal.wait("Settings · saved defaults");
-    terminal.send(b"3");
+    terminal.wait_after("5. OpenRouter key", settings);
+    terminal.send(b"5");
     let key = terminal.wait_after("Enter validate and save", settings);
     terminal.send(b"\x03");
     terminal.wait_after("Settings · saved defaults", key);
@@ -175,13 +176,18 @@ fn native_pty_fixture() {
         .map(|message| message.get("content").unwrap().as_str().unwrap())
         .collect();
     assert_eq!(prompts, ["first α🙂\nline", "second prompt"]);
-    assert!(
+    assert_eq!(
         saved
             .input
             .history
             .iter()
-            .any(|prompt| prompt == "queued follow-up")
+            .map(|prompt| prompt.text.as_str())
+            .collect::<Vec<_>>(),
+        prompts
     );
+    assert!(saved.input.queued.is_empty());
+    assert_eq!(saved.input.paused.len(), 1);
+    assert_eq!(saved.input.paused[0].text, "queued follow-up");
     assert!(
         saved
             .events
