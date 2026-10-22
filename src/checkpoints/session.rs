@@ -208,12 +208,6 @@ impl Session {
         })
     }
 
-    /// Protects one file change by a tool.
-    #[cfg(test)]
-    pub fn file(&self, kind: &'static str, path: &Path) -> FileGuard<'_> {
-        self.file_cancellable(kind, path, &crate::cancel::Cancellation::default())
-    }
-
     /// Protects one file change while honoring interruption during preparation.
     pub fn file_cancellable(
         &self,
