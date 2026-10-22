@@ -194,22 +194,8 @@ pub(super) fn due(index: &Index, now: u64) -> bool {
     let Some((mode, mode_time)) = index.recovery.mode else {
         return false;
     };
-    let held: BTreeSet<u64> = anchored_versions(index, index.horizon, now)
-        .into_iter()
-        .map(|version| version.seq)
-        .collect();
-    if index
-        .paths
-        .values()
-        .filter_map(|versions| versions.last())
-        .any(|version| {
-            version.seq >= mode
-                && matches!(version.state, State::File { .. })
-                && !held.contains(&version.seq)
-        })
-    {
-        return true;
-    }
+    // A newly written current file is reduced to metadata when collection is
+    // otherwise due. It alone must not compact an active group after each edit.
     let selected = selected(index, now);
     if index
         .recovery
@@ -230,8 +216,12 @@ pub(super) fn due(index: &Index, now: u64) -> bool {
     }) {
         return true;
     }
-    if now >= mode_time.saturating_add(recovery::LEGACY_GRACE_MS)
-        && index
+    if now >= mode_time.saturating_add(recovery::LEGACY_GRACE_MS) {
+        let held: BTreeSet<u64> = anchored_versions(index, index.horizon, now)
+            .into_iter()
+            .map(|version| version.seq)
+            .collect();
+        if index
             .paths
             .values()
             .flat_map(|versions| versions.iter())
@@ -240,8 +230,9 @@ pub(super) fn due(index: &Index, now: u64) -> bool {
                     && matches!(version.state, State::File { .. })
                     && !held.contains(&version.seq)
             })
-    {
-        return true;
+        {
+            return true;
+        }
     }
     false
 }

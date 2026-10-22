@@ -205,6 +205,7 @@ fn child() {
     if mode == "helper" {
         let started = Instant::now();
         let workspace = workspace::open(&home, &root, Options::interactive()).unwrap();
+        workspace.initialize().unwrap();
         while workspace.watching() != Watching::Active {
             assert!(
                 started.elapsed() < Duration::from_secs(300),
@@ -264,10 +265,10 @@ fn cold_helper(recorder: &mut Recorder) {
     recorder.add(
         [
             "notifications",
-            "helper start, new process (compiles)",
+            "explicit full-scan helper start, new process (compiles)",
             "total",
         ],
-        "child process; a fresh helper cache per test process, as on first use",
+        "explicit scan starts the watcher; ordinary on-demand startup does not; fresh helper cache per test process",
         times,
     );
 }

@@ -16,6 +16,27 @@ fn location(fixture: &Fixture) -> Location {
         .unwrap()
 }
 
+#[test]
+fn a_small_active_recovery_write_does_not_force_collection() {
+    let fixture = Fixture::new();
+    fixture.write("small.txt", b"before\n");
+    let workspace =
+        workspace::open(fixture.home.path(), fixture.root.path(), Options::offline()).unwrap();
+    let after = b"after\n";
+    let mut mutation = workspace.mutation("test", "write", &fixture.path("small.txt"));
+    mutation.prepare(after);
+    fixture.write("small.txt", after);
+    assert!(matches!(
+        mutation.finish(true),
+        crate::checkpoints::mutation::Protection::Protected { .. }
+    ));
+    let archive = location(&fixture);
+    let generation = workspace.store().journal.generation;
+    assert!(index(&workspace).object_bytes < workspace.store().policy.budget_bytes / 4);
+    assert!(gc::collect(&archive, false).unwrap().is_none());
+    assert_eq!(workspace.store().journal.generation, generation);
+}
+
 /// Eight distinct 200 KiB versions of one file: 1.6 MiB against a 1 MiB budget.
 fn history(fixture: &Fixture, workspace: &Workspace) -> Vec<u64> {
     workspace
@@ -209,9 +230,9 @@ fn collection_keeps_pins_current_state_and_readers_within_the_budget() {
     let again = super::index(&reopened);
     assert_eq!(again.horizon, collection.horizon);
     assert!(again.pins.contains_key(&points[1]));
-    // The restores made a new targeted group, whose after-image head still
-    // needs to be reduced to metadata even though the archive is below budget.
-    let followup = gc::collect(&location, false).unwrap().unwrap();
+    // A forced collection still reduces an unheld after-image to metadata;
+    // an ordinary active-group write no longer triggers collection by itself.
+    let followup = gc::collect(&location, true).unwrap().unwrap();
     assert!(followup.generation > collection.generation);
     assert!(super::index(&reopened).pins.contains_key(&points[1]));
 }
