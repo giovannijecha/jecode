@@ -46,7 +46,8 @@ an error; Jecode leaves it unchanged so you can correct it. Saves replace the
 file atomically. New Unix configuration directories and files use permissions
 `0700` and `0600`; Windows inherits permissions from the user's directory.
 Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
-storage and resume.
+storage and resume. Each project's checkpoint scope and storage budget live in
+its archive's `policy.json`; see [Checkpoints](CHECKPOINTS.md#scope-and-limits).
 
 ## Automatic compaction threshold
 
@@ -128,7 +129,7 @@ model for one launch without editing defaults; a different model starts at
 always manages the personal file.
 
 `JECODE_HOME` selects an absolute configuration directory, including sessions,
-temporary storage and the personal [skill library](SKILLS.md), and `JECODE_BASH`
+temporary storage, checkpoint archives and the personal [skill library](SKILLS.md), and `JECODE_BASH`
 selects the Bash executable. These are
 useful for isolated development.
 

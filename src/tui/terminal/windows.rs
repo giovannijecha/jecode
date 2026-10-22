@@ -212,6 +212,8 @@ fn parse(line: &str) -> Input {
 }
 
 #[cfg(test)]
+mod measurement_tests;
+#[cfg(test)]
 mod native_tests;
 #[cfg(test)]
 #[path = "windows_tests.rs"]

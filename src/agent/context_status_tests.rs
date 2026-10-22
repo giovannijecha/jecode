@@ -263,7 +263,11 @@ fn an_unattainable_threshold_fails_once_and_preserves_history() {
 fn accepted_input_updates_context_before_a_summary_starts() {
     for with_tool in [false, true] {
         let directory = Directory::new();
-        std::fs::write(directory.path().join("source"), "Original evidence.").unwrap();
+        let workspace = directory
+            .path()
+            .join("local-runner/jobs/jecode/fresh-checkout/project");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("source"), "Original evidence.").unwrap();
         let calls = if with_tool {
             vec![tool_call(
                 "inspect",
@@ -282,14 +286,15 @@ fn accepted_input_updates_context_before_a_summary_starts() {
             (200, completion("Finished.", vec![])),
         ]);
         let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-        client.fixture_limits(24000, Some(4096));
-        let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+        client.fixture_limits(32000, Some(4096));
+        let mut agent = Agent::new(client, Tools::new(&workspace).unwrap());
         let inbox = agent.inbox();
         let update = "Updated requirement. ".repeat(4000);
         let mut submitted = false;
         let mut accepted = false;
-        let mut last = None;
+        let mut accepted_context = None;
         let mut before_summary = None;
+        let mut summaries_started = 0;
         agent
             .run_turn("Start the task.", &mut |event| {
                 let submit = if with_tool {
@@ -305,12 +310,13 @@ fn accepted_input_updates_context_before_a_summary_starts() {
                     submitted = true;
                 }
                 match event {
-                    Event::Context(status) => last = Some(status),
+                    Event::Context(status) if accepted => accepted_context = Some(status),
                     Event::Accepted { .. } => accepted = true,
-                    Event::Maintenance { text }
-                        if text.starts_with("Compacting context") && accepted =>
-                    {
-                        before_summary = last;
+                    Event::Maintenance { text } if text.starts_with("Compacting context") => {
+                        summaries_started += 1;
+                        if accepted {
+                            before_summary = accepted_context;
+                        }
                     }
                     _ => {}
                 }
@@ -318,8 +324,9 @@ fn accepted_input_updates_context_before_a_summary_starts() {
             })
             .unwrap();
         let status = before_summary.expect("Accepted input should trigger a summary");
+        assert_eq!(summaries_started, 1);
         assert!(
-            status.tokens >= threshold(24000, AUTO_COMPACT_DEFAULT),
+            status.tokens >= threshold(32000, AUTO_COMPACT_DEFAULT),
             "The footer must show accepted input before summarizing it (with_tool={with_tool}): {status:?}"
         );
         assert_eq!(fixture.finish().len(), 3);

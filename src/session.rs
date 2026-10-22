@@ -1,4 +1,5 @@
 mod attach;
+mod checkpoints;
 pub mod commands;
 mod copy;
 pub(crate) mod delete;
@@ -129,6 +130,7 @@ fn chat_inner(
             }
             ("/terminal", _) => processes::print(agent, arguments, output),
             ("/tmp", _) => temporary::print(agent, arguments, output),
+            ("/checkpoints", _) => checkpoints::print(agent, arguments, output),
             ("/resume", _) => {
                 let previous = agent.sessions();
                 persistence::resume(agent, config, Some(arguments), input, output, status)
@@ -188,6 +190,8 @@ fn chat_inner(
     }
 }
 
+#[cfg(test)]
+mod checkpoint_tests;
 #[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]

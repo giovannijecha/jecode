@@ -28,6 +28,7 @@ impl Agent {
             self.context.reset_usage();
             self.persistence = Some(Handle::new(store, document, self.redactor.clone()));
             self.sync_conversation();
+            self.begin_checkpoints();
             self.checkpoint(Stage::Preserve)?;
         }
         Ok(())
@@ -136,6 +137,7 @@ impl Agent {
         self.clear();
         self.persistence = next;
         self.sync_conversation();
+        self.begin_checkpoints();
         if let Some(handle) = &self.persistence {
             self.tools.configure_session_output(
                 handle.store().output_directory(),
@@ -203,6 +205,7 @@ impl Agent {
         self.cancellation.reset();
         self.persistence = Some(handle);
         self.sync_conversation();
+        self.begin_checkpoints();
         let handle = self.persistence.as_ref().unwrap();
         self.tools.configure_session_output(
             handle.store().output_directory(),
@@ -254,6 +257,7 @@ impl Agent {
         self.cancellation.reset();
         self.persistence = Some(next);
         self.sync_conversation();
+        self.begin_checkpoints();
         self.tools.configure_output_store(outputs);
         self.tools.configure_temporary(temporary);
         Ok((report, true))

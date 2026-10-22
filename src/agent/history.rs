@@ -8,10 +8,15 @@ use crate::{
 impl Agent {
     #[cfg(test)]
     pub(super) fn execute_tool(&self, call: &ToolCall) -> Value {
-        self.execute_tool_with_change(call).result
+        self.execute_tool_with_change(call, crate::tools::Begun::default())
+            .result
     }
 
-    pub(super) fn execute_tool_with_change(&self, call: &ToolCall) -> crate::tools::Execution {
+    pub(super) fn execute_tool_with_change(
+        &self,
+        call: &ToolCall,
+        begun: crate::tools::Begun,
+    ) -> crate::tools::Execution {
         if call.name == "read"
             && let Ok(arguments) = json::parse(&call.arguments)
             && arguments
@@ -42,7 +47,7 @@ impl Agent {
             };
         }
         self.tools
-            .execute_with_change(&call.name, &call.arguments, &self.cancellation)
+            .execute_begun(begun, &call.name, &call.arguments, &self.cancellation)
     }
 
     fn read_history(&self, arguments: &Value) -> Result<Value, String> {

@@ -17,6 +17,7 @@ Paths are relative to `src/`.
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
+| Workspace checkpoints | `checkpoints.rs`, `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments | `attachments/`, `tools/attachment.rs` |
 | OpenRouter | `openrouter/` |
@@ -105,10 +106,11 @@ newline-terminated transaction appends messages and events with changed metadata
 and input. Streaming text uses UTF-8-safe prefix/suffix updates. Unchanged state
 is omitted; previous messages remain intact.
 
-Checkpoints surround provider and tool work. The first streamed text is saved
-immediately; later streaming updates and TUI input use a 250 ms save interval.
-Periodic saves serialize disk access in a worker; explicit checkpoints and clean
-exit flush synchronously.
+Conversation saves surround provider and tool work. The first streamed text is
+saved immediately; later streaming updates and TUI input use a 250 ms save
+interval. Periodic saves serialize disk access in a worker; explicit saves and
+clean exit flush synchronously. The session journal calls these saves
+checkpoints; they are unrelated to the workspace checkpoints below.
 
 | Condition | Recovery |
 | --- | --- |
@@ -123,6 +125,49 @@ share a pool within the project bucket and are collected when no saved session
 references them. Operational details live in [sessions](../usage/SESSIONS.md),
 [temporary files](../usage/TEMPORARY.md) and [attachments](../usage/ATTACHMENTS.md).
 
+## Workspace checkpoints
+
+`checkpoints/` keeps file history for each canonical workspace root under
+`~/.jecode/checkpoints/<id>/`, independently of conversations and of the
+terminal. User-facing behavior is in [checkpoints](../usage/CHECKPOINTS.md).
+
+| Part | Responsibility |
+| --- | --- |
+| `store.rs`, `journal.rs`, `frame.rs`, `record.rs`, `index.rs` | One archive generation: checksummed frames in 64 MiB append-only segments, objects stored whole or as bounded prefix/suffix deltas, and the in-memory index replayed from them. |
+| `locks.rs`, `activity.rs`, `identity.rs` | Operating-system file locks for archive writes and striped path leases; live-session descriptions; one archive per canonical root. |
+| `workspace.rs`, `inventory.rs`, `scan.rs`, `capture.rs`, `policy.rs` | Bounded background discovery, selective protection of large scopes, reconciliation and parallel capture with bounded live-content buffers. |
+| `quota.rs` | Admission under the shared store lock: one traversal counts total and active-generation logical bytes, with a hard 1 GiB archive ceiling and a 512 MiB active generation ceiling. |
+| `watch.rs`, `watcher.cs` | Windows change notifications through an owned .NET helper. |
+| `mutation.rs`, `reconcile.rs`, `points.rs` | Tool file changes and commands, resolution of operations left prepared by exited processes, and points. |
+| `restore.rs`, `history.rs`, `gc.rs` | Restores with undo and conflict checks; pins, limits and generation compaction. |
+| `actions.rs`, `command.rs`, `render.rs`, `session.rs`, `show.rs` | The model tool, `jecode checkpoints` and `/checkpoints` over shared actions; notices; historical reads. |
+
+Every archive write runs under the archive lock and first replays frames that
+other processes appended. A tool's file change durably records a prepare frame
+with the previous and intended state before the file changes, and a completion
+afterward. A successful write completes from the tool's bytes and the file's
+metadata; the path is then reread off the call's path, or before the next
+point, to observe concurrent changes. Windows measurements show a delay when
+reopening newly written large files; its cause has not been isolated.
+Recovery resolves an interrupted operation by observing the file.
+Parallel observation preserves path order and hands off bounded content batches,
+including during restores. Size hints from discovery cannot bound live data:
+another writer may have grown the files. A failed later batch can leave truthful
+earlier observations in history, while no restore installation has begun.
+Restores durably plan per-path progress, save the current state, install
+targets and record a point with undo. Compaction copies retained history into a
+new generation, publishes it through `CURRENT` and leaves the old one to its
+readers until they move on. Idle workers follow these moves and remove released
+generations. The latest named point remains a state anchor even when the
+retention horizon advances through versions from a long turn. A new point or
+an unpin can retry a blocked collection without waiting for more byte growth.
+
+The agent records a point at each turn, wraps each tool call and delivers
+notices about history changed outside its own calls before the next request.
+Failures make a call unprotected and never block it. `tools/` returns each
+protection status, the TUI renders it, and the offline CLI opens the archive
+without a background worker or provider.
+
 ## Native boundaries
 
 Rust launches installed executables through `std::process::Command`. Owned Bash,
@@ -132,6 +177,7 @@ unsafe Rust FFI.
 | Boundary | Implementation and requirements |
 | --- | --- |
 | Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. |
+| Windows file notifications | An owned C# helper reports paths through `FileSystemWatcher` over stdin/stdout. Its marker echo checks helper responsiveness, not filesystem ordering. Ordinary points drain delivered observations; Bash preparation and completion use a bounded settling window. Queue overflow requests reconciliation. Without the helper, checkpoints scan. |
 | Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
 | Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
 | Unix terminal | Bash and `stty` save terminal modes, read `/dev/tty` and restore the terminal through a guardian. Requires a VT-compatible terminal. |

@@ -49,6 +49,11 @@ pub enum Event {
         id: String,
         change: crate::file_change::Change,
     },
+    /// Context for a running call, such as the checkpoint before a command.
+    ToolNote {
+        id: String,
+        text: String,
+    },
 }
 
 pub trait EventSink {
@@ -62,8 +67,86 @@ impl<F: FnMut(Event) -> Result<(), String>> EventSink for F {
 }
 
 pub fn tool_summary(name: &str, result: &Value) -> String {
+    let summary = outcome_summary(name, result);
+    match checkpoint_warning(result) {
+        Some(warning) => format!("{summary}; {warning}"),
+        None => summary,
+    }
+}
+
+/// A checkpoint problem that people should see next to a tool result.
+pub fn checkpoint_warning(result: &Value) -> Option<String> {
+    let checkpoint = result.get("checkpoint")?;
+    let text = |key| checkpoint.get(key).and_then(Value::as_str);
+    if text("status") == Some("unprotected") {
+        return Some(format!("unprotected: {}", text("reason").unwrap_or("")));
+    }
+    text("warning")
+        .or(text("error"))
+        .map(|warning| format!("checkpoint: {warning}"))
+}
+
+fn checkpoint_summary(result: &Value) -> String {
+    if let Some(saved) = result.get("saved").and_then(Value::as_usize) {
+        let skipped = result.get("skipped").and_then(Value::as_usize).unwrap_or(0);
+        let unprotected = result
+            .get("unprotected")
+            .and_then(Value::as_usize)
+            .unwrap_or(0);
+        let mut summary = format!(
+            "captured {}; {skipped} skipped; {unprotected} unprotected",
+            counted(saved, "path")
+        );
+        if result.get("point_error").is_some() {
+            summary.push_str("; point unavailable");
+        }
+        return summary;
+    }
+    let count = |key| {
+        result
+            .get(key)
+            .and_then(Value::as_array)
+            .map(<[Value]>::len)
+    };
+    let text = |key| result.get(key).and_then(Value::as_str).unwrap_or("");
+    let mut summary = if let Some(planned) = count("planned") {
+        format!("preview: {} would change", counted(planned, "path"))
+    } else if let Some(restored) = count("restored") {
+        format!(
+            "restored {} from {}",
+            counted(restored, "path"),
+            text("target")
+        )
+    } else if let Some(points) = count("points") {
+        counted(points, "point")
+    } else if let Some(paths) = count("paths") {
+        format!("history of {}", counted(paths, "path"))
+    } else if let Some(state) = result.get("state").and_then(Value::as_str) {
+        state.into()
+    } else if result.get("pinned").is_some() {
+        text("ref").into()
+    } else {
+        "complete".into()
+    };
+    if let Some(conflicts) = count("conflicts") {
+        summary.push_str(&format!("; {}", counted(conflicts, "conflict")));
+    }
+    if result.get("failed").is_some() {
+        summary.push_str("; stopped by an error");
+    }
+    summary
+}
+
+fn counted(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
+
+fn outcome_summary(name: &str, result: &Value) -> String {
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return format!("error: {error}");
+    }
+    if name == "checkpoint" {
+        return checkpoint_summary(result);
     }
     if name == "process"
         && let Some(processes) = result.get("processes").and_then(Value::as_array)
@@ -144,6 +227,15 @@ pub fn description(name: &str, arguments: &Value) -> String {
         return format!("{} {}", field("action"), field("process_id"))
             .trim_end()
             .into();
+    }
+    if name == "checkpoint" {
+        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        let mut words = vec![field("action"), field("ref"), field("label")];
+        if let Some(paths) = arguments.get("paths").and_then(Value::as_array) {
+            words.extend(paths.iter().filter_map(Value::as_str));
+        }
+        words.retain(|word| !word.is_empty());
+        return words.join(" ");
     }
     if name == "bash" {
         return arguments

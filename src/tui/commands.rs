@@ -140,7 +140,7 @@ impl App {
             self.open_processes(id);
             return Ok(false);
         }
-        if self.worker.is_some() || self.deletion_job.is_some() {
+        if self.worker.is_some() || self.deletion_job.is_some() || self.checkpoint_job.is_some() {
             if let Err(error) = self.state.queue.push(prompt.clone()) {
                 self.warn(&error);
                 return Ok(false);
@@ -265,6 +265,7 @@ impl App {
                 Ok(report) => self.local_finish(Kind::Notice, &report.message, report.details),
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
+            "/checkpoints" => self.start_checkpoints(arguments),
             "/new" if arguments.is_empty() => self.local_finish(
                 Kind::Notice,
                 "New conversation · saved defaults applied",
@@ -358,7 +359,11 @@ impl App {
                 matches!(item, Item::Local { command, .. }
                 if command.eq_ignore_ascii_case("/help")
                     || command.eq_ignore_ascii_case("/tmp")
-                    || command.eq_ignore_ascii_case("/skills"))
+                    || command.eq_ignore_ascii_case("/skills")
+                    || command
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|name| name.eq_ignore_ascii_case("/checkpoints")))
             });
         if information && matches!(kind, Kind::Notice) && !details.is_empty() {
             if self

@@ -134,6 +134,7 @@ impl State {
                 | Event::Message { .. }
                 | Event::ToolStarted { .. }
                 | Event::ToolChanged { .. }
+                | Event::ToolNote { .. }
                 | Event::ToolFinished { .. }
         ) {
             self.changed();
@@ -256,6 +257,13 @@ impl State {
                     last: None,
                     presentation: Presentation::live(),
                 });
+            }
+            Event::ToolNote { id, text } => {
+                if let Some(Item::Tool { presentation, .. }) = self.items.iter_mut().rev().find(
+                    |item| matches!(item, Item::Tool { id: current, result: None, .. } if *current == id),
+                ) {
+                    presentation.note = Some(text);
+                }
             }
             Event::ToolChanged { id, change } => {
                 if let Some(Item::Tool { change: captured, .. }) = self.items.iter_mut().rev().find(|item| matches!(item, Item::Tool { id: current, result: None, .. } if *current == id)) {

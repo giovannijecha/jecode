@@ -3,7 +3,7 @@ use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 
 fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent, Vec<Value>) {
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(24000, None);
+    client.fixture_limits(37500, None);
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent
         .prepare_turn("Continue the current inspection")
@@ -17,12 +17,12 @@ fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent
         ("role", Value::string("assistant")),
         (
             "content",
-            Value::string("Recorded inspection data ".repeat(120)),
+            Value::string("Recorded inspection data ".repeat(640)),
         ),
     ]));
     let original = agent.messages.lock().unwrap().clone();
     // Raw growth crosses the default 80% budget; the calibrated estimate does not.
-    let budget = crate::context::threshold(24000, crate::context::AUTO_COMPACT_DEFAULT);
+    let budget = crate::context::threshold(37500, crate::context::AUTO_COMPACT_DEFAULT);
     assert!(16635 + crate::context::bytes(&original[2..]) > budget);
     assert!(agent.context_estimate(&original) < budget);
     (agent, original)

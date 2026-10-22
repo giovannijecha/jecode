@@ -61,6 +61,53 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
     }
 }
 
+#[test]
+#[ignore = "requires Windows ConPTY; explicit native input-to-VT latency measurement"]
+fn native_windows_input_to_vt_latency() {
+    for scenario in ["latency-idle", "latency-active"] {
+        let directory = Directory::new();
+        let script = format!(
+            "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', '{}')\n",
+            include_str!("native_pty.cs"),
+            std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .replace('\'', "''"),
+            directory.path().to_string_lossy().replace('\'', "''"),
+            scenario,
+        );
+        let result = process::run_observed(
+            Command::new("powershell.exe")
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    &script,
+                ])
+                .env("TEMP", directory.path())
+                .env("TMP", directory.path())
+                .env_remove("OPENROUTER_API_KEY"),
+            None,
+            Duration::from_secs(120),
+            64 * 1024,
+            &Cancellation::default(),
+            None,
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            result.exit_code,
+            Some(0),
+            "{scenario}: {}\n{}",
+            String::from_utf8_lossy(&result.stderr),
+            String::from_utf8_lossy(&result.stdout)
+        );
+        assert!(!result.timed_out, "native {scenario} timed out");
+        println!("{}", String::from_utf8_lossy(&result.stdout));
+    }
+}
+
 fn probe() -> String {
     let script = format!(
         "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeConsoleProbe]::Snapshot()",
@@ -209,6 +256,12 @@ fn native_console_fixture() {
     println!("NATIVE_SHELL_SENTINEL");
     std::fs::write(path.join("modes.txt"), probe().lines().next().unwrap()).unwrap();
     let bash = crate::tools::find_bash().unwrap();
+    if scenario == "latency-idle" || scenario == "latency-active" {
+        super::measurement_tests::fixture(&path, &bash, scenario == "latency-active");
+        restored(&path);
+        println!("NATIVE_LATENCY_RESTORED");
+        return;
+    }
     if scenario == "owner-death" {
         let _terminal = Terminal::open(&bash).unwrap();
         println!("NATIVE_OWNER_READY");

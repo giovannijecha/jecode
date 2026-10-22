@@ -8,6 +8,7 @@ impl App {
         dirty |= self.poll_job()?;
         dirty |= self.poll_imports();
         dirty |= self.finish_delete(false)?;
+        dirty |= self.finish_checkpoints(false);
         for _ in 0..32 {
             let Some(event) = self.next_event() else {
                 break;
@@ -83,6 +84,7 @@ impl App {
         while self.worker.is_none()
             && self.job.is_none()
             && self.deletion_job.is_none()
+            && self.checkpoint_job.is_none()
             && self.state.selector.is_none()
             && self.state.information.is_none()
             && !self.state.queue.is_editing()

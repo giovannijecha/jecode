@@ -25,10 +25,14 @@ pub use observer::{Observer, Page, Process, Window};
 
 const STOP_WAIT: Duration = Duration::from_secs(10);
 
+/// Told how many owned processes still run whenever one starts or ends.
+pub type Listener = Arc<dyn Fn(usize) + Send + Sync>;
+
 #[derive(Default)]
 pub(super) struct Registry {
     // Replaced when the conversation ends, so observers never see a later one.
     scope: Mutex<Arc<Scope>>,
+    listener: Mutex<Option<Listener>>,
 }
 
 #[derive(Default)]
@@ -93,16 +97,20 @@ impl Registry {
             monitor: Mutex::new(None),
         });
         // Register before waiting so an interrupted wait leaves a discoverable process.
-        self.scope()
-            .entries
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&entry));
+        let scope = self.scope();
+        scope.entries.lock().unwrap().push(Arc::clone(&entry));
+        let listener = self.listener.lock().unwrap().clone();
+        if let Some(listener) = &listener {
+            listener(scope.running());
+        }
         let owner = Arc::clone(&entry);
         let monitor = thread::spawn(move || {
             let result = started.supervise(timeout, &owner.stop, &mut |_| Ok(()));
             owner.state.lock().unwrap().outcome = Some(Outcome::from(result));
             owner.changed.notify_all();
+            if let Some(listener) = listener {
+                listener(scope.running());
+            }
         });
         *entry.monitor.lock().unwrap() = Some(monitor);
         let interrupted = entry.wait(wait, cancellation);
@@ -167,6 +175,10 @@ impl Registry {
         )])
     }
 
+    pub(super) fn listen(&self, listener: Listener) {
+        *self.listener.lock().unwrap() = Some(listener);
+    }
+
     /// Stops every owned process and forgets them; used when the conversation ends.
     pub(super) fn stop_all(&self) {
         let scope = std::mem::take(&mut *self.scope.lock().unwrap());
@@ -179,6 +191,19 @@ impl Registry {
                 let _ = monitor.join();
             }
         }
+        if let Some(listener) = self.listener.lock().unwrap().as_ref() {
+            listener(0);
+        }
+    }
+}
+
+impl Scope {
+    fn running(&self) -> usize {
+        let entries = self.entries.lock().unwrap();
+        entries
+            .iter()
+            .filter(|entry| entry.state.lock().unwrap().outcome.is_none())
+            .count()
     }
 }
 

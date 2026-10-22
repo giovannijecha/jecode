@@ -54,6 +54,13 @@ impl Agent {
     }
 
     pub(super) fn request_environment(&self) -> String {
-        self.temporary_instructions()
+        [
+            self.temporary_instructions(),
+            self.checkpoint_instructions(),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
     }
 }

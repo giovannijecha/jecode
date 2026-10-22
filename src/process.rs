@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 mod unix;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+pub(crate) use windows::helper as compile_helper;
 
 #[derive(Default)]
 struct Capture {

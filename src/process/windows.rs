@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 static NEXT_PIPE: AtomicU64 = AtomicU64::new(0);
 mod cache;
+pub(crate) use cache::helper;
 
 pub(super) struct Spawned {
     pub child: Child,

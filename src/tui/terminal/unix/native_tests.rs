@@ -10,6 +10,67 @@ use crate::{
     tools::Tools,
 };
 
+#[cfg(target_os = "macos")]
+const PENDIN: u32 = 0x2000_0000;
+
+#[cfg(target_os = "macos")]
+fn without_pendin(snapshot: &str) -> String {
+    // Darwin marks pending input for reprocessing when ICANON is restored.
+    // https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/tty.c#L1358-L1391
+    let mut found = false;
+    let fields = snapshot
+        .split(':')
+        .map(|field| {
+            if let Some(flags) = field.strip_prefix("lflag=") {
+                found = true;
+                let flags = u32::from_str_radix(flags, 16).unwrap();
+                format!("lflag={:x}", flags & !PENDIN)
+            } else {
+                field.to_owned()
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(found, "stty -g omitted lflag: {snapshot}");
+    fields.join(":")
+}
+
+fn mode_matches(restored: &str, saved: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        without_pendin(restored) == without_pendin(saved)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        restored == saved
+    }
+}
+
+fn assert_mode_restored(tty: &File, saved: &str) {
+    let restored = mode::stty(tty, &["-g"]).unwrap();
+    assert!(
+        mode_matches(&restored, saved),
+        "terminal mode changed: restored {restored:?}, saved {saved:?}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_mode_comparison_preserves_all_other_settings() {
+    let saved = "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3";
+    assert!(mode_matches(
+        "gfmt1:cflag=4b00:iflag=2b02:lflag=200005cb:oflag=3",
+        saved
+    ));
+    assert!(!mode_matches(
+        "gfmt1:cflag=4b00:iflag=2b02:lflag=200005ca:oflag=3",
+        saved
+    ));
+    assert!(!mode_matches(
+        "gfmt1:cflag=4b00:iflag=2b03:lflag=200005cb:oflag=3",
+        saved
+    ));
+}
+
 #[test]
 #[cfg(target_os = "linux")]
 #[ignore = "requires util-linux script to exercise an isolated native Linux PTY"]
@@ -96,6 +157,23 @@ fn native_pty_fixture() {
     eprintln!("\nPTY_META|{}|{}", std::process::id(), tty.display());
     let tty = File::open(tty).unwrap();
     let original = mode::stty(&tty, &["-g"]).unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        // Independent control: clear any incoming PENDIN while entering raw
+        // mode, then restore canonical settings without running Jecode.
+        let control_saved = without_pendin(&original);
+        mode::stty(&tty, &["raw", "-pendin"]).unwrap();
+        let raw = mode::stty(&tty, &["-g"]).unwrap();
+        assert_eq!(raw, without_pendin(&raw), "raw mode retained PENDIN");
+        mode::stty(&tty, &[&control_saved]).unwrap();
+        let restored = mode::stty(&tty, &["-g"]).unwrap();
+        eprintln!("PTY_PENDIN_CONTROL|saved={control_saved}|raw={raw}|restored={restored}");
+        assert!(mode_matches(&restored, &control_saved));
+        assert_ne!(
+            restored, control_saved,
+            "raw-mode control did not set PENDIN"
+        );
+    }
     let bash = crate::tools::find_bash().unwrap();
     if std::env::var("JECODE_TUI_CASE").unwrap() == "guardian-loss" {
         let mut terminal = Terminal::open(&bash).unwrap();
@@ -104,7 +182,7 @@ fn native_pty_fixture() {
         let at = Instant::now();
         drop(terminal);
         assert!(at.elapsed() < Duration::from_secs(1));
-        assert_eq!(mode::stty(&tty, &["-g"]).unwrap(), original);
+        assert_mode_restored(&tty, &original);
         eprintln!("PTY_GUARDIAN_RECOVERED");
         return;
     }
@@ -160,7 +238,7 @@ fn native_pty_fixture() {
         )
     };
     crate::tui::run(agent(), config(), Default::default()).unwrap();
-    assert_eq!(mode::stty(&tty, &["-g"]).unwrap(), original);
+    assert_mode_restored(&tty, &original);
     assert!(!path.join("late.txt").exists());
     let sessions = crate::sessions::Store::new(path.join("home"), &path).unwrap();
     let listing = sessions.list().unwrap();
@@ -196,7 +274,7 @@ fn native_pty_fixture() {
     );
     eprintln!("\r\nPTY_PHASE_RESUME");
     crate::tui::resume(agent(), config(), Some(id.clone())).unwrap();
-    assert_eq!(mode::stty(&tty, &["-g"]).unwrap(), original);
+    assert_mode_restored(&tty, &original);
     assert!(
         sessions
             .fixture_load(id)
@@ -221,7 +299,7 @@ fn native_pty_fixture() {
     drop(other);
     eprintln!("\r\nPTY_PHASE_MANAGE");
     crate::tui::resume(agent(), config(), None).unwrap();
-    assert_eq!(mode::stty(&tty, &["-g"]).unwrap(), original);
+    assert_mode_restored(&tty, &original);
     assert!(sessions.list().unwrap().sessions.is_empty());
     assert!(sessions.fixture_load(id).is_err());
     assert_eq!(fixture.finish().len(), 2);

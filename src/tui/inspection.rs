@@ -8,6 +8,7 @@ impl App {
         if self.worker.is_none()
             && self.job.is_none()
             && self.deletion_job.is_none()
+            && self.checkpoint_job.is_none()
             && !super::view::panel_open(&self.state)
             && !self.state.queue.is_editing()
             && let Some((expanded, first)) = self.state.toggle_tools()

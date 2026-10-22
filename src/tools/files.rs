@@ -1,4 +1,5 @@
 use super::required_string;
+use crate::checkpoints::session::{FileGuard, Session};
 use crate::{file_change::MAX_DIFF_BYTES, json::Value};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -24,35 +25,42 @@ pub(super) fn read(
 
 #[cfg(test)]
 pub(super) fn write(root: &Path, arguments: &Value) -> Result<Value, String> {
-    write_with_change(root, arguments).map(|(result, _)| result)
+    write_with_change(root, arguments, None).map(|(result, _)| result)
 }
 
 pub(super) fn write_with_change(
     root: &Path,
     arguments: &Value,
+    checkpoints: Option<&Session>,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     let path = writable_path(root, required_string(arguments, "path")?)?;
     let content = required_string(arguments, "content")?;
+    let mut guard = checkpoints.map(|session| session.file("write", &path));
     // A write may replace non-text data; inability to read it cannot reject
     // an operation that was previously allowed.
-    let previous = previous_text(&path, content.len());
-    replace_file(&path, content)?;
+    let previous = guard.as_mut().map_or_else(
+        || previous_text(&path, content.len()),
+        |guard| {
+            guard
+                .prepare_with_previous(content.as_bytes(), MAX_DIFF_BYTES)
+                .or_else(|| previous_text(&path, content.len()))
+        },
+    );
+    let checkpoint = finish_replacement(guard, &path, content)?;
     let change =
         previous.and_then(|old| crate::file_change::Change::between(old.as_deref(), content));
-    Ok((
-        Value::object([("bytes_written", Value::number(content.len()))]),
-        change,
-    ))
+    Ok((written(content.len(), checkpoint), change))
 }
 
 #[cfg(test)]
 pub(super) fn edit(root: &Path, arguments: &Value) -> Result<Value, String> {
-    edit_with_change(root, arguments).map(|(result, _)| result)
+    edit_with_change(root, arguments, None).map(|(result, _)| result)
 }
 
 pub(super) fn edit_with_change(
     root: &Path,
     arguments: &Value,
+    checkpoints: Option<&Session>,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     let path = existing_path(root, required_string(arguments, "path")?)?;
     let old = required_string(arguments, "old_text")?;
@@ -60,7 +68,9 @@ pub(super) fn edit_with_change(
     if old.is_empty() {
         return Err("old_text must not be empty; use write to replace the whole file".into());
     }
-    let content = read_text(&path)?;
+    // Hold the path from reading to replacing so concurrent sessions take turns.
+    let guard = checkpoints.map(|session| session.file("edit", &path));
+    let mut content = read_text(&path)?;
     let Some(position) = content.find(old) else {
         return Ok((
             mismatch::result(
@@ -81,14 +91,54 @@ pub(super) fn edit_with_change(
             None,
         ));
     }
-    let mut updated = content.clone();
+    let updated_len = content.len() - old.len() + new.len();
+    let include_change = content.len() <= MAX_DIFF_BYTES && updated_len <= MAX_DIFF_BYTES;
+    let mut updated = if include_change {
+        content.clone()
+    } else {
+        std::mem::take(&mut content)
+    };
     updated.replace_range(position..position + old.len(), new);
-    replace_file(&path, &updated)?;
-    let change = crate::file_change::Change::between(Some(&content), &updated);
-    Ok((
-        Value::object([("bytes_written", Value::number(updated.len()))]),
-        change,
-    ))
+    let checkpoint = replace_protected(guard, &path, &updated)?;
+    let change = include_change
+        .then(|| crate::file_change::Change::between(Some(&content), &updated))
+        .flatten();
+    Ok((written(updated.len(), checkpoint), change))
+}
+
+/// Saves the previous state before replacing the file. The replacement
+/// proceeds whether or not saving succeeded; the result says which.
+fn replace_protected(
+    guard: Option<FileGuard<'_>>,
+    path: &Path,
+    content: &str,
+) -> Result<Option<Value>, String> {
+    let Some(mut guard) = guard else {
+        return replace_file(path, content).map(|()| None);
+    };
+    guard.prepare(content.as_bytes());
+    finish_replacement(Some(guard), path, content)
+}
+
+fn finish_replacement(
+    guard: Option<FileGuard<'_>>,
+    path: &Path,
+    content: &str,
+) -> Result<Option<Value>, String> {
+    let Some(guard) = guard else {
+        return replace_file(path, content).map(|()| None);
+    };
+    let replaced = replace_file(path, content);
+    let checkpoint = guard.finish(replaced.is_ok());
+    replaced.map(|()| Some(checkpoint))
+}
+
+fn written(bytes: usize, checkpoint: Option<Value>) -> Value {
+    let mut result = Value::object([("bytes_written", Value::number(bytes))]);
+    if let (Value::Object(fields), Some(checkpoint)) = (&mut result, checkpoint) {
+        fields.insert("checkpoint".into(), checkpoint);
+    }
+    result
 }
 
 fn previous_text(path: &Path, updated_bytes: usize) -> Option<Option<String>> {

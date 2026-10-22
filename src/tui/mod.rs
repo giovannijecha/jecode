@@ -1,6 +1,9 @@
 mod activity;
 mod attach;
 mod cards;
+#[cfg(test)]
+mod checkpoint_tests;
+mod checkpoints;
 mod commands;
 mod copy;
 mod delete;
@@ -68,6 +71,7 @@ struct App {
     copy_targets: Vec<crate::copy::Target>,
     copy_job: Option<(String, crate::clipboard::Job)>,
     deletion_job: Option<delete::Job>,
+    checkpoint_job: Option<checkpoints::Job>,
     imports: Vec<attach::Import>,
     settings_parent: Option<selector::Setting>,
     /// Reads the current conversation's processes, including while a worker owns the agent.
@@ -107,6 +111,7 @@ impl App {
             copy_targets: vec![],
             copy_job: None,
             deletion_job: None,
+            checkpoint_job: None,
             imports: Vec::new(),
             settings_parent: None,
             #[cfg(test)]
@@ -207,7 +212,7 @@ fn run_inner(
             let delay = app
                 .state
                 .feedback_wait(now, app.renderer.wait(&app.state, now));
-            let delay = if app.worker.is_some() {
+            let delay = if app.worker.is_some() || app.checkpoint_job.is_some() {
                 delay.min(Duration::from_millis(16))
             } else {
                 delay
@@ -301,6 +306,7 @@ impl Drop for App {
         // The worker may have accepted input whose event was never polled.
         self.reconcile_accepted();
         drop(self.job.take());
+        self.finish_checkpoints(true);
         let deletion_error = self.finish_delete(true).err();
         self.persist_input(true);
         self.collect_attachments();

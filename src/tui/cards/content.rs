@@ -40,6 +40,10 @@ pub(super) fn render(
         "edit" => selected(&payload(field(arguments, "new_text")), columns, expanded, 3),
         _ if result.get("processes").is_some() => processes(result, columns, expanded),
         "bash" | "process" => streams(result, columns, failed, expanded),
+        "checkpoint" => {
+            let lines = payload(&crate::checkpoints::render::text(result, "/checkpoints"));
+            selected(&lines, columns, expanded, 3)
+        }
         _ => {
             let lines = payload(&result.pretty());
             selected(&lines, columns, expanded, 3)
@@ -228,7 +232,7 @@ fn selected(lines: &[String], columns: usize, expanded: bool, limit: usize) -> B
     }
 }
 
-pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
+pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool) -> Vec<Line> {
     let mut notices = Vec::new();
     if name == "read" && result.get("offset") == Some(&Value::Null) {
         if let Some(next) = result.get("next_byte_offset").and_then(Value::as_usize) {
@@ -287,6 +291,27 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize) -> Vec<Line> {
                     },
                 ));
             }
+        }
+    }
+    if let Some(checkpoint) = result.get("checkpoint") {
+        let text = |key| checkpoint.get(key).and_then(Value::as_str);
+        if text("status") == Some("unprotected") {
+            notices.push((
+                Level::Warning,
+                format!("Checkpoint unavailable · {}", text("reason").unwrap_or("")),
+            ));
+        }
+        for warning in [text("warning"), text("error")].into_iter().flatten() {
+            notices.push((Level::Warning, format!("Checkpoint · {warning}")));
+        }
+        if expanded && let Some(before) = text("before") {
+            notices.push((
+                Level::Info,
+                text("after").map_or_else(
+                    || format!("Checkpoint {before}"),
+                    |after| format!("Checkpoint {before} → {after}"),
+                ),
+            ));
         }
     }
     notices

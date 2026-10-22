@@ -5,7 +5,7 @@ use crate::console::Console;
 use crate::openrouter::OpenRouter;
 use crate::session::{self, SessionConfig};
 use crate::{setup, tools::Tools};
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal, Read, Write};
 
 pub fn configure() -> Result<(), String> {
     require_terminal()?;
@@ -33,6 +33,23 @@ pub fn run(
 
 pub fn resume(id: Option<String>, plain: bool) -> Result<(), String> {
     launch(None, None, Vec::new(), plain, Some(id))
+}
+
+/// `jecode checkpoints ...`: reads no provider settings and needs no Bash.
+pub fn checkpoints(words: &[String]) -> Result<(), String> {
+    let store = Store::discover()?;
+    let home = store.path().parent().expect("configuration directory");
+    let root =
+        std::env::current_dir().map_err(|error| format!("Invalid working directory: {error}"))?;
+    let output = crate::checkpoints::command::offline(home, &root, words)?;
+    let mut stdout = io::stdout().lock();
+    let written = match &output.raw {
+        Some(raw) => stdout.write_all(raw.as_bytes()),
+        None => writeln!(stdout, "{}", output.text()),
+    };
+    written
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("Could not print checkpoints: {error}"))
 }
 
 fn launch(
@@ -102,6 +119,7 @@ fn launch(
         eprintln!("Could not create personal skills library: {error}");
     }
     agent.enable_sessions(config_home)?;
+    agent.enable_checkpoints(config_home);
     let attachments = agent.import_attachments(
         &attachments
             .iter()
