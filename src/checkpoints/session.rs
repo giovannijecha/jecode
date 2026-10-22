@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 const CHANGED_LIMIT: usize = 20;
+const PARTIAL_LIMIT: usize = 20;
 const NOTICE_LIMIT: usize = 20;
 const NOTICE_LINE: usize = 400;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -414,21 +415,7 @@ impl CommandGuard {
             fields.push(("changed_count", Value::number(report.changed.len())));
         }
         if !report.partial.is_empty() {
-            fields.push((
-                "partial",
-                Value::Array(
-                    report
-                        .partial
-                        .iter()
-                        .map(|(path, reason)| {
-                            Value::object([
-                                ("path", Value::string(path)),
-                                ("reason", Value::string(reason)),
-                            ])
-                        })
-                        .collect(),
-                ),
-            ));
+            partial(&mut fields, &report.partial);
         }
         if let Some(error) = report.error {
             fields.push((
@@ -449,6 +436,31 @@ impl CommandGuard {
         };
         fields.push(("note", Value::string(note)));
         object(fields)
+    }
+}
+
+pub(super) fn partial(fields: &mut Vec<(&str, Value)>, issues: &[(String, String)]) {
+    fields.push((
+        "partial",
+        Value::Array(
+            issues
+                .iter()
+                .take(PARTIAL_LIMIT)
+                .map(|(path, reason)| {
+                    Value::object([
+                        ("path", Value::string(path)),
+                        ("reason", Value::string(reason)),
+                    ])
+                })
+                .collect(),
+        ),
+    ));
+    if issues.len() > PARTIAL_LIMIT {
+        fields.push(("partial_count", Value::number(issues.len())));
+        fields.push((
+            "partial_omitted",
+            Value::number(issues.len() - PARTIAL_LIMIT),
+        ));
     }
 }
 

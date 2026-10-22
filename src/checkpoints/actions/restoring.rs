@@ -78,10 +78,10 @@ pub(super) fn restore(
         origin: caller.origin,
         excluded: &excluded,
     })?;
-    Ok(report_value(&report, all, paths.as_deref(), exact))
+    Ok(report_value(&report, all, paths.as_deref()))
 }
 
-fn report_value(report: &Report, all: bool, paths: Option<&[String]>, exact: bool) -> Value {
+fn report_value(report: &Report, all: bool, paths: Option<&[String]>) -> Value {
     let mut fields = vec![
         ("target", Value::string(reference(report.target))),
         ("preview", Value::Bool(report.preview)),
@@ -112,14 +112,9 @@ fn report_value(report: &Report, all: bool, paths: Option<&[String]>, exact: boo
                 ),
                 ("ref", Value::string(reference(before))),
             ];
-            if partial {
+            if partial || paths.is_some() {
                 undo.push(("paths", strings(changed.iter())));
                 undo.push(("exact", Value::Bool(true)));
-            } else if let Some(paths) = paths {
-                undo.push(("paths", strings(paths.iter())));
-                if exact {
-                    undo.push(("exact", Value::Bool(true)));
-                }
             }
             fields.push(("undo", object(undo)));
         }

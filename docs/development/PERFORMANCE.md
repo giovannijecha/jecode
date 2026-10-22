@@ -435,6 +435,40 @@ can miss shorter peaks. GC wall times with the observer were 172/125 ms and
 are not release GC timings. The observed doubling is a real compaction-space
 cost even when the payload is still required by an accepted recovery group.
 
+### Scoped acquisition review follow-up
+
+Recorded **2026-10-22**, Windows / NTFS, Rust 1.95.0 release. A focused probe
+compares the existing path order with batches grouped by their lease stripe.
+Both variants include the same pending review corrections against `712f7d9`;
+only batch ordering differs. Batches remain 16 paths and leases remain short.
+The two immutable executables ran in A/B/B/A order, with two warmups and ten
+recorded samples per size in each run (20 per variant). No builds or CI ran
+during timed samples. Fixture writes and exact content checks are outside timers.
+
+| Declared files | Prior capture + reconcile median | Grouped median | Prior / grouped range |
+| --- | ---: | ---: | --- |
+| 100 | 50.958 ms | 56.088 ms | 44.613-79.384 / 44.082-126.902 ms |
+| 1,000 | 723.753 ms | 606.667 ms | 418.990-799.040 / 345.310-638.824 ms |
+
+The 1,000-file median decreases by 16.2%; the smaller case shows no demonstrated
+improvement. These timings isolate acquisition plus reconciliation. They exclude
+the Bash process and tool-result handling, so they do not replace the earlier
+end-to-end Bash measurements. Immutable executable SHA-256s are
+`C27DF7BDE2D9D15A55741B6E039174DA8B05EA475709C913CD66004AC41A3166`
+and `30AC5D09863F9117B96951C19749DF129A41D81F506E4C4AFD81FC1EAAB61587`.
+
+The follow-up also avoids archive admission for an empty protection request and
+uses an ordered prefix range for recorded absences in a selected directory.
+The latter changes lookup work from the whole path catalog to its selected
+subtree; its separate latency contribution was not measured. A regression holds
+the store mutex and verifies that an empty request can finish independently.
+Directory-prefix tests retain deleted children and reject similarly named
+siblings. The focused probe is opt-in:
+
+```text
+cargo test --locked --offline --release checkpoints::scopes::tests::measure_declared_directory_work -- --exact --ignored --nocapture --test-threads=1
+```
+
 ## Measurement conditions
 
 Run from the repository root with Rust 1.95.0. Release builds keep Cargo

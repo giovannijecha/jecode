@@ -47,7 +47,15 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     let Some(_collecting) = lock else {
         return Ok(None);
     };
-    let mut store = Store::open(location.clone())?;
+    collect_opened(location, Store::open(location.clone())?, force)
+}
+
+fn collect_opened(
+    location: &Location,
+    mut store: Store,
+    force: bool,
+) -> Result<Option<Collection>, String> {
+    let directory = &location.directory;
     let before = store.journal.stored_bytes();
     let budget = store.policy.budget_bytes;
     let expired = due(&store.index, crate::checkpoints::clock::now());
@@ -61,8 +69,6 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     if !force && !expired && projected >= before {
         return Ok(None);
     }
-    // Compaction briefly needs a second generation beside the active one.
-    store.journal.ensure_scratch(projected)?;
     let old = store.journal.generation;
     let generation = old + 1;
     // A collection that crashed before finishing left an unused generation.
@@ -82,6 +88,10 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
             }
         }
     }
+    // The previous attempt's unused copy must not consume the room needed by
+    // this one. Apply the current policy to the fresh Store's journal first.
+    store.journal.min_free_bytes = store.policy.min_free_bytes;
+    store.journal.ensure_scratch(projected)?;
     let mut output = Output {
         journal: Journal::open_generation(directory, generation)?,
         lock_path: layout::store_lock(directory),
@@ -89,6 +99,8 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
         buffer: Vec::new(),
         bytes: 0,
     };
+    #[cfg(test)]
+    output.journal.share_test_pressure(&store.journal);
     output.journal.min_free_bytes = store.policy.min_free_bytes;
     #[cfg(test)]
     let mut first = true;

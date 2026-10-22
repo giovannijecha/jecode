@@ -1,6 +1,96 @@
 use super::*;
 
 #[test]
+fn large_partial_scopes_return_bounded_diagnostics_with_total_counts() {
+    let fixture = fixture();
+    let workspace = fixture.tools.checkpoints().unwrap().workspace().unwrap();
+    workspace.configure(None, Some(1), "test").unwrap();
+    fs::create_dir(fixture.root.path().join("data")).unwrap();
+    for number in 0..80 {
+        fs::write(
+            fixture.root.path().join(format!("data/{number:03}.txt")),
+            b"large",
+        )
+        .unwrap();
+    }
+    let results = [
+        call(
+            &fixture.tools,
+            "bash",
+            &[
+                ("command", Value::string("true")),
+                ("protect", Value::Array(vec![Value::string("data/")])),
+            ],
+        )
+        .get("checkpoint")
+        .cloned()
+        .unwrap(),
+        call(
+            &fixture.tools,
+            "checkpoint",
+            &[
+                ("action", Value::string("capture")),
+                ("paths", Value::Array(vec![Value::string("data/")])),
+            ],
+        ),
+    ];
+    for result in results {
+        assert_eq!(text(&result, &["status"]), "partial", "{result:?}");
+        let shown = result.get("partial").and_then(Value::as_array).unwrap();
+        assert!(
+            shown.len() <= 20,
+            "{} diagnostics, {} result bytes",
+            shown.len(),
+            result.encode().len()
+        );
+        let total = result
+            .get("partial_count")
+            .and_then(Value::as_usize)
+            .unwrap();
+        assert!(total >= 80);
+        assert_eq!(
+            result.get("partial_omitted").and_then(Value::as_usize),
+            Some(total - shown.len())
+        );
+        assert!(result.encode().len() < 8192);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn deleting_through_a_case_alias_returns_an_executable_undo() {
+    let fixture = fixture();
+    let captured = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("capture")),
+            ("paths", Value::Array(vec![Value::string("Case.txt")])),
+        ],
+    );
+    fs::write(fixture.root.path().join("Case.txt"), b"keep exact bytes").unwrap();
+    let deleted = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("restore")),
+            ("ref", Value::string(text(&captured, &["ref"]))),
+            ("paths", Value::Array(vec![Value::string("case.txt")])),
+            ("expected", Value::string("latest")),
+        ],
+    );
+    assert!(deleted.get("error").is_none(), "{deleted:?}");
+    assert!(!fixture.root.path().join("Case.txt").exists());
+    let undo = deleted.get("undo").unwrap();
+    let restored = fixture.tools.execute("checkpoint", &undo.encode());
+    assert!(restored.get("error").is_none(), "{restored:?}");
+    assert_eq!(
+        fs::read(fixture.root.path().join("Case.txt")).unwrap(),
+        b"keep exact bytes"
+    );
+}
+
+#[test]
 fn bash_shows_its_point_first_and_reports_what_it_changed() {
     let fixture = fixture();
     let tools = &fixture.tools;

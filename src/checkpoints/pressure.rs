@@ -61,6 +61,11 @@ pub fn for_archive(path: &Path) -> Result<Arc<Pressure>, String> {
 }
 
 impl Pressure {
+    #[cfg(test)]
+    pub(crate) fn for_test(path: &Path, probe: Probe) -> Arc<Self> {
+        Self::start(path.to_path_buf(), probe)
+    }
+
     fn start(path: PathBuf, probe: Probe) -> Arc<Self> {
         let pressure = Arc::new(Self {
             path,

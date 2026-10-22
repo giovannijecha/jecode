@@ -18,6 +18,49 @@ fn capture_paths(workspace: &Arc<Workspace>, paths: &[&str]) -> Captured {
 }
 
 #[test]
+#[ignore = "explicit release measurement of scoped capture and reconciliation"]
+fn measure_declared_directory_work() {
+    use std::time::Instant;
+    println!("paths,sample,capture_ms,reconcile_ms");
+    for count in [100, 1000] {
+        let fixture = Fixture::new();
+        for number in 0..count {
+            fixture.write(&format!("bulk/{number:04}.txt"), b"old");
+        }
+        let workspace = workspace(&fixture);
+        let first = capture_paths(&workspace, &["bulk/"]);
+        assert!(first.partial.is_empty());
+        for sample in 0..12 {
+            let started = Instant::now();
+            let captured = capture_paths(&workspace, &["bulk/"]);
+            let capture_ms = started.elapsed().as_secs_f64() * 1000.0;
+            assert!(captured.partial.is_empty());
+            let content = format!("revision-{sample}");
+            for number in 0..count {
+                fixture.write(&format!("bulk/{number:04}.txt"), content.as_bytes());
+            }
+            let started = Instant::now();
+            let report =
+                reconcile(&workspace, &captured, "external", &Cancellation::default()).unwrap();
+            let reconcile_ms = started.elapsed().as_secs_f64() * 1000.0;
+            assert!(report.partial.is_empty());
+            assert_eq!(report.observed, count + 1);
+            let store = workspace.store();
+            for number in 0..count {
+                let state = store.index.current_state(&format!("bulk/{number:04}.txt"));
+                let State::File { object, .. } = state else {
+                    panic!("{state:?}")
+                };
+                assert_eq!(&*store.bytes(object).unwrap(), content.as_bytes());
+            }
+            if sample >= 2 {
+                println!("{count},{},{capture_ms:.6},{reconcile_ms:.6}", sample - 2);
+            }
+        }
+    }
+}
+
+#[test]
 fn exact_file_and_absence_are_saved_without_a_workspace_baseline() {
     let fixture = Fixture::new();
     fixture.write("existing.txt", b"before");
@@ -36,6 +79,53 @@ fn exact_file_and_absence_are_saved_without_a_workspace_baseline() {
         Some(State::Absent)
     );
     assert!(index.current("unrelated.txt").is_none());
+}
+
+#[test]
+fn an_empty_scope_does_not_wait_for_the_archive() {
+    let fixture = Fixture::new();
+    let workspace = workspace(&fixture);
+    let held = workspace.store();
+    let (sent, received) = std::sync::mpsc::channel();
+    let worker = Arc::clone(&workspace);
+    let thread = std::thread::spawn(move || {
+        let result = capture(&worker, &[], "test", &Cancellation::default());
+        sent.send(result).unwrap();
+    });
+    let result = received.recv_timeout(std::time::Duration::from_secs(1));
+    drop(held);
+    thread.join().unwrap();
+    let captured = result
+        .expect("no protection was requested, but capture waited for the store")
+        .unwrap();
+    assert!(captured.snapshot.is_none());
+    assert!(captured.selection.files.is_empty() && captured.selection.directories.is_empty());
+}
+
+#[test]
+fn a_narrow_scope_keeps_deleted_children_without_sibling_prefixes() {
+    let fixture = Fixture::new();
+    for path in [
+        "source/keep.txt",
+        "source/deleted.txt",
+        "source.c",
+        "source2/deleted.txt",
+    ] {
+        fixture.write(path, b"before");
+    }
+    let workspace = workspace(&fixture);
+    capture_paths(&workspace, &["."]);
+    fs::remove_file(fixture.path("source/deleted.txt")).unwrap();
+    let captured = capture_paths(&workspace, &["source/"]);
+    assert!(captured.partial.is_empty());
+    let index = index(&workspace);
+    let before = captured.snapshot.unwrap();
+    assert_eq!(
+        super::super::recovery::target(&index, before, "source/deleted.txt"),
+        Some(State::Absent)
+    );
+    assert!(super::super::recovery::target(&index, before, "source.c").is_none());
+    assert!(super::super::recovery::target(&index, before, "source2/deleted.txt").is_none());
 }
 
 #[test]

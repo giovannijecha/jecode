@@ -93,6 +93,19 @@ fn zeros(reader: &mut impl Read) -> Result<bool, String> {
 }
 
 impl Journal {
+    #[cfg(test)]
+    pub(crate) fn set_test_probe(
+        &mut self,
+        probe: fn(&Path, Option<&Cancellation>) -> Result<u64, String>,
+    ) {
+        self.pressure = Pressure::for_test(&self.archive, probe);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn share_test_pressure(&mut self, other: &Self) {
+        self.pressure = Arc::clone(&other.pressure);
+    }
+
     /// Opens the current generation. Callers hold the store lock.
     pub fn open(archive: &Path) -> Result<Self, String> {
         let generation = current_generation(archive)?;

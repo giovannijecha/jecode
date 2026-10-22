@@ -41,6 +41,8 @@ excluded or temporary paths, or `unprotected` with a reason. Bash uses
 snapshot and a `group`; Bash also returns an `after` observation reference.
 The `before` snapshot restores that step's preimages. The group restores the
 first saved state of each path in the current attempt.
+Use `after` for comparisons. Collection can release an unpinned observation;
+use the saved `before` snapshot or recovery group for recovery.
 
 ## Restore and accept
 
@@ -115,7 +117,10 @@ layout, in place and after older readers release it.
 Large files use bounded readers and deduplicated blocks. Metadata, available
 memory, permissions, filesystem support and free disk space still matter.
 Check each `checkpoint` result: incomplete capture is reported as partial or
-unprotected. `verify` deliberately rereads the eligible workspace; normal
+unprotected. Bash and explicit capture show the first 20 partial diagnostics;
+`partial_count` and `partial_omitted` report larger totals without filling the
+conversation with every affected path. `verify` deliberately rereads the
+eligible workspace; normal
 startup and turns do not require that scan. A snapshot is an ordered set of
 observations, not an atomic multi-file filesystem image.
 
@@ -193,6 +198,8 @@ records can use the free-space margin so a failed capture can be closed.
 Checkpoints are local history, not a backup. Writes outside declared Bash
 scopes or between two observations are not captured. Symbolic links are saved
 as links; directory traversal does not follow them outside the workspace.
+For a command that writes through a symbolic link, declare its target path too;
+protecting only the link saves its directory entry, not the target's contents.
 Restores preserve file bytes, permissions and link targets, but not hard-link
 relationships, extended attributes, ACLs or timestamps. Another writer can
 still race the final restore recheck. On Unix, completed archive writes sync

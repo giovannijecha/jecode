@@ -130,22 +130,8 @@ pub fn run(workspace: &Arc<Workspace>, origin: &str, paths: &[String]) -> Result
         ("saved", Value::number(captured.saved)),
         ("skipped", Value::number(skipped)),
         ("unprotected", Value::number(unprotected)),
-        (
-            "partial",
-            Value::Array(
-                captured
-                    .partial
-                    .iter()
-                    .map(|(path, reason)| {
-                        Value::object([
-                            ("path", Value::string(path)),
-                            ("reason", Value::string(reason)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ),
     ];
+    super::session::partial(&mut fields, &captured.partial);
     if let Some(group) = captured.group {
         fields.push(("group", Value::string(reference(group))));
     }

@@ -194,7 +194,23 @@ fn include_recorded_absences(
 ) -> Result<(), String> {
     let found: BTreeSet<String> = names.iter().cloned().collect();
     let store = workspace.store_cancellable(cancellation)?;
-    for (path, versions) in &store.index.paths {
+    let prefix = if root.is_empty() {
+        String::new()
+    } else {
+        format!("{root}/")
+    };
+    let descendants = store
+        .index
+        .paths
+        .range(prefix.clone()..)
+        .take_while(|(path, _)| path.starts_with(&prefix));
+    for (path, versions) in store
+        .index
+        .paths
+        .get_key_value(root)
+        .into_iter()
+        .chain(descendants)
+    {
         cancelled(cancellation)?;
         if !within(root, path) || found.contains(path) {
             continue;
@@ -212,13 +228,13 @@ fn include_recorded_absences(
 
 fn record_batch(
     workspace: &Workspace,
-    names: &[String],
+    names: &[&String],
     policy: &Policy,
     origin: &str,
     snapshot: Option<(u64, u64)>,
     cancellation: &Cancellation,
 ) -> Result<Vec<(String, State)>, String> {
-    let leased: Vec<&str> = names.iter().map(String::as_str).collect();
+    let leased: Vec<&str> = names.iter().map(|path| path.as_str()).collect();
     let _lease = workspace
         .leases
         .acquire_cancellable(&leased, cancellation)
@@ -268,8 +284,13 @@ fn capture_names(
     cancellation: &Cancellation,
     partial: &mut Vec<(String, String)>,
 ) -> Result<Vec<(String, State)>, String> {
+    cancelled(cancellation)?;
     let mut saved = Vec::new();
-    for batch in names.chunks(BATCH_PATHS) {
+    // Group paths by stripe to reduce repeated lock-file opens while keeping
+    // leases limited to a short batch.
+    let mut ordered: Vec<&String> = names.iter().collect();
+    ordered.sort_by_cached_key(|path| super::locks::Leases::stripe(path));
+    for batch in ordered.chunks(BATCH_PATHS) {
         cancelled(cancellation)?;
         match record_batch(workspace, batch, policy, origin, snapshot, cancellation) {
             Ok(records) => {
@@ -286,7 +307,7 @@ fn capture_names(
             Err(reason) if cancellation.requested() => return Err(reason),
             Err(reason) => {
                 for path in batch {
-                    partial.push((path.clone(), reason.clone()));
+                    partial.push((path.to_string(), reason.clone()));
                 }
             }
         }
@@ -318,9 +339,10 @@ pub fn capture(
     cancellation: &Cancellation,
 ) -> Result<Captured, String> {
     cancelled(cancellation)?;
-    if !paths.is_empty() {
-        super::lifecycle::touch_throttled(&workspace.archive)?;
+    if paths.is_empty() {
+        return Ok(Captured::default());
     }
+    super::lifecycle::touch_throttled(&workspace.archive)?;
     let policy = policy(workspace, cancellation)?;
     let mut result = Captured::default();
     result.policy_id = policy.id();
