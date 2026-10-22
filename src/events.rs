@@ -81,9 +81,14 @@ pub fn checkpoint_warning(result: &Value) -> Option<String> {
     if text("status") == Some("unprotected") {
         return Some(format!("unprotected: {}", text("reason").unwrap_or("")));
     }
-    text("warning")
-        .or(text("error"))
-        .map(|warning| format!("checkpoint: {warning}"))
+    let detail = text("warning").or(text("error")).or(text("reason"));
+    match text("status") {
+        Some("partial" | "none") => Some(match detail {
+            Some(detail) => format!("checkpoint {}: {detail}", text("status").unwrap_or("")),
+            None => format!("checkpoint {}", text("status").unwrap_or("")),
+        }),
+        _ => detail.map(|detail| format!("checkpoint: {detail}")),
+    }
 }
 
 fn checkpoint_summary(result: &Value) -> String {
@@ -260,4 +265,27 @@ pub fn description(name: &str, arguments: &Value) -> String {
         return format!("{path} (from line {offset}, up to {limit} lines)");
     }
     path.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bash_summary_exposes_incomplete_checkpoint_status() {
+        for status in ["partial", "none"] {
+            let result = Value::object([
+                ("exit_code", Value::number(0)),
+                (
+                    "checkpoint",
+                    Value::object([("status", Value::string(status))]),
+                ),
+            ]);
+            let summary = tool_summary("bash", &result);
+            assert!(
+                summary.contains(status),
+                "{status} checkpoint was hidden from the tool card: {summary}"
+            );
+        }
+    }
 }

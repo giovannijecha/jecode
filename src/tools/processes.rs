@@ -50,6 +50,7 @@ struct Entry {
     command: String,
     streams: [Stream; 2],
     stop: Cancellation,
+    finalize_stop: Cancellation,
     state: Mutex<State>,
     changed: Condvar,
     monitor: Mutex<Option<JoinHandle<()>>>,
@@ -107,6 +108,7 @@ impl Registry {
             command: command.into(),
             streams,
             stop: Cancellation::default(),
+            finalize_stop: Cancellation::default(),
             state: Mutex::default(),
             changed: Condvar::new(),
             monitor: Mutex::new(None),
@@ -133,7 +135,7 @@ impl Registry {
                         continue;
                     }
                     drop(state);
-                    let renewed = completion.renew();
+                    let renewed = completion.renew_cancellable(&owner.finalize_stop);
                     state = owner.state.lock().unwrap();
                     if state.outcome.is_none() {
                         state.checkpoint_error = renewed.err();
@@ -145,7 +147,9 @@ impl Registry {
         let owner = Arc::clone(&entry);
         let monitor = thread::spawn(move || {
             let result = started.supervise(timeout, &owner.stop, &mut |_| Ok(()));
-            let checkpoint = completion.as_ref().map(|completion| completion.finish());
+            let checkpoint = completion
+                .as_ref()
+                .map(|completion| completion.finish_cancellable(&owner.finalize_stop));
             let mut state = owner.state.lock().unwrap();
             state.outcome = Some(Outcome::from(result));
             if let Some(checkpoint) = checkpoint {
@@ -231,6 +235,7 @@ impl Registry {
         let entries = std::mem::take(&mut *scope.entries.lock().unwrap());
         for entry in &entries {
             entry.stop.cancel();
+            entry.finalize_stop.cancel();
         }
         for entry in &entries {
             if let Some(monitor) = entry.monitor.lock().unwrap().take() {

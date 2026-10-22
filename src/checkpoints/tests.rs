@@ -17,6 +17,7 @@ mod mutation;
 mod notices;
 pub(crate) mod process;
 mod recovery;
+mod recovery_results;
 mod redesign;
 mod restore;
 #[cfg(windows)]

@@ -2,6 +2,8 @@ use super::*;
 use crate::checkpoints::gc;
 use crate::checkpoints::identity;
 use crate::checkpoints::journal;
+use crate::checkpoints::layout;
+use crate::checkpoints::record::{Point, Record, Recovery};
 use crate::checkpoints::store::Store;
 use crate::checkpoints::workspace::Readiness;
 use std::time::{Duration, Instant};
@@ -12,6 +14,81 @@ fn wait_until(mut condition: impl FnMut() -> bool) {
         std::thread::sleep(Duration::from_millis(25));
     }
     assert!(condition(), "the idle archive reader did not refresh");
+}
+
+#[test]
+fn failed_due_gc_waits_before_retrying() {
+    let fixture = Fixture::new();
+    let workspace = fixture.open();
+    let location = identity::locate(fixture.home.path(), fixture.root.path(), false)
+        .unwrap()
+        .unwrap();
+    let old = crate::checkpoints::clock::now() - 8 * 24 * 60 * 60 * 1_000;
+    workspace
+        .store()
+        .transaction(true, |tx| {
+            let seq = tx.seq();
+            tx.record(Record::Recovery(Recovery::Mode { seq, time: old }));
+            let group = tx.seq();
+            tx.record(Record::Point(Point {
+                seq: group,
+                kind: crate::checkpoints::recovery::GROUP_KIND.into(),
+                label: String::new(),
+                origin: "owner".into(),
+                time: old,
+                policy: 0,
+                pinned: false,
+            }));
+            let snapshot = tx.seq();
+            tx.record(Record::Point(Point {
+                seq: snapshot,
+                kind: crate::checkpoints::recovery::SNAPSHOT_KIND.into(),
+                label: String::new(),
+                origin: "owner".into(),
+                time: old,
+                policy: 0,
+                pinned: false,
+            }));
+            let seq = tx.seq();
+            tx.record(Record::Recovery(Recovery::Snapshot {
+                seq,
+                group,
+                snapshot,
+            }));
+            Ok(())
+        })
+        .unwrap();
+    assert!(gc::due(
+        &workspace.store().index,
+        crate::checkpoints::clock::now()
+    ));
+
+    // A directory where the GC lock file belongs makes this collection fail
+    // deterministically, without exhausting the fixture's filesystem.
+    let lock = layout::gc_lock(&location.directory);
+    std::fs::create_dir(&lock).unwrap();
+    workspace.maintain();
+    assert!(matches!(
+        workspace.signals.lock().collection.as_ref(),
+        Some(Err(_))
+    ));
+    workspace.signals.update(|health| health.collection = None);
+    workspace.maintain();
+    assert!(workspace.signals.lock().collection.is_none());
+
+    std::fs::remove_dir(&lock).unwrap();
+    assert!(workspace.collect(false).unwrap().is_some());
+    workspace
+        .signals
+        .update(|health| health.collection_retry.failed(Instant::now()));
+    assert!(workspace.collect(false).unwrap().is_none());
+    assert!(
+        !workspace
+            .signals
+            .lock()
+            .collection_retry
+            .blocked(Instant::now())
+    );
 }
 
 #[test]

@@ -295,6 +295,9 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
     }
     if let Some(checkpoint) = result.get("checkpoint") {
         let text = |key| checkpoint.get(key).and_then(Value::as_str);
+        if let Some(status @ ("partial" | "none")) = text("status") {
+            notices.push((Level::Warning, format!("Checkpoint {status}")));
+        }
         if text("status") == Some("unprotected") {
             notices.push((
                 Level::Warning,

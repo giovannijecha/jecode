@@ -17,6 +17,95 @@ fn point(seq: u64, kind: &str, time: u64) -> Record {
 }
 
 #[test]
+fn superseded_touch_does_not_move_a_live_generation() {
+    let fixture = Fixture::new();
+    let workspace = fixture.open();
+    let location = identity::locate(fixture.home.path(), fixture.root.path(), false)
+        .unwrap()
+        .unwrap();
+    let mut store = workspace.store();
+    let group = store
+        .transaction(true, |tx| {
+            let (group, snapshot) = recovery::begin_snapshot(tx, "owner", "write")?;
+            tx.flush(false)?;
+            let bytes: Arc<[u8]> = b"held before-image".as_slice().into();
+            let object = tx.object(bytes.clone(), None)?;
+            recovery::add(
+                tx,
+                group,
+                snapshot,
+                "a.txt",
+                &State::File {
+                    object,
+                    length: bytes.len() as u64,
+                    digest: crate::checkpoints::hash::digest(&bytes),
+                    mode: Default::default(),
+                },
+            )?;
+            let now = crate::checkpoints::clock::now();
+            for offset in [1, 2] {
+                let seq = tx.seq();
+                tx.record(Record::Recovery(Recovery::Status {
+                    seq,
+                    group,
+                    action: RecoveryAction::Touched,
+                    time: now + offset,
+                    until: 0,
+                }));
+            }
+            Ok(group)
+        })
+        .unwrap();
+    let generation = store.journal.generation;
+    assert!(recovery::available(&store.index, group));
+    drop(store);
+    assert!(super::super::collect(&location, false).unwrap().is_none());
+    let mut store = workspace.store();
+    store.refresh().unwrap();
+    assert_eq!(store.journal.generation, generation);
+    assert!(recovery::available(&store.index, group));
+}
+
+#[test]
+fn duplicate_step_with_held_object_does_not_require_collection() {
+    let mut index = Index::default();
+    let now = crate::checkpoints::clock::now();
+    let before = State::File {
+        object: 50,
+        length: 4,
+        digest: crate::checkpoints::hash::digest(b"data"),
+        mode: Default::default(),
+    };
+    for record in [
+        Record::Recovery(Recovery::Mode { seq: 1, time: now }),
+        point(2, GROUP_KIND, now),
+        point(3, SNAPSHOT_KIND, now),
+        Record::Recovery(Recovery::Snapshot {
+            seq: 4,
+            group: 2,
+            snapshot: 3,
+        }),
+        Record::Recovery(Recovery::Step {
+            seq: 5,
+            group: 2,
+            snapshot: 3,
+            path: "a.txt".into(),
+            before: before.clone(),
+        }),
+        Record::Recovery(Recovery::Step {
+            seq: 6,
+            group: 2,
+            snapshot: 3,
+            path: "a.txt".into(),
+            before,
+        }),
+    ] {
+        index.record(record);
+    }
+    assert!(!due(&index, now));
+}
+
+#[test]
 fn acceptance_collapses_steps_and_current_head_loses_payload_reference() {
     let mut index = Index::default();
     let digest = crate::checkpoints::hash::digest(b"after");

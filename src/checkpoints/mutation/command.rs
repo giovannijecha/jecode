@@ -1,8 +1,10 @@
 //! An explicit Bash preimage and scoped observation after execution.
 use super::Freshness;
 use crate::cancel::Cancellation;
-use crate::checkpoints::scopes::{self, Captured};
+use crate::checkpoints::index::Index;
+use crate::checkpoints::scopes::{self, Captured, Selection};
 use crate::checkpoints::workspace::Workspace;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub struct Command {
@@ -12,6 +14,7 @@ pub struct Command {
     /// Compatibility with callers that display a point before launch.
     pub point: Result<u64, String>,
     pub freshness: Freshness,
+    cancellation: Cancellation,
     finished: bool,
 }
 
@@ -49,19 +52,13 @@ pub struct Completion {
 }
 
 impl Completion {
+    #[cfg(test)]
     pub fn finish(&self) -> Result<(), String> {
-        if let Some(group) = self.captured.group {
-            let mut store = self.workspace.store();
-            store.transaction(true, |transaction| {
-                crate::checkpoints::recovery::touch(transaction, group, &self.origin)
-            })?;
-        }
-        let report = scopes::reconcile(
-            &self.workspace,
-            &self.captured,
-            "external",
-            &Cancellation::default(),
-        )?;
+        self.finish_cancellable(&Cancellation::default())
+    }
+
+    pub fn finish_cancellable(&self, cancellation: &Cancellation) -> Result<(), String> {
+        let report = scopes::reconcile(&self.workspace, &self.captured, "external", cancellation)?;
         if !report.partial.is_empty() {
             let (path, reason) = &report.partial[0];
             return Err(format!(
@@ -72,10 +69,10 @@ impl Completion {
         Ok(())
     }
 
-    pub fn renew(&self) -> Result<(), String> {
+    pub fn renew_cancellable(&self, cancellation: &Cancellation) -> Result<(), String> {
         if let Some(group) = self.captured.group {
-            let mut store = self.workspace.store();
-            store.transaction(true, |transaction| {
+            let mut store = self.workspace.store_cancellable(cancellation)?;
+            store.transaction_cancellable(true, cancellation, |transaction| {
                 crate::checkpoints::recovery::touch(transaction, group, &self.origin)
             })?;
         }
@@ -140,6 +137,7 @@ impl Workspace {
             captured,
             point,
             freshness,
+            cancellation: cancellation.clone(),
             finished: false,
         }
     }
@@ -176,27 +174,32 @@ impl Command {
                         &self.workspace,
                         captured,
                         "external",
-                        &Cancellation::default(),
+                        &self.cancellation,
                     ) {
                         Ok(after) => report.partial.extend(after.partial),
                         Err(error) => report.error = Some(error),
                     }
                 }
                 if let Some(before) = captured.snapshot {
-                    let mut store = self.workspace.store();
-                    if let Err(error) = store.refresh() {
-                        report.error.get_or_insert(error);
-                    } else {
-                        let index = &store.index;
-                        report.after = Some(index.latest());
-                        let mut changed: Vec<String> = index
-                            .changed_between(captured.frontier.max(before), index.latest())
-                            .into_iter()
-                            .map(|version| version.path.clone())
-                            .collect();
-                        changed.sort();
-                        changed.dedup();
-                        report.changed = changed;
+                    match self.workspace.store_cancellable(&self.cancellation) {
+                        Ok(mut store) => {
+                            if let Err(error) = store.refresh_cancellable(&self.cancellation) {
+                                report.error.get_or_insert(error);
+                            } else {
+                                let index = &store.index;
+                                if report.error.is_none() && report.partial.is_empty() {
+                                    report.after = Some(index.latest());
+                                }
+                                report.changed = changed_in_selection(
+                                    index,
+                                    &captured.selection,
+                                    captured.frontier.max(before),
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            report.error.get_or_insert(error);
+                        }
                     }
                 }
             }
@@ -217,6 +220,49 @@ impl Command {
             }
         });
     }
+}
+
+fn changed_in_selection(index: &Index, selection: &Selection, after: u64) -> Vec<String> {
+    let mut changed = BTreeSet::new();
+    let changed_since = |versions: &[crate::checkpoints::record::Version]| {
+        versions.last().is_some_and(|version| version.seq > after)
+    };
+    for name in &selection.files {
+        if index
+            .paths
+            .get(name)
+            .is_some_and(|versions| changed_since(versions))
+        {
+            changed.insert(name.clone());
+        }
+    }
+    for root in &selection.directories {
+        if root.is_empty() {
+            for (name, versions) in &index.paths {
+                if changed_since(versions) {
+                    changed.insert(name.clone());
+                }
+            }
+            continue;
+        }
+        if index
+            .paths
+            .get(root)
+            .is_some_and(|versions| changed_since(versions))
+        {
+            changed.insert(root.clone());
+        }
+        let prefix = format!("{root}/");
+        for (name, versions) in index.paths.range(prefix.clone()..) {
+            if !name.starts_with(&prefix) {
+                break;
+            }
+            if changed_since(versions) {
+                changed.insert(name.clone());
+            }
+        }
+    }
+    changed.into_iter().collect()
 }
 
 impl Drop for Command {

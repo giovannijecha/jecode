@@ -15,6 +15,7 @@ pub(crate) struct TargetNames {
     catalog: Vec<String>,
     by_depth: HashMap<usize, Vec<usize>>,
     non_ascii_by_depth: HashMap<usize, Vec<usize>>,
+    recovery_order: Option<HashMap<String, u64>>,
     indexes: RefCell<HashMap<(usize, bool), DepthIndex>>,
     #[cfg(test)]
     index_probes: Cell<usize>,
@@ -37,9 +38,29 @@ struct DepthIndex {
 impl TargetNames {
     pub(crate) fn new(root: &Path, index: &Index, target: u64) -> Self {
         let mut names = BTreeSet::new();
+        let mut recovery_order = None;
         if super::recovery_reference(index, target) {
             names.extend(recovery::paths(index, target));
             names.extend(recovery::roots(index, target));
+            let snapshots: Vec<_> = if let Some(group) = index.recovery.groups.get(&target) {
+                group
+                    .snapshots
+                    .iter()
+                    .filter_map(|id| index.recovery.snapshots.get(id))
+                    .collect()
+            } else {
+                index.recovery.snapshots.get(&target).into_iter().collect()
+            };
+            let mut first = HashMap::new();
+            for snapshot in snapshots {
+                for (path, step) in &snapshot.steps {
+                    first
+                        .entry(path.clone())
+                        .and_modify(|seq: &mut u64| *seq = (*seq).min(step.seq))
+                        .or_insert(step.seq);
+                }
+            }
+            recovery_order = Some(first);
         } else {
             names.extend(
                 index
@@ -71,6 +92,7 @@ impl TargetNames {
             catalog,
             by_depth,
             non_ascii_by_depth,
+            recovery_order,
             indexes: RefCell::new(HashMap::new()),
             #[cfg(test)]
             index_probes: Cell::new(0),
@@ -120,16 +142,33 @@ impl TargetNames {
                 }
                 continue;
             }
-            let proven: Vec<usize> = candidates
+            let mut proven: Vec<usize> = candidates
                 .iter()
                 .copied()
                 .filter(|candidate| self.same_entry(&prefix, &self.catalog[*candidate]))
                 .collect();
             if proven.len() > 1 {
-                return Err(format!(
-                    "Ambiguous restore path {raw:?}; recorded spellings are {}",
-                    self.describe(&proven)
-                ));
+                let earliest = self.recovery_order.as_ref().and_then(|order| {
+                    proven
+                        .iter()
+                        .map(|candidate| {
+                            order
+                                .get(&self.catalog[*candidate])
+                                .map(|seq| (*seq, *candidate))
+                        })
+                        .collect::<Option<Vec<_>>>()?
+                        .into_iter()
+                        .min()
+                });
+                match earliest {
+                    Some((_, candidate)) => proven = vec![candidate],
+                    None => {
+                        return Err(format!(
+                            "Ambiguous restore path {raw:?}; recorded spellings are {}",
+                            self.describe(&proven)
+                        ));
+                    }
+                }
             }
             if let Some(candidate) = proven.first() {
                 if let Some(candidates) = &uncertain

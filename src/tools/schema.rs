@@ -118,7 +118,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "checkpoint",
-            "Inspect and restore local workspace recovery. write and edit save their own previous file state; Bash saves only paths declared in protect. capture can save explicit files, recursive directories or the whole workspace with a deliberate dot path. Results identify saved, partial or none and include recovery group and before references when available. accept marks the selected recovery group complete; its first saved before state remains available for 24 hours at most. Active groups expire after seven days without activity. Restore observes live paths, checks conflicts and preserves unrelated changes. Pinned user milestones follow separate retention rules. No automatic full workspace baseline is required.",
+            "Inspect and restore local workspace recovery. write and edit save their own previous file state; Bash saves only paths declared in protect. capture can save explicit files, recursive directories or the whole workspace with a deliberate dot path. Results identify saved, partial or none and include recovery group and before references when available. accept marks the selected recovery group complete; its first saved before state remains available for 24 hours at most. Active groups expire after seven days without activity by default. Restore observes live paths, checks conflicts and preserves unrelated changes. Pinned user milestones follow separate retention rules. No automatic full workspace baseline is required.",
             Value::object([
                 (
                     "action",

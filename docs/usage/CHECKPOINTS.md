@@ -38,7 +38,8 @@ scope is treated as known absent.
 `write` and `edit` results use `checkpoint.status: saved`, `not_tracked` for
 excluded or temporary paths, or `unprotected` with a reason. Bash uses
 `saved`, `partial` or `none`. A saved Bash or capture result includes a `before`
-snapshot and a `group`; Bash also returns an `after` observation reference.
+snapshot and a `group`; a complete Bash observation also returns an `after`
+reference. Partial or cancelled observation does not return a complete `after`.
 The `before` snapshot restores that step's preimages. The group restores the
 first saved state of each path in the current attempt.
 Use `after` for comparisons. Collection can release an unpinned observation;
@@ -55,6 +56,9 @@ state per path, for a fixed period of at most 24 hours from acceptance.
 Intermediate snapshots stop being available unless you pinned one. Active
 groups expire after seven days of meaningful inactivity by default; a running
 persistent process renews its active group. Only the user controls pins.
+Within a conversation, `/checkpoints accept` without a reference accepts the
+current model attempt. Pass `cp-N` to accept another group, including a manual
+capture.
 
 Inspect before restoring. A restore compares the live state with an expected
 state and rechecks it immediately before replacing or deleting each path. A
@@ -74,8 +78,10 @@ an unverified alias is not evidence that the saved file was absent.
 Restoring a saved directory can remove children created within that complete
 scope after its `before` snapshot. It never interprets a path outside complete
 captured scope as absent. Excluded, unreadable and oversized paths are not
-protected by that capture. An exact file capture does not cover future siblings
-or children; declare a directory scope for those.
+protected by that capture. A directory that cannot be traversed, including a
+non-link Windows reparse directory, leaves its children unknown and makes that
+scope incomplete. An exact file capture does not cover future siblings or
+children; declare a directory scope for those.
 
 ## Scope, policy and capacity
 
@@ -166,9 +172,12 @@ operation reach the next model request; a changed `JECODE.md` is reloaded.
 Collection retains active recovery states, accepted groups until their fixed
 deadline, user pins and unfinished operations. It can release intermediate
 versions and objects while keeping lightweight comparison metadata. `gc`
-compacts eligible history; old generations remain readable until their active
-readers release them. Compaction can temporarily need both generations on
-disk, so neither the budget nor the free-space margin reserves disk capacity.
+compacts eligible history. Superseded activity records and steps whose file
+object is still retained do not alone trigger a full rewrite; their unused
+metadata can remain until collection is otherwise due. Old generations remain
+readable until their active readers release them. Compaction can temporarily
+need both generations on disk, so neither the budget nor the free-space margin
+reserves disk capacity.
 
 Inactive archive cleanup runs in background maintenance; opening a current
 archive does not synchronously sweep or migrate other projects. Cleanup does
@@ -181,10 +190,15 @@ Recovery deadlines are checked on access. Physical removal runs while Jecode
 is active, including an hourly sweep of closed current-format archives; no
 operating-system service runs while Jecode is closed. Readers, user pins and
 unfinished recovery can keep objects on disk after an ordinary deadline.
+Unreadable or damaged archives are preserved for recovery rather than purged.
+Failed background collection retries use a delay that grows from one second
+to one minute; an explicit `gc` can retry immediately.
 
-Retention uses monotonic elapsed time while a process runs, so moving the
-system clock does not immediately expire open recovery groups. Across process
-restarts, persisted deadlines still depend on the system clock being correct.
+Persisted timestamps and deadlines use UTC wall time, including time spent
+with the computer suspended. Backward samples are clamped within a process.
+Retention across processes requires a correct system clock; a forward clock
+correction can expire old data. Local waits and maintenance retry delays use
+monotonic elapsed time separately.
 
 On Windows, free-space checks use an owned helper and `GetDiskFreeSpaceExW`
 on the actual archive directory, including mounted volumes and UNC paths.

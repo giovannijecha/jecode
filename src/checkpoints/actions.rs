@@ -13,6 +13,8 @@ use restoring::{actions, restore, skipped};
 use std::sync::Arc;
 
 mod recovering;
+#[cfg(test)]
+pub(crate) use recovering::test_after_accept;
 mod status;
 use status::status;
 mod restoring;
@@ -314,12 +316,18 @@ fn inspect(
     arguments: &Value,
 ) -> Result<Value, String> {
     let target = target(arguments)?;
-    let paths = selected(arguments)?;
+    let mut paths = selected(arguments)?;
     let mut fields = Vec::new();
     {
         let mut store = workspace.store();
         store.refresh()?;
         let index = &store.index;
+        if let Some(paths) = &mut paths {
+            let names = restore::TargetNames::new(&workspace.root, index, target);
+            for path in paths {
+                *path = names.resolve(path)?;
+            }
+        }
         if let Some(point) = index.points.get(&target) {
             fields.push(("kind", Value::string(&point.kind)));
             fields.push(("label", Value::string(&point.label)));

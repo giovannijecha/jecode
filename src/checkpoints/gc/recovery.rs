@@ -199,11 +199,54 @@ pub(super) fn due(index: &Index, now: u64) -> bool {
     let selected = selected(index, now);
     if index
         .recovery
-        .records
+        .groups
         .keys()
+        .chain(index.recovery.snapshots.keys())
         .any(|seq| !selected.contains(seq))
     {
         return true;
+    }
+    // Superseded touches and duplicate steps wait for budget collection or
+    // group expiry. A released step needs immediate collection only when its
+    // file object is not held by another step, pin, milestone or pending write.
+    let released_objects: Vec<u64> = index
+        .recovery
+        .records
+        .iter()
+        .filter_map(|(seq, record)| match record {
+            Recovery::Step {
+                before: State::File { object, .. },
+                ..
+            } if !selected.contains(seq) => Some(*object),
+            _ => None,
+        })
+        .collect();
+    if !released_objects.is_empty() {
+        let held_by_step: BTreeSet<u64> = index
+            .recovery
+            .records
+            .iter()
+            .filter(|(seq, _)| selected.contains(seq))
+            .filter_map(|(_, record)| match record {
+                Recovery::Step {
+                    before: State::File { object, .. },
+                    ..
+                } => Some(*object),
+                _ => None,
+            })
+            .collect();
+        if released_objects
+            .iter()
+            .any(|object| !held_by_step.contains(object))
+        {
+            let retained = super::retained_records(index, &snapshot(index, index.horizon, now)).0;
+            if released_objects
+                .iter()
+                .any(|object| !retained.contains(object))
+            {
+                return true;
+            }
+        }
     }
     if index.points.values().any(|point| {
         !is_recovery_point(point)

@@ -2,6 +2,102 @@ use super::*;
 use crate::cancel::Cancellation;
 use crate::checkpoints::scopes;
 
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn group_restore_merges_case_only_renames_in_both_directions() {
+    for (first, second) in [("Case.txt", "case.txt"), ("case.txt", "Case.txt")] {
+        let fixture = Fixture::new();
+        fixture.write(first, b"first\n");
+        if !fixture.path(second).exists() {
+            return;
+        }
+        let workspace =
+            workspace::open(fixture.home.path(), fixture.root.path(), Options::offline()).unwrap();
+        let initial = scopes::capture(
+            &workspace,
+            &paths(&["."]),
+            "model",
+            &Cancellation::default(),
+        )
+        .unwrap();
+        fs::rename(fixture.path(first), fixture.path("intermediate.txt")).unwrap();
+        fs::rename(fixture.path("intermediate.txt"), fixture.path(second)).unwrap();
+        fixture.write(second, b"second\n");
+        let later = scopes::capture(
+            &workspace,
+            &paths(&["."]),
+            "model",
+            &Cancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(later.group, initial.group);
+        fixture.write(second, b"third\n");
+
+        let report = workspace
+            .restore(&request(
+                &workspace,
+                initial.group.unwrap(),
+                None,
+                Expected::Latest,
+            ))
+            .unwrap();
+        assert!(report.failed.is_none() && report.conflicts.is_empty());
+        assert_eq!(fixture.read(first).unwrap(), b"first\n");
+        assert_eq!(fixture.read(second).unwrap(), b"first\n");
+        assert_eq!(report.applied.len(), 1, "{} -> {}", first, second);
+        assert_eq!(fs::read_dir(fixture.root.path()).unwrap().count(), 1);
+    }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn group_restore_merges_case_only_directory_renames() {
+    for (first, second) in [("Dir", "dir"), ("dir", "Dir")] {
+        let fixture = Fixture::new();
+        fixture.write(&format!("{first}/file.txt"), b"first\n");
+        if !fixture.path(&format!("{second}/file.txt")).exists() {
+            return;
+        }
+        let workspace =
+            workspace::open(fixture.home.path(), fixture.root.path(), Options::offline()).unwrap();
+        let initial = scopes::capture(
+            &workspace,
+            &paths(&["."]),
+            "model",
+            &Cancellation::default(),
+        )
+        .unwrap();
+        fs::rename(fixture.path(first), fixture.path("intermediate")).unwrap();
+        fs::rename(fixture.path("intermediate"), fixture.path(second)).unwrap();
+        fixture.write(&format!("{second}/file.txt"), b"second\n");
+        let later = scopes::capture(
+            &workspace,
+            &paths(&["."]),
+            "model",
+            &Cancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(later.group, initial.group);
+        fixture.write(&format!("{second}/file.txt"), b"third\n");
+
+        let report = workspace
+            .restore(&request(
+                &workspace,
+                initial.group.unwrap(),
+                None,
+                Expected::Latest,
+            ))
+            .unwrap();
+        assert!(report.failed.is_none() && report.conflicts.is_empty());
+        assert_eq!(
+            fixture.read(&format!("{first}/file.txt")).unwrap(),
+            b"first\n"
+        );
+        assert_eq!(fs::read_dir(fixture.root.path()).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(fixture.path(first)).unwrap().count(), 1);
+    }
+}
+
 #[test]
 fn full_restore_handles_unicode_normalization_aliases() {
     const SAVED: &str = "caf\u{e9}.txt";
@@ -68,6 +164,47 @@ fn unrelated_unicode_name_does_not_make_a_deleted_ascii_path_ambiguous() {
     assert!(report.failed.is_none() && report.conflicts.is_empty());
     assert_eq!(fixture.read("caf\u{e9}.txt").unwrap(), b"saved\n");
     assert!(fixture.read("created.txt").is_none());
+}
+
+#[test]
+fn full_restore_ignores_unrelated_deleted_unicode_history() {
+    for scope in ["src/main.rs", "src/"] {
+        let fixture = Fixture::new();
+        fixture.write("docs/perché.md", b"old document\n");
+        fixture.write("src/main.rs", b"original\n");
+        let workspace =
+            workspace::open(fixture.home.path(), fixture.root.path(), Options::offline()).unwrap();
+        let old = scopes::capture(
+            &workspace,
+            &paths(&["docs/perché.md"]),
+            "earlier",
+            &Cancellation::default(),
+        )
+        .unwrap();
+        fs::remove_file(fixture.path("docs/perché.md")).unwrap();
+        scopes::reconcile(&workspace, &old, "external", &Cancellation::default()).unwrap();
+        let current = scopes::capture(
+            &workspace,
+            &paths(&[scope]),
+            "model",
+            &Cancellation::default(),
+        )
+        .unwrap();
+        fixture.write("src/main.rs", b"changed\n");
+
+        let report = workspace
+            .restore(&request(
+                &workspace,
+                current.group.unwrap(),
+                None,
+                Expected::Latest,
+            ))
+            .unwrap();
+        assert!(report.failed.is_none() && report.conflicts.is_empty());
+        assert_eq!(restored(&report), paths(&["src/main.rs"]), "{scope}");
+        assert_eq!(fixture.read("src/main.rs").unwrap(), b"original\n");
+        assert!(fixture.read("docs/perché.md").is_none());
+    }
 }
 
 #[test]

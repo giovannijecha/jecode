@@ -1,6 +1,17 @@
 //! Model-owned recovery attempts and explicit scope acquisition.
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    static TEST_AFTER_ACCEPT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn test_after_accept(hook: impl FnOnce() + 'static) {
+    TEST_AFTER_ACCEPT.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
 pub(super) fn capture(
     workspace: &Arc<Workspace>,
     caller: &Caller<'_>,
@@ -28,7 +39,7 @@ pub(super) fn accept(
     caller: &Caller<'_>,
     arguments: &Value,
 ) -> Result<Value, String> {
-    let group = workspace.store().transaction(true, |tx| {
+    let (group, accepted, expires) = workspace.store().transaction(true, |tx| {
         let selected = string(arguments, "ref")?.map(parse_reference).transpose()?;
         let group = selected
             .map(|id| {
@@ -38,7 +49,14 @@ pub(super) fn accept(
                     .get(&id)
                     .map_or(id, |snapshot| snapshot.group)
             })
-            .or_else(|| super::super::recovery::group_for(tx.index(), caller.origin))
+            .or_else(|| {
+                let origin = if caller.user {
+                    caller.origin.strip_prefix("user:").unwrap_or(caller.origin)
+                } else {
+                    caller.origin
+                };
+                super::super::recovery::group_for(tx.index(), origin)
+            })
             .ok_or("There is no active recovery group for this conversation")?;
         let origin = if caller.user {
             tx.index()
@@ -50,22 +68,20 @@ pub(super) fn accept(
         } else {
             caller.origin.to_string()
         };
-        super::super::recovery::accept(tx, group, &origin)?;
-        Ok(group)
+        let (accepted, expires) = super::super::recovery::accept(tx, group, &origin)?;
+        Ok((group, accepted, expires))
     })?;
-    let store = workspace.store();
-    let data = &store.index.recovery.groups[&group];
+    #[cfg(test)]
+    TEST_AFTER_ACCEPT.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
     Ok(Value::object([
         ("status", Value::string("accepted")),
         ("group", Value::string(reference(group))),
-        (
-            "accepted_at",
-            Value::number(data.accepted.unwrap_or_default()),
-        ),
-        (
-            "expires_at",
-            Value::number(data.accepted_until.unwrap_or_default()),
-        ),
+        ("accepted_at", Value::number(accepted)),
+        ("expires_at", Value::number(expires)),
         ("maximum_retention_hours", Value::number(24)),
         (
             "retained",

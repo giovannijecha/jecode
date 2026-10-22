@@ -322,8 +322,13 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("Could not read checkpoint file"));
         assert!(store.index.manifests.is_empty());
+        assert!(!store.index.objects.is_empty());
         drop(store);
-        let store = Store::open(location).unwrap();
+        let store = Store::open(location.clone()).unwrap();
         assert!(store.index.manifests.is_empty());
+        assert!(!store.index.objects.is_empty());
+        drop(store);
+        gc::collect(&location, true).unwrap().unwrap();
+        assert!(Store::open(location).unwrap().index.objects.is_empty());
     }
 }

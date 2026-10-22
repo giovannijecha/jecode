@@ -99,7 +99,7 @@ fn collect_group(expired: bool) -> (f64, u64, u64) {
                 }));
                 Ok(())
             } else {
-                recovery::accept(transaction, group, origin)
+                recovery::accept(transaction, group, origin).map(|_| ())
             }
         })
         .unwrap();

@@ -10,6 +10,7 @@ use super::scan;
 use super::scopes::Selection;
 use super::workspace::{Readiness, Workspace};
 use std::collections::BTreeSet;
+use std::time::Instant;
 
 impl Workspace {
     /// Restores selected paths, or the whole scope, after bringing the
@@ -157,9 +158,20 @@ impl Workspace {
                 _ => bytes,
             };
             match &result {
-                Ok(Some(collection)) => health.collection = Some(Ok(collection.clone())),
-                Err(error) => health.collection = Some(Err(error.clone())),
-                Ok(None) => {}
+                Ok(Some(collection)) => {
+                    health.collection = Some(Ok(collection.clone()));
+                    health.collection_retry.clear();
+                }
+                Err(error) => {
+                    health.collection = Some(Err(error.clone()));
+                    health.collection_retry.failed(Instant::now());
+                }
+                Ok(None) => {
+                    health.collection_retry.clear();
+                    if health.collection.as_ref().is_some_and(Result::is_err) {
+                        health.collection = None;
+                    }
+                }
             }
         });
         result
@@ -174,6 +186,7 @@ impl Workspace {
     /// Refreshes idle readers and collects off the hot path after enough
     /// growth or a change to the points and pins that constrain pruning.
     pub(super) fn maintain(&self) {
+        let retry_blocked = self.signals.lock().collection_retry.blocked(Instant::now());
         let (bytes, budget, eligibility, expired) = {
             let mut store = self.store();
             if let Err(error) = store.maintain() {
@@ -184,16 +197,18 @@ impl Workspace {
                 store.journal.stored_bytes(),
                 store.policy.budget_bytes,
                 collection_eligibility(&store.index),
-                gc::due(&store.index, crate::checkpoints::clock::now()),
+                !retry_blocked && gc::due(&store.index, crate::checkpoints::clock::now()),
             )
         };
         let due = {
             let health = self.signals.lock();
-            expired
-                || health.readiness == Readiness::Ready
-                    && (bytes > budget / 5 * 2
-                        && (bytes >= health.collected.saturating_add(budget / 10)
-                            || health.collection_eligibility.as_ref() != Some(&eligibility)))
+            !retry_blocked
+                && !health.collection_retry.blocked(Instant::now())
+                && (expired
+                    || health.readiness == Readiness::Ready
+                        && (bytes > budget / 5 * 2
+                            && (bytes >= health.collected.saturating_add(budget / 10)
+                                || health.collection_eligibility.as_ref() != Some(&eligibility))))
         };
         if due {
             let _ = self.collect(false);

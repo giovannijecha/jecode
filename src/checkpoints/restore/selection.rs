@@ -44,11 +44,26 @@ pub fn paths(store: &mut Store, request: &Request<'_>) -> Result<Vec<String>, St
         None if request.exact => Err("exact needs selected paths".into()),
         None => {
             let mut selected = std::collections::BTreeSet::new();
+            let recovery = recovery_reference(&store.index, request.target);
+            let has_complete_roots =
+                recovery && !recovery::roots(&store.index, request.target).is_empty();
             for path in store.index.paths.keys() {
-                let path = names.resolve(path)?;
-                if !recovery_reference(&store.index, request.target)
-                    || recovery::target(&store.index, request.target, &path).is_some()
-                {
+                let raw_target =
+                    recovery && recovery::target(&store.index, request.target, path).is_some();
+                // Without complete directory roots, only explicitly saved
+                // names belong to this recovery target. Resolve them after
+                // filtering so unrelated missing Unicode names cannot make a
+                // full restore ambiguous. A root can cover an alias whose raw
+                // spelling is absent from the target; keep resolving those.
+                if recovery && !has_complete_roots && !raw_target {
+                    continue;
+                }
+                let path = match names.resolve(path) {
+                    Ok(path) => path,
+                    Err(_) if recovery && !raw_target => continue,
+                    Err(error) => return Err(error),
+                };
+                if !recovery || recovery::target(&store.index, request.target, &path).is_some() {
                     selected.insert(path);
                 }
             }

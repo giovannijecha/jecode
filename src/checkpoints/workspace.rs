@@ -12,6 +12,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 mod readiness;
+pub(super) mod retry;
 
 const TICK: Duration = Duration::from_millis(500);
 const DEBOUNCE: Duration = Duration::from_millis(20);
@@ -105,6 +106,8 @@ pub(super) struct Health {
     pub collection_eligibility: Option<(Option<u64>, Vec<u64>)>,
     /// The last collection, or why it failed.
     pub collection: Option<Result<super::gc::Collection, String>>,
+    /// Retry failed background collections on a bounded monotonic schedule.
+    pub collection_retry: retry::CollectionRetry,
 }
 
 impl Health {
@@ -226,6 +229,7 @@ impl Workspace {
                     collected: 0,
                     collection_eligibility: None,
                     collection: None,
+                    collection_retry: retry::CollectionRetry::default(),
                 }),
                 changed: Condvar::new(),
             }),
@@ -261,6 +265,11 @@ impl Workspace {
 
     pub(super) fn store(&self) -> MutexGuard<'_, Store> {
         self.store.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_hold_store(&self) -> MutexGuard<'_, Store> {
+        self.store()
     }
 
     pub(super) fn store_cancellable(

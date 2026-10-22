@@ -5,6 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod bash;
+mod bash_results;
 mod large;
 
 struct Fixture {
@@ -55,6 +56,54 @@ fn wait_for(mut condition: impl FnMut() -> bool) {
         );
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn inspect_uses_the_same_saved_name_as_restore_preview() {
+    let fixture = fixture();
+    fs::write(fixture.root.path().join("Case.txt"), b"original\n").unwrap();
+    let captured = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("capture")),
+            ("paths", Value::Array(vec![Value::string("Case.txt")])),
+        ],
+    );
+    let group = text(&captured, &["group"]).to_string();
+    fs::write(fixture.root.path().join("Case.txt"), b"changed\n").unwrap();
+
+    let inspected = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("inspect")),
+            ("ref", Value::string(&group)),
+            ("paths", Value::Array(vec![Value::string("case.txt")])),
+        ],
+    );
+    let states = inspected.get("paths").and_then(Value::as_array).unwrap();
+    let state = &states[0];
+    assert_eq!(text(state, &["path"]), "Case.txt", "{inspected:?}");
+    assert!(
+        text(state, &["at_ref"]).starts_with("file"),
+        "{inspected:?}"
+    );
+    assert!(
+        text(state, &["current"]).starts_with("file"),
+        "{inspected:?}"
+    );
+    assert_eq!(
+        text(state, &["read"]),
+        format!("checkpoint:{group}:Case.txt"),
+        "{inspected:?}"
+    );
+    let planned = inspected
+        .get("restore_would")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(text(&planned[0], &["path"]), "Case.txt", "{inspected:?}");
 }
 
 #[test]
@@ -312,10 +361,32 @@ fn a_cancelled_wait_keeps_protection_for_the_running_command() {
         Some(&Value::Bool(true)),
         "{result:?}"
     );
-    assert_eq!(text(&result, &["checkpoint", "status"]), "saved");
+    assert_eq!(text(&result, &["checkpoint", "status"]), "partial");
+    let checkpoint = result.get("checkpoint").unwrap();
+    let before = text(checkpoint, &["before"]).to_string();
+    assert!(text(checkpoint, &["group"]).starts_with("cp-"));
+    assert!(checkpoint.get("after").is_none(), "{checkpoint:?}");
+    assert!(
+        text(checkpoint, &["error"])
+            .to_lowercase()
+            .contains("cancel"),
+        "{checkpoint:?}"
+    );
     assert!(text(&result, &["checkpoint", "note"]).contains("still running"));
     fs::write(fixture.root.path().join("go"), "").unwrap();
     tools.stop_processes();
+    let restored = call(
+        tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("restore")),
+            ("ref", Value::string(before)),
+            ("paths", Value::Array(vec![Value::string("started")])),
+            ("expected", Value::string("latest")),
+        ],
+    );
+    assert!(restored.get("error").is_none(), "{restored:?}");
+    assert!(!fixture.root.path().join("started").exists());
 }
 
 #[test]

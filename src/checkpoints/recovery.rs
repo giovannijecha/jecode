@@ -238,7 +238,7 @@ pub fn scope(
     Ok(())
 }
 
-pub fn accept(tx: &mut Transaction<'_>, group: u64, origin: &str) -> Result<(), String> {
+pub fn accept(tx: &mut Transaction<'_>, group: u64, origin: &str) -> Result<(u64, u64), String> {
     let data = tx
         .index()
         .recovery
@@ -248,8 +248,12 @@ pub fn accept(tx: &mut Transaction<'_>, group: u64, origin: &str) -> Result<(), 
     if data.origin != origin {
         return Err("Recovery group belongs to another conversation".into());
     }
-    if data.accepted.is_some() {
-        return Ok(());
+    if let Some(accepted) = data.accepted {
+        return Ok((
+            accepted,
+            data.accepted_until
+                .unwrap_or_else(|| accepted.saturating_add(limits(tx.index()).accepted())),
+        ));
     }
     if !available(tx.index(), group) {
         return Err("Recovery group has expired".into());
@@ -264,7 +268,7 @@ pub fn accept(tx: &mut Transaction<'_>, group: u64, origin: &str) -> Result<(), 
         time: now,
         until,
     }));
-    Ok(())
+    Ok((now, until))
 }
 
 /// Renews a running persistent command's inactivity window. A crashed

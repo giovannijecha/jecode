@@ -231,6 +231,16 @@ pub fn bounded_cancellable(
     Ok(walk)
 }
 
+fn traverse_directory(walk: &mut Walk, path: &str, is_directory: bool, traversable: bool) -> bool {
+    if is_directory && !traversable {
+        // The entry is known, but its children are not. It cannot prove their
+        // absence in a complete directory scope or a later workspace scan.
+        walk.unreadable += 1;
+        walk.unreadable_dirs.push(path.into());
+    }
+    traversable
+}
+
 fn read(
     root: &Path,
     directory: &str,
@@ -288,11 +298,11 @@ fn read(
         };
         let kind = entry.file_type();
         let metadata = fs::symlink_metadata(entry.path());
-        let directory = kind
+        let is_directory = kind
             .as_ref()
-            .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
-            && metadata.as_ref().is_ok_and(ordinary_directory);
-        if !in_scope(policy, excluded, &path, directory) {
+            .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink());
+        let directory = is_directory && metadata.as_ref().is_ok_and(ordinary_directory);
+        if !in_scope(policy, excluded, &path, is_directory) {
             walk.excluded += 1;
             continue;
         }
@@ -317,7 +327,7 @@ fn read(
                     .map_or("", |(parent, _)| parent)
                     .into()
             });
-        } else if directory {
+        } else if traverse_directory(walk, &path, is_directory, directory) {
             found.push(path.clone());
         }
         walk.entries.push(Entry {
@@ -332,6 +342,24 @@ fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn untraversed_directory_records_unknown_children() {
+        let mut walk = Walk::default();
+        // A native reparse directory can be a directory without being a link.
+        assert!(!traverse_directory(&mut walk, "cloud", true, false));
+        assert_eq!(walk.unreadable_dirs, ["cloud"]);
+        assert_eq!(walk.unreadable, 1);
+    }
+
+    #[test]
+    fn ordinary_directories_and_link_entries_do_not_leave_unknown_children() {
+        let mut walk = Walk::default();
+        assert!(traverse_directory(&mut walk, "ordinary", true, true));
+        assert!(!traverse_directory(&mut walk, "link", false, false));
+        assert!(walk.unreadable_dirs.is_empty());
+        assert_eq!(walk.unreadable, 0);
+    }
 
     #[test]
     fn cancelled_walk_returns_no_partial_inventory() {

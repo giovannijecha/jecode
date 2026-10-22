@@ -210,7 +210,25 @@ fn tool_cards_console(bash: &std::path::Path) {
         name: "bash".into(),
         arguments: Value::object([("command", Value::string("cargo test --locked --offline"))]),
     });
+    let result = Value::object([
+        ("exit_code", Value::number(0)),
+        (
+            "checkpoint",
+            Value::object([("status", Value::string("partial"))]),
+        ),
+    ]);
+    state.event(Event::ToolFinished {
+        id: "verify".into(),
+        name: "bash".into(),
+        summary: crate::events::tool_summary("bash", &result),
+        result,
+    });
     let rows: Vec<_> = state.rows().into_iter().flatten().collect();
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().contains("Checkpoint partial")),
+        "partial checkpoint status is missing from the Bash tool card"
+    );
     assert!(
         rows.iter()
             .any(|row| row.plain().contains("1 −  let limit = 10;"))

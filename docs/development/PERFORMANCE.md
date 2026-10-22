@@ -384,6 +384,9 @@ and conflict checks were retained.
 Recovery also has regressions. These timings include current-state observation,
 conflict checking, saving undo and installing the selected state; initial
 full-scope preimages are prepared outside the new implementation's timer.
+The prior fixture used a turn marker after its initial baseline; the new fixture
+captures `.` before each sample. These are different workflows, so the figures
+are not an isolated before/after comparison of the restore algorithm.
 
 | Recovery operation | Prior median | Current median | Samples |
 | --- | ---: | ---: | ---: |
@@ -395,6 +398,9 @@ The one-file current range was 7.526-95.297 ms; the whole-workspace range was
 693.129-1,052.196 ms. These are integrated costs, not isolated estimates of a
 single storage or path-lookup operation. Saving an undo reference remains part
 of each successful restore.
+The one-file series rises and falls in several stretches rather than remaining
+constant. The source of that pattern has not been isolated;
+its median must not be read as a fixed per-file cost.
 
 In a 20-revision retention fixture, acceptance reduced median archive file
 lengths from 1,732,672 to 87,383 bytes in 77.313 ms; expiry reduced 1,732,650 to
