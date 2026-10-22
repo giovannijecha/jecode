@@ -67,7 +67,7 @@ pub struct RestoreReport {
 }
 
 mod selecting;
-use selecting::{in_root, lease_paths, selected};
+use selecting::{absence_proven, lease_paths, selected};
 
 fn token(selected: &[Inspected]) -> String {
     let mut bytes = Vec::new();
@@ -122,13 +122,11 @@ fn inspect_loaded(
         if cancel.requested() {
             return Err("Recovery inspection was cancelled".into());
         }
-        let saved = snapshot.entries.get(&path).cloned().or_else(|| {
-            snapshot
-                .roots
-                .iter()
-                .any(|scope| in_root(&path, scope))
-                .then_some(State::Absent)
-        });
+        let saved = snapshot
+            .entries
+            .get(&path)
+            .cloned()
+            .or_else(|| absence_proven(snapshot, &path).then_some(State::Absent));
         let Some(saved) = saved else {
             partial.push((path, "Not protected by this call".into()));
             continue;
@@ -489,3 +487,6 @@ impl Store {
 #[cfg(test)]
 #[path = "restore/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod scope_tests;

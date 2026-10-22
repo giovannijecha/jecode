@@ -32,6 +32,11 @@ fn published_pack_survives_restart_and_expires_from_creation() {
         .capture("write", "test", &["hello.txt".into()], &cancel)
         .unwrap();
     assert_ne!(first.reference, second.reference);
+    // Both captures may share a millisecond, so keep both packs leased while
+    // checking that cleanup cannot remove an active reader's pack.
+    let _second_reader = store
+        .load(second.reference.as_ref().unwrap(), &cancel)
+        .unwrap();
     let reference = first.reference.unwrap();
     let loaded = store.load(&reference, &cancel).unwrap();
     let state = &loaded.snapshot.entries["hello.txt"];

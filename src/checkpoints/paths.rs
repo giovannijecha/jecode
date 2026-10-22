@@ -248,7 +248,7 @@ pub fn eligible(_root: &Path, path: &str, excluded: &[String]) -> bool {
     eligible_beneath(path, "", excluded)
 }
 
-fn eligible_beneath(path: &str, selected_root: &str, excluded: &[String]) -> bool {
+pub(super) fn eligible_beneath(path: &str, selected_root: &str, excluded: &[String]) -> bool {
     let below = if selected_root.is_empty() {
         path
     } else {

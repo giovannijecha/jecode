@@ -77,6 +77,14 @@ pub(super) fn in_root(path: &str, root: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
+/// A complete walk proves absence only within its original eligible scope.
+/// A later explicit selection cannot widen that proof into excluded content.
+pub(super) fn absence_proven(snapshot: &Snapshot, path: &str) -> bool {
+    snapshot.roots.iter().any(|scope| {
+        in_root(path, scope) && paths::eligible_beneath(path, scope, &snapshot.excluded)
+    })
+}
+
 pub(super) fn selected(
     snapshot: &Snapshot,
     root: &Path,
@@ -147,8 +155,7 @@ pub(super) fn selected(
             issues.push((relative, "Internal recovery storage is excluded".into()));
             continue;
         }
-        let saved = snapshot.entries.contains_key(&relative)
-            || snapshot.roots.iter().any(|scope| in_root(&relative, scope));
+        let saved = snapshot.entries.contains_key(&relative) || absence_proven(snapshot, &relative);
         if !saved && !relative.is_empty() {
             issues.push((relative, "Not protected by this call".into()));
             continue;
@@ -163,7 +170,7 @@ pub(super) fn selected(
         for path in discovery.paths {
             if let Some(saved) = paths::saved_alias(root, snapshot, &path) {
                 names.insert(saved);
-            } else if snapshot.roots.iter().any(|scope| in_root(&path, scope)) {
+            } else if absence_proven(snapshot, &path) {
                 names.insert(path);
             }
         }

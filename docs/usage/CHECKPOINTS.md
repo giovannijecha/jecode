@@ -101,14 +101,15 @@ unreadable path is reported as partial coverage and never as protected absence.
 
 Recursive discovery skips version-control metadata, generated/cache directories
 such as `target`, `node_modules`, `.venv` and `.cache`, and internal recovery
-storage. An explicitly requested file or directory can select generated content;
+storage. An explicitly protected file or directory can select generated content;
 internal storage stays excluded. Symlinks are saved as links without traversing
 their targets. Unsupported entries, unreadable directories and untraversed
 Windows reparse directories make their scope incomplete. A complete directory
 proof is recorded only after capture and a membership recheck agree. Only such
-a proof can establish that a later-created child should be deleted by restore.
+a proof can establish that a later-created eligible child should be deleted by
+restore. A later selection cannot expand the scope originally captured.
 An explicitly protected path that is absent throughout capture also proves its
-whole subtree was absent, so a newly created directory can be recovered too.
+eligible subtree was absent, so a newly created directory can be recovered too.
 
 Path leases coordinate Jecode sessions on the same archive. Arbitrary external
 programs do not honor them; restores check live states and bytes, but filesystem

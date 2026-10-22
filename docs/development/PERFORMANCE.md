@@ -111,21 +111,21 @@ states; the candidate saves only preimages for a fixed 24 hours.
 
 | Operation | Samples per variant | Baseline median | Per-call median | Median change |
 | --- | ---: | ---: | ---: | ---: |
-| Write 4 KiB | 60 | 3.92 ms | 4.60 ms | +17.3% |
-| Edit 1 MiB | 40 | 36.17 ms | 39.32 ms | +8.7% |
-| Bash, protect 1 file | 20 | 136.89 ms | 144.44 ms | +5.5% |
-| Bash, protect 100 files | 20 | 208.04 ms | 180.47 ms | -13.3% |
-| Bash, protect 1,000 files | 12 | 751.36 ms | 402.38 ms | -46.4% |
-| Restore 1 file | 60 | 8.57 ms | 15.46 ms | +80.4% |
-| Restore 100 files | 20 | 367.90 ms | 336.91 ms | -8.4% |
-| Restore 1,000 files | 12 | 3,357.41 ms | 3,227.86 ms | -3.9% |
-| Edit 256 MiB | 6 | 1,477.79 ms | 1,249.81 ms | -15.4% |
+| Write 4 KiB | 60 | 3.89 ms | 4.85 ms | +24.5% |
+| Edit 1 MiB | 40 | 34.73 ms | 33.22 ms | -4.4% |
+| Bash, protect 1 file | 20 | 142.01 ms | 135.73 ms | -4.4% |
+| Bash, protect 100 files | 20 | 210.58 ms | 175.70 ms | -16.6% |
+| Bash, protect 1,000 files | 12 | 712.88 ms | 382.27 ms | -46.4% |
+| Restore 1 file | 60 | 7.57 ms | 18.11 ms | +139.3% |
+| Restore 100 files | 20 | 362.99 ms | 335.21 ms | -7.7% |
+| Restore 1,000 files | 12 | 3,310.25 ms | 2,944.20 ms | -11.1% |
+| Edit 256 MiB | 6 | 1,473.01 ms | 1,269.55 ms | -13.8% |
 
-Small operations did not improve in this run. Single-file restore remains slower
+Small operations show no consistent speedup. Single-file restore remains slower
 than the baseline, even after narrower path leases and avoiding a final reread
-reduced its observed median from 46.54 to 15.46 ms. The 3.9% difference on
-1,000-file restore is smaller than the observed variation and does not
-establish a speedup.
+reduced its earlier observed median of 46.54 ms. The modest differences on short
+calls and bulk restore overlap observed variation and do not establish a general
+speedup.
 Bash includes native process startup; it runs `:` and protects its declared
 files. There is no post-command scan in the candidate.
 
@@ -133,15 +133,15 @@ Observed sample ranges, including outliers:
 
 | Operation | Baseline range | Per-call range |
 | --- | ---: | ---: |
-| Write 4 KiB | 3.42-4.72 ms | 3.57-7.82 ms |
-| Edit 1 MiB | 24.51-43.56 ms | 27.17-243.70 ms |
-| Bash, 1 file | 89.30-313.20 ms | 130.49-173.84 ms |
-| Bash, 100 files | 133.29-461.53 ms | 164.12-258.90 ms |
-| Bash, 1,000 files | 497.47-2,103.70 ms | 344.05-1,812.38 ms |
-| Restore 1 file | 6.14-385.97 ms | 8.62-26.27 ms |
-| Restore 100 files | 201.93-836.76 ms | 201.07-1,368.83 ms |
-| Restore 1,000 files | 2,706.17-4,024.01 ms | 1,945.47-4,128.38 ms |
-| Edit 256 MiB | 1,442.07-1,783.18 ms | 1,156.48-1,385.45 ms |
+| Write 4 KiB | 3.57-12.30 ms | 4.45-7.31 ms |
+| Edit 1 MiB | 25.61-43.24 ms | 25.66-338.74 ms |
+| Bash, 1 file | 90.92-428.41 ms | 129.57-146.38 ms |
+| Bash, 100 files | 197.57-269.64 ms | 124.00-371.85 ms |
+| Bash, 1,000 files | 416.84-1,199.63 ms | 221.12-1,904.70 ms |
+| Restore 1 file | 4.71-93.59 ms | 8.42-128.51 ms |
+| Restore 100 files | 169.53-1,096.59 ms | 242.74-887.47 ms |
+| Restore 1,000 files | 2,395.40-3,788.37 ms | 2,457.29-3,999.76 ms |
+| Edit 256 MiB | 1,207.47-1,600.75 ms | 1,027.11-1,548.48 ms |
 
 ### Method
 
@@ -165,7 +165,7 @@ No tail percentile or general throughput claim follows from these sample sizes.
 ### Memory and disk tradeoff
 
 Peak main-process working set, sampled every 20 ms over each whole workload,
-was 30.0 -> 8.9 MiB for 1,000-file restore and 12.9 -> 6.7 MiB for the 256 MiB
+was 29.4 -> 8.8 MiB for 1,000-file restore and 13.0 -> 6.8 MiB for the 256 MiB
 edit. These exclude child processes and the OS page cache; sampling can miss
 shorter peaks. Payload buffering stays bounded, while metadata and traversal
 memory still grow with the selected path count.
@@ -191,9 +191,10 @@ replacement space. Expiry unlinks individual packs without a full archive copy;
 physical deletion waits for maintenance or the next launch and active readers.
 
 The checkpoint subtree changed from 107 files / 28,106 lines at `6679d6c` to
-30 files / 7,250 lines, including its tests. Startup and new turns perform no
+31 files / 7,322 lines, including its tests. Startup and new turns perform no
 workspace acquisition; this is covered by behavioral tests rather than a
-startup timing claim.
+startup timing claim. The merged base `2239186` had 68 files / 18,242 lines in
+that subtree, so the replacement is about 60% smaller than the base too.
 
 ### Reproduce
 
