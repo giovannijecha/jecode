@@ -96,6 +96,10 @@ fn input_during_a_tool_preview_joins_the_immediately_following_request() {
 #[test]
 fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
     let directory = Directory::new();
+    let workspace = directory
+        .path()
+        .join("local-runner/jobs/jecode/fresh-checkout/project");
+    std::fs::create_dir_all(&workspace).unwrap();
     let fixture = HttpFixture::new(vec![
         (200, completion("Original objective retained.", vec![])),
         (
@@ -105,10 +109,12 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         (200, completion("Finished.", vec![])),
     ]);
     let limits = Limits {
-        context: 24000,
+        context: 32000,
         output: Some(4096),
     };
-    let mut agent = agent(&directory, &fixture, limits);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.fixture_limits(limits.context, limits.output);
+    let mut agent = Agent::new(client, Tools::new(&workspace).unwrap());
     agent
         .prepare_turn("Continue the current inspection.")
         .unwrap();
@@ -123,28 +129,40 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         Some(&Value::object([("prompt_tokens", Value::number(22000))])),
         2,
     );
+    assert!(
+        agent.context_status().tokens
+            >= crate::context::threshold(limits.context, crate::context::AUTO_COMPACT_DEFAULT)
+    );
     let inbox = agent.inbox();
     let update = "updated requirement ".repeat(10000);
     let mut sent = false;
+    let mut summaries_started = 0;
     agent
         .run_turn("Continue the current inspection.", &mut |event| {
-            if matches!(&event, Event::Maintenance { text } if text.starts_with("Compacting context"))
-                && !sent
-            {
-                send(&inbox, &update);
-                sent = true;
+            if matches!(
+                &event,
+                Event::Maintenance { text } if text.starts_with("Compacting context")
+            ) {
+                summaries_started += 1;
+                if !sent {
+                    send(&inbox, &update);
+                    sent = true;
+                }
             }
             Ok(())
         })
         .unwrap();
     let requests = fixture.finish();
     assert!(sent);
+    assert_eq!(summaries_started, 2);
     assert_eq!(requests.len(), 3);
     assert!(
         requests[..2]
             .iter()
             .all(|request| request.body.get("tools").is_none())
     );
+    assert!(!requests[0].body.encode().contains("updated requirement"));
+    assert!(requests[1].body.encode().contains("updated requirement"));
     assert!(requests[2].body.get("tools").is_some());
     assert!(requests[2].body.encode().contains("updated requirement"));
     assert_eq!(

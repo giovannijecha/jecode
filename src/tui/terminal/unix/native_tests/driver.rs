@@ -29,8 +29,15 @@ impl Pty {
         let fixture = "tui::terminal::unix::native_tests::native_pty_fixture";
         let run = format!("{executable} --exact {fixture} --ignored --nocapture --test-threads=1");
         let script = if case == "owner-death" {
+            let release = quote(
+                directory
+                    .path()
+                    .join("owner-mode-checked")
+                    .to_str()
+                    .unwrap(),
+            );
             format!(
-                "stty rows 24 cols 80; saved=$(stty -g); {run}; n=0; while [ \"$(stty -g)\" != \"$saved\" ] && [ $n -lt 30 ]; do sleep 0.1; n=$((n + 1)); done; if [ \"$(stty -g)\" = \"$saved\" ]; then printf '\\nPTY_OWNER_RESTORED\\n'; else exit 1; fi"
+                "stty rows 24 cols 80; saved=$(stty -g); printf '\\nPTY_OWNER_SAVED|%s\\n' \"$saved\"; {run}; while [ ! -f {release} ]; do sleep 0.1; done; printf '\\nPTY_OWNER_RESTORED\\n'"
             )
         } else {
             format!("stty rows 24 cols 80; exec {run}")
@@ -172,6 +179,27 @@ impl Pty {
     }
 
     pub(super) fn finish(&mut self, marker: &str) {
+        if marker == "PTY_OWNER_RESTORED" {
+            let tty = File::open(self.tty.as_ref().unwrap()).unwrap();
+            let output = String::from_utf8_lossy(&self.bytes);
+            let saved = output
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("PTY_OWNER_SAVED|"))
+                .expect("owner-death fixture omitted saved terminal mode");
+            let at = Instant::now();
+            loop {
+                let restored = super::super::mode::stty(&tty, &["-g"]).unwrap();
+                if super::mode_matches(&restored, saved) {
+                    break;
+                }
+                assert!(
+                    at.elapsed() < Duration::from_secs(3),
+                    "owner death did not restore terminal mode: restored {restored:?}, saved {saved:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            fs::write(self.directory.path().join("owner-mode-checked"), "").unwrap();
+        }
         self.wait(marker);
         drop(self.input.take());
         let at = Instant::now();
