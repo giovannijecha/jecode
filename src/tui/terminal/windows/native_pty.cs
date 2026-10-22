@@ -52,6 +52,7 @@ public sealed class JecodeTestPty : IDisposable {
     static extern bool SetStdHandle(int handle, IntPtr value);
 
     IntPtr console, process;
+    uint processId;
     FileStream input, output;
     Thread reader;
     readonly StringBuilder received = new StringBuilder();
@@ -80,6 +81,7 @@ public sealed class JecodeTestPty : IDisposable {
                         lock (gate) {
                             received.Append(buffer, 0, count);
                             if (received.Length > 4 * 1024 * 1024) throw new IOException("ConPTY output exceeded fixture limit");
+                            Monitor.PulseAll(gate);
                         }
                     }
                 } catch (IOException) { }
@@ -116,6 +118,7 @@ public sealed class JecodeTestPty : IDisposable {
                 SetStdHandle(-10, savedInput); SetStdHandle(-11, savedOutput); SetStdHandle(-12, savedError);
             }
             process = child.Process;
+            processId = child.Id;
             CloseHandle(child.Thread);
         } finally {
             if (initialized) DeleteProcThreadAttributeList(attributes);
@@ -139,6 +142,95 @@ public sealed class JecodeTestPty : IDisposable {
         }
         lock (gate) { throw new IOException("ConPTY did not show " + text + ": " + received); }
     }
+
+    // Reader wakeups locate the first matching VT bytes without a 10 ms
+    // polling floor. This observes the stream, not terminal pixels or keys.
+    public void WaitFast(string text, int after = 0) {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        lock (gate) {
+            while (clock.ElapsedMilliseconds < 20000) {
+                string plain = System.Text.RegularExpressions.Regex.Replace(
+                    received.ToString(after, received.Length - after),
+                    "\x1b\\[[0-?]*[ -/]*[@-~]", "");
+                if (plain.Contains(text)) return;
+                long remaining = 20000 - clock.ElapsedMilliseconds;
+                if (remaining <= 0) break;
+                Monitor.Wait(gate, (int)remaining);
+            }
+            int length = Math.Min(received.Length, 2000);
+            throw new IOException("ConPTY did not show " + text + ": " + received.ToString(received.Length - length, length));
+        }
+    }
+
+    static int ReadCount(string path) {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            try {
+                int count;
+                if (int.TryParse(File.ReadAllText(path), out count)) return count;
+            } catch (IOException) { }
+            Thread.Sleep(2);
+        }
+        throw new IOException("Checkpoint write counter was not readable");
+    }
+
+    static int WaitNextCount(string path, int previous) {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < 20000) {
+            if (ReadCount(path) > previous) return ReadCount(path);
+            Thread.Sleep(5);
+        }
+        throw new IOException("Checkpoint writes stopped during ConPTY latency samples");
+    }
+
+    static void PrintLatency(string phase, string kind, double[] samples) {
+        double[] sorted = (double[])samples.Clone();
+        Array.Sort(sorted);
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        string name = "NATIVE_LATENCY_" + phase + "_" + kind;
+        Console.WriteLine(name + "_US=" + string.Join(",", Array.ConvertAll(samples, value => value.ToString("F3", culture))));
+        Console.WriteLine(name + "_P50_US=" + sorted[49].ToString("F3", culture));
+        Console.WriteLine(name + "_P95_US=" + sorted[94].ToString("F3", culture));
+    }
+
+    void Latency(string directory, bool active) {
+        WaitFast("Ask anything");
+        string phase = active ? "active" : "idle";
+        string counter = Path.Combine(directory, "home", "latency-count.txt");
+        int before = active ? WaitNextCount(counter, 0) : 0, midway = before;
+        double[] burst = new double[100], key = new double[100];
+        for (int index = 0; index < burst.Length; index++) {
+            string marker = "q" + index.ToString("D3");
+            int start = Mark();
+            long sent = System.Diagnostics.Stopwatch.GetTimestamp();
+            Send(marker);
+            WaitFast(marker, start);
+            long seen = System.Diagnostics.Stopwatch.GetTimestamp();
+            burst[index] = (seen - sent) * 1000000.0 / System.Diagnostics.Stopwatch.Frequency;
+            int keyStart = Mark();
+            sent = System.Diagnostics.Stopwatch.GetTimestamp();
+            Send("!");
+            WaitFast("!", keyStart);
+            seen = System.Diagnostics.Stopwatch.GetTimestamp();
+            key[index] = (seen - sent) * 1000000.0 / System.Diagnostics.Stopwatch.Frequency;
+            int clear = Mark();
+            Send("\x15");
+            WaitFast("Ask anything", clear);
+            if (active && index == 49) midway = WaitNextCount(counter, before);
+        }
+        int after = active ? WaitNextCount(counter, midway) : 0;
+        PrintLatency(phase, "BURST4", burst);
+        PrintLatency(phase, "KEY", key);
+        if (active) Console.WriteLine("NATIVE_LATENCY_ACTIVE_WRITES=" + before + "," + midway + "," + after);
+        using (var child = System.Diagnostics.Process.GetProcessById((int)processId)) {
+            child.Refresh();
+            Console.WriteLine("NATIVE_LATENCY_" + phase + "_CHILD_RUST_WORKING_SET_BYTES=" + child.WorkingSet64);
+            Console.WriteLine("NATIVE_LATENCY_" + phase + "_CHILD_RUST_PRIVATE_BYTES=" + child.PrivateMemorySize64);
+            Console.WriteLine("NATIVE_LATENCY_" + phase + "_CHILD_RUST_PEAK_RSS_BYTES=" + child.PeakWorkingSet64);
+        }
+        Send("\x11");
+        WaitFast("NATIVE_LATENCY_RESTORED");
+        Finish(true);
+    }
     public void Resize(short width, short height) { Result(ResizePseudoConsole(console, new Coord(width, height))); Thread.Sleep(200); }
     public void Kill() { Check(TerminateProcess(process, 17)); Finish(false); }
     public void Finish(bool success) {
@@ -153,7 +245,9 @@ public sealed class JecodeTestPty : IDisposable {
     public static void Run(string executable, string directory, string scenario) {
         using (var pty = new JecodeTestPty()) {
             pty.Start(executable, directory, scenario);
-            if (scenario == "interactive") {
+            if (scenario == "latency-idle" || scenario == "latency-active") {
+                pty.Latency(directory, scenario == "latency-active");
+            } else if (scenario == "interactive") {
                 pty.Wait("Ask anything");
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native row 099");

@@ -17,8 +17,10 @@ There is no guaranteed response time.
 
 Jecode runs local tools with the invoking user's permissions. It is not a
 sandbox for untrusted projects or commands. Settings include a plaintext
-OpenRouter key in the user-scoped configuration; sessions and attachment
-copies are also local data. Provider requests send the selected conversation
+OpenRouter key in the user-scoped configuration; sessions, attachment copies
+and workspace checkpoint archives are also local data. Checkpoint archives hold
+unredacted project file contents, including Git-ignored secrets such as `.env`.
+Provider requests send the selected conversation
 and supported attachments to OpenRouter and the selected model provider.
 
 Relevant reports include unintended credential exposure, attachment or

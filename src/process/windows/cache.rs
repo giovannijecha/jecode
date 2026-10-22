@@ -86,12 +86,12 @@ fn root() -> Result<PathBuf, String> {
     }
 }
 
-fn fingerprint() -> String {
+fn fingerprint(source: &str) -> String {
     // Two independent FNV-1a streams make source changes invalidate the cache.
     // This is a version key, not an authenticity check for the user-owned cache.
     let mut a = 0xcbf29ce484222325u64;
     let mut b = 0x84222325cbf29ce4u64;
-    for byte in SOURCE.bytes() {
+    for byte in source.bytes() {
         a = (a ^ u64::from(byte)).wrapping_mul(0x100000001b3);
         b = (b ^ u64::from(byte)).wrapping_mul(0x100000001b3);
     }
@@ -106,11 +106,25 @@ fn compile(cancellation: &Cancellation) -> Result<PathBuf, CompileError> {
 }
 
 fn compile_at(root: PathBuf, cancellation: &Cancellation) -> Result<PathBuf, CompileError> {
+    build(root, "supervisor-v1", SOURCE, cancellation)
+}
+
+/// Compiles another owned helper into the same cache.
+pub(crate) fn helper(name: &str, source: &str, cancellation: &Cancellation) -> Option<PathBuf> {
+    build(root().ok()?, name, source, cancellation).ok()
+}
+
+fn build(
+    root: PathBuf,
+    name: &str,
+    source_text: &str,
+    cancellation: &Cancellation,
+) -> Result<PathBuf, CompileError> {
     if cancellation.requested() {
         return Err(CompileError::Cancelled);
     }
     fs::create_dir_all(&root).map_err(|_| CompileError::Failed)?;
-    let final_path = root.join(format!("supervisor-v1-{}.exe", fingerprint()));
+    let final_path = root.join(format!("{name}-{}.exe", fingerprint(source_text)));
     if fs::metadata(&final_path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0) {
         return Ok(final_path);
     }
@@ -125,7 +139,7 @@ fn compile_at(root: PathBuf, cancellation: &Cancellation) -> Result<PathBuf, Com
         if cancellation.requested() {
             return Err(CompileError::Cancelled);
         }
-        fs::write(&source, SOURCE).map_err(|_| CompileError::Failed)?;
+        fs::write(&source, source_text).map_err(|_| CompileError::Failed)?;
         let quote = |path: &PathBuf| path.to_string_lossy().replace('\'', "''");
         let script = format!(
             "$ErrorActionPreference = 'Stop'\nAdd-Type -LiteralPath '{}' -OutputAssembly '{}' -OutputType ConsoleApplication",

@@ -2,6 +2,7 @@ mod agent;
 mod attachments;
 mod bootstrap;
 mod cancel;
+mod checkpoints;
 mod cli;
 mod clipboard;
 mod config;
@@ -58,6 +59,7 @@ fn main() -> ExitCode {
             attachments,
             plain,
         } => bootstrap::run(model, prompt, attachments, plain),
+        Action::Checkpoints(words) => bootstrap::checkpoints(&words),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

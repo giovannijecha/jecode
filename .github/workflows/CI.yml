@@ -71,3 +71,12 @@ jobs:
         run: cargo +${{ matrix.toolchain }} clippy --locked --offline --all-targets -- -D warnings
       - name: Run tests
         run: cargo +${{ matrix.toolchain }} test --locked --offline --quiet
+      - name: Verify native Windows ConPTY
+        if: runner.os == 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native Linux PTY
+        if: runner.os == 'Linux'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native macOS PTY
+        if: runner.os == 'macOS'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1

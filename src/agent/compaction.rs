@@ -34,6 +34,7 @@ impl Agent {
     ) -> Result<Completion, String> {
         let mut retries = super::recovery::Retries::default();
         loop {
+            self.deliver_checkpoint_notices();
             self.accept_input(events)?;
             self.compact_if_needed(limits, false, events)?;
             if self.accept_input(events)? {
@@ -44,6 +45,9 @@ impl Agent {
             events.emit(Event::Waiting {
                 model: self.redact(self.model()),
             })?;
+            // Summarization and event delivery can take time. Include restores
+            // observed during that work before constructing the next request.
+            self.deliver_checkpoint_notices();
             let messages = self.transport_messages();
             let output_tokens = limits.and_then(|limits| {
                 limits.output.map(|_| {
@@ -84,15 +88,10 @@ impl Agent {
                 }
                 events.emit(self.update_event(update))
             };
-            let result = loop {
-                match self.complete_attempt(&request, true, output_tokens, &mut retries, &mut emit)
-                {
-                    // Rebuild the retry when submitted messages can join it.
-                    Ok(None) if self.inbox.with(|entries| entries.ready()) => break Ok(None),
-                    Ok(None) => {}
-                    result => break result,
-                }
-            };
+            // Rebuild after every retry wait so newly observed restores and
+            // submitted messages reach the next provider request as well.
+            let result =
+                self.complete_attempt(&request, true, output_tokens, &mut retries, &mut emit);
             match result {
                 Ok(None) => {}
                 Ok(Some(completion)) => {

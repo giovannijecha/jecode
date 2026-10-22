@@ -43,7 +43,7 @@ pub fn definitions() -> Value {
     Value::Array(vec![
         tool(
             "read",
-            "Read a project file or tmp:relative/path. Text is paged UTF-8; images and PDFs are recognized from their contents, copied into session storage and shown to you on the next request. The result includes an attachment:ID reference for rereading the copy after the original changes or disappears. Also accepts skill:<name> for a personal skill's SKILL.md or skill:<name>/<relative-path> for a text resource, saved output:SESSION:ID:stdout or :stderr, attachment:ID (text files page normally; images and PDFs are shown again; other files return their local path), or history:INDEX (a zero-based original message index in this session). history:requests returns the complete ordered user requests. history:memory returns the current conversation summary. History, skills, attachments and saved output are read-only and remain available after compaction and resume. Older output:ID:stdout/:stderr references remain readable. Text paging uses one-based offset (default 1) and limit (default 200, maximum 2000). Pages contain up to 64 KiB; follow next_offset or next_byte_offset with byte_offset for a split long line. byte_offset is zero-based and returns unnumbered text; it takes precedence over offset. Paging arguments do not crop images or PDFs. A context_truncated tool result is an excerpt; read its history_reference for the full original, using small pages. total_lines is available at EOF in line mode.",
+            "Read a project file or tmp:relative/path. Text is paged UTF-8; images and PDFs are recognized from their contents, copied into session storage and shown to you on the next request. The result includes an attachment:ID reference for rereading the copy after the original changes or disappears. Also accepts skill:<name> for a personal skill's SKILL.md or skill:<name>/<relative-path> for a text resource, saved output:SESSION:ID:stdout or :stderr, attachment:ID (text files page normally; images and PDFs are shown again; other files return their local path), or history:INDEX (a zero-based original message index in this session). history:requests returns the complete ordered user requests. history:memory returns the current conversation summary. checkpoint:cp-N:path returns a file as it was at a checkpoint. History, checkpoints, skills, attachments and saved output are read-only and remain available after compaction and resume. Older output:ID:stdout/:stderr references remain readable. Text paging uses one-based offset (default 1) and limit (default 200, maximum 2000). Pages contain up to 64 KiB; follow next_offset or next_byte_offset with byte_offset for a split long line. byte_offset is zero-based and returns unnumbered text; it takes precedence over offset. Paging arguments do not crop images or PDFs. A context_truncated tool result is an excerpt; read its history_reference for the full original, using small pages. total_lines is available at EOF in line mode.",
             Value::object([
                 ("path", string()),
                 ("offset", integer(1, None)),
@@ -100,6 +100,60 @@ pub fn definitions() -> Value {
                 ),
                 ("process_id", string()),
                 ("wait_ms", integer(0, None)),
+            ]),
+            &["action"],
+        ),
+        tool(
+            "checkpoint",
+            "Inspect and restore local workspace checkpoints, separate from Git and conversations. Before write/edit/restore changes a file, Jecode durably saves its previous state. Results include checkpoint.status: saved with before/after cp-N refs, not_tracked outside scope, or unprotected with a reason; a failed save never blocks the tool. Use checkpoint.before to undo that exact change. A point before each turn and Bash command records observed history, not an atomic filesystem snapshot; external notifications may lag. Large workspaces use selective protection: write/edit protect their own paths, while turn/Bash points cover already recorded paths. Before Bash may change known files, use checkpoint capture with explicit workspace-relative file paths. Inspect each saved, skipped or unprotected result; only saved paths have a recoverable preimage. Name individual files, not directories. Each saved path has a durable saved_at version; a capture ref is returned after all saved states are durable. Hard ceilings are 1 GiB per archive and 10 MiB per captured file, including Git-ignored files within scope. Actions: status shows coverage, limits and sessions; list returns newest points or versions of paths; inspect describes ref and a live restore plan, with checkpoint:cp-N:path references accepted by read; milestone records label (pin true retains it without raising capacity); restore restores paths and their recorded descendants; restore_all restores the recorded scope, removing paths known to have been created after ref and skipping unknown prior states. Restores first save undo.ref. By default a model restore replaces a path only if nobody else changed it since your own last change after ref; conflicts include target/expected/current and retry gives an expected ref accepting that current version after inspection. expected latest accepts whatever is current. preview true plans without changing workspace files.",
+            Value::object([
+                (
+                    "action",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(
+                                crate::checkpoints::actions::MODEL_ACTIONS
+                                    .map(Value::string)
+                                    .into(),
+                            ),
+                        ),
+                    ]),
+                ),
+                ("ref", string()),
+                (
+                    "paths",
+                    Value::object([
+                        ("type", Value::string("array")),
+                        ("items", string()),
+                        (
+                            "description",
+                            Value::string(
+                                "capture and restore require explicit paths. For list, inspect and restore_all, omit or use an empty array for the recorded scope.",
+                            ),
+                        ),
+                    ]),
+                ),
+                ("label", string()),
+                ("pin", Value::object([("type", Value::string("boolean"))])),
+                (
+                    "expected",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "description",
+                            Value::string(
+                                "Optional restore precondition. Omit or use an empty string for default conflict checking; cp-N accepts that observed version; latest accepts the current state.",
+                            ),
+                        ),
+                    ]),
+                ),
+                (
+                    "preview",
+                    Value::object([("type", Value::string("boolean"))]),
+                ),
+                ("limit", integer(1, Some(200))),
             ]),
             &["action"],
         ),

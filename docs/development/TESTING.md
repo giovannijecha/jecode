@@ -43,6 +43,7 @@ Pass a test-name filter after the Cargo options:
 cargo test --locked --offline agent::routing_tests::
 cargo test --locked --offline tools::processes::tests::
 cargo test --locked --offline sessions::journal_tests::
+cargo test --locked --offline checkpoint
 ```
 
 Check the reported test count: a successful command that matched no tests has not
@@ -53,11 +54,27 @@ verified the change. Use `-- --list` to inspect available names.
 | Agent/context/provider | Tests beside `agent/`, `context/` and `openrouter/`; use loopback responses. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
+| Checkpoints | Tests beside `checkpoints/` and the `checkpoint_tests` modules in `agent/`, `session/`, `tools/` and `tui/`. Cover total and active-generation admission, four processes sharing a reduced test quota, selective discovery, polling coverage, long-turn pruning, idle-reader cleanup, retries after points or unpins, crash recovery, conflicts and exact undo. Children re-enter the test binary with isolated archive homes; reduced test ceilings have no production configuration path. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
 
 Run the applicable normal checks after focused verification. Keep credentials,
 logs, screenshots and temporary drivers out of tracked files; use ignored `.tmp/`
 or `target` directories.
+
+The combined checkpoint regression runs in the ordinary suite. To isolate it:
+
+```text
+cargo test --locked --offline checkpoints::tests::process::stress::four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity -- --exact --nocapture --test-threads=1
+```
+
+It places an isolated archive 4 MiB below the real 1 GiB logical limit, with a
+4 MiB retention policy and four writer processes. The fourth writer commits
+while collection is paused inside its copy. The fixture kills the collector
+after its durable move but before `CURRENT` is updated, then kills a restore
+after its first file installation. Reopening must preserve the concurrent
+write, repair the pointer, classify pending work and support exact undo. Stage
+barriers exist only under `cfg(test)`; the filler uses file length, not a GiB
+of generated contents. Capacity and retention pruning are asserted separately.
 
 ## Development binary and installation
 
@@ -102,10 +119,13 @@ in [performance](PERFORMANCE.md).
 
 ## CI
 
-[CI.yml](../../.github/workflows/CI.yml) defines the normal checks for Windows,
-Linux and macOS. Windows and Linux use maintainer-hosted local runners; macOS uses
-GitHub's hosted runner. The required checks are `Rust (Windows)`, `Rust (Linux)`
-and `Rust (macOS)`.
+[CI.yml](../../.github/workflows/CI.yml) runs the normal checks and then the
+platform's exact, ignored native terminal fixture from [platform
+verification](PLATFORMS.md). It does not run the other ignored tests, which
+include manual interaction, private child fixtures, live-provider evaluation and
+opt-in measurements. Windows and Linux use maintainer-hosted local runners;
+macOS uses GitHub's hosted runner. The required checks are `Rust (Windows)`,
+`Rust (Linux)` and `Rust (macOS)`.
 
 Local runners use fresh checkouts and one-job credentials, with a host policy
 rejecting fork code before workflow steps. Their jobs queue while the maintainer's

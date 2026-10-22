@@ -12,6 +12,7 @@ scripts run from the Jecode repository root.
 | Initialize project rules and scope `JECODE.md` files | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
 | Add personal workflows and inspect the skill library | [Skills](usage/SKILLS.md) |
 | Understand file tools, command output and background processes | [Tools](usage/TOOLS.md) |
+| Inspect or undo file changes from any source | [Checkpoints](usage/CHECKPOINTS.md) |
 | Resume, recover or delete a conversation | [Saved sessions](usage/SESSIONS.md) |
 | Add files and clipboard images | [Attachments](usage/ATTACHMENTS.md) |
 | Copy an answer or code block | [Copy](usage/COPY.md) |

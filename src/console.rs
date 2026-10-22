@@ -47,6 +47,7 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                             .collect::<String>()
                     ),
                     Event::ToolFinished { name, summary, .. } => format!("[{name}: {summary}]"),
+                    Event::ToolNote { text, .. } => format!("[{text}]"),
                     Event::Recovering {
                         attempt,
                         delay,

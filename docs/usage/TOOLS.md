@@ -1,6 +1,6 @@
 # Tools
 
-Jecode offers five tools to the model. A call runs only after the complete model
+Jecode offers six tools to the model. A call runs only after the complete model
 response and its arguments validate; streamed partial calls never execute.
 Tool errors return as results so the model can correct the call.
 
@@ -13,6 +13,11 @@ Tool errors return as results so the model can correct the call.
 | `edit` | `path`, `old_text`, `new_text` | — | Replaces exactly one nonempty match; returns `bytes_written`. A missing or ambiguous match leaves the file unchanged. |
 | `bash` | `command` | `timeout_seconds`, `wait_ms` | Runs a Bash command from the project directory. With `wait_ms`, it returns a persistent `process_id`. |
 | `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll` | Lists, polls or stops this conversation's persistent processes. |
+| `checkpoint` | `action` | `ref`, `paths`, `label`, `pin`, `expected`, `preview`, `limit` | Captures named paths before Bash, and inspects, marks and restores workspace history. See [Checkpoints](CHECKPOINTS.md#the-models-checkpoint-tool). |
+
+`write`, `edit` and `bash` results include a `checkpoint` object whose
+`status` is `saved`, `not_tracked` or `unprotected`; see
+[Checkpoints](CHECKPOINTS.md#what-is-saved-and-when).
 
 ## File paths and paged reads
 
@@ -29,7 +34,7 @@ The result returns an `attachment:ID` reference to a session-owned copy. Read
 that reference to revisit it after the original changes, temporary cleanup or
 session resume. Other binary or invalid UTF-8 file reads still fail.
 
-The interactive TUI shows Read, Update (`edit`), Write, Bash and Process in one
+The interactive TUI shows Read, Update (`edit`), Write, Bash, Process and Checkpoint in one
 inline format. Successful file changes retain a numbered contextual diff,
 including Write on an existing text file. These display records stay in local
 session history and survive resume without changing model-facing tool results.
@@ -59,13 +64,14 @@ The `path` argument also accepts these read-only references:
 | `history:requests` / `history:memory` | Ordered original user requests / current compaction summary. |
 | `skill:NAME` / `skill:NAME/relative/path` | A personal skill's `SKILL.md` / a resource inside that skill. See [Skills](SKILLS.md). |
 | `attachment:ID` | An attached text file, or a re-shown image/PDF; other binaries return their local path. See [Attachments](ATTACHMENTS.md#what-the-model-receives). |
+| `checkpoint:cp-N:path` | A project file as recorded at checkpoint `cp-N`. See [Checkpoints](CHECKPOINTS.md). |
 
 History pages remain available after compaction and resume and exclude
 provider-specific reasoning fields. Reading a tool result can also return
 `request_history_reference` for the original tool call, including exact `write`
 content. Indexed pages identify the source role and originating request/call.
-Known credentials are masked. History, skills, attachments and saved output cannot be
-changed with `write` or `edit`.
+Known credentials are masked. History, checkpoints, skills, attachments and saved
+output cannot be changed with `write` or `edit`.
 
 For disposable files, use `tmp:relative/path` with the file tools. Its parent
 directories are created as needed, and Bash receives `JECODE_TMP`, `TMPDIR`,

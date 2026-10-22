@@ -175,6 +175,7 @@ impl Agent {
         if let Err(error) = &result {
             self.record_turn_error(error, &partial);
         }
+        self.checkpoint_idle();
         let saved = self.checkpoint(crate::sessions::Stage::Ready);
         if result.is_ok()
             && let Err(error) = &saved
@@ -194,6 +195,9 @@ impl Agent {
             self.prepare_turn(prompt)?;
         }
         self.prepared = None;
+        // Workspace reconciliation may read many files. Run it here on the
+        // execution worker, not while the TUI prepares the submitted prompt.
+        self.checkpoint_turn(&prompt.text);
         self.prepare_routing()?;
         let limits = self.model_limits(events)?;
         self.emit_context(events)?;
@@ -256,7 +260,17 @@ impl Agent {
                     self.cancel_calls(&completion.calls[index..]);
                     return Err(error);
                 }
-                let outcome = self.execute_tool_with_change(call);
+                let begun = self.tools.begin(&call.name, &call.arguments);
+                if let Some(note) = begun.note()
+                    && let Err(error) = events.emit(Event::ToolNote {
+                        id: self.redact(&call.id),
+                        text: self.redact(&note),
+                    })
+                {
+                    self.cancel_calls(&completion.calls[index..]);
+                    return Err(error);
+                }
+                let outcome = self.execute_tool_with_change(call, begun);
                 let result = &outcome.result;
                 self.tool_result(call, result);
                 let change = outcome.change.map(|change| change.redacted(&self.redactor));
@@ -430,6 +444,7 @@ impl Agent {
     }
 }
 
+pub(crate) mod checkpoints;
 mod compaction;
 mod environment;
 mod history;
@@ -444,6 +459,8 @@ mod temporary;
 
 #[cfg(test)]
 mod attachment_tests;
+#[cfg(test)]
+mod checkpoint_tests;
 #[cfg(test)]
 mod compaction_tests;
 #[cfg(test)]

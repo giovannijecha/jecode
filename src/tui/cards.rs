@@ -159,7 +159,7 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
             ));
         }
         rows.extend(body.rows);
-        rows.extend(content::notices(tool.name, result, columns));
+        rows.extend(content::notices(tool.name, result, columns, expanded));
     }
     if expanded && let Some(elapsed) = tool.presentation.duration() {
         rows.extend(wrapped(
@@ -193,11 +193,12 @@ fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
         "edit" => "Update",
         "bash" => "Bash",
         "process" => "Process",
+        "checkpoint" => "Checkpoint",
         other => other,
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
-        "process" => crate::events::description(tool.name, tool.arguments),
+        "process" | "checkpoint" => crate::events::description(tool.name, tool.arguments),
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
     let mut title = Line::new(&format!("{name}("), EMPHASIS.bold()).at_source(0);
@@ -220,10 +221,14 @@ fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
 
 fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {
     let Some(result) = tool.result else {
-        return tool.presentation.duration().map_or_else(
-            || "Running…".into(),
-            |elapsed| format!("Running… · {}", activity::duration(elapsed)),
-        );
+        let mut text = String::from("Running…");
+        if let Some(note) = &tool.presentation.note {
+            text.push_str(&format!(" · {note}"));
+        }
+        if let Some(elapsed) = tool.presentation.duration() {
+            text.push_str(&format!(" · {}", activity::duration(elapsed)));
+        }
+        return text;
     };
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return format!("Failed · {}", text::clean(error));
@@ -390,6 +395,8 @@ fn field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
+#[cfg(test)]
+mod checkpoint_tests;
 #[cfg(test)]
 mod skill_tests;
 #[cfg(test)]

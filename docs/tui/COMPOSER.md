@@ -92,6 +92,9 @@ values remain marked independently of the highlighted row.
   [Copy](../usage/COPY.md).
 - `/drafts` opens the pending drafts list.
 - `/terminal [ID]` opens active processes or saved output.
+- `/checkpoints [COMMAND]` inspects, restores or configures workspace history
+  and shows the result without a model request. See
+  [Checkpoints](../usage/CHECKPOINTS.md#commands).
 - `/init` asks the current model to inspect the project and create or update the
   launch directory's `JECODE.md`. See [Project instructions](../usage/PROJECT_INSTRUCTIONS.md).
 - `/exit` quits after the current turn. Its hidden alias `/quit` follows the same

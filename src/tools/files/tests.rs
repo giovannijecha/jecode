@@ -22,6 +22,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
     let (result, created) = write_with_change(
         &root,
         &arguments(&[("path", "source.txt"), ("content", "one\ntwo\n")]),
+        None,
     )
     .unwrap();
     assert_eq!(result.get("bytes_written"), Some(&Value::number(8)));
@@ -35,6 +36,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
             ("old_text", "two"),
             ("new_text", "three"),
         ]),
+        None,
     )
     .unwrap();
     let edit_change = edit_change.unwrap();
@@ -46,6 +48,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
             ("old_text", "missing"),
             ("new_text", "x"),
         ]),
+        None,
     )
     .unwrap();
     assert!(mismatch.get("error").is_some());
@@ -60,6 +63,7 @@ fn replacing_binary_content_keeps_write_available_without_claiming_a_creation() 
     let (result, change) = write_with_change(
         &root,
         &arguments(&[("path", "binary"), ("content", "text\n")]),
+        None,
     )
     .unwrap();
     assert_eq!(result.get("bytes_written"), Some(&Value::number(5)));
@@ -75,6 +79,7 @@ fn oversized_previous_text_does_not_prevent_a_write_or_claim_a_diff() {
     let (result, change) = write_with_change(
         &root,
         &arguments(&[("path", "large.txt"), ("content", "replacement\n")]),
+        None,
     )
     .unwrap();
     assert_eq!(result.get("bytes_written"), Some(&Value::number(12)));
@@ -82,6 +87,33 @@ fn oversized_previous_text_does_not_prevent_a_write_or_claim_a_diff() {
     assert_eq!(
         fs::read_to_string(root.join("large.txt")).unwrap(),
         "replacement\n"
+    );
+}
+
+#[test]
+fn editing_large_text_preserves_exact_content_without_a_diff_payload() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let original = format!("{}old", "x".repeat(MAX_DIFF_BYTES));
+    fs::write(root.join("large.txt"), &original).unwrap();
+    let (result, change) = edit_with_change(
+        &root,
+        &arguments(&[
+            ("path", "large.txt"),
+            ("old_text", "old"),
+            ("new_text", "new"),
+        ]),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        result.get("bytes_written"),
+        Some(&Value::number(original.len()))
+    );
+    assert!(change.is_none());
+    assert_eq!(
+        fs::read_to_string(root.join("large.txt")).unwrap(),
+        format!("{}new", "x".repeat(MAX_DIFF_BYTES))
     );
 }
 

@@ -3,7 +3,8 @@
 [![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
 
 A terminal coding agent written in Rust. Jecode connects to OpenRouter and works
-in your project through five tools: `read`, `write`, `edit`, `bash` and `process`.
+in your project through six tools: `read`, `write`, `edit`, `bash`, `process` and
+`checkpoint`.
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
 One Cargo package, the Rust standard library, no external crates. Installed system
@@ -82,6 +83,7 @@ saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard sh
 | `/settings` | Edit saved defaults and the OpenRouter key. |
 | `/init` | Inspect this project and create or update its `JECODE.md`. |
 | `/skills` | List personal skills available to the model. |
+| `/checkpoints` | Inspect, restore or configure workspace checkpoints. |
 | `/help` | Show commands and controls. |
 | `/exit` | Quit when the active turn finishes. |
 
@@ -93,6 +95,13 @@ directory and descendants; instructions above the launch directory are excluded.
 Keep reusable workflows in [`~/.jecode/skills`](docs/usage/SKILLS.md). Jecode
 shows their names and descriptions to the model, which reads a skill when it
 fits the task. `/skills` lists the library without making a model request.
+
+Jecode keeps a private local history of your project's files in
+[checkpoints](docs/usage/CHECKPOINTS.md). It saves a file's previous state
+before `write` and `edit` change it, records a point before each turn and Bash
+command, and captures changes made by commands, editors and other sessions.
+You or the model can inspect and restore any recorded point; restores can be
+undone.
 
 Conversations autosave under `~/.jecode/sessions/`. To resume, run
 `jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)
@@ -123,12 +132,18 @@ to stderr. Piped input requires existing configuration.
 Task failures exit with code 1; invalid arguments use code 2. `--help` and
 `--version` need no configuration.
 
+`jecode checkpoints` inspects and restores the project's checkpoints without a
+key, provider or network, for example `jecode checkpoints list src/main.rs` or
+`jecode checkpoints restore cp-42 src/main.rs`. Run `jecode checkpoints help`
+for every command.
+
 ## Documentation
 
 The [documentation index](docs/README.md) links the usage guides and technical references.
 
 - [Configuration](docs/usage/CONFIGURATION.md): models, effort, routing and environment overrides.
 - [Tools](docs/usage/TOOLS.md): file operations, foreground commands and persistent processes.
+- [Checkpoints](docs/usage/CHECKPOINTS.md): automatic file history, restores, scope and storage.
 - [Attachments](docs/usage/ATTACHMENTS.md), [copy](docs/usage/COPY.md) and [export](docs/usage/EXPORT.md).
 - [Architecture](docs/development/ARCHITECTURE.md) and [development checks](docs/development/TESTING.md).
 

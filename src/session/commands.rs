@@ -17,7 +17,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 16] = [
+pub const COMMANDS: [Command; 17] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -95,6 +95,12 @@ pub const COMMANDS: [Command; 16] = [
         description: "Show session temporary files; /tmp clean clears them",
         tui_usage: "/tmp [clean]",
         plain_usage: Some("/tmp [clean]"),
+    },
+    Command {
+        name: "/checkpoints",
+        description: "Inspect, restore or configure workspace checkpoints; /checkpoints help",
+        tui_usage: "/checkpoints",
+        plain_usage: Some("/checkpoints"),
     },
     Command {
         name: "/terminal",

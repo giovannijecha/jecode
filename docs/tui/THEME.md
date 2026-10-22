@@ -49,7 +49,7 @@ See [Markdown responses](MARKDOWN.md) for the display subset.
 
 Every call uses `● Tool(target)` and an indented `⎿` result. The display
 names are Read, Skill (a `read` of a skill's `SKILL.md`), Update (the `edit`
-tool), Write, Bash and Process. A successful skill load uses the same green
+tool), Write, Bash, Process and Checkpoint. A successful skill load uses the same green
 marker; a failed read keeps the error state. Titles
 wrap with a two-cell indent; result continuations and output use four cells.
 Compact titles and individual output lines wrap through at most three rows;
@@ -67,7 +67,12 @@ Read starts with its returned range; expansion reveals numbered source.
 Image and PDF attachments state their view; expansion reveals attachment metadata.
 Bash and Process keep a recent three-line preview; failed commands prioritize
 up to six error lines. Expansion retains both stdout and stderr. Capture
-limits remain visible in either state. Completed previews stay visible when
+limits remain visible in either state. A running Bash call shows the
+[checkpoint](../usage/CHECKPOINTS.md) recorded before it, such as
+`checkpoint cp-42`. Saves are otherwise quiet: a warning appears only when a
+checkpoint problem needs attention, and expansion adds the call's
+`Checkpoint cp-41 → cp-42` points. Checkpoint calls show a three-line preview
+of their labeled result rows. Completed previews stay visible when
 the next call starts. Elapsed time stays in the running result or expanded
 details, without a right-aligned status column.
 

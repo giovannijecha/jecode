@@ -10,7 +10,7 @@ isolated files.
 | Platform | Recorded local verification | Remaining host checks |
 | --- | --- | --- |
 | Windows, `x86_64-pc-windows-gnullvm` | Offline build, formatting, Clippy, ordinary tests and the ConPTY fixture. | Physical input, fonts and clipboard behavior in the chosen terminal. |
-| Linux under WSL, native tmpfs | Offline build, formatting, Clippy, ordinary tests and the Linux PTY fixture. | Physical terminal integration; Windows-backed `/mnt/c` has an unresolved fixture issue below. |
+| Linux under WSL, native tmpfs or ext4 | Offline build, formatting, Clippy, ordinary tests and the Linux PTY fixture. | Physical terminal integration; Windows-backed `/mnt/c` has an unresolved fixture issue below. |
 | macOS, Intel and Apple Silicon | All-target cross compilation and Clippy. | Native linking, test execution and terminal interaction on a Mac. |
 
 These are local verification boundaries. CI jobs and ignored/manual fixtures
@@ -28,6 +28,10 @@ The fixture checks a full-width console grid, Unicode and dropped-path input,
 wheel/page navigation, prompt history, endpoint selection and resize. It then
 checks saved drafts and restoration of the shell screen, console modes and output
 code page. Separate scenarios terminate the owner and terminal guardian.
+
+Workspace checkpoints compile their file-notification helper with the same
+PowerShell/.NET compiler. Ordinary tests exercise it; without it, checkpoints
+fall back to scans.
 
 ## Linux and WSL
 
@@ -47,6 +51,12 @@ that remained present. Native tmpfs runs passed; standalone save/read probes did
 not isolate the cause. Treat a `/mnt/c` failure as unresolved evidence and retain
 its fixture rather than masking it with retries.
 
+Linux and macOS have no checkpoint notification helper: checkpoints scan at
+each point and, while a background command runs, every few seconds. Checkpoint
+tests that depend on that timing have run natively on Linux. Local macOS
+verification has compile coverage only; the macOS CI job runs the ordinary tests
+and the native PTY fixture for its checked-out revision.
+
 ## macOS
 
 Use a native filesystem, Rust 1.95.0 and Apple's Command Line Tools. The native
@@ -56,9 +66,10 @@ fixture also needs the system `script` and `tty` utilities:
 cargo test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 ```
 
-This fixture is adapted to macOS's `script` invocation and has compilation
-coverage; it still requires native execution. It exercises the Unix control and
-lifetime scenarios above. Do not invoke its private `native_pty_fixture` child directly.
+This fixture uses macOS's `script` invocation and exercises the Unix control and
+lifetime scenarios above. The hosted macOS CI job invokes it; inspect the job
+result for evidence of native execution. Do not invoke its private
+`native_pty_fixture` child directly.
 
 ## Check the terminal host
 
