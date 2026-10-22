@@ -238,22 +238,39 @@ fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>> {
 /// Byte-exact comparison without reconstructing a large archived file in RAM.
 /// Streaming observations are rechecked after the comparison, including on an
 /// early mismatch, so a displaced handle is never accepted as the live path.
-pub fn matches_file(store: &Store, object: u64, observed: &Observation) -> bool {
+fn matches_file_exact(store: &Store, object: u64, observed: &Observation) -> Result<bool, String> {
     match observed {
-        Observation::File(bytes, _) => store
-            .equal_reader(object, std::io::Cursor::new(bytes.as_ref()))
-            .unwrap_or(false),
-        Observation::Stream(source, _) => source.open().is_ok_and(|mut file| {
-            let equal = store.equal_reader(object, &mut file).unwrap_or(false);
-            source.verify(&file).is_ok() && equal
-        }),
-        _ => false,
+        Observation::File(bytes, _) => {
+            store.equal_reader(object, std::io::Cursor::new(bytes.as_ref()))
+        }
+        Observation::Stream(source, _) => {
+            let Ok(mut file) = source.open() else {
+                return Ok(false);
+            };
+            let equal = store.equal_reader(object, &mut file);
+            if source.verify(&file).is_err() {
+                return Ok(false);
+            }
+            equal
+        }
+        _ => Ok(false),
     }
 }
 
 pub fn matches_state(store: &Store, observed: &Observed, state: &State, modes: bool) -> bool {
+    matches_state_exact(store, observed, state, modes).unwrap_or(false)
+}
+
+/// Preserve archive read errors for restore's final comparison. Acquisition
+/// callers use `matches_state` so an unreadable object prompts recapture.
+pub fn matches_state_exact(
+    store: &Store,
+    observed: &Observed,
+    state: &State,
+    modes: bool,
+) -> Result<bool, String> {
     match (state, &observed.kind) {
-        (State::Absent, Observation::Absent) => true,
+        (State::Absent, Observation::Absent) => Ok(true),
         (
             State::File {
                 object,
@@ -266,15 +283,16 @@ pub fn matches_state(store: &Store, observed: &Observed, state: &State, modes: b
             let (actual_length, actual_mode) = match kind {
                 Observation::File(bytes, mode) => (bytes.len() as u64, *mode),
                 Observation::Stream(source, mode) => (source.length(), *mode),
-                _ => return false,
+                _ => return Ok(false),
             };
-            *length == actual_length
-                && (!modes || *mode == actual_mode)
-                && matches_file(store, *object, kind)
+            if *length != actual_length || (modes && *mode != actual_mode) {
+                return Ok(false);
+            }
+            matches_file_exact(store, *object, kind)
         }
-        (State::Directory { mode }, Observation::Directory(actual)) => !modes || mode == actual,
-        (State::Link { target }, Observation::Link(actual)) => target == actual,
-        _ => false,
+        (State::Directory { mode }, Observation::Directory(actual)) => Ok(!modes || mode == actual),
+        (State::Link { target }, Observation::Link(actual)) => Ok(target == actual),
+        _ => Ok(false),
     }
 }
 

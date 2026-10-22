@@ -5,6 +5,8 @@ use crate::json::{self, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod compatibility;
+
 #[derive(Clone, Debug)]
 pub struct Location {
     /// Canonical workspace root; the authoritative identity.
@@ -31,9 +33,7 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
         return Err(format!("Workspace {} is not a directory", root.display()));
     }
     let key = root.to_string_lossy().into_owned();
-    let base = key.bytes().fold(0u128, |value, byte| {
-        value.wrapping_mul(257).wrapping_add(u128::from(byte) + 1)
-    });
+    let base = identity_hash(&key);
     let archives = home.join("checkpoints");
     if create {
         files::private_directory(&archives)
@@ -59,6 +59,8 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
         .unwrap_or_else(|| "workspace".into());
     let mut free = None;
     let mut found = None;
+    let mut legacy = None;
+    let mut reserved = None;
     for suffix in 0..64 {
         for (kind, prefix) in [format!("{base:032x}"), format!("{name}-{base:032x}")]
             .into_iter()
@@ -70,20 +72,34 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
                 format!("{prefix}-{suffix}")
             };
             let directory = archives.join(&id);
+            if kind == 0
+                && let Some(marker) = compatibility::reservation(&directory)?
+            {
+                if marker.root == key {
+                    reserved.get_or_insert((directory, marker.archive));
+                }
+                continue;
+            }
             match read(&directory) {
                 Some(record) if record.root == key => {
                     if found
                         .as_ref()
-                        .is_some_and(|previous| previous != &directory)
+                        .is_some_and(|(previous, _)| previous != &directory)
                     {
                         return Err(format!(
                             "Multiple checkpoint archives exist for {}; history was preserved",
                             root.display()
                         ));
                     }
-                    found = Some(directory);
+                    found = Some((directory, kind == 0));
                 }
                 Some(_) => {}
+                None if kind == 1
+                    && reserved.as_ref().is_some_and(|(_, target)| target == &id)
+                    && !directory.join("workspace.json").exists() =>
+                {
+                    free.get_or_insert(directory);
+                }
                 None if directory.exists() => {
                     return Err(format!(
                         "Checkpoint identity at {} is damaged or incomplete; history was preserved",
@@ -93,22 +109,47 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
                 None if kind == 1 => {
                     free.get_or_insert(directory);
                 }
-                None => {}
+                None => {
+                    legacy.get_or_insert(directory);
+                }
             }
         }
     }
-    if let Some(directory) = found {
+    if let Some((directory, legacy_identity)) = found {
+        if create {
+            if !legacy_identity {
+                let slot = reserved
+                    .map(|(path, _)| path)
+                    .or(legacy)
+                    .ok_or("No legacy checkpoint identity slot is available")?;
+                compatibility::reserve(&slot, &key, &directory)?;
+            }
+            if super::layout::version(&directory) == Some(2) {
+                super::layout::guard_legacy(&directory)?;
+            }
+        }
         return Ok(Some(Location { root, directory }));
     }
     if let Some(location) = node.and_then(|node| alias(&archives, &root, node)) {
+        if create && super::layout::version(&location.directory) == Some(2) {
+            super::layout::guard_legacy(&location.directory)?;
+        }
         return Ok(Some(location));
     }
     if !create {
         return Ok(None);
     }
     let directory = free.ok_or("Too many checkpoint archives share one identity hash")?;
+    let slot = reserved
+        .map(|(path, _)| path)
+        .or(legacy)
+        .ok_or("No legacy checkpoint identity slot is available")?;
+    // Older binaries do not use .identity.lock. Reserve their path before
+    // publishing an identity their Unix inode fallback can discover.
+    compatibility::reserve(&slot, &key, &directory)?;
     files::private_directory(&directory)
         .map_err(|error| format!("Could not create checkpoint archive: {error}"))?;
+    super::layout::guard_legacy(&directory)?;
     let mut record = vec![
         ("version", Value::number(2)),
         ("root", Value::string(&key)),
@@ -134,6 +175,12 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
     Ok(Some(Location { root, directory }))
 }
 
+fn identity_hash(root: &str) -> u128 {
+    root.bytes().fold(0u128, |value, byte| {
+        value.wrapping_mul(257).wrapping_add(u128::from(byte) + 1)
+    })
+}
+
 fn safe_name(name: &str) -> String {
     name.chars()
         .take(40)
@@ -155,9 +202,7 @@ pub fn recognized_archive(directory: &Path) -> bool {
     if !Path::new(&record.root).is_absolute() {
         return false;
     }
-    let hash = record.root.bytes().fold(0u128, |value, byte| {
-        value.wrapping_mul(257).wrapping_add(u128::from(byte) + 1)
-    });
+    let hash = identity_hash(&record.root);
     let hash = format!("{hash:032x}");
     let Some(name) = directory.file_name().and_then(|name| name.to_str()) else {
         return false;
@@ -313,125 +358,6 @@ pub fn plain(path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::Directory;
-
-    #[test]
-    fn equivalent_paths_share_one_archive_and_collisions_get_a_suffix() {
-        let fixture = Directory::new();
-        let home = fixture.path().join("home");
-        let workspace = fixture.path().join("Work");
-        fs::create_dir_all(workspace.join("sub")).unwrap();
-        let first = locate(&home, &workspace, true).unwrap().unwrap();
-        let again = locate(&home, &workspace.join("sub").join(".."), false)
-            .unwrap()
-            .unwrap();
-        assert_eq!(first.directory, again.directory);
-        #[cfg(windows)]
-        {
-            let alias = fixture.path().join("WORK");
-            let other = locate(&home, &alias, false).unwrap().unwrap();
-            assert_eq!(first.directory, other.directory);
-        }
-        #[cfg(unix)]
-        {
-            let link = fixture.path().join("link");
-            std::os::unix::fs::symlink(&workspace, &link).unwrap();
-            let other = locate(&home, &link, false).unwrap().unwrap();
-            assert_eq!(first.directory, other.directory);
-        }
-        // Simulate a different root that hashes to the same archive name.
-        fs::write(
-            first.directory.join("workspace.json"),
-            r#"{"version":1,"root":"elsewhere"}"#,
-        )
-        .unwrap();
-        let moved = locate(&home, &workspace, true).unwrap().unwrap();
-        assert_ne!(moved.directory, first.directory);
-        assert!(
-            moved
-                .directory
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("Work-")
-        );
-        fs::write(moved.directory.join("workspace.json"), b"{broken").unwrap();
-        assert!(locate(&home, &workspace, true).is_err());
-        assert!(locate(&home, &fixture.path().join("missing"), false).is_err());
-    }
-
-    #[test]
-    fn duplicate_legacy_and_new_roots_do_not_silently_split_history() {
-        let fixture = Directory::new();
-        let home = fixture.path().join("home");
-        let workspace = fixture.path().join("Work");
-        fs::create_dir(&workspace).unwrap();
-        let new = locate(&home, &workspace, true).unwrap().unwrap();
-        let hash = new
-            .directory
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .strip_prefix("Work-")
-            .unwrap()
-            .to_string();
-        let old = home.join("checkpoints").join(hash);
-        fs::create_dir(&old).unwrap();
-        let text = fs::read_to_string(new.directory.join("workspace.json")).unwrap();
-        fs::write(
-            old.join("workspace.json"),
-            text.replace("\"version\": 2", "\"version\": 1"),
-        )
-        .unwrap();
-        assert!(locate(&home, &workspace, false).is_err());
-    }
-
-    #[test]
-    fn relative_paths_resolve_aliases_without_following_the_entry() {
-        let fixture = Directory::new();
-        fs::create_dir_all(fixture.path().join("Work").join("src")).unwrap();
-        let root = fs::canonicalize(fixture.path().join("Work")).unwrap();
-        let plain_root = plain(&root);
-        assert_eq!(
-            relative(&root, &absolute(&plain_root, "src/new/b.txt")).as_deref(),
-            Some("src/new/b.txt")
-        );
-        assert_eq!(relative(&root, &root), None);
-        assert_eq!(relative(&root, &plain_root.join("..").join("Other")), None);
-        #[cfg(windows)]
-        {
-            assert!(!plain_root.to_string_lossy().starts_with(r"\\?\"));
-            let alias = fixture.path().join("WORK").join("SRC").join("a.rs");
-            assert_eq!(relative(&root, &alias).as_deref(), Some("src/a.rs"));
-            fs::write(root.join("src/Case.txt"), b"case").unwrap();
-            let file_alias = fixture.path().join("WORK/SRC/cASE.TXT");
-            assert_eq!(
-                relative(&root, &file_alias).as_deref(),
-                Some("src/Case.txt")
-            );
-            // The last entry itself is never followed, and a new file keeps
-            // the spelling supplied by its creator.
-            assert_eq!(
-                relative(&root, &fixture.path().join("WORK/SRC/New.txt")).as_deref(),
-                Some("src/New.txt")
-            );
-        }
-        #[cfg(unix)]
-        {
-            let link = fixture.path().join("link");
-            std::os::unix::fs::symlink(&root, &link).unwrap();
-            assert_eq!(
-                relative(&root, &link.join("src/a.rs")).as_deref(),
-                Some("src/a.rs")
-            );
-            // A link inside the workspace is the entry itself.
-            std::os::unix::fs::symlink("/elsewhere", root.join("src/out")).unwrap();
-            assert_eq!(
-                relative(&root, &root.join("src/out")).as_deref(),
-                Some("src/out")
-            );
-        }
-    }
-}
+mod compatibility_tests;
+#[cfg(test)]
+mod tests;

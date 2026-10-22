@@ -55,6 +55,9 @@ impl Store {
 
     pub fn open(workspace: Workspace) -> Result<Self, String> {
         let directory = workspace.directory.clone();
+        if layout::version(&directory) == Some(2) {
+            layout::guard_legacy(&directory)?;
+        }
         let lifecycle = lifecycle::open(&workspace)?;
         let owner = super::files::unique("owner");
         let owner_lock = Owner::acquire(layout::owner_lock(&directory, &owner))

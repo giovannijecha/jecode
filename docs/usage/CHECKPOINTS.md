@@ -262,6 +262,7 @@ The archive layout separates durable history from live coordination:
 <project-name>-<id>/
   workspace.json
   policy.json
+  CURRENT
   history/
     CURRENT
     gen-000001/
@@ -279,10 +280,16 @@ The archive layout separates durable history from live coordination:
 
 Lock files are internal process coordination and normally occupy no content
 bytes. Existing hashed archive directories keep their name and migrate their
-contents in place when no legacy reader is active. The migration is resumable;
-old binaries cannot open the migrated history. Root coordination locks stay
-stable across migration. A migrated archive also keeps a root `CURRENT`
-compatibility marker; the active generation is in `history/CURRENT`.
+contents in place when no legacy reader is active. Close older sessions before
+opening their archive with the new version; new writers wait for migration
+rather than appending a new format to legacy history. The migration is resumable.
+Root coordination locks stay stable across migration. Every new-layout archive
+keeps a root `CURRENT` compatibility marker that rejects older binaries; the
+active generation is in `history/CURRENT`. New readable archives also reserve
+their old hash-only lookup path with a small identity file, preventing an older
+binary from creating a separate archive. Keep these compatibility files intact.
+If parallel legacy history already exists, Jecode preserves both copies and
+reports the ambiguity.
 
 Jecode checks inactive archives when it opens and periodically while running.
 After seven inactive days, it removes unpinned history with no unfinished

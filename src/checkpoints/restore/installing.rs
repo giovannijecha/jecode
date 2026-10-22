@@ -62,7 +62,7 @@ pub(super) fn install(
     #[cfg(test)]
     crate::checkpoints::tests::process::stage("restore-before-install");
     let observed = capture::observe(root, &planned.path, maximum);
-    let matches = capture::matches_state(store, &observed, &planned.current, true);
+    let matches = capture::matches_state_exact(store, &observed, &planned.current, true)?;
     if !matches || !capture::still_current(root, &observed) {
         // Read the new state when the final metadata check detected a race;
         // saving the earlier observation would misidentify the conflict.
@@ -109,3 +109,6 @@ pub(super) fn install(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

@@ -6,13 +6,14 @@ use crate::json::{self, Value};
 use std::fs;
 use std::path::Path;
 
-const SENTINEL: &[u8] = b"migrated-to-history";
+const SENTINEL: &[u8] = layout::LEGACY_SENTINEL;
 
 /// Called under the stable lifecycle and root store locks. `false` means an
 /// old reader is still active, so neither migration nor expiry can proceed.
 pub(super) fn resume_or_start(archive: &Path) -> Result<bool, String> {
     let marker = archive.join(".migrating");
     if layout::version(archive) == Some(2) {
+        layout::guard_legacy_locked(archive)?;
         if marker.exists() {
             verify_completed(archive)?;
             fs::remove_file(marker)

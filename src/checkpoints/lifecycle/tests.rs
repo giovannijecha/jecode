@@ -34,6 +34,7 @@ fn legacy_location(fixture: &Directory, location: &Location) -> Location {
         .unwrap()
         .to_string();
     let legacy = fixture.path().join("home/checkpoints").join(hash);
+    fs::remove_file(&legacy).unwrap();
     fs::create_dir(&legacy).unwrap();
     let text = fs::read_to_string(location.directory.join("workspace.json")).unwrap();
     fs::write(
@@ -321,6 +322,32 @@ fn legacy_history_expires_in_place_without_moving_identity() {
     );
     let reopened = Store::open(legacy.clone()).unwrap();
     assert!(reopened.index.next > first);
+}
+
+#[test]
+fn legacy_readers_block_new_writers_until_migration_can_finish() {
+    for owner in [false, true] {
+        let (_fixture, legacy, id, bytes) = legacy_with_object();
+        let journal = legacy.directory.join("gen-000001/000001.log");
+        let before = fs::read(&journal).unwrap();
+        let reader =
+            (!owner).then(|| Shared::acquire(&legacy.directory.join("gen-000001.lock")).unwrap());
+        let owner =
+            owner.then(|| Exclusive::acquire(&legacy.directory.join("owners/older.lock")).unwrap());
+        let error = Store::open(legacy.clone()).err().unwrap();
+        assert!(
+            error.contains("migration is waiting for older readers"),
+            "{error}"
+        );
+        assert_eq!(layout::version(&legacy.directory), Some(1));
+        assert_eq!(fs::read(&journal).unwrap(), before);
+        assert!(!legacy.directory.join(".migrating").exists());
+        drop(reader);
+        drop(owner);
+        let reopened = Store::open(legacy.clone()).unwrap();
+        assert_eq!(layout::version(&legacy.directory), Some(2));
+        assert_eq!(&*reopened.bytes(id).unwrap(), bytes.as_slice());
+    }
 }
 
 #[test]

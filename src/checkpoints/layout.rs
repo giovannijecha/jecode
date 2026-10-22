@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 static VERSION_TWO: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+pub const LEGACY_SENTINEL: &[u8] = b"migrated-to-history";
 
 pub fn history(archive: &Path) -> PathBuf {
     if cached_version(archive) == Some(2) {
@@ -91,4 +92,58 @@ fn cached_version(archive: &Path) -> Option<u64> {
             .insert(archive.to_path_buf());
     }
     Some(version)
+}
+
+/// Call before lifecycle admission. In an existing v2 archive, the stable
+/// store lock serializes this check with an older binary opening a flat journal.
+pub fn guard_legacy(archive: &Path) -> Result<(), String> {
+    let _store = super::locks::Exclusive::acquire(&store_lock(archive))
+        .map_err(|error| format!("Could not guard checkpoint layout: {error}"))?;
+    guard_legacy_locked(archive)
+}
+
+/// Called while the stable store lock is held, including during expiry.
+pub fn guard_legacy_locked(archive: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(archive).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.file_name().to_string_lossy().starts_with("gen-") {
+            return Err(
+                "Legacy checkpoint history exists beside history/; both histories were preserved"
+                    .into(),
+            );
+        }
+    }
+    let current = archive.join("CURRENT");
+    match fs::symlink_metadata(&current) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            if fs::read(&current).map_err(|error| error.to_string())? == LEGACY_SENTINEL {
+                // A rejected older opener can leave an empty root owners/.
+                return Ok(());
+            }
+            return Err(
+                "A legacy checkpoint CURRENT exists beside history/; history was preserved".into(),
+            );
+        }
+        Ok(_) => return Err("Checkpoint compatibility marker is not an ordinary file".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    let owners = archive.join("owners");
+    match fs::symlink_metadata(&owners) {
+        Ok(metadata)
+            if !metadata.is_dir()
+                || metadata.file_type().is_symlink()
+                || fs::read_dir(&owners)
+                    .map_err(|error| error.to_string())?
+                    .next()
+                    .is_some() =>
+        {
+            return Err("Legacy checkpoint owners exist beside history/; close older sessions and preserve their history".into());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    super::files::atomic_write(&current, LEGACY_SENTINEL)
+        .map_err(|error| format!("Could not guard checkpoint layout: {error}"))
 }

@@ -76,6 +76,9 @@ pub fn open(location: &Location) -> Result<Lease, String> {
     }
     let held = Shared::acquire(&lease_path(archive))
         .map_err(|error| format!("Could not join checkpoint archive: {error}"))?;
+    if layout::version(archive) != Some(2) {
+        return Err("Checkpoint layout migration is waiting for older readers; close older sessions and retry".into());
+    }
     // A sweeper may finish (or fail) between the nonblocking exclusive probe
     // and this shared lock. Never admit a reader into an incomplete purge.
     if archive.join(".purging").exists()
