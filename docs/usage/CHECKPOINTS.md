@@ -66,7 +66,7 @@ current version for review. Earlier paths may already have changed; inspect
 is based on the states saved before installation.
 
 Restore resolves verified filesystem aliases to the saved path spelling. If a
-deleted path's spelling is ambiguous, use the exact name shown in the archive;
+path's spelling is ambiguous, use the exact name shown in the archive;
 an unverified alias is not evidence that the saved file was absent.
 
 Restoring a saved directory can remove children created within that complete
