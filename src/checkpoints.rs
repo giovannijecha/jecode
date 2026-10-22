@@ -3,6 +3,7 @@
 pub mod actions;
 mod activity;
 mod capture;
+mod clock;
 pub mod command;
 mod files;
 mod frame;
@@ -21,14 +22,17 @@ mod measurement_tests;
 mod mutation;
 mod points;
 mod policy;
+mod pressure;
 mod quota;
 #[cfg(test)]
 mod real_model_tests;
 mod reconcile;
 mod record;
+mod recovery;
 pub mod render;
 mod restore;
 mod scan;
+mod scopes;
 pub mod session;
 pub mod show;
 mod store;

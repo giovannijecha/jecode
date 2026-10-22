@@ -5,6 +5,57 @@ impl Record {
     pub fn frame(&self) -> Vec<u8> {
         let mut out = Encoder::default();
         let kind = match self {
+            Self::Recovery(recovery) => {
+                match recovery {
+                    Recovery::Mode { seq, time } => {
+                        out.u8(1).u64(*seq).u64(*time);
+                    }
+                    Recovery::Snapshot {
+                        seq,
+                        group,
+                        snapshot,
+                    } => {
+                        out.u8(2).u64(*seq).u64(*group).u64(*snapshot);
+                    }
+                    Recovery::Step {
+                        seq,
+                        group,
+                        snapshot,
+                        path,
+                        before,
+                    } => {
+                        out.u8(3).u64(*seq).u64(*group).u64(*snapshot).text(path);
+                        before.encode(&mut out);
+                    }
+                    Recovery::Scope {
+                        seq,
+                        group,
+                        snapshot,
+                        root,
+                    } => {
+                        out.u8(4).u64(*seq).u64(*group).u64(*snapshot).text(root);
+                    }
+                    Recovery::Status {
+                        seq,
+                        group,
+                        action,
+                        time,
+                        until,
+                    } => {
+                        let action = match action {
+                            RecoveryAction::Accepted => 1,
+                            RecoveryAction::Touched => 4,
+                        };
+                        out.u8(5)
+                            .u64(*seq)
+                            .u64(*group)
+                            .u8(action)
+                            .u64(*time)
+                            .u64(*until);
+                    }
+                }
+                Kind::Recovery
+            }
             Self::Version(version) => {
                 out.u64(version.seq).text(&version.path);
                 version.state.encode(&mut out);
@@ -99,6 +150,47 @@ impl Record {
         let flag = |value: u8| value != 0;
         Ok(match kind {
             Kind::Object => return Err("object frames are decoded separately".into()),
+            Kind::Recovery => Self::Recovery(match input.u8()? {
+                1 => Recovery::Mode {
+                    seq: input.u64()?,
+                    time: input.u64()?,
+                },
+                2 => Recovery::Snapshot {
+                    seq: input.u64()?,
+                    group: input.u64()?,
+                    snapshot: input.u64()?,
+                },
+                3 => Recovery::Step {
+                    seq: input.u64()?,
+                    group: input.u64()?,
+                    snapshot: input.u64()?,
+                    path: input.text()?,
+                    before: State::decode(&mut input)?,
+                },
+                4 => Recovery::Scope {
+                    seq: input.u64()?,
+                    group: input.u64()?,
+                    snapshot: input.u64()?,
+                    root: input.text()?,
+                },
+                5 => {
+                    let seq = input.u64()?;
+                    let group = input.u64()?;
+                    let action = match input.u8()? {
+                        1 => RecoveryAction::Accepted,
+                        4 => RecoveryAction::Touched,
+                        _ => return Err("unknown recovery action".into()),
+                    };
+                    Recovery::Status {
+                        seq,
+                        group,
+                        action,
+                        time: input.u64()?,
+                        until: input.u64()?,
+                    }
+                }
+                _ => return Err("unknown recovery record".into()),
+            }),
             Kind::Version => Self::Version(Version {
                 seq: input.u64()?,
                 path: input.text()?,

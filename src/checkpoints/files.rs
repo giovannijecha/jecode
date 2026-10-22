@@ -33,7 +33,7 @@ pub fn unique(prefix: &str) -> String {
     format!(
         "{prefix}-{}-{}-{}",
         std::process::id(),
-        crate::sessions::now(),
+        crate::checkpoints::clock::now(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     )
 }

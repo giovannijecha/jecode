@@ -201,7 +201,8 @@ impl Tools {
             .and_then(|session| {
                 let arguments = json::parse(arguments).ok()?;
                 let text = arguments.get("command")?.as_str()?;
-                Some(session.command_cancellable(text, cancellation))
+                let paths = shell::protect_paths(&arguments).ok()?;
+                Some(session.command_scoped_cancellable(text, &paths, cancellation))
             });
         Begun { command }
     }
@@ -251,9 +252,9 @@ impl Tools {
                         // Session temporary files are outside the workspace scope.
                         let checkpoints = self.checkpoints.as_deref().filter(|_| root == self.root);
                         let result = if name == "write" {
-                            files::write_with_change(&root, &arguments, checkpoints)
+                            files::write_with_change(&root, &arguments, checkpoints, cancellation)
                         } else {
-                            files::edit_with_change(&root, &arguments, checkpoints)
+                            files::edit_with_change(&root, &arguments, checkpoints, cancellation)
                         };
                         result.map(|(mut value, change)| {
                             if self.checkpoints.is_some()
@@ -278,19 +279,23 @@ impl Tools {
                         })
                     }
                     "bash" => {
+                        let completion = begun.command.as_ref().and_then(CommandGuard::completion);
                         let temporary = self
                             .temporary
                             .as_ref()
                             .map(|area| area.ensure())
                             .transpose()?;
                         let mut result = shell::execute(
-                            &self.bash,
-                            &self.root,
+                            shell::Context {
+                                bash: &self.bash,
+                                root: &self.root,
+                                outputs: &self.outputs,
+                                temporary: temporary.as_deref(),
+                                processes: &self.processes,
+                            },
                             &arguments,
                             cancellation,
-                            &self.outputs,
-                            temporary.as_deref(),
-                            &self.processes,
+                            completion,
                         )
                         .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
                         if let Some(command) = begun.command {

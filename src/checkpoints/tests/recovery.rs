@@ -222,7 +222,7 @@ fn abandoned(store: &mut Store, owner: &str, path: &str, intended: &[u8]) -> u64
                 path: path.into(),
                 before,
                 after,
-                time: crate::sessions::now(),
+                time: crate::checkpoints::clock::now(),
             }));
             Ok(seq)
         })

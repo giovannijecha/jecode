@@ -91,6 +91,56 @@ fn gate(name: &str) -> String {
 }
 
 #[test]
+fn persistent_bash_finishes_observing_its_declared_directory() {
+    use crate::checkpoints::session::Session;
+
+    let home = Directory::new();
+    let root = Directory::new();
+    let session = Session::open(home.path(), root.path());
+    session.begin("model", None);
+    let mut tools = tools(&root, Redactor::empty());
+    tools.configure_checkpoints(std::sync::Arc::clone(&session));
+    let started = bash(
+        &tools,
+        &format!(
+            "{}; mkdir -p generated; printf final > generated/result.txt",
+            gate("go")
+        ),
+        &[
+            ("wait_ms", Value::number(0)),
+            ("protect", Value::Array(vec![Value::string("generated/")])),
+        ],
+    );
+    assert_eq!(text(&started, "status"), "running");
+    let checkpoint = started.get("checkpoint").unwrap();
+    assert_eq!(
+        checkpoint.get("status").and_then(Value::as_str),
+        Some("saved")
+    );
+    assert!(text(checkpoint, "before").starts_with("cp-"));
+    release(&root, "go");
+    let finished = process(&tools, "poll", &text(&started, "process_id"), Some(10_000));
+    assert_eq!(text(&finished, "status"), "exited");
+    assert_eq!(
+        finished.get("checkpoint_finalized"),
+        Some(&Value::Bool(true))
+    );
+    let observed = tools.execute(
+        "checkpoint",
+        &Value::object([
+            ("action", Value::string("list")),
+            (
+                "paths",
+                Value::Array(vec![Value::string("generated/result.txt")]),
+            ),
+        ])
+        .encode(),
+    );
+    let child = &observed.get("paths").unwrap().as_array().unwrap()[0];
+    assert!(child.get("total").and_then(Value::as_usize).unwrap() > 0);
+}
+
+#[test]
 fn a_running_process_returns_control_and_later_reports_all_output_and_its_exit() {
     let directory = Directory::new();
     let tools = tools(&directory, Redactor::empty());
@@ -424,9 +474,12 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
                 error: None,
             }),
             cursors: [0, 0],
+            checkpoint_finalized: false,
+            checkpoint_error: None,
         }),
         changed: Condvar::new(),
         monitor: Mutex::new(None),
+        heartbeat: Mutex::new(None),
     };
     assert!(entry.report(false).unwrap_err().contains("saved stderr"));
     std::fs::write(stderr, "unread stderr").unwrap();

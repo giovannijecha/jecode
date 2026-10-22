@@ -239,15 +239,31 @@ fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>> {
 /// Streaming observations are rechecked after the comparison, including on an
 /// early mismatch, so a displaced handle is never accepted as the live path.
 fn matches_file_exact(store: &Store, object: u64, observed: &Observation) -> Result<bool, String> {
+    matches_file_cancellable(
+        store,
+        object,
+        observed,
+        &crate::cancel::Cancellation::default(),
+    )
+}
+
+fn matches_file_cancellable(
+    store: &Store,
+    object: u64,
+    observed: &Observation,
+    cancellation: &crate::cancel::Cancellation,
+) -> Result<bool, String> {
     match observed {
-        Observation::File(bytes, _) => {
-            store.equal_reader(object, std::io::Cursor::new(bytes.as_ref()))
-        }
+        Observation::File(bytes, _) => store.equal_reader_cancellable(
+            object,
+            std::io::Cursor::new(bytes.as_ref()),
+            cancellation,
+        ),
         Observation::Stream(source, _) => {
             let Ok(mut file) = source.open() else {
                 return Ok(false);
             };
-            let equal = store.equal_reader(object, &mut file);
+            let equal = store.equal_reader_cancellable(object, &mut file, cancellation);
             if source.verify(&file).is_err() {
                 return Ok(false);
             }
@@ -259,6 +275,37 @@ fn matches_file_exact(store: &Store, object: u64, observed: &Observation) -> Res
 
 pub fn matches_state(store: &Store, observed: &Observed, state: &State, modes: bool) -> bool {
     matches_state_exact(store, observed, state, modes).unwrap_or(false)
+}
+
+pub fn matches_state_cancellable(
+    store: &Store,
+    observed: &Observed,
+    state: &State,
+    modes: bool,
+    cancellation: &crate::cancel::Cancellation,
+) -> Result<bool, String> {
+    if cancellation.requested() {
+        return Err("Operation cancelled".into());
+    }
+    if let State::File {
+        object,
+        length,
+        mode,
+        ..
+    } = state
+    {
+        let (actual_length, actual_mode) = match &observed.kind {
+            Observation::File(bytes, mode) => (bytes.len() as u64, *mode),
+            Observation::Stream(source, mode) => (source.length(), *mode),
+            _ => return Ok(false),
+        };
+        if *length != actual_length || modes && *mode != actual_mode {
+            return Ok(false);
+        }
+        matches_file_cancellable(store, *object, &observed.kind, cancellation)
+    } else {
+        matches_state_exact(store, observed, state, modes)
+    }
 }
 
 /// Preserve archive read errors for restore's final comparison. Acquisition
@@ -361,7 +408,26 @@ pub fn record(
     origin: &str,
     operation: u64,
 ) -> Result<Option<Recorded>, String> {
-    if unchanged(transaction.store, transaction.index(), &observed) {
+    transaction.check_cancelled()?;
+    let unchanged = if matches!(observed.kind, Observation::Stream(..)) {
+        transaction
+            .index()
+            .current(&observed.path)
+            .is_some_and(|current| {
+                matches_state_cancellable(
+                    transaction.store,
+                    &observed,
+                    &current.state,
+                    true,
+                    &transaction.cancellation(),
+                )
+                .unwrap_or(false)
+            })
+    } else {
+        unchanged(transaction.store, transaction.index(), &observed)
+    };
+    transaction.check_cancelled()?;
+    if unchanged {
         if let Some(stat) = observed.stat
             && transaction.index().stats.get(&observed.path) != Some(&stat)
             && transaction.index().current(&observed.path).is_some()
@@ -424,7 +490,7 @@ pub fn record(
         path: observed.path,
         state: state.clone(),
         stat: observed.stat,
-        time: crate::sessions::now(),
+        time: crate::checkpoints::clock::now(),
         origin: origin.into(),
         operation,
         discovery,
@@ -487,7 +553,7 @@ pub fn record_prepared(
         path: written.path,
         state: state.clone(),
         stat: written.stat,
-        time: crate::sessions::now(),
+        time: crate::checkpoints::clock::now(),
         origin: origin.into(),
         operation,
         discovery,

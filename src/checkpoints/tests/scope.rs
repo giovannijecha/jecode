@@ -118,6 +118,12 @@ fn scope_rules_edited_by_another_process_apply_at_the_next_point() {
     assert!(
         index(&workspace)
             .current("node_modules/pkg/index.js")
+            .is_none()
+    );
+    workspace.verify().unwrap();
+    assert!(
+        index(&workspace)
+            .current("node_modules/pkg/index.js")
             .is_some()
     );
 }

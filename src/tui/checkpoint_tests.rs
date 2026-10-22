@@ -55,6 +55,14 @@ fn checkpoint_commands_open_information_and_never_copy_recorded_files_into_the_c
     );
     agent.enable_sessions(home.path()).unwrap();
     agent.use_checkpoints(Session::offline(home.path(), project.path()));
+    let captured = agent.checkpoints_command("capture a.txt").unwrap();
+    let latest = captured
+        .details
+        .iter()
+        .find(|(key, _)| key == "before")
+        .unwrap_or_else(|| panic!("{}", captured.text()))
+        .1
+        .clone();
     let mut app = App::new(agent, tests::config(&project), None);
 
     submit(&mut app, "/checkpoints");
@@ -73,13 +81,7 @@ fn checkpoint_commands_open_information_and_never_copy_recorded_files_into_the_c
         "{}",
         information.title
     );
-    let latest = information
-        .details
-        .iter()
-        .find(|(key, _)| key == "latest")
-        .unwrap()
-        .1
-        .clone();
+    assert!(information.details.iter().any(|(key, _)| key == "latest"));
 
     app.state.information = None;
     submit(&mut app, &format!("/checkpoints show {latest} a.txt"));

@@ -66,7 +66,7 @@ fn interrupted_reservation_resumes_before_or_after_directory_creation() {
         assert!(locate(&home, &root, false).unwrap().is_none());
         let location = locate(&home, &root, true).unwrap().unwrap();
         assert_eq!(location.directory, target);
-        assert_eq!(layout::version(&target), Some(2));
+        assert_eq!(layout::version(&target), Some(layout::VERSION));
         Store::open(location).unwrap();
     }
 }

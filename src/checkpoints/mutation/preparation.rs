@@ -3,6 +3,7 @@ use super::*;
 use crate::checkpoints::capture::Observation;
 use crate::checkpoints::files::Mode;
 use crate::checkpoints::record::{Discovery, Prepare, Version};
+use std::sync::Arc;
 
 enum Intended<'a> {
     Bytes(&'a [u8]),
@@ -85,7 +86,13 @@ impl Mutation<'_> {
         }
         let length = content.length();
         let workspace = self.workspace;
-        let mut store = workspace.store();
+        let mut store = match workspace.store_cancellable(&self.cancellation) {
+            Ok(store) => store,
+            Err(error) => {
+                self.protection = Protection::Unprotected(error);
+                return None;
+            }
+        };
         let max = store.policy.max_file_bytes;
         let observed = capture::observe(&workspace.root, path, max);
         let previous = max_text_bytes
@@ -107,7 +114,10 @@ impl Mutation<'_> {
             }
             _ => None,
         };
-        let result = store.transaction(true, |transaction| {
+        let result = store.transaction_cancellable(true, &self.cancellation, |transaction| {
+            let (group, snapshot) =
+                crate::checkpoints::recovery::begin_snapshot(transaction, &self.origin, self.kind)?;
+            transaction.flush(false)?;
             capture::record(transaction, observed, "external", 0)?;
             if absent && transaction.index().current(path).is_none() {
                 // Make the absence explicit so restoring it removes the file.
@@ -122,7 +132,7 @@ impl Mutation<'_> {
                     path: path.clone(),
                     state: State::Absent,
                     stat: None,
-                    time: crate::sessions::now(),
+                    time: crate::checkpoints::clock::now(),
                     origin: "external".into(),
                     operation: 0,
                     discovery,
@@ -131,6 +141,9 @@ impl Mutation<'_> {
             // Apply what was observed so the index shows the actual state.
             transaction.flush(false)?;
             let before = transaction.index().current_state(path);
+            if before.recoverable() {
+                crate::checkpoints::recovery::add(transaction, group, snapshot, path, &before)?;
+            }
             let after = if length <= max {
                 let base = match before {
                     State::File { object, .. } => Some(object),
@@ -158,15 +171,15 @@ impl Mutation<'_> {
                 path: path.clone(),
                 before: before.clone(),
                 after: after.clone(),
-                time: crate::sessions::now(),
+                time: crate::checkpoints::clock::now(),
             }));
-            Ok((seq, before, after))
+            Ok((seq, snapshot, before, after))
         });
         match result {
-            Ok((seq, before, after)) => {
+            Ok((seq, snapshot, before, after)) => {
                 self.protection = if before.recoverable() {
                     Protection::Protected {
-                        before: seq,
+                        before: snapshot,
                         after: None,
                     }
                 } else {

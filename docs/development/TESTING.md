@@ -54,7 +54,7 @@ verified the change. Use `-- --list` to inspect available names.
 | Agent/context/provider | Tests beside `agent/`, `context/` and `openrouter/`; use loopback responses. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
-| Checkpoints | Tests beside `checkpoints/` and the `checkpoint_tests` modules in `agent/`, `session/`, `tools/` and `tui/`. Cover total and active-generation admission, four processes sharing a reduced test quota, selective discovery, polling coverage, long-turn pruning, idle-reader cleanup, retries after points or unpins, crash recovery, conflicts and exact undo. Children re-enter the test binary with isolated archive homes; reduced test ceilings have no production configuration path. |
+| Checkpoints | Tests beside `checkpoints/` and the `checkpoint_tests` modules in `agent/`, `session/`, `tools/` and `tui/`. Cover startup without acquisition, exact-file and recursive Bash protection, unknown paths, partial coverage, cancellation, background completion, recovery acceptance and expiry, pins, migration, concurrent collection, crash recovery, conflicts and exact undo. Children re-enter the test binary with isolated archive homes. Synthetic quota injection exercises the same journal admission path as production; production uses a soft retention budget and advisory free-space checks. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
 
 Run the applicable normal checks after focused verification. Keep credentials,
@@ -64,17 +64,34 @@ or `target` directories.
 The combined checkpoint regression runs in the ordinary suite. To isolate it:
 
 ```text
-cargo test --locked --offline checkpoints::tests::process::stress::four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity -- --exact --nocapture --test-threads=1
+cargo test --locked --offline checkpoints::tests::process::stress::four_sessions_survive_concurrent_collection_and_crashed_restore -- --exact --nocapture --test-threads=1
 ```
 
-It places an isolated archive 4 MiB below the real 1 GiB logical limit, with a
-4 MiB retention policy and four writer processes. The fourth writer commits
+It uses an isolated archive, a 4 MiB retention policy and four writer
+processes. The fourth writer commits
 while collection is paused inside its copy. The fixture kills the collector
 after its durable move but before `CURRENT` is updated, then kills a restore
 after its first file installation. Reopening must preserve the concurrent
 write, repair the pointer, classify pending work and support exact undo. Stage
-barriers exist only under `cfg(test)`; the filler uses file length, not a GiB
-of generated contents. Capacity and retention pruning are asserted separately.
+barriers exist only under `cfg(test)`. Quota admission, native free-space queries
+and retention pruning have separate checks.
+
+Recovery lifecycle and cancellation regressions also run in the ordinary suite:
+
+```text
+cargo test --locked --offline checkpoints::tests::redesign::
+cargo test --locked --offline checkpoints::recovery::tests::
+cargo test --locked --offline checkpoints::gc::recovery::tests::
+cargo test --locked --offline checkpoints::lifecycle::tests::
+cargo test --locked --offline checkpoints::session::cancellation_tests::
+```
+
+The opt-in `on-demand` measurement asserts that opening large workspaces records
+no paths and reads no file payload, then checks declared Bash recovery and
+background finalization. `retention` measures acceptance compaction and expiry
+with exact-byte checks. Select them through `JECODE_CHECKPOINT_MEASURE_ONLY` in
+the [checkpoint workflow probe](PERFORMANCE.md#workspace-checkpoints). Keep
+measurement runs serial and unset `JECODE_CHECKPOINT_MEASURE_QUICK` for final data.
 
 ## Development binary and installation
 

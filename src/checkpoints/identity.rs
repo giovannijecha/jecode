@@ -124,14 +124,15 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
                     .ok_or("No legacy checkpoint identity slot is available")?;
                 compatibility::reserve(&slot, &key, &directory)?;
             }
-            if super::layout::version(&directory) == Some(2) {
+            if super::layout::version(&directory).is_some_and(|version| version >= 2) {
                 super::layout::guard_legacy(&directory)?;
             }
         }
         return Ok(Some(Location { root, directory }));
     }
     if let Some(location) = node.and_then(|node| alias(&archives, &root, node)) {
-        if create && super::layout::version(&location.directory) == Some(2) {
+        if create && super::layout::version(&location.directory).is_some_and(|version| version >= 2)
+        {
             super::layout::guard_legacy(&location.directory)?;
         }
         return Ok(Some(location));
@@ -151,9 +152,9 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
         .map_err(|error| format!("Could not create checkpoint archive: {error}"))?;
     super::layout::guard_legacy(&directory)?;
     let mut record = vec![
-        ("version", Value::number(2)),
+        ("version", Value::number(super::layout::VERSION)),
         ("root", Value::string(&key)),
-        ("created", Value::number(crate::sessions::now())),
+        ("created", Value::number(crate::checkpoints::clock::now())),
     ];
     if let Some((device, inode)) = node {
         record.push(("device", Value::number(device)));
@@ -237,7 +238,7 @@ fn read(directory: &Path) -> Option<Record> {
             .and_then(|text| text.parse::<u64>().ok())
     };
     let version = number("version")?;
-    if version != 1 && version != 2 {
+    if !(1..=super::layout::VERSION).contains(&version) {
         return None;
     }
     Some(Record {
@@ -282,7 +283,6 @@ fn node(_path: &Path) -> Option<(u64, u64)> {
 /// the entry itself and is never followed.
 pub fn relative(root: &Path, path: &Path) -> Option<String> {
     let mut missing = vec![path.file_name()?.to_os_string()];
-    #[cfg(windows)]
     if let Some(spelling) = existing_name(path) {
         missing[0] = spelling;
     }
@@ -309,33 +309,40 @@ pub fn relative(root: &Path, path: &Path) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-/// The directory entry's spelling on Windows. The final entry may be a link
-/// or junction, so only ordinary files and directories can be canonicalized.
-#[cfg(windows)]
+/// The final directory entry's spelling on case-insensitive volumes. Never
+/// follow a final link or junction merely to recover its name.
 fn existing_name(path: &Path) -> Option<std::ffi::OsString> {
-    use std::os::windows::fs::MetadataExt;
-
     let metadata = fs::symlink_metadata(path).ok()?;
-    const REPARSE_POINT: u32 = 0x400;
-    if metadata.file_attributes() & REPARSE_POINT == 0 {
-        return fs::canonicalize(path)
-            .ok()?
-            .file_name()
-            .map(std::ffi::OsStr::to_os_string);
-    }
-    let requested = path.file_name()?;
-    let folded = requested.to_string_lossy().to_lowercase();
-    let mut folded_match = None;
-    for entry in fs::read_dir(path.parent()?).ok()?.flatten() {
-        let name = entry.file_name();
-        if name == requested {
-            return Some(name);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const REPARSE_POINT: u32 = 0x400;
+        if metadata.file_attributes() & REPARSE_POINT != 0 {
+            let requested = path.file_name()?;
+            let folded = requested.to_string_lossy().to_lowercase();
+            let mut match_name = None;
+            for entry in fs::read_dir(path.parent()?).ok()?.flatten() {
+                let name = entry.file_name();
+                if name == requested {
+                    return Some(name);
+                }
+                if name.to_string_lossy().to_lowercase() == folded {
+                    if match_name.is_some() {
+                        return None;
+                    }
+                    match_name = Some(name);
+                }
+            }
+            return match_name;
         }
-        if name.to_string_lossy().to_lowercase() == folded {
-            folded_match = Some(name);
-        }
     }
-    folded_match
+    if metadata.file_type().is_symlink() {
+        return None;
+    }
+    fs::canonicalize(path)
+        .ok()?
+        .file_name()
+        .map(std::ffi::OsStr::to_os_string)
 }
 
 pub fn absolute(root: &Path, relative: &str) -> PathBuf {

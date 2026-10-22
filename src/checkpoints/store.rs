@@ -55,7 +55,7 @@ impl Store {
 
     pub fn open(workspace: Workspace) -> Result<Self, String> {
         let directory = workspace.directory.clone();
-        if layout::version(&directory) == Some(2) {
+        if layout::version(&directory).is_some_and(|version| version >= 2) {
             layout::guard_legacy(&directory)?;
         }
         let lifecycle = lifecycle::open(&workspace)?;
@@ -118,7 +118,7 @@ impl Store {
                 transaction.record(Record::Event(Event {
                     seq,
                     origin: "policy".into(),
-                    time: crate::sessions::now(),
+                    time: crate::checkpoints::clock::now(),
                     text: format!(
                         "checkpoint scope changed in policy.json: {}",
                         changes.join(", ")
@@ -147,8 +147,16 @@ impl Store {
 
     /// Replays other processes' appends; follows a compaction to its new generation.
     fn catch_up(&mut self) -> Result<(), String> {
+        self.catch_up_cancellable(&crate::cancel::Cancellation::default())
+    }
+
+    fn catch_up_cancellable(
+        &mut self,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> Result<(), String> {
         let index = &mut self.index;
-        self.journal.catch_up(&mut |entry| index.apply(entry))?;
+        self.journal
+            .catch_up_cancellable(&mut |entry| index.apply(entry), cancellation)?;
         // Compaction writes Moved before CURRENT; a crash between them is
         // repaired by the first process that follows the move.
         while let Some(generation) = self.index.moved {
@@ -158,7 +166,8 @@ impl Store {
             self.index = Index::default();
             self.cache = Mutex::new(Cache::default());
             let index = &mut self.index;
-            self.journal.catch_up(&mut |entry| index.apply(entry))?;
+            self.journal
+                .catch_up_cancellable(&mut |entry| index.apply(entry), cancellation)?;
             self.remove_stale_generations();
         }
         // Expiry preserves sequence identity: old cp-N references must stay
@@ -207,11 +216,37 @@ impl Store {
         Ok(value)
     }
 
+    pub fn transaction_cancellable<T>(
+        &mut self,
+        durable: bool,
+        cancellation: &crate::cancel::Cancellation,
+        body: impl FnOnce(&mut Transaction<'_>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _lock = Exclusive::acquire_cancellable(&self.lock_path(), cancellation)
+            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
+        self.catch_up_cancellable(cancellation)?;
+        let mut transaction = Transaction::new(self);
+        transaction.cancellation = Some(cancellation.clone());
+        transaction.check_cancelled()?;
+        let value = body(&mut transaction)?;
+        transaction.commit(durable)?;
+        Ok(value)
+    }
+
     /// Refreshes the index from the shared journal.
     pub fn refresh(&mut self) -> Result<(), String> {
         let _lock = Exclusive::acquire(&self.lock_path())
             .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
         self.catch_up()
+    }
+
+    pub fn refresh_cancellable(
+        &mut self,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> Result<(), String> {
+        let _lock = Exclusive::acquire_cancellable(&self.lock_path(), cancellation)
+            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
+        self.catch_up_cancellable(cancellation)
     }
 
     /// Follows peer compaction and releases old generations after readers leave.
@@ -322,6 +357,7 @@ pub struct Transaction<'a> {
     records: Vec<Record>,
     fresh: Fresh,
     used: Option<super::quota::Usage>,
+    cancellation: Option<crate::cancel::Cancellation>,
 }
 
 impl<'a> Transaction<'a> {
@@ -333,6 +369,7 @@ impl<'a> Transaction<'a> {
             records: Vec::new(),
             fresh: HashMap::new(),
             used: None,
+            cancellation: None,
         }
     }
 
@@ -344,6 +381,22 @@ impl<'a> Transaction<'a> {
 
     pub fn index(&self) -> &Index {
         &self.store.index
+    }
+
+    pub fn check_cancelled(&self) -> Result<(), String> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|token| token.requested())
+        {
+            Err("Operation cancelled".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn cancellation(&self) -> crate::cancel::Cancellation {
+        self.cancellation.clone().unwrap_or_default()
     }
 
     /// Another journal wrote under this same store lock (compaction tail).
@@ -364,7 +417,7 @@ impl<'a> Transaction<'a> {
             kind: kind.into(),
             label: label.into(),
             origin: origin.into(),
-            time: crate::sessions::now(),
+            time: crate::checkpoints::clock::now(),
             policy,
             pinned,
         }));
@@ -374,6 +427,7 @@ impl<'a> Transaction<'a> {
     /// Appends buffered frames and applies them to the index. Sequence numbers
     /// were reserved in the index while building the transaction.
     pub fn flush(&mut self, durable: bool) -> Result<(), String> {
+        self.check_cancelled()?;
         if self.buffer.is_empty() {
             if durable {
                 self.store.journal.sync()?;
@@ -388,7 +442,7 @@ impl<'a> Transaction<'a> {
                     Record::Complete { .. } | Record::Coverage { .. } | Record::Moved { .. }
                 )
             });
-        #[cfg(test)]
+        self.store.journal.min_free_bytes = self.store.policy.min_free_bytes;
         let used = if self.store.journal.quota_limit == u64::MAX {
             super::quota::Usage {
                 total: 0,
@@ -403,17 +457,13 @@ impl<'a> Transaction<'a> {
                 )?,
             }
         };
-        #[cfg(not(test))]
-        let used = super::quota::Usage {
-            total: 0,
-            generation: 0,
-        };
         let result = self.store.journal.append_counted(
             &self.buffer,
             durable,
             terminal,
             self.objects.is_empty(),
             used,
+            self.cancellation.as_ref(),
         );
         let next = self.store.index.next;
         let (segment, start) = match result {

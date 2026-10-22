@@ -17,7 +17,7 @@ fn delayed_notices_are_bounded_and_report_released_instruction_events() {
                 transaction.record(Record::Event(Event {
                     seq,
                     origin: "cli".into(),
-                    time: crate::sessions::now(),
+                    time: crate::checkpoints::clock::now(),
                     text: "restored ".repeat(500),
                     paths: if number == 0 {
                         vec!["JECODE.md".into()]

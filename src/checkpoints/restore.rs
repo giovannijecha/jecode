@@ -4,10 +4,17 @@ use super::capture::{self, Observation};
 use super::files;
 use super::index::{Index, reference};
 use super::record::{Discovery, Event, Outcome, Prepare, Record, State, Version};
+use super::recovery;
 use super::scan::in_scope;
 use super::store::Store;
 
 mod directories;
+mod names;
+mod selection;
+pub(super) use names::TargetNames;
+pub use selection::normalize;
+use selection::{check_retained, created_after, expectation, same_bytes};
+pub(super) use selection::{paths, recovery_reference, target_state};
 mod installing;
 use installing::{Failure, Step};
 
@@ -90,45 +97,6 @@ impl Report {
     }
 }
 
-pub fn normalize(path: &str) -> Result<String, String> {
-    let path = path.replace('\\', "/");
-    let parts: Vec<&str> = path
-        .split('/')
-        .filter(|part| !part.is_empty() && *part != ".")
-        .collect();
-    if parts.is_empty()
-        || path.starts_with('/')
-        || path.get(1..2) == Some(":")
-        || parts.contains(&"..")
-        || parts.iter().any(|part| !files::normal_component(part))
-    {
-        return Err(format!(
-            "Invalid restore path {path:?}; use a workspace-relative path"
-        ));
-    }
-    Ok(parts.join("/"))
-}
-
-/// The paths a restore examines: selected paths with their recorded
-/// descendants, or every recorded path for a full restore.
-pub fn paths(store: &mut Store, request: &Request<'_>) -> Result<Vec<String>, String> {
-    store.refresh()?;
-    check_retained(&store.index, request.target)?;
-    if let Expected::At(seq) = request.expected {
-        check_retained(&store.index, seq)?;
-    }
-    match request.paths {
-        Some(paths) if request.exact => paths
-            .iter()
-            .map(|path| normalize(path))
-            .collect::<Result<std::collections::BTreeSet<_>, _>>()
-            .map(|paths| paths.into_iter().collect()),
-        Some(paths) => expand(&store.index, paths, request.target),
-        None if request.exact => Err("exact needs selected paths".into()),
-        None => Ok(store.index.paths.keys().cloned().collect()),
-    }
-}
-
 /// Restores `paths`, which the caller has leased.
 pub fn restore(
     store: &mut Store,
@@ -158,6 +126,9 @@ pub fn restore(
     store.transaction(durable, |transaction| {
         // Retention may have advanced since the paths were chosen.
         check_retained(transaction.index(), target)?;
+        if !request.preview {
+            recovery::enable(transaction)?;
+        }
         capture::observe_batches(&root, paths, policy.max_file_bytes, |observed| {
             for observed in observed {
                 let path = observed.path.clone();
@@ -165,10 +136,15 @@ pub fn restore(
                 let directory = matches!(observed.kind, Observation::Directory(_));
                 // A change found now is buffered, not yet in the index, and
                 // differs from every expectation, so it conflicts.
-                let recorded = capture::record(transaction, observed, &origin, 0)?;
+                let recorded = capture::record(transaction, observed, "external", 0)?;
                 let index = transaction.index();
                 let target_version = index.at(&path, target);
-                let target_state = target_version.map_or(State::Absent, |v| v.state.clone());
+                let Some(target_state) = target_state(index, target, &path) else {
+                    report
+                        .skipped
+                        .push((path, "not protected by this recovery point".into()));
+                    continue;
+                };
                 let current = index.current(&path);
                 let (current_state, current_seq) = match recorded {
                     Some(recorded) => (recorded.state, recorded.seq),
@@ -193,7 +169,8 @@ pub fn restore(
                     continue;
                 }
                 // Uncaptured states compare equal only as the same version.
-                let identical = target_version.is_some_and(|version| version.seq == current_seq);
+                let identical = !recovery_reference(index, target)
+                    && target_version.is_some_and(|version| version.seq == current_seq);
                 if identical || target_state.recoverable() && target_state.same(&current_state) {
                     report.unchanged += 1;
                     continue;
@@ -221,6 +198,7 @@ pub fn restore(
                 }
                 if !target_state.exists()
                     && target_version.is_none()
+                    && !recovery_reference(index, target)
                     && !created_after(index, &path, target)
                 {
                     report.skipped.push((
@@ -231,7 +209,7 @@ pub fn restore(
                 }
                 let (expected_seq, expected_state) = expectation(index, &path, target, request);
                 if !expected_state.same(&current_state)
-                    || !same_bytes(transaction.store, &expected_state, &current_state)
+                    || !same_bytes(transaction.store, &expected_state, &current_state)?
                 {
                     report.conflicts.push(Conflict {
                         path,
@@ -274,10 +252,22 @@ pub fn restore(
         "restore"
     };
     let operations = store.transaction(true, |transaction| {
-        report.before =
-            Some(transaction.point("restore-before", &reference(target), &origin, false));
+        let (group, snapshot) = recovery::begin_snapshot(
+            transaction,
+            &origin,
+            &format!("restore {}", reference(target)),
+        )?;
+        transaction.flush(false)?;
+        report.before = Some(snapshot);
         let mut operations = Vec::new();
         for planned in &plan {
+            recovery::add(
+                transaction,
+                group,
+                snapshot,
+                &planned.path,
+                &planned.current,
+            )?;
             let seq = transaction.seq();
             transaction.record(Record::Prepare(Prepare {
                 seq,
@@ -287,7 +277,7 @@ pub fn restore(
                 path: planned.path.clone(),
                 before: planned.current.clone(),
                 after: planned.target.clone(),
-                time: crate::sessions::now(),
+                time: crate::checkpoints::clock::now(),
             }));
             operations.push(seq);
         }
@@ -381,7 +371,7 @@ pub fn restore(
                     ))
                     .ok()
                     .map(|metadata| super::record::Stat::of(&metadata)),
-                    time: crate::sessions::now(),
+                    time: crate::checkpoints::clock::now(),
                     origin: origin.clone(),
                     operation: *operation,
                     discovery: Discovery::Known,
@@ -409,7 +399,7 @@ pub fn restore(
         transaction.record(Record::Event(Event {
             seq,
             origin: origin.clone(),
-            time: crate::sessions::now(),
+            time: crate::checkpoints::clock::now(),
             text: format!(
                 "{} {} path{} to {}; the previous state is saved as {}",
                 if kind == "restore" {
@@ -427,83 +417,6 @@ pub fn restore(
         Ok(after)
     })?);
     Ok(report)
-}
-
-fn check_retained(index: &Index, seq: u64) -> Result<(), String> {
-    if seq > index.latest() {
-        return Err(format!("{} does not exist yet", reference(seq)));
-    }
-    if !index.retained(seq) {
-        return Err(format!(
-            "{} is no longer retained; the oldest retained checkpoint is {}",
-            reference(seq),
-            reference(index.horizon)
-        ));
-    }
-    Ok(())
-}
-
-/// Complete coverage at `target` means every path existing then was already
-/// recorded, so a path first recorded later did not exist at `target`.
-fn created_after(index: &Index, path: &str, target: u64) -> bool {
-    index
-        .paths
-        .get(path)
-        .and_then(|versions| versions.first())
-        .is_some_and(|first| first.seq > target && index.coverage_at(target))
-}
-
-fn expectation(index: &Index, path: &str, target: u64, request: &Request<'_>) -> (u64, State) {
-    let at = |seq: u64| (seq, index.state_at(path, seq));
-    match request.expected {
-        Expected::At(seq) => at(seq),
-        Expected::Latest => at(index.latest()),
-        Expected::Own => index
-            .paths
-            .get(path)
-            .and_then(|versions| {
-                versions
-                    .iter()
-                    .rev()
-                    .find(|version| version.seq > target && version.origin == request.origin)
-            })
-            .map_or_else(
-                || at(target),
-                |version| (version.seq, version.state.clone()),
-            ),
-    }
-}
-
-fn same_bytes(store: &Store, a: &State, b: &State) -> bool {
-    match (a, b) {
-        (State::File { object: x, .. }, State::File { object: y, .. }) if x != y => {
-            store.objects_equal(*x, *y).unwrap_or(false)
-        }
-        _ => true,
-    }
-}
-
-/// Selected directories include their recorded descendants.
-fn expand(index: &Index, paths: &[String], target: u64) -> Result<Vec<String>, String> {
-    let mut expanded = std::collections::BTreeSet::new();
-    for path in paths {
-        let path = normalize(path)?;
-        let prefix = format!("{path}/");
-        for (candidate, versions) in index.paths.range(prefix.clone()..) {
-            if !candidate.starts_with(&prefix) {
-                break;
-            }
-            let visible = index
-                .at(candidate, target)
-                .is_some_and(|v| v.state.exists())
-                || versions.last().is_some_and(|v| v.state.exists());
-            if visible {
-                expanded.insert(candidate.clone());
-            }
-        }
-        expanded.insert(path);
-    }
-    Ok(expanded.into_iter().collect())
 }
 
 /// Delete descendants before replacing their parents; create directories

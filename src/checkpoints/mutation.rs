@@ -1,17 +1,18 @@
 //! Protection for changes made by tools. A file mutation durably records the
 //! path's previous state and the intended content before the tool writes; a
-//! command records a point before it runs and captures what it changed.
+//! command acquires declared scopes and observes only those scopes afterward.
 use super::capture;
 
 use super::identity;
 use super::locks::Lease;
 use super::record::{Outcome, Record, State};
 use super::scan::in_scope;
-use super::workspace::{Readiness, Workspace};
+use super::workspace::Workspace;
 use std::path::Path;
-use std::sync::Arc;
 
+mod command;
 mod preparation;
+pub use command::{Command, Completion};
 
 /// Whether a change can be reversed from the archive.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,10 +32,6 @@ pub enum Freshness {
     Current,
     /// The scope protects recorded paths and direct tool mutations.
     Selective(String),
-    /// The first capture is running; uncaptured paths cannot be restored yet.
-    Baseline(usize),
-    /// Offline changes are being reconciled; the point may miss some of them.
-    Reconciling(usize),
     /// The archive is unavailable; nothing before the command is saved.
     Unavailable(String),
 }
@@ -48,12 +45,24 @@ pub struct Mutation<'a> {
     /// Prepare sequence, previous state and intended state.
     prepared: Option<(u64, State, State)>,
     protection: Protection,
+    cancellation: crate::cancel::Cancellation,
 }
 
 impl Workspace {
     /// Starts protecting a change of one file. A path that cannot be
     /// protected still yields a mutation, so the tool proceeds regardless.
+    #[cfg(test)]
     pub fn mutation(&self, origin: &str, kind: &'static str, absolute: &Path) -> Mutation<'_> {
+        self.mutation_cancellable(origin, kind, absolute, &self.cancellation)
+    }
+
+    pub fn mutation_cancellable(
+        &self,
+        origin: &str,
+        kind: &'static str,
+        absolute: &Path,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> Mutation<'_> {
         let mut mutation = Mutation {
             workspace: self,
             origin: origin.into(),
@@ -62,13 +71,20 @@ impl Workspace {
             lease: None,
             prepared: None,
             protection: Protection::Unprotected("the change was not prepared".into()),
+            cancellation: cancellation.clone(),
         };
         let Some(path) = identity::relative(&self.root, absolute) else {
             mutation.protection = Protection::Excluded("outside the workspace".into());
             return mutation;
         };
         let policy = {
-            let store = self.store();
+            let store = match self.store_cancellable(cancellation) {
+                Ok(store) => store,
+                Err(error) => {
+                    mutation.protection = Protection::Unprotected(error);
+                    return mutation;
+                }
+            };
             let _ = super::lifecycle::touch_throttled(&store.workspace.directory);
             store.policy.clone()
         };
@@ -76,11 +92,7 @@ impl Workspace {
             mutation.protection = Protection::Excluded("excluded by the checkpoint scope".into());
             return mutation;
         }
-        if let Readiness::Failed(reason) = self.readiness() {
-            mutation.protection = Protection::Unprotected(reason);
-            return mutation;
-        }
-        match self.leases.acquire(&[&path]) {
+        match self.leases.acquire_cancellable(&[&path], cancellation) {
             Ok(lease) => mutation.lease = Some(lease),
             Err(error) => {
                 mutation.protection =
@@ -94,6 +106,13 @@ impl Workspace {
 }
 
 impl Mutation<'_> {
+    pub fn check_cancelled(&self) -> Result<(), String> {
+        if self.cancellation.requested() {
+            Err("Operation cancelled".into())
+        } else {
+            Ok(())
+        }
+    }
     /// Records the actual result and releases the path.
     pub fn finish(mut self, applied: bool) -> Protection {
         self.complete(applied);
@@ -107,6 +126,16 @@ impl Mutation<'_> {
         };
         let workspace = self.workspace;
         let path = self.path.clone().unwrap_or_default();
+        if self.cancellation.requested() {
+            // Leave the durable intent for recovery rather than rereading a
+            // large file or waiting behind a peer during interruption.
+            self.lease = None;
+            workspace.signals.update(|health| {
+                health.interrupted.insert(operation);
+                health.dirty.insert(path);
+            });
+            return;
+        }
         let mut store = workspace.store();
         // The prepared object is the exact content supplied to the tool. A
         // metadata match lets us record that object without processing it a
@@ -209,126 +238,5 @@ fn same_content(state: &State, intended: &State) -> bool {
         ) => length == expected && digest == wanted,
         (State::Oversized { length }, State::Oversized { length: expected }) => length == expected,
         _ => false,
-    }
-}
-
-/// A shell command's protection: the point before it and what it changed.
-pub struct Command {
-    workspace: Arc<Workspace>,
-    origin: String,
-    pub point: Result<u64, String>,
-    pub freshness: Freshness,
-    finished: bool,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CommandReport {
-    pub before: Option<u64>,
-    pub after: Option<u64>,
-    pub changed: Vec<String>,
-    pub error: Option<String>,
-}
-
-impl Workspace {
-    /// Brings the archive up to date and records the point before a command.
-    #[cfg(test)]
-    pub fn command(self: &Arc<Self>, origin: &str, text: &str) -> Command {
-        self.command_cancellable(origin, text, &crate::cancel::Cancellation::default())
-    }
-
-    pub fn command_cancellable(
-        self: &Arc<Self>,
-        origin: &str,
-        text: &str,
-        cancellation: &crate::cancel::Cancellation,
-    ) -> Command {
-        self.signals
-            .update(|health| health.bash.push(origin.to_string()));
-        let label: String = text.chars().take(120).collect();
-        // A shell command can overwrite paths we cannot predict. Preserve
-        // the settling window before it starts, as well as at completion;
-        // ordinary turn points need no such fixed delay.
-        let point = self.wait_ready_cancellable(cancellation).and_then(|()| {
-            if !self.polling() {
-                self.settle();
-            }
-            if cancellation.requested() {
-                return Err("Operation cancelled".into());
-            }
-            self.mark("command", &label, origin, false, true)
-        });
-        let freshness = match self.readiness() {
-            Readiness::Ready => self
-                .selective()
-                .map_or(Freshness::Current, Freshness::Selective),
-            Readiness::Starting => Freshness::Baseline(0),
-            Readiness::Baseline(count) => Freshness::Baseline(count),
-            Readiness::Reconciling(count) => Freshness::Reconciling(count),
-            Readiness::Failed(reason) => Freshness::Unavailable(reason),
-        };
-        let freshness = match &point {
-            Err(error) => Freshness::Unavailable(error.clone()),
-            Ok(_) => freshness,
-        };
-        Command {
-            workspace: Arc::clone(self),
-            origin: origin.into(),
-            point,
-            freshness,
-            finished: false,
-        }
-    }
-}
-
-impl Command {
-    /// Captures the command's changes and reports them.
-    pub fn finish(mut self) -> CommandReport {
-        let mut report = CommandReport {
-            before: self.point.as_ref().ok().copied(),
-            ..CommandReport::default()
-        };
-        // Filesystem observations do not identify the writer. Even during a
-        // command, another process may have changed any reported path.
-        if let Err(error) = self.workspace.catch_up_settled("external") {
-            report.error = Some(error);
-        }
-        self.release();
-        let Some(before) = report.before else {
-            report.error = self.point.as_ref().err().cloned();
-            return report;
-        };
-        let mut store = self.workspace.store();
-        if let Err(error) = store.refresh() {
-            report.error.get_or_insert(error);
-        }
-        let index = &store.index;
-        report.after = Some(index.latest());
-        let mut changed: Vec<String> = index
-            .changed_between(before, index.latest())
-            .into_iter()
-            .map(|version| version.path.clone())
-            .collect();
-        changed.sort();
-        changed.dedup();
-        report.changed = changed;
-        report
-    }
-
-    fn release(&mut self) {
-        if std::mem::replace(&mut self.finished, true) {
-            return;
-        }
-        let origin = &self.origin;
-        self.workspace.signals.update(|health| {
-            if let Some(position) = health.bash.iter().position(|running| running == origin) {
-                health.bash.remove(position);
-            }
-        });
-    }
-}
-
-impl Drop for Command {
-    fn drop(&mut self) {
-        self.release();
     }
 }

@@ -12,10 +12,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 // sessions::now() and persisted activity timestamps are Unix milliseconds.
+#[cfg(test)]
 const RETENTION_MILLIS: u64 = 7 * 24 * 60 * 60 * 1_000;
 const SWEEP_MILLIS: u64 = 60 * 60 * 1_000;
 static LAST_SWEEP: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
 static LAST_TOUCH: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+mod idle_gc;
 mod migration;
 
 pub struct Lease {
@@ -62,8 +64,12 @@ pub fn open(location: &Location) -> Result<Lease, String> {
             ));
         }
     }
-    if let Some(exclusive) = Exclusive::try_acquire(&lease_path(archive))
-        .map_err(|error| format!("Could not lock checkpoint lifecycle: {error}"))?
+    if (layout::version(archive) != Some(layout::VERSION)
+        || archive.join(".purging").exists()
+        || archive.join(".migrating").exists()
+        || expiry_pending_path(archive).exists())
+        && let Some(exclusive) = Exclusive::try_acquire(&lease_path(archive))
+            .map_err(|error| format!("Could not lock checkpoint lifecycle: {error}"))?
     {
         if let Err(error) = expire(archive)
             && (archive.join(".purging").exists()
@@ -76,7 +82,7 @@ pub fn open(location: &Location) -> Result<Lease, String> {
     }
     let held = Shared::acquire(&lease_path(archive))
         .map_err(|error| format!("Could not join checkpoint archive: {error}"))?;
-    if layout::version(archive) != Some(2) {
+    if layout::version(archive) != Some(layout::VERSION) {
         return Err("Checkpoint layout migration is waiting for older readers; close older sessions and retry".into());
     }
     // A sweeper may finish (or fail) between the nonblocking exclusive probe
@@ -95,7 +101,7 @@ pub fn open(location: &Location) -> Result<Lease, String> {
 pub fn touch(archive: &Path) -> Result<(), String> {
     let _lock = Exclusive::acquire(&archive.join("runtime/last-use.lock"))
         .map_err(|error| format!("Could not lock checkpoint activity: {error}"))?;
-    let now = crate::sessions::now();
+    let now = crate::checkpoints::clock::now();
     // A damaged activity timestamp must never block an explicit user session.
     // Its repair is a fresh activity event, while the sweeper fails closed.
     let previous = read_number(&last_use_path(archive))
@@ -117,7 +123,7 @@ pub fn touch(archive: &Path) -> Result<(), String> {
 /// User actions renew activity at most hourly per process. The durable time
 /// remains exact enough for a seven-day boundary without a write per edit.
 pub fn touch_throttled(archive: &Path) -> Result<(), String> {
-    let now = crate::sessions::now();
+    let now = crate::checkpoints::clock::now();
     let recent = LAST_TOUCH
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -145,22 +151,35 @@ pub fn sweep(archives: &Path) -> Result<usize, String> {
         if !ordinary_directory(&archive) || !super::identity::recognized_archive(&archive) {
             continue;
         }
+        // Background maintenance never upgrades a different project's history.
+        if layout::version(&archive) != Some(layout::VERSION) {
+            continue;
+        }
         let runtime = archive.join("runtime");
         if runtime.exists() && !ordinary_directory(&runtime) {
             continue;
         }
-        let Ok(Some(_lease)) = Exclusive::try_acquire(&lease_path(&archive)) else {
+        let Ok(Some(lease)) = Exclusive::try_acquire(&lease_path(&archive)) else {
             continue;
         };
-        if expire(&archive).unwrap_or(false) {
+        let Ok(expired) = expire(&archive) else {
+            continue;
+        };
+        let due = !expired && idle_gc::due(&archive);
+        drop(lease);
+        if expired {
             removed += 1;
+        } else if due {
+            // Collection joins the archive through a shared lease. Never
+            // open that Store while this sweep holds its exclusive lease.
+            let _ = idle_gc::collect(&archive);
         }
     }
     Ok(removed)
 }
 
 pub fn sweep_throttled(archives: &Path) -> Result<usize, String> {
-    let now = crate::sessions::now();
+    let now = crate::checkpoints::clock::now();
     {
         let mut swept = LAST_SWEEP
             .get_or_init(|| Mutex::new(HashMap::new()))
@@ -189,8 +208,11 @@ fn expire(archive: &Path) -> Result<bool, String> {
     if !ordinary_directory(archive) || !super::identity::recognized_archive(archive) {
         return Ok(false);
     }
-    let _store = Exclusive::acquire(&layout::store_lock(archive))
-        .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
+    let Some(_store) = Exclusive::try_acquire(&layout::store_lock(archive))
+        .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?
+    else {
+        return Ok(false);
+    };
     resume_interrupted_purge(archive)?;
     let observed = read_number(&last_use_path(archive))?;
     let last_use = if let Some(last_use) = observed {
@@ -198,7 +220,7 @@ fn expire(archive: &Path) -> Result<bool, String> {
     } else {
         // Old archives did not record user activity. Their first observation
         // starts a full grace period rather than guessing from file mtimes.
-        let now = crate::sessions::now();
+        let now = crate::checkpoints::clock::now();
         files::atomic_write(&last_use_path(archive), now.to_string().as_bytes())
             .map_err(|error| format!("Could not record checkpoint grace period: {error}"))?;
         now
@@ -208,7 +230,16 @@ fn expire(archive: &Path) -> Result<bool, String> {
     }
     // A process can coalesce user actions for one hour. Waiting that extra
     // hour prevents an action just before a crash from expiring early.
-    if crate::sessions::now().saturating_sub(last_use) < RETENTION_MILLIS + SWEEP_MILLIS {
+    let policy = super::policy::Policy::read_with_migration(archive)?
+        .map(|(policy, _)| policy)
+        .unwrap_or_default();
+    let Some(days) = policy.recovery_inactive_days else {
+        return Ok(false);
+    };
+    let retention = days.saturating_mul(24 * 60 * 60 * 1000);
+    if crate::checkpoints::clock::now().saturating_sub(last_use)
+        < retention.saturating_add(SWEEP_MILLIS)
+    {
         return Ok(false);
     }
     if !has_history(archive)? || old_owner_active(archive)? {
@@ -235,6 +266,9 @@ fn expire(archive: &Path) -> Result<bool, String> {
         || !journal.damage.is_empty()
         || journal.blocked.is_some()
     {
+        return Ok(false);
+    }
+    if idle_gc::held(&index, crate::checkpoints::clock::now()) {
         return Ok(false);
     }
     drop(journal);
@@ -274,7 +308,7 @@ fn ordinary_directory(path: &Path) -> bool {
 }
 
 fn has_history(archive: &Path) -> Result<bool, String> {
-    if layout::version(archive) == Some(2) {
+    if layout::version(archive).is_some_and(|version| version >= 2) {
         let path = layout::history(archive);
         return Ok(ordinary_directory(&path));
     }
@@ -350,7 +384,7 @@ fn old_owner_active(archive: &Path) -> Result<bool, String> {
 }
 
 fn remove_history(archive: &Path) -> Result<(), String> {
-    if layout::version(archive) == Some(2) {
+    if layout::version(archive).is_some_and(|version| version >= 2) {
         files::atomic_write(&expiry_pending_path(archive), b"1")
             .map_err(|error| format!("Could not mark checkpoint expiry: {error}"))?;
         finish_v2_purge(archive)?;
@@ -367,7 +401,7 @@ fn remove_history(archive: &Path) -> Result<(), String> {
 fn resume_interrupted_purge(archive: &Path) -> Result<(), String> {
     let pending = expiry_pending_path(archive);
     if pending.exists() {
-        if layout::version(archive) != Some(2) {
+        if layout::version(archive).is_none_or(|version| version < 2) {
             return Err("Checkpoint expiry marker has an unsupported layout".into());
         }
         let valid_marker = fs::symlink_metadata(&pending)

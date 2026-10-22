@@ -27,6 +27,7 @@ pub enum Kind {
     Event = 9,
     Coverage = 10,
     Moved = 11,
+    Recovery = 12,
 }
 
 impl Kind {
@@ -43,6 +44,7 @@ impl Kind {
             9 => Self::Event,
             10 => Self::Coverage,
             11 => Self::Moved,
+            12 => Self::Recovery,
             _ => return None,
         })
     }

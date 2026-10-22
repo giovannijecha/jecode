@@ -17,9 +17,13 @@ mod mutation;
 mod notices;
 pub(crate) mod process;
 mod recovery;
+mod redesign;
 mod restore;
+#[cfg(windows)]
+mod restore_aliases;
 #[cfg(unix)]
 mod restore_links;
+mod restore_normalization;
 mod restore_races;
 mod scope;
 mod selective;

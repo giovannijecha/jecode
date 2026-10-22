@@ -89,16 +89,6 @@ pub fn scan_full(
     reconcile(workspace, origin, verify, true, cancellation)
 }
 
-/// Explicit verification retries full discovery, so a workspace that was
-/// previously selective can regain whole-scope protection.
-pub fn discover(
-    workspace: &Workspace,
-    origin: &str,
-    cancellation: &crate::cancel::Cancellation,
-) -> Result<Summary, String> {
-    reconcile(workspace, origin, true, true, cancellation)
-}
-
 fn reconcile(
     workspace: &Workspace,
     origin: &str,
@@ -107,8 +97,8 @@ fn reconcile(
     cancellation: &crate::cancel::Cancellation,
 ) -> Result<Summary, String> {
     let (root, policy) = {
-        let mut store = workspace.store();
-        store.refresh()?;
+        let mut store = workspace.store_cancellable(cancellation)?;
+        store.refresh_cancellable(cancellation)?;
         workspace.observe_coverage(&store);
         store.counters.scans += 1;
         (store.workspace.root.clone(), store.policy.clone())
@@ -116,7 +106,7 @@ fn reconcile(
     workspace.signals.update(|health| {
         if health.scope != policy.id() {
             health.scope = policy.id();
-            health.selective = None;
+            health.selective = Some("on-demand recovery; only captured paths are protected".into());
             #[cfg(windows)]
             {
                 health.policy = policy.clone();
@@ -127,7 +117,7 @@ fn reconcile(
         return tracked(workspace, &policy, origin, verify, reason, cancellation);
     }
     let excluded = &workspace.excluded;
-    let walk = walk(&root, "", &policy, excluded);
+    let walk = super::inventory::walk_cancellable(&root, "", &policy, excluded, cancellation)?;
     if let Some(reason) = walk.limited {
         workspace.limit_scope(&reason)?;
         return tracked(workspace, &policy, origin, verify, reason, cancellation);
@@ -135,7 +125,7 @@ fn reconcile(
     workspace.signals.update(|health| health.selective = None);
     let mut candidates = Vec::new();
     {
-        let store = workspace.store();
+        let store = workspace.store_cancellable(cancellation)?;
         let mut seen = HashSet::with_capacity(walk.entries.len());
         for entry in &walk.entries {
             seen.insert(entry.path.as_str());
@@ -197,7 +187,7 @@ fn tracked(
     cancellation: &crate::cancel::Cancellation,
 ) -> Result<Summary, String> {
     let recorded: Vec<_> = {
-        let store = workspace.store();
+        let store = workspace.store_cancellable(cancellation)?;
         store
             .index
             .paths
@@ -273,22 +263,24 @@ pub fn capture_paths(
         let names: Vec<&str> = batch.iter().map(|(path, _)| path.as_str()).collect();
         let _lease = workspace
             .leases
-            .acquire(&names)
+            .acquire_cancellable(&names, cancellation)
             .map_err(|error| format!("Could not coordinate checkpoint capture: {error}"))?;
         let captured = capture::observe_batches(root, &names, policy.max_file_bytes, |observed| {
             if cancellation.requested() {
                 return Err("Checkpoint capture was cancelled".into());
             }
-            let changed = workspace.store().transaction(false, |transaction| {
-                let mut changed = Vec::new();
-                for observed in observed {
-                    let path = observed.path.clone();
-                    if let Some(recorded) = capture::record(transaction, observed, origin, 0)? {
-                        changed.push((path, recorded.seq));
+            let changed = workspace
+                .store_cancellable(cancellation)?
+                .transaction_cancellable(false, cancellation, |transaction| {
+                    let mut changed = Vec::new();
+                    for observed in observed {
+                        let path = observed.path.clone();
+                        if let Some(recorded) = capture::record(transaction, observed, origin, 0)? {
+                            changed.push((path, recorded.seq));
+                        }
                     }
-                }
-                Ok(changed)
-            })?;
+                    Ok(changed)
+                })?;
             summary.changed.extend(changed);
             Ok(())
         });

@@ -1,7 +1,8 @@
 //! Retention and compaction. When the archive outgrows its budget, history
 //! older than a horizon is released by copying what stays into a new
-//! generation. Pins, pending operations and the current state always stay;
-//! processes still reading the old generation keep it until they move on.
+//! generation. Targeted recovery keeps live before-images and metadata for
+//! current files; pins and pending operations keep their required objects.
+//! Processes still reading the old generation keep it until they move on.
 use super::frame::{HEADER, ObjectMeta};
 use super::identity::Location;
 use super::index::Index;
@@ -13,6 +14,8 @@ use super::store::{Store, Transaction};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+mod recovery;
+
 /// Start while a second generation still has room beside the first one.
 const TRIGGER_PERCENT: u64 = 40;
 const TARGET_PERCENT: u64 = 25;
@@ -20,13 +23,19 @@ const BATCH_BYTES: usize = 8 << 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Collection {
-    /// Oldest retained point; earlier unpinned history was released.
+    /// Legacy budget horizon; targeted recovery has independent deadlines.
     pub horizon: u64,
     pub before: u64,
     pub after: u64,
     pub generation: u64,
-    /// The current state and pins alone exceed the retention target.
+    /// Required recovery states, pins or pending writes exceed the target.
     pub over_budget: bool,
+}
+
+/// Time-based retention or accepted-group collapse needs a generation move
+/// even when the archive is well below its byte budget.
+pub fn due(index: &Index, now: u64) -> bool {
+    recovery::due(index, now)
 }
 
 /// Compacts the archive when it exceeds its budget, or always with `force`.
@@ -41,15 +50,19 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     let mut store = Store::open(location.clone())?;
     let before = store.journal.stored_bytes();
     let budget = store.policy.budget_bytes;
-    if !force && before <= budget / 100 * TRIGGER_PERCENT {
+    let expired = due(&store.index, crate::checkpoints::clock::now());
+    if !force && !expired && before <= budget / 100 * TRIGGER_PERCENT {
         return Ok(None);
     }
     let target = budget / 100 * TARGET_PERCENT;
     let horizon = choose(&store.index, target);
-    let (objects, projected) = retained(&store.index, horizon);
-    if !force && projected >= before {
+    let records = snapshot(&store.index, horizon);
+    let (objects, projected) = retained_records(&store.index, &records);
+    if !force && !expired && projected >= before {
         return Ok(None);
     }
+    // Compaction briefly needs a second generation beside the active one.
+    store.journal.ensure_scratch(projected)?;
     let old = store.journal.generation;
     let generation = old + 1;
     // A collection that crashed before finishing left an unused generation.
@@ -76,6 +89,7 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
         buffer: Vec::new(),
         bytes: 0,
     };
+    output.journal.min_free_bytes = store.policy.min_free_bytes;
     #[cfg(test)]
     let mut first = true;
     let copy = (|| {
@@ -86,8 +100,8 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
                 super::tests::process::stage("gc-first-object-copied");
             }
         }
-        for record in snapshot(&store.index, horizon) {
-            output.record(&record)?;
+        for record in &records {
+            output.record(record)?;
         }
         Ok::<(), String>(())
     })();
@@ -102,9 +116,7 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     }
     let copied = Copied {
         objects,
-        horizon,
         latest: store.index.latest(),
-        latest_point: store.index.points.keys().next_back().copied(),
         pins: store.index.pins.keys().copied().collect(),
     };
     let mut input = Journal::open_generation(directory, old)?;
@@ -140,9 +152,7 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
 /// What the snapshot copied, for checking the appends made meanwhile.
 struct Copied {
     objects: BTreeSet<u64>,
-    horizon: u64,
     latest: u64,
-    latest_point: Option<u64>,
     pins: BTreeSet<u64>,
 }
 
@@ -171,16 +181,16 @@ fn tail(
                 target,
                 pinned: true,
                 ..
-            }) if *target < copied.horizon
-                && !copied.pins.contains(target)
-                && copied.latest_point != Some(*target) =>
-            {
-                return Err("a released point was pinned during compaction; retry later".into());
+            }) if !copied.pins.contains(target) => {
+                return Err("a new pin was added during compaction; retry later".into());
             }
             Entry::Record(Record::Version(version)) => refer(&version.state, &mut missing),
             Entry::Record(Record::Prepare(prepare)) => {
                 refer(&prepare.before, &mut missing);
                 refer(&prepare.after, &mut missing);
+            }
+            Entry::Record(Record::Recovery(super::record::Recovery::Step { before, .. })) => {
+                refer(before, &mut missing)
             }
             Entry::Object(meta, _, chunks) => {
                 if let super::frame::Encoding::Delta { base, .. } = meta.encoding
@@ -291,7 +301,7 @@ fn marker(kind: &str, seq: u64) -> Record {
         kind: kind.into(),
         label: String::new(),
         origin: "retention".into(),
-        time: crate::sessions::now(),
+        time: crate::checkpoints::clock::now(),
         policy: 0,
         pinned: false,
     })
@@ -374,25 +384,36 @@ fn kept_versions(index: &Index, horizon: u64) -> Vec<&Version> {
 /// Objects needed by the kept versions and pending operations, with their
 /// delta bases, and their stored size.
 fn retained(index: &Index, horizon: u64) -> (BTreeSet<u64>, u64) {
+    let records = snapshot(index, horizon);
+    retained_records(index, &records)
+}
+
+fn retained_records(index: &Index, records: &[Record]) -> (BTreeSet<u64>, u64) {
     let mut objects = BTreeSet::new();
     let add = |state: &State, objects: &mut BTreeSet<u64>| {
         if let State::File { object, .. } = state {
             bases(index, *object, objects);
         }
     };
-    for version in kept_versions(index, horizon) {
-        add(&version.state, &mut objects);
-    }
-    for prepare in index.pending.values() {
-        add(&prepare.before, &mut objects);
-        add(&prepare.after, &mut objects);
+    for record in records {
+        match record {
+            Record::Version(version) => add(&version.state, &mut objects),
+            Record::Prepare(prepare) => {
+                add(&prepare.before, &mut objects);
+                add(&prepare.after, &mut objects);
+            }
+            Record::Recovery(super::record::Recovery::Step { before, .. }) => {
+                add(before, &mut objects);
+            }
+            _ => {}
+        }
     }
     let object_bytes: u64 = objects
         .iter()
         .filter_map(|id| index.objects.get(id))
         .map(|object| object.location.length + HEADER as u64)
         .sum();
-    let records: u64 = snapshot(index, horizon)
+    let record_bytes: u64 = records
         .iter()
         .map(|record| record.frame().len() as u64)
         .sum();
@@ -400,7 +421,7 @@ fn retained(index: &Index, horizon: u64) -> (BTreeSet<u64>, u64) {
     (
         objects,
         object_bytes
-            .saturating_add(records)
+            .saturating_add(record_bytes)
             .saturating_add(watermark),
     )
 }
@@ -425,6 +446,9 @@ fn bases(index: &Index, id: u64, objects: &mut BTreeSet<u64>) {
 
 /// Records of the new generation, in sequence order.
 fn snapshot(index: &Index, horizon: u64) -> Vec<Record> {
+    if index.recovery.mode.is_some() {
+        return recovery::snapshot(index, horizon, crate::checkpoints::clock::now());
+    }
     let mut anchors: Vec<u64> = index.pins.keys().copied().collect();
     let latest_point = index.points.keys().next_back().copied();
     if let Some(latest_point) = latest_point {

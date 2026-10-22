@@ -25,12 +25,14 @@ fn plain_checkpoint_commands_restore_without_a_provider_request() {
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
         bash: crate::tools::find_bash().unwrap(),
     };
-    let baseline = agent.checkpoints_command("list a.txt").unwrap().text();
-    let reference = baseline
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-        .rfind(|word| word.starts_with("cp-"))
-        .unwrap_or_else(|| panic!("{baseline}"))
-        .to_string();
+    let captured = agent.checkpoints_command("capture a.txt").unwrap();
+    let reference = captured
+        .details
+        .iter()
+        .find(|(key, _)| key == "before")
+        .unwrap_or_else(|| panic!("{}", captured.text()))
+        .1
+        .clone();
     fs::write(project.path().join("a.txt"), "two\n").unwrap();
 
     let mut input = Cursor::new(format!(

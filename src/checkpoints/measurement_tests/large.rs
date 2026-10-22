@@ -43,6 +43,7 @@ fn content_limit(recorder: &mut Recorder) {
         let (workspace, elapsed) = timed(|| {
             let workspace =
                 workspace::open(home.path(), root.path(), Options::interactive()).unwrap();
+            workspace.initialize().unwrap();
             ready(&workspace);
             workspace
         });
@@ -93,7 +94,7 @@ fn content_limit(recorder: &mut Recorder) {
     }
     recorder.add(
         ["large", "264 MiB initial capture", "total"],
-        "warm OS cache after fixture creation; time until readiness; three fresh archives",
+        "legacy explicit full scan; warm OS cache after fixture creation; three fresh archives",
         initial,
     );
 }
@@ -217,6 +218,7 @@ fn path_limit(recorder: &mut Recorder) {
         let (workspace, elapsed) = timed(|| {
             let workspace =
                 workspace::open(home.path(), root.path(), Options::interactive()).unwrap();
+            workspace.initialize().unwrap();
             ready(&workspace);
             workspace
         });
@@ -252,7 +254,7 @@ fn path_limit(recorder: &mut Recorder) {
     }
     recorder.add(
         ["large", "50,010 files initial capture", "total"],
-        "warm OS cache after fixture creation; time until readiness; three fresh archives",
+        "legacy explicit full scan; warm OS cache after fixture creation; three fresh archives",
         initial,
     );
 }

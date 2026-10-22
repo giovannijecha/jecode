@@ -2,12 +2,31 @@
 use super::policy::Policy;
 use super::record::Stat;
 use super::scan::{WORKERS, in_scope};
+use crate::cancel::Cancellation;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
+use std::time::Duration;
 
 const PATH_BYTES: u64 = 512;
+
+/// Reparse directories (including Windows junctions) are never traversed.
+pub fn ordinary_directory(metadata: &fs::Metadata) -> bool {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const REPARSE_POINT: u32 = 0x400;
+        metadata.file_attributes() & REPARSE_POINT == 0
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct Limits {
@@ -82,6 +101,23 @@ pub fn walk(root: &Path, start: &str, policy: &Policy, excluded: &[String]) -> W
     bounded(root, start, policy, excluded, Limits::for_policy(policy))
 }
 
+pub fn walk_cancellable(
+    root: &Path,
+    start: &str,
+    policy: &Policy,
+    excluded: &[String],
+    cancellation: &Cancellation,
+) -> Result<Walk, String> {
+    bounded_cancellable(
+        root,
+        start,
+        policy,
+        excluded,
+        Limits::for_policy(policy),
+        cancellation,
+    )
+}
+
 pub fn bounded(
     root: &Path,
     start: &str,
@@ -89,6 +125,26 @@ pub fn bounded(
     excluded: &[String],
     limits: Limits,
 ) -> Walk {
+    // The non-cancellable entry point is retained for existing callers.
+    bounded_cancellable(
+        root,
+        start,
+        policy,
+        excluded,
+        limits,
+        &Cancellation::default(),
+    )
+    .expect("an uncancelled inventory cannot be cancelled")
+}
+
+pub fn bounded_cancellable(
+    root: &Path,
+    start: &str,
+    policy: &Policy,
+    excluded: &[String],
+    limits: Limits,
+    cancellation: &Cancellation,
+) -> Result<Walk, String> {
     struct Queue {
         directories: Vec<String>,
         active: usize,
@@ -113,6 +169,9 @@ pub fn bounded(
                     let directory = {
                         let mut state = queue.lock().unwrap_or_else(|e| e.into_inner());
                         loop {
+                            if cancellation.requested() {
+                                budget.stopped.store(3, Ordering::Relaxed);
+                            }
                             if budget.stopped.load(Ordering::Relaxed) != 0 {
                                 break None;
                             }
@@ -123,14 +182,25 @@ pub fn bounded(
                             if state.active == 0 {
                                 break None;
                             }
-                            state = ready.wait(state).unwrap_or_else(|e| e.into_inner());
+                            state = ready
+                                .wait_timeout(state, Duration::from_millis(50))
+                                .unwrap_or_else(|e| e.into_inner())
+                                .0;
                         }
                     };
                     let Some(directory) = directory else {
                         ready.notify_all();
                         break;
                     };
-                    let found = read(root, &directory, policy, excluded, &budget, &mut local);
+                    let found = read(
+                        root,
+                        &directory,
+                        policy,
+                        excluded,
+                        &budget,
+                        cancellation,
+                        &mut local,
+                    );
                     let mut state = queue.lock().unwrap_or_else(|e| e.into_inner());
                     state.directories.extend(found);
                     state.active -= 1;
@@ -145,6 +215,9 @@ pub fn bounded(
             });
         }
     });
+    if cancellation.requested() || budget.stopped.load(Ordering::Relaxed) == 3 {
+        return Err("Checkpoint capture was cancelled".into());
+    }
     let mut walk = results.into_inner().unwrap_or_else(|e| e.into_inner());
     walk.entries.sort_by(|a, b| a.path.cmp(&b.path));
     walk.limited = match budget.stopped.load(Ordering::Relaxed) {
@@ -155,7 +228,7 @@ pub fn bounded(
         )),
         _ => None,
     };
-    walk
+    Ok(walk)
 }
 
 fn read(
@@ -164,15 +237,29 @@ fn read(
     policy: &Policy,
     excluded: &[String],
     budget: &Budget,
+    cancellation: &Cancellation,
     walk: &mut Walk,
 ) -> Vec<String> {
     let mut found = Vec::new();
+    if !directory.is_empty()
+        && (super::files::confined_parent(root, directory).is_err()
+            || !fs::symlink_metadata(super::identity::absolute(root, directory))
+                .is_ok_and(|metadata| ordinary_directory(&metadata)))
+    {
+        walk.unreadable += 1;
+        walk.unreadable_dirs.push(directory.into());
+        return found;
+    }
     let Ok(entries) = fs::read_dir(super::identity::absolute(root, directory)) else {
         walk.unreadable += 1;
         walk.unreadable_dirs.push(directory.into());
         return found;
     };
     for entry in entries {
+        if cancellation.requested() {
+            budget.stopped.store(3, Ordering::Relaxed);
+            break;
+        }
         if !budget.visit() {
             break;
         }
@@ -200,12 +287,15 @@ fn read(
             format!("{directory}/{name}")
         };
         let kind = entry.file_type();
-        let directory = kind.as_ref().is_ok_and(|kind| kind.is_dir());
+        let metadata = fs::symlink_metadata(entry.path());
+        let directory = kind
+            .as_ref()
+            .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
+            && metadata.as_ref().is_ok_and(ordinary_directory);
         if !in_scope(policy, excluded, &path, directory) {
             walk.excluded += 1;
             continue;
         }
-        let metadata = entry.metadata();
         let stat = metadata.as_ref().map_or(Stat::default(), Stat::of);
         let length = if !directory
             && !kind.as_ref().is_ok_and(|kind| kind.is_symlink())
@@ -237,4 +327,19 @@ fn read(
         });
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancelled_walk_returns_no_partial_inventory() {
+        let root = crate::test_support::Directory::new();
+        std::fs::create_dir(root.path().join("nested")).unwrap();
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        let result = walk_cancellable(root.path(), "", &Policy::default(), &[], &cancellation);
+        assert!(result.err().unwrap().contains("cancelled"));
+    }
 }

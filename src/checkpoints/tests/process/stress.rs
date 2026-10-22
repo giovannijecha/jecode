@@ -2,7 +2,8 @@
 use super::{HOME, MODE, ROOT};
 use crate::checkpoints::identity;
 use crate::checkpoints::mutation::Protection;
-use crate::checkpoints::record::{Outcome, State};
+use crate::checkpoints::record::{Discovery, Outcome, Record, State, Version};
+use crate::checkpoints::recovery;
 use crate::checkpoints::restore::Expected;
 use crate::checkpoints::store::Store;
 use crate::checkpoints::workspace::{self, Options};
@@ -72,8 +73,19 @@ pub(super) fn child(home: &Path, root: &Path, mode: &str) {
                 Protection::Protected { .. }
             ));
         }
+        // The durable marker proves the collector copied this writer's tail.
+        // A milestone would wait for the collector's GC lock at this stage.
         workspace
-            .mark("milestone", mode, mode, false, false)
+            .store()
+            .transaction(true, |transaction| {
+                Ok(transaction.point("turn", mode, mode, false))
+            })
+            .unwrap();
+        return;
+    }
+    if mode == "stress-milestone" {
+        workspace
+            .mark("milestone", "stress-milestone", mode, false, false)
             .unwrap();
         return;
     }
@@ -175,6 +187,77 @@ impl Drop for Session {
     }
 }
 
+#[test]
+fn collection_waits_until_a_materialized_milestone_is_durable() {
+    let fixture = super::super::Fixture::new();
+    fixture.write("a.txt", b"exact bytes");
+    let workspace = fixture.open();
+    let state = workspace.store().index.current_state("a.txt");
+    workspace
+        .store()
+        .transaction(true, |transaction| {
+            recovery::enable(transaction)?;
+            let seq = transaction.seq();
+            transaction.record(Record::Version(Version {
+                seq,
+                path: "a.txt".into(),
+                state,
+                stat: None,
+                time: crate::checkpoints::clock::now(),
+                origin: "test".into(),
+                operation: 0,
+                discovery: Discovery::Known,
+            }));
+            Ok(())
+        })
+        .unwrap();
+    workspace.collect(true).unwrap().unwrap();
+    assert!(matches!(
+        workspace.store().index.current_state("a.txt"),
+        State::UnretainedFile { .. }
+    ));
+    drop(workspace);
+
+    let mut child = Session::spawn(&fixture, "stress-milestone", Some("milestone-captured"), 0);
+    child.ready(&fixture, "milestone-captured");
+    let location = identity::locate(fixture.home.path(), fixture.root.path(), false)
+        .unwrap()
+        .unwrap();
+    let observed = Store::open(location.clone()).unwrap();
+    assert!(matches!(
+        observed.index.current_state("a.txt"),
+        State::File { .. }
+    ));
+    drop(observed);
+    assert!(
+        crate::checkpoints::gc::collect(&location, true)
+            .unwrap()
+            .is_none()
+    );
+    fs::write(
+        marker(fixture.home.path(), "milestone-captured", "release"),
+        b"go",
+    )
+    .unwrap();
+    child.finish();
+
+    crate::checkpoints::gc::collect(&location, true)
+        .unwrap()
+        .unwrap();
+    let store = Store::open(location).unwrap();
+    let point = store
+        .index
+        .points
+        .values()
+        .find(|point| point.label == "stress-milestone")
+        .unwrap();
+    assert!(store.index.retained(point.seq));
+    let State::File { object, .. } = store.index.state_at("a.txt", point.seq) else {
+        panic!("milestone lost its materialized file")
+    };
+    assert_eq!(&*store.bytes(object).unwrap(), b"exact bytes");
+}
+
 fn assert_bytes(fixture: &super::super::Fixture, initial: &[bool; 4]) {
     for (number, initial) in initial.iter().enumerate() {
         assert_eq!(
@@ -252,8 +335,8 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore() {
         (old_generation + 1).to_string()
     );
     assert!(
-        reopened.index.horizon > baseline,
-        "collection pruned old revisions"
+        reopened.index.horizon >= baseline,
+        "active recovery groups may retain the oldest protected revision"
     );
     assert!(reopened.index.pins.contains_key(&baseline));
     assert!(reopened.index.pending.is_empty());
@@ -266,11 +349,17 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore() {
     );
     for number in 0..4 {
         let version = reopened.index.current(&file(number)).unwrap();
-        let State::File { object, .. } = &version.state else {
-            panic!("writer {number} has no stored file");
-        };
         let expected = bytes(number, false);
-        assert_eq!(&reopened.bytes(*object).unwrap()[..], expected.as_slice());
+        match &version.state {
+            State::File { object, .. } => {
+                assert_eq!(&reopened.bytes(*object).unwrap()[..], expected.as_slice())
+            }
+            State::UnretainedFile { length, digest, .. } => {
+                assert_eq!(*length, expected.len() as u64);
+                assert_eq!(*digest, crate::checkpoints::hash::digest(&expected));
+            }
+            other => panic!("writer {number} has no file metadata: {other:?}"),
+        }
     }
     assert_bytes(&fixture, &[false; 4]);
     drop(reopened);
@@ -301,7 +390,10 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore() {
     let before = index
         .points
         .values()
-        .find(|point| point.kind == "restore-before")
+        .find(|point| {
+            point.kind == crate::checkpoints::recovery::SNAPSHOT_KIND
+                && point.label.starts_with("restore ")
+        })
         .unwrap()
         .seq;
     reopened

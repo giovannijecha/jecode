@@ -12,7 +12,8 @@ use std::sync::Arc;
 pub const USAGE: &str = "\
 status                              archive state, limits and activity
 list [PATH...] [--limit N]          points, or the recorded versions of paths
-capture PATH...                     save explicit file paths before Bash
+capture PATH...                     save files or recursive directories before Bash
+accept [cp-N]                       accept an attempt; retain its initial states up to 24h
 inspect cp-N [PATH...]              a point and what restoring it would change
 show cp-N PATH                      a path's recorded content
 milestone LABEL [--pin]             record a named point
@@ -135,13 +136,16 @@ pub fn parse(words: &[String]) -> Result<Parsed, String> {
                 Value::Array(rest.into_iter().map(Value::string).collect()),
             ));
         }
+        "accept" if rest.len() == 1 => {
+            fields.push(("ref", Value::string(rest[0])));
+        }
         "milestone" | "pin" if !rest.is_empty() => {
             fields.push(("label", Value::string(rest.join(" "))));
         }
         "milestone" => return Err("milestone needs a label".into()),
-        "capture" => return Err("capture needs explicit file paths".into()),
+        "capture" => return Err("capture needs file or directory paths".into()),
         "status" | "list" | "inspect" | "restore" | "restore_all" | "pin" | "unpin" | "config"
-        | "gc" | "verify" => {
+        | "gc" | "verify" | "accept" => {
             if let Some(word) = rest.first() {
                 return Err(format!("Unexpected {word:?} after {action}"));
             }
@@ -262,13 +266,6 @@ pub fn offline(home: &Path, root: &Path, words: &[String]) -> Result<Output, Str
         return Ok(help("jecode checkpoints"));
     }
     let workspace = workspace::open(home, root, Options::offline())?;
-    // Commands that compare with the workspace first reconcile it.
-    if !matches!(
-        action,
-        "status" | "list" | "show" | "pin" | "unpin" | "config" | "gc" | "capture"
-    ) {
-        workspace.initialize()?;
-    }
     execute(&workspace, "cli", words, "jecode checkpoints")
 }
 

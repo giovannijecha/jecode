@@ -98,10 +98,10 @@ fits the task. `/skills` lists the library without making a model request.
 
 Jecode keeps a private local history of your project's files in
 [checkpoints](docs/usage/CHECKPOINTS.md). It saves a file's previous state
-before `write` and `edit` change it, records a point before each turn and Bash
-command, and captures changes made by commands, editors and other sessions.
-You or the model can inspect and restore any recorded point; restores can be
-undone.
+before `write` and `edit` change it. Bash saves declared files and recursive
+directories through `protect`; use `"."` to opt into the whole eligible
+workspace. Startup and turns do not scan the project. You or the model can
+inspect and restore saved states; restores can be undone.
 
 Conversations autosave under `~/.jecode/sessions/`. To resume, run
 `jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)
@@ -143,7 +143,7 @@ The [documentation index](docs/README.md) links the usage guides and technical r
 
 - [Configuration](docs/usage/CONFIGURATION.md): models, effort, routing and environment overrides.
 - [Tools](docs/usage/TOOLS.md): file operations, foreground commands and persistent processes.
-- [Checkpoints](docs/usage/CHECKPOINTS.md): automatic file history, restores, scope and storage.
+- [Checkpoints](docs/usage/CHECKPOINTS.md): on-demand recovery, restores, scope and storage.
 - [Attachments](docs/usage/ATTACHMENTS.md), [copy](docs/usage/COPY.md) and [export](docs/usage/EXPORT.md).
 - [Architecture](docs/development/ARCHITECTURE.md) and [development checks](docs/development/TESTING.md).
 

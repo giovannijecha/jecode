@@ -22,11 +22,19 @@ fn checkpoint(tools: &Tools, fields: &[(&str, Value)]) -> Value {
 }
 
 fn mark(bench: &Bench) -> String {
-    let seq = bench
-        .workspace()
-        .mark("turn", "measure", "measure", false, false)
-        .unwrap();
-    reference(seq)
+    mark_as(bench, "measure")
+}
+
+fn mark_as(bench: &Bench, origin: &str) -> String {
+    let captured = super::super::scopes::capture(
+        bench.workspace(),
+        &[".".into()],
+        origin,
+        &crate::cancel::Cancellation::default(),
+    )
+    .unwrap();
+    assert!(captured.partial.is_empty(), "{:?}", captured.partial);
+    reference(captured.snapshot.unwrap())
 }
 
 /// 100 distinct revisions of one 40 KiB file, each a small change.
@@ -41,11 +49,21 @@ fn history(bench: &Bench) -> Vec<String> {
                 ("path", Value::string("h/history.rs")),
                 ("content", Value::string(&content)),
             ];
-            let result = call(tools, "write", &fields);
-            let after = result
-                .get("checkpoint")
-                .and_then(|value| value.get("after"));
-            after.and_then(Value::as_str).unwrap().to_string()
+            call(tools, "write", &fields);
+            // Tool after-images are raw observations in targeted mode; name a
+            // retained point for historical navigation and reconstruction.
+            reference(
+                bench
+                    .workspace()
+                    .mark(
+                        "milestone",
+                        &format!("revision {revision}"),
+                        "measure",
+                        false,
+                        false,
+                    )
+                    .unwrap(),
+            )
         })
         .collect()
 }
@@ -173,7 +191,16 @@ fn restores(recorder: &mut Recorder, bench: &Bench) {
     let workflow = "recovery";
     let tools = &bench.tools[1];
     let tree = &bench.trees[1];
-    let note = "checkpoint tool restore; saves the current state, then installs";
+    let note = "explicit full-scope preimage captured outside timer; checkpoint tool restore saves current state, then installs";
+    let covered = super::super::scopes::capture(
+        bench.workspace(),
+        &[".".into()],
+        "measure",
+        &crate::cancel::Cancellation::default(),
+    )
+    .unwrap();
+    assert!(covered.partial.is_empty(), "{:?}", covered.partial);
+    assert!(covered.saved >= tree.files.len());
     // Changes below come from outside this conversation, so restores replace
     // the latest state, as a user would; the conflict case keeps the default.
     let restore_with = |target: &str, paths: Option<&[String]>, latest: bool| {
@@ -232,6 +259,11 @@ fn restores(recorder: &mut Recorder, bench: &Bench) {
                 .and_then(Value::as_str)
                 .unwrap()
                 .to_string();
+            let back_seq = crate::checkpoints::index::parse_reference(&back).unwrap();
+            assert!(
+                bench.workspace().store().index.retained(back_seq),
+                "undo snapshot {back} is not retained",
+            );
             // As before the restore, notifications of the last writes have
             // settled; otherwise a point waits 30 ms for them to stop.
             std::thread::sleep(Duration::from_millis(100));
@@ -328,7 +360,7 @@ fn restores(recorder: &mut Recorder, bench: &Bench) {
             ],
         );
         tree.write(relative, b"theirs\n");
-        mark(bench);
+        mark_as(bench, "external");
         let (result, time) = timed(|| restore_with(&target, Some(&path), false));
         assert!(result.get("conflicts").is_some(), "{result:?}");
         conflict.push(time);

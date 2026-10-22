@@ -333,11 +333,28 @@ type Case = (&'static str, fn(usize) -> String);
 
 fn bash(recorder: &mut Recorder, bench: &Bench) {
     let workflow = "bash";
-    let note = "foreground bash tool call; process start dominates the baseline";
-    let run = |tools: &Tools, command: String| {
-        let result = call(tools, "bash", &[("command", Value::string(command))]);
+    let note = "foreground bash tool call; checkpoint side declares exact file or recursive directory protection";
+    let run = |tools: &Tools, command: String, protect: &[&str]| {
+        let fields = [
+            ("command", Value::string(command)),
+            (
+                "protect",
+                Value::Array(protect.iter().copied().map(Value::string).collect()),
+            ),
+        ];
+        let result = call(tools, "bash", &fields);
         let code = result.get("exit_code").and_then(Value::as_usize);
         assert_eq!(code, Some(0), "{result:?}");
+        if tools.checkpoints().is_some() && !protect.is_empty() {
+            assert_eq!(
+                result
+                    .get("checkpoint")
+                    .and_then(|checkpoint| checkpoint.get("status"))
+                    .and_then(Value::as_str),
+                Some("saved"),
+                "{result:?}"
+            );
+        }
     };
     bench.prepare("out/ra.txt", b"rename\n");
     bench.prepare("out/d.txt", b"delete\n");
@@ -364,6 +381,14 @@ fn bash(recorder: &mut Recorder, bench: &Bench) {
         }),
     ];
     for (case, command) in cases {
+        let protect: &[&str] = match case {
+            "read-only command" => &[],
+            "one changed file" => &["out/one.txt"],
+            "100 changed files" => &["out/m/"],
+            "rename a file" => &["out/ra.txt", "out/rb.txt"],
+            "delete or create a file" => &["out/d.txt"],
+            _ => unreachable!(),
+        };
         bench.measure(
             recorder,
             [workflow, case],
@@ -371,7 +396,7 @@ fn bash(recorder: &mut Recorder, bench: &Bench) {
             samples,
             Duration::ZERO,
             |tools, _, sample| {
-                run(tools, command(sample));
+                run(tools, command(sample), protect);
             },
         );
     }
@@ -379,7 +404,7 @@ fn bash(recorder: &mut Recorder, bench: &Bench) {
     bench.captured("out/m/100.txt");
     let samples = recorder.count(10);
     bench.measure(recorder, [workflow, "burst of 1,000 changed files"], note, samples, Duration::ZERO, |tools, _, sample| {
-        run(tools, format!("mkdir -p out/b && for i in $(seq 1 1000); do printf 'v{sample}' > out/b/$i.txt; done"));
+        run(tools, format!("mkdir -p out/b && for i in $(seq 1 1000); do printf 'v{sample}' > out/b/$i.txt; done"), &["out/b/"]);
     });
     bench.captured("out/b/1000.txt");
 }
@@ -398,6 +423,8 @@ fn background(recorder: &mut Recorder, bench: &Bench) {
             ("command", Value::string(command)),
             ("wait_ms", Value::number(0)),
         ];
+        let mut fields = fields.to_vec();
+        fields.push(("protect", Value::Array(vec![Value::string("out/bg/")])));
         call(tools, "bash", &fields);
         let last = tree.path("out/bg/20.txt");
         let started = Instant::now();

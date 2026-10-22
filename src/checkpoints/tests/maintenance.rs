@@ -42,7 +42,7 @@ fn idle_reader_follows_a_move_and_releases_the_old_generation() {
 }
 
 #[test]
-fn a_new_point_retries_collection_without_tenth_budget_growth() {
+fn a_new_point_below_the_trigger_does_not_repeat_collection() {
     let fixture = Fixture::new();
     // Baseline this file under the normal budget. The small test budget below
     // intentionally limits discovery of *new* large paths.
@@ -73,8 +73,8 @@ fn a_new_point_retries_collection_without_tenth_budget_growth() {
         .clone()
         .unwrap()
         .unwrap();
-    assert!(second.generation > first.generation);
-    assert!(second.after < second.before, "{second:?}");
+    assert_eq!(second.generation, first.generation);
+    assert!(workspace.store().journal.stored_bytes() < first.after + (1 << 20) / 10);
 }
 
 #[test]

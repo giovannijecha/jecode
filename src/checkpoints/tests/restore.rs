@@ -274,6 +274,7 @@ fn scope_and_limits_classify_paths_without_reading_ignore_files() {
 
     // Raising the limit captures the file without another change.
     reopened.configure(None, Some(8192), "test").unwrap();
+    reopened.verify().unwrap();
     reopened
         .mark("milestone", "raised", "test", false, false)
         .unwrap();

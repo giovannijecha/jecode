@@ -5,13 +5,15 @@ use super::files;
 use super::frame::{self, HEADER, Kind, ObjectMeta};
 use super::layout;
 use super::locks::Shared;
+use super::pressure::{self, Pressure};
 use super::quota;
 use super::record::Record;
+use crate::cancel::Cancellation;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub const SEGMENT_LIMIT: u64 = 64 << 20;
 
@@ -31,6 +33,8 @@ pub enum Entry {
 
 pub struct Journal {
     archive: PathBuf,
+    pressure: Arc<Pressure>,
+    pub min_free_bytes: u64,
     pub generation: u64,
     _generation: Shared,
     segment: u64,
@@ -52,7 +56,6 @@ pub struct Journal {
     pub fault: Option<String>,
     #[cfg(test)]
     pub sync_fault: Option<String>,
-    #[cfg(test)]
     pub quota_limit: u64,
 }
 
@@ -129,6 +132,8 @@ impl Journal {
         }
         Ok(Self {
             archive: archive.to_path_buf(),
+            pressure: pressure::for_archive(archive)?,
+            min_free_bytes: pressure::DEFAULT_MIN_FREE_BYTES,
             generation,
             _generation: lock,
             segment: 1,
@@ -143,7 +148,6 @@ impl Journal {
             fault: None,
             #[cfg(test)]
             sync_fault: None,
-            #[cfg(test)]
             quota_limit: u64::MAX,
         })
     }
@@ -154,7 +158,18 @@ impl Journal {
 
     /// Replays frames appended since the last call, by any process.
     pub fn catch_up(&mut self, apply: &mut dyn FnMut(Entry)) -> Result<(), String> {
+        self.catch_up_cancellable(apply, &crate::cancel::Cancellation::default())
+    }
+
+    pub fn catch_up_cancellable(
+        &mut self,
+        apply: &mut dyn FnMut(Entry),
+        cancellation: &crate::cancel::Cancellation,
+    ) -> Result<(), String> {
         loop {
+            if cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
             let file = match self.follower.take() {
                 Some((segment, file)) if segment == self.segment => file,
                 _ => match File::open(self.segment_path(self.segment)) {
@@ -170,7 +185,7 @@ impl Journal {
                 .map_err(|error| format!("Could not read checkpoint journal: {error}"))?
                 .len();
             if self.offset < length {
-                self.replay(&file, length, apply)?;
+                self.replay(&file, length, apply, cancellation)?;
             }
             if self.offset >= length && self.segment_path(self.segment + 1).exists() {
                 self.sealed_bytes = self.sealed_bytes.saturating_add(length);
@@ -190,11 +205,15 @@ impl Journal {
         file: &File,
         length: u64,
         apply: &mut dyn FnMut(Entry),
+        cancellation: &crate::cancel::Cancellation,
     ) -> Result<(), String> {
         let io = |error: std::io::Error| format!("Could not read checkpoint journal: {error}");
         let mut reader = BufReader::with_capacity(256 * 1024, file);
         reader.seek(SeekFrom::Start(self.offset)).map_err(io)?;
         while self.offset < length {
+            if cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
             let remaining = length - self.offset;
             let mut bytes = [0u8; HEADER];
             if remaining < HEADER as u64 {
@@ -351,7 +370,7 @@ impl Journal {
     /// Appends frames after `catch_up`. Returns the segment and offset of the
     /// first byte. Durable appends reach stable storage before returning.
     pub fn append(&mut self, bytes: &[u8], durable: bool) -> Result<(u64, u64), String> {
-        self.append_checked(bytes, durable, false, false, None)
+        self.append_checked(bytes, durable, false, false, None, None)
     }
 
     /// `used` is measured under the store lock and updated after each
@@ -363,8 +382,24 @@ impl Journal {
         reserved: bool,
         metadata_only: bool,
         used: quota::Usage,
+        cancellation: Option<&Cancellation>,
     ) -> Result<(u64, u64), String> {
-        self.append_checked(bytes, durable, reserved, metadata_only, Some(used))
+        self.append_checked(
+            bytes,
+            durable,
+            reserved,
+            metadata_only,
+            Some(used),
+            cancellation,
+        )
+    }
+
+    /// Verifies space for the retained generation before compaction creates it.
+    /// The append guard still checks each batch as concurrent writes may extend
+    /// the old generation after this estimate.
+    pub fn ensure_scratch(&self, projected: u64) -> Result<(), String> {
+        self.pressure
+            .ensure_scratch(&self.archive, projected, self.min_free_bytes)
     }
 
     fn append_checked(
@@ -374,15 +409,13 @@ impl Journal {
         reserved: bool,
         metadata_only: bool,
         used: Option<quota::Usage>,
+        cancellation: Option<&Cancellation>,
     ) -> Result<(u64, u64), String> {
         #[cfg(test)]
         if let Some(fault) = &self.fault {
             return Err(fault.clone());
         }
-        #[cfg(test)]
         let limit = self.quota_limit;
-        #[cfg(not(test))]
-        let limit = u64::MAX;
         if limit != u64::MAX {
             match used {
                 Some(used) => quota::admit_generation(
@@ -396,6 +429,16 @@ impl Journal {
             }
         }
         frame::validate_lengths(bytes)?;
+        self.pressure.claim(
+            &self.archive,
+            bytes.len() as u64,
+            if reserved && metadata_only && bytes.len() as u64 <= quota::RESERVE {
+                0
+            } else {
+                self.min_free_bytes
+            },
+            cancellation,
+        )?;
         let io = |error: std::io::Error| format!("Could not write checkpoint journal: {error}");
         // The damaged bytes stay for inspection; appending after them would
         // hide the new frames from every reader.

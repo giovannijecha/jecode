@@ -9,16 +9,29 @@ use std::time::Duration;
 #[cfg(all(test, windows))]
 mod windows_tests;
 
+pub(super) struct Context<'a> {
+    pub bash: &'a Path,
+    pub root: &'a Path,
+    pub outputs: &'a crate::output::Store,
+    pub temporary: Option<&'a Path>,
+    pub processes: &'a super::processes::Registry,
+}
+
 pub(super) fn execute(
-    bash: &Path,
-    root: &Path,
+    context: Context<'_>,
     arguments: &Value,
     cancellation: &Cancellation,
-    outputs: &crate::output::Store,
-    temporary: Option<&Path>,
-    processes: &super::processes::Registry,
+    completion: Option<crate::checkpoints::session::Completion>,
 ) -> Result<Value, String> {
+    let Context {
+        bash,
+        root,
+        outputs,
+        temporary,
+        processes,
+    } = context;
     let text = required_string(arguments, "command")?;
+    let _ = protect_paths(arguments)?;
     if text.trim().is_empty() {
         return Err("command must not be empty".into());
     }
@@ -55,7 +68,17 @@ pub(super) fn execute(
             cancellation,
             [logs.stdout, logs.stderr],
         ) {
-            Ok(started) => processes.adopt(text, streams, started, timeout, wait, cancellation),
+            Ok(started) => processes.adopt(
+                text,
+                streams,
+                started,
+                super::processes::Adoption {
+                    timeout,
+                    wait,
+                    cancellation,
+                    completion,
+                },
+            ),
             Err(error) if !error.started => Err(error.message),
             Err(error) => Ok(unknown_outcome(
                 &error.message,
@@ -99,6 +122,25 @@ pub(super) fn execute(
         ("stderr_file", Value::string(stderr_ref)),
         ("capture", Value::string("tail")),
     ]))
+}
+
+/// Declared workspace names whose preimages Bash may need. Command text is
+/// never parsed to guess write effects.
+pub(super) fn protect_paths(arguments: &Value) -> Result<Vec<String>, String> {
+    let Some(value) = arguments.get("protect") else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_array()
+        .ok_or("protect must be a list of workspace paths")?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "protect must contain only workspace paths".to_string())
+        })
+        .collect()
 }
 
 fn unknown_outcome(message: &str, [stdout_ref, stderr_ref]: [String; 2]) -> Value {
@@ -189,14 +231,20 @@ mod tests {
         arguments: &Value,
         cancellation: &Cancellation,
     ) -> Result<Value, String> {
+        let outputs =
+            crate::output::Store::new(root.join("logs"), crate::redact::Redactor::empty());
+        let processes = crate::tools::processes::Registry::default();
         super::execute(
-            bash,
-            root,
+            Context {
+                bash,
+                root,
+                outputs: &outputs,
+                temporary: None,
+                processes: &processes,
+            },
             arguments,
             cancellation,
-            &crate::output::Store::new(root.join("logs"), crate::redact::Redactor::empty()),
             None,
-            &crate::tools::processes::Registry::default(),
         )
     }
 
@@ -261,7 +309,11 @@ mod tests {
         let started = Instant::now();
         let result = run(directory.path(), "printf 'started'; sleep 10", 1);
         assert!(started.elapsed() < Duration::from_secs(6));
-        assert_eq!(result.get("stdout").unwrap().as_str(), Some("started"));
+        assert_eq!(
+            result.get("stdout").and_then(Value::as_str),
+            Some("started"),
+            "{result:?}"
+        );
         assert_eq!(result.get("timed_out"), Some(&Value::Bool(true)));
     }
 

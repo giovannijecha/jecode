@@ -12,10 +12,13 @@ use crate::json::Value;
 use restoring::{actions, restore, skipped};
 use std::sync::Arc;
 
+mod recovering;
+mod status;
+use status::status;
 mod restoring;
 
 /// Actions the model may use; the others belong to the user.
-pub const MODEL_ACTIONS: [&str; 7] = [
+pub const MODEL_ACTIONS: [&str; 8] = [
     "status",
     "capture",
     "list",
@@ -23,6 +26,7 @@ pub const MODEL_ACTIONS: [&str; 7] = [
     "milestone",
     "restore",
     "restore_all",
+    "accept",
 ];
 
 const LIST_DEFAULT: usize = 20;
@@ -54,16 +58,16 @@ pub fn run(
     }
     match action {
         "status" => Ok(status(workspace, caller.origin)),
-        "capture" => super::targeted::run(
-            workspace,
-            caller.origin,
-            &selected(arguments)?.ok_or("capture needs explicit file paths")?,
-        ),
+        "capture" => recovering::capture(workspace, caller, arguments),
+        "accept" => recovering::accept(workspace, caller, arguments),
         "list" => list(workspace, arguments),
         "inspect" => inspect(workspace, caller, arguments),
         "milestone" => {
             let label = string(arguments, "label")?.ok_or("label is required for a milestone")?;
             let pinned = arguments.get("pin") == Some(&Value::Bool(true));
+            if pinned && !caller.user {
+                return Err("Only the user can pin recovery history".into());
+            }
             let seq = workspace.mark("milestone", label, caller.origin, pinned, false)?;
             Ok(Value::object([
                 ("ref", Value::string(reference(seq))),
@@ -163,164 +167,9 @@ fn limits(budget: u64, max_file: u64) -> Value {
     ])
 }
 
-fn status(workspace: &Arc<Workspace>, own: &str) -> Value {
-    let (readiness, watching, running, background, collection, failure) = {
-        let health = workspace.signals.lock();
-        (
-            health.readiness.clone(),
-            health.watching.clone(),
-            health.bash.len(),
-            health.background.values().sum::<usize>(),
-            health.collection.clone(),
-            health.failure.clone(),
-        )
-    };
-    let mut store = workspace.store();
-    let refreshed = store.refresh();
-    workspace.observe_coverage(&store);
-    let index = &store.index;
-    let state = match &readiness {
-        Readiness::Starting if !workspace.options().background => {
-            "not reconciled (offline command)".to_string()
-        }
-        Readiness::Starting => "starting".to_string(),
-        Readiness::Baseline(count) => format!("first capture running: {count} paths saved"),
-        Readiness::Reconciling(count) => {
-            format!("reconciling offline changes: {count} paths examined")
-        }
-        Readiness::Ready if workspace.options().background => "ready".into(),
-        Readiness::Ready => "ready (scanned now)".into(),
-        Readiness::Failed(reason) => format!("unavailable: {reason}"),
-    };
-    let state = workspace.selective().map_or(state.clone(), |reason| {
-        format!("{state}; selective protection: {reason}")
-    });
-    let watching = match watching {
-        Watching::Active => "native notifications (observed changes; delivery may lag)".to_string(),
-        Watching::Off if !workspace.options().background => "off (offline command)".into(),
-        Watching::Off | Watching::Starting => "scans at each point".into(),
-        Watching::Lost(reason) => format!("restarting after {reason}"),
-        Watching::Unavailable(reason) => format!("scans at each point ({reason})"),
-    };
-    let coverage = match index.current_coverage() {
-        Some((true, _)) => "complete".to_string(),
-        Some((false, reason)) => format!("incomplete since {reason}"),
-        None => "not recorded".into(),
-    };
-    let mut fields = vec![
-        (
-            "workspace",
-            Value::string(plain(&workspace.root).to_string_lossy()),
-        ),
-        (
-            "archive",
-            Value::string(plain(&workspace.archive).to_string_lossy()),
-        ),
-        ("state", Value::string(state)),
-        ("watching", Value::string(watching)),
-        ("coverage", Value::string(coverage)),
-        ("latest", Value::string(reference(index.latest()))),
-        ("oldest_retained", Value::string(reference(index.horizon))),
-        ("points", Value::number(index.points.len())),
-        ("pinned", Value::number(index.pins.len())),
-        (
-            "stored",
-            Value::string(
-                super::quota::used(&workspace.archive).map_or_else(|_| "unknown".into(), size),
-            ),
-        ),
-        (
-            "stored_current_generation",
-            Value::string(size(store.journal.stored_bytes())),
-        ),
-        (
-            "protected_paths",
-            Value::number(
-                index
-                    .paths
-                    .values()
-                    .filter(|versions| {
-                        versions.last().is_some_and(|version| {
-                            version.state.exists() && version.state.recoverable()
-                        })
-                    })
-                    .count(),
-            ),
-        ),
-        (
-            "uncaptured_content_paths",
-            Value::number(
-                index
-                    .paths
-                    .values()
-                    .filter(|versions| {
-                        versions
-                            .last()
-                            .is_some_and(|version| !version.state.recoverable())
-                    })
-                    .count(),
-            ),
-        ),
-        (
-            "limits",
-            limits(store.policy.budget_bytes, store.policy.max_file_bytes),
-        ),
-        (
-            "inactive_history",
-            Value::string(
-                "expires after 7 days without user activity; pins, pending operations and active readers preserve it",
-            ),
-        ),
-        ("running_commands", Value::number(running)),
-        ("background_processes", Value::number(background)),
-    ];
-    if !index.pending.is_empty() {
-        fields.push(("operations_in_progress", Value::number(index.pending.len())));
-    }
-    let activity: Vec<Value> = super::activity::list(&workspace.archive)
-        .into_iter()
-        .map(|entry| {
-            let who = if entry.origin == own {
-                "this conversation".to_string()
-            } else {
-                entry.origin
-            };
-            Value::object([
-                ("session", Value::string(who)),
-                ("state", Value::string(entry.state)),
-                ("pid", Value::number(entry.pid)),
-                ("updated", Value::string(age(entry.updated))),
-            ])
-        })
-        .collect();
-    fields.push(("activity", Value::Array(activity)));
-    match collection {
-        Some(Ok(collection)) => fields.push((
-            "last_collection",
-            Value::string(format!(
-                "released history before {} ({} to {})",
-                reference(collection.horizon),
-                size(collection.before),
-                size(collection.after)
-            )),
-        )),
-        Some(Err(error)) => {
-            fields.push(("last_collection", Value::string(format!("failed: {error}"))))
-        }
-        None => {}
-    }
-    if !store.journal.damage.is_empty() {
-        fields.push(("damage", strings(store.journal.damage.iter().take(10))));
-    }
-    if let Some(error) = failure.or(refreshed.err()) {
-        fields.push(("error", Value::string(error)));
-    }
-    object(fields)
-}
-
 /// How long ago a millisecond timestamp was.
 pub fn age(time: u64) -> String {
-    let seconds = crate::sessions::now().saturating_sub(time) / 1000;
+    let seconds = crate::checkpoints::clock::now().saturating_sub(time) / 1000;
     match seconds {
         0..60 => format!("{seconds}s ago"),
         60..3600 => format!("{}m ago", seconds / 60),
@@ -382,8 +231,16 @@ fn list(workspace: &Arc<Workspace>, arguments: &Value) -> Result<Value, String> 
                             ("state", Value::string(describe(&version.state))),
                             ("origin", Value::string(&version.origin)),
                             ("time", Value::string(age(version.time))),
+                            (
+                                "available",
+                                Value::Bool(
+                                    index.retained(version.seq) && version.state.recoverable(),
+                                ),
+                            ),
                         ];
-                        if matches!(version.state, State::File { .. }) {
+                        if matches!(version.state, State::File { .. })
+                            && index.retained(version.seq)
+                        {
                             fields.push((
                                 "read",
                                 Value::string(format!(
@@ -411,6 +268,7 @@ fn list(workspace: &Arc<Workspace>, arguments: &Value) -> Result<Value, String> 
     let mut points: Vec<Value> = index
         .points
         .values()
+        .filter(|point| index.retained(point.seq))
         .map(|point| {
             let changes = index.changed_between(previous, point.seq).len();
             previous = point.seq;
@@ -467,6 +325,22 @@ fn inspect(
             fields.push(("label", Value::string(&point.label)));
             fields.push(("origin", Value::string(&point.origin)));
             fields.push(("time", Value::string(age(point.time))));
+            if let Some(group) = index.recovery.groups.get(&target) {
+                fields.push(("created_at", Value::number(group.created)));
+                fields.push(("last_activity", Value::number(group.last_activity)));
+                fields.push((
+                    "accepted_at",
+                    group.accepted.map_or(Value::Null, Value::number),
+                ));
+                fields.push((
+                    "expires_at",
+                    group.accepted_until.map_or(Value::Null, Value::number),
+                ));
+            }
+            if let Some(snapshot) = index.recovery.snapshots.get(&target) {
+                fields.push(("group", Value::string(reference(snapshot.group))));
+                fields.push(("captured_at", Value::number(snapshot.time)));
+            }
             let previous = index
                 .points
                 .range(..target)
@@ -486,7 +360,11 @@ fn inspect(
             let states: Vec<Value> = paths
                 .iter()
                 .map(|path| {
-                    let state = index.state_at(path, target);
+                    let state = restore::target_state(index, target, path).unwrap_or_else(|| {
+                        State::Unreadable {
+                            reason: "not protected by this recovery point".into(),
+                        }
+                    });
                     let mut entry = vec![
                         ("path", Value::string(path)),
                         ("at_ref", Value::string(describe(&state))),

@@ -1,17 +1,19 @@
-//! Archive paths. Version 1 archives use flat paths until idle migration;
-//! version 2 puts disposable data under `history/` and runtime state under
-//! `runtime/`. Identity and user policy remain at the archive root.
+//! Archive paths. Selected version 1 archives migrate from flat paths;
+//! versions 2 and 3 put disposable data under `history/` and runtime state
+//! under `runtime/`. Identity and policy remain at the archive root.
 use crate::json::{self, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-static VERSION_TWO: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+static MODERN_LAYOUT: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 pub const LEGACY_SENTINEL: &[u8] = b"migrated-to-history";
+/// Version 3 adds recovery records that previous binaries must not append to.
+pub const VERSION: u64 = 3;
 
 pub fn history(archive: &Path) -> PathBuf {
-    if cached_version(archive) == Some(2) {
+    if cached_version(archive).is_some_and(|version| version >= 2) {
         archive.join("history")
     } else {
         archive.to_path_buf()
@@ -58,7 +60,7 @@ pub fn leases_directory(archive: &Path) -> PathBuf {
 }
 
 pub fn runtime(archive: &Path) -> PathBuf {
-    if cached_version(archive) == Some(2) {
+    if cached_version(archive).is_some_and(|version| version >= 2) {
         archive.join("runtime")
     } else {
         archive.to_path_buf()
@@ -75,7 +77,7 @@ pub fn version(archive: &Path) -> Option<u64> {
 }
 
 fn cached_version(archive: &Path) -> Option<u64> {
-    let cache = VERSION_TWO.get_or_init(|| Mutex::new(HashSet::new()));
+    let cache = MODERN_LAYOUT.get_or_init(|| Mutex::new(HashSet::new()));
     if cache
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -83,9 +85,9 @@ fn cached_version(archive: &Path) -> Option<u64> {
     {
         return Some(2);
     }
-    // Only version 2 is immutable. Version 1 may migrate in another process.
+    // Modern path placement is immutable. Version 1 may migrate in a peer.
     let version = version(archive)?;
-    if version == 2 {
+    if version >= 2 {
         cache
             .lock()
             .unwrap_or_else(|error| error.into_inner())

@@ -1,5 +1,5 @@
 //! The conversation's use of workspace checkpoints: its origin on every
-//! conversation switch, a point at each turn and notices about history
+//! conversation switch, recovery activity at each turn and notices about history
 //! changed elsewhere, delivered before the next request.
 use super::Agent;
 use crate::checkpoints::Workspace;
@@ -95,8 +95,7 @@ impl Agent {
         session.begin(&origin, cursor);
     }
 
-    /// Records the point at the start of a turn. A failure never blocks the
-    /// turn; tool results and status report it.
+    /// Marks conversation activity without acquiring workspace contents.
     pub(super) fn checkpoint_turn(&self, label: &str) {
         if let Some(session) = self.tools.checkpoints() {
             let _ = session.turn(label);
@@ -161,7 +160,7 @@ impl Agent {
         let scope = self.tools.checkpoints()
             .and_then(|session| session.workspace().ok())
             .and_then(|workspace| workspace.selective())
-            .map(|reason| self.redact(&format!("Workspace checkpoints use selective protection ({reason}). write/edit still save their own previous states; use each result's checkpoint.before to undo it. Turn and Bash points cover recorded paths only; uncaptured paths have unknown history. Before Bash may change known files, use checkpoint capture with explicit file paths and inspect each saved, skipped or unprotected result. Name files, not directories; restore only saved paths from its ref.")));
+            .map(|_| "Recovery is on demand. write/edit save each file's previous state automatically. For Bash that may change files, supply protect with file paths or recursive directories; `.` explicitly requests the whole workspace. Read the reported coverage: paths outside those scopes have no before-state guarantee. Use checkpoint.before to undo one step, or its group to undo the attempt. Inspect content/diffs only when useful. Accept your recovery group when satisfied with the result; tool success alone does not accept it. Accepted groups retain their initial states for at most 24 hours; active groups expire after 7 days of inactivity by default. User pins remain until released.".to_string());
         let events = self.events.lock().unwrap();
         let mut notices: Vec<&str> = events
             .iter()

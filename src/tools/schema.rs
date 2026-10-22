@@ -70,9 +70,22 @@ pub fn definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run a Bash command in a new process from the project working directory. stdin is closed and no shell state carries over between commands. No timeout unless positive timeout_seconds is supplied; it is an execution deadline from command start. JECODE_TMP, TMPDIR, TEMP and TMP point to persistent session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references; full streams remain readable through them. With wait_ms (0 or more) the command becomes a persistent process: Jecode waits up to wait_ms for it to finish, then returns process_id and status (running, exited with exit_code, timed_out, stopped or unknown) with output as the process tool reports it. A running process keeps running after the wait, across tool calls and turns, until it exits, reaches timeout_seconds or is stopped; use it for servers, watchers and long builds or tests. Bash has normal system access.",
+            "Run a Bash command from the project directory. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Jecode saves their preimages before launch and reports saved, partial or none. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an execution deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. A running process continues until exit, timeout or stop, and its protected paths are observed again at completion. Bash has normal system access.",
             Value::object([
                 ("command", string()),
+                (
+                    "protect",
+                    Value::object([
+                        ("type", Value::string("array")),
+                        ("items", string()),
+                        (
+                            "description",
+                            Value::string(
+                                "Optional workspace-relative paths to save before Bash; existing directories are recursive, a trailing slash declares a new directory, and '.' covers the workspace.",
+                            ),
+                        ),
+                    ]),
+                ),
                 (
                     "timeout_seconds",
                     Value::object([
@@ -105,7 +118,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "checkpoint",
-            "Inspect and restore local workspace checkpoints, separate from Git and conversations. Before write/edit changes a file, Jecode durably saves its previous state; a failed save does not block those tools. Results include checkpoint.status: saved with before/after cp-N refs, not_tracked outside scope, or unprotected with a reason. Use checkpoint.before to undo that exact change. Jecode attempts a point before each turn and Bash command, then observes changes; points are observed history, not atomic filesystem snapshots. Bash waits for the full initial capture, and an unavailable checkpoint reports why while the tool still runs. Jecode captures the full in-scope baseline, including large repositories and files. If coverage is incomplete because of unreadable paths, unsupported names or a capture failure, inspect status and use capture for named files before a risky command or to save a precise preimage. Name individual workspace-relative files or links, not directories. Inspect each saved, skipped or unprotected result; only saved paths have a recoverable preimage. Each saved path has a durable saved_at version; a capture ref is returned after all saved states are durable. The 1 GiB default budget is a soft retention target and the default file size is unlimited; explicit limits and I/O failures can still prevent capture. In-scope Git-ignored files such as .env are included unless excluded by policy. Unpinned inactive history expires after 7 days; pins, pending operations and active readers preserve it. Actions: status shows coverage, limits and sessions; list returns newest points or versions of paths; inspect describes ref and a live restore plan, with checkpoint:cp-N:path references accepted by read; milestone records a label (pin true retains it across collection); restore restores paths and their recorded descendants by default; exact true with explicit inspect or restore paths selects only named entries; restore_all restores the recorded scope, removing paths known to have been created after ref and skipping unknown prior states. A restore with confirmed applied paths returns undo with a before ref; if no path was confirmed restored, there is no undo. Default model conflicts compare the current version with your own last version after ref, or the target; they do not identify who changed a file. Conflicts include target/expected/current and retry gives an expected ref accepting that observed version after inspection; expected latest accepts the current state at planning. Jecode stages file replacements, then reobserves each path immediately before replacement or deletion and leaves it untouched if it changed since planning. A restore may have changed earlier paths before stopping with conflicts; inspect restored, not_restored and undo. Partial undo selects only confirmed restored paths with exact true, preserving untouched descendants. Inspect a failed path and before before deciding whether to restore it; an I/O error does not identify who wrote the live bytes. A successful full restore uses restore_all for undo. Another editor can still race the final recheck and filesystem operation. preview true plans without changing workspace files.",
+            "Inspect and restore local workspace recovery. write and edit save their own previous file state; Bash saves only paths declared in protect. capture can save explicit files, recursive directories or the whole workspace with a deliberate dot path. Results identify saved, partial or none and include recovery group and before references when available. accept marks the selected recovery group complete; its first saved before state remains available for 24 hours at most. Active groups expire after seven days without activity. Restore observes live paths, checks conflicts and preserves unrelated changes. Pinned user milestones follow separate retention rules. No automatic full workspace baseline is required.",
             Value::object([
                 (
                     "action",
@@ -136,7 +149,6 @@ pub fn definitions() -> Value {
                     ]),
                 ),
                 ("label", string()),
-                ("pin", Value::object([("type", Value::string("boolean"))])),
                 (
                     "exact",
                     Value::object([
@@ -156,7 +168,7 @@ pub fn definitions() -> Value {
                         (
                             "description",
                             Value::string(
-                                "Optional restore precondition. Omit or use an empty string for default conflict checking; cp-N accepts that observed version; latest accepts the current state.",
+                                "Optional restore precondition. Omit or use an empty string for default conflict checking; cp-N accepts that observed version; latest accepts the current state. To undo Bash after inspecting its result, explicitly pass its returned after ref: observed Bash changes have unknown ownership.",
                             ),
                         ),
                     ]),

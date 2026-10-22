@@ -260,6 +260,13 @@ fn an_operation_of_a_killed_process_is_recovered_by_the_next_one() {
     let current = index.current("shared.txt").unwrap();
     assert_eq!(current.origin, "crash");
     let operation = current.operation;
+    let before = index
+        .recovery
+        .snapshots
+        .keys()
+        .next_back()
+        .copied()
+        .unwrap();
     assert!(matches!(
         index.state_at("shared.txt", operation),
         State::File { length: 7, .. }
@@ -268,7 +275,7 @@ fn an_operation_of_a_killed_process_is_recovered_by_the_next_one() {
     workspace
         .restore(&request(
             &workspace,
-            operation,
+            before,
             Some(&selected),
             Expected::Latest,
         ))

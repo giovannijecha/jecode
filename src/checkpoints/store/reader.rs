@@ -146,11 +146,23 @@ impl Store {
         })
     }
 
-    pub fn equal_reader(&self, id: u64, mut other: impl Read) -> Result<bool, String> {
+    pub fn equal_reader(&self, id: u64, other: impl Read) -> Result<bool, String> {
+        self.equal_reader_cancellable(id, other, &crate::cancel::Cancellation::default())
+    }
+
+    pub fn equal_reader_cancellable(
+        &self,
+        id: u64,
+        mut other: impl Read,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> Result<bool, String> {
         let mut archived = self.reader(id)?;
         let mut left = [0u8; 64 * 1024];
         let mut right = [0u8; 64 * 1024];
         loop {
+            if cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
             let count = archived
                 .read(&mut left)
                 .map_err(|error| format!("Could not verify checkpoint object: {error}"))?;

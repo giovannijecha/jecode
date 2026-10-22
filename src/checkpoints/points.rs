@@ -19,6 +19,13 @@ impl Workspace {
     /// A different process can change coverage without changing scope rules.
     /// Publish that fact before a model request or a command uses the archive.
     pub(super) fn observe_coverage(&self, store: &super::store::Store) {
+        if store.index.recovery.mode.is_some() {
+            self.signals.update(|health| {
+                health.selective =
+                    Some("on-demand recovery; only captured paths are protected".into())
+            });
+            return;
+        }
         let Some((complete, reason)) = store.index.current_coverage() else {
             return;
         };
@@ -49,7 +56,26 @@ impl Workspace {
         reuse: bool,
     ) -> Result<u64, String> {
         super::lifecycle::touch_throttled(&self.archive)?;
-        let summary = self.catch_up("external")?;
+        // The scan may rematerialize expired current heads. Keep collection
+        // from dropping them before the milestone names their exact bytes.
+        let _gc = if kind == "milestone" {
+            Some(
+                super::locks::Exclusive::acquire_cancellable(
+                    &super::layout::gc_lock(&self.archive),
+                    &self.cancellation,
+                )
+                .map_err(|error| format!("Could not coordinate checkpoint milestone: {error}"))?,
+            )
+        } else {
+            None
+        };
+        let summary = if kind == "milestone" {
+            // A named point must materialize tracked metadata-only heads.
+            // Targeted mode still visits only the paths already protected.
+            Some(scan::scan(self, "external", true, &self.cancellation)?)
+        } else {
+            self.catch_up("external")?
+        };
         let reused = {
             let store = self.store();
             let index = &store.index;
@@ -57,6 +83,8 @@ impl Workspace {
                 .last_point()
                 .filter(|point| {
                     reuse
+                        && point.kind != super::recovery::GROUP_KIND
+                        && point.kind != super::recovery::SNAPSHOT_KIND
                         && index.last_change < point.seq
                         && (index.coverage_at(point.seq) || !index.coverage_complete())
                 })
@@ -67,6 +95,10 @@ impl Workspace {
             // flush. It must be stable before a command can change the files.
             self.store().transaction(true, |_| Ok(()))?;
             return Ok(seq);
+        }
+        #[cfg(test)]
+        if kind == "milestone" {
+            super::tests::process::stage("milestone-captured");
         }
         let point = Some((kind, label, origin, pinned));
         let seq = match summary {
@@ -156,6 +188,17 @@ impl Workspace {
     /// notifications. A watched point records the observed state; a future
     /// notification can still report an earlier external filesystem change.
     pub(super) fn catch_up(&self, origin: &str) -> Result<Option<Summary>, String> {
+        self.catch_up_cancellable(origin, &self.cancellation)
+    }
+
+    pub(super) fn catch_up_cancellable(
+        &self,
+        origin: &str,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> Result<Option<Summary>, String> {
+        if cancellation.requested() {
+            return Err("Operation cancelled".into());
+        }
         let readiness = self.readiness();
         if !matches!(readiness, Readiness::Ready | Readiness::Failed(_)) {
             return Ok(None);
@@ -164,7 +207,7 @@ impl Workspace {
             // A later successful full scan can recover an interrupted baseline
             // or offline reconciliation. Keep the failure visible until the
             // scan and its coverage record both succeed.
-            let summary = scan::scan_full(self, origin, true, &self.cancellation)?;
+            let summary = scan::scan_full(self, origin, true, cancellation)?;
             if !self.polling() {
                 self.settle();
             }
@@ -175,15 +218,15 @@ impl Workspace {
             return Ok(Some(summary));
         }
         if self.polling() {
-            let summary = scan::scan(self, origin, false, &self.cancellation)?;
+            let summary = scan::scan(self, origin, false, cancellation)?;
             // Reported paths are reread even when their metadata matches.
             self.flush(origin)?;
             return Ok(Some(summary));
         }
         // Notifications never report files that only came into scope.
         let policy = {
-            let mut store = self.store();
-            store.refresh()?;
+            let mut store = self.store_cancellable(cancellation)?;
+            store.refresh_cancellable(cancellation)?;
             self.observe_coverage(&store);
             store.policy.clone()
         };
@@ -201,16 +244,6 @@ impl Workspace {
         });
         self.flush(origin)?;
         Ok(None)
-    }
-
-    /// Allows a short window for a command's last filesystem notifications
-    /// before draining them. This is a best-effort delay, not a barrier with
-    /// the filesystem or the helper's independent notification callbacks.
-    pub(super) fn catch_up_settled(&self, origin: &str) -> Result<Option<Summary>, String> {
-        if self.readiness() == Readiness::Ready && !self.polling() {
-            self.settle();
-        }
-        self.catch_up(origin)
     }
 
     /// Waits briefly for likely notifications of a completed command. The

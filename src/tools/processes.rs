@@ -53,18 +53,29 @@ struct Entry {
     state: Mutex<State>,
     changed: Condvar,
     monitor: Mutex<Option<JoinHandle<()>>>,
+    heartbeat: Mutex<Option<JoinHandle<()>>>,
 }
 
 #[derive(Default)]
 struct State {
     outcome: Option<Outcome>,
     cursors: [u64; 2],
+    checkpoint_finalized: bool,
+    checkpoint_error: Option<String>,
 }
 
 struct Outcome {
     status: &'static str,
     exit_code: Option<i32>,
     error: Option<String>,
+}
+
+/// Controls the initial wait and the lifetime of one launched process.
+pub(super) struct Adoption<'a> {
+    pub timeout: Option<Duration>,
+    pub wait: Duration,
+    pub cancellation: &'a Cancellation,
+    pub completion: Option<crate::checkpoints::session::Completion>,
 }
 
 impl Registry {
@@ -83,10 +94,14 @@ impl Registry {
         command: &str,
         streams: [Stream; 2],
         started: Started,
-        timeout: Option<Duration>,
-        wait: Duration,
-        cancellation: &Cancellation,
+        adoption: Adoption<'_>,
     ) -> Result<Value, String> {
+        let Adoption {
+            timeout,
+            wait,
+            cancellation,
+            completion,
+        } = adoption;
         let entry = Arc::new(Entry {
             id: format!("process-{}", crate::sessions::identifier()),
             command: command.into(),
@@ -95,6 +110,7 @@ impl Registry {
             state: Mutex::default(),
             changed: Condvar::new(),
             monitor: Mutex::new(None),
+            heartbeat: Mutex::new(None),
         });
         // Register before waiting so an interrupted wait leaves a discoverable process.
         let scope = self.scope();
@@ -103,10 +119,40 @@ impl Registry {
         if let Some(listener) = &listener {
             listener(scope.running());
         }
+        if let Some(completion) = completion.clone() {
+            let owner = Arc::clone(&entry);
+            let heartbeat = thread::spawn(move || {
+                let mut state = owner.state.lock().unwrap();
+                while state.outcome.is_none() {
+                    let (next, timeout) = owner
+                        .changed
+                        .wait_timeout(state, Duration::from_secs(30 * 60))
+                        .unwrap();
+                    state = next;
+                    if state.outcome.is_some() || !timeout.timed_out() {
+                        continue;
+                    }
+                    drop(state);
+                    let renewed = completion.renew();
+                    state = owner.state.lock().unwrap();
+                    if state.outcome.is_none() {
+                        state.checkpoint_error = renewed.err();
+                    }
+                }
+            });
+            *entry.heartbeat.lock().unwrap() = Some(heartbeat);
+        }
         let owner = Arc::clone(&entry);
         let monitor = thread::spawn(move || {
             let result = started.supervise(timeout, &owner.stop, &mut |_| Ok(()));
-            owner.state.lock().unwrap().outcome = Some(Outcome::from(result));
+            let checkpoint = completion.as_ref().map(|completion| completion.finish());
+            let mut state = owner.state.lock().unwrap();
+            state.outcome = Some(Outcome::from(result));
+            if let Some(checkpoint) = checkpoint {
+                state.checkpoint_finalized = checkpoint.is_ok();
+                state.checkpoint_error = checkpoint.err();
+            }
+            drop(state);
             owner.changed.notify_all();
             if let Some(listener) = listener {
                 listener(scope.running());
@@ -190,6 +236,9 @@ impl Registry {
             if let Some(monitor) = entry.monitor.lock().unwrap().take() {
                 let _ = monitor.join();
             }
+            if let Some(heartbeat) = entry.heartbeat.lock().unwrap().take() {
+                let _ = heartbeat.join();
+            }
         }
         if let Some(listener) = self.listener.lock().unwrap().as_ref() {
             listener(0);
@@ -259,6 +308,12 @@ impl Entry {
                 fields.insert("error".into(), Value::string(error));
                 fields.insert("outcome".into(), Value::string("unknown"));
             }
+        }
+        if state.checkpoint_finalized {
+            fields.insert("checkpoint_finalized".into(), Value::Bool(true));
+        }
+        if let Some(error) = &state.checkpoint_error {
+            fields.insert("checkpoint_error".into(), Value::string(error));
         }
         fields
     }

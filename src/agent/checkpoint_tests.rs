@@ -322,7 +322,7 @@ fn restores_during_request_preparation_reach_that_request() {
 }
 
 #[test]
-fn large_scope_reaches_the_model_with_full_baseline_and_exact_before_refs_restore() {
+fn large_scope_reaches_the_model_with_on_demand_recovery() {
     let fixture = Fixture::new();
     let http = HttpFixture::new(vec![
         (200, write("a.txt", "changed\n")),
@@ -347,9 +347,6 @@ fn large_scope_reaches_the_model_with_full_baseline_and_exact_before_refs_restor
         )
         .unwrap();
     }
-    let verified = workspace.verify().unwrap();
-    assert!(verified.limited.is_none());
-    assert!(workspace.selective().is_none());
     agent.run_turn("Change a.txt", &mut |_| Ok(())).unwrap();
     let before = last_before(&agent);
     fixture.cli(&["restore", &before, "a.txt"]);
@@ -360,11 +357,9 @@ fn large_scope_reaches_the_model_with_full_baseline_and_exact_before_refs_restor
     agent.run_turn("Continue", &mut |_| Ok(())).unwrap();
     let requests = http.finish();
     for request in &requests {
-        let context = system(&request.body);
-        assert!(!context.contains("selective protection"), "{context}");
         let tools = request.body.get("tools").unwrap().encode();
-        assert!(tools.contains("full in-scope baseline"));
-        assert!(tools.contains("checkpoint.before"));
+        assert!(tools.contains("No automatic full workspace baseline"));
+        assert!(tools.contains("protect"));
     }
     assert!(system(&requests[2].body).contains("Checkpoint notices"));
 }

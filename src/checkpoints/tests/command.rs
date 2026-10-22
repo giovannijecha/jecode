@@ -143,6 +143,20 @@ fn the_offline_command_ignores_provider_configuration() {
 }
 
 #[test]
+fn user_milestone_pin_is_available_from_offline_cli() {
+    let fixture = Fixture::new();
+    let pinned = offline(
+        fixture.home.path(),
+        fixture.root.path(),
+        &words(&["milestone", "keep", "--pin"]),
+    )
+    .unwrap();
+    assert!(pinned.text().contains("pinned"), "{}", pinned.text());
+    let workspace = fixture.open();
+    assert_eq!(index(&workspace).pins.len(), 1);
+}
+
+#[test]
 fn empty_optional_restore_fields_preserve_default_conflict_checking() {
     use crate::checkpoints::actions::{self, Caller};
     use crate::json::Value;

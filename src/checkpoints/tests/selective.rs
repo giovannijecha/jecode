@@ -34,7 +34,7 @@ fn blocked_baseline(fixture: &Fixture) -> (std::sync::Arc<Workspace>, Lease) {
 }
 
 #[test]
-fn first_bash_point_waits_for_the_complete_baseline() {
+fn explicit_whole_workspace_protection_waits_for_its_requested_paths() {
     let fixture = Fixture::new();
     let (workspace, held) = blocked_baseline(&fixture);
     let (sender, receiver) = mpsc::channel();
@@ -324,7 +324,7 @@ fn explicit_verify_can_regain_full_coverage_after_the_scope_shrinks() {
 }
 
 #[test]
-fn expanding_scope_rules_retries_discovery_at_the_next_point() {
+fn expanding_scope_rules_requires_explicit_discovery_for_new_paths() {
     let fixture = Fixture::new();
     fixture.write("target/new.rs", b"excluded before policy change");
     let workspace = fixture.open();
@@ -337,6 +337,8 @@ fn expanding_scope_rules_retries_discovery_at_the_next_point() {
     workspace
         .mark("turn", "narrower", "model", false, false)
         .unwrap();
+    assert!(index(&workspace).current("target/new.rs").is_none());
+    workspace.verify().unwrap();
     assert!(workspace.selective().is_none());
     assert!(index(&workspace).current("target/new.rs").is_some());
 }
@@ -349,7 +351,7 @@ fn another_process_selective_coverage_reaches_requests_and_commands() {
         crate::checkpoints::session::Session::offline(fixture.home.path(), fixture.root.path());
     session.begin("model", None);
     let workspace = session.workspace().unwrap();
-    assert!(workspace.selective().is_none());
+    assert!(workspace.selective().is_some());
     let mut other =
         crate::checkpoints::store::Store::open(workspace.store().workspace.clone()).unwrap();
     crate::checkpoints::scan::coverage(
@@ -364,11 +366,11 @@ fn another_process_selective_coverage_reaches_requests_and_commands() {
         Some("another process reached capacity")
     );
     let command = workspace.command("model", "read-only");
-    assert!(matches!(command.freshness, Freshness::Unavailable(_)));
+    assert!(matches!(command.freshness, Freshness::Current));
     command.finish();
     crate::checkpoints::scan::coverage(&mut other, true, "scan").unwrap();
     session.notices();
-    assert!(workspace.selective().is_none());
+    assert!(workspace.selective().is_some());
 }
 
 #[test]

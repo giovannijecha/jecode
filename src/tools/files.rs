@@ -1,4 +1,5 @@
 use super::required_string;
+use crate::cancel::Cancellation;
 use crate::checkpoints::session::{FileGuard, Session};
 use crate::{file_change::MAX_DIFF_BYTES, json::Value};
 use std::fs::{self, OpenOptions};
@@ -27,17 +28,20 @@ pub(super) fn read(
 
 #[cfg(test)]
 pub(super) fn write(root: &Path, arguments: &Value) -> Result<Value, String> {
-    write_with_change(root, arguments, None).map(|(result, _)| result)
+    write_with_change(root, arguments, None, &Cancellation::default()).map(|(result, _)| result)
 }
 
 pub(super) fn write_with_change(
     root: &Path,
     arguments: &Value,
     checkpoints: Option<&Session>,
+    cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
+    check_cancelled(cancellation)?;
     let path = writable_path(root, required_string(arguments, "path")?)?;
     let content = required_string(arguments, "content")?;
-    let mut guard = checkpoints.map(|session| session.file("write", &path));
+    let mut guard =
+        checkpoints.map(|session| session.file_cancellable("write", &path, cancellation));
     // A write may replace non-text data; inability to read it cannot reject
     // an operation that was previously allowed.
     let previous = guard.as_mut().map_or_else(
@@ -48,7 +52,8 @@ pub(super) fn write_with_change(
                 .or_else(|| previous_text(&path, content.len()))
         },
     );
-    let checkpoint = finish_replacement(guard, &path, content)?;
+    check_guard(guard.as_ref(), cancellation)?;
+    let checkpoint = finish_replacement(guard, &path, content, cancellation)?;
     let change =
         previous.and_then(|old| crate::file_change::Change::between(old.as_deref(), content));
     Ok((written(content.len() as u64, checkpoint), change))
@@ -56,14 +61,16 @@ pub(super) fn write_with_change(
 
 #[cfg(test)]
 pub(super) fn edit(root: &Path, arguments: &Value) -> Result<Value, String> {
-    edit_with_change(root, arguments, None).map(|(result, _)| result)
+    edit_with_change(root, arguments, None, &Cancellation::default()).map(|(result, _)| result)
 }
 
 pub(super) fn edit_with_change(
     root: &Path,
     arguments: &Value,
     checkpoints: Option<&Session>,
+    cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
+    check_cancelled(cancellation)?;
     let path = existing_path(root, required_string(arguments, "path")?)?;
     let old = required_string(arguments, "old_text")?;
     let new = required_string(arguments, "new_text")?;
@@ -71,11 +78,11 @@ pub(super) fn edit_with_change(
         return Err("old_text must not be empty; use write to replace the whole file".into());
     }
     // Hold the path from reading to replacing so concurrent sessions take turns.
-    let guard = checkpoints.map(|session| session.file("edit", &path));
+    let guard = checkpoints.map(|session| session.file_cancellable("edit", &path, cancellation));
     if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > MAX_DIFF_BYTES as u64) {
-        return streaming::edit(&path, old, new, guard);
+        return streaming::edit(&path, old, new, guard, cancellation);
     }
-    let mut content = read_text(&path)?;
+    let mut content = read_text(&path, cancellation)?;
     let Some(position) = content.find(old) else {
         return Ok((
             mismatch::result(
@@ -104,7 +111,7 @@ pub(super) fn edit_with_change(
         std::mem::take(&mut content)
     };
     updated.replace_range(position..position + old.len(), new);
-    let checkpoint = replace_protected(guard, &path, &updated)?;
+    let checkpoint = replace_protected(guard, &path, &updated, cancellation)?;
     let change = include_change
         .then(|| crate::file_change::Change::between(Some(&content), &updated))
         .flatten();
@@ -117,23 +124,27 @@ fn replace_protected(
     guard: Option<FileGuard<'_>>,
     path: &Path,
     content: &str,
+    cancellation: &Cancellation,
 ) -> Result<Option<Value>, String> {
     let Some(mut guard) = guard else {
-        return replace_file(path, content).map(|()| None);
+        return replace_file(path, content, cancellation).map(|()| None);
     };
     guard.prepare(content.as_bytes());
-    finish_replacement(Some(guard), path, content)
+    check_guard(Some(&guard), cancellation)?;
+    finish_replacement(Some(guard), path, content, cancellation)
 }
 
 fn finish_replacement(
     guard: Option<FileGuard<'_>>,
     path: &Path,
     content: &str,
+    cancellation: &Cancellation,
 ) -> Result<Option<Value>, String> {
     let Some(guard) = guard else {
-        return replace_file(path, content).map(|()| None);
+        return replace_file(path, content, cancellation).map(|()| None);
     };
-    let replaced = replace_file(path, content);
+    check_guard(Some(&guard), cancellation)?;
+    let replaced = replace_file(path, content, cancellation);
     let checkpoint = guard.finish(replaced.is_ok());
     replaced.map(|()| Some(checkpoint))
 }
@@ -201,7 +212,7 @@ fn check_path(root: &Path, path: PathBuf) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn read_text(path: &Path) -> Result<String, String> {
+fn read_text(path: &Path, cancellation: &Cancellation) -> Result<String, String> {
     if !fs::metadata(path)
         .map_err(|error| error.to_string())?
         .is_file()
@@ -210,8 +221,17 @@ fn read_text(path: &Path) -> Result<String, String> {
     }
     let mut file = fs::File::open(path).map_err(|error| format!("Could not open file: {error}"))?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|error| format!("Could not read file: {error}"))?;
+    let mut block = [0; 64 * 1024];
+    loop {
+        check_cancelled(cancellation)?;
+        let count = file
+            .read(&mut block)
+            .map_err(|error| format!("Could not read file: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&block[..count]);
+    }
     let text = String::from_utf8(bytes).map_err(|_| "File is not UTF-8 text".to_string())?;
     if text.contains('\0') {
         return Err("File contains binary data".into());
@@ -219,7 +239,8 @@ fn read_text(path: &Path) -> Result<String, String> {
     Ok(text)
 }
 
-fn replace_file(path: &Path, content: &str) -> Result<(), String> {
+fn replace_file(path: &Path, content: &str, cancellation: &Cancellation) -> Result<(), String> {
+    check_cancelled(cancellation)?;
     if content.contains('\0') {
         return Err("File content must be UTF-8 text without NUL bytes".into());
     }
@@ -245,19 +266,41 @@ fn replace_file(path: &Path, content: &str) -> Result<(), String> {
         .create_new(true)
         .open(&temporary)
         .map_err(|error| format!("Could not create temporary file: {error}"))?;
-    let result = (|| {
+    let result = (|| -> Result<(), String> {
         if let Some(metadata) = metadata {
-            file.set_permissions(metadata.permissions())?;
+            file.set_permissions(metadata.permissions())
+                .map_err(|error| error.to_string())?;
         }
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
+        for block in content.as_bytes().chunks(64 * 1024) {
+            check_cancelled(cancellation)?;
+            file.write_all(block).map_err(|error| error.to_string())?;
+        }
+        check_cancelled(cancellation)?;
+        file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
-        fs::rename(&temporary, path)
+        check_cancelled(cancellation)?;
+        fs::rename(&temporary, path).map_err(|error| error.to_string())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
     result.map_err(|error| format!("Could not replace file: {error}"))
+}
+
+fn check_cancelled(cancellation: &Cancellation) -> Result<(), String> {
+    if cancellation.requested() {
+        Err("Operation cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+
+fn check_guard(guard: Option<&FileGuard<'_>>, cancellation: &Cancellation) -> Result<(), String> {
+    check_cancelled(cancellation)?;
+    if let Some(guard) = guard {
+        guard.check_cancelled()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -67,7 +67,7 @@ pub fn incomplete(workspace: &Workspace) -> Result<usize, String> {
             transaction.record(Record::Event(Event {
                 seq,
                 origin: "recovery".into(),
-                time: crate::sessions::now(),
+                time: crate::checkpoints::clock::now(),
                 text: format!(
                     "an interrupted {} of {} by {} was found {}; current state is recorded",
                     prepare.kind,

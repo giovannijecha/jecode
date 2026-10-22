@@ -5,6 +5,8 @@ use crate::checkpoints::store::Store;
 use crate::test_support::Directory;
 use std::time::Duration;
 
+mod idle_gc;
+
 fn fixture() -> (Directory, Location) {
     let fixture = Directory::new();
     let workspace = fixture.path().join("project");
@@ -20,7 +22,7 @@ fn age(archive: &Path) {
 }
 
 fn set_age(archive: &Path, elapsed: Duration) {
-    let old = crate::sessions::now() - elapsed.as_millis() as u64;
+    let old = crate::checkpoints::clock::now() - elapsed.as_millis() as u64;
     files::atomic_write(&last_use_path(archive), old.to_string().as_bytes()).unwrap();
 }
 
@@ -39,7 +41,10 @@ fn legacy_location(fixture: &Directory, location: &Location) -> Location {
     let text = fs::read_to_string(location.directory.join("workspace.json")).unwrap();
     fs::write(
         legacy.join("workspace.json"),
-        text.replace("\"version\": 2", "\"version\": 1"),
+        text.replace(
+            &format!("\"version\": {}", layout::VERSION),
+            "\"version\": 1",
+        ),
     )
     .unwrap();
     Location {
@@ -77,7 +82,7 @@ fn legacy_with_object() -> (Directory, Location, u64, Vec<u8>) {
 #[test]
 fn new_layout_expires_idle_history_and_keeps_sequence_identity_and_policy() {
     let (_fixture, location) = fixture();
-    assert_eq!(layout::version(&location.directory), Some(2));
+    assert_eq!(layout::version(&location.directory), Some(layout::VERSION));
     let mut store = Store::open(location.clone()).unwrap();
     let first = store
         .transaction(true, |tx| Ok(tx.point("test", "first", "test", false)))
@@ -140,7 +145,7 @@ fn retention_uses_real_days_and_hourly_throttles_use_real_hours() {
 
     set_age(archive, Duration::from_secs(2 * 60 * 60));
     let stale_activity = fs::read(last_use_path(archive)).unwrap();
-    let now = crate::sessions::now();
+    let now = crate::checkpoints::clock::now();
     let touches = LAST_TOUCH.get_or_init(|| Mutex::new(HashMap::new()));
     touches.lock().unwrap().insert(
         archive.to_path_buf(),
@@ -252,7 +257,7 @@ fn live_reader_and_pinned_or_pending_history_never_expire() {
         read_number(&last_use_path(&location.directory))
             .unwrap()
             .unwrap()
-            <= crate::sessions::now()
+            <= crate::checkpoints::clock::now()
                 - Duration::from_secs(7 * 24 * 60 * 60 + 60 * 60).as_millis() as u64
     );
     assert_eq!(sweep(location.directory.parent().unwrap()).unwrap(), 0);
@@ -275,7 +280,7 @@ fn live_reader_and_pinned_or_pending_history_never_expire() {
                 path: "file.txt".into(),
                 before: State::Absent,
                 after: State::Absent,
-                time: crate::sessions::now(),
+                time: crate::checkpoints::clock::now(),
             }));
             Ok(())
         })
@@ -286,18 +291,16 @@ fn live_reader_and_pinned_or_pending_history_never_expire() {
 }
 
 #[test]
-fn unknown_legacy_activity_gets_full_grace_period() {
+fn background_sweep_preserves_unopened_legacy_archives_without_migration() {
     let (fixture, location) = fixture();
     let legacy = legacy_location(&fixture, &location);
     assert_eq!(layout::version(&legacy.directory), Some(1));
-    let _journal = Journal::open(&legacy.directory).unwrap();
+    fs::create_dir_all(legacy.directory.join("gen-000001")).unwrap();
     assert_eq!(sweep(legacy.directory.parent().unwrap()).unwrap(), 0);
-    assert!(last_use_path(&legacy.directory).exists());
-    assert!(
-        layout::history(&legacy.directory)
-            .join("gen-000001")
-            .exists()
-    );
+    assert_eq!(layout::version(&legacy.directory), Some(1));
+    assert!(!last_use_path(&legacy.directory).exists());
+    assert!(legacy.directory.join("gen-000001").exists());
+    assert!(!legacy.directory.join("history").exists());
 }
 
 #[test]
@@ -313,7 +316,7 @@ fn legacy_history_expires_in_place_without_moving_identity() {
     assert_eq!(sweep(legacy.directory.parent().unwrap()).unwrap(), 1);
     assert!(!legacy.directory.join("gen-000001").exists());
     assert!(legacy.directory.join("workspace.json").exists());
-    assert_eq!(layout::version(&legacy.directory), Some(2));
+    assert_eq!(layout::version(&legacy.directory), Some(layout::VERSION));
     assert_eq!(
         fs::read(legacy.directory.join("CURRENT"))
             .unwrap()
@@ -345,7 +348,7 @@ fn legacy_readers_block_new_writers_until_migration_can_finish() {
         drop(reader);
         drop(owner);
         let reopened = Store::open(legacy.clone()).unwrap();
-        assert_eq!(layout::version(&legacy.directory), Some(2));
+        assert_eq!(layout::version(&legacy.directory), Some(layout::VERSION));
         assert_eq!(&*reopened.bytes(id).unwrap(), bytes.as_slice());
     }
 }
@@ -355,7 +358,7 @@ fn legacy_migration_reopens_exact_object_bytes() {
     let (_fixture, legacy, id, bytes) = legacy_with_object();
     let reopened = Store::open(legacy.clone()).unwrap();
     assert_eq!(&*reopened.bytes(id).unwrap(), bytes.as_slice());
-    assert_eq!(layout::version(&legacy.directory), Some(2));
+    assert_eq!(layout::version(&legacy.directory), Some(layout::VERSION));
     assert!(layout::generation_directory(&legacy.directory, 1).exists());
     assert_eq!(
         fs::read(legacy.directory.join("CURRENT"))
@@ -382,7 +385,7 @@ fn interrupted_legacy_migration_resumes_before_opening_journal() {
         let reopened = Store::open(legacy.clone()).unwrap();
         assert_eq!(&*reopened.bytes(id).unwrap(), bytes.as_slice());
         assert!(!legacy.directory.join(".migrating").exists());
-        assert_eq!(layout::version(&legacy.directory), Some(2));
+        assert_eq!(layout::version(&legacy.directory), Some(layout::VERSION));
     }
 }
 
@@ -423,7 +426,9 @@ fn recent_throttled_action_cannot_expire_early() {
     let (_fixture, location) = fixture();
     let store = Store::open(location.clone()).unwrap();
     drop(store);
-    let old = crate::sessions::now() - Duration::from_secs(7 * 24 * 60 * 60).as_millis() as u64 - 1;
+    let old = crate::checkpoints::clock::now()
+        - Duration::from_secs(7 * 24 * 60 * 60).as_millis() as u64
+        - 1;
     files::atomic_write(
         &last_use_path(&location.directory),
         old.to_string().as_bytes(),

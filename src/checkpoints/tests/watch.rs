@@ -40,6 +40,7 @@ fn ordinary_points_drain_reported_paths_without_waiting_for_quiet() {
     let fixture = Fixture::new();
     fixture.write("a.txt", b"before\n");
     let workspace = fixture.open_with(Options::interactive());
+    workspace.initialize().unwrap();
     until("the baseline", || workspace.readiness() == Readiness::Ready);
     assert_eq!(workspace.watching(), Watching::Active);
 
@@ -143,6 +144,7 @@ fn notifications_capture_disguised_edits_and_a_lost_helper_forces_a_verified_res
     let fixture = Fixture::new();
     fixture.write("same.txt", b"aaaa\n");
     let workspace = fixture.open_with(Options::interactive());
+    workspace.initialize().unwrap();
     until("the baseline", || workspace.readiness() == Readiness::Ready);
     assert_eq!(workspace.watching(), Watching::Active);
 
@@ -188,6 +190,7 @@ fn a_helper_that_keeps_failing_falls_back_to_scans_at_each_point() {
     let fixture = Fixture::new();
     fixture.write("a.txt", b"one\n");
     let workspace = fixture.open_with(Options::interactive());
+    workspace.initialize().unwrap();
     until("the baseline", || workspace.readiness() == Readiness::Ready);
     let stopped = |workspace: &Workspace| matches!(workspace.watching(), Watching::Unavailable(reason) if reason.contains("stopped repeatedly"));
     for attempt in 1.. {
@@ -217,6 +220,7 @@ fn scope_rules_edited_by_another_process_rescan_before_the_next_point() {
     let fixture = Fixture::new();
     fixture.write("node_modules/pkg/index.js", b"dependency\n");
     let workspace = fixture.open_with(Options::interactive());
+    workspace.initialize().unwrap();
     until("the baseline", || workspace.readiness() == Readiness::Ready);
     assert_eq!(workspace.watching(), Watching::Active);
 
@@ -248,6 +252,7 @@ fn notifications_record_creates_deletes_renames_and_whole_subtrees() {
     fixture.write("keep.txt", b"keep\n");
     fixture.write("old.txt", b"old\n");
     let workspace = fixture.open_with(Options::interactive());
+    workspace.initialize().unwrap();
     until("the baseline", || workspace.readiness() == Readiness::Ready);
     assert_eq!(workspace.watching(), Watching::Active);
 

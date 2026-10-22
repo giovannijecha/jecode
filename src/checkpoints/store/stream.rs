@@ -36,6 +36,7 @@ impl Transaction<'_> {
         length: u64,
         base: Option<u64>,
     ) -> Result<(u64, Digest), String> {
+        self.check_cancelled()?;
         if length <= CHUNK_BYTES as u64 {
             let mut bytes = vec![0; length as usize];
             reader
@@ -65,6 +66,7 @@ impl Transaction<'_> {
         let mut position = 0u64;
         let mut root = None;
         while remaining != 0 {
+            self.check_cancelled()?;
             let size = remaining.min(CHUNK_BYTES as u64) as usize;
             let mut bytes = vec![0; size];
             reader

@@ -7,7 +7,6 @@ use std::path::Path;
 /// No per-file ceiling unless the user sets one.
 pub const DEFAULT_MAX_FILE_BYTES: u64 = u64::MAX;
 pub const DEFAULT_BUDGET_BYTES: u64 = 1024 * MIB;
-const LEGACY_DEFAULT_MAX_FILE_BYTES: u64 = 10 * MIB;
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * KIB;
 const GIB: u64 = 1024 * MIB;
@@ -48,6 +47,9 @@ pub struct Policy {
     pub budget_bytes: u64,
     pub exclude: Vec<String>,
     pub include: Vec<String>,
+    pub recovery_accepted_hours: u64,
+    pub recovery_inactive_days: Option<u64>,
+    pub min_free_bytes: u64,
 }
 
 impl Default for Policy {
@@ -60,6 +62,9 @@ impl Default for Policy {
                 .map(|rule| rule.to_string())
                 .collect(),
             include: Vec::new(),
+            recovery_accepted_hours: 24,
+            recovery_inactive_days: Some(7),
+            min_free_bytes: super::pressure::DEFAULT_MIN_FREE_BYTES,
         }
     }
 }
@@ -71,9 +76,7 @@ impl Policy {
         Ok(Self::read_with_migration(directory)?.map(|(policy, _)| policy))
     }
 
-    /// The flag requests canonical v2 persistence after a legacy default is
-    /// translated. Version 1 could not distinguish its generated 10 MiB value
-    /// from an explicit 10 MiB choice; version 2 makes that choice durable.
+    /// Legacy numeric limits are preserved, including their former default.
     pub fn read_with_migration(directory: &Path) -> Result<Option<(Self, bool)>, String> {
         let path = directory.join("policy.json");
         let text = match std::fs::read_to_string(&path) {
@@ -121,26 +124,28 @@ impl Policy {
                 .collect()
         };
         let max_file_bytes = limit("max_file_bytes", DEFAULT_MAX_FILE_BYTES)?;
-        let legacy = value.get("version").and_then(Value::as_usize).unwrap_or(1) < 2;
-        let migrated = legacy && max_file_bytes == LEGACY_DEFAULT_MAX_FILE_BYTES;
+        // A legacy number can be an explicit user choice. Preserve it rather
+        // than guessing whether its former default should become unlimited.
         let policy = Self {
-            max_file_bytes: if migrated {
-                DEFAULT_MAX_FILE_BYTES
-            } else {
-                max_file_bytes
-            },
+            max_file_bytes,
             budget_bytes: limit("budget_bytes", DEFAULT_BUDGET_BYTES)?,
             exclude: rules("exclude", DEFAULT_EXCLUDE)?,
             include: rules("include", &[])?,
+            recovery_accepted_hours: limit("recovery_accepted_hours", 24)?,
+            recovery_inactive_days: match value.get("recovery_inactive_days") {
+                Some(Value::Null) => None,
+                _ => Some(limit("recovery_inactive_days", 7)?),
+            },
+            min_free_bytes: limit("min_free_bytes", super::pressure::DEFAULT_MIN_FREE_BYTES)?,
         };
         policy.validate()?;
-        Ok((policy, migrated))
+        Ok((policy, false))
     }
 
     pub fn encode(&self) -> String {
         let list = |rules: &[String]| Value::Array(rules.iter().map(Value::string).collect());
         Value::object([
-            ("version", Value::number(2)),
+            ("version", Value::number(3)),
             (
                 "max_file_bytes",
                 if self.max_file_bytes == DEFAULT_MAX_FILE_BYTES {
@@ -152,6 +157,16 @@ impl Policy {
             ("budget_bytes", Value::number(self.budget_bytes)),
             ("exclude", list(&self.exclude)),
             ("include", list(&self.include)),
+            (
+                "recovery_accepted_hours",
+                Value::number(self.recovery_accepted_hours),
+            ),
+            (
+                "recovery_inactive_days",
+                self.recovery_inactive_days
+                    .map_or(Value::Null, Value::number),
+            ),
+            ("min_free_bytes", Value::number(self.min_free_bytes)),
         ])
         .pretty()
     }
@@ -173,6 +188,15 @@ impl Policy {
 
     pub fn id(&self) -> u64 {
         hash::digest(self.encode().as_bytes()).0[0]
+    }
+
+    pub fn recovery_expiry(&self) -> super::recovery::Expiry {
+        super::recovery::Expiry {
+            accepted_ms: self.recovery_accepted_hours.saturating_mul(60 * 60 * 1000),
+            active_ms: self
+                .recovery_inactive_days
+                .map(|days| days.saturating_mul(24 * 60 * 60 * 1000)),
+        }
     }
 
     /// Describes what differs from `previous`, such as `+exclude *.log`.
@@ -197,6 +221,14 @@ impl Policy {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.recovery_accepted_hours > 24 {
+            return Err("Accepted recovery groups can be retained for at most 24 hours".into());
+        }
+        if self.recovery_inactive_days == Some(0) {
+            return Err(
+                "Inactive recovery days must be positive, or null to disable expiry".into(),
+            );
+        }
         if self.budget_bytes < MIN_BUDGET {
             return Err(format!(
                 "The archive retention budget must be at least {}",
@@ -448,15 +480,15 @@ mod tests {
     }
 
     #[test]
-    fn only_the_legacy_generated_file_limit_migrates_to_unlimited() {
+    fn legacy_numeric_limits_are_preserved_without_guessing_user_intent() {
         let directory = crate::test_support::Directory::new();
         let old = r#"{"version":1,"max_file_bytes":10485760,"budget_bytes":1073741824}"#;
         std::fs::write(directory.path().join("policy.json"), old).unwrap();
         let (migrated, changed) = Policy::read_with_migration(directory.path())
             .unwrap()
             .unwrap();
-        assert!(changed);
-        assert_eq!(migrated.max_file_bytes, u64::MAX);
+        assert!(!changed);
+        assert_eq!(migrated.max_file_bytes, 10 * MIB);
         migrated.save(directory.path()).unwrap();
         let (reloaded, changed) = Policy::read_with_migration(directory.path())
             .unwrap()

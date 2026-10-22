@@ -13,6 +13,15 @@ fn protected(protection: Protection) -> (u64, u64) {
     }
 }
 
+fn operation(index: &Index, snapshot: u64) -> u64 {
+    *index
+        .outcomes
+        .range(snapshot..)
+        .next()
+        .expect("completed operation after snapshot")
+        .0
+}
+
 #[test]
 fn a_write_saves_the_previous_state_before_the_file_changes() {
     let fixture = Fixture::new();
@@ -41,11 +50,12 @@ fn a_write_saves_the_previous_state_before_the_file_changes() {
 
     let index = index(&workspace);
     assert!(index.pending.is_empty());
-    assert_eq!(index.outcomes.get(&before), Some(&Outcome::Applied));
+    let operation = operation(&index, before);
+    assert_eq!(index.outcomes.get(&operation), Some(&Outcome::Applied));
     let current = index.current("notes.txt").unwrap();
     assert_eq!(
         (current.seq, current.origin.as_str(), current.operation),
-        (after, "session-a", before)
+        (after, "session-a", operation)
     );
 
     let selected = paths(&["notes.txt"]);
@@ -101,7 +111,11 @@ fn failed_and_abandoned_writes_are_classified_from_the_actual_file() {
     failed.prepare(b"never written\n");
     let (operation, _) = protected(failed.finish(false));
     assert_eq!(
-        index(&workspace).outcomes.get(&operation),
+        index(&workspace)
+            .outcomes
+            .range(operation..)
+            .next()
+            .map(|(_, outcome)| outcome),
         Some(&Outcome::NotApplied)
     );
 
@@ -137,7 +151,11 @@ fn a_finished_write_is_recorded_from_its_bytes_and_reread_before_the_next_point(
         reused_before_finish
     );
     assert_eq!(
-        index(&workspace).outcomes.get(&operation),
+        index(&workspace)
+            .outcomes
+            .range(operation..)
+            .next()
+            .map(|(_, outcome)| outcome),
         Some(&Outcome::Applied)
     );
 
@@ -185,7 +203,14 @@ fn a_full_working_generation_closes_a_prepared_write_as_unknown_and_reconciles_i
     };
     let snapshot = index(&workspace);
     assert!(snapshot.pending.is_empty());
-    assert_eq!(snapshot.outcomes.get(&operation), Some(&Outcome::Unknown));
+    assert_eq!(
+        snapshot
+            .outcomes
+            .range(operation..)
+            .next()
+            .map(|(_, outcome)| outcome),
+        Some(&Outcome::Unknown)
+    );
 
     workspace.store().journal.quota_limit = crate::checkpoints::quota::LIMIT;
     workspace
@@ -246,12 +271,13 @@ fn unprotected_changes_still_proceed_and_say_why() {
     workspace
         .signals
         .update(|health| health.readiness = Readiness::Failed("synthetic failure".into()));
-    let mutation = workspace.mutation("session-a", "write", &fixture.path("ok.txt"));
-    assert_eq!(
-        mutation.finish(true),
-        Protection::Unprotected("synthetic failure".into())
+    let mut mutation = workspace.mutation("session-a", "write", &fixture.path("ok.txt"));
+    mutation.prepare(b"still protected\n");
+    assert!(
+        matches!(mutation.finish(false), Protection::Protected { .. }),
+        "a background capture failure does not disable exact-path protection"
     );
-    // A healthy full scan makes a later command safe again.
+    // Explicit scope protection is independent of legacy baseline readiness.
     let command = workspace.command("session-a", "true");
     assert_eq!(command.freshness, Freshness::Current);
 }
@@ -278,12 +304,12 @@ fn commands_record_a_point_before_and_report_what_changed() {
     let index = index(&workspace);
     assert_eq!(index.current("a.txt").unwrap().origin, "external");
 
-    // An unchanged workspace reuses its last point instead of adding markers.
+    // Each protected command has its own before-state inside the same attempt.
     let first = workspace.command("session-a", "ls").finish();
     let second = workspace.command("session-a", "ls").finish();
     assert!(first.changed.is_empty() && second.changed.is_empty());
-    assert_eq!(first.before, second.before);
-    assert_eq!(first.after, second.after);
+    assert_eq!(first.group, second.group);
+    assert_ne!(first.before, second.before);
 
     // Undoing the command restores every path it touched.
     let report = workspace

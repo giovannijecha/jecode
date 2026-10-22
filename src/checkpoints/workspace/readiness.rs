@@ -1,6 +1,8 @@
 //! Baseline readiness and the coverage state exposed to tool callers.
 use super::{Readiness, Watching, Workspace};
+#[cfg(test)]
 use crate::cancel::Cancellation;
+#[cfg(test)]
 use std::time::Duration;
 
 impl Workspace {
@@ -24,6 +26,7 @@ impl Workspace {
         self.wait_ready_cancellable(&self.cancellation)
     }
 
+    #[cfg(test)]
     pub fn wait_ready_cancellable(&self, cancellation: &Cancellation) -> Result<(), String> {
         let mut health = self.signals.lock();
         loop {
@@ -37,7 +40,7 @@ impl Workspace {
                     // error. Retry the full scan before declaring Bash
                     // unprotected, as ordinary points already do.
                     drop(health);
-                    self.catch_up("external")?;
+                    self.catch_up_cancellable("external", cancellation)?;
                     health = self.signals.lock();
                 }
                 _ if !self.options.background => {
@@ -58,8 +61,8 @@ impl Workspace {
         if cancellation.requested() {
             return Err("Operation cancelled".into());
         }
-        let mut store = self.store();
-        store.refresh()?;
+        let mut store = self.store_cancellable(cancellation)?;
+        store.refresh_cancellable(cancellation)?;
         self.observe_coverage(&store);
         if cancellation.requested() {
             return Err("Operation cancelled".into());

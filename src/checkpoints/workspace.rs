@@ -1,6 +1,5 @@
-//! One process's shared handle on a workspace archive. A background worker
-//! captures the baseline, reconciles offline changes and records what the
-//! watcher reports; tools capture their own mutations synchronously.
+//! One process's shared archive handle. Tools acquire path-specific recovery
+//! synchronously; the worker maintains retention and explicit notifications.
 use super::identity::{self, Location};
 use super::locks::Leases;
 use super::record::State;
@@ -16,16 +15,15 @@ mod readiness;
 
 const TICK: Duration = Duration::from_millis(500);
 const DEBOUNCE: Duration = Duration::from_millis(20);
-const POLL_MIN: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
     /// Watch the workspace with the platform helper where one exists.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub watch: bool,
-    /// Capture the baseline and later changes on a background thread.
+    /// Run archive maintenance and deferred completion on a background thread.
     pub background: bool,
-    /// Reread every file on reopen to find edits that preserved metadata.
+    /// Verify recorded paths when an explicit rescan is requested.
     pub verify: bool,
 }
 
@@ -49,7 +47,6 @@ impl Options {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Readiness {
-    Starting,
     /// The first capture of the scope, with paths captured so far.
     Baseline(usize),
     /// Reconciling changes made while no session watched, with paths examined.
@@ -81,13 +78,14 @@ pub(super) struct Health {
     pub excluded: Vec<String>,
     pub watching: Watching,
     pub dirty: BTreeSet<String>,
+    pub interrupted: BTreeSet<u64>,
     pub rescan: Option<String>,
     pub failure: Option<String>,
     /// Origins of Bash commands running in this process.
     pub bash: Vec<String>,
     /// Background processes still running in each conversation runtime.
     pub background: BTreeMap<u64, usize>,
-    /// A background process ended; scan once for its last changes.
+    /// A background process ended; wake archive maintenance.
     pub ended: bool,
     pub event: Option<Instant>,
     pub marker: u64,
@@ -112,6 +110,7 @@ pub(super) struct Health {
 impl Health {
     fn has_work(&self) -> bool {
         !self.dirty.is_empty()
+            || !self.interrupted.is_empty()
             || self.rescan.is_some()
             || matches!(self.watching, Watching::Lost(_))
     }
@@ -135,6 +134,7 @@ impl Signals {
 
 struct Work {
     dirty: BTreeSet<String>,
+    interrupted: BTreeSet<u64>,
     rescan: Option<String>,
 }
 
@@ -155,9 +155,6 @@ static OPEN: Mutex<Vec<Weak<Workspace>>> = Mutex::new(Vec::new());
 
 /// Opens this process's shared handle on the workspace archive.
 pub fn open(home: &Path, root: &Path, options: Options) -> Result<Arc<Workspace>, String> {
-    // A separate archive can expire while this workspace is being opened.
-    // Sweep before locate creates or reuses this archive.
-    let _ = super::lifecycle::sweep(&home.join("checkpoints"));
     let location = identity::locate(home, root, true)?
         .ok_or("Could not create the workspace checkpoint archive")?;
     let mut open = OPEN.lock().unwrap_or_else(|e| e.into_inner());
@@ -203,14 +200,17 @@ impl Workspace {
             excluded,
             signals: Arc::new(Signals {
                 health: Mutex::new(Health {
-                    readiness: Readiness::Starting,
-                    selective,
+                    readiness: Readiness::Ready,
+                    selective: selective.or_else(|| {
+                        Some("on-demand recovery; only captured paths are protected".into())
+                    }),
                     #[cfg(windows)]
                     policy: scope_policy,
                     #[cfg(windows)]
                     excluded: scope_excluded,
                     watching: Watching::Off,
                     dirty: BTreeSet::new(),
+                    interrupted: BTreeSet::new(),
                     rescan: None,
                     failure: reopened_error,
                     bash: Vec::new(),
@@ -263,12 +263,30 @@ impl Workspace {
         self.store.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    pub(super) fn store_cancellable(
+        &self,
+        cancellation: &Cancellation,
+    ) -> Result<MutexGuard<'_, Store>, String> {
+        loop {
+            if cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
+            match self.store.try_lock() {
+                Ok(store) => return Ok(store),
+                Err(std::sync::TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    cancellation.wait(Duration::from_millis(10))?
+                }
+            }
+        }
+    }
+
     pub fn options(&self) -> Options {
         self.options
     }
 
     /// Runs the first capture, or reconciles offline changes, on this thread.
-    pub fn initialize(&self) -> Result<(), String> {
+    pub fn initialize(&self) -> Result<Summary, String> {
         #[cfg(windows)]
         if self.options.watch {
             self.start_watcher();
@@ -282,13 +300,8 @@ impl Workspace {
             };
         });
         let origin = if baseline { "baseline" } else { "external" };
-        let result = (|| {
-            let summary = scan::scan_full(
-                self,
-                origin,
-                !baseline && self.options.verify,
-                &self.cancellation,
-            )?;
+        let result: Result<Summary, String> = (|| {
+            let summary = scan::scan_full(self, origin, true, &self.cancellation)?;
             if !self.polling() {
                 self.settle();
                 self.flush(origin)?;
@@ -305,7 +318,8 @@ impl Workspace {
             self.covered_point(
                 &summary,
                 record.then_some((kind, label.as_str(), origin, false)),
-            )
+            )?;
+            Ok(summary)
         })();
         self.signals.update(|health| {
             health.readiness = match &result {
@@ -313,7 +327,7 @@ impl Workspace {
                 Err(error) => Readiness::Failed(error.clone()),
             };
         });
-        result.map(|_| ())
+        result
     }
 
     /// Captures reported changes. One capture runs at a time per process.
@@ -330,15 +344,18 @@ impl Workspace {
             health.busy = true;
             Work {
                 dirty: std::mem::take(&mut health.dirty),
+                interrupted: std::mem::take(&mut health.interrupted),
                 rescan: health.rescan.take(),
             }
         };
+        let interrupted = work.interrupted.clone();
         let result = self.process(work, origin);
         self.signals.update(|health| {
             health.busy = false;
             match &result {
                 Ok(()) => health.failure = None,
                 Err(error) => {
+                    health.interrupted.extend(interrupted);
                     // Work was taken before processing. A failed partial capture
                     // needs a fresh walk even if no further event arrives.
                     health.rescan = Some("a checkpoint capture failed".into());
@@ -350,6 +367,26 @@ impl Workspace {
     }
 
     fn process(&self, work: Work, origin: &str) -> Result<(), String> {
+        if !work.interrupted.is_empty() {
+            self.store().transaction(false, |tx| {
+                for operation in &work.interrupted {
+                    if tx
+                        .index()
+                        .pending
+                        .get(operation)
+                        .is_some_and(|prepare| prepare.owner == tx.store.owner)
+                    {
+                        let seq = tx.seq();
+                        tx.record(super::record::Record::Complete {
+                            seq,
+                            operation: *operation,
+                            outcome: super::record::Outcome::Unknown,
+                        });
+                    }
+                }
+                Ok(())
+            })?;
+        }
         if let Some(reason) = work.rescan {
             scan::coverage(&mut self.store(), false, &reason)?;
             // Unobserved edits may have preserved size and modification time.
@@ -451,14 +488,6 @@ impl Drop for Workspace {
 }
 
 fn worker(weak: Weak<Workspace>, signals: Arc<Signals>) {
-    match weak.upgrade() {
-        Some(workspace) => {
-            let _ = workspace.initialize();
-        }
-        None => return,
-    }
-    let mut polled = Instant::now();
-    let mut interval = POLL_MIN;
     loop {
         let work = {
             let mut health = signals.lock();
@@ -487,25 +516,7 @@ fn worker(weak: Weak<Workspace>, signals: Arc<Signals>) {
                 std::thread::sleep(TICK);
             }
         }
-        let poll = {
-            let mut health = signals.lock();
-            let due =
-                (!health.background.is_empty() && polled.elapsed() >= interval) || health.ended;
-            health.ended = false;
-            due && health.watching != Watching::Active
-        };
-        if poll {
-            let started = Instant::now();
-            if let Err(error) = scan::scan(&workspace, "external", false, &workspace.cancellation) {
-                signals.update(|health| {
-                    health.failure = Some(error);
-                    health.rescan = Some("a background capture failed".into());
-                });
-            }
-            // Keep polling below a tenth of the time.
-            interval = POLL_MIN.max(started.elapsed() * 10);
-            polled = Instant::now();
-        }
+        signals.update(|health| health.ended = false);
         workspace.maintain();
         let _ = super::lifecycle::sweep_throttled(
             workspace.archive.parent().unwrap_or(&workspace.archive),

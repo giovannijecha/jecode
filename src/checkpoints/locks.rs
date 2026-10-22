@@ -39,6 +39,23 @@ impl Exclusive {
             Err(std::fs::TryLockError::Error(error)) => Err(error),
         }
     }
+
+    pub fn acquire_cancellable(
+        path: &Path,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> std::io::Result<Self> {
+        loop {
+            if cancellation.requested() {
+                return Err(std::io::Error::other("Operation cancelled"));
+            }
+            if let Some(lock) = Self::try_acquire(path)? {
+                return Ok(lock);
+            }
+            cancellation
+                .wait(std::time::Duration::from_millis(10))
+                .map_err(std::io::Error::other)?;
+        }
+    }
 }
 
 impl Drop for Exclusive {
@@ -127,12 +144,31 @@ impl Leases {
         self.stripes(stripes)
     }
 
+    pub fn acquire_cancellable(
+        self: &Arc<Self>,
+        paths: &[&str],
+        cancellation: &crate::cancel::Cancellation,
+    ) -> std::io::Result<Lease> {
+        let mut stripes: Vec<usize> = paths.iter().map(|path| Self::stripe(path)).collect();
+        stripes.sort_unstable();
+        stripes.dedup();
+        self.stripes_cancellable(stripes, Some(cancellation))
+    }
+
     /// Every stripe, for whole-scope operations.
     pub fn acquire_all(self: &Arc<Self>) -> std::io::Result<Lease> {
         self.stripes((0..STRIPES).collect())
     }
 
     fn stripes(self: &Arc<Self>, stripes: Vec<usize>) -> std::io::Result<Lease> {
+        self.stripes_cancellable(stripes, None)
+    }
+
+    fn stripes_cancellable(
+        self: &Arc<Self>,
+        stripes: Vec<usize>,
+        cancellation: Option<&crate::cancel::Cancellation>,
+    ) -> std::io::Result<Lease> {
         let mut lease = Lease {
             leases: self.clone(),
             stripes: Vec::new(),
@@ -141,11 +177,23 @@ impl Leases {
             {
                 let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
                 while held.contains(&stripe) {
-                    held = self.released.wait(held).unwrap_or_else(|e| e.into_inner());
+                    if cancellation.is_some_and(|token| token.requested()) {
+                        return Err(std::io::Error::other("Operation cancelled"));
+                    }
+                    held = self
+                        .released
+                        .wait_timeout(held, std::time::Duration::from_millis(10))
+                        .unwrap_or_else(|e| e.into_inner())
+                        .0;
                 }
                 held.insert(stripe);
             }
-            match Exclusive::acquire(&self.directory.join(format!("{stripe:02x}.lock"))) {
+            let path = self.directory.join(format!("{stripe:02x}.lock"));
+            let acquired = match cancellation {
+                Some(token) => Exclusive::acquire_cancellable(&path, token),
+                None => Exclusive::acquire(&path),
+            };
+            match acquired {
                 Ok(lock) => lease.stripes.push((stripe, lock)),
                 Err(error) => {
                     self.release(stripe);

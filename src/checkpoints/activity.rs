@@ -32,7 +32,7 @@ pub fn register(archive: &Path, origin: &str) -> Result<Registration, String> {
     let directory = directory(archive);
     let lock = Exclusive::acquire(&directory.join(format!("{name}.lock")))
         .map_err(|error| format!("Could not register session activity: {error}"))?;
-    let now = crate::sessions::now();
+    let now = crate::checkpoints::clock::now();
     let registration = Registration {
         archive: archive.to_path_buf(),
         description: directory.join(format!("{name}.json")),
@@ -55,7 +55,7 @@ impl Registration {
         {
             let mut entry = self.entry.lock().unwrap_or_else(|e| e.into_inner());
             entry.state = state.chars().take(160).collect();
-            entry.updated = crate::sessions::now();
+            entry.updated = crate::checkpoints::clock::now();
         }
         self.save();
     }

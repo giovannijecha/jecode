@@ -103,7 +103,7 @@ pub(super) fn install(
             files::remove(&path)?;
             files::symlink(target, &path)?;
         }
-        State::Oversized { .. } | State::Unreadable { .. } => {
+        State::Oversized { .. } | State::Unreadable { .. } | State::UnretainedFile { .. } => {
             return Err(Failure::Io("the target state was not captured".into()));
         }
     }

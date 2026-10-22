@@ -9,8 +9,8 @@
 //! `.tmp/checkpoint-measurements/<os>`; `JECODE_CHECKPOINT_MEASURE_QUICK=1`
 //! takes a tenth of the samples to check the harness itself. Set
 //! `JECODE_CHECKPOINT_MEASURE_ONLY` to comma-separated workflow names to rerun
-//! capture, editing, recovery, storage or sessions independently. The `large`
-//! workflow creates a 264 MiB workspace and 50,010 files; select it explicitly.
+//! capture, editing, recovery, storage or sessions independently. `large` and
+//! `on-demand` create a 264 MiB workspace and 50,010 files; select them explicitly.
 use super::store::Counters;
 use super::workspace::{self, Options, Readiness, Watching, Workspace};
 use crate::test_support::Directory;
@@ -24,6 +24,8 @@ mod capture;
 mod editing;
 mod environment;
 mod large;
+mod lifecycle;
+mod on_demand;
 mod recovery;
 mod sessions;
 mod storage;
@@ -58,6 +60,8 @@ fn workflows() {
         ("storage", storage::run),
         ("sessions", sessions::run),
         ("large", large::run),
+        ("retention", lifecycle::run),
+        ("on-demand", on_demand::run),
         ("streaming", streaming::run),
     ] {
         if workflows.contains(&name) {
@@ -78,6 +82,8 @@ fn selected(value: Option<&str>) -> Result<Vec<&str>, String> {
         "storage",
         "sessions",
         "large",
+        "retention",
+        "on-demand",
         "streaming",
     ];
     let Some(value) = value else {
@@ -103,6 +109,7 @@ fn workflow_selection_rejects_unknown_or_empty_measurements() {
     assert!(selected(Some("")).is_err());
     assert!(selected(Some("edting")).is_err());
     assert_eq!(selected(Some("large")).unwrap(), ["large"]);
+    assert_eq!(selected(Some("on-demand")).unwrap(), ["on-demand"]);
 }
 
 #[derive(Default)]
@@ -353,16 +360,15 @@ impl Tree {
         fs::write(path, bytes).unwrap();
     }
 
-    /// Opens the workspace as the TUI does and waits for its baseline.
+    /// Opts into the legacy full scan for comparisons with the former global
+    /// baseline. Product startup is measured separately by `on_demand`.
     pub fn open(&self) -> Arc<Workspace> {
         self.open_with(Options::interactive())
     }
 
     pub fn open_with(&self, options: Options) -> Arc<Workspace> {
         let workspace = workspace::open(self.home.path(), self.root.path(), options).unwrap();
-        if !options.background {
-            workspace.initialize().unwrap();
-        }
+        workspace.initialize().unwrap();
         ready(&workspace);
         workspace
     }

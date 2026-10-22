@@ -12,12 +12,15 @@ const SENTINEL: &[u8] = layout::LEGACY_SENTINEL;
 /// old reader is still active, so neither migration nor expiry can proceed.
 pub(super) fn resume_or_start(archive: &Path) -> Result<bool, String> {
     let marker = archive.join(".migrating");
-    if layout::version(archive) == Some(2) {
+    if layout::version(archive).is_some_and(|version| (2..=layout::VERSION).contains(&version)) {
         layout::guard_legacy_locked(archive)?;
         if marker.exists() {
             verify_completed(archive)?;
             fs::remove_file(marker)
                 .map_err(|error| format!("Could not finish checkpoint migration: {error}"))?;
+        }
+        if layout::version(archive) != Some(layout::VERSION) {
+            publish_version(archive)?;
         }
         return Ok(true);
     }
@@ -86,6 +89,15 @@ pub(super) fn resume_or_start(archive: &Path) -> Result<bool, String> {
         .map_err(|error| format!("Could not flush migrated checkpoint history: {error}"))?;
     files::sync_directory(&runtime)
         .map_err(|error| format!("Could not flush migrated checkpoint runtime: {error}"))?;
+    publish_version(archive)?;
+    fs::remove_file(marker)
+        .map_err(|error| format!("Could not finish checkpoint migration: {error}"))?;
+    files::sync_directory(archive)
+        .map_err(|error| format!("Could not flush checkpoint migration: {error}"))?;
+    Ok(true)
+}
+
+fn publish_version(archive: &Path) -> Result<(), String> {
     let identity = archive.join("workspace.json");
     let text = fs::read_to_string(&identity)
         .map_err(|error| format!("Could not read checkpoint identity: {error}"))?;
@@ -93,14 +105,10 @@ pub(super) fn resume_or_start(archive: &Path) -> Result<bool, String> {
     let Value::Object(ref mut fields) = value else {
         return Err("Checkpoint identity is damaged".into());
     };
-    fields.insert("version".into(), Value::number(2));
+    fields.insert("version".into(), Value::number(layout::VERSION));
     files::atomic_write(&identity, value.pretty().as_bytes())
         .map_err(|error| format!("Could not publish checkpoint migration: {error}"))?;
-    fs::remove_file(marker)
-        .map_err(|error| format!("Could not finish checkpoint migration: {error}"))?;
-    files::sync_directory(archive)
-        .map_err(|error| format!("Could not flush checkpoint migration: {error}"))?;
-    Ok(true)
+    Ok(())
 }
 
 fn read_marker(path: &Path) -> Result<(u64, bool), String> {

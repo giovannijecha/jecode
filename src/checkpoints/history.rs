@@ -1,26 +1,44 @@
 //! Operations on recorded history shared by the tool, the command line and
 //! the interactive view: restores, pins and the archive policy.
 use super::gc::{self, Collection};
+use super::index::Index;
 use super::index::reference;
 use super::policy::{Policy, size};
 use super::record::{Event, Record};
 use super::restore::{self, Report, Request};
 use super::scan;
+use super::scopes::Selection;
 use super::workspace::{Readiness, Workspace};
+use std::collections::BTreeSet;
 
 impl Workspace {
     /// Restores selected paths, or the whole scope, after bringing the
     /// archive up to date so conflicts compare with the actual state.
     pub fn restore(&self, request: &Request<'_>) -> Result<Report, String> {
         let readiness = self.readiness();
-        if request.paths.is_none()
-            && matches!(readiness, Readiness::Starting | Readiness::Baseline(_))
-        {
+        if request.paths.is_none() && matches!(readiness, Readiness::Baseline(_)) {
             return Err(
                 "The first capture of this workspace is still running; a full restore needs it to finish".into(),
             );
         }
-        self.catch_up("external")?;
+        let captured = {
+            let mut store = self.store();
+            store.refresh()?;
+            if restore::recovery_reference(&store.index, request.target) {
+                Some(super::scopes::Captured {
+                    selection: recovery_selection(&self.root, &store.index, request)?,
+                    policy_id: store.policy.id(),
+                    ..Default::default()
+                })
+            } else {
+                None
+            }
+        };
+        if let Some(captured) = captured {
+            super::scopes::reconcile(self, &captured, "external", &self.cancellation)?;
+        } else {
+            self.catch_up("external")?;
+        }
         let paths = restore::paths(&mut self.store(), request)?;
         let lease = match request.paths {
             None => self.leases.acquire_all(),
@@ -90,7 +108,7 @@ impl Workspace {
             transaction.record(Record::Event(Event {
                 seq,
                 origin: origin.into(),
-                time: crate::sessions::now(),
+                time: crate::checkpoints::clock::now(),
                 text: format!(
                     "checkpoint limits changed: budget {}, maximum file {}",
                     size(policy.budget_bytes),
@@ -105,7 +123,7 @@ impl Workspace {
         // Files that crossed the size limit change state.
         self.signals.update(|health| {
             health.scope = policy.id();
-            health.selective = None;
+            health.selective = Some("on-demand recovery; only captured paths are protected".into());
             health.collected = 0;
             health.collection_eligibility = None;
             #[cfg(windows)]
@@ -150,15 +168,13 @@ impl Workspace {
     /// Rereads every file in scope to find edits that preserved size and
     /// modification time; returns the paths whose recorded state changed.
     pub fn verify(&self) -> Result<scan::Summary, String> {
-        let summary = scan::discover(self, "external", &self.cancellation)?;
-        self.covered_point(&summary, None)?;
-        Ok(summary)
+        self.initialize()
     }
 
     /// Refreshes idle readers and collects off the hot path after enough
     /// growth or a change to the points and pins that constrain pruning.
     pub(super) fn maintain(&self) {
-        let (bytes, budget, eligibility) = {
+        let (bytes, budget, eligibility, expired) = {
             let mut store = self.store();
             if let Err(error) = store.maintain() {
                 self.signals.update(|health| health.failure = Some(error));
@@ -168,19 +184,81 @@ impl Workspace {
                 store.journal.stored_bytes(),
                 store.policy.budget_bytes,
                 collection_eligibility(&store.index),
+                gc::due(&store.index, crate::checkpoints::clock::now()),
             )
         };
         let due = {
             let health = self.signals.lock();
-            health.readiness == Readiness::Ready
-                && bytes > budget / 5 * 2
-                && (bytes >= health.collected.saturating_add(budget / 10)
-                    || health.collection_eligibility.as_ref() != Some(&eligibility))
+            expired
+                || health.readiness == Readiness::Ready
+                    && (bytes > budget / 5 * 2
+                        && (bytes >= health.collected.saturating_add(budget / 10)
+                            || health.collection_eligibility.as_ref() != Some(&eligibility)))
         };
         if due {
             let _ = self.collect(false);
         }
     }
+}
+
+fn within(root: &str, path: &str) -> bool {
+    root.is_empty()
+        || path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|tail| tail.starts_with('/'))
+}
+
+fn recovery_selection(
+    root: &std::path::Path,
+    index: &Index,
+    request: &Request<'_>,
+) -> Result<Selection, String> {
+    let saved = super::recovery::paths(index, request.target);
+    let roots = super::recovery::roots(index, request.target);
+    let Some(requested) = request.paths else {
+        return Ok(Selection {
+            files: saved,
+            directories: roots,
+        });
+    };
+    let mut files = BTreeSet::new();
+    let mut directories = BTreeSet::new();
+    let names = restore::TargetNames::new(root, index, request.target);
+    for requested in requested {
+        let requested = names.resolve(requested)?;
+        // Even an entry absent from the saved scope needs a current-state
+        // observation; recovery::target decides whether it can be restored.
+        files.insert(requested.clone());
+        if request.exact {
+            continue;
+        }
+        files.extend(
+            saved
+                .iter()
+                .filter(|path| within(&requested, path))
+                .cloned(),
+        );
+        for root in &roots {
+            if within(root, &requested) {
+                directories.insert(requested.clone());
+            } else if within(&requested, root) {
+                directories.insert(root.clone());
+            }
+        }
+    }
+    let mut directories: Vec<String> = directories.into_iter().collect();
+    directories.sort_by_key(String::len);
+    let mut minimal = Vec::new();
+    for directory in directories {
+        if !minimal.iter().any(|root: &String| within(root, &directory)) {
+            minimal.push(directory);
+        }
+    }
+    Ok(Selection {
+        files: files.into_iter().collect(),
+        directories: minimal,
+    })
 }
 
 fn collection_eligibility(index: &super::index::Index) -> (Option<u64>, Vec<u64>) {

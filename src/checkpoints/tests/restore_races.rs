@@ -322,7 +322,14 @@ fn failed_replacement_does_not_claim_an_external_edit_for_undo() {
             result.get("before").unwrap().as_str().unwrap(),
         )
         .unwrap();
-        assert_eq!(history.outcomes.get(&(before + 1)), Some(&Outcome::Unknown));
+        assert_eq!(
+            history
+                .outcomes
+                .range(before..)
+                .next()
+                .map(|(_, outcome)| outcome),
+            Some(&Outcome::Unknown)
+        );
     }
 }
 

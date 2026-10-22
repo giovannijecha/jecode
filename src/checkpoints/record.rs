@@ -13,6 +13,12 @@ pub enum State {
         digest: Digest,
         mode: Mode,
     },
+    /// Current file metadata retained after its archived bytes expire.
+    UnretainedFile {
+        length: u64,
+        digest: Digest,
+        mode: Mode,
+    },
     Directory {
         mode: Mode,
     },
@@ -45,6 +51,16 @@ impl State {
                     .digest(*digest)
                     .u64(u64::from(mode.0));
             }
+            Self::UnretainedFile {
+                length,
+                digest,
+                mode,
+            } => {
+                out.u8(6)
+                    .u64(*length)
+                    .digest(*digest)
+                    .u64(u64::from(mode.0));
+            }
             Self::Directory { mode } => {
                 out.u8(2).u64(u64::from(mode.0));
             }
@@ -66,6 +82,11 @@ impl State {
             0 => Self::Absent,
             1 => Self::File {
                 object: input.u64()?,
+                length: input.u64()?,
+                digest: input.digest()?,
+                mode: mode(input.u64()?),
+            },
+            6 => Self::UnretainedFile {
                 length: input.u64()?,
                 digest: input.digest()?,
                 mode: mode(input.u64()?),
@@ -115,6 +136,44 @@ impl State {
                     ..
                 },
             ) => a == b && x == y && m == n,
+            (
+                Self::UnretainedFile {
+                    length: a,
+                    digest: x,
+                    mode: m,
+                },
+                Self::UnretainedFile {
+                    length: b,
+                    digest: y,
+                    mode: n,
+                },
+            ) => a == b && x == y && m == n,
+            (
+                Self::File {
+                    length: a,
+                    digest: x,
+                    mode: m,
+                    ..
+                },
+                Self::UnretainedFile {
+                    length: b,
+                    digest: y,
+                    mode: n,
+                },
+            )
+            | (
+                Self::UnretainedFile {
+                    length: a,
+                    digest: x,
+                    mode: m,
+                },
+                Self::File {
+                    length: b,
+                    digest: y,
+                    mode: n,
+                    ..
+                },
+            ) => a == b && x == y && m == n,
             _ => self == other,
         }
     }
@@ -123,6 +182,7 @@ impl State {
         match self {
             Self::Absent => "absent",
             Self::File { .. } => "file",
+            Self::UnretainedFile { .. } => "unretained file",
             Self::Directory { .. } => "directory",
             Self::Link { .. } => "link",
             Self::Oversized { .. } => "oversized",
@@ -262,9 +322,62 @@ pub struct Event {
     pub paths: Vec<String>,
 }
 
+/// Durable recovery facts; points provide the public cp-N handles.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Recovery {
+    Mode {
+        seq: u64,
+        time: u64,
+    },
+    Snapshot {
+        seq: u64,
+        group: u64,
+        snapshot: u64,
+    },
+    Step {
+        seq: u64,
+        group: u64,
+        snapshot: u64,
+        path: String,
+        before: State,
+    },
+    Scope {
+        seq: u64,
+        group: u64,
+        snapshot: u64,
+        root: String,
+    },
+    Status {
+        seq: u64,
+        group: u64,
+        action: RecoveryAction,
+        time: u64,
+        until: u64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoveryAction {
+    Accepted,
+    Touched,
+}
+
+impl Recovery {
+    pub fn seq(&self) -> u64 {
+        match self {
+            Self::Mode { seq, .. }
+            | Self::Snapshot { seq, .. }
+            | Self::Step { seq, .. }
+            | Self::Scope { seq, .. }
+            | Self::Status { seq, .. } => *seq,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Record {
     Version(Version),
+    Recovery(Recovery),
     Stat {
         seq: u64,
         path: String,
@@ -306,6 +419,7 @@ impl Record {
     pub fn seq(&self) -> u64 {
         match self {
             Self::Version(version) => version.seq,
+            Self::Recovery(recovery) => recovery.seq(),
             Self::Prepare(prepare) => prepare.seq,
             Self::Point(point) => point.seq,
             Self::Event(event) => event.seq,

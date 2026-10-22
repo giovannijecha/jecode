@@ -3,8 +3,8 @@ use super::*;
 use crate::checkpoints::record::State;
 
 pub fn run(recorder: &mut Recorder) {
-    // The first helper start in a process compiles it; keep that out of the
-    // capture figures below.
+    // The explicit full scan is a legacy comparison workload; ordinary
+    // on-demand startup is measured separately.
     #[cfg(windows)]
     helper(recorder);
     for (files, samples) in [(1_000, 10), (10_000, 5)] {
@@ -121,7 +121,8 @@ fn initial_and_reopen(recorder: &mut Recorder, files: usize, samples: usize) {
         close(workspace);
     }
     let [initial, verify, reopen, offline, mutated, offline_after] = series;
-    let note = "warm OS cache; interactive options as in the TUI; time until the baseline is ready";
+    let note =
+        "legacy explicit full scan; warm OS cache; time until all eligible paths are recorded";
     recorder.add(
         [workflow, &case("initial capture (empty archive)"), "total"],
         note,
@@ -283,6 +284,7 @@ fn helper(recorder: &mut Recorder) {
         let workspace =
             workspace::open(tree.home.path(), tree.root.path(), Options::interactive()).unwrap();
         let started = Instant::now();
+        workspace.initialize().unwrap();
         let deadline = Duration::from_secs(120);
         while workspace.watching() != Watching::Active {
             assert!(started.elapsed() < deadline, "{:?}", workspace.watching());
@@ -293,7 +295,7 @@ fn helper(recorder: &mut Recorder) {
     let (workspace, cold) = start(&tree);
     recorder.add(
         [workflow, "helper start, first in process", "total"],
-        "compiles the helper into a fresh test cache, then starts it",
+        "explicit full scan starts the notification helper; first helper may compile",
         vec![cold],
     );
     ready(&workspace);
@@ -307,7 +309,7 @@ fn helper(recorder: &mut Recorder) {
     }
     recorder.add(
         [workflow, "helper start, compiled", "total"],
-        "process start until the helper reports readiness",
+        "explicit full scan, including already compiled helper readiness",
         warm,
     );
 

@@ -4,6 +4,7 @@
 //! reported on every protected call instead of blocking it.
 use super::activity::{self, Registration};
 use super::index::{EVENT_LIMIT, reference};
+pub use super::mutation::Completion;
 use super::mutation::{Command, Freshness, Mutation, Protection};
 use super::workspace::{self, Options, Workspace};
 use crate::json::Value;
@@ -53,14 +54,10 @@ impl Session {
         })
     }
 
-    /// Opens without a watcher or worker and captures the scope on this thread.
+    /// Opens without a watcher, worker or baseline scan.
     #[cfg(test)]
     pub fn offline(home: &Path, root: &Path) -> Arc<Self> {
-        let session = Self::open_with(home, root, Options::offline());
-        if let Ok(workspace) = session.workspace() {
-            workspace.initialize().unwrap();
-        }
-        session
+        Self::open_with(home, root, Options::offline())
     }
 
     pub fn workspace(&self) -> Result<&Arc<Workspace>, String> {
@@ -116,19 +113,13 @@ impl Session {
         }
     }
 
-    /// Records the point at the start of a turn; an unchanged workspace
-    /// keeps its last point.
-    pub fn turn(&self, label: &str) -> Result<u64, String> {
+    /// Publish activity and observe archive metadata without scanning files.
+    pub fn turn(&self, _label: &str) -> Result<u64, String> {
         let workspace = self.workspace()?;
         self.activity("working");
-        let label: String = label
-            .lines()
-            .next()
-            .unwrap_or("")
-            .chars()
-            .take(80)
-            .collect();
-        workspace.mark("turn", &label, &self.origin(), false, true)
+        let mut store = workspace.store();
+        store.refresh()?;
+        Ok(store.index.latest())
     }
 
     /// Notes that this conversation's own restore changed JECODE.md.
@@ -218,27 +209,39 @@ impl Session {
     }
 
     /// Protects one file change by a tool.
+    #[cfg(test)]
     pub fn file(&self, kind: &'static str, path: &Path) -> FileGuard<'_> {
+        self.file_cancellable(kind, path, &crate::cancel::Cancellation::default())
+    }
+
+    /// Protects one file change while honoring interruption during preparation.
+    pub fn file_cancellable(
+        &self,
+        kind: &'static str,
+        path: &Path,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> FileGuard<'_> {
         let origin = self.origin();
         FileGuard {
             mutation: self
                 .workspace()
-                .map(|workspace| workspace.mutation(&origin, kind, path)),
+                .map(|workspace| workspace.mutation_cancellable(&origin, kind, path, cancellation)),
         }
     }
 
-    /// Records the point before a shell command.
-    pub fn command_cancellable(
+    /// Captures declared paths before a shell command.
+    pub fn command_scoped_cancellable(
         &self,
         text: &str,
+        paths: &[String],
         cancellation: &crate::cancel::Cancellation,
     ) -> CommandGuard {
         let label: String = text.chars().take(80).collect();
         self.activity(&format!("running: {label}"));
         CommandGuard {
-            command: self
-                .workspace()
-                .map(|workspace| workspace.command_cancellable(&self.origin(), text, cancellation)),
+            command: self.workspace().map(|workspace| {
+                workspace.command_scoped_cancellable(&self.origin(), text, paths, cancellation)
+            }),
         }
     }
 
@@ -279,6 +282,13 @@ pub struct FileGuard<'a> {
 }
 
 impl FileGuard<'_> {
+    pub fn check_cancelled(&self) -> Result<(), String> {
+        if let Ok(mutation) = &self.mutation {
+            mutation.check_cancelled()?;
+        }
+        Ok(())
+    }
+
     /// Durably saves the previous state and the intended content.
     pub fn prepare(&mut self, content: &[u8]) {
         if let Ok(mutation) = &mut self.mutation {
@@ -349,27 +359,25 @@ pub struct CommandGuard {
     command: Result<Command, String>,
 }
 
+#[cfg(test)]
+mod cancellation_tests;
+
 impl CommandGuard {
+    pub fn completion(&self) -> Option<Completion> {
+        self.command.as_ref().ok()?.completion()
+    }
+
     /// One line describing the point before the command, for display.
     pub fn note(&self) -> String {
         match &self.command {
-            Err(reason) => format!("unprotected · {reason}"),
+            Err(reason) => format!("checkpoint none · {reason}"),
             Ok(command) => match (&command.point, &command.freshness) {
                 (Ok(point), Freshness::Current) => format!("checkpoint {}", reference(*point)),
-                (Ok(point), Freshness::Selective(_)) => format!(
-                    "checkpoint {} · selected paths protected",
-                    reference(*point)
-                ),
-                (Ok(point), Freshness::Baseline(count)) => format!(
-                    "checkpoint {} · first capture running, {count} paths saved so far",
-                    reference(*point)
-                ),
-                (Ok(point), Freshness::Reconciling(count)) => format!(
-                    "checkpoint {} · offline changes still reconciling, {count} paths examined",
-                    reference(*point)
-                ),
+                (Ok(point), Freshness::Selective(_)) => {
+                    format!("checkpoint {} · partial protection", reference(*point))
+                }
                 (_, Freshness::Unavailable(reason)) | (Err(reason), _) => {
-                    format!("unprotected · {reason}")
+                    format!("checkpoint none · {reason}")
                 }
             },
         }
@@ -379,17 +387,25 @@ impl CommandGuard {
     pub fn finish(self, running: bool) -> Value {
         let command = match self.command {
             Ok(command) => command,
-            Err(reason) => return unprotected(&reason),
+            Err(reason) => {
+                return Value::object([
+                    ("status", Value::string("none")),
+                    ("reason", Value::string(reason)),
+                ]);
+            }
         };
-        let freshness = command.freshness.clone();
         let report = command.finish();
-        let Some(before) = report.before else {
-            return unprotected(report.error.as_deref().unwrap_or("no point was recorded"));
-        };
+        let status = report.status();
         let mut fields = vec![
-            ("status", Value::string("saved")),
-            ("before", Value::string(reference(before))),
+            ("status", Value::string(status)),
+            ("saved_paths", Value::number(report.saved)),
         ];
+        if let Some(before) = report.before {
+            fields.push(("before", Value::string(reference(before))));
+        }
+        if let Some(group) = report.group {
+            fields.push(("group", Value::string(reference(group))));
+        }
         if let Some(after) = report.after {
             fields.push(("after", Value::string(reference(after))));
         }
@@ -403,29 +419,37 @@ impl CommandGuard {
         if report.changed.len() > CHANGED_LIMIT {
             fields.push(("changed_count", Value::number(report.changed.len())));
         }
-        match freshness {
-            Freshness::Selective(reason) => fields.push((
-                "warning",
-                Value::string(format!("selective protection: {reason}; only recorded paths can be restored; write and edit protect their own paths before changing them")),
-            )),
-            Freshness::Baseline(_) => fields.push((
-                "warning",
-                Value::string("the first capture was still running; paths it had not reached cannot be restored to their state before this command"),
-            )),
-            Freshness::Reconciling(_) => fields.push((
-                "warning",
-                Value::string("offline changes were still reconciling; the point may miss some of them"),
-            )),
-            Freshness::Current | Freshness::Unavailable(_) => {}
+        if !report.partial.is_empty() {
+            fields.push((
+                "partial",
+                Value::Array(
+                    report
+                        .partial
+                        .iter()
+                        .map(|(path, reason)| {
+                            Value::object([
+                                ("path", Value::string(path)),
+                                ("reason", Value::string(reason)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ));
         }
         if let Some(error) = report.error {
             fields.push((
                 "error",
-                Value::string(format!("later changes may be incomplete: {error}")),
+                Value::string(if report.before.is_some() {
+                    format!("later changes may be incomplete: {error}")
+                } else {
+                    format!("the previous state was not saved: {error}")
+                }),
             ));
         }
-        let note = if running {
-            "changed lists paths observed while this command ran; their writer is unknown. The process is still running; later changes are captured as they happen"
+        let note = if running && status == "none" {
+            "changed lists paths observed so far; their writer is unknown. The process is still running, and no previous state was saved"
+        } else if running {
+            "changed lists paths observed so far; their writer is unknown. The process is still running; its protected paths will be observed again when it exits"
         } else {
             "changed lists paths observed while this command ran; their writer is unknown"
         };

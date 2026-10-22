@@ -41,7 +41,9 @@ fn resolve(store: &mut super::store::Store, path: &str) -> Result<(String, u64, 
             reference(index.latest())
         ));
     }
-    Ok((relative.clone(), target, index.state_at(&relative, target)))
+    let state = super::restore::target_state(index, target, &relative)
+        .ok_or_else(|| format!("{relative} was not protected by {}", reference(target)))?;
+    Ok((relative, target, state))
 }
 
 /// The state of a path, with bounded preview for a large text file. Tool reads
@@ -94,10 +96,15 @@ pub fn content(workspace: &Workspace, path: &str) -> Result<Content, String> {
             let prefix = format!("{relative}/");
             let children = store
                 .index
-                .existing_at(target)
-                .filter_map(|version| {
-                    let child = version.path.strip_prefix(&prefix)?;
-                    let directory = matches!(version.state, State::Directory { .. });
+                .paths
+                .keys()
+                .filter_map(|path| {
+                    let child = path.strip_prefix(&prefix)?;
+                    let state = super::restore::target_state(&store.index, target, path)?;
+                    if !state.exists() {
+                        return None;
+                    }
+                    let directory = matches!(state, State::Directory { .. });
                     (!child.contains('/'))
                         .then(|| format!("{child}{}", if directory { "/" } else { "" }))
                 })

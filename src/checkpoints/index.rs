@@ -6,6 +6,7 @@ use super::hash::Digest;
 use super::journal::{Entry, Location};
 use super::policy::Policy;
 use super::record::{Event, Outcome, Point, Prepare, Record, Stat, State, Version};
+use super::recovery::{self, RecoveryIndex};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 pub const MAX_DEPTH: u32 = 16;
@@ -29,6 +30,7 @@ pub struct Index {
     pub paths: BTreeMap<String, Vec<Version>>,
     pub stats: HashMap<String, Stat>,
     pub points: BTreeMap<u64, Point>,
+    pub recovery: RecoveryIndex,
     pub pins: BTreeMap<u64, String>,
     /// Prepared operations without a completion record.
     pub pending: BTreeMap<u64, Prepare>,
@@ -84,6 +86,7 @@ impl Index {
     pub fn record(&mut self, record: Record) {
         self.next = self.next.max(record.seq() + 1);
         match record {
+            Record::Recovery(recovery) => self.recovery.record(recovery, &self.points),
             Record::Version(version) => {
                 self.last_change = self.last_change.max(version.seq);
                 if let Some(stat) = version.stat {
@@ -115,6 +118,7 @@ impl Index {
                     self.horizon = self.horizon.max(point.seq);
                     return;
                 }
+                self.recovery.point(&point);
                 if point.pinned {
                     self.pins.insert(point.seq, point.label.clone());
                 }
@@ -222,6 +226,40 @@ impl Index {
 
     /// Whether a reference names retained history.
     pub fn retained(&self, seq: u64) -> bool {
+        if self.recovery.groups.contains_key(&seq) || self.recovery.snapshots.contains_key(&seq) {
+            return recovery::retained(self, seq);
+        }
+        if let Some((mode, mode_time)) = self.recovery.mode {
+            if seq < mode {
+                return self.pins.contains_key(&seq)
+                    || crate::checkpoints::clock::now()
+                        < mode_time.saturating_add(recovery::LEGACY_GRACE_MS)
+                        && (seq >= self.horizon || self.points.contains_key(&seq));
+            }
+            // A generic point created after targeted collection can see a
+            // metadata-only head. Pinning its sequence cannot recreate the
+            // dropped bytes, so it must not claim to be a restore target.
+            if self.points.contains_key(&seq)
+                && self
+                    .paths
+                    .values()
+                    .filter_map(|versions| {
+                        let count = versions.partition_point(|version| version.seq <= seq);
+                        count.checked_sub(1).map(|at| &versions[at])
+                    })
+                    .any(|version| matches!(version.state, State::UnretainedFile { .. }))
+            {
+                return false;
+            }
+            if self.pins.contains_key(&seq) {
+                return true;
+            }
+            let Some(point) = self.points.get(&seq) else {
+                return false;
+            };
+            let age_limit = point.time.saturating_add(recovery::MAX_ACCEPTED_MS);
+            return crate::checkpoints::clock::now() < age_limit;
+        }
         seq >= self.horizon && seq <= self.latest()
             || self.pins.contains_key(&seq)
             || self.points.contains_key(&seq)
@@ -241,17 +279,6 @@ impl Index {
             .collect();
         changed.sort_by_key(|version| version.seq);
         changed
-    }
-
-    /// Paths that exist at `seq`, in path order.
-    pub fn existing_at(&self, seq: u64) -> impl Iterator<Item = &Version> {
-        self.paths
-            .values()
-            .filter_map(move |versions| {
-                let count = versions.partition_point(|version| version.seq <= seq);
-                count.checked_sub(1).map(|index| &versions[index])
-            })
-            .filter(|version| version.state.exists())
     }
 }
 

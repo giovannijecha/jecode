@@ -4,6 +4,35 @@ use crate::checkpoints::quota;
 use crate::checkpoints::record::{Event, Outcome, Point, Record};
 
 #[test]
+fn terminal_metadata_can_close_an_intent_below_the_free_space_margin() {
+    let fixture = Fixture::new();
+    let workspace = fixture.open();
+    let mut store = workspace.store();
+    store.journal.min_free_bytes = u64::MAX / 2;
+    let frame = Record::Complete {
+        seq: store.index.next,
+        operation: 0,
+        outcome: Outcome::Unknown,
+    }
+    .frame();
+    assert!(store.journal.append(&frame, false).is_err());
+    store
+        .journal
+        .append_counted(
+            &frame,
+            true,
+            true,
+            true,
+            quota::Usage {
+                total: 0,
+                generation: 0,
+            },
+            None,
+        )
+        .unwrap();
+}
+
+#[test]
 fn oversized_milestones_are_rejected_before_any_frame_is_appended() {
     let fixture = Fixture::new();
     let workspace = fixture.open();

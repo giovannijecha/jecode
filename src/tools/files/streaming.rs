@@ -64,7 +64,11 @@ impl Read for Replacement<'_> {
 }
 
 /// Streaming KMP includes overlapping occurrences and matches across reads.
-fn locate(mut source: impl Read, pattern: &[u8]) -> Result<(Option<u64>, bool), String> {
+fn locate(
+    mut source: impl Read,
+    pattern: &[u8],
+    cancellation: &Cancellation,
+) -> Result<(Option<u64>, bool), String> {
     let mut failure = vec![0; pattern.len()];
     for index in 1..pattern.len() {
         let mut matched = failure[index - 1];
@@ -83,6 +87,7 @@ fn locate(mut source: impl Read, pattern: &[u8]) -> Result<(Option<u64>, bool), 
     let mut position = None;
     let mut ambiguous = false;
     loop {
+        check_cancelled(cancellation)?;
         let count = source
             .read(&mut buffer)
             .map_err(|error| error.to_string())?;
@@ -177,7 +182,9 @@ pub(super) fn edit(
     old: &str,
     new: &str,
     mut guard: Option<FileGuard<'_>>,
+    cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
+    check_cancelled(cancellation)?;
     if new.contains('\0') {
         return Err("File content must be UTF-8 text without NUL bytes".into());
     }
@@ -186,7 +193,7 @@ pub(super) fn edit(
     if !metadata.is_file() {
         return Err("The path must refer to a regular file".into());
     }
-    let (position, ambiguous) = locate(&mut source, old.as_bytes())?;
+    let (position, ambiguous) = locate(&mut source, old.as_bytes(), cancellation)?;
     unchanged(path, &source, &metadata)?;
     let reason = if position.is_none() {
         Some("old_text was not found; read the file and use exact current text")
@@ -213,6 +220,7 @@ pub(super) fn edit(
             length,
         );
     }
+    check_guard(guard.as_ref(), cancellation)?;
     unchanged(path, &source, &metadata)?;
     let temporary = Temporary(path.with_file_name(format!(
         ".jecode-{}-{}.tmp",
@@ -224,42 +232,120 @@ pub(super) fn edit(
         .create_new(true)
         .open(&temporary.0)
         .map_err(|error| error.to_string())?;
-    let result = (|| -> std::io::Result<()> {
-        source.rewind()?;
-        std::io::copy(&mut (&mut source).take(position.unwrap()), &mut output)?;
-        output.write_all(new.as_bytes())?;
-        source.seek(SeekFrom::Start(position.unwrap() + old.len() as u64))?;
-        std::io::copy(&mut source, &mut output)?;
-        output.set_permissions(metadata.permissions())?;
-        output.sync_all()
+    let result = (|| -> Result<(), String> {
+        source.rewind().map_err(|error| error.to_string())?;
+        copy_cancellable(
+            &mut source,
+            &mut output,
+            Some(position.unwrap()),
+            cancellation,
+        )?;
+        for block in new.as_bytes().chunks(BLOCK) {
+            check_cancelled(cancellation)?;
+            output.write_all(block).map_err(|error| error.to_string())?;
+        }
+        source
+            .seek(SeekFrom::Start(position.unwrap() + old.len() as u64))
+            .map_err(|error| error.to_string())?;
+        copy_cancellable(&mut source, &mut output, None, cancellation)?;
+        output
+            .set_permissions(metadata.permissions())
+            .map_err(|error| error.to_string())?;
+        check_cancelled(cancellation)?;
+        output.sync_all().map_err(|error| error.to_string())
     })();
     drop(output);
     result.map_err(|error| format!("Could not stage file: {error}"))?;
     unchanged(path, &source, &metadata)?;
     drop(source);
+    check_guard(guard.as_ref(), cancellation)?;
     let replaced = fs::rename(&temporary.0, path);
     let checkpoint = guard.map(|guard| guard.finish(replaced.is_ok()));
     replaced.map_err(|error| format!("Could not replace file: {error}"))?;
     Ok((written(length, checkpoint), None))
 }
 
+fn copy_cancellable(
+    source: &mut fs::File,
+    output: &mut fs::File,
+    mut remaining: Option<u64>,
+    cancellation: &Cancellation,
+) -> Result<(), String> {
+    let mut buffer = [0; BLOCK];
+    loop {
+        check_cancelled(cancellation)?;
+        let take = remaining.map_or(BLOCK, |left| left.min(BLOCK as u64) as usize);
+        if take == 0 {
+            return Ok(());
+        }
+        let count = source
+            .read(&mut buffer[..take])
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            return Ok(());
+        }
+        output
+            .write_all(&buffer[..count])
+            .map_err(|error| error.to_string())?;
+        if let Some(left) = &mut remaining {
+            *left -= count as u64;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CancelAfterRead<'a> {
+        cancellation: &'a Cancellation,
+        read: bool,
+    }
+
+    impl Read for CancelAfterRead<'_> {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            if self.read {
+                return Ok(0);
+            }
+            self.read = true;
+            output[0] = b'x';
+            self.cancellation.cancel();
+            Ok(1)
+        }
+    }
+
+    #[test]
+    fn streaming_search_checks_cancellation_between_reads() {
+        let cancellation = Cancellation::default();
+        let source = CancelAfterRead {
+            cancellation: &cancellation,
+            read: false,
+        };
+        assert!(
+            locate(source, b"x", &cancellation)
+                .unwrap_err()
+                .contains("cancelled")
+        );
+    }
 
     #[test]
     fn matches_across_blocks_and_detects_overlaps() {
         let mut text = vec![b'x'; BLOCK - 2];
         text.extend_from_slice("é日🦀end".as_bytes());
         assert_eq!(
-            locate(text.as_slice(), "é日🦀".as_bytes()).unwrap(),
+            locate(
+                text.as_slice(),
+                "é日🦀".as_bytes(),
+                &Cancellation::default()
+            )
+            .unwrap(),
             (Some((BLOCK - 2) as u64), false)
         );
         assert_eq!(
-            locate(b"ababa".as_slice(), b"aba").unwrap(),
+            locate(b"ababa".as_slice(), b"aba", &Cancellation::default()).unwrap(),
             (Some(0), true)
         );
-        assert!(locate(b"one\xfftwo".as_slice(), b"one").is_err());
+        assert!(locate(b"one\xfftwo".as_slice(), b"one", &Cancellation::default()).is_err());
     }
 
     #[test]

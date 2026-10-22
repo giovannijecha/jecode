@@ -4,6 +4,7 @@ use crate::checkpoints::identity::{self, Location};
 use crate::checkpoints::journal;
 use crate::checkpoints::quota;
 use crate::checkpoints::record::{Discovery, Event, Outcome, Record, State, Version};
+use crate::checkpoints::recovery;
 use crate::checkpoints::store::Store;
 use std::sync::Arc;
 
@@ -23,6 +24,11 @@ fn history(fixture: &Fixture, workspace: &Workspace) -> Vec<u64> {
     (0..8)
         .map(|seed| {
             fixture.write("big.bin", &noise(seed, 200 << 10));
+            if seed == 0 {
+                // This legacy budget fixture explicitly discovers the path.
+                // A named point in targeted mode only rereads tracked paths.
+                workspace.verify().unwrap();
+            }
             workspace
                 .mark("milestone", &format!("v{seed}"), "test", false, false)
                 .unwrap()
@@ -31,7 +37,7 @@ fn history(fixture: &Fixture, workspace: &Workspace) -> Vec<u64> {
 }
 
 #[test]
-fn a_long_turn_releases_intermediate_versions_but_keeps_its_last_named_point() {
+fn an_accepted_long_turn_releases_intermediate_versions_but_keeps_its_last_named_point() {
     let fixture = Fixture::new();
     fixture.write("long.bin", &noise(0, 80 << 10));
     let workspace = fixture.open();
@@ -49,8 +55,12 @@ fn a_long_turn_releases_intermediate_versions_but_keeps_its_last_named_point() {
             crate::checkpoints::mutation::Protection::Protected { .. }
         ));
     }
+    let group = recovery::group_for(&index(&workspace), "test").unwrap();
+    workspace
+        .store()
+        .transaction(true, |tx| recovery::accept(tx, group, "test"))
+        .unwrap();
     let collected = gc::collect(&location(&fixture), false).unwrap().unwrap();
-    assert!(collected.horizon > baseline, "{collected:?}");
     assert!(collected.after < collected.before / 2, "{collected:?}");
     assert!(!collected.over_budget, "{collected:?}");
     assert!(index(&workspace).retained(baseline));
@@ -199,10 +209,11 @@ fn collection_keeps_pins_current_state_and_readers_within_the_budget() {
     let again = super::index(&reopened);
     assert_eq!(again.horizon, collection.horizon);
     assert!(again.pins.contains_key(&points[1]));
-    assert!(
-        gc::collect(&location, false).unwrap().is_none(),
-        "nothing is due"
-    );
+    // The restores made a new targeted group, whose after-image head still
+    // needs to be reduced to metadata even though the archive is below budget.
+    let followup = gc::collect(&location, false).unwrap().unwrap();
+    assert!(followup.generation > collection.generation);
+    assert!(super::index(&reopened).pins.contains_key(&points[1]));
 }
 
 #[test]
