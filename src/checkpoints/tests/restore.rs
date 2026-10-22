@@ -11,6 +11,33 @@ fn baseline(workspace: &Workspace) -> u64 {
         .seq
 }
 
+#[cfg(unix)]
+#[test]
+fn directory_modes_allow_child_restores_before_final_restrictions() {
+    use std::os::unix::fs::PermissionsExt;
+    for (target_mode, current_mode) in [(0o500, 0o700), (0o700, 0o500)] {
+        let fixture = Fixture::new();
+        fixture.write("directory/file.txt", b"original\n");
+        let workspace = fixture.open();
+        let path = fixture.path("directory");
+        fs::set_permissions(&path, fs::Permissions::from_mode(target_mode)).unwrap();
+        let target = workspace
+            .mark("milestone", "read-only directory", "test", false, false)
+            .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(current_mode)).unwrap();
+        fixture.write("directory/file.txt", b"edited\n");
+        let report = workspace
+            .restore(&request(&workspace, target, None, Expected::Latest))
+            .unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o7777;
+        let bytes = fixture.read("directory/file.txt").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(report.failed.is_none() && report.conflicts.is_empty());
+        assert_eq!(bytes, b"original\n");
+        assert_eq!(mode, target_mode);
+    }
+}
+
 #[test]
 fn full_restore_reproduces_exact_bytes_and_permissions_and_can_be_undone() {
     let fixture = Fixture::new();

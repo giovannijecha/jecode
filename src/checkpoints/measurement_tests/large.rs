@@ -137,6 +137,7 @@ fn protected_points_and_restore(
     let request = Request {
         target,
         paths: None,
+        exact: false,
         expected: Expected::Latest,
         preview: false,
         origin: "measure",

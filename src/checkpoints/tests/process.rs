@@ -67,6 +67,10 @@ fn child() {
     };
     let home = std::env::var(HOME).unwrap();
     let root = std::env::var(ROOT).unwrap();
+    if mode == "restore-race" {
+        super::restore_races::child(Path::new(&home), Path::new(&root));
+        return;
+    }
     if mode.starts_with("stress-") {
         stress::child(Path::new(&home), Path::new(&root), &mode);
         return;

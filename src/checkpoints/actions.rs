@@ -524,6 +524,7 @@ fn inspect(
     let preview = workspace.restore(&Request {
         target,
         paths: paths.as_deref(),
+        exact: arguments.get("exact") == Some(&Value::Bool(true)),
         expected: Expected::Latest,
         preview: true,
         origin: caller.origin,

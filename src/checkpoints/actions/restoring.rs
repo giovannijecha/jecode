@@ -49,6 +49,10 @@ pub(super) fn restore(
 ) -> Result<Value, String> {
     let target = target(arguments)?;
     let paths = selected(arguments)?;
+    let exact = arguments.get("exact") == Some(&Value::Bool(true));
+    if exact && paths.is_none() {
+        return Err("exact needs selected paths; use restore to select entries".into());
+    }
     match (&paths, all) {
         (Some(_), true) => {
             return Err("restore_all restores the whole scope; use restore to select paths".into());
@@ -68,15 +72,16 @@ pub(super) fn restore(
     let report = workspace.restore(&Request {
         target,
         paths: paths.as_deref(),
+        exact,
         expected,
         preview: arguments.get("preview") == Some(&Value::Bool(true)),
         origin: caller.origin,
         excluded: &excluded,
     })?;
-    Ok(report_value(&report, all, paths.as_deref()))
+    Ok(report_value(&report, all, paths.as_deref(), exact))
 }
 
-fn report_value(report: &Report, all: bool, paths: Option<&[String]>) -> Value {
+fn report_value(report: &Report, all: bool, paths: Option<&[String]>, exact: bool) -> Value {
     let mut fields = vec![
         ("target", Value::string(reference(report.target))),
         ("preview", Value::Bool(report.preview)),
@@ -88,21 +93,36 @@ fn report_value(report: &Report, all: bool, paths: Option<&[String]>) -> Value {
     }
     if let Some(before) = report.before {
         fields.push(("before", Value::string(reference(before))));
-        let mut undo = vec![
-            (
-                "action",
-                Value::string(if paths.is_some() {
-                    "restore"
-                } else {
-                    "restore_all"
-                }),
-            ),
-            ("ref", Value::string(reference(before))),
-        ];
-        if let Some(paths) = paths {
-            undo.push(("paths", strings(paths.iter())));
+        let partial =
+            report.failed.is_some() || !report.conflicts.is_empty() || !report.remaining.is_empty();
+        let changed: Vec<String> = report
+            .applied
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect();
+        if !partial || !changed.is_empty() {
+            let mut undo = vec![
+                (
+                    "action",
+                    Value::string(if partial || paths.is_some() {
+                        "restore"
+                    } else {
+                        "restore_all"
+                    }),
+                ),
+                ("ref", Value::string(reference(before))),
+            ];
+            if partial {
+                undo.push(("paths", strings(changed.iter())));
+                undo.push(("exact", Value::Bool(true)));
+            } else if let Some(paths) = paths {
+                undo.push(("paths", strings(paths.iter())));
+                if exact {
+                    undo.push(("exact", Value::Bool(true)));
+                }
+            }
+            fields.push(("undo", object(undo)));
         }
-        fields.push(("undo", object(undo)));
     }
     if let Some(after) = report.after {
         fields.push(("after", Value::string(reference(after))));
@@ -128,7 +148,9 @@ fn report_value(report: &Report, all: bool, paths: Option<&[String]>) -> Value {
             .map(|conflict| conflict.current)
             .max()
             .unwrap_or_default();
-        let note = if all {
+        let note = if !report.applied.is_empty() {
+            "the restore stopped after applying the paths in restored; the conflicting path and remaining paths were not restored"
+        } else if all {
             "nothing was restored: a full restore applies only without conflicts"
         } else {
             "the conflicting paths were not restored"
@@ -155,6 +177,8 @@ fn report_value(report: &Report, all: bool, paths: Option<&[String]>) -> Value {
                 ("error", Value::string(error)),
             ]),
         ));
+    }
+    if !report.remaining.is_empty() {
         fields.push(("not_restored", strings(report.remaining.iter().take(SHOWN))));
     }
     if report.instructions_changed() {

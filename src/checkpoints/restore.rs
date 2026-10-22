@@ -6,7 +6,10 @@ use super::index::{Index, reference};
 use super::record::{Discovery, Event, Outcome, Prepare, Record, State, Version};
 use super::scan::in_scope;
 use super::store::Store;
-use std::path::Path;
+
+mod directories;
+mod installing;
+use installing::{Failure, Step};
 
 /// Which current state a restore may replace.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +26,8 @@ pub struct Request<'a> {
     pub target: u64,
     /// Selected paths; `None` restores the whole protected scope.
     pub paths: Option<&'a [String]>,
+    /// Select only named entries, without expanding directory descendants.
+    pub exact: bool,
     pub expected: Expected,
     pub preview: bool,
     pub origin: &'a str,
@@ -51,6 +56,7 @@ pub struct Planned {
     pub action: Action,
     target: State,
     current: State,
+    current_seq: u64,
 }
 
 pub struct Conflict {
@@ -112,7 +118,13 @@ pub fn paths(store: &mut Store, request: &Request<'_>) -> Result<Vec<String>, St
         check_retained(&store.index, seq)?;
     }
     match request.paths {
+        Some(paths) if request.exact => paths
+            .iter()
+            .map(|path| normalize(path))
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()
+            .map(|paths| paths.into_iter().collect()),
         Some(paths) => expand(&store.index, paths, request.target),
+        None if request.exact => Err("exact needs selected paths".into()),
         None => Ok(store.index.paths.keys().cloned().collect()),
     }
 }
@@ -240,6 +252,7 @@ pub fn restore(
                     action,
                     target: target_state,
                     current: current_state,
+                    current_seq,
                 });
             }
             // Save bounded live observations before reading another batch. The
@@ -281,49 +294,82 @@ pub fn restore(
         Ok(operations)
     })?;
     let mut results = Vec::new();
+    let mut directories = directories::Directories::default();
+    let mut sync_failed = false;
     for (index, (planned, operation)) in plan.iter().zip(&operations).enumerate() {
-        match install(store, &root, planned) {
+        if let Err(failure) = directories.before(planned) {
+            sync_failed = true;
+            report.failed = Some(failure);
+            report.remaining = plan[index..].iter().map(|p| p.path.clone()).collect();
+            for (planned, operation) in plan[index..].iter().zip(&operations[index..]) {
+                results.push((*operation, planned, Step::Untouched));
+            }
+            break;
+        }
+        match installing::install(store, &root, planned, policy.max_file_bytes) {
             Ok(()) => {
+                directories.changed(&root, planned);
                 report.applied.push((planned.path.clone(), planned.action));
-                results.push((*operation, planned, Outcome::Applied));
+                results.push((*operation, planned, Step::Applied));
                 #[cfg(test)]
                 if index == 0 {
                     super::tests::process::stage("restore-first-installed");
                 }
             }
             Err(error) => {
-                report.failed = Some((planned.path.clone(), error));
-                results.push((*operation, planned, Outcome::NotApplied));
+                let step = match error {
+                    Failure::Changed(observed) => {
+                        let current = installing::save_conflict(store, observed)?;
+                        report.conflicts.push(Conflict {
+                            path: planned.path.clone(),
+                            target,
+                            expected: planned.current_seq,
+                            current,
+                        });
+                        Step::Untouched
+                    }
+                    Failure::Io(error) => {
+                        report.failed = Some((planned.path.clone(), error));
+                        Step::Failed
+                    }
+                };
+                results.push((*operation, planned, step));
                 report.remaining = plan[index + 1..].iter().map(|p| p.path.clone()).collect();
                 for (planned, operation) in plan[index + 1..].iter().zip(&operations[index + 1..]) {
-                    results.push((*operation, planned, Outcome::NotApplied));
+                    results.push((*operation, planned, Step::Untouched));
                 }
                 break;
             }
         }
     }
-    let applied: Vec<String> = report
-        .applied
-        .iter()
-        .map(|(path, _)| path.clone())
-        .collect();
+    if !sync_failed && let Err((path, error)) = directories.flush() {
+        if let Some((_, previous)) = &mut report.failed {
+            previous.push_str(&format!("; {error}"));
+        } else {
+            report.failed = Some((path, error));
+        }
+    }
     let before = report.before.unwrap_or(target);
     let max = policy.max_file_bytes;
     report.after = Some(store.transaction(false, |transaction| {
-        for (operation, planned, outcome) in &results {
-            let mut outcome = *outcome;
-            if outcome == Outcome::NotApplied {
+        for (operation, planned, step) in &results {
+            let mut outcome = Outcome::NotApplied;
+            if matches!(step, Step::Failed) {
                 // Record what is actually there; the failed step may have left a change.
                 let observed = capture::observe(&root, &planned.path, max);
-                if let Some(recorded) = capture::record(transaction, observed, &origin, *operation)?
-                {
-                    outcome = if recorded.state.same(&planned.target) {
-                        Outcome::Applied
-                    } else {
-                        Outcome::Unknown
-                    };
-                }
-            } else {
+                // A failed step cannot establish who wrote the observed state.
+                let recorded = capture::record(transaction, observed, "external", 0)?;
+                let actual = recorded.map_or_else(
+                    || transaction.index().current_state(&planned.path),
+                    |recorded| recorded.state,
+                );
+                outcome = if actual.same(&planned.current) {
+                    Outcome::NotApplied
+                } else {
+                    Outcome::Unknown
+                };
+            } else if matches!(step, Step::Applied) {
+                outcome = Outcome::Applied;
                 let seq = transaction.seq();
                 transaction.record(Record::Version(Version {
                     seq,
@@ -341,6 +387,11 @@ pub fn restore(
                     discovery: Discovery::Known,
                 }));
             }
+            // Keep unsynced renames prepared. Recovery must reconsider them
+            // after a crash, even if the live path currently has the target.
+            if matches!(step, Step::Applied) && directories.pending(&root, planned) {
+                continue;
+            }
             let seq = transaction.seq();
             transaction.record(Record::Complete {
                 seq,
@@ -349,6 +400,11 @@ pub fn restore(
             });
         }
         let after = transaction.point("restore", &reference(target), &origin, false);
+        let applied: Vec<String> = report
+            .applied
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect();
         let seq = transaction.seq();
         transaction.record(Record::Event(Event {
             seq,
@@ -460,59 +516,23 @@ fn order(plan: &mut [Planned]) {
         let depth = |p: &Planned| p.path.matches('/').count();
         let rank = |p: &Planned| match (p.action, &p.target) {
             (Action::Delete, _) => 0,
+            (_, State::Directory { mode })
+                if matches!(p.current,
+                    State::Directory { mode: current } if (mode.0 & 0o300) & !current.0 != 0
+                ) =>
+            {
+                1
+            }
+            (_, State::Directory { .. }) if matches!(p.current, State::Directory { .. }) => 3,
             (_, State::Directory { .. }) => 1,
             _ => 2,
         };
         rank(a)
             .cmp(&rank(b))
             .then_with(|| match rank(a) {
-                0 => depth(b).cmp(&depth(a)),
+                0 | 3 => depth(b).cmp(&depth(a)),
                 _ => depth(a).cmp(&depth(b)),
             })
             .then_with(|| a.path.cmp(&b.path))
     });
-}
-
-fn install(store: &Store, root: &Path, planned: &Planned) -> Result<(), String> {
-    files::confined_parent(root, &planned.path)?;
-    let path = super::identity::absolute(root, &planned.path);
-    let io = |error: std::io::Error| error.to_string();
-    match &planned.target {
-        State::Absent => match planned.current {
-            State::Directory { .. } => std::fs::remove_dir(&path)
-                .map_err(|error| format!("directory not removed: {error}")),
-            _ => files::remove(&path).map_err(io),
-        },
-        State::File { object, mode, .. } => {
-            let bytes = store.bytes(*object)?;
-            if matches!(
-                planned.current,
-                State::Link { .. } | State::Directory { .. }
-            ) {
-                files::remove(&path).map_err(io)?;
-            }
-            files::install(&path, &bytes, *mode).map_err(io)
-        }
-        State::Directory { mode } => {
-            if matches!(planned.current, State::Directory { .. }) {
-                // Only the mode differs; the entries are restored separately.
-                return mode.apply_path(&path).map_err(io);
-            }
-            if !matches!(planned.current, State::Absent) {
-                files::remove(&path).map_err(io)?;
-            }
-            std::fs::create_dir(&path).map_err(io)?;
-            if cfg!(unix) {
-                mode.apply_path(&path).map_err(io)?;
-            }
-            Ok(())
-        }
-        State::Link { target } => {
-            files::remove(&path).map_err(io)?;
-            files::symlink(target, &path).map_err(io)
-        }
-        State::Oversized { .. } | State::Unreadable { .. } => {
-            Err("the target state was not captured".into())
-        }
-    }
 }

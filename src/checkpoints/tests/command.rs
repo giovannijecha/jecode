@@ -21,6 +21,39 @@ fn words_split_on_spaces_outside_quotes() {
 }
 
 #[test]
+fn exact_directory_restore_keeps_descendants_unchanged() {
+    let fixture = Fixture::new();
+    fixture.write("directory/file.txt", b"before\n");
+    let workspace = fixture.open();
+    let target = index(&workspace).latest();
+    fixture.write("directory/file.txt", b"keep this edit\n");
+    drop(workspace);
+    let reference = crate::checkpoints::index::reference(target);
+    let result = offline(
+        fixture.home.path(),
+        fixture.root.path(),
+        &words(&["restore", &reference, "directory", "--exact-paths"]),
+    )
+    .unwrap();
+    assert!(
+        result.text().contains("restored 0 paths"),
+        "{}",
+        result.text()
+    );
+    assert_eq!(
+        fixture.read("directory/file.txt").unwrap(),
+        b"keep this edit\n"
+    );
+    offline(
+        fixture.home.path(),
+        fixture.root.path(),
+        &words(&["restore", &reference, "directory"]),
+    )
+    .unwrap();
+    assert_eq!(fixture.read("directory/file.txt").unwrap(), b"before\n");
+}
+
+#[test]
 fn the_offline_command_ignores_provider_configuration() {
     let fixture = Fixture::new();
     fixture.write("a.txt", b"one\n");

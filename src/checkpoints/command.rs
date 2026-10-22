@@ -16,7 +16,7 @@ capture PATH...                     save explicit file paths before Bash
 inspect cp-N [PATH...]              a point and what restoring it would change
 show cp-N PATH                      a path's recorded content
 milestone LABEL [--pin]             record a named point
-restore cp-N PATH... [--preview] [--expected cp-M|latest]
+restore cp-N PATH... [--exact-paths] [--preview] [--expected cp-M|latest]
 restore-all cp-N [--preview] [--expected cp-M|latest]
 pin cp-N [LABEL] | unpin cp-N       keep a point regardless of the budget
 config [--budget SIZE] [--max-file SIZE]
@@ -88,6 +88,7 @@ pub fn parse(words: &[String]) -> Result<Parsed, String> {
         };
         match word {
             "--preview" => fields.push(("preview", Value::Bool(true))),
+            "--exact-paths" => fields.push(("exact", Value::Bool(true))),
             "--pin" => fields.push(("pin", Value::Bool(true))),
             "--expected" => fields.push(("expected", value(word)?)),
             "--budget" => fields.push(("budget", value(word)?)),

@@ -20,6 +20,7 @@ mod recovery;
 mod restore;
 #[cfg(unix)]
 mod restore_links;
+mod restore_races;
 mod scope;
 mod selective;
 mod streaming;
@@ -120,6 +121,7 @@ pub(super) fn request<'a>(
     Request {
         target,
         paths,
+        exact: false,
         expected,
         preview: false,
         origin: "test",

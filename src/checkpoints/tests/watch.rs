@@ -162,14 +162,16 @@ fn notifications_capture_disguised_edits_and_a_lost_helper_forces_a_verified_res
     until("the restarted helper", || {
         workspace.watching() == Watching::Active
     });
-    let index = index(&workspace);
-    assert!(
-        index
-            .coverage
-            .values()
-            .any(|(complete, reason)| !complete && reason.contains("restarted"))
-    );
-    assert!(index.coverage_complete());
+    // The helper can be ready and the content batch visible before the
+    // verified rescan records its final complete-coverage point.
+    until("the completed verified rescan", || {
+        let index = index(&workspace);
+        index.coverage_complete()
+            && index
+                .coverage
+                .values()
+                .any(|(complete, reason)| !complete && reason.contains("restarted"))
+    });
 
     // An overflow is handled the same way.
     disguise(&fixture, "same.txt", b"dddd\n");

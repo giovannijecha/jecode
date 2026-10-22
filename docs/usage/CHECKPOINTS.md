@@ -19,18 +19,18 @@ and files touched by `write` and `edit`. Restores cover a path once captured.
 
 | Moment | What Jecode records |
 | --- | --- |
-| Before `write`, `edit` or a restore changes a file | The previous state and the intended content, durably, before the file changes. |
+| Before `write`, `edit` or a restore changes a file | Its previous state, durably, before the file changes. A restore stages file replacements before installation. |
 | Start of each turn and before each Bash command | A durable point (`cp-N`) in the observed history. An unchanged history reuses its last point. |
 | During and after commands | Changed files observed while the command ran; background processes keep being observed. |
 | A `milestone` | A named point, optionally pinned. |
-| An explicit `capture` | The current states of named files or links, before a command that may change them. |
+| An explicit `capture` | The current states of named files or links when an exact preimage is needed. |
 
 `write`, `edit` and `bash` results carry a `checkpoint` object:
 
 For Bash, `changed` lists paths observed during the command. It does not
 identify which process wrote them; editors and other sessions may run at the
 same time. Recorded versions found through filesystem observation have origin
-`external`.
+`external` because their writer is unknown.
 
 | `status` | Meaning |
 | --- | --- |
@@ -41,7 +41,7 @@ same time. Recorded versions found through filesystem observation have origin
 Successful `write` and `edit` calls to `tmp:` session storage report
 `not_tracked`: that storage is outside the project checkpoint scope.
 
-A checkpoint failure never blocks a tool call. Saves are quiet in the TUI: a
+A failed save does not block `write`, `edit` or Bash. Saves are quiet in the TUI: a
 tool card shows a warning only when a checkpoint problem needs attention, and
 `Ctrl+O` shows a call's `before → after` points.
 
@@ -72,7 +72,8 @@ find edits that preserved size and modification time.
 ## Scope and limits
 
 The scope is Jecode's own: every file under the project directory except the
-default exclusions, regardless of Git ignore rules.
+default exclusions, regardless of Git ignore rules. `.env` is included by
+default; add a policy exclusion if the local archive should omit it.
 
 | Setting | Default |
 | --- | --- |
@@ -120,8 +121,10 @@ an arbitrary prefix of file contents. A scope that does not fit switches to
 **selective protection**: existing history remains available, `write` and `edit`
 save their own paths before changing them, and automatic observation follows
 recorded paths. Untouched files do not consume the reserve for actual work.
-Before a Bash command that may edit known paths, call `checkpoint` with
-`action: "capture"` and the exact workspace-relative file paths. The result
+Turn and Bash points still observe recorded paths automatically. Before a Bash
+command may edit a known file without a captured state, use `checkpoint` with
+`action: "capture"` and the exact workspace-relative file paths. Capture is
+also useful for an initial state or a precise preimage. The result
 reports `saved`, `skipped` or `unprotected` for each path. A `saved` path has a
 durable `saved_at` version; `ref` names a point after all saved paths. An absent
 path is saved as absent, so restoring it after Bash creates it removes it.
@@ -132,8 +135,8 @@ it is reported unprotected and should be retried before Bash. External changes
 can still race after the final read; this is an observed point, not an atomic
 filesystem snapshot.
 Changes seen after Bash have `external` origin because Jecode cannot identify
-their writer. A model restore may report a conflict; inspect the current state
-and pass `expected: "latest"` if replacing it is intended.
+their writer. A model restore may report a version conflict; inspect the current
+state and pass `expected: "latest"` if replacing it is intended.
 
 Live acquisition and restores consume bounded batches, including when files
 grew after discovery; they do not retain the entire tree's content in memory.
@@ -154,10 +157,10 @@ without an OpenRouter key, provider, Bash or curl:
 status                              archive state, limits and activity
 list [PATH...] [--limit N]          points, or the recorded versions of paths
 capture PATH...                     save explicit file paths before Bash
-inspect cp-N [PATH...]              a point and what restoring it would change
+inspect cp-N [PATH...] [--exact-paths]  a point and what restoring it would change
 show cp-N PATH                      a path's recorded content
 milestone LABEL [--pin]             record a named point
-restore cp-N PATH... [--preview] [--expected cp-M|latest]
+restore cp-N PATH... [--exact-paths] [--preview] [--expected cp-M|latest]
 restore-all cp-N [--preview] [--expected cp-M|latest]
 pin cp-N [LABEL] | unpin cp-N       keep a point regardless of the budget
 config [--budget SIZE] [--max-file SIZE]
@@ -183,8 +186,9 @@ Inside a session, `/checkpoints` takes the same words, such as
 The TUI shows the result in the information panel without adding a model
 message. Archive commands run while the terminal remains responsive; later
 conversation commands and prompts wait until the command finishes. They cannot be cancelled midway,
-and exiting waits for the current command to finish. Your restores replace the
-current state unless you pass `--expected`.
+and exiting waits for the current command to finish. Your restores use the
+current state as the initial expected version unless you pass `--expected`;
+they still check each path again immediately before changing it.
 
 ## The model's checkpoint tool
 
@@ -195,6 +199,7 @@ The model uses the `checkpoint` tool with these arguments:
 | `action` | all | `status`, `capture`, `list`, `inspect`, `milestone`, `restore` or `restore_all`. |
 | `ref` | `inspect`, `restore`, `restore_all` | A point such as `cp-42`. |
 | `paths` | `capture`, `list`, `inspect`, `restore` | Project-relative paths; `capture` requires 1–200 explicit file or link names. |
+| `exact` | `inspect`, `restore` | With explicit `paths`, `true` selects only those entries, without recorded descendants; defaults to `false`. |
 | `label`, `pin` | `milestone` | The point's name; `pin: true` keeps it regardless of the budget. |
 | `expected` | restores | A point that accepts the current state, or `latest`. |
 | `preview` | restores | `true` plans without changing files. |
@@ -203,6 +208,7 @@ The model uses the `checkpoint` tool with these arguments:
 An empty `expected` uses the same conflict checking as an omitted value.
 An empty `paths` array means no path filter for queries and `restore_all`;
 `capture` and `restore` still require explicit, nonempty paths.
+`exact` and `--exact-paths` change path selection only; conflict checking is unchanged.
 
 The `read` tool accepts `checkpoint:cp-N:path` to read a recorded version.
 `pin`, `unpin`, `config`, `gc` and `verify` are only for you.
@@ -214,18 +220,31 @@ limit changes and recovered interrupted operations. When a change touches a
 
 ## Restores and undo
 
-A restore first saves the current state of every affected path, then installs
-the target state. The result's `undo.ref` returns to the state before the
-restore. `restore` also covers recorded paths below a restored directory.
+A restore first saves the current state of every affected path and stages file
+replacements. Immediately before replacing or deleting a path, it reobserves
+that path. If its state changed since planning, the path stays untouched and
+the restore stops with a conflict. Earlier paths may already have changed;
+inspect `restored`, `not_restored` and `undo` in the result. By default, `restore`
+also covers recorded paths below a restored directory; `exact: true` (or
+`--exact-paths`) selects only the named entries.
 `restore_all` returns the recorded scope and deletes paths known to have been
 created after the point. Paths whose prior state was never captured are skipped.
 
-By default, a model restore replaces a path only if nobody else changed it
-after the conversation's own last change since the point. Otherwise the path
-is left as it is and reported in `conflicts` with its target, expected and
-current points. Its `retry` value is an `expected` point that accepts the
-current state once it has been inspected; `expected: "latest"` replaces
-whatever is current. `preview` returns the same plan without changing files.
+The returned `undo` restores the state before the operation. After partial
+progress, it selects only the paths confirmed restored, with `exact: true`, so
+untouched descendants of a selected directory stay untouched. A failed step is
+recorded from the live state without assuming who wrote it; inspect that path
+and `before` before deciding whether to restore it. If no path was confirmed
+restored, there is no undo action. A successful full restore uses a compact
+`restore_all` undo.
+
+By default, a model restore compares the current version with the conversation's
+last version after the target point, or the target if there is none. A mismatch
+is reported in `conflicts` with target, expected and current points; it does not
+establish who changed the file. Its `retry` value is an `expected` point that
+accepts the observed state once it has been inspected; `expected: "latest"`
+accepts the current state when planning. Neither bypasses the immediate recheck.
+`preview` returns a plan without changing files.
 
 ## Storage and retention
 
@@ -257,6 +276,15 @@ in private files under your Jecode home. Model-visible results use the same
 credential masking as other tools. Deleting `~/.jecode/checkpoints/<id>/`
 deletes that project's history.
 
+On Unix, completed archive changes sync their contents and permissions and the
+affected directory entries. The Rust standard library does not provide the
+same directory flush on Windows, so completion there is not a power-loss
+guarantee. Process-kill recovery tests do not simulate a power cut.
+Unix restores batch shared parent-directory flushes. If a flush fails, the
+result reports the durability failure and installed files under that parent
+keep their prepared journal records. After that process exits, recovery checks
+their actual state; the records also retain their preimages until then.
+
 ## Several sessions
 
 Several Jecode processes can use one archive. File locks order archive
@@ -281,6 +309,11 @@ changes to detect conflicts.
 - Filesystem notifications and scans identify changed paths, not writers.
   Their recorded versions have origin `external`, including changes observed
   while a Bash command or background process runs.
+- The recheck before restore installation narrows the race with other editors,
+  but an uncooperative editor can still change a path between the recheck and
+  the filesystem operation.
+- Restores preserve file bytes, permissions and symbolic link targets. They do
+  not reproduce hard-link relationships, extended attributes, ACLs or timestamps.
 - An unchanged archive reopens without rereading files, except for the
   Windows interactive reread described above, which takes about 1 s for
   10,000 files.
