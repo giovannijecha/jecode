@@ -165,7 +165,7 @@ current states and the last named point. These samples do not establish GC tail
 latency. That revision imposed a hard archive ceiling of 1 GiB in file lengths
 and an active generation ceiling of 512 MiB to leave compaction space. These
 ceilings were subsequently replaced by streamed storage and a soft retention
-target; see [checkpoint capacity](../usage/CHECKPOINTS.md#scope-and-capacity).
+target; see [checkpoint capacity](../usage/CHECKPOINTS.md#scope-policy-and-capacity).
 
 ### Explicit capture follow-up
 
@@ -303,6 +303,137 @@ overhead prevent treating this as a continuous maximum or pure GC timing.
 Ten alternating CLI samples of 100-file restores measured 249.843 ms median
 in one directory and 262.040 ms in 100 directories, including startup and
 reconciliation, with exact manifests verified after every operation.
+
+## On-demand checkpoint recovery
+
+Recorded **2026-10-22**, comparing PR head `26d27d8` with `19c67a9` on
+Windows 11, NTFS, Rust 1.95.0 `x86_64-pc-windows-gnullvm`, release builds.
+The measured source fingerprints are `3bae5a6e03b8563323f446602c870b35 over
+413 files` and `21231d80b1c46218e74a7bc9b582be81 over 436 files`.
+Each executable was rebuilt separately and identified by SHA-256. Workflows
+ran serially without concurrent builds or CI, with warm file caches and
+`JECODE_CHECKPOINT_MEASURE_QUICK` unset. These are separate runs, not an
+alternating implementation A/B experiment; disk and scheduling variation
+remain in the samples.
+
+Normal startup no longer acquires the workspace. File tools save their exact
+preimages, and Bash declares protected files or directories. Startup therefore
+changes protection coverage; avoiding a full backup is not a faster full-backup
+algorithm. [Checkpoint usage](../usage/CHECKPOINTS.md) describes the contract.
+
+| Open before the first tool | Median | Samples | Recorded paths / payload bytes read |
+| --- | ---: | ---: | ---: |
+| 1,000 source files | 88.116 ms | 10 | 0 / 0 |
+| 10,000 source files | 86.502 ms | 5 | 0 / 0 |
+| 50,010 empty files | 80.575 ms | 3 | 0 / 0 |
+| 264 MiB of untouched content | 95.666 ms | 3 | 0 / 0 |
+
+These fresh archives occupied 1,439-1,440 bytes in file lengths before the first
+tool. The 1,000-file range was 84.194-709.818 ms, including the first sample;
+the small large-scope samples do not establish tail latency. A foreground Bash
+changing one explicitly protected file in the 264 MiB fixture took 155.896 ms
+total (30 samples) and read 89 payload bytes, leaving the bulk files uncaptured.
+Its single measured restore took 7.069 ms and verified the exact previous bytes.
+Background Bash including a 300 ms command delay and checkpoint finalization
+took 495.931 ms median over 20 samples.
+
+The explicit full-scan comparison remains available. Initial acquisition of
+1,000 files measured 320.888 to 478.252 ms (10 samples; current range
+369.577-560.208 ms), while 10,000 files measured 1,416.478 to 1,220.008 ms
+(5 samples; 1,026.574-1,353.358 ms). The small full-scan control regressed;
+explicit capture is not uniformly faster.
+Full acquisition of 264 MiB measured 1,298.020 to 1,204.671 ms, while scanning
+50,010 empty files measured 6,117.529 to 8,220.645 ms (three samples each).
+Those explicit operations remain proportional to the protected scope.
+
+The following values are median paired added time against the same tool call
+without checkpoints. The Bash baseline maintained global observed history;
+the new side explicitly acquires declared before-images, so coverage and work
+also change.
+
+| Windows tool operation | Prior added | Current added | Samples |
+| --- | ---: | ---: | ---: |
+| Replace 4 KiB text | 2.915 ms | 2.627 ms | 200 |
+| Edit one line of 1 MiB text | 4.166 ms | 4.999 ms | 50 |
+| Rewrite 1 MiB text | 9.486 ms | 7.592 ms | 50 |
+| Read-only Bash, no declared protection | 32.400 ms | 1.454 ms | 30 |
+| Bash changing one declared file | 30.197 ms | 16.188 ms | 30 |
+| Bash changing 100 files in a declared directory | 37.314 ms | 101.325 ms | 30 |
+| Bash changing 1,000 files in a declared directory | 183.592 ms | 958.733 ms | 10 |
+
+Bulk Bash protection regressed. The 1,000-file added range was
+856.238-1,036.939 ms; this is not hidden by the startup improvement. The 4 KiB
+paired range was -5.249 to 9.801 ms (p95 6.068 ms). The 1 MiB edit paired range
+was -136.695 to 99.054 ms: individual paired differences include substantial
+system variation and do not isolate a precise causal overhead. The following
+point after a 1 MiB edit still measured 183.955 ms median over 50 samples,
+compared with 193.783 ms in the fresh baseline.
+For the 1,000-file Bash series, archive counters recorded the same 1,000 file
+reads and 2,200 payload bytes per call, but 1,001 to 2,004 journal frames,
+176,057 to 287,074 written bytes, and 85.3 to 130 transactions. The 100-file
+case similarly changed from 101 to 204 frames. These identify increased archive
+work, without assigning all elapsed-time variation to those counters.
+
+An intermediate candidate compacted unheld current heads after ordinary small
+writes below budget. Integrated probes exposed a 4 KiB added median of
+18.940 ms and a later current-head assertion failure. Collection now waits for
+budget pressure, acceptance-collapse, expiry or an explicit request; a
+generation-boundary regression test covers that behavior. Durable preparation
+and conflict checks were retained.
+
+Recovery also has regressions. These timings include current-state observation,
+conflict checking, saving undo and installing the selected state; initial
+full-scope preimages are prepared outside the new implementation's timer.
+
+| Recovery operation | Prior median | Current median | Samples |
+| --- | ---: | ---: | ---: |
+| Restore one changed file | 6.654 ms | 35.959 ms | 50 |
+| Restore 100 changed files | 294.524 ms | 353.636 ms | 10 |
+| Restore the whole workspace, 120 changes | 528.481 ms | 972.525 ms | 10 |
+
+The one-file current range was 7.526-95.297 ms; the whole-workspace range was
+693.129-1,052.196 ms. These are integrated costs, not isolated estimates of a
+single storage or path-lookup operation. Saving an undo reference remains part
+of each successful restore.
+
+In a 20-revision retention fixture, acceptance reduced median archive file
+lengths from 1,732,672 to 87,383 bytes in 77.313 ms; expiry reduced 1,732,650 to
+1,824 bytes in 78.212 ms (three samples each). This tests collapsing repeated
+versions of one 80 KiB file. It does not imply the same reduction for 20 distinct
+files, whose original before-images must all remain until their deadline.
+
+Three fresh-archive streaming samples compared the same 256 MiB workload on
+both binaries, with exact-byte verification outside timers:
+
+| Streaming operation | Prior median | Current median |
+| --- | ---: | ---: |
+| Initial 256 MiB acquisition | 1,007.256 ms | 1,358.292 ms |
+| Durable replacement preparation | 1,547.911 ms | 1,523.036 ms |
+| Restore | 3,082.436 ms | 3,926.910 ms |
+| Undo restore | 3,493.575 ms | 3,068.086 ms |
+| Compact two unrelated 256 MiB states | 2,107.179 ms | 3,562.117 ms |
+
+The current restore range was 3,008.510-3,983.883 ms and compaction ranged from
+1,830.534 to 3,707.197 ms. Two unrelated states occupied 536,920,649 bytes in
+archive file lengths. Small sample counts do not establish tail latency or
+remove the large-file restore and collection regressions. File lengths do not
+measure allocated disk space or directory metadata.
+
+A separate debug-binary footprint probe protects 20 distinct 80 KiB files in
+one group, accepts it, and forces collection. With the 24-hour policy, allocated
+archive-file bytes were 1,655,040 before GC, 3,305,736 at the highest sample and
+1,655,048 afterward: every distinct original remains available. An immediate
+expiry policy (`recovery_accepted_hours: 0`) reduced 1,655,040 to 12,552 allocated bytes;
+its highest sample was 1,663,232. All 20 workspace file hashes were unchanged
+in both cases. This is not a timed 24-hour wait.
+
+The probe reads `FILE_STANDARD_INFO.EndOfFile` and `AllocationSize` from each
+open file handle and includes both generations when observed. It excludes
+directory entries, MFT and volume metadata, so it is not a volume free-space
+delta. Six/five samples were requested every 20 ms; enumeration adds cost and
+can miss shorter peaks. GC wall times with the observer were 172/125 ms and
+are not release GC timings. The observed doubling is a real compaction-space
+cost even when the payload is still required by an accepted recovery group.
 
 ## Measurement conditions
 
