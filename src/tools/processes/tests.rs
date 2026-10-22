@@ -2,7 +2,6 @@ use super::*;
 use crate::redact::Redactor;
 use crate::test_support::Directory;
 use crate::tools::Tools;
-use std::sync::{Arc, mpsc};
 
 // The root exits at once; the descendant keeps the boundary alive.
 const HEARTBEAT: &str = "(while :; do printf x >> heartbeat; sleep 0.05; done) & printf 'ready\\n'";
@@ -92,13 +91,13 @@ fn gate(name: &str) -> String {
 }
 
 #[test]
-fn persistent_bash_finishes_observing_its_declared_directory() {
+fn persistent_bash_reports_only_its_prelaunch_capture() {
     use crate::checkpoints::session::Session;
 
     let home = Directory::new();
     let root = Directory::new();
     let session = Session::open(home.path(), root.path());
-    session.begin("model", None);
+    session.begin("model");
     let mut tools = tools(&root, Redactor::empty());
     tools.configure_checkpoints(std::sync::Arc::clone(&session));
     let started = bash(
@@ -118,65 +117,15 @@ fn persistent_bash_finishes_observing_its_declared_directory() {
         checkpoint.get("status").and_then(Value::as_str),
         Some("saved")
     );
-    assert!(text(checkpoint, "before").starts_with("cp-"));
+    assert!(text(checkpoint, "ref").starts_with("rc-"));
     release(&root, "go");
     let finished = process(&tools, "poll", &text(&started, "process_id"), Some(10_000));
     assert_eq!(text(&finished, "status"), "exited");
+    assert!(finished.get("checkpoint_finalized").is_none());
+    assert!(finished.get("checkpoint_error").is_none());
     assert_eq!(
-        finished.get("checkpoint_finalized"),
-        Some(&Value::Bool(true))
-    );
-    let observed = tools.execute(
-        "checkpoint",
-        &Value::object([
-            ("action", Value::string("list")),
-            (
-                "paths",
-                Value::Array(vec![Value::string("generated/result.txt")]),
-            ),
-        ])
-        .encode(),
-    );
-    let child = &observed.get("paths").unwrap().as_array().unwrap()[0];
-    assert!(child.get("total").and_then(Value::as_usize).unwrap() > 0);
-}
-
-#[test]
-fn stopping_processes_does_not_wait_for_checkpoint_store_lock() {
-    use crate::checkpoints::session::Session;
-
-    let home = Directory::new();
-    let root = Directory::new();
-    let session = Session::offline(home.path(), root.path());
-    session.begin("model", None);
-    let mut configured = tools(&root, Redactor::empty());
-    configured.configure_checkpoints(Arc::clone(&session));
-    let tools = Arc::new(configured);
-    let started = bash(
-        &tools,
-        "sleep 30",
-        &[
-            ("wait_ms", Value::number(0)),
-            ("protect", Value::Array(vec![Value::string("result.txt")])),
-        ],
-    );
-    assert_eq!(text(&started, "status"), "running", "{started:?}");
-
-    let store = session.workspace().unwrap().test_hold_store();
-    let (tx, rx) = mpsc::channel();
-    let worker = thread::spawn(move || {
-        tools.stop_processes();
-        let _ = tx.send(());
-    });
-    let prompt = rx.recv_timeout(Duration::from_secs(1)).is_ok();
-    drop(store);
-    if !prompt {
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    }
-    worker.join().unwrap();
-    assert!(
-        prompt,
-        "stopping the conversation waited for checkpoint finalization"
+        std::fs::read(root.path().join("generated/result.txt")).unwrap(),
+        b"final"
     );
 }
 
@@ -507,7 +456,6 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
             },
         ],
         stop: Cancellation::default(),
-        finalize_stop: Cancellation::default(),
         state: Mutex::new(State {
             outcome: Some(Outcome {
                 status: "exited",
@@ -515,12 +463,9 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
                 error: None,
             }),
             cursors: [0, 0],
-            checkpoint_finalized: false,
-            checkpoint_error: None,
         }),
         changed: Condvar::new(),
         monitor: Mutex::new(None),
-        heartbeat: Mutex::new(None),
     };
     assert!(entry.report(false).unwrap_err().contains("saved stderr"));
     std::fs::write(stderr, "unread stderr").unwrap();

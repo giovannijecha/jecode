@@ -10,7 +10,7 @@ pub use schema::definitions;
 pub use shell::find_bash;
 
 use crate::cancel::Cancellation;
-use crate::checkpoints::actions::{self, Caller};
+use crate::checkpoints::actions;
 use crate::checkpoints::session::{CommandGuard, Session};
 use crate::checkpoints::show;
 use crate::json::{self, Value};
@@ -142,7 +142,7 @@ impl Tools {
         }
         if show::is_reference(path) {
             return Err(
-                "Checkpoint history is read-only; restore it with the checkpoint tool".into(),
+                "Saved recovery files are read-only; restore them with the checkpoint tool".into(),
             );
         }
         let absolute = self
@@ -179,13 +179,6 @@ impl Tools {
             cancellation,
         )
         .result
-    }
-
-    /// Records the checkpoint before a shell command, so its freshness can
-    /// be shown while the command runs.
-    #[cfg(test)]
-    pub fn begin(&self, name: &str, arguments: &str) -> Begun {
-        self.begin_cancellable(name, arguments, &Cancellation::default())
     }
 
     pub fn begin_cancellable(
@@ -265,7 +258,8 @@ impl Tools {
                                 fields.insert(
                                 "checkpoint".into(),
                                 Value::object([
-                                    ("status", Value::string("not_tracked")),
+                                    ("status", Value::string("none")),
+                                    ("saved_paths", Value::number(0)),
                                     (
                                         "reason",
                                         Value::string(
@@ -279,7 +273,6 @@ impl Tools {
                         })
                     }
                     "bash" => {
-                        let completion = begun.command.as_ref().and_then(CommandGuard::completion);
                         let temporary = self
                             .temporary
                             .as_ref()
@@ -295,15 +288,10 @@ impl Tools {
                             },
                             &arguments,
                             cancellation,
-                            completion,
                         )
                         .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
                         if let Some(command) = begun.command {
-                            let running = matches!(
-                                result.get("status").and_then(Value::as_str),
-                                Some("running" | "stopping")
-                            );
-                            let checkpoint = command.finish(running);
+                            let checkpoint = command.finish();
                             if let Value::Object(fields) = &mut result {
                                 fields.insert("checkpoint".into(), checkpoint);
                             }
@@ -314,7 +302,9 @@ impl Tools {
                         .processes
                         .execute(&arguments, cancellation)
                         .map(|value| (value, None)),
-                    "checkpoint" => self.checkpoint(&arguments).map(|value| (value, None)),
+                    "checkpoint" => self
+                        .checkpoint(&arguments, cancellation)
+                        .map(|value| (value, None)),
                     _ => Err(format!("Unknown tool: {name}")),
                 }
             });
@@ -325,9 +315,6 @@ impl Tools {
 
     /// Protects workspace changes from this conversation's tools.
     pub fn configure_checkpoints(&mut self, session: Arc<Session>) {
-        let listener = Arc::clone(&session);
-        self.processes
-            .listen(Arc::new(move |running| listener.set_background(running)));
         self.checkpoints = Some(session);
     }
 
@@ -341,15 +328,21 @@ impl Tools {
             .ok_or_else(|| "Checkpoints are not enabled in this session".into())
     }
 
-    fn checkpoint(&self, arguments: &Value) -> Result<Value, String> {
+    fn checkpoint(&self, arguments: &Value, cancellation: &Cancellation) -> Result<Value, String> {
         let session = self.enabled_checkpoints()?;
-        let origin = session.origin();
-        let caller = Caller {
-            origin: &origin,
-            user: false,
-        };
-        let result = actions::run(session.workspace()?, &caller, arguments)?;
-        if result.get("instructions_changed") == Some(&Value::Bool(true)) {
+        let result = actions::run(session.store()?, arguments, cancellation)?;
+        if result
+            .get("restored")
+            .and_then(Value::as_array)
+            .is_some_and(|paths| {
+                paths.iter().any(|entry| {
+                    entry
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| path.rsplit('/').next() == Some("JECODE.md"))
+                })
+            })
+        {
             session.restored_instructions();
         }
         Ok(result)
@@ -362,7 +355,7 @@ impl Tools {
         cancellation: &Cancellation,
     ) -> Result<Value, String> {
         let session = self.enabled_checkpoints()?;
-        show::read_page(session.workspace()?, path, arguments, cancellation)
+        show::read(session.store()?, path, arguments, cancellation)
     }
 }
 

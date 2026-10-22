@@ -418,7 +418,13 @@ fn read_only_files_are_preserved_without_leaving_temporary_files() {
         &arguments(&[("path", "source"), ("content", "changed")]),
     );
     fs::set_permissions(&path, original_permissions).unwrap();
-    assert!(result.unwrap_err().contains("read-only"));
+    assert!(
+        result
+            .unwrap()
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|error| error.contains("read-only"))
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), "unchanged");
     assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
 }

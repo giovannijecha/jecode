@@ -1,529 +1,434 @@
-//! One process's handle on a shared workspace archive: replayed index, short
-//! store-lock transactions and verified object reconstruction.
-mod cache;
-mod objects;
-mod reader;
-mod stream;
-use super::frame::{Encoding, ObjectMeta};
-use super::hash::{self, Digest};
-use super::identity::Location as Workspace;
-use super::index::Index;
-use super::journal::{self, Journal, Location};
-use super::locks::{Exclusive, Owner};
-use super::policy::Policy;
-use super::record::{Event, Point, Record};
-use super::{layout, lifecycle};
-use cache::Cache;
-use std::collections::HashMap;
-use std::path::PathBuf;
+//! Independent immutable recovery packs for modifying calls.
+use super::files;
+use super::format;
+use super::hash;
+use super::locks;
+use super::pressure::{self, Pressure};
+use super::state::State;
+use super::types::{Snapshot, Summary, TTL_MILLIS};
+use crate::cancel::Cancellation;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-pub const CHUNK_BYTES: usize = 1 << 20;
+mod identity;
+use identity::{
+    add_exclusion, identity_bytes, ordinary_directory, ordinary_file, recognized_workspace,
+};
 
 pub struct Store {
-    pub workspace: Workspace,
-    pub policy: Policy,
-    pub journal: Journal,
-    pub index: Index,
-    pub owner: String,
-    history_floor: u64,
-    _lifecycle: lifecycle::Lease,
-    _owner: Owner,
-    cache: Mutex<Cache>,
-    /// Counters for measurements and status.
-    pub counters: Counters,
-}
-
-#[derive(Default, Clone, Copy, Debug)]
-pub struct Counters {
-    pub transactions: u64,
-    pub flushes: u64,
-    pub frames: u64,
-    pub bytes_written: u64,
-    pub objects_full: u64,
-    pub objects_delta: u64,
-    pub objects_reused: u64,
-    pub files_read: u64,
-    pub bytes_read: u64,
-    pub scans: u64,
+    pub root: PathBuf,
+    pub directory: PathBuf,
+    pub excluded: Vec<String>,
+    pub leases: Arc<locks::Leases>,
+    pressure: Mutex<Option<Arc<Pressure>>>,
+    #[cfg(test)]
+    pub(super) cancel_after_chunk: AtomicBool,
 }
 
 impl Store {
-    pub fn lock_path(&self) -> PathBuf {
-        layout::store_lock(&self.workspace.directory)
-    }
-
-    pub fn open(workspace: Workspace) -> Result<Self, String> {
-        let directory = workspace.directory.clone();
-        if layout::version(&directory).is_some_and(|version| version >= 2) {
-            layout::guard_legacy(&directory)?;
+    pub fn open(home: &Path, root: &Path) -> Result<Arc<Self>, String> {
+        let root =
+            fs::canonicalize(root).map_err(|e| format!("Could not locate workspace: {e}"))?;
+        if !root.is_dir() {
+            return Err("Workspace is not a directory".into());
         }
-        let lifecycle = lifecycle::open(&workspace)?;
-        let owner = super::files::unique("owner");
-        let owner_lock = Owner::acquire(layout::owner_lock(&directory, &owner))
-            .map_err(|error| format!("Could not register with checkpoint archive: {error}"))?;
-        let _lock = Exclusive::acquire(&layout::store_lock(&directory))
-            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
-        let edited = Policy::read_with_migration(&directory)?;
-        let journal = Journal::open(&directory)?;
-        let history_floor = lifecycle::high_water(&directory)?;
-        let mut store = Self {
-            workspace,
-            policy: edited
-                .as_ref()
-                .map(|(policy, _)| policy.clone())
-                .unwrap_or_default(),
-            journal,
-            index: Index::default(),
-            owner,
-            history_floor,
-            _lifecycle: lifecycle,
-            _owner: owner_lock,
-            cache: Mutex::new(Cache::default()),
-            counters: Counters::default(),
+        let identity = identity_bytes(&root);
+        let key = hash::digest(&identity);
+        let leaf = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace");
+        let friendly: String = leaf
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .take(32)
+            .collect();
+        let friendly = if friendly.is_empty() {
+            "workspace"
+        } else {
+            &friendly
         };
-        store.catch_up()?;
-        store.remove_stale_generations();
-        store.adopt(edited)?;
-        Ok(store)
+        let directory = home
+            .join("recovery")
+            .join(format!("{friendly}-{:016x}{:016x}", key.0[0], key.0[1]));
+        files::private_directory(&directory)
+            .map_err(|e| format!("Could not create recovery directory: {e}"))?;
+        let directory = fs::canonicalize(&directory).map_err(|e| e.to_string())?;
+        let _identity_lock = locks::Exclusive::acquire(&directory.join(".identity.lock"))
+            .map_err(|e| format!("Could not lock recovery identity: {e}"))?;
+        let marker = directory.join("workspace.id");
+        match fs::read(&marker) {
+            Ok(saved) if saved == identity => {}
+            Ok(_) => return Err("Recovery directory belongs to another workspace".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                files::atomic_write(&marker, &identity)
+                    .map_err(|e| format!("Could not establish recovery identity: {e}"))?;
+            }
+            Err(error) => return Err(format!("Could not read recovery identity: {error}")),
+        }
+        let home =
+            fs::canonicalize(home).map_err(|e| format!("Could not locate recovery home: {e}"))?;
+        let mut excluded = Vec::new();
+        // Exclude every recovery archive if the workspace contains the user's
+        // home. The logical names cover symlink aliases; canonical targets
+        // cover storage physically located elsewhere inside the workspace.
+        for path in [
+            home.join("recovery"),
+            directory.parent().unwrap().to_path_buf(),
+            home.join("checkpoints"),
+            directory.clone(),
+        ] {
+            add_exclusion(&root, &path, &mut excluded);
+        }
+        match fs::canonicalize(home.join("checkpoints")) {
+            Ok(path) => add_exclusion(&root, &path, &mut excluded),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Could not resolve legacy archive location: {error}"
+                ));
+            }
+        }
+        excluded.sort();
+        excluded.dedup();
+        let leases = locks::Leases::new(directory.join("leases"));
+        Ok(Arc::new(Self {
+            root,
+            directory,
+            excluded,
+            leases,
+            pressure: Mutex::new(None),
+            #[cfg(test)]
+            cancel_after_chunk: AtomicBool::new(false),
+        }))
     }
 
-    /// Applies a hand-edited `policy.json`; the journal tells other processes.
-    /// A missing file is written so users can find and edit it.
-    fn adopt(&mut self, edited: Option<(Policy, bool)>) -> Result<(), String> {
-        let recorded = self.index.policies.values().next_back().cloned();
-        let previous = recorded
-            .as_ref()
-            .map(|(_, policy)| policy.clone())
-            .unwrap_or_default();
-        let rewrite = edited.as_ref().is_some_and(|(_, migrated)| *migrated);
-        let policy = edited.map(|(policy, _)| policy).unwrap_or_else(|| {
-            let _ = self.policy.save_locked(&self.workspace.directory);
-            self.policy.clone()
-        });
-        if recorded.as_ref().map(|(id, _)| *id) == Some(policy.id()) {
-            if rewrite {
-                policy.save_locked(&self.workspace.directory)?;
+    pub(super) fn claim(&self, bytes: u64, cancel: &Cancellation) -> Result<(), String> {
+        let mut cached = self.pressure.lock().unwrap_or_else(|e| e.into_inner());
+        let pressure = match &*cached {
+            Some(pressure) => Arc::clone(pressure),
+            None => {
+                let pressure = pressure::for_archive(&self.directory)?;
+                *cached = Some(Arc::clone(&pressure));
+                pressure
             }
-            return Ok(());
+        };
+        drop(cached);
+        pressure.claim(
+            &self.directory,
+            bytes,
+            pressure::DEFAULT_MIN_FREE_BYTES,
+            Some(cancel),
+        )
+    }
+
+    pub fn load(&self, reference: &str, cancel: &Cancellation) -> Result<Loaded, String> {
+        if cancel.requested() {
+            return Err("Operation cancelled".into());
         }
-        let mut transaction = Transaction::new(self);
-        let seq = transaction.seq();
-        let (id, text) = (policy.id(), policy.encode());
-        transaction.record(Record::Policy { seq, id, text });
-        if let Some((_, previous)) = recorded {
-            let changes = policy.changes(&previous);
-            if !changes.is_empty() {
-                let seq = transaction.seq();
-                transaction.record(Record::Event(Event {
-                    seq,
-                    origin: "policy".into(),
-                    time: crate::checkpoints::clock::now(),
-                    text: format!(
-                        "checkpoint scope changed in policy.json: {}",
-                        changes.join(", ")
-                    ),
-                    paths: Vec::new(),
-                }));
-            }
+        if !valid_reference(reference) {
+            return Err("Invalid recovery reference".into());
         }
-        transaction.store.policy = policy;
-        match transaction.commit(false) {
-            Err(error) if super::quota::is_full(&error) => {
-                // A legacy archive can already exceed the hard cap. Keep it
-                // readable and leave the policy from its last valid record.
-                self.policy = previous;
-                Ok(())
+        let path = self.directory.join(format!("{reference}.rcp"));
+        if !ordinary_file(&path)? {
+            return Err("Recovery pack is missing or is not an ordinary file".into());
+        }
+        let mut file =
+            File::open(&path).map_err(|e| format!("Could not open recovery {reference}: {e}"))?;
+        loop {
+            if cancel.requested() {
+                return Err("Operation cancelled".into());
             }
-            Ok(()) => {
-                if rewrite {
-                    self.policy.save_locked(&self.workspace.directory)?;
+            match file.try_lock_shared() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    cancel.wait(std::time::Duration::from_millis(10))?;
                 }
-                Ok(())
+                Err(std::fs::TryLockError::Error(error)) => {
+                    return Err(format!("Could not lock recovery {reference}: {error}"));
+                }
             }
-            Err(error) => Err(error),
         }
-    }
-
-    /// Replays other processes' appends; follows a compaction to its new generation.
-    fn catch_up(&mut self) -> Result<(), String> {
-        self.catch_up_cancellable(&crate::cancel::Cancellation::default())
-    }
-
-    fn catch_up_cancellable(
-        &mut self,
-        cancellation: &crate::cancel::Cancellation,
-    ) -> Result<(), String> {
-        let index = &mut self.index;
-        self.journal
-            .catch_up_cancellable(&mut |entry| index.apply(entry), cancellation)?;
-        // Compaction writes Moved before CURRENT; a crash between them is
-        // repaired by the first process that follows the move.
-        while let Some(generation) = self.index.moved {
-            let directory = &self.workspace.directory;
-            let journal = Journal::open_existing_generation(directory, generation)?;
-            self.journal = journal;
-            self.index = Index::default();
-            self.cache = Mutex::new(Cache::default());
-            let index = &mut self.index;
-            self.journal
-                .catch_up_cancellable(&mut |entry| index.apply(entry), cancellation)?;
-            self.remove_stale_generations();
-        }
-        // Expiry preserves sequence identity: old cp-N references must stay
-        // below the retained horizon even after new history or compaction.
-        self.index.next = self.index.next.max(self.history_floor);
-        self.index.horizon = self.index.horizon.max(self.history_floor);
-        self.repair_current()?;
-        // Limits changed by another process apply here too.
-        if let Some((_, (id, policy))) = self.index.policies.iter().next_back()
-            && *id != self.policy.id()
+        let snapshot = format::read(&mut file)?;
+        if snapshot.reference != reference
+            || snapshot.created != created_from_reference(reference).unwrap()
         {
-            self.policy = policy.clone();
+            return Err("Recovery reference mismatch".into());
         }
-        Ok(())
-    }
-
-    /// A full archive may delay the small CURRENT repair after Moved. Keep
-    /// following the published generation, and retry on later transactions.
-    fn repair_current(&self) -> Result<(), String> {
-        let directory = &self.workspace.directory;
-        let generation = self.journal.generation;
-        if journal::current_generation(directory)? >= generation {
-            return Ok(());
+        if snapshot.expires() <= super::clock::now() {
+            return Err("Recovery has expired".into());
         }
-        let next = generation.to_string();
-        match super::quota::admit(directory, next.len() as u64, true, u64::MAX) {
-            Ok(()) => super::files::atomic_write(&layout::current(directory), next.as_bytes())
-                .map_err(|error| format!("Could not update checkpoint archive: {error}")),
-            Err(error) if super::quota::is_full(&error) => Ok(()),
-            Err(error) => Err(error),
+        if cancel.requested() {
+            return Err("Operation cancelled".into());
         }
+        Ok(Loaded { snapshot, file })
     }
 
-    /// Runs `body` under the store lock with an up-to-date index.
-    pub fn transaction<T>(
-        &mut self,
-        durable: bool,
-        body: impl FnOnce(&mut Transaction<'_>) -> Result<T, String>,
-    ) -> Result<T, String> {
-        let _lock = Exclusive::acquire(&self.lock_path())
-            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
-        self.catch_up()?;
-        let mut transaction = Transaction::new(self);
-        let value = body(&mut transaction)?;
-        transaction.commit(durable)?;
-        Ok(value)
-    }
-
-    pub fn transaction_cancellable<T>(
-        &mut self,
-        durable: bool,
-        cancellation: &crate::cancel::Cancellation,
-        body: impl FnOnce(&mut Transaction<'_>) -> Result<T, String>,
-    ) -> Result<T, String> {
-        let _lock = Exclusive::acquire_cancellable(&self.lock_path(), cancellation)
-            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
-        self.catch_up_cancellable(cancellation)?;
-        let mut transaction = Transaction::new(self);
-        transaction.cancellation = Some(cancellation.clone());
-        transaction.check_cancelled()?;
-        let value = body(&mut transaction)?;
-        transaction.commit(durable)?;
-        Ok(value)
-    }
-
-    /// Refreshes the index from the shared journal.
-    pub fn refresh(&mut self) -> Result<(), String> {
-        let _lock = Exclusive::acquire(&self.lock_path())
-            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
-        self.catch_up()
-    }
-
-    pub fn refresh_cancellable(
-        &mut self,
-        cancellation: &crate::cancel::Cancellation,
-    ) -> Result<(), String> {
-        let _lock = Exclusive::acquire_cancellable(&self.lock_path(), cancellation)
-            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
-        self.catch_up_cancellable(cancellation)
-    }
-
-    /// Follows peer compaction and releases old generations after readers leave.
-    pub fn maintain(&mut self) -> Result<(), String> {
-        let _lock = Exclusive::acquire(&self.lock_path())
-            .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
-        self.catch_up()?;
-        self.remove_stale_generations();
-        Ok(())
-    }
-
-    /// Exact bytes of an object, verified against its recorded digest.
-    pub fn bytes(&self, id: u64) -> Result<Arc<[u8]>, String> {
-        if let Some(bytes) = self.cache.lock().unwrap_or_else(|e| e.into_inner()).get(id) {
-            return Ok(bytes);
+    pub fn list(&self, limit: usize, cancel: &Cancellation) -> Result<Vec<Summary>, String> {
+        if limit == 0 {
+            return Ok(Vec::new());
         }
-        let object = *self
-            .index
-            .objects
-            .get(&id)
-            .ok_or_else(|| format!("Checkpoint object {id} is not available"))?;
-        let payload = self.journal.read(&object.location)?;
-        let data = &payload[ObjectMeta::SIZE.min(payload.len())..];
-        let bytes: Arc<[u8]> = match object.meta.encoding {
-            Encoding::Full => data.into(),
-            Encoding::Delta {
-                base,
-                prefix,
-                suffix,
-            } => {
-                let base = self.bytes(base)?;
-                let (prefix, suffix) = (prefix as usize, suffix as usize);
-                if prefix + suffix > base.len() {
-                    return Err(format!("Checkpoint object {id} has an invalid delta"));
-                }
-                let mut bytes = Vec::with_capacity(object.meta.length as usize);
-                bytes.extend_from_slice(&base[..prefix]);
-                bytes.extend_from_slice(data);
-                bytes.extend_from_slice(&base[base.len() - suffix..]);
-                bytes.into()
+        let now = super::clock::now();
+        let mut names = Vec::new();
+        for entry in fs::read_dir(&self.directory).map_err(|e| e.to_string())? {
+            if cancel.requested() {
+                return Err("Operation cancelled".into());
             }
-            Encoding::Chunks { .. } => {
-                let mut reader = self.reader(id)?;
-                let mut bytes = Vec::new();
-                std::io::Read::read_to_end(&mut reader, &mut bytes)
-                    .map_err(|error| format!("Could not read checkpoint file: {error}"))?;
-                bytes.into()
+            let entry = entry.map_err(|e| e.to_string())?;
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Some(reference) = name.strip_suffix(".rcp") else {
+                continue;
+            };
+            let Some(created) = created_from_reference(reference) else {
+                continue;
+            };
+            if created.saturating_add(TTL_MILLIS) <= now {
+                continue;
             }
+            names.push((created, reference.to_owned()));
+        }
+        names.sort_unstable_by(|a, b| b.cmp(a));
+        let mut result = Vec::new();
+        for (_, reference) in names {
+            if result.len() == limit {
+                break;
+            }
+            if cancel.requested() {
+                return Err("Operation cancelled".into());
+            }
+            let loaded = match self.load(&reference, cancel) {
+                Ok(loaded) => loaded,
+                Err(error) if error == "Operation cancelled" => return Err(error),
+                Err(_) => continue,
+            };
+            let snapshot = &loaded.snapshot;
+            result.push(Summary {
+                reference: snapshot.reference.clone(),
+                created: snapshot.created,
+                tool: snapshot.tool.clone(),
+                saved: snapshot
+                    .entries
+                    .values()
+                    .filter(|s| s.recoverable())
+                    .count(),
+                partial: snapshot.partial.len(),
+            });
+        }
+        Ok(result)
+    }
+
+    #[cfg(test)]
+    pub fn cleanup(&self, now: u64) -> Result<usize, String> {
+        cleanup_directory(&self.directory, now, None)
+    }
+
+    /// Sweep only directories created by this recovery format. This includes
+    /// inactive workspaces without opening their sessions or old archives.
+    pub fn sweep_home(home: &Path, now: u64, cancel: &Cancellation) -> Result<usize, String> {
+        check_sweep(Some(cancel))?;
+        let recovery = home.join("recovery");
+        if !ordinary_directory(&recovery)? {
+            return Ok(0);
+        }
+        let mut removed = 0;
+        for entry in fs::read_dir(&recovery).map_err(|e| e.to_string())? {
+            check_sweep(Some(cancel))?;
+            let entry = entry.map_err(|e| e.to_string())?;
+            let directory = entry.path();
+            if ordinary_directory(&directory)? && recognized_workspace(&directory)? {
+                removed += cleanup_directory(&directory, now, Some(cancel))?;
+            }
+        }
+        Ok(removed)
+    }
+}
+
+fn cleanup_directory(
+    directory: &Path,
+    now: u64,
+    cancel: Option<&Cancellation>,
+) -> Result<usize, String> {
+    let mut removed = 0;
+    for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
+        check_sweep(cancel)?;
+        let entry = entry.map_err(|e| e.to_string())?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
         };
-        if bytes.len() as u64 != object.meta.length || hash::digest(&bytes) != object.meta.digest {
-            return Err(format!(
-                "Checkpoint object {id} failed verification; its bytes are damaged"
+        let pending = name.starts_with('.') && name.ends_with(".pending");
+        let reference = if pending {
+            name.strip_prefix('.')
+                .and_then(|name| name.strip_suffix(".pending"))
+        } else {
+            name.strip_suffix(".rcp")
+        };
+        let Some(reference) = reference else {
+            continue;
+        };
+        if !valid_reference(reference)
+            || created_from_reference(reference)
+                .unwrap()
+                .saturating_add(TTL_MILLIS)
+                > now
+        {
+            continue;
+        }
+        let path = entry.path();
+        if !ordinary_file(&path)? {
+            continue;
+        }
+        let file = match files::options().read(true).write(true).open(&path) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => continue,
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.to_string()),
+        }
+        // The generated reference is the creation clock. Strict names and an
+        // exclusive lock identify both intact packs and crashed/corrupt ones,
+        // so damaged contents do not outlive the same fixed retention window.
+        check_sweep(cancel)?;
+        fs::remove_file(&path).map_err(|e| format!("Could not expire {reference}: {e}"))?;
+        removed += 1;
+    }
+    if removed != 0 {
+        files::sync_directory(directory).map_err(|e| e.to_string())?;
+    }
+    Ok(removed)
+}
+
+fn check_sweep(cancel: Option<&Cancellation>) -> Result<(), String> {
+    if cancel.is_some_and(Cancellation::requested) {
+        Err("Operation cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+
+pub struct Loaded {
+    pub snapshot: Snapshot,
+    file: File,
+}
+
+impl Loaded {
+    pub fn reader(&self, state: &State) -> Result<Reader, String> {
+        let State::File { offset, length, .. } = state else {
+            return Err("Recovery state has no file bytes".into());
+        };
+        let file = self.file.try_clone().map_err(|e| e.to_string())?;
+        Ok(Reader {
+            file,
+            start: *offset,
+            length: *length,
+            at: 0,
+        })
+    }
+
+    pub fn verify(&self, state: &State, cancel: &Cancellation) -> Result<(), String> {
+        let State::File { length, digest, .. } = state else {
+            return Err("Recovery state has no file bytes".into());
+        };
+        let mut reader = self.reader(state)?;
+        let mut hasher = hash::Hasher::new(*length);
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            if cancel.requested() {
+                return Err("Operation cancelled".into());
+            }
+            let n = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
+        if hasher.finish() != *digest {
+            return Err("Corrupt recovery payload".into());
+        }
+        Ok(())
+    }
+}
+
+pub struct Reader {
+    file: File,
+    start: u64,
+    length: u64,
+    at: u64,
+}
+
+impl Read for Reader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.length.saturating_sub(self.at).min(buffer.len() as u64) as usize;
+        if n == 0 {
+            return Ok(0);
+        }
+        let read = read_at(&self.file, &mut buffer[..n], self.start + self.at)?;
+        if read == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Truncated recovery payload",
             ));
         }
-        self.cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, bytes.clone());
-        Ok(bytes)
-    }
-
-    fn remember(&self, id: u64, bytes: Arc<[u8]>) {
-        self.cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, bytes);
-    }
-
-    /// Deletes generations that no process still reads.
-    pub fn remove_stale_generations(&self) {
-        let directory = &self.workspace.directory;
-        let Ok(current) = journal::current_generation(directory) else {
-            return;
-        };
-        let oldest_needed = current.min(self.journal.generation);
-        let Ok(entries) = std::fs::read_dir(layout::history(directory)) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(generation) = name
-                .strip_prefix("gen-")
-                .filter(|rest| !rest.contains('.'))
-                .and_then(|rest| rest.parse::<u64>().ok())
-            else {
-                continue;
-            };
-            // Newer generations may be a compaction in progress.
-            if generation >= oldest_needed {
-                continue;
-            }
-            let lock = journal::generation_lock(directory, generation);
-            if let Ok(Some(_held)) = Exclusive::try_acquire(&lock) {
-                let _ = std::fs::remove_dir_all(entry.path());
-            }
-        }
+        self.at += read as u64;
+        Ok(read)
     }
 }
 
-/// Objects written by an unflushed transaction, keyed by content.
-type Fresh = HashMap<(Digest, u64), Vec<(u64, Arc<[u8]>)>>;
-
-/// Frames buffered under the store lock and appended in one write.
-pub struct Transaction<'a> {
-    pub store: &'a mut Store,
-    buffer: Vec<u8>,
-    objects: Vec<(ObjectMeta, usize, u64, u64, Vec<u64>)>,
-    records: Vec<Record>,
-    fresh: Fresh,
-    used: Option<super::quota::Usage>,
-    cancellation: Option<crate::cancel::Cancellation>,
-}
-
-impl<'a> Transaction<'a> {
-    fn new(store: &'a mut Store) -> Self {
-        Self {
-            store,
-            buffer: Vec::new(),
-            objects: Vec::new(),
-            records: Vec::new(),
-            fresh: HashMap::new(),
-            used: None,
-            cancellation: None,
-        }
-    }
-
-    pub fn seq(&mut self) -> u64 {
-        let seq = self.store.index.next;
-        self.store.index.next += 1;
-        seq
-    }
-
-    pub fn index(&self) -> &Index {
-        &self.store.index
-    }
-
-    pub fn check_cancelled(&self) -> Result<(), String> {
-        if self
-            .cancellation
-            .as_ref()
-            .is_some_and(|token| token.requested())
-        {
-            Err("Operation cancelled".into())
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn cancellation(&self) -> crate::cancel::Cancellation {
-        self.cancellation.clone().unwrap_or_default()
-    }
-
-    /// Another journal wrote under this same store lock (compaction tail).
-    pub fn refresh_admission(&mut self) {
-        self.used = None;
-    }
-
-    pub fn record(&mut self, record: Record) {
-        self.buffer.extend_from_slice(&record.frame());
-        self.records.push(record);
-    }
-
-    pub fn point(&mut self, kind: &str, label: &str, origin: &str, pinned: bool) -> u64 {
-        let seq = self.seq();
-        let policy = self.store.policy.id();
-        self.record(Record::Point(Point {
-            seq,
-            kind: kind.into(),
-            label: label.into(),
-            origin: origin.into(),
-            time: crate::checkpoints::clock::now(),
-            policy,
-            pinned,
-        }));
-        seq
-    }
-
-    /// Appends buffered frames and applies them to the index. Sequence numbers
-    /// were reserved in the index while building the transaction.
-    pub fn flush(&mut self, durable: bool) -> Result<(), String> {
-        self.check_cancelled()?;
-        if self.buffer.is_empty() {
-            if durable {
-                self.store.journal.sync()?;
-            }
-            return Ok(());
-        }
-        let terminal = self.objects.is_empty()
-            && !self.records.is_empty()
-            && self.records.iter().all(|record| {
-                matches!(
-                    record,
-                    Record::Complete { .. } | Record::Coverage { .. } | Record::Moved { .. }
-                )
-            });
-        self.store.journal.min_free_bytes = self.store.policy.min_free_bytes;
-        let used = if self.store.journal.quota_limit == u64::MAX {
-            super::quota::Usage {
-                total: 0,
-                generation: 0,
-            }
-        } else {
-            match self.used {
-                Some(used) => used,
-                None => super::quota::measure(
-                    &self.store.workspace.directory,
-                    self.store.journal.generation,
-                )?,
-            }
+impl Seek for Reader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let next = match pos {
+            SeekFrom::Start(n) => n as i128,
+            SeekFrom::Current(n) => self.at as i128 + n as i128,
+            SeekFrom::End(n) => self.length as i128 + n as i128,
         };
-        let result = self.store.journal.append_counted(
-            &self.buffer,
-            durable,
-            terminal,
-            self.objects.is_empty(),
-            used,
-            self.cancellation.as_ref(),
-        );
-        let next = self.store.index.next;
-        let (segment, start) = match result {
-            Ok(position) => position,
-            Err(error) => {
-                self.used = None;
-                // Forget reserved numbers and cached bytes of unwritten objects.
-                self.buffer.clear();
-                self.records.clear();
-                for (meta, ..) in self.objects.drain(..) {
-                    self.store
-                        .cache
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .remove(meta.id);
-                }
-                self.fresh.clear();
-                return Err(error);
-            }
-        };
-        let counters = &mut self.store.counters;
-        let added = self.buffer.len() as u64;
-        self.used = Some(super::quota::Usage {
-            total: used.total.saturating_add(added),
-            generation: used.generation.saturating_add(added),
-        });
-        counters.flushes += u64::from(durable);
-        counters.bytes_written += self.buffer.len() as u64;
-        counters.frames += (self.objects.len() + self.records.len()) as u64;
-        for (meta, offset, length, checksum, chunks) in self.objects.drain(..) {
-            let location = Location {
-                segment,
-                offset: start + offset as u64,
-                length,
-                checksum,
-            };
-            self.store.index.object(meta, location, chunks);
+        if next < 0 || next > self.length as i128 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Outside recovery payload",
+            ));
         }
-        for record in self.records.drain(..) {
-            self.store.index.record(record);
-        }
-        self.store.index.next = self.store.index.next.max(next);
-        self.buffer.clear();
-        self.fresh.clear();
-        Ok(())
-    }
-
-    fn commit(mut self, durable: bool) -> Result<(), String> {
-        self.store.counters.transactions += 1;
-        self.flush(durable)
+        self.at = next as u64;
+        Ok(self.at)
     }
 }
 
-impl Drop for Transaction<'_> {
-    fn drop(&mut self) {
-        // A body can fail after buffering objects but before its first flush.
-        // Their cache entries must not outlive the unwritten frames.
-        let mut cache = self.store.cache.lock().unwrap_or_else(|e| e.into_inner());
-        for (meta, ..) in &self.objects {
-            cache.remove(meta.id);
-        }
-    }
+fn valid_reference(reference: &str) -> bool {
+    let bytes = reference.as_bytes();
+    bytes.len() == 45
+        && bytes.starts_with(b"rc-")
+        && bytes[19] == b'-'
+        && bytes[28] == b'-'
+        && bytes[3..19]
+            .iter()
+            .chain(&bytes[20..28])
+            .chain(&bytes[29..])
+            .all(u8::is_ascii_hexdigit)
 }
+
+fn created_from_reference(reference: &str) -> Option<u64> {
+    valid_reference(reference)
+        .then(|| u64::from_str_radix(&reference[3..19], 16).ok())
+        .flatten()
+}
+
+#[cfg(unix)]
+fn read_at(file: &File, buffer: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    file.read_at(buffer, offset)
+}
+
+#[cfg(windows)]
+fn read_at(file: &File, buffer: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    use std::os::windows::fs::FileExt;
+    file.seek_read(buffer, offset)
+}
+
+#[cfg(test)]
+mod tests;

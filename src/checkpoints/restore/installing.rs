@@ -1,114 +1,237 @@
-//! Stage the desired content before checking the live path immediately before
-//! installation. Leases coordinate Jecode writers; external writers can still
-//! race the final check and filesystem operation.
-use super::{Planned, State, files};
-use crate::checkpoints::capture::{self, Observed};
-use crate::checkpoints::store::Store;
-use std::path::Path;
+use super::super::files;
+use super::*;
+use std::fs;
+use std::io::Read;
 
-pub(super) enum Failure {
-    Changed(Box<Observed>),
-    Io(String),
-}
-
-impl From<std::io::Error> for Failure {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error.to_string())
+pub(super) fn same_file_bytes(
+    loaded: &super::super::store::Loaded,
+    saved: &State,
+    path: &std::path::Path,
+    cancel: &Cancellation,
+) -> Result<bool, String> {
+    let mut archived = loaded.reader(saved)?;
+    let mut current = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("Could not recheck {}: {error}", path.display())),
+    };
+    let mut left = [0u8; 64 * 1024];
+    let mut right = [0u8; 64 * 1024];
+    loop {
+        if cancel.requested() {
+            return Err("Recovery restore was cancelled".into());
+        }
+        let count = archived
+            .read(&mut left)
+            .map_err(|error| format!("Could not read undo: {error}"))?;
+        if count == 0 {
+            return Ok(current
+                .read(&mut right[..1])
+                .map_err(|error| error.to_string())?
+                == 0);
+        }
+        if current.read_exact(&mut right[..count]).is_err() || left[..count] != right[..count] {
+            return Ok(false);
+        }
     }
 }
 
-impl From<String> for Failure {
-    fn from(error: String) -> Self {
-        Self::Io(error)
+pub(super) fn same_live(
+    loaded: &super::super::store::Loaded,
+    before: &State,
+    current: &State,
+    path: &std::path::Path,
+    cancel: &Cancellation,
+) -> Result<bool, String> {
+    if !before.same(current) {
+        return Ok(false);
     }
-}
-
-pub(super) enum Step {
-    Applied,
-    Failed,
-    Untouched,
-}
-
-pub(super) fn save_conflict(store: &mut Store, observed: Observed) -> Result<u64, String> {
-    let path = observed.path.clone();
-    store.transaction(true, |transaction| {
-        let recorded = capture::record(transaction, observed, "external", 0)?;
-        Ok(recorded.map_or_else(
-            || {
-                transaction
-                    .index()
-                    .current(&path)
-                    .map_or(transaction.index().latest(), |version| version.seq)
-            },
-            |recorded| recorded.seq,
-        ))
-    })
+    if matches!(before, State::File { .. }) {
+        same_file_bytes(loaded, before, path, cancel)
+    } else {
+        Ok(true)
+    }
 }
 
 pub(super) fn install(
-    store: &Store,
-    root: &Path,
-    planned: &Planned,
-    maximum: u64,
-) -> Result<(), Failure> {
-    files::confined_parent(root, &planned.path)?;
-    let path = crate::checkpoints::identity::absolute(root, &planned.path);
-    let pending = match planned.target {
-        State::File { object, mode, .. } => {
-            Some(files::stage_reader(&path, store.reader(object)?, mode)?)
+    entry: &Inspected,
+    root: &std::path::Path,
+    staged_file: Option<files::PendingFile>,
+    staged_link: Option<files::PendingLink>,
+) -> Result<(), String> {
+    let path = paths::absolute(root, &entry.path);
+    files::confined_parent(root, &entry.path)?;
+    match &entry.saved {
+        State::Absent => files::remove(&path)
+            .map_err(|error| format!("Could not remove {}: {error}", entry.path)),
+        State::Directory { .. } => {
+            if !matches!(entry.current, State::Directory { .. }) {
+                files::remove(&path)
+                    .map_err(|error| format!("Could not clear {}: {error}", entry.path))?;
+                fs::create_dir(&path).map_err(|error| {
+                    format!("Could not create directory {}: {error}", entry.path)
+                })?;
+                #[cfg(unix)]
+                files::directory_mode(&path, files::Mode(0o700)).map_err(|error| {
+                    format!(
+                        "Could not make new directory accessible {}: {error}",
+                        entry.path
+                    )
+                })?;
+                files::sync_directory(path.parent().unwrap_or(root))
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(())
         }
-        _ => None,
-    };
-    #[cfg(test)]
-    crate::checkpoints::tests::process::stage("restore-before-install");
-    let observed = capture::observe(root, &planned.path, maximum);
-    let matches = capture::matches_state_exact(store, &observed, &planned.current, true)?;
-    if !matches || !capture::still_current(root, &observed) {
-        // Read the new state when the final metadata check detected a race;
-        // saving the earlier observation would misidentify the conflict.
-        let observed = capture::observe(root, &planned.path, maximum);
-        return Err(Failure::Changed(Box::new(observed)));
-    }
-    #[cfg(test)]
-    crate::checkpoints::tests::process::stage("restore-after-check");
-    match &planned.target {
-        State::Absent => files::remove(&path)?,
         State::File { .. } => {
-            if matches!(
-                planned.current,
-                State::Link { .. } | State::Directory { .. }
-            ) {
-                files::remove(&path)?;
+            let staged = staged_file.ok_or_else(|| format!("No staged file for {}", entry.path))?;
+            if matches!(entry.current, State::Directory { .. } | State::Link { .. }) {
+                files::remove(&path)
+                    .map_err(|error| format!("Could not clear {}: {error}", entry.path))?;
             }
-            let pending = pending.expect("file target was staged");
-            #[cfg(unix)]
-            pending.install_deferred()?;
-            #[cfg(not(unix))]
-            pending.install()?;
+            staged
+                .install_deferred()
+                .map_err(|error| format!("Could not install {}: {error}", entry.path))?;
+            files::sync_directory(path.parent().unwrap_or(root)).map_err(|error| error.to_string())
         }
-        State::Directory { mode } => {
-            if !matches!(planned.current, State::Directory { .. }) {
-                if !matches!(planned.current, State::Absent) {
-                    files::remove(&path)?;
-                }
-                std::fs::create_dir(&path)?;
-                files::sync_directory(path.parent().unwrap_or(root))?;
+        State::Link { .. } => {
+            let staged = staged_link.ok_or_else(|| format!("No staged link for {}", entry.path))?;
+            if matches!(entry.current, State::Directory { .. }) {
+                files::remove(&path)
+                    .map_err(|error| format!("Could not clear {}: {error}", entry.path))?;
             }
-            #[cfg(unix)]
-            files::directory_mode(&path, *mode)?;
-            #[cfg(not(unix))]
-            let _ = mode;
+            staged
+                .install_deferred()
+                .map_err(|error| format!("Could not install link {}: {error}", entry.path))?;
+            files::sync_directory(path.parent().unwrap_or(root)).map_err(|error| error.to_string())
         }
-        State::Link { target } => {
-            files::remove(&path)?;
-            files::symlink(target, &path)?;
-        }
-        State::Oversized { .. } | State::Unreadable { .. } | State::UnretainedFile { .. } => {
-            return Err(Failure::Io("the target state was not captured".into()));
-        }
+        State::Unreadable { reason } => Err(format!("{} was not captured: {reason}", entry.path)),
     }
+}
+
+pub(super) fn stage_link(
+    entry: &Inspected,
+    root: &std::path::Path,
+) -> Result<Option<files::PendingLink>, String> {
+    let State::Link { target, directory } = &entry.saved else {
+        return Ok(None);
+    };
+    files::stage_link(target, *directory, &paths::absolute(root, &entry.path))
+        .map(Some)
+        .map_err(|error| format!("Could not stage link {}: {error}", entry.path))
+}
+
+pub(super) fn finalize_directory(
+    root: &std::path::Path,
+    relative: &str,
+    mode: files::Mode,
+) -> Result<(), String> {
+    files::confined_parent(root, relative)?;
+    let path = paths::absolute(root, relative);
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|error| format!("Could not recheck directory {relative}: {error}"))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(format!(
+            "Directory {relative} changed before mode installation"
+        ));
+    }
+    #[cfg(unix)]
+    files::directory_mode(&path, mode)
+        .map_err(|error| format!("Could not set directory mode {relative}: {error}"))?;
+    #[cfg(not(unix))]
+    mode.apply_path(&path)
+        .map_err(|error| format!("Could not set directory mode {relative}: {error}"))?;
     Ok(())
 }
 
-#[cfg(test)]
-mod tests;
+struct VerifiedReader<R> {
+    source: R,
+    hasher: Option<hash::Hasher>,
+    remaining: u64,
+    expected: hash::Digest,
+    cancel: Cancellation,
+}
+
+impl<R: Read> Read for VerifiedReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.cancel.requested() {
+            return Err(std::io::Error::other("Recovery restore was cancelled"));
+        }
+        let count = self.source.read(buffer)?;
+        if count as u64 > self.remaining {
+            return Err(std::io::Error::other(
+                "Recovery source exceeded saved length",
+            ));
+        }
+        if count == 0 && self.remaining != 0 {
+            return Err(std::io::Error::other("Recovery source is truncated"));
+        }
+        self.remaining -= count as u64;
+        if count != 0 {
+            self.hasher
+                .as_mut()
+                .expect("hasher available")
+                .update(&buffer[..count]);
+        }
+        Ok(count)
+    }
+}
+
+impl<R> VerifiedReader<R> {
+    fn finish(mut self) -> Result<(), String> {
+        if self.remaining != 0 {
+            return Err("Recovery source is truncated".into());
+        }
+        if self.hasher.take().expect("hasher available").finish() != self.expected {
+            return Err("Recovery source failed its content checksum".into());
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn stage_file(
+    loaded: &super::super::store::Loaded,
+    entry: &Inspected,
+    root: &std::path::Path,
+    cancel: &Cancellation,
+) -> Result<Option<files::PendingFile>, String> {
+    let State::File {
+        length,
+        digest,
+        mode,
+        ..
+    } = &entry.saved
+    else {
+        return Ok(None);
+    };
+    let mut source = VerifiedReader {
+        source: loaded.reader(&entry.saved)?,
+        hasher: Some(hash::Hasher::new(*length)),
+        remaining: *length,
+        expected: *digest,
+        cancel: cancel.clone(),
+    };
+    let staged = files::stage_reader(&paths::absolute(root, &entry.path), &mut source, *mode)
+        .map_err(|error| format!("Could not stage {}: {error}", entry.path))?;
+    source.finish()?;
+    Ok(Some(staged))
+}
+
+pub(super) fn order(entries: &mut [Inspected]) {
+    entries.sort_by(|a, b| {
+        let depth = |entry: &Inspected| entry.path.bytes().filter(|byte| *byte == b'/').count();
+        let rank = |entry: &Inspected| match &entry.saved {
+            State::Absent => 0,
+            State::Directory { .. } if !matches!(entry.current, State::Directory { .. }) => 1,
+            State::Directory { .. } => 3,
+            _ => 2,
+        };
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| match rank(a) {
+                0 | 3 => depth(b).cmp(&depth(a)),
+                _ => depth(a).cmp(&depth(b)),
+            })
+            .then_with(|| a.path.cmp(&b.path))
+    });
+}

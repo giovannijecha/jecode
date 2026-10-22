@@ -68,18 +68,6 @@ fn repeated_insufficient_claims_reuse_recent_probe() {
 }
 
 #[test]
-fn compaction_requires_scratch_beside_the_free_space_minimum() {
-    let pressure = settled(10);
-    pressure
-        .ensure_scratch(Path::new("unused"), 700, 256)
-        .unwrap();
-    let error = pressure
-        .ensure_scratch(Path::new("unused"), 800, 256)
-        .unwrap_err();
-    assert!(error.contains("800 B requested plus 256 B"), "{error}");
-}
-
-#[test]
 fn waiting_for_an_initial_sample_observes_cancellation() {
     let pressure = Arc::new(Pressure {
         path: PathBuf::from("unused"),

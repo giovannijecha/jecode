@@ -83,7 +83,7 @@ saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard sh
 | `/settings` | Edit saved defaults and the OpenRouter key. |
 | `/init` | Inspect this project and create or update its `JECODE.md`. |
 | `/skills` | List personal skills available to the model. |
-| `/checkpoints` | Inspect, restore or configure workspace checkpoints. |
+| `/checkpoints` | Inspect or recover files from a tool call. |
 | `/help` | Show commands and controls. |
 | `/exit` | Quit when the active turn finishes. |
 
@@ -96,12 +96,12 @@ Keep reusable workflows in [`~/.jecode/skills`](docs/usage/SKILLS.md). Jecode
 shows their names and descriptions to the model, which reads a skill when it
 fits the task. `/skills` lists the library without making a model request.
 
-Jecode keeps a private local history of your project's files in
+Jecode saves local preimages of modifying tool calls in
 [checkpoints](docs/usage/CHECKPOINTS.md). It saves a file's previous state
 before `write` and `edit` change it. Bash saves declared files and recursive
 directories through `protect`; use `"."` to opt into the whole eligible
 workspace. Startup and turns do not scan the project. You or the model can
-inspect and restore saved states; restores can be undone.
+inspect and restore saved states; restores can be undone. Every snapshot expires after 24 hours.
 
 Conversations autosave under `~/.jecode/sessions/`. To resume, run
 `jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)
@@ -133,8 +133,8 @@ Task failures exit with code 1; invalid arguments use code 2. `--help` and
 `--version` need no configuration.
 
 `jecode checkpoints` inspects and restores the project's checkpoints without a
-key, provider or network, for example `jecode checkpoints list src/main.rs` or
-`jecode checkpoints restore cp-42 src/main.rs`. Run `jecode checkpoints help`
+key, provider or network, for example `jecode checkpoints list` or
+`jecode checkpoints restore rc-ID src/main.rs --expected latest`. Run `jecode checkpoints help`
 for every command.
 
 ## Documentation

@@ -54,44 +54,36 @@ verified the change. Use `-- --list` to inspect available names.
 | Agent/context/provider | Tests beside `agent/`, `context/` and `openrouter/`; use loopback responses. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
-| Checkpoints | Tests beside `checkpoints/` and the `checkpoint_tests` modules in `agent/`, `session/`, `tools/` and `tui/`. Cover startup without acquisition, exact-file and recursive Bash protection, unknown paths, partial coverage, cancellation, background completion, recovery acceptance and expiry, pins, migration, concurrent collection, crash recovery, conflicts and exact undo. Children re-enter the test binary with isolated archive homes. Synthetic quota injection exercises the same journal admission path as production; production uses a soft retention budget and advisory free-space checks. |
+| Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
 
 Run the applicable normal checks after focused verification. Keep credentials,
 logs, screenshots and temporary drivers out of tracked files; use ignored `.tmp/`
 or `target` directories.
 
-The combined checkpoint regression runs in the ordinary suite. To isolate it:
+Focused recovery checks run without a provider:
 
 ```text
-cargo test --locked --offline checkpoints::tests::process::stress::four_sessions_survive_concurrent_collection_and_crashed_restore -- --exact --nocapture --test-threads=1
+cargo test --locked --offline checkpoint
 ```
 
-It uses an isolated archive, a 4 MiB retention policy and four writer
-processes. The fourth writer commits
-while collection is paused inside its copy. The fixture kills the collector
-after its durable move but before `CURRENT` is updated, then kills a restore
-after its first file installation. Reopening must preserve the concurrent
-write, repair the pointer, classify pending work and support exact undo. Stage
-barriers exist only under `cfg(test)`. Quota admission, native free-space queries
-and retention pruning have separate checks.
+Storage subprocess fixtures terminate a writer or reader and verify released OS
+locks, retained live reads and cleanup of expired pending data. Normal tests use
+isolated homes; no real archive is read or deleted. Free-space probes have
+separate cancellation, insufficient-space and failed-helper checks.
 
-Recovery lifecycle and cancellation regressions also run in the ordinary suite:
+The opt-in matched tool workload uses release binaries with identical fixtures:
 
 ```text
-cargo test --locked --offline checkpoints::tests::redesign::
-cargo test --locked --offline checkpoints::recovery::tests::
-cargo test --locked --offline checkpoints::gc::recovery::tests::
-cargo test --locked --offline checkpoints::lifecycle::tests::
-cargo test --locked --offline checkpoints::session::cancellation_tests::
+cargo test --locked --offline --release checkpoint_bench::matched_tools -- --exact --ignored --nocapture --test-threads=1
 ```
 
-The opt-in `on-demand` measurement asserts that opening large workspaces records
-no paths and reads no file payload, then checks declared Bash recovery and
-background finalization. `retention` measures acceptance compaction and expiry
-with exact-byte checks. Select them through `JECODE_CHECKPOINT_MEASURE_ONLY` in
-the [checkpoint workflow probe](PERFORMANCE.md#workspace-checkpoints). Keep
-measurement runs serial and unset `JECODE_CHECKPOINT_MEASURE_QUICK` for final data.
+Set `JECODE_BENCH_CASE` to `write4k`, `edit1m`, `bash1`, `bash100`, `bash1000`,
+`restore1`, `restore100`, `restore1000` or `large256m`; set `JECODE_BENCH_COUNT`
+for measured samples. Two warmups precede them. `JECODE_BENCH_ENABLED=0` disables
+capture for control cases. Exact output validation and restore setup are outside
+the timed interval. Run variants serially with no builds/CI in progress and
+alternate their order. See [performance](PERFORMANCE.md) for evidence and limits.
 
 ## Development binary and installation
 

@@ -296,25 +296,16 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
     if let Some(checkpoint) = result.get("checkpoint") {
         let text = |key| checkpoint.get(key).and_then(Value::as_str);
         if let Some(status @ ("partial" | "none")) = text("status") {
-            notices.push((Level::Warning, format!("Checkpoint {status}")));
-        }
-        if text("status") == Some("unprotected") {
             notices.push((
                 Level::Warning,
-                format!("Checkpoint unavailable · {}", text("reason").unwrap_or("")),
-            ));
-        }
-        for warning in [text("warning"), text("error")].into_iter().flatten() {
-            notices.push((Level::Warning, format!("Checkpoint · {warning}")));
-        }
-        if expanded && let Some(before) = text("before") {
-            notices.push((
-                Level::Info,
-                text("after").map_or_else(
-                    || format!("Checkpoint {before}"),
-                    |after| format!("Checkpoint {before} → {after}"),
+                text("reason").map_or_else(
+                    || format!("Checkpoint {status}"),
+                    |reason| format!("Checkpoint {status} · {reason}"),
                 ),
             ));
+        }
+        if expanded && let Some(reference) = text("ref") {
+            notices.push((Level::Info, format!("Checkpoint {reference}")));
         }
     }
     notices

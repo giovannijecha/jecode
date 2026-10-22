@@ -12,57 +12,6 @@ impl Drop for Temporary {
     }
 }
 
-/// The intended bytes come from the original file and replacement text, so
-/// checkpoint preparation never reopens a newly written temporary file.
-struct Replacement<'a> {
-    source: &'a mut fs::File,
-    prefix: u64,
-    replacement: std::io::Cursor<&'a [u8]>,
-    suffix: u64,
-    skipped: bool,
-}
-
-impl<'a> Replacement<'a> {
-    fn new(
-        source: &'a mut fs::File,
-        position: u64,
-        old: usize,
-        new: &'a [u8],
-    ) -> std::io::Result<Self> {
-        source.rewind()?;
-        Ok(Self {
-            source,
-            prefix: position,
-            replacement: std::io::Cursor::new(new),
-            suffix: position + old as u64,
-            skipped: false,
-        })
-    }
-}
-
-impl Read for Replacement<'_> {
-    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
-        if output.is_empty() {
-            return Ok(0);
-        }
-        if self.prefix > 0 {
-            let count = self.prefix.min(output.len() as u64) as usize;
-            let read = self.source.read(&mut output[..count])?;
-            self.prefix -= read as u64;
-            return Ok(read);
-        }
-        let read = self.replacement.read(output)?;
-        if read != 0 {
-            return Ok(read);
-        }
-        if !self.skipped {
-            self.source.seek(SeekFrom::Start(self.suffix))?;
-            self.skipped = true;
-        }
-        self.source.read(output)
-    }
-}
-
 /// Streaming KMP includes overlapping occurrences and matches across reads.
 fn locate(
     mut source: impl Read,
@@ -214,55 +163,55 @@ pub(super) fn edit(
         .and_then(|length| length.checked_add(new.len() as u64))
         .ok_or("The replacement exceeds the filesystem length range")?;
     if let Some(guard) = &mut guard {
-        guard.prepare_reader(
-            Replacement::new(&mut source, position.unwrap(), old.len(), new.as_bytes())
-                .map_err(|error| error.to_string())?,
-            length,
-        );
+        guard.capture();
     }
-    check_guard(guard.as_ref(), cancellation)?;
-    unchanged(path, &source, &metadata)?;
-    let temporary = Temporary(path.with_file_name(format!(
-        ".jecode-{}-{}.tmp",
-        std::process::id(),
-        NEXT_FILE.fetch_add(1, Ordering::Relaxed)
-    )));
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary.0)
-        .map_err(|error| error.to_string())?;
     let result = (|| -> Result<(), String> {
-        source.rewind().map_err(|error| error.to_string())?;
-        copy_cancellable(
-            &mut source,
-            &mut output,
-            Some(position.unwrap()),
-            cancellation,
-        )?;
-        for block in new.as_bytes().chunks(BLOCK) {
+        check_guard(guard.as_ref(), cancellation)?;
+        unchanged(path, &source, &metadata)?;
+        let temporary = Temporary(path.with_file_name(format!(
+            ".jecode-{}-{}.tmp",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        )));
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary.0)
+            .map_err(|error| error.to_string())?;
+        let staged = (|| -> Result<(), String> {
+            source.rewind().map_err(|error| error.to_string())?;
+            copy_cancellable(
+                &mut source,
+                &mut output,
+                Some(position.unwrap()),
+                cancellation,
+            )?;
+            for block in new.as_bytes().chunks(BLOCK) {
+                check_cancelled(cancellation)?;
+                output.write_all(block).map_err(|error| error.to_string())?;
+            }
+            source
+                .seek(SeekFrom::Start(position.unwrap() + old.len() as u64))
+                .map_err(|error| error.to_string())?;
+            copy_cancellable(&mut source, &mut output, None, cancellation)?;
+            output
+                .set_permissions(metadata.permissions())
+                .map_err(|error| error.to_string())?;
             check_cancelled(cancellation)?;
-            output.write_all(block).map_err(|error| error.to_string())?;
-        }
-        source
-            .seek(SeekFrom::Start(position.unwrap() + old.len() as u64))
-            .map_err(|error| error.to_string())?;
-        copy_cancellable(&mut source, &mut output, None, cancellation)?;
-        output
-            .set_permissions(metadata.permissions())
-            .map_err(|error| error.to_string())?;
-        check_cancelled(cancellation)?;
-        output.sync_all().map_err(|error| error.to_string())
+            output.sync_all().map_err(|error| error.to_string())
+        })();
+        drop(output);
+        staged.map_err(|error| format!("Could not stage file: {error}"))?;
+        unchanged(path, &source, &metadata)?;
+        drop(source);
+        check_guard(guard.as_ref(), cancellation)?;
+        fs::rename(&temporary.0, path).map_err(|error| format!("Could not replace file: {error}"))
     })();
-    drop(output);
-    result.map_err(|error| format!("Could not stage file: {error}"))?;
-    unchanged(path, &source, &metadata)?;
-    drop(source);
-    check_guard(guard.as_ref(), cancellation)?;
-    let replaced = fs::rename(&temporary.0, path);
-    let checkpoint = guard.map(|guard| guard.finish(replaced.is_ok()));
-    replaced.map_err(|error| format!("Could not replace file: {error}"))?;
-    Ok((written(length, checkpoint), None))
+    let checkpoint = guard.map(|guard| guard.finish());
+    match result {
+        Ok(()) => Ok((written(length, checkpoint), None)),
+        Err(error) => Ok((failed(error, checkpoint), None)),
+    }
 }
 
 fn copy_cancellable(
@@ -346,29 +295,5 @@ mod tests {
             (Some(0), true)
         );
         assert!(locate(b"one\xfftwo".as_slice(), b"one", &Cancellation::default()).is_err());
-    }
-
-    #[test]
-    fn replacement_stream_preserves_prefix_suffix_and_utf8_at_every_read_size() {
-        let directory = crate::test_support::Directory::new();
-        let path = directory.path().join("source.txt");
-        fs::write(&path, "prefix-é日🦀-suffix").unwrap();
-        for replacement in ["new", "", "different é日 text"] {
-            for size in 1..17 {
-                let mut file = fs::File::open(&path).unwrap();
-                let mut reader =
-                    Replacement::new(&mut file, 7, "é日🦀".len(), replacement.as_bytes()).unwrap();
-                let mut output = Vec::new();
-                let mut buffer = vec![0; size];
-                loop {
-                    let count = reader.read(&mut buffer).unwrap();
-                    if count == 0 {
-                        break;
-                    }
-                    output.extend_from_slice(&buffer[..count]);
-                }
-                assert_eq!(output, format!("prefix-{replacement}-suffix").as_bytes());
-            }
-        }
     }
 }

@@ -78,10 +78,7 @@ pub fn tool_summary(name: &str, result: &Value) -> String {
 pub fn checkpoint_warning(result: &Value) -> Option<String> {
     let checkpoint = result.get("checkpoint")?;
     let text = |key| checkpoint.get(key).and_then(Value::as_str);
-    if text("status") == Some("unprotected") {
-        return Some(format!("unprotected: {}", text("reason").unwrap_or("")));
-    }
-    let detail = text("warning").or(text("error")).or(text("reason"));
+    let detail = text("reason");
     match text("status") {
         Some("partial" | "none") => Some(match detail {
             Some(detail) => format!("checkpoint {}: {detail}", text("status").unwrap_or("")),
@@ -92,52 +89,40 @@ pub fn checkpoint_warning(result: &Value) -> Option<String> {
 }
 
 fn checkpoint_summary(result: &Value) -> String {
-    if let Some(saved) = result.get("saved").and_then(Value::as_usize) {
-        let skipped = result.get("skipped").and_then(Value::as_usize).unwrap_or(0);
-        let unprotected = result
-            .get("unprotected")
-            .and_then(Value::as_usize)
-            .unwrap_or(0);
-        let mut summary = format!(
-            "captured {}; {skipped} skipped; {unprotected} unprotected",
-            counted(saved, "path")
-        );
-        if result.get("point_error").is_some() {
-            summary.push_str("; point unavailable");
-        }
-        return summary;
-    }
-    let count = |key| {
+    let count = |key: &str| {
         result
             .get(key)
             .and_then(Value::as_array)
             .map(<[Value]>::len)
     };
+    let total = |key: &str, fallback: &str| {
+        result
+            .get(key)
+            .and_then(Value::as_usize)
+            .or_else(|| count(fallback))
+    };
     let text = |key| result.get(key).and_then(Value::as_str).unwrap_or("");
-    let mut summary = if let Some(planned) = count("planned") {
+    let mut summary = if result.get("preview") == Some(&Value::Bool(true)) {
+        let planned = total("planned_count", "planned").unwrap_or(0);
         format!("preview: {} would change", counted(planned, "path"))
-    } else if let Some(restored) = count("restored") {
+    } else if let Some(restored) = total("restored_count", "restored") {
         format!(
             "restored {} from {}",
             counted(restored, "path"),
-            text("target")
+            text("ref")
         )
-    } else if let Some(points) = count("points") {
-        counted(points, "point")
-    } else if let Some(paths) = count("paths") {
-        format!("history of {}", counted(paths, "path"))
-    } else if let Some(state) = result.get("state").and_then(Value::as_str) {
-        state.into()
-    } else if result.get("pinned").is_some() {
-        text("ref").into()
+    } else if let Some(calls) = count("calls") {
+        counted(calls, "call")
+    } else if let Some(paths) = total("path_count", "paths") {
+        format!("inspected {} in {}", counted(paths, "path"), text("ref"))
     } else {
         "complete".into()
     };
-    if let Some(conflicts) = count("conflicts") {
+    if let Some(conflicts) = total("conflict_count", "conflicts").filter(|count| *count > 0) {
         summary.push_str(&format!("; {}", counted(conflicts, "conflict")));
     }
-    if result.get("failed").is_some() {
-        summary.push_str("; stopped by an error");
+    if let Some(failed) = total("failed_count", "failed").filter(|count| *count > 0) {
+        summary.push_str(&format!("; {} failed", counted(failed, "path")));
     }
     summary
 }
@@ -235,7 +220,7 @@ pub fn description(name: &str, arguments: &Value) -> String {
     }
     if name == "checkpoint" {
         let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
-        let mut words = vec![field("action"), field("ref"), field("label")];
+        let mut words = vec![field("action"), field("ref")];
         if let Some(paths) = arguments.get("paths").and_then(Value::as_array) {
             words.extend(paths.iter().filter_map(Value::as_str));
         }
@@ -287,5 +272,60 @@ mod tests {
                 "{status} checkpoint was hidden from the tool card: {summary}"
             );
         }
+    }
+
+    #[test]
+    fn checkpoint_summaries_use_actual_preview_and_full_counts() {
+        let restored = Value::object([
+            ("ref", Value::string("rc-one")),
+            ("preview", Value::Bool(false)),
+            ("planned", Value::Array(vec![Value::object([])])),
+            ("planned_count", Value::number(71)),
+            ("restored", Value::Array(vec![Value::object([])])),
+            ("restored_count", Value::number(60)),
+            ("conflicts", Value::Array(vec![])),
+            ("conflict_count", Value::number(0)),
+            ("failed", Value::Array(vec![])),
+            ("failed_count", Value::number(0)),
+        ]);
+        assert_eq!(
+            tool_summary("checkpoint", &restored),
+            "restored 60 paths from rc-one"
+        );
+        let mut preview = restored;
+        if let Value::Object(fields) = &mut preview {
+            fields.insert("preview".into(), Value::Bool(true));
+        }
+        assert_eq!(
+            tool_summary("checkpoint", &preview),
+            "preview: 71 paths would change"
+        );
+    }
+
+    #[test]
+    fn checkpoint_summaries_distinguish_list_inspect_and_failures() {
+        let listed = Value::object([("calls", Value::Array(vec![Value::object([])]))]);
+        assert_eq!(tool_summary("checkpoint", &listed), "1 call");
+        let inspected = Value::object([
+            ("ref", Value::string("rc-one")),
+            ("paths", Value::Array(vec![Value::object([])])),
+            ("path_count", Value::number(80)),
+        ]);
+        assert_eq!(
+            tool_summary("checkpoint", &inspected),
+            "inspected 80 paths in rc-one"
+        );
+        let failed = Value::object([
+            ("ref", Value::string("rc-one")),
+            ("preview", Value::Bool(false)),
+            ("restored_count", Value::number(1)),
+            ("failed", Value::Array(vec![Value::object([])])),
+            ("failed_count", Value::number(3)),
+            ("conflict_count", Value::number(2)),
+        ]);
+        assert_eq!(
+            tool_summary("checkpoint", &failed),
+            "restored 1 path from rc-one; 2 conflicts; 3 paths failed"
+        );
     }
 }

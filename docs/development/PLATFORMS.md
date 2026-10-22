@@ -29,9 +29,7 @@ wheel/page navigation, prompt history, endpoint selection and resize. It then
 checks saved drafts and restoration of the shell screen, console modes and output
 code page. Separate scenarios terminate the owner and terminal guardian.
 
-Workspace checkpoints compile their file-notification helper with the same
-PowerShell/.NET compiler. Ordinary tests exercise it; without it, checkpoints
-fall back to scans.
+Checkpoint preimages use standard-library file I/O and operating-system file locks. The advisory disk-space probe uses the owned cached PowerShell/.NET helper.
 
 ## Linux and WSL
 
@@ -51,11 +49,7 @@ that remained present. Native tmpfs runs passed; standalone save/read probes did
 not isolate the cause. Treat a `/mnt/c` failure as unresolved evidence and retain
 its fixture rather than masking it with retries.
 
-Linux and macOS have no checkpoint notification helper: checkpoints scan at
-each point and, while a background command runs, every few seconds. Checkpoint
-tests that depend on that timing have run natively on Linux. Local macOS
-verification has compile coverage only; the macOS CI job runs the ordinary tests
-and the native PTY fixture for its checked-out revision.
+Checkpoint capture has no notification helper or background command scan on any platform. Unix admission uses the system df command; directory publication/installation uses directory fsync. Platform CI runs the ordinary suite and its native terminal fixture for the checked-out revision.
 
 ## macOS
 

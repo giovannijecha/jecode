@@ -21,7 +21,6 @@ pub(super) fn execute(
     context: Context<'_>,
     arguments: &Value,
     cancellation: &Cancellation,
-    completion: Option<crate::checkpoints::session::Completion>,
 ) -> Result<Value, String> {
     let Context {
         bash,
@@ -76,7 +75,6 @@ pub(super) fn execute(
                     timeout,
                     wait,
                     cancellation,
-                    completion,
                 },
             ),
             Err(error) if !error.started => Err(error.message),
@@ -244,7 +242,6 @@ mod tests {
             },
             arguments,
             cancellation,
-            None,
         )
     }
 

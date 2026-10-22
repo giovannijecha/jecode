@@ -1,6 +1,6 @@
-//! Advisory free-space admission for checkpoint journal writes and compaction.
+//! Advisory free-space admission for independent recovery packs.
 //! The operating system remains the final authority if another process fills
-//! the volume after a sample; journal I/O errors must still be reported.
+//! the volume after a sample; write errors must still be reported.
 use crate::cancel::Cancellation;
 use std::collections::HashMap;
 #[cfg(unix)]
@@ -39,8 +39,8 @@ struct Estimate {
     spent_during_refresh: u64,
 }
 
-/// One estimate per volume in this process, shared by open journals. The
-/// first sample begins in the background during journal opening.
+/// One shared estimate per volume identity in this process. The first sample
+/// starts lazily, when a call first needs storage admission.
 pub struct Pressure {
     path: PathBuf,
     probe: Probe,
@@ -234,22 +234,6 @@ impl Pressure {
             )));
         }
     }
-
-    /// Uses a fresh OS sample before creating a second archive generation.
-    /// Incremental appends still call `claim` because writers can extend the
-    /// old generation while compaction copies it.
-    pub fn ensure_scratch(&self, path: &Path, projected: u64, minimum: u64) -> Result<(), String> {
-        let needed = minimum
-            .checked_add(projected)
-            .ok_or("Checkpoint disk-space requirement overflows byte accounting")?;
-        let free = (self.probe)(path, None)
-            .map_err(|error| format!("Could not check checkpoint disk space: {error}"))?;
-        if free >= needed {
-            Ok(())
-        } else {
-            Err(insufficient(free, projected, minimum))
-        }
-    }
 }
 
 fn insufficient(free: u64, operation: u64, minimum: u64) -> String {
@@ -263,7 +247,7 @@ fn insufficient(free: u64, operation: u64, minimum: u64) -> String {
 fn volume(path: &Path) -> Result<Volume, String> {
     // A drive prefix is not a volume identity: C:\mnt may be another mounted
     // volume, and an archive may live on a UNC share. Share the estimate only
-    // among journals for the same resolved archive directory.
+    // among writers for the same resolved archive directory.
     std::fs::canonicalize(path)
         .map(Volume::Windows)
         .map_err(|error| format!("Could not locate checkpoint archive volume: {error}"))

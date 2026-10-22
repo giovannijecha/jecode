@@ -69,9 +69,9 @@ Bash and Process keep a recent three-line preview; failed commands prioritize
 up to six error lines. Expansion retains both stdout and stderr. Capture
 limits remain visible in either state. A running Bash call shows the
 [checkpoint](../usage/CHECKPOINTS.md) recorded before it, such as
-`checkpoint cp-42`. Saves are otherwise quiet: a warning appears only when a
-checkpoint problem needs attention, and expansion adds the call's
-`Checkpoint cp-41 → cp-42` points. Checkpoint calls show a three-line preview
+`checkpoint rc-ID`. Saves are otherwise quiet: partial or missing coverage
+shows a warning, and expansion adds the call's `Checkpoint rc-ID` reference.
+Checkpoint calls show a three-line preview
 of their labeled result rows. Completed previews stay visible when
 the next call starts. Elapsed time stays in the running result or expanded
 details, without a right-aligned status column.

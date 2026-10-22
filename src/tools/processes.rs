@@ -25,14 +25,10 @@ pub use observer::{Observer, Page, Process, Window};
 
 const STOP_WAIT: Duration = Duration::from_secs(10);
 
-/// Told how many owned processes still run whenever one starts or ends.
-pub type Listener = Arc<dyn Fn(usize) + Send + Sync>;
-
 #[derive(Default)]
 pub(super) struct Registry {
     // Replaced when the conversation ends, so observers never see a later one.
     scope: Mutex<Arc<Scope>>,
-    listener: Mutex<Option<Listener>>,
 }
 
 #[derive(Default)]
@@ -50,19 +46,15 @@ struct Entry {
     command: String,
     streams: [Stream; 2],
     stop: Cancellation,
-    finalize_stop: Cancellation,
     state: Mutex<State>,
     changed: Condvar,
     monitor: Mutex<Option<JoinHandle<()>>>,
-    heartbeat: Mutex<Option<JoinHandle<()>>>,
 }
 
 #[derive(Default)]
 struct State {
     outcome: Option<Outcome>,
     cursors: [u64; 2],
-    checkpoint_finalized: bool,
-    checkpoint_error: Option<String>,
 }
 
 struct Outcome {
@@ -76,7 +68,6 @@ pub(super) struct Adoption<'a> {
     pub timeout: Option<Duration>,
     pub wait: Duration,
     pub cancellation: &'a Cancellation,
-    pub completion: Option<crate::checkpoints::session::Completion>,
 }
 
 impl Registry {
@@ -101,66 +92,26 @@ impl Registry {
             timeout,
             wait,
             cancellation,
-            completion,
         } = adoption;
         let entry = Arc::new(Entry {
             id: format!("process-{}", crate::sessions::identifier()),
             command: command.into(),
             streams,
             stop: Cancellation::default(),
-            finalize_stop: Cancellation::default(),
             state: Mutex::default(),
             changed: Condvar::new(),
             monitor: Mutex::new(None),
-            heartbeat: Mutex::new(None),
         });
         // Register before waiting so an interrupted wait leaves a discoverable process.
         let scope = self.scope();
         scope.entries.lock().unwrap().push(Arc::clone(&entry));
-        let listener = self.listener.lock().unwrap().clone();
-        if let Some(listener) = &listener {
-            listener(scope.running());
-        }
-        if let Some(completion) = completion.clone() {
-            let owner = Arc::clone(&entry);
-            let heartbeat = thread::spawn(move || {
-                let mut state = owner.state.lock().unwrap();
-                while state.outcome.is_none() {
-                    let (next, timeout) = owner
-                        .changed
-                        .wait_timeout(state, Duration::from_secs(30 * 60))
-                        .unwrap();
-                    state = next;
-                    if state.outcome.is_some() || !timeout.timed_out() {
-                        continue;
-                    }
-                    drop(state);
-                    let renewed = completion.renew_cancellable(&owner.finalize_stop);
-                    state = owner.state.lock().unwrap();
-                    if state.outcome.is_none() {
-                        state.checkpoint_error = renewed.err();
-                    }
-                }
-            });
-            *entry.heartbeat.lock().unwrap() = Some(heartbeat);
-        }
         let owner = Arc::clone(&entry);
         let monitor = thread::spawn(move || {
             let result = started.supervise(timeout, &owner.stop, &mut |_| Ok(()));
-            let checkpoint = completion
-                .as_ref()
-                .map(|completion| completion.finish_cancellable(&owner.finalize_stop));
             let mut state = owner.state.lock().unwrap();
             state.outcome = Some(Outcome::from(result));
-            if let Some(checkpoint) = checkpoint {
-                state.checkpoint_finalized = checkpoint.is_ok();
-                state.checkpoint_error = checkpoint.err();
-            }
             drop(state);
             owner.changed.notify_all();
-            if let Some(listener) = listener {
-                listener(scope.running());
-            }
         });
         *entry.monitor.lock().unwrap() = Some(monitor);
         let interrupted = entry.wait(wait, cancellation);
@@ -225,39 +176,18 @@ impl Registry {
         )])
     }
 
-    pub(super) fn listen(&self, listener: Listener) {
-        *self.listener.lock().unwrap() = Some(listener);
-    }
-
     /// Stops every owned process and forgets them; used when the conversation ends.
     pub(super) fn stop_all(&self) {
         let scope = std::mem::take(&mut *self.scope.lock().unwrap());
         let entries = std::mem::take(&mut *scope.entries.lock().unwrap());
         for entry in &entries {
             entry.stop.cancel();
-            entry.finalize_stop.cancel();
         }
         for entry in &entries {
             if let Some(monitor) = entry.monitor.lock().unwrap().take() {
                 let _ = monitor.join();
             }
-            if let Some(heartbeat) = entry.heartbeat.lock().unwrap().take() {
-                let _ = heartbeat.join();
-            }
         }
-        if let Some(listener) = self.listener.lock().unwrap().as_ref() {
-            listener(0);
-        }
-    }
-}
-
-impl Scope {
-    fn running(&self) -> usize {
-        let entries = self.entries.lock().unwrap();
-        entries
-            .iter()
-            .filter(|entry| entry.state.lock().unwrap().outcome.is_none())
-            .count()
     }
 }
 
@@ -313,12 +243,6 @@ impl Entry {
                 fields.insert("error".into(), Value::string(error));
                 fields.insert("outcome".into(), Value::string("unknown"));
             }
-        }
-        if state.checkpoint_finalized {
-            fields.insert("checkpoint_finalized".into(), Value::Bool(true));
-        }
-        if let Some(error) = &state.checkpoint_error {
-            fields.insert("checkpoint_error".into(), Value::string(error));
         }
         fields
     }

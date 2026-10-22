@@ -1,12 +1,8 @@
-//! Checkpoint protection as the model sees it through tool results.
+//! Per-call recovery as seen by the model tools.
 use super::*;
 use crate::test_support::Directory;
-use std::thread;
-use std::time::{Duration, Instant};
-
-mod bash;
-mod bash_results;
-mod large;
+use std::io::Read;
+use std::time::Duration;
 
 struct Fixture {
     _home: Directory,
@@ -21,7 +17,7 @@ fn fixture() -> Fixture {
     let mut tools = Tools::new(root.path()).unwrap();
     tools.configure_output(home.path().join("logs"), crate::redact::Redactor::empty());
     let session = Session::offline(home.path(), tools.root());
-    session.begin("conversation-a", None);
+    session.begin("conversation-a");
     tools.configure_checkpoints(session);
     Fixture {
         _home: home,
@@ -47,113 +43,23 @@ fn text<'a>(value: &'a Value, path: &[&str]) -> &'a str {
         .unwrap_or_else(|| panic!("{path:?} missing from {value:?}"))
 }
 
-fn wait_for(mut condition: impl FnMut() -> bool) {
-    let started = Instant::now();
-    while !condition() {
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "condition timed out"
-        );
-        thread::sleep(Duration::from_millis(20));
-    }
-}
-
-#[cfg(windows)]
-#[test]
-fn inspect_uses_the_same_saved_name_as_restore_preview() {
-    let fixture = fixture();
-    fs::write(fixture.root.path().join("Case.txt"), b"original\n").unwrap();
-    let captured = call(
-        &fixture.tools,
-        "checkpoint",
-        &[
-            ("action", Value::string("capture")),
-            ("paths", Value::Array(vec![Value::string("Case.txt")])),
-        ],
-    );
-    let group = text(&captured, &["group"]).to_string();
-    fs::write(fixture.root.path().join("Case.txt"), b"changed\n").unwrap();
-
-    let inspected = call(
-        &fixture.tools,
-        "checkpoint",
-        &[
-            ("action", Value::string("inspect")),
-            ("ref", Value::string(&group)),
-            ("paths", Value::Array(vec![Value::string("case.txt")])),
-        ],
-    );
-    let states = inspected.get("paths").and_then(Value::as_array).unwrap();
-    let state = &states[0];
-    assert_eq!(text(state, &["path"]), "Case.txt", "{inspected:?}");
-    assert!(
-        text(state, &["at_ref"]).starts_with("file"),
-        "{inspected:?}"
-    );
-    assert!(
-        text(state, &["current"]).starts_with("file"),
-        "{inspected:?}"
-    );
-    assert_eq!(
-        text(state, &["read"]),
-        format!("checkpoint:{group}:Case.txt"),
-        "{inspected:?}"
-    );
-    let planned = inspected
-        .get("restore_would")
-        .and_then(Value::as_array)
-        .unwrap();
-    assert_eq!(text(&planned[0], &["path"]), "Case.txt", "{inspected:?}");
-}
-
-#[test]
-fn model_milestone_cannot_pin_history() {
-    let fixture = fixture();
-    let tools = &fixture.tools;
-    let status = call(tools, "checkpoint", &[("action", Value::string("status"))]);
-    let pinned = status.get("pinned").and_then(Value::as_usize);
-    assert_eq!(pinned, Some(0), "{status:?}");
-    let rejected = call(
-        tools,
-        "checkpoint",
-        &[
-            ("action", Value::string("milestone")),
-            ("label", Value::string("model pin")),
-            ("pin", Value::Bool(true)),
-        ],
-    );
-    assert!(rejected.get("error").is_some(), "{rejected:?}");
-    let after = call(tools, "checkpoint", &[("action", Value::string("status"))]);
-    assert_eq!(after.get("pinned").and_then(Value::as_usize), pinned);
-
-    let definitions = crate::tools::schema::definitions();
-    let checkpoint = definitions
-        .as_array()
+fn saved_bytes(tools: &Tools, reference: &str, path: &str) -> Vec<u8> {
+    let store = tools.checkpoints().unwrap().store().unwrap();
+    let loaded = store.load(reference, &Cancellation::default()).unwrap();
+    let mut bytes = Vec::new();
+    loaded
+        .reader(loaded.snapshot.entries.get(path).unwrap())
         .unwrap()
-        .iter()
-        .find(|tool| {
-            tool.get("function").and_then(|f| f.get("name")) == Some(&Value::string("checkpoint"))
-        })
+        .read_to_end(&mut bytes)
         .unwrap();
-    assert!(
-        checkpoint
-            .get("function")
-            .unwrap()
-            .get("parameters")
-            .unwrap()
-            .get("properties")
-            .unwrap()
-            .get("pin")
-            .is_none()
-    );
+    bytes
 }
 
 #[test]
-fn file_tools_return_saved_references_that_read_and_restore_use() {
+fn write_and_edit_each_save_their_own_exact_preimage() {
     let fixture = fixture();
-    let tools = &fixture.tools;
     let written = call(
-        tools,
+        &fixture.tools,
         "write",
         &[
             ("path", Value::string("notes.txt")),
@@ -161,10 +67,19 @@ fn file_tools_return_saved_references_that_read_and_restore_use() {
         ],
     );
     assert_eq!(text(&written, &["checkpoint", "status"]), "saved");
-    let before = text(&written, &["checkpoint", "before"]).to_string();
-    assert!(before.starts_with("cp-"), "{written:?}");
+    let first = text(&written, &["checkpoint", "ref"]);
+    assert!(first.starts_with("rc-"));
+    assert_eq!(saved_bytes(&fixture.tools, first, "notes.txt"), b"first\n");
+    assert!(
+        written
+            .get("checkpoint")
+            .unwrap()
+            .get("expires_at")
+            .is_some()
+    );
+
     let edited = call(
-        tools,
+        &fixture.tools,
         "edit",
         &[
             ("path", Value::string("notes.txt")),
@@ -172,289 +87,281 @@ fn file_tools_return_saved_references_that_read_and_restore_use() {
             ("new_text", Value::string("third")),
         ],
     );
+    assert_eq!(text(&edited, &["checkpoint", "status"]), "saved");
+    let second = text(&edited, &["checkpoint", "ref"]);
+    assert_ne!(first, second);
     assert_eq!(
-        text(&edited, &["checkpoint", "status"]),
-        "saved",
-        "{edited:?}"
-    );
-
-    // History is readable through read and refused by the writing tools.
-    let old = call(
-        tools,
-        "read",
-        &[(
-            "path",
-            Value::string(format!("checkpoint:{before}:notes.txt")),
-        )],
-    );
-    assert!(old.encode().contains("first"), "{old:?}");
-    let refused = call(
-        tools,
-        "write",
-        &[
-            (
-                "path",
-                Value::string(format!("checkpoint:{before}:notes.txt")),
-            ),
-            ("content", Value::string("x")),
-        ],
-    );
-    assert!(text(&refused, &["error"]).contains("read-only"));
-
-    // Generated trees are outside the default scope and say so.
-    fs::create_dir_all(fixture.root.path().join("node_modules/pkg")).unwrap();
-    let generated = call(
-        tools,
-        "write",
-        &[
-            ("path", Value::string("node_modules/pkg/index.js")),
-            ("content", Value::string("x\n")),
-        ],
+        saved_bytes(&fixture.tools, second, "notes.txt"),
+        b"second\n"
     );
     assert_eq!(
-        text(&generated, &["checkpoint", "status"]),
-        "not_tracked",
-        "{generated:?}"
+        fs::read(fixture.root.path().join("notes.txt")).unwrap(),
+        b"third\n"
     );
-
-    let listed = call(
-        tools,
-        "checkpoint",
-        &[
-            ("action", Value::string("list")),
-            ("paths", Value::Array(vec![Value::string("notes.txt")])),
-        ],
-    );
-    // The first write records the original, followed by write and edit.
-    let history = &listed.get("paths").and_then(Value::as_array).unwrap()[0];
-    assert_eq!(
-        history.get("total").and_then(Value::as_usize),
-        Some(3),
-        "{listed:?}"
-    );
-    let restored = call(
-        tools,
-        "checkpoint",
-        &[
-            ("action", Value::string("restore")),
-            ("ref", Value::string(&before)),
-            ("paths", Value::Array(vec![Value::string("notes.txt")])),
-        ],
-    );
-    assert_eq!(
-        fs::read_to_string(fixture.root.path().join("notes.txt")).unwrap(),
-        "first\n"
-    );
-    let undo = restored
-        .get("undo")
-        .unwrap_or_else(|| panic!("{restored:?}"));
-    let undo_ref = text(undo, &["ref"]).to_string();
-    call(
-        tools,
-        "checkpoint",
-        &[
-            ("action", Value::string("restore")),
-            ("ref", Value::string(&undo_ref)),
-            ("paths", Value::Array(vec![Value::string("notes.txt")])),
-        ],
-    );
-    assert_eq!(
-        fs::read_to_string(fixture.root.path().join("notes.txt")).unwrap(),
-        "third\n"
-    );
-    assert!(!crate::events::tool_summary("write", &written).contains("unprotected"));
 }
 
 #[test]
-fn successful_temporary_writes_and_edits_report_their_checkpoint_exclusion() {
-    let mut fixture = fixture();
-    let store =
-        crate::sessions::Store::new(fixture._home.path().to_path_buf(), fixture.root.path())
-            .unwrap();
-    fixture
-        .tools
-        .configure_temporary(store.temporary_area("123-1-0").unwrap());
+fn bash_receipt_is_the_prelaunch_capture_even_when_command_fails() {
+    let fixture = fixture();
+    let result = call(
+        &fixture.tools,
+        "bash",
+        &[
+            (
+                "command",
+                Value::string("printf changed > notes.txt; exit 7"),
+            ),
+            ("protect", Value::Array(vec![Value::string("notes.txt")])),
+        ],
+    );
+    assert_eq!(result.get("exit_code").and_then(Value::as_usize), Some(7));
+    assert_eq!(text(&result, &["checkpoint", "status"]), "saved");
+    let reference = text(&result, &["checkpoint", "ref"]);
+    assert_eq!(
+        saved_bytes(&fixture.tools, reference, "notes.txt"),
+        b"first\n"
+    );
+    assert_eq!(
+        fs::read(fixture.root.path().join("notes.txt")).unwrap(),
+        b"changed"
+    );
+    for removed in ["before", "after", "group", "changed"] {
+        assert!(result.get("checkpoint").unwrap().get(removed).is_none());
+    }
+}
+
+#[test]
+fn cancelled_background_wait_keeps_the_prelaunch_receipt() {
+    let fixture = fixture();
+    let cancellation = Cancellation::default();
+    let interrupt = cancellation.clone();
+    let worker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        interrupt.cancel();
+    });
+    let result = fixture.tools.execute_with_cancel(
+        "bash",
+        &Value::object([
+            (
+                "command",
+                Value::string("sleep 5; printf changed > notes.txt"),
+            ),
+            ("wait_ms", Value::number(5_000)),
+            ("protect", Value::Array(vec![Value::string("notes.txt")])),
+        ])
+        .encode(),
+        &cancellation,
+    );
+    worker.join().unwrap();
+    fixture.tools.stop_processes();
+    assert_eq!(result.get("wait_cancelled"), Some(&Value::Bool(true)));
+    assert_eq!(text(&result, &["checkpoint", "status"]), "saved");
+    let reference = text(&result, &["checkpoint", "ref"]);
+    assert_eq!(
+        saved_bytes(&fixture.tools, reference, "notes.txt"),
+        b"first\n"
+    );
+}
+
+#[test]
+fn missed_edit_does_not_create_a_snapshot() {
+    let fixture = fixture();
+    let result = call(
+        &fixture.tools,
+        "edit",
+        &[
+            ("path", Value::string("notes.txt")),
+            ("old_text", Value::string("missing")),
+            ("new_text", Value::string("other")),
+        ],
+    );
+    assert!(result.get("checkpoint").is_none());
+    assert!(
+        fixture
+            .tools
+            .checkpoints()
+            .unwrap()
+            .store()
+            .unwrap()
+            .list(10, &Cancellation::default())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn failed_installation_still_returns_its_saved_preimage() {
+    let fixture = fixture();
+    let path = fixture.root.path().join("notes.txt");
+    let original_permissions = fs::metadata(&path).unwrap().permissions();
+    let mut permissions = original_permissions.clone();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions).unwrap();
+    let result = call(
+        &fixture.tools,
+        "write",
+        &[
+            ("path", Value::string("notes.txt")),
+            ("content", Value::string("replacement")),
+        ],
+    );
+    fs::set_permissions(&path, original_permissions).unwrap();
+    assert!(text(&result, &["error"]).contains("read-only"));
+    assert_eq!(text(&result, &["checkpoint", "status"]), "saved");
+    let reference = text(&result, &["checkpoint", "ref"]);
+    assert_eq!(
+        saved_bytes(&fixture.tools, reference, "notes.txt"),
+        b"first\n"
+    );
+    assert_eq!(fs::read(path).unwrap(), b"first\n");
+}
+
+#[test]
+fn checkpoint_tool_inspects_restores_and_returns_a_usable_undo() {
+    let fixture = fixture();
     let written = call(
         &fixture.tools,
         "write",
         &[
-            ("path", Value::string("tmp:notes.txt")),
-            ("content", Value::string("first")),
+            ("path", Value::string("notes.txt")),
+            ("content", Value::string("second\n")),
         ],
     );
-    assert_eq!(text(&written, &["checkpoint", "status"]), "not_tracked");
-    assert!(text(&written, &["checkpoint", "reason"]).contains("temporary"));
-    let edited = call(
-        &fixture.tools,
-        "edit",
-        &[
-            ("path", Value::string("tmp:notes.txt")),
-            ("old_text", Value::string("first")),
-            ("new_text", Value::string("second")),
-        ],
-    );
-    assert_eq!(text(&edited, &["checkpoint", "status"]), "not_tracked");
-    let unchanged = call(
-        &fixture.tools,
-        "edit",
-        &[
-            ("path", Value::string("tmp:notes.txt")),
-            ("old_text", Value::string("missing")),
-            ("new_text", Value::string("ignored")),
-        ],
-    );
-    assert!(unchanged.get("checkpoint").is_none());
-}
-
-#[test]
-fn stopping_a_conversation_clears_its_background_checkpoint_count() {
-    let fixture = fixture();
-    let session = fixture.tools.checkpoints().unwrap();
-    session.set_background(1);
-    let status = call(
+    let reference = text(&written, &["checkpoint", "ref"]);
+    let inspected = call(
         &fixture.tools,
         "checkpoint",
-        &[("action", Value::string("status"))],
+        &[
+            ("action", Value::string("inspect")),
+            ("ref", Value::string(reference)),
+        ],
     );
-    assert_eq!(
-        status.get("background_processes").and_then(Value::as_usize),
-        Some(1)
-    );
-    fixture.tools.stop_processes();
-    let status = call(
+    let expected = text(&inspected, &["expected"]);
+    let unsafe_restore = call(
         &fixture.tools,
-        "checkpoint",
-        &[("action", Value::string("status"))],
-    );
-    assert_eq!(
-        status.get("background_processes").and_then(Value::as_usize),
-        Some(0)
-    );
-}
-
-#[test]
-fn a_cancelled_wait_keeps_protection_for_the_running_command() {
-    let fixture = fixture();
-    let tools = &fixture.tools;
-    let cancellation = Cancellation::default();
-    let result = thread::scope(|scope| {
-        scope.spawn(|| {
-            wait_for(|| fixture.root.path().join("started").exists());
-            cancellation.cancel();
-        });
-        tools.execute_with_cancel(
-            "bash",
-            &Value::object([
-                (
-                    "command",
-                    Value::string("touch started; until [ -e go ]; do sleep 0.02; done"),
-                ),
-                ("protect", Value::Array(vec![Value::string("started")])),
-                ("wait_ms", Value::number(30_000)),
-            ])
-            .encode(),
-            &cancellation,
-        )
-    });
-    assert_eq!(
-        result.get("wait_cancelled"),
-        Some(&Value::Bool(true)),
-        "{result:?}"
-    );
-    assert_eq!(text(&result, &["checkpoint", "status"]), "partial");
-    let checkpoint = result.get("checkpoint").unwrap();
-    let before = text(checkpoint, &["before"]).to_string();
-    assert!(text(checkpoint, &["group"]).starts_with("cp-"));
-    assert!(checkpoint.get("after").is_none(), "{checkpoint:?}");
-    assert!(
-        text(checkpoint, &["error"])
-            .to_lowercase()
-            .contains("cancel"),
-        "{checkpoint:?}"
-    );
-    assert!(text(&result, &["checkpoint", "note"]).contains("still running"));
-    fs::write(fixture.root.path().join("go"), "").unwrap();
-    tools.stop_processes();
-    let restored = call(
-        tools,
         "checkpoint",
         &[
             ("action", Value::string("restore")),
-            ("ref", Value::string(before)),
-            ("paths", Value::Array(vec![Value::string("started")])),
+            ("ref", Value::string(reference)),
+        ],
+    );
+    assert!(text(&unsafe_restore, &["error"]).contains("expected"));
+    assert_eq!(
+        fs::read(fixture.root.path().join("notes.txt")).unwrap(),
+        b"second\n"
+    );
+    let restored = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("restore")),
+            ("ref", Value::string(reference)),
+            ("expected", Value::string(expected)),
+        ],
+    );
+    assert_eq!(
+        restored.get("restored_count").and_then(Value::as_usize),
+        Some(1)
+    );
+    assert_eq!(
+        fs::read(fixture.root.path().join("notes.txt")).unwrap(),
+        b"first\n"
+    );
+    let undo = restored.get("undo").unwrap();
+    let redone = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("restore")),
+            ("ref", Value::string(text(undo, &["ref"]))),
+            ("expected", Value::string(text(undo, &["expected"]))),
+            ("paths", undo.get("paths").unwrap().clone()),
+        ],
+    );
+    assert_eq!(
+        redone.get("restored_count").and_then(Value::as_usize),
+        Some(1)
+    );
+    assert_eq!(
+        fs::read(fixture.root.path().join("notes.txt")).unwrap(),
+        b"second\n"
+    );
+}
+
+#[test]
+fn restoring_project_instructions_requests_reload_before_next_model_request() {
+    let fixture = fixture();
+    fs::write(fixture.root.path().join("JECODE.md"), "Original rule\n").unwrap();
+    let written = call(
+        &fixture.tools,
+        "write",
+        &[
+            ("path", Value::string("JECODE.md")),
+            ("content", Value::string("Changed rule\n")),
+        ],
+    );
+    let reference = text(&written, &["checkpoint", "ref"]);
+    let restored = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("restore")),
+            ("ref", Value::string(reference)),
             ("expected", Value::string("latest")),
         ],
     );
-    assert!(restored.get("error").is_none(), "{restored:?}");
-    assert!(!fixture.root.path().join("started").exists());
-}
-
-#[test]
-fn an_unavailable_archive_never_blocks_a_tool_call() {
-    let home = Directory::new();
-    let root = Directory::new();
-    // The configuration directory cannot hold an archive.
-    let blocked = home.path().join("file");
-    fs::write(&blocked, "").unwrap();
-    let mut tools = Tools::new(root.path()).unwrap();
-    tools.configure_output(home.path().join("logs"), crate::redact::Redactor::empty());
-    tools.configure_checkpoints(Session::offline(&blocked, root.path()));
-
-    let written = call(
-        &tools,
-        "write",
-        &[
-            ("path", Value::string("a.txt")),
-            ("content", Value::string("a\n")),
-        ],
-    );
     assert_eq!(
-        fs::read_to_string(root.path().join("a.txt")).unwrap(),
-        "a\n"
+        restored.get("restored_count").and_then(Value::as_usize),
+        Some(1)
     );
-    assert_eq!(text(&written, &["checkpoint", "status"]), "unprotected");
     assert!(
-        text(&written, &["checkpoint", "reason"]).starts_with("the previous state was not saved")
+        fixture
+            .tools
+            .checkpoints()
+            .unwrap()
+            .take_restored_instructions()
     );
-    let summary = crate::events::tool_summary("write", &written);
     assert!(
-        summary.contains("unprotected: the previous state was not saved"),
-        "{summary}"
-    );
-
-    let arguments = Value::object([
-        ("command", Value::string("printf b > b.txt")),
-        ("protect", Value::Array(vec![Value::string("b.txt")])),
-    ])
-    .encode();
-    let begun = tools.begin("bash", &arguments);
-    assert!(begun.note().unwrap().starts_with("checkpoint none · "));
-    let result = tools
-        .execute_begun(begun, "bash", &arguments, &Cancellation::default())
-        .result;
-    assert_eq!(result.get("exit_code").and_then(Value::as_usize), Some(0));
-    assert_eq!(text(&result, &["checkpoint", "status"]), "none");
-    assert_eq!(fs::read_to_string(root.path().join("b.txt")).unwrap(), "b");
-    let status = call(&tools, "checkpoint", &[("action", Value::string("status"))]);
-    assert!(
-        text(&status, &["error"]).contains("checkpoints are unavailable"),
-        "{status:?}"
+        !fixture
+            .tools
+            .checkpoints()
+            .unwrap()
+            .take_restored_instructions()
     );
 }
 
 #[test]
-fn checkpoint_calls_without_a_session_explain_themselves() {
-    let root = Directory::new();
-    let tools = Tools::new(root.path()).unwrap();
-    let result = call(&tools, "checkpoint", &[("action", Value::string("status"))]);
-    assert!(text(&result, &["error"]).contains("not enabled"));
-    let written = call(
-        &tools,
-        "write",
+fn checkpoint_schema_offers_only_call_recovery_actions() {
+    let definitions = definitions();
+    let checkpoint = definitions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+                == Some(&Value::string("checkpoint"))
+        })
+        .unwrap();
+    let actions = checkpoint
+        .get("function")
+        .unwrap()
+        .get("parameters")
+        .unwrap()
+        .get("properties")
+        .unwrap()
+        .get("action")
+        .unwrap()
+        .get("enum")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        actions,
         &[
-            ("path", Value::string("a.txt")),
-            ("content", Value::string("a")),
-        ],
+            Value::string("list"),
+            Value::string("inspect"),
+            Value::string("restore")
+        ]
     );
-    assert!(written.get("checkpoint").is_none());
 }

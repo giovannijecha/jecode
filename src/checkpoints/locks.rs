@@ -1,6 +1,5 @@
 //! Cross-process coordination through operating-system file locks, released
-//! automatically when a process exits. Unique owner locks are removed on
-//! orderly exit; recovery removes files left by crashed processes.
+//! automatically when a process exits.
 use super::files;
 use std::collections::HashSet;
 use std::fs::File;
@@ -65,47 +64,6 @@ impl Drop for Exclusive {
     }
 }
 
-/// One store's unique lock file, removed after its handle closes.
-pub struct Owner {
-    path: PathBuf,
-    held: Option<Exclusive>,
-}
-
-impl Owner {
-    pub fn acquire(path: PathBuf) -> std::io::Result<Self> {
-        Ok(Self {
-            held: Some(Exclusive::acquire(&path)?),
-            path,
-        })
-    }
-}
-
-impl Drop for Owner {
-    fn drop(&mut self) {
-        // Windows cannot remove an open lock file. A crash skips this drop;
-        // the next workspace recovery still cleans that stale file.
-        drop(self.held.take());
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-/// A shared lock held until drop.
-pub struct Shared(File);
-
-impl Shared {
-    pub fn acquire(path: &Path) -> std::io::Result<Self> {
-        let file = open(path)?;
-        file.lock_shared()?;
-        Ok(Self(file))
-    }
-}
-
-impl Drop for Shared {
-    fn drop(&mut self) {
-        let _ = self.0.unlock();
-    }
-}
-
 /// Striped path leases. Paths are folded to lowercase so aliases on
 /// case-insensitive volumes share a stripe; unrelated paths sharing a stripe
 /// only serialize. File locks are per handle, so one process also coordinates
@@ -135,15 +93,7 @@ impl Leases {
         (super::hash::digest(folded.as_bytes()).0[0] as usize) % STRIPES
     }
 
-    /// Acquires every path's stripe in ascending order, so concurrent
-    /// multi-path holders cannot deadlock.
-    pub fn acquire(self: &Arc<Self>, paths: &[&str]) -> std::io::Result<Lease> {
-        let mut stripes: Vec<usize> = paths.iter().map(|path| Self::stripe(path)).collect();
-        stripes.sort_unstable();
-        stripes.dedup();
-        self.stripes(stripes)
-    }
-
+    /// Acquire path stripes in ascending order to avoid multi-path deadlocks.
     pub fn acquire_cancellable(
         self: &Arc<Self>,
         paths: &[&str],
@@ -155,13 +105,11 @@ impl Leases {
         self.stripes_cancellable(stripes, Some(cancellation))
     }
 
-    /// Every stripe, for whole-scope operations.
-    pub fn acquire_all(self: &Arc<Self>) -> std::io::Result<Lease> {
-        self.stripes((0..STRIPES).collect())
-    }
-
-    fn stripes(self: &Arc<Self>, stripes: Vec<usize>) -> std::io::Result<Lease> {
-        self.stripes_cancellable(stripes, None)
+    pub fn acquire_all_cancellable(
+        self: &Arc<Self>,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> std::io::Result<Lease> {
+        self.stripes_cancellable((0..STRIPES).collect(), Some(cancellation))
     }
 
     fn stripes_cancellable(
@@ -220,13 +168,4 @@ impl Drop for Lease {
             self.leases.release(stripe);
         }
     }
-}
-
-/// Whether the process that took `owners/<owner>.lock` has exited.
-pub fn owner_gone(directory: &Path, owner: &str) -> bool {
-    let path = super::layout::owner_lock(directory, owner);
-    if !path.exists() {
-        return true;
-    }
-    matches!(Exclusive::try_acquire(&path), Ok(Some(_)))
 }

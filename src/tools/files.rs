@@ -44,19 +44,18 @@ pub(super) fn write_with_change(
         checkpoints.map(|session| session.file_cancellable("write", &path, cancellation));
     // A write may replace non-text data; inability to read it cannot reject
     // an operation that was previously allowed.
-    let previous = guard.as_mut().map_or_else(
-        || previous_text(&path, content.len()),
-        |guard| {
-            guard
-                .prepare_with_previous(content.as_bytes(), MAX_DIFF_BYTES)
-                .or_else(|| previous_text(&path, content.len()))
-        },
-    );
+    let previous = previous_text(&path, content.len());
+    if let Some(guard) = &mut guard {
+        guard.capture();
+    }
     check_guard(guard.as_ref(), cancellation)?;
-    let checkpoint = finish_replacement(guard, &path, content, cancellation)?;
+    let outcome = finish_replacement(guard, &path, content, cancellation);
+    if let Err(error) = outcome.result {
+        return Ok((failed(error, outcome.checkpoint), None));
+    }
     let change =
         previous.and_then(|old| crate::file_change::Change::between(old.as_deref(), content));
-    Ok((written(content.len() as u64, checkpoint), change))
+    Ok((written(content.len() as u64, outcome.checkpoint), change))
 }
 
 #[cfg(test)]
@@ -82,7 +81,7 @@ pub(super) fn edit_with_change(
     if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > MAX_DIFF_BYTES as u64) {
         return streaming::edit(&path, old, new, guard, cancellation);
     }
-    let mut content = read_text(&path, cancellation)?;
+    let content = read_text(&path, cancellation)?;
     let Some(position) = content.find(old) else {
         return Ok((
             mismatch::result(
@@ -105,17 +104,21 @@ pub(super) fn edit_with_change(
     }
     let updated_len = content.len() - old.len() + new.len();
     let include_change = content.len() <= MAX_DIFF_BYTES && updated_len <= MAX_DIFF_BYTES;
-    let mut updated = if include_change {
-        content.clone()
-    } else {
-        std::mem::take(&mut content)
-    };
+    let mut updated = content.clone();
     updated.replace_range(position..position + old.len(), new);
-    let checkpoint = replace_protected(guard, &path, &updated, cancellation)?;
+    let outcome = replace_protected(guard, &path, &content, &updated, cancellation);
+    if let Err(error) = outcome.result {
+        return Ok((failed(error, outcome.checkpoint), None));
+    }
     let change = include_change
         .then(|| crate::file_change::Change::between(Some(&content), &updated))
         .flatten();
-    Ok((written(updated.len() as u64, checkpoint), change))
+    Ok((written(updated.len() as u64, outcome.checkpoint), change))
+}
+
+struct ReplacementOutcome {
+    result: Result<(), String>,
+    checkpoint: Option<Value>,
 }
 
 /// Saves the previous state before replacing the file. The replacement
@@ -123,14 +126,39 @@ pub(super) fn edit_with_change(
 fn replace_protected(
     guard: Option<FileGuard<'_>>,
     path: &Path,
+    expected: &str,
     content: &str,
     cancellation: &Cancellation,
-) -> Result<Option<Value>, String> {
+) -> ReplacementOutcome {
     let Some(mut guard) = guard else {
-        return replace_file(path, content, cancellation).map(|()| None);
+        return finish_replacement(None, path, content, cancellation);
     };
-    guard.prepare(content.as_bytes());
-    check_guard(Some(&guard), cancellation)?;
+    guard.capture();
+    if let Err(error) = check_guard(Some(&guard), cancellation) {
+        return ReplacementOutcome {
+            result: Err(error),
+            checkpoint: Some(guard.finish()),
+        };
+    }
+    // An external writer does not honor our lease. Check the exact source
+    // after capture, before installing the replacement derived from it.
+    match read_text(path, cancellation) {
+        Ok(current) if current == expected => {}
+        Ok(_) => {
+            return ReplacementOutcome {
+                result: Err(
+                    "The file changed while the edit was being prepared; read it and retry".into(),
+                ),
+                checkpoint: Some(guard.finish()),
+            };
+        }
+        Err(error) => {
+            return ReplacementOutcome {
+                result: Err(error),
+                checkpoint: Some(guard.finish()),
+            };
+        }
+    }
     finish_replacement(Some(guard), path, content, cancellation)
 }
 
@@ -139,18 +167,29 @@ fn finish_replacement(
     path: &Path,
     content: &str,
     cancellation: &Cancellation,
-) -> Result<Option<Value>, String> {
+) -> ReplacementOutcome {
     let Some(guard) = guard else {
-        return replace_file(path, content, cancellation).map(|()| None);
+        return ReplacementOutcome {
+            result: replace_file(path, content, cancellation),
+            checkpoint: None,
+        };
     };
-    check_guard(Some(&guard), cancellation)?;
-    let replaced = replace_file(path, content, cancellation);
-    let checkpoint = guard.finish(replaced.is_ok());
-    replaced.map(|()| Some(checkpoint))
+    let result = check_guard(Some(&guard), cancellation)
+        .and_then(|()| replace_file(path, content, cancellation));
+    let checkpoint = Some(guard.finish());
+    ReplacementOutcome { result, checkpoint }
 }
 
 fn written(bytes: u64, checkpoint: Option<Value>) -> Value {
     let mut result = Value::object([("bytes_written", Value::number(bytes))]);
+    if let (Value::Object(fields), Some(checkpoint)) = (&mut result, checkpoint) {
+        fields.insert("checkpoint".into(), checkpoint);
+    }
+    result
+}
+
+fn failed(error: String, checkpoint: Option<Value>) -> Value {
+    let mut result = Value::object([("error", Value::string(error))]);
     if let (Value::Object(fields), Some(checkpoint)) = (&mut result, checkpoint) {
         fields.insert("checkpoint".into(), checkpoint);
     }

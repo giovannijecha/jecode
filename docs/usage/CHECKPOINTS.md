@@ -1,222 +1,159 @@
 # Checkpoints
 
-Jecode keeps local file history so you or the model can inspect and undo selected
-changes. It is separate from Git and from [saved conversations](SESSIONS.md).
-The archive is private to your Jecode home, but it can contain unredacted
-project files, including Git-ignored secrets such as `.env`.
+Checkpoints let the model recover files after a modifying tool call goes wrong.
+Each reference identifies the state saved **before one call**. They are local,
+independent of Git and conversations, and expire 24 hours after capture.
 
-## When files are protected
+## What is saved
 
-Each canonical project directory has one archive under
-`~/.jecode/checkpoints/<project-name>-<id>/`, shared by its Jecode sessions.
-Opening a project or starting a turn does not scan its files. Protection is
-acquired when a tool needs it:
+`write` and `edit` automatically save their file's previous bytes and mode. A new
+file records that the path was absent. An edit that finds no unique match does
+not create a checkpoint. Successful and failed calls have the same expiry;
+Jecode cannot infer whether a successful command produced the intended result.
 
-| Action | Preimage saved before the change |
-| --- | --- |
-| `write` or `edit` | The exact file path, including an absent path before creation. |
-| Bash with `protect` | The declared files and complete recursive directory scopes. |
-| `checkpoint capture` | Explicit files, directories or the whole workspace when requested. |
-| Restore | The current states of paths it will change, for undo. |
-
-For Bash, pass workspace-relative paths in `protect`, for example
-`{"command":"mv src/old.rs src/new.rs","protect":["src/old.rs","src/new.rs"]}`.
-An existing directory is recursive. Use `"generated/"` to cover a directory
-that does not yet exist or will replace a file. Use `"."` only when you want
-the entire eligible workspace captured before launch. Bash has normal system
-access: its working directory does not confine absolute paths, and `protect`
-does not intercept writes outside the declared scopes.
-
-The preimage is made durable before Bash launches. A failed capture does not
-silently become a save: the command can still run and reports `partial` or
-`none` with the affected paths and reasons. Cancelling before launch stops the
-command. Bash's `changed` paths are observations within the declared scope,
-including changes seen after a persistent process exits. Their writer is
-unknown; another process may have edited them. Nothing outside the selected
-scope is treated as known absent.
-
-`write` and `edit` results use `checkpoint.status: saved`, `not_tracked` for
-excluded or temporary paths, or `unprotected` with a reason. Bash uses
-`saved`, `partial` or `none`. A saved Bash or capture result includes a `before`
-snapshot and a `group`; a complete Bash observation also returns an `after`
-reference. Partial or cancelled observation does not return a complete `after`.
-The `before` snapshot restores that step's preimages. The group restores the
-first saved state of each path in the current attempt.
-Use `after` for comparisons. Collection can release an unpinned observation;
-use the saved `before` snapshot or recovery group for recovery.
-
-## Restore and accept
-
-One active recovery group belongs to each conversation. Its successive
-snapshots cover the paths saved by that conversation's changes. A successful
-Bash exit does not accept or discard its group. The model explicitly calls
-`checkpoint` with `{"action":"accept"}` when the attempt is complete; it can
-name a group or snapshot with `ref`. The group then keeps only its first saved
-state per path, for a fixed period of at most 24 hours from acceptance.
-Intermediate snapshots stop being available unless you pinned one. Active
-groups expire after seven days of meaningful inactivity by default; a running
-persistent process renews its active group. Only the user controls pins.
-Within a conversation, `/checkpoints accept` without a reference accepts the
-current model attempt. Pass `cp-N` to accept another group, including a manual
-capture.
-
-Inspect before restoring. A restore compares the live state with an expected
-state and rechecks it immediately before replacing or deleting each path. A
-model restore defaults to the conversation's last known version after the
-target; it does not assume Bash wrote an observed change. When undoing a Bash
-step after inspecting its result, pass its returned `after` as the explicit
-`expected` reference. `expected: "latest"` accepts the state observed when
-planning. A conflict leaves the affected path untouched and reports the
-current version for review. Earlier paths may already have changed; inspect
-`restored`, `not_restored` and `undo` in a partial result. The returned `undo`
-is based on the states saved before installation.
-
-Restore resolves verified filesystem aliases to the saved path spelling. If a
-path's spelling is ambiguous, use the exact name shown in the archive;
-an unverified alias is not evidence that the saved file was absent.
-
-Restoring a saved directory can remove children created within that complete
-scope after its `before` snapshot. It never interprets a path outside complete
-captured scope as absent. Excluded, unreadable and oversized paths are not
-protected by that capture. A directory that cannot be traversed, including a
-non-link Windows reparse directory, leaves its children unknown and makes that
-scope incomplete. An exact file capture does not cover future siblings or
-children; declare a directory scope for those.
-
-## Scope, policy and capacity
-
-Git ignore rules do not determine checkpoint scope. The defaults exclude VCS
-metadata and generated directories such as `.git`, `target`, `node_modules`,
-`.venv`, `.cache` and `.jecode-output`; `.env` is eligible. Edit this archive's
-`policy.json` to change the rules and limits:
+Bash can modify several files, so the model declares its protection scope:
 
 ```json
-{
-  "version": 3,
-  "max_file_bytes": null,
-  "budget_bytes": 1073741824,
-  "min_free_bytes": 268435456,
-  "recovery_accepted_hours": 24,
-  "recovery_inactive_days": 7,
-  "exclude": [".git", "target", "node_modules", "*.log"],
-  "include": ["keep.log"]
-}
+{"command":"./update.sh","protect":["src","Cargo.toml"]}
 ```
 
-`max_file_bytes: null` is the default: there is no configured per-file
-ceiling. A numeric value imposes one; `config --max-file unlimited` restores
-the default. The 1 GiB `budget_bytes` is a soft retention target, not a hard
-archive cap. `min_free_bytes` asks Jecode to leave a free-space margin before
-archive writes; disk space can still change between a check and a write.
-`recovery_accepted_hours` cannot exceed 24. Set `recovery_inactive_days` to
-`null` to disable inactivity expiry, or to a positive number to change it.
+Files are exact targets; directories include their eligible descendants. Use
+`"."` for the eligible workspace when the command's scope is broad. Without
+`protect`, Bash creates no checkpoint. Jecode does not parse shell commands to
+predict writes, and protection does not constrain what Bash may change.
+Persistent processes use their launch snapshot, with the same 24-hour deadline.
+There is no post-command scan, automatic rollback or success-based deletion.
 
-A rule without `/` matches a component name; one with `/` matches the relative
-path. `*` and `?` stay in one component, `**` spans components, and a trailing
-`/` limits an exclusion to directories. An `include` rule can override an
-exclusion, but an excluded parent must itself be included to visit children.
-Omitting `exclude` uses the full built-in defaults. Existing numeric limits
-from legacy policies are preserved; Jecode does not guess whether they were
-user choices. Only an archive selected for use is migrated to the current
-layout, in place and after older readers release it.
+A receipt contains `ref`, `saved_paths`, `expires_at` (Unix milliseconds) and
+`status`: `saved`, `partial` or `none`. Partial receipts include bounded reasons
+and the total issue count. A saved receipt proves a preimage was durable before
+execution; it does not prove that execution started, finished or succeeded.
+Capture failures are reported without preventing an otherwise valid tool call.
+Cancellation before launch prevents the call from starting.
 
-Large files use bounded readers and deduplicated blocks. Metadata, available
-memory, permissions, filesystem support and free disk space still matter.
-Check each `checkpoint` result: incomplete capture is reported as partial or
-unprotected. Bash and explicit capture show the first 20 partial diagnostics;
-`partial_count` and `partial_omitted` report larger totals without filling the
-conversation with every affected path. `verify` deliberately rereads the
-eligible workspace; normal
-startup and turns do not require that scan. A snapshot is an ordered set of
-observations, not an atomic multi-file filesystem image.
+Startup, new turns, reads and commands without protection do not scan or archive
+the workspace. There is no generic version history, acceptance action, recovery
+group, milestone, pin, watcher or configurable retention policy.
 
-## Commands
+## Inspect and recover
 
-`jecode checkpoints` works from the project directory without a model key,
-provider or network. `/checkpoints` accepts the same words in a conversation.
+The `checkpoint` tool has three actions:
+
+| Action | Result |
+| --- | --- |
+| `list` | Recent unexpired calls; default 20, `limit` up to 200. |
+| `inspect` | Saved/current states, proposed changes and a current-state `expected` token. |
+| `restore` | Restores selected paths, or the saved scope of the call when `paths` is omitted. |
+
+For example, after a bad edit:
+
+```json
+{"action":"inspect","ref":"rc-ID","paths":["src/main.rs"]}
+{"action":"restore","ref":"rc-ID","paths":["src/main.rs"],"expected":"TOKEN_FROM_INSPECT"}
+```
+
+A restore requires an `expected` token from inspection of the same selected
+paths. The explicit value `"latest"` instead acknowledges their current state.
+If the inspected state changed, restore reports a conflict. `preview: true`
+reports the plan without changing files or creating an undo.
+
+Before restoring, Jecode verifies saved content and durably saves the current
+states as an undo. It rechecks current bytes before each installation. The
+returned undo includes only paths actually changed, including a failed
+installation if it modified that path. Use its supplied `ref`, `paths` and
+`expected` to undo. Restore is per path, not an atomic transaction across files;
+a partial result reports restored, conflicted, failed and skipped paths.
+
+The original preimage and an undo remain independently available until their
+own 24-hour deadlines. Restoring never renews the original reference. A crash
+before a tool starts may leave an unused snapshot; a crash during a mutation
+leaves its before snapshot. There is no inferred completion replay.
+
+If a restore process dies before returning its result, find its undo snapshot
+in `list` and inspect it before choosing paths. No per-path crash progress log
+is kept; the pack contains the states saved for the planned restore.
+
+Read a saved file through the normal `read` tool:
+
+```json
+{"path":"checkpoint:rc-ID:src/main.rs"}
+```
+
+Paging works as for workspace text. The requested file's checksum is verified;
+reading it does not load other saved payloads. Exact recorded names remain
+usable after deletion, including non-ASCII names. Supported live aliases resolve
+to the saved entry without traversing a final link.
+
+## Scope and storage
+
+Snapshots are private files under
+`~/.jecode/recovery/<project-name>-<canonical-root-id>/`. Each call creates one
+immutable `.rcp` file containing its streamed preimages and checked metadata.
+There is no global journal replay, content-object graph, delta chain or copying
+compaction. Repeated calls store independent copies; frequently editing a very
+large file can consume more space than deduplicated history.
+
+File payloads use fixed-size I/O buffers. Metadata and traversal memory grow
+with the number of selected paths. There is no configured file-size or path-count
+ceiling; memory, disk capacity and permissions still constrain capture. Admission
+keeps a 256 MiB free-space margin based on advisory OS samples. A failed or
+unreadable path is reported as partial coverage and never as protected absence.
+
+Recursive discovery skips version-control metadata, generated/cache directories
+such as `target`, `node_modules`, `.venv` and `.cache`, and internal recovery
+storage. An explicitly requested file or directory can select generated content;
+internal storage stays excluded. Symlinks are saved as links without traversing
+their targets. Unsupported entries, unreadable directories and untraversed
+Windows reparse directories make their scope incomplete. A complete directory
+proof is recorded only after capture and a membership recheck agree. Only such
+a proof can establish that a later-created child should be deleted by restore.
+An explicitly protected path that is absent throughout capture also proves its
+whole subtree was absent, so a newly created directory can be recovered too.
+
+Path leases coordinate Jecode sessions on the same archive. Arbitrary external
+programs do not honor them; restores check live states and bytes, but filesystem
+operations cannot provide a transaction against an uncooperative external writer.
+On Unix, publication and installation sync their directories. Windows std does
+not provide equivalent directory flushing, so power-loss durability is limited
+by the operating system and filesystem.
+
+## Expiry
+
+Every snapshot, including an undo, expires 24 hours after its creation timestamp
+and refuses new access. Reads, commands, processes, activity and restarts do not
+extend it. Time is sampled from the wall clock so suspension counts; persisted
+timestamps do not decrease within a process. Correct UTC time is required.
+
+While Jecode runs, maintenance checks recognized new-format workspace archives
+once a minute and deletes expired snapshots individually. Readers temporarily
+hold a shared lease, so physical removal may wait until a reader releases it.
+Offline commands also sweep expired files. When Jecode is closed, cleanup runs
+on the next launch; no background system service is installed. Workspace files
+are never removed by expiry. Old-format and unrecognized data are untouched.
+
+## Local commands and previous archives
+
+`/checkpoints` and the provider-free CLI use the same actions:
 
 ```text
-status                              archive state, limits and activity
-list [PATH...] [--limit N]          points or path versions
-capture PATH...                     save files or recursive directories
-accept [cp-N]                       accept a recovery group
-inspect cp-N [PATH...]              target state and restore preview
-show cp-N PATH                      recorded content
-milestone LABEL [--pin]             named user point
-restore cp-N PATH... [--exact-paths] [--preview] [--expected cp-M|latest]
-restore-all cp-N [--preview] [--expected cp-M|latest]
-pin cp-N [LABEL] | unpin cp-N       user-controlled retention
-config [--budget SIZE] [--max-file SIZE|unlimited]
-gc                                  compact eligible history
-verify                              reread eligible workspace files
+jecode checkpoints list
+jecode checkpoints inspect rc-ID src/main.rs
+jecode checkpoints show rc-ID src/main.rs
+jecode checkpoints show rc-ID src/main.rs --offset 201 --limit 200
+jecode checkpoints restore rc-ID src/main.rs --preview --expected latest
+jecode checkpoints restore rc-ID src/main.rs --expected TOKEN_FROM_INSPECT
 ```
 
-Examples: `jecode checkpoints capture src/ generated/` saves a recursive
-source directory and a new directory scope; `capture .` deliberately includes
-the eligible workspace. `restore cp-42 src/ --preview` shows what would change.
-`--exact-paths` selects only named entries. `restore-all` uses the target's
-recorded scope. The model's `checkpoint` tool supports `status`, `capture`,
-`accept`, `list`, `inspect`, `milestone`, `restore` and `restore_all`; user-only
-commands control pins, policy, collection and verification.
+Omit paths to inspect or restore the call's saved scope. `show` streams saved
+text; binary files can be restored. Commands need no model, provider or network.
+In the conversation, `show` displays a bounded page with a next-page command.
+Explicit paging flags work in both interfaces. Suggested offline commands use
+PowerShell quoting on Windows and POSIX shell quoting on Unix; `--` separates
+paths beginning with dashes from options.
 
-A milestone records the observed states of already tracked paths. Capture
-additional files or directories first when you want the point to cover them.
-
-`read` accepts `checkpoint:cp-N:path` for content retained by a recoverable
-reference. A version listed for comparison is not necessarily a retained
-preimage. Notices about another session's restore, policy change or recovered
-operation reach the next model request; a changed `JECODE.md` is reloaded.
-
-## Retention and limits
-
-Collection retains active recovery states, accepted groups until their fixed
-deadline, user pins and unfinished operations. It can release intermediate
-versions and objects while keeping lightweight comparison metadata. `gc`
-compacts eligible history. Superseded activity records and steps whose file
-object is still retained do not alone trigger a full rewrite; their unused
-metadata can remain until collection is otherwise due. Old generations remain
-readable until their active readers release them. Compaction can temporarily
-need both generations on disk, so neither the budget nor the free-space margin
-reserves disk capacity.
-
-Inactive archive cleanup runs in background maintenance; opening a current
-archive does not synchronously sweep or migrate other projects. Cleanup does
-not delete workspace files or conversation saves. Identity, policy and the
-sequence watermark survive cleanup, so an old `cp-N` cannot name unrelated
-new data. Legacy archives migrate only when selected; migration waits for old
-readers and can resume after interruption.
-
-Recovery deadlines are checked on access. Physical removal runs while Jecode
-is active, including an hourly sweep of closed current-format archives; no
-operating-system service runs while Jecode is closed. Readers, user pins and
-unfinished recovery can keep objects on disk after an ordinary deadline.
-Unreadable or damaged archives are preserved for recovery rather than purged.
-Failed background collection retries use a delay that grows from one second
-to one minute; an explicit `gc` can retry immediately.
-
-Persisted timestamps and deadlines use UTC wall time, including time spent
-with the computer suspended. Backward samples are clamped within a process.
-Retention across processes requires a correct system clock; a forward clock
-correction can expire old data. Local waits and maintenance retry delays use
-monotonic elapsed time separately.
-
-On Windows, free-space checks use an owned helper and `GetDiskFreeSpaceExW`
-on the actual archive directory, including mounted volumes and UNC paths.
-The helper uses the same system C# compiler/cache boundary as process control.
-Unix checks use the system `df -Pk` tool. A failed query is reported rather
-than treated as an unlimited amount of free space. Estimates are refreshed
-in the background and account for this process's journal writes; other writers
-can still consume space before the OS accepts a write. Small terminal recovery
-records can use the free-space margin so a failed capture can be closed.
-
-Checkpoints are local history, not a backup. Writes outside declared Bash
-scopes or between two observations are not captured. Symbolic links are saved
-as links; directory traversal does not follow them outside the workspace.
-For a command that writes through a symbolic link, declare its target path too;
-protecting only the link saves its directory entry, not the target's contents.
-Restores preserve file bytes, permissions and link targets, but not hard-link
-relationships, extended attributes, ACLs or timestamps. Another writer can
-still race the final restore recheck. On Unix, completed archive writes sync
-their affected directory entries; the Rust standard library does not expose
-the same directory flush on Windows, so completion there is not a power-loss
-guarantee.
+Archives from the previous format remain unchanged under `~/.jecode/checkpoints`.
+They are not imported, expired or read by this engine. Old `cp-N` references give
+a legacy-format error; use the previous Jecode version to inspect that history.
+The new cleanup never deletes the old archives automatically. The previous PR
+head, [`6679d6c`](https://github.com/giovannijecha/jecode/tree/6679d6cacb5de25f54a42d18dd7015b2659da625),
+retains the legacy reader.

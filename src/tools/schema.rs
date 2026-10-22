@@ -43,7 +43,7 @@ pub fn definitions() -> Value {
     Value::Array(vec![
         tool(
             "read",
-            "Read a project file or tmp:relative/path. Text is paged UTF-8; images and PDFs are recognized from their contents, copied into session storage and shown to you on the next request. The result includes an attachment:ID reference for rereading the copy after the original changes or disappears. Also accepts skill:<name> for a personal skill's SKILL.md or skill:<name>/<relative-path> for a text resource, saved output:SESSION:ID:stdout or :stderr, attachment:ID (text files page normally; images and PDFs are shown again; other files return their local path), or history:INDEX (a zero-based original message index in this session). history:requests returns the complete ordered user requests. history:memory returns the current conversation summary. checkpoint:cp-N:path returns a file as it was at a checkpoint. History, checkpoints, skills, attachments and saved output are read-only and remain available after compaction and resume. Older output:ID:stdout/:stderr references remain readable. Text paging uses one-based offset (default 1) and limit (default 200, maximum 2000). Pages contain up to 64 KiB; follow next_offset or next_byte_offset with byte_offset for a split long line. byte_offset is zero-based and returns unnumbered text; it takes precedence over offset. Paging arguments do not crop images or PDFs. A context_truncated tool result is an excerpt; read its history_reference for the full original, using small pages. total_lines is available at EOF in line mode.",
+            "Read a project file or tmp:relative/path. Text is paged UTF-8; images and PDFs are recognized from their contents, copied into session storage and shown to you on the next request. The result includes an attachment:ID reference for rereading the copy after the original changes or disappears. Also accepts skill:<name> for a personal skill's SKILL.md or skill:<name>/<relative-path> for a text resource, saved output:SESSION:ID:stdout or :stderr, attachment:ID (text files page normally; images and PDFs are shown again; other files return their local path), or history:INDEX (a zero-based original message index in this session). history:requests returns the complete ordered user requests. history:memory returns the current conversation summary. checkpoint:rc-ID:path returns a file saved before one modifying call, until its fixed 24-hour expiry. History, skills, attachments and saved output remain available after compaction and resume. Older output:ID:stdout/:stderr references remain readable. Text paging uses one-based offset (default 1) and limit (default 200, maximum 2000). Pages contain up to 64 KiB; follow next_offset or next_byte_offset with byte_offset for a split long line. byte_offset is zero-based and returns unnumbered text; it takes precedence over offset. Paging arguments do not crop images or PDFs. A context_truncated tool result is an excerpt; read its history_reference for the full original, using small pages. total_lines is available at EOF in line mode.",
             Value::object([
                 ("path", string()),
                 ("offset", integer(1, None)),
@@ -70,7 +70,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run a Bash command from the project directory. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an execution deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. A running process continues until exit, timeout or stop, and its protected paths are observed again at completion. Bash has normal system access.",
+            "Run a Bash command from the project directory. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an execution deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
             Value::object([
                 ("command", string()),
                 (
@@ -118,7 +118,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "checkpoint",
-            "Inspect and restore local workspace recovery. write and edit save their own previous file state; Bash saves only paths declared in protect. capture can save explicit files, recursive directories or the whole workspace with a deliberate dot path. Results identify saved, partial or none and include recovery group and before references when available. accept marks the selected recovery group complete; its first saved before state remains available for 24 hours at most. Active groups expire after seven days without activity by default. Restore observes live paths, checks conflicts and preserves unrelated changes. Pinned user milestones follow separate retention rules. No automatic full workspace baseline is required.",
+            "List, inspect and restore before-state snapshots from individual modifying calls. write and edit protect their file; Bash protects only declared paths. Each saved ref expires exactly 24 hours after capture. Inspect returns a token for the selected current paths. Restore requires that token or expected latest to acknowledge their current state, and saves an undo of paths it changes. A receipt reports what was saved before execution; it does not claim the tool succeeded.",
             Value::object([
                 (
                     "action",
@@ -126,11 +126,7 @@ pub fn definitions() -> Value {
                         ("type", Value::string("string")),
                         (
                             "enum",
-                            Value::Array(
-                                crate::checkpoints::actions::MODEL_ACTIONS
-                                    .map(Value::string)
-                                    .into(),
-                            ),
+                            Value::Array(["list", "inspect", "restore"].map(Value::string).into()),
                         ),
                     ]),
                 ),
@@ -143,20 +139,7 @@ pub fn definitions() -> Value {
                         (
                             "description",
                             Value::string(
-                                "capture and restore require explicit paths. For list, inspect and restore_all, omit or use an empty array for the recorded scope.",
-                            ),
-                        ),
-                    ]),
-                ),
-                ("label", string()),
-                (
-                    "exact",
-                    Value::object([
-                        ("type", Value::string("boolean")),
-                        (
-                            "description",
-                            Value::string(
-                                "For inspect or restore with explicit paths, true selects only those entries, without recorded descendants. Defaults to false; conflict checking is unchanged.",
+                                "Optional selected paths for inspect or restore. Omit to select the scope saved by the call.",
                             ),
                         ),
                     ]),
@@ -168,7 +151,7 @@ pub fn definitions() -> Value {
                         (
                             "description",
                             Value::string(
-                                "Optional restore precondition. Omit or use an empty string for default conflict checking; cp-N accepts that observed version; latest accepts the current state. To undo Bash after inspecting its result, explicitly pass its returned after ref: observed Bash changes have unknown ownership.",
+                                "Required for restore: the fingerprint from inspect for these paths, or latest to acknowledge the current live state.",
                             ),
                         ),
                     ]),

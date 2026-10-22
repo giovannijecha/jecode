@@ -31,8 +31,7 @@ fn saved() -> Value {
             "checkpoint",
             Value::object([
                 ("status", Value::string("saved")),
-                ("before", Value::string("cp-3")),
-                ("after", Value::string("cp-4")),
+                ("ref", Value::string("rc-3")),
             ]),
         ),
     ])
@@ -41,7 +40,7 @@ fn saved() -> Value {
 #[test]
 fn a_running_command_shows_its_checkpoint_in_the_running_line() {
     let presentation = Presentation {
-        note: Some("checkpoint cp-12".into()),
+        note: Some("checkpoint rc-12 · saved".into()),
         ..Presentation::default()
     };
     let rows = plain(&draw(
@@ -53,7 +52,10 @@ fn a_running_command_shows_its_checkpoint_in_the_running_line() {
     ));
     assert_eq!(
         rows,
-        ["● Bash(cargo fmt)", "  ⎿ Running… · checkpoint cp-12"]
+        [
+            "● Bash(cargo fmt)",
+            "  ⎿ Running… · checkpoint rc-12 · saved"
+        ]
     );
 }
 
@@ -68,7 +70,7 @@ fn saved_states_stay_quiet_until_expanded() {
         &Presentation::default(),
     ));
     assert!(
-        collapsed.iter().all(|row| !row.contains("cp-")),
+        collapsed.iter().all(|row| !row.contains("rc-")),
         "{collapsed:?}"
     );
     let expanded = Presentation {
@@ -78,23 +80,20 @@ fn saved_states_stay_quiet_until_expanded() {
     let rows = plain(&draw("write", &arguments, Some(&saved()), 80, &expanded));
     assert!(
         rows.iter()
-            .any(|row| row.trim_start().ends_with("Checkpoint cp-3 → cp-4")),
+            .any(|row| row.trim_start().ends_with("Checkpoint rc-3")),
         "{rows:?}"
     );
 }
 
 #[test]
-fn an_unprotected_change_always_says_so_without_claiming_a_save() {
+fn an_uncaptured_change_always_says_so_without_claiming_a_save() {
     let result = Value::object([
         ("bytes", Value::number(6)),
         (
             "checkpoint",
             Value::object([
-                ("status", Value::string("unprotected")),
-                (
-                    "reason",
-                    Value::string("the previous state was not saved: disk full"),
-                ),
+                ("status", Value::string("none")),
+                ("reason", Value::string("disk full")),
             ]),
         ),
     ]);
@@ -107,18 +106,18 @@ fn an_unprotected_change_always_says_so_without_claiming_a_save() {
     ));
     let warning: Vec<&String> = rows
         .iter()
-        .filter(|row| row.contains("Checkpoint unavailable"))
+        .filter(|row| row.contains("Checkpoint none"))
         .collect();
     assert_eq!(warning.len(), 1, "{rows:?}");
-    assert!(warning[0].contains("not saved: disk full"));
-    assert!(rows.iter().all(|row| !row.contains("cp-")));
+    assert!(warning[0].contains("disk full"));
+    assert!(rows.iter().all(|row| !row.contains("rc-")));
 }
 
 #[test]
 fn checkpoint_cards_fit_narrow_and_wide_terminals() {
     let arguments = Value::object([
         ("action", Value::string("restore")),
-        ("ref", Value::string("cp-7")),
+        ("ref", Value::string("rc-7")),
         (
             "paths",
             Value::Array(vec![Value::string(
@@ -127,7 +126,7 @@ fn checkpoint_cards_fit_narrow_and_wide_terminals() {
         ),
     ]);
     let result = Value::object([
-        ("target", Value::string("cp-7")),
+        ("ref", Value::string("rc-7")),
         ("preview", Value::Bool(false)),
         (
             "restored",
@@ -139,12 +138,11 @@ fn checkpoint_cards_fit_narrow_and_wide_terminals() {
                 ("action", Value::string("replace")),
             ])]),
         ),
-        ("before", Value::string("cp-9")),
         (
             "undo",
             Value::object([
                 ("action", Value::string("restore")),
-                ("ref", Value::string("cp-9")),
+                ("ref", Value::string("rc-9")),
             ]),
         ),
     ]);

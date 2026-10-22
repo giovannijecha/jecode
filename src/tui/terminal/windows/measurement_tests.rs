@@ -38,7 +38,7 @@ pub(super) fn fixture(path: &Path, bash: &Path, active: bool) {
     let stop = Arc::new(AtomicBool::new(false));
     let writer = work.map(|(file, first, second)| {
         let session = CheckpointSession::open(&home, path);
-        session.begin("latency-writer", None);
+        session.begin("latency-writer");
         let counter = home.join("latency-count.txt");
         std::fs::write(&counter, "0").unwrap();
         let stop = Arc::clone(&stop);
@@ -52,9 +52,9 @@ pub(super) fn fixture(path: &Path, bash: &Path, active: bool) {
             {
                 let content = if count % 2 == 0 { &second } else { &first };
                 let mut guard = session.file_cancellable("write", &file, &cancellation);
-                guard.prepare(content);
+                guard.capture();
                 std::fs::write(&file, content).unwrap();
-                let result = guard.finish(true);
+                let result = guard.finish();
                 assert_eq!(
                     result.get("status").and_then(crate::json::Value::as_str),
                     Some("saved"),

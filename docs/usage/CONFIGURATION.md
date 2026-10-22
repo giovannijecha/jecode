@@ -46,8 +46,8 @@ an error; Jecode leaves it unchanged so you can correct it. Saves replace the
 file atomically. New Unix configuration directories and files use permissions
 `0700` and `0600`; Windows inherits permissions from the user's directory.
 Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
-storage and resume. Each project's checkpoint scope and storage budget live in
-its archive's `policy.json`; see [Checkpoints](CHECKPOINTS.md#scope-and-limits).
+storage and resume. Per-call checkpoints have a fixed 24-hour lifetime and no
+policy file; see [Checkpoints](CHECKPOINTS.md).
 
 ## Automatic compaction threshold
 

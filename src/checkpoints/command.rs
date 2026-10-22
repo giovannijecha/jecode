@@ -1,39 +1,20 @@
-//! The user's checkpoint commands: `jecode checkpoints ...` without a model
-//! provider, and `/checkpoints ...` inside a session. Both parse the same
-//! words into actions and render the results as labeled rows.
-use super::actions::{self, Caller};
+//! Provider-free CLI and conversation commands for per-call recovery.
+use super::actions;
 use super::render::{self, Output};
-use super::show::{self, Content};
-use super::workspace::{self, Options, Workspace};
+use super::{Store, show};
+use crate::cancel::Cancellation;
 use crate::json::Value;
 use std::path::Path;
 use std::sync::Arc;
 
 pub const USAGE: &str = "\
-status                              archive state, limits and activity
-list [PATH...] [--limit N]          points, or the recorded versions of paths
-capture PATH...                     save files or recursive directories before Bash
-accept [cp-N]                       accept an attempt; retain its initial states up to 24h
-inspect cp-N [PATH...]              a point and what restoring it would change
-show cp-N PATH                      a path's recorded content
-milestone LABEL [--pin]             record a named point
-restore cp-N PATH... [--exact-paths] [--preview] [--expected cp-M|latest]
-restore-all cp-N [--preview] [--expected cp-M|latest]
-pin cp-N [LABEL] | unpin cp-N       keep a point regardless of the budget
-config [--budget SIZE] [--max-file SIZE|unlimited]
-gc                                  release history beyond the budget now
-verify                              reread every file for disguised edits";
+list [--limit N]                    saved calls from the last 24 hours
+inspect rc-ID [PATH...]              before/current states and restore token
+show rc-ID PATH [--offset N | --byte-offset N] [--limit N]
+                                     stream text, or show one page with options
+restore rc-ID [PATH...] [--preview] [--expected TOKEN|latest]
+Use -- before paths that start with --. CLI commands use PowerShell quoting on Windows.";
 
-/// Lines shown for a recorded text file; the plain command prints it whole.
-const SHOWN_LINES: usize = 2000;
-
-/// Parsed words: action arguments, or a `show` request.
-pub enum Parsed {
-    Action(Value),
-    Show(String),
-}
-
-/// Splits command text into words; double quotes keep spaces, `\"` a quote.
 pub fn split(text: &str) -> Result<Vec<String>, String> {
     let mut words = Vec::new();
     let mut word = String::new();
@@ -75,201 +56,191 @@ pub fn split(text: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
-pub fn parse(words: &[String]) -> Result<Parsed, String> {
-    let mut words = words.iter().map(String::as_str);
-    let action = words.next().unwrap_or("status");
+enum Parsed {
+    Action(Value),
+    Show {
+        reference: String,
+        page: Value,
+        paged: bool,
+        path: String,
+    },
+}
+
+fn parse(words: &[String]) -> Result<Parsed, String> {
+    let action = words.first().map_or("list", String::as_str);
+    let mut fields = vec![("action", Value::string(action))];
+    let mut page = Vec::new();
+    let mut paged = false;
     let mut positional = Vec::new();
-    let mut fields: Vec<(&str, Value)> = Vec::new();
+    let mut words = words.iter().skip(1);
+    let mut literal = false;
     while let Some(word) = words.next() {
-        let mut value = |name: &str| {
-            words
-                .next()
-                .map(Value::string)
-                .ok_or_else(|| format!("{name} needs a value"))
-        };
-        match word {
+        if literal {
+            positional.push(word);
+            continue;
+        }
+        match word.as_str() {
+            "--" => literal = true,
             "--preview" => fields.push(("preview", Value::Bool(true))),
-            "--exact-paths" => fields.push(("exact", Value::Bool(true))),
-            "--pin" => fields.push(("pin", Value::Bool(true))),
-            "--expected" => fields.push(("expected", value(word)?)),
-            "--budget" => fields.push(("budget", value(word)?)),
-            "--max-file" => fields.push(("max_file", value(word)?)),
+            "--expected" => fields.push((
+                "expected",
+                Value::string(words.next().ok_or("--expected needs a token or latest")?),
+            )),
             "--limit" => {
-                let limit = value(word)?;
-                let number = limit.as_str().and_then(|text| text.parse::<usize>().ok());
-                fields.push((
-                    "limit",
-                    Value::number(number.ok_or("--limit needs a number")?),
+                let limit = words
+                    .next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .ok_or("--limit needs a number")?;
+                fields.push(("limit", Value::number(limit)));
+                if action == "show" {
+                    page.push(("limit", Value::number(limit)));
+                    paged = true;
+                }
+            }
+            "--offset" | "--byte-offset" if action == "show" => {
+                let number = words
+                    .next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .ok_or_else(|| format!("{word} needs a number"))?;
+                page.push((
+                    if word == "--offset" {
+                        "offset"
+                    } else {
+                        "byte_offset"
+                    },
+                    Value::number(number),
                 ));
+                paged = true;
             }
             flag if flag.starts_with("--") => return Err(format!("Unknown option {flag}")),
-            other => positional.push(other),
+            _ => positional.push(word),
         }
     }
-    let mut positional = positional.into_iter();
-    let action = match action {
-        "restore-all" => "restore_all",
-        "show" => {
-            let (Some(target), Some(path), None) =
-                (positional.next(), positional.next(), positional.next())
-            else {
-                return Err("show needs cp-N and one path".into());
-            };
-            return Ok(Parsed::Show(format!("{}{target}:{path}", show::PREFIX)));
-        }
-        other => other,
-    };
-    if matches!(
-        action,
-        "inspect" | "restore" | "restore_all" | "pin" | "unpin"
-    ) {
-        let target = positional
-            .next()
-            .ok_or_else(|| format!("{action} needs a checkpoint such as cp-12"))?;
-        fields.push(("ref", Value::string(target)));
-    }
-    let rest: Vec<&str> = positional.collect();
     match action {
-        "list" | "inspect" | "restore" | "capture" if !rest.is_empty() => {
-            fields.push((
-                "paths",
-                Value::Array(rest.into_iter().map(Value::string).collect()),
-            ));
-        }
-        "accept" if rest.len() == 1 => {
-            fields.push(("ref", Value::string(rest[0])));
-        }
-        "milestone" | "pin" if !rest.is_empty() => {
-            fields.push(("label", Value::string(rest.join(" "))));
-        }
-        "milestone" => return Err("milestone needs a label".into()),
-        "capture" => return Err("capture needs file or directory paths".into()),
-        "status" | "list" | "inspect" | "restore" | "restore_all" | "pin" | "unpin" | "config"
-        | "gc" | "verify" | "accept" => {
-            if let Some(word) = rest.first() {
-                return Err(format!("Unexpected {word:?} after {action}"));
+        "show" if positional.len() == 2 => Ok(Parsed::Show {
+            reference: format!("{}{}:{}", show::PREFIX, positional[0], positional[1]),
+            page: object(page),
+            paged,
+            path: positional[1].to_string(),
+        }),
+        "inspect" | "restore" if !positional.is_empty() => {
+            fields.push(("ref", Value::string(positional[0])));
+            if positional.len() > 1 {
+                fields.push((
+                    "paths",
+                    Value::Array(
+                        positional[1..]
+                            .iter()
+                            .map(|path| Value::string(path.as_str()))
+                            .collect(),
+                    ),
+                ));
             }
+            Ok(Parsed::Action(object(fields)))
         }
-        other => return Err(format!("Unknown checkpoints command {other:?}\n{USAGE}")),
-    }
-    fields.push(("action", Value::string(action)));
-    Ok(Parsed::Action(super::session::object(fields)))
-}
-
-/// Runs the words against a workspace and renders the result for `prefix`
-/// (`jecode checkpoints` or `/checkpoints`).
-pub fn execute(
-    workspace: &Arc<Workspace>,
-    origin: &str,
-    words: &[String],
-    prefix: &str,
-) -> Result<Output, String> {
-    if words.first().is_some_and(|word| word == "help") {
-        return Ok(help(prefix));
-    }
-    match parse(words)? {
-        Parsed::Show(reference) => {
-            let title = reference
-                .strip_prefix(show::PREFIX)
-                .unwrap_or(&reference)
-                .to_string();
-            Ok(match show::content(workspace, &reference)? {
-                Content::Text(text) => shown(title, text),
-                Content::Preview(text, length) => {
-                    let mut result = shown(title, text);
-                    result.raw = None;
-                    result.details.push(("preview".into(), format!("{length} bytes total; use checkpoint read pages or jecode checkpoints show for exact full content")));
-                    result
-                }
-                Content::Binary(length) => output(
-                    title,
-                    vec![(
-                        "binary".into(),
-                        format!("{length} bytes; restore it to inspect"),
-                    )],
-                ),
-                Content::Directory(children) => output(
-                    title,
-                    children
-                        .into_iter()
-                        .map(|child| (child, String::new()))
-                        .collect(),
-                ),
-                Content::Link(target) => output(title, vec![("link".into(), target)]),
-            })
+        "list" if positional.is_empty() => Ok(Parsed::Action(object(fields))),
+        "show" | "inspect" | "restore" => {
+            Err(format!("{action} needs a recovery reference; {USAGE}"))
         }
-        Parsed::Action(arguments) => {
-            let caller = Caller { origin, user: true };
-            let result = actions::run(workspace, &caller, &arguments)?;
-            let summary = crate::events::tool_summary("checkpoint", &result);
-            Ok(render::output(
-                format!("Checkpoints · {summary}"),
-                &result,
-                prefix,
-            ))
-        }
+        _ => Err(format!("Unknown checkpoints command {action:?}\n{USAGE}")),
     }
 }
 
-fn output(title: String, details: Vec<(String, String)>) -> Output {
-    Output {
-        title,
-        details,
-        raw: None,
-    }
-}
-
-/// A recorded text file: numbered rows for the panel, exact text for print.
-fn shown(title: String, text: String) -> Output {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut details: Vec<(String, String)> = lines
-        .iter()
-        .take(SHOWN_LINES)
-        .enumerate()
-        .map(|(index, line)| ((index + 1).to_string(), (*line).to_string()))
-        .collect();
-    if lines.len() > SHOWN_LINES {
-        details.push((
-            "…".into(),
-            format!(
-                "{} more lines; jecode checkpoints show prints the whole file",
-                lines.len() - SHOWN_LINES
-            ),
-        ));
-    }
-    Output {
-        title,
-        details,
-        raw: Some(text),
-    }
-}
-
-fn help(prefix: &str) -> Output {
-    output(
-        format!("{prefix} commands"),
-        USAGE
-            .lines()
-            .map(|line| match line.split_once("  ") {
-                Some((usage, description)) => {
-                    (usage.trim().to_string(), description.trim().to_string())
-                }
-                None => (line.to_string(), String::new()),
-            })
+fn object(fields: Vec<(&str, Value)>) -> Value {
+    Value::Object(
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.into(), value))
             .collect(),
     )
 }
 
-/// `jecode checkpoints ...`: works without a model provider or network.
-pub fn offline(home: &Path, root: &Path, words: &[String]) -> Result<Output, String> {
-    let action = words.first().map_or("status", String::as_str);
-    if action == "help" {
-        return Ok(help("jecode checkpoints"));
-    }
-    let workspace = workspace::open(home, root, Options::offline())?;
-    execute(&workspace, "cli", words, "jecode checkpoints")
+pub fn run(store: &Arc<Store>, words: &[String]) -> Result<Output, String> {
+    execute(store, words, "/checkpoints")
 }
 
-/// Plain `show` streams complete text rather than building a giant panel.
+fn execute(store: &Arc<Store>, words: &[String], prefix: &str) -> Result<Output, String> {
+    if words.first().is_some_and(|word| word == "help") {
+        return Ok(help(prefix));
+    }
+    let cancel = Cancellation::default();
+    match parse(words)? {
+        Parsed::Show {
+            reference,
+            page,
+            path,
+            ..
+        } => {
+            let value = show::read(store, &reference, &page, &cancel)?;
+            let mut output = render::output(reference.clone(), &value, prefix);
+            output.raw = value
+                .get("content")
+                .and_then(Value::as_str)
+                .map(String::from);
+            if value.get("truncated") == Some(&Value::Bool(true)) {
+                let mut words = vec![prefix.to_string(), "show".into()];
+                let (call, _) = reference
+                    .trim_start_matches(show::PREFIX)
+                    .split_once(':')
+                    .expect("parsed show reference");
+                words.push(call.into());
+                if value.get("partial_line") == Some(&Value::Bool(true))
+                    || page.get("byte_offset").is_some()
+                {
+                    let next = value
+                        .get("next_byte_offset")
+                        .and_then(Value::as_usize)
+                        .expect("truncated page has next byte");
+                    words.extend(["--byte-offset".into(), next.to_string()]);
+                } else {
+                    let next = value
+                        .get("next_offset")
+                        .and_then(Value::as_usize)
+                        .expect("truncated page has next line");
+                    words.extend(["--offset".into(), next.to_string()]);
+                }
+                if let Some(limit) = page.get("limit").and_then(Value::as_usize) {
+                    words.extend(["--limit".into(), limit.to_string()]);
+                }
+                words.extend(["--".into(), render::quote(&path, prefix)]);
+                let next = words.join(" ");
+                output.details.push(("next page".into(), next.clone()));
+                if let Some(raw) = output.raw.as_mut() {
+                    if !raw.ends_with('\n') {
+                        raw.push('\n');
+                    }
+                    raw.push_str(&format!("\nNext page: {next}\n"));
+                }
+            }
+            Ok(output)
+        }
+        Parsed::Action(args) => {
+            let value = actions::run(store, &args, &cancel)?;
+            Ok(render::output("Checkpoints".into(), &value, prefix))
+        }
+    }
+}
+
+fn help(prefix: &str) -> Output {
+    Output {
+        title: format!("{prefix} commands"),
+        details: USAGE
+            .lines()
+            .map(|line| (line.into(), String::new()))
+            .collect(),
+        raw: None,
+    }
+}
+
+pub fn offline(home: &Path, root: &Path, words: &[String]) -> Result<Output, String> {
+    if words.first().is_some_and(|word| word == "help") {
+        return Ok(help("jecode checkpoints"));
+    }
+    // Maintenance in another archive must not prevent local recovery.
+    let _ = Store::sweep_home(home, super::clock::now(), &Cancellation::default());
+    execute(&Store::open(home, root)?, words, "jecode checkpoints")
+}
+
 pub fn stream_show(
     home: &Path,
     root: &Path,
@@ -279,9 +250,20 @@ pub fn stream_show(
     if words.first().is_none_or(|word| word != "show") {
         return Ok(false);
     }
-    let Parsed::Show(reference) = parse(words)? else {
+    let Parsed::Show {
+        reference, paged, ..
+    } = parse(words)?
+    else {
         return Ok(false);
     };
-    let workspace = workspace::open(home, root, Options::offline())?;
-    show::write_text(&workspace, &reference, output)
+    if paged {
+        return Ok(false);
+    }
+    let _ = Store::sweep_home(home, super::clock::now(), &Cancellation::default());
+    show::write_text(&Store::open(home, root)?, &reference, output)?;
+    Ok(true)
 }
+
+#[cfg(test)]
+#[path = "command_tests.rs"]
+mod tests;

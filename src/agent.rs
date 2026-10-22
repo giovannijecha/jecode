@@ -175,7 +175,6 @@ impl Agent {
         if let Err(error) = &result {
             self.record_turn_error(error, &partial);
         }
-        self.checkpoint_idle();
         let saved = self.checkpoint(crate::sessions::Stage::Ready);
         if result.is_ok()
             && let Err(error) = &saved
@@ -197,7 +196,6 @@ impl Agent {
         self.prepared = None;
         // Workspace reconciliation may read many files. Run it here on the
         // execution worker, not while the TUI prepares the submitted prompt.
-        self.checkpoint_turn(&prompt.text);
         self.prepare_routing()?;
         let limits = self.model_limits(events)?;
         self.emit_context(events)?;

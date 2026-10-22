@@ -2,6 +2,8 @@ mod agent;
 mod attachments;
 mod bootstrap;
 mod cancel;
+#[cfg(test)]
+mod checkpoint_bench;
 mod checkpoints;
 mod cli;
 mod clipboard;

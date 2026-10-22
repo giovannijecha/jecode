@@ -3,12 +3,22 @@
 use crate::json::Value;
 
 /// Fields shown first in a row, in this order; others follow by name.
-const ORDER: [&str; 16] = [
-    "ref", "path", "session", "kind", "action", "state", "label", "at_ref", "current", "target",
-    "expected", "origin", "changes", "time", "updated", "reason",
+const ORDER: [&str; 12] = [
+    "ref",
+    "path",
+    "tool",
+    "kind",
+    "action",
+    "saved",
+    "current",
+    "expected",
+    "created_at",
+    "expires_at",
+    "bytes",
+    "reason",
 ];
 /// Fields that identify a row and label it.
-const IDENTIFIERS: [&str; 3] = ["ref", "path", "session"];
+const IDENTIFIERS: [&str; 2] = ["ref", "path"];
 
 /// A titled list of labeled rows.
 pub struct Output {
@@ -149,7 +159,6 @@ fn row(value: &Value) -> String {
         .into_iter()
         .map(|(key, value)| match (key.as_str(), value) {
             ("label" | "action" | "state", _) => scalar(value),
-            ("pinned", Value::Bool(true)) => "pinned".into(),
             (_, Value::Array(items)) => format!(
                 "{}: {}",
                 key.replace('_', " "),
@@ -167,15 +176,34 @@ fn command(value: &Value, prefix: &str) -> String {
     let action = value.get("action").and_then(Value::as_str).unwrap_or("");
     let mut words = vec![prefix.to_string(), action.replace('_', "-")];
     words.extend(value.get("ref").and_then(Value::as_str).map(String::from));
-    if let Some(paths) = value.get("paths").and_then(Value::as_array) {
-        words.extend(paths.iter().filter_map(Value::as_str).map(quote));
+    if let Some(expected) = value.get("expected").and_then(Value::as_str) {
+        words.push("--expected".into());
+        words.push(quote(expected, prefix));
+    }
+    if let Some(paths) = value.get("paths").and_then(Value::as_array)
+        && !paths.is_empty()
+    {
+        words.push("--".into());
+        words.extend(
+            paths
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|path| quote(path, prefix)),
+        );
     }
     words.join(" ")
 }
 
-fn quote(path: &str) -> String {
+/// Quote for the TUI parser or for a pasted CLI command in a native shell.
+pub(super) fn quote(path: &str, prefix: &str) -> String {
+    if prefix != "/checkpoints" {
+        #[cfg(windows)]
+        return format!("'{}'", path.replace('\'', "''"));
+        #[cfg(not(windows))]
+        return format!("'{}'", path.replace('\'', "'\\''"));
+    }
     if path.contains(char::is_whitespace) || path.contains('"') {
-        format!("\"{}\"", path.replace('"', "\\\""))
+        format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
     } else {
         path.into()
     }

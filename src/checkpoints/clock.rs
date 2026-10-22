@@ -32,17 +32,17 @@ mod tests {
     }
 
     #[test]
-    fn new_process_sees_a_fresh_accept_as_unexpired() {
+    fn new_process_sees_a_fresh_snapshot_as_unexpired() {
         const DAY: u64 = 24 * 60 * 60 * 1_000;
         let running = AtomicU64::new(0);
         sampled(&running, || 1_000);
         let resumed_wall = 1_000 + 2 * DAY;
-        let accepted_until = sampled(&running, || resumed_wall) + DAY;
+        let expires_at = sampled(&running, || resumed_wall) + DAY;
         let restarted = AtomicU64::new(0);
         let restarted_now = sampled(&restarted, || resumed_wall);
         assert!(
-            restarted_now < accepted_until,
-            "a fresh 24-hour accept was already expired"
+            restarted_now < expires_at,
+            "a fresh 24-hour snapshot was already expired"
         );
     }
 

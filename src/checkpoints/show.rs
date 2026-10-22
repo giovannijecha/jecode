@@ -1,183 +1,107 @@
-//! Recorded content addressed as `checkpoint:cp-N:path`, read without
-//! changing the workspace.
-use super::index::{parse_reference, reference};
-use super::record::State;
-use super::restore::normalize;
-use super::workspace::Workspace;
+//! Read a call's saved file without changing the workspace.
+use super::Store;
+use super::paths;
+use super::state::State;
+use super::store::Loaded;
+use crate::cancel::Cancellation;
 use crate::json::Value;
-use std::io::{BufReader, Read, Seek, Write};
+use std::io::{BufReader, Read, Write};
+use std::sync::Arc;
 
 pub const PREFIX: &str = "checkpoint:";
-
-pub enum Content {
-    Text(String),
-    Binary(usize),
-    Preview(String, u64),
-    Directory(Vec<String>),
-    Link(String),
-}
 
 pub fn is_reference(path: &str) -> bool {
     path.starts_with(PREFIX)
 }
 
-/// The state of a path at a checkpoint.
-fn resolve(store: &mut super::store::Store, path: &str) -> Result<(String, u64, State), String> {
-    let rest = path
+fn resolve(
+    store: &Store,
+    reference: &str,
+    cancel: &Cancellation,
+) -> Result<(Loaded, String, State), String> {
+    let rest = reference
         .strip_prefix(PREFIX)
         .ok_or("Not a checkpoint reference")?;
-    let (target, relative) = rest
+    let (reference, path) = rest
         .split_once(':')
-        .ok_or("Use checkpoint:cp-<number>:<workspace-relative path>")?;
-    let target = parse_reference(target)?;
-    let relative = normalize(relative)?;
-    store.refresh()?;
-    let index = &store.index;
-    if !index.retained(target) || target > index.latest() {
-        return Err(format!(
-            "{} is not available; retained history runs from {} to {}",
-            reference(target),
-            reference(index.horizon),
-            reference(index.latest())
-        ));
+        .ok_or("Use checkpoint:rc-ID:workspace-relative-path")?;
+    if reference.starts_with("cp-") {
+        return Err("This is a legacy cp-N reference. Its archive is preserved; read it using the previous Jecode version".into());
     }
-    let state = super::restore::target_state(index, target, &relative)
-        .ok_or_else(|| format!("{relative} was not protected by {}", reference(target)))?;
-    Ok((relative, target, state))
+    let loaded = store.load(reference, cancel)?;
+    let path = paths::resolve_saved(&store.root, &loaded.snapshot, path)?;
+    let state = loaded
+        .snapshot
+        .entries
+        .get(&path)
+        .cloned()
+        .ok_or_else(|| format!("{path} was not saved by this call"))?;
+    Ok((loaded, path, state))
 }
 
-/// The state of a path, with bounded preview for a large text file. Tool reads
-/// use `read_page`; plain CLI output uses `write_text` to stream exact bytes.
-pub fn content(workspace: &Workspace, path: &str) -> Result<Content, String> {
-    let mut store = workspace.store();
-    let (relative, target, state) = resolve(&mut store, path)?;
-    match state {
-        State::File { object, length, .. } => {
-            if length > super::capture::INLINE_BYTES
-                && !crate::utf8::is_text(store.reader(object)?)
-                    .map_err(|error| error.to_string())?
-            {
-                return Ok(Content::Binary(
-                    usize::try_from(length).unwrap_or(usize::MAX),
-                ));
-            }
-            let mut bytes = Vec::new();
-            store
-                .reader(object)?
-                .take(super::capture::INLINE_BYTES)
-                .read_to_end(&mut bytes)
-                .map_err(|error| error.to_string())?;
-            if length > bytes.len() as u64 {
-                let valid = match std::str::from_utf8(&bytes) {
-                    Ok(_) => bytes.len(),
-                    Err(error) if error.error_len().is_none() => error.valid_up_to(),
-                    Err(_) => {
-                        return Ok(Content::Binary(
-                            usize::try_from(length).unwrap_or(usize::MAX),
-                        ));
-                    }
-                };
-                if bytes[..valid].contains(&0) {
-                    return Ok(Content::Binary(
-                        usize::try_from(length).unwrap_or(usize::MAX),
-                    ));
-                }
-                return Ok(Content::Preview(
-                    std::str::from_utf8(&bytes[..valid]).unwrap().into(),
-                    length,
-                ));
-            }
-            match std::str::from_utf8(&bytes) {
-                Ok(text) if !text.contains('\0') => Ok(Content::Text(text.into())),
-                _ => Ok(Content::Binary(bytes.len())),
-            }
+pub fn read(
+    store: &Arc<Store>,
+    reference: &str,
+    args: &Value,
+    cancel: &Cancellation,
+) -> Result<Value, String> {
+    let (loaded, path, state) = resolve(store, reference, cancel)?;
+    match &state {
+        State::File { length, .. } => {
+            loaded.verify(&state, cancel)?;
+            crate::tools::read_source(
+                BufReader::new(loaded.reader(&state)?),
+                *length,
+                args,
+                cancel,
+            )
         }
         State::Directory { .. } => {
-            let prefix = format!("{relative}/");
-            let children = store
-                .index
-                .paths
-                .keys()
-                .filter_map(|path| {
-                    let child = path.strip_prefix(&prefix)?;
-                    let state = super::restore::target_state(&store.index, target, path)?;
-                    if !state.exists() {
-                        return None;
-                    }
-                    let directory = matches!(state, State::Directory { .. });
-                    (!child.contains('/'))
-                        .then(|| format!("{child}{}", if directory { "/" } else { "" }))
+            let prefix = format!("{path}/");
+            let entries = loaded
+                .snapshot
+                .entries
+                .iter()
+                .filter_map(|(name, state)| {
+                    let child = name.strip_prefix(&prefix)?;
+                    (!child.contains('/') && state.exists()).then(|| Value::string(child))
                 })
                 .collect();
-            Ok(Content::Directory(children))
+            Ok(Value::object([("entries", Value::Array(entries))]))
         }
-        State::Link { target } => Ok(Content::Link(target)),
-        State::Absent => Err(format!("{relative} did not exist at {}", reference(target))),
-        other => Err(format!(
-            "{relative} was not captured at {}: {}",
-            reference(target),
-            super::actions::describe(&other)
-        )),
+        State::Link { target, .. } => Ok(Value::object([("link", Value::string(target))])),
+        State::Absent => Err(format!("{path} did not exist before this call")),
+        State::Unreadable { reason } => Err(format!("{path} was not captured: {reason}")),
     }
 }
 
-pub fn read_page(
-    workspace: &Workspace,
-    path: &str,
-    arguments: &Value,
-    cancellation: &crate::cancel::Cancellation,
-) -> Result<Value, String> {
-    let mut store = workspace.store();
-    let (_, _, state) = resolve(&mut store, path)?;
-    if let State::File { object, length, .. } = state {
-        let mut reader = store.reader(object)?;
-        let mut sample = [0; 4096];
-        let count = reader
-            .read(&mut sample)
-            .map_err(|error| error.to_string())?;
-        let binary = sample[..count].contains(&0)
-            || std::str::from_utf8(&sample[..count])
-                .is_err_and(|error| error.error_len().is_some());
-        if binary {
-            return Ok(Value::object([
-                ("binary", Value::Bool(true)),
-                ("bytes", Value::number(length)),
-                (
-                    "note",
-                    Value::string("restore the path to use this content"),
-                ),
-            ]));
-        }
-        reader.rewind().map_err(|error| error.to_string())?;
-        return crate::tools::read_source(BufReader::new(reader), length, arguments, cancellation);
-    }
-    drop(store);
-    match content(workspace, path)? {
-        Content::Directory(entries) => Ok(Value::object([(
-            "entries",
-            Value::Array(entries.into_iter().map(Value::string).collect()),
-        )])),
-        Content::Link(target) => Ok(Value::object([("link", Value::string(target))])),
-        _ => Err("The checkpoint path changed while being read; retry".into()),
-    }
-}
-
-/// Returns false for non-text content, allowing the caller's normal rendering.
+/// CLI output is streamed, with integrity checked before emitting saved bytes.
 pub fn write_text(
-    workspace: &Workspace,
-    path: &str,
+    store: &Arc<Store>,
+    reference: &str,
     output: &mut impl Write,
-) -> Result<bool, String> {
-    let mut store = workspace.store();
-    let (_, _, state) = resolve(&mut store, path)?;
-    let State::File { object, .. } = state else {
-        return Ok(false);
-    };
-    let mut reader = store.reader(object)?;
-    if !crate::utf8::is_text(&mut reader).map_err(|error| error.to_string())? {
-        return Ok(false);
+) -> Result<(), String> {
+    let cancel = Cancellation::default();
+    let (loaded, path, state) = resolve(store, reference, &cancel)?;
+    if !matches!(state, State::File { .. }) {
+        return Err(format!("{path} is not a saved regular file"));
     }
-    reader.rewind().map_err(|error| error.to_string())?;
-    std::io::copy(&mut reader, output).map_err(|error| error.to_string())?;
-    Ok(true)
+    loaded.verify(&state, &cancel)?;
+    let mut reader = loaded.reader(&state)?;
+    if !crate::utf8::is_text(loaded.reader(&state)?).map_err(|error| error.to_string())? {
+        return Err("Saved file contains binary data; restore it to use its content".into());
+    }
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        output
+            .write_all(&buffer[..count])
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }

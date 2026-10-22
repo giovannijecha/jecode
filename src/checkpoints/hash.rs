@@ -1,5 +1,5 @@
-//! Owned non-cryptographic fingerprints for frame checksums and content lookup.
-//! A matching digest only nominates a reuse candidate; callers compare bytes.
+//! Owned non-cryptographic checksums and content fingerprints.
+//! Destructive restore guards also compare the live bytes with saved undo.
 
 const LANE: [u64; 2] = [0x9e37_79b9_7f4a_7c15, 0xc2b2_ae3d_27d4_eb4f];
 
