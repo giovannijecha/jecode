@@ -10,7 +10,9 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 mod mismatch;
 mod page;
+mod streaming;
 pub(super) use page::read_page;
+pub(crate) use page::read_source;
 pub(crate) use page::read_text_page;
 
 #[cfg(test)]
@@ -49,7 +51,7 @@ pub(super) fn write_with_change(
     let checkpoint = finish_replacement(guard, &path, content)?;
     let change =
         previous.and_then(|old| crate::file_change::Change::between(old.as_deref(), content));
-    Ok((written(content.len(), checkpoint), change))
+    Ok((written(content.len() as u64, checkpoint), change))
 }
 
 #[cfg(test)]
@@ -70,6 +72,9 @@ pub(super) fn edit_with_change(
     }
     // Hold the path from reading to replacing so concurrent sessions take turns.
     let guard = checkpoints.map(|session| session.file("edit", &path));
+    if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > MAX_DIFF_BYTES as u64) {
+        return streaming::edit(&path, old, new, guard);
+    }
     let mut content = read_text(&path)?;
     let Some(position) = content.find(old) else {
         return Ok((
@@ -103,7 +108,7 @@ pub(super) fn edit_with_change(
     let change = include_change
         .then(|| crate::file_change::Change::between(Some(&content), &updated))
         .flatten();
-    Ok((written(updated.len(), checkpoint), change))
+    Ok((written(updated.len() as u64, checkpoint), change))
 }
 
 /// Saves the previous state before replacing the file. The replacement
@@ -133,7 +138,7 @@ fn finish_replacement(
     replaced.map(|()| Some(checkpoint))
 }
 
-fn written(bytes: usize, checkpoint: Option<Value>) -> Value {
+fn written(bytes: u64, checkpoint: Option<Value>) -> Value {
     let mut result = Value::object([("bytes_written", Value::number(bytes))]);
     if let (Value::Object(fields), Some(checkpoint)) = (&mut result, checkpoint) {
         fields.insert("checkpoint".into(), checkpoint);

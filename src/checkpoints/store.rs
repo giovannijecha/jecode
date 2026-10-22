@@ -1,18 +1,24 @@
 //! One process's handle on a shared workspace archive: replayed index, short
 //! store-lock transactions and verified object reconstruction.
 mod cache;
-use super::frame::{Encoding, HEADER, ObjectMeta};
+mod objects;
+mod reader;
+mod stream;
+use super::frame::{Encoding, ObjectMeta};
 use super::hash::{self, Digest};
 use super::identity::Location as Workspace;
-use super::index::{Index, MAX_DEPTH};
+use super::index::Index;
 use super::journal::{self, Journal, Location};
 use super::locks::{Exclusive, Owner};
 use super::policy::Policy;
 use super::record::{Event, Point, Record};
+use super::{layout, lifecycle};
 use cache::Cache;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+pub const CHUNK_BYTES: usize = 1 << 20;
 
 pub struct Store {
     pub workspace: Workspace,
@@ -20,6 +26,8 @@ pub struct Store {
     pub journal: Journal,
     pub index: Index,
     pub owner: String,
+    history_floor: u64,
+    _lifecycle: lifecycle::Lease,
     _owner: Owner,
     cache: Mutex<Cache>,
     /// Counters for measurements and status.
@@ -42,24 +50,31 @@ pub struct Counters {
 
 impl Store {
     pub fn lock_path(&self) -> PathBuf {
-        self.workspace.directory.join("store.lock")
+        layout::store_lock(&self.workspace.directory)
     }
 
     pub fn open(workspace: Workspace) -> Result<Self, String> {
-        let directory = &workspace.directory;
+        let directory = workspace.directory.clone();
+        let lifecycle = lifecycle::open(&workspace)?;
         let owner = super::files::unique("owner");
-        let owner_lock = Owner::acquire(directory.join("owners").join(format!("{owner}.lock")))
+        let owner_lock = Owner::acquire(layout::owner_lock(&directory, &owner))
             .map_err(|error| format!("Could not register with checkpoint archive: {error}"))?;
-        let _lock = Exclusive::acquire(&directory.join("store.lock"))
+        let _lock = Exclusive::acquire(&layout::store_lock(&directory))
             .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
-        let edited = Policy::read(directory)?;
-        let journal = Journal::open(directory)?;
+        let edited = Policy::read_with_migration(&directory)?;
+        let journal = Journal::open(&directory)?;
+        let history_floor = lifecycle::high_water(&directory)?;
         let mut store = Self {
             workspace,
-            policy: edited.clone().unwrap_or_default(),
+            policy: edited
+                .as_ref()
+                .map(|(policy, _)| policy.clone())
+                .unwrap_or_default(),
             journal,
             index: Index::default(),
             owner,
+            history_floor,
+            _lifecycle: lifecycle,
             _owner: owner_lock,
             cache: Mutex::new(Cache::default()),
             counters: Counters::default(),
@@ -72,17 +87,21 @@ impl Store {
 
     /// Applies a hand-edited `policy.json`; the journal tells other processes.
     /// A missing file is written so users can find and edit it.
-    fn adopt(&mut self, edited: Option<Policy>) -> Result<(), String> {
+    fn adopt(&mut self, edited: Option<(Policy, bool)>) -> Result<(), String> {
         let recorded = self.index.policies.values().next_back().cloned();
         let previous = recorded
             .as_ref()
             .map(|(_, policy)| policy.clone())
             .unwrap_or_default();
-        let policy = edited.unwrap_or_else(|| {
+        let rewrite = edited.as_ref().is_some_and(|(_, migrated)| *migrated);
+        let policy = edited.map(|(policy, _)| policy).unwrap_or_else(|| {
             let _ = self.policy.save_locked(&self.workspace.directory);
             self.policy.clone()
         });
         if recorded.as_ref().map(|(id, _)| *id) == Some(policy.id()) {
+            if rewrite {
+                policy.save_locked(&self.workspace.directory)?;
+            }
             return Ok(());
         }
         let mut transaction = Transaction::new(self);
@@ -90,17 +109,20 @@ impl Store {
         let (id, text) = (policy.id(), policy.encode());
         transaction.record(Record::Policy { seq, id, text });
         if let Some((_, previous)) = recorded {
-            let seq = transaction.seq();
-            transaction.record(Record::Event(Event {
-                seq,
-                origin: "policy".into(),
-                time: crate::sessions::now(),
-                text: format!(
-                    "checkpoint scope changed in policy.json: {}",
-                    policy.changes(&previous).join(", ")
-                ),
-                paths: Vec::new(),
-            }));
+            let changes = policy.changes(&previous);
+            if !changes.is_empty() {
+                let seq = transaction.seq();
+                transaction.record(Record::Event(Event {
+                    seq,
+                    origin: "policy".into(),
+                    time: crate::sessions::now(),
+                    text: format!(
+                        "checkpoint scope changed in policy.json: {}",
+                        changes.join(", ")
+                    ),
+                    paths: Vec::new(),
+                }));
+            }
         }
         transaction.store.policy = policy;
         match transaction.commit(false) {
@@ -110,7 +132,13 @@ impl Store {
                 self.policy = previous;
                 Ok(())
             }
-            result => result,
+            Ok(()) => {
+                if rewrite {
+                    self.policy.save_locked(&self.workspace.directory)?;
+                }
+                Ok(())
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -130,6 +158,10 @@ impl Store {
             self.journal.catch_up(&mut |entry| index.apply(entry))?;
             self.remove_stale_generations();
         }
+        // Expiry preserves sequence identity: old cp-N references must stay
+        // below the retained horizon even after new history or compaction.
+        self.index.next = self.index.next.max(self.history_floor);
+        self.index.horizon = self.index.horizon.max(self.history_floor);
         self.repair_current()?;
         // Limits changed by another process apply here too.
         if let Some((_, (id, policy))) = self.index.policies.iter().next_back()
@@ -149,8 +181,8 @@ impl Store {
             return Ok(());
         }
         let next = generation.to_string();
-        match super::quota::admit(directory, next.len() as u64, true, super::quota::LIMIT) {
-            Ok(()) => super::files::atomic_write(&directory.join("CURRENT"), next.as_bytes())
+        match super::quota::admit(directory, next.len() as u64, true, u64::MAX) {
+            Ok(()) => super::files::atomic_write(&layout::current(directory), next.as_bytes())
                 .map_err(|error| format!("Could not update checkpoint archive: {error}")),
             Err(error) if super::quota::is_full(&error) => Ok(()),
             Err(error) => Err(error),
@@ -218,6 +250,13 @@ impl Store {
                 bytes.extend_from_slice(&base[base.len() - suffix..]);
                 bytes.into()
             }
+            Encoding::Chunks { .. } => {
+                let mut reader = self.reader(id)?;
+                let mut bytes = Vec::new();
+                std::io::Read::read_to_end(&mut reader, &mut bytes)
+                    .map_err(|error| format!("Could not read checkpoint file: {error}"))?;
+                bytes.into()
+            }
         };
         if bytes.len() as u64 != object.meta.length || hash::digest(&bytes) != object.meta.digest {
             return Err(format!(
@@ -245,7 +284,7 @@ impl Store {
             return;
         };
         let oldest_needed = current.min(self.journal.generation);
-        let Ok(entries) = std::fs::read_dir(directory) else {
+        let Ok(entries) = std::fs::read_dir(layout::history(directory)) else {
             return;
         };
         for entry in entries.flatten() {
@@ -276,7 +315,7 @@ type Fresh = HashMap<(Digest, u64), Vec<(u64, Arc<[u8]>)>>;
 pub struct Transaction<'a> {
     pub store: &'a mut Store,
     buffer: Vec<u8>,
-    objects: Vec<(ObjectMeta, usize, u64, u64)>,
+    objects: Vec<(ObjectMeta, usize, u64, u64, Vec<u64>)>,
     records: Vec<Record>,
     fresh: Fresh,
     used: Option<super::quota::Usage>,
@@ -329,92 +368,6 @@ impl<'a> Transaction<'a> {
         seq
     }
 
-    /// Stores bytes once, as a delta of `base` when that saves at least half.
-    /// Equal digests only nominate reuse; the bytes are compared first.
-    pub fn object(&mut self, bytes: Arc<[u8]>, base: Option<u64>) -> Result<u64, String> {
-        if bytes.len() as u64 > super::policy::DEFAULT_MAX_FILE_BYTES {
-            return Err("Checkpoint file exceeds the hard 10 MiB capture limit".into());
-        }
-        let digest = hash::digest(&bytes);
-        let key = (digest, bytes.len() as u64);
-        if let Some(candidates) = self.store.index.contents.get(&key) {
-            for id in candidates.clone() {
-                if self.store.bytes(id).is_ok_and(|old| old[..] == bytes[..]) {
-                    self.store.counters.objects_reused += 1;
-                    return Ok(id);
-                }
-            }
-        }
-        if let Some(candidates) = self.fresh.get(&key) {
-            for (id, old) in candidates {
-                if old[..] == bytes[..] {
-                    self.store.counters.objects_reused += 1;
-                    return Ok(*id);
-                }
-            }
-        }
-        let id = self.seq();
-        let delta = base.and_then(|base| self.delta(base, &bytes));
-        let (encoding, data) = match delta {
-            Some((encoding, range)) => {
-                self.store.counters.objects_delta += 1;
-                (encoding, &bytes[range])
-            }
-            None => {
-                self.store.counters.objects_full += 1;
-                (Encoding::Full, &bytes[..])
-            }
-        };
-        let meta = ObjectMeta {
-            id,
-            digest,
-            length: bytes.len() as u64,
-            encoding,
-        };
-        let frame = meta.encode(data);
-        let checksum = u64::from_le_bytes(frame[16..24].try_into().unwrap_or_default());
-        self.objects.push((
-            meta,
-            self.buffer.len(),
-            (frame.len() - HEADER) as u64,
-            checksum,
-        ));
-        self.buffer.extend_from_slice(&frame);
-        self.fresh.entry(key).or_default().push((id, bytes.clone()));
-        self.store.remember(id, bytes);
-        Ok(id)
-    }
-
-    fn delta(&self, base: u64, bytes: &[u8]) -> Option<(Encoding, std::ops::Range<usize>)> {
-        let depth = self.store.index.objects.get(&base)?.depth;
-        if depth >= MAX_DEPTH || bytes.len() < 256 {
-            return None;
-        }
-        let old = self.store.bytes(base).ok()?;
-        let limit = old.len().min(bytes.len());
-        let prefix = old
-            .iter()
-            .zip(bytes.iter())
-            .take_while(|(a, b)| a == b)
-            .count();
-        let suffix = old[prefix..]
-            .iter()
-            .rev()
-            .zip(bytes[prefix..].iter().rev())
-            .take(limit - prefix)
-            .take_while(|(a, b)| a == b)
-            .count();
-        let literal = bytes.len() - prefix - suffix;
-        (literal + 64 <= bytes.len() / 2).then_some((
-            Encoding::Delta {
-                base,
-                prefix: prefix as u64,
-                suffix: suffix as u64,
-            },
-            prefix..bytes.len() - suffix,
-        ))
-    }
-
     /// Appends buffered frames and applies them to the index. Sequence numbers
     /// were reserved in the index while building the transaction.
     pub fn flush(&mut self, durable: bool) -> Result<(), String> {
@@ -432,12 +385,25 @@ impl<'a> Transaction<'a> {
                     Record::Complete { .. } | Record::Coverage { .. } | Record::Moved { .. }
                 )
             });
-        let used = match self.used {
-            Some(used) => used,
-            None => super::quota::measure(
-                &self.store.workspace.directory,
-                self.store.journal.generation,
-            )?,
+        #[cfg(test)]
+        let used = if self.store.journal.quota_limit == u64::MAX {
+            super::quota::Usage {
+                total: 0,
+                generation: 0,
+            }
+        } else {
+            match self.used {
+                Some(used) => used,
+                None => super::quota::measure(
+                    &self.store.workspace.directory,
+                    self.store.journal.generation,
+                )?,
+            }
+        };
+        #[cfg(not(test))]
+        let used = super::quota::Usage {
+            total: 0,
+            generation: 0,
         };
         let result = self.store.journal.append_counted(
             &self.buffer,
@@ -474,14 +440,14 @@ impl<'a> Transaction<'a> {
         counters.flushes += u64::from(durable);
         counters.bytes_written += self.buffer.len() as u64;
         counters.frames += (self.objects.len() + self.records.len()) as u64;
-        for (meta, offset, length, checksum) in self.objects.drain(..) {
+        for (meta, offset, length, checksum, chunks) in self.objects.drain(..) {
             let location = Location {
                 segment,
                 offset: start + offset as u64,
                 length,
                 checksum,
             };
-            self.store.index.object(meta, location);
+            self.store.index.object(meta, location, chunks);
         }
         for record in self.records.drain(..) {
             self.store.index.record(record);

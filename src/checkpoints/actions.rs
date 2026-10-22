@@ -3,7 +3,7 @@
 //! for people.
 use super::identity::plain;
 use super::index::{parse_reference, reference};
-use super::policy::{parse_size, size};
+use super::policy::{file_limit, parse_size, size};
 use super::record::State;
 use super::restore::{self, Expected, Request};
 use super::session::object;
@@ -41,6 +41,7 @@ pub fn run(
     caller: &Caller<'_>,
     arguments: &Value,
 ) -> Result<Value, String> {
+    super::lifecycle::touch_throttled(&workspace.archive)?;
     let action = arguments
         .get("action")
         .and_then(Value::as_str)
@@ -81,9 +82,18 @@ pub fn run(
             ]))
         }
         "config" => {
-            let limit = |name| string(arguments, name)?.map(parse_size).transpose();
-            let policy =
-                workspace.configure(limit("budget")?, limit("max_file")?, caller.origin)?;
+            let budget = string(arguments, "budget")?.map(parse_size).transpose()?;
+            let max_file = string(arguments, "max_file")?
+                .map(|value| {
+                    if value.eq_ignore_ascii_case("unlimited") || value.eq_ignore_ascii_case("none")
+                    {
+                        Ok(u64::MAX)
+                    } else {
+                        parse_size(value)
+                    }
+                })
+                .transpose()?;
+            let policy = workspace.configure(budget, max_file, caller.origin)?;
             Ok(limits(policy.budget_bytes, policy.max_file_bytes))
         }
         "gc" => match workspace.collect(true)? {
@@ -113,12 +123,7 @@ pub fn run(
                 ("unreadable_directories", Value::number(summary.unreadable)),
                 (
                     "coverage",
-                    Value::string(
-                        summary
-                            .limited
-                            .as_ref()
-                            .map_or("full bounded discovery", |_| "selective"),
-                    ),
+                    Value::string(summary.limited.as_ref().map_or("complete", |_| "selective")),
                 ),
                 (
                     "coverage_reason",
@@ -153,7 +158,8 @@ fn strings<'a>(items: impl Iterator<Item = &'a String>) -> Value {
 fn limits(budget: u64, max_file: u64) -> Value {
     Value::object([
         ("budget", Value::string(size(budget))),
-        ("max_file", Value::string(size(max_file))),
+        ("budget_kind", Value::string("soft retention target")),
+        ("max_file", Value::string(file_limit(max_file))),
     ])
 }
 
@@ -219,27 +225,13 @@ fn status(workspace: &Arc<Workspace>, own: &str) -> Value {
         ("pinned", Value::number(index.pins.len())),
         (
             "stored",
-            Value::string(format!(
-                "{} of {}",
+            Value::string(
                 super::quota::used(&workspace.archive).map_or_else(|_| "unknown".into(), size),
-                size(super::quota::LIMIT)
-            )),
+            ),
         ),
         (
             "stored_current_generation",
             Value::string(size(store.journal.stored_bytes())),
-        ),
-        (
-            "hard_limits",
-            limits(super::quota::LIMIT, super::policy::DEFAULT_MAX_FILE_BYTES),
-        ),
-        (
-            "generation_capacity",
-            Value::string(size(super::quota::WORKING_LIMIT)),
-        ),
-        (
-            "compaction_reserve",
-            Value::string(size(super::quota::LIMIT - super::quota::WORKING_LIMIT)),
         ),
         (
             "protected_paths",
@@ -270,18 +262,14 @@ fn status(workspace: &Arc<Workspace>, own: &str) -> Value {
             ),
         ),
         (
-            "discovery_limits",
-            Value::object([
-                ("paths_examined", Value::number(super::inventory::MAX_PATHS)),
-                (
-                    "baseline_estimate",
-                    Value::string(size(store.policy.budget_bytes / 4)),
-                ),
-            ]),
-        ),
-        (
             "limits",
             limits(store.policy.budget_bytes, store.policy.max_file_bytes),
+        ),
+        (
+            "inactive_history",
+            Value::string(
+                "expires after 7 days without user activity; pins, pending operations and active readers preserve it",
+            ),
         ),
         ("running_commands", Value::number(running)),
         ("background_processes", Value::number(background)),

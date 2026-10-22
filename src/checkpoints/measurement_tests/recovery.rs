@@ -125,6 +125,10 @@ fn reconstruction(
     close(workspace);
     for back in [0, 9, 49, 99] {
         let target = &refs[refs.len() - 1 - back];
+        let mut expected = String::from_utf8(text(30, 40 * 1024)).unwrap();
+        for revision in 0..refs.len() - back {
+            expected.push_str(&format!("// revision {revision}\n"));
+        }
         let path = format!("checkpoint:{target}:h/history.rs");
         let samples = recorder.count(30);
         let times = (0..samples)
@@ -133,10 +137,10 @@ fn reconstruction(
                 workspace.initialize().unwrap();
                 let (content, time) =
                     timed(|| crate::checkpoints::show::content(&workspace, &path).unwrap());
-                assert!(matches!(
-                    content,
-                    crate::checkpoints::show::Content::Text(_)
-                ));
+                match content {
+                    crate::checkpoints::show::Content::Text(found) => assert_eq!(found, expected),
+                    _ => panic!("historical text was not reconstructed"),
+                }
                 close(workspace);
                 time
             })
@@ -232,6 +236,13 @@ fn restores(recorder: &mut Recorder, bench: &Bench) {
             // settled; otherwise a point waits 30 ms for them to stop.
             std::thread::sleep(Duration::from_millis(100));
             undo.push(timed(|| restore(&back, Some(&paths))).1);
+            for (index, (relative, _)) in originals[..count].iter().enumerate() {
+                assert_eq!(
+                    fs::read(tree.path(relative)).unwrap(),
+                    text(50_000 + (sample * 1000 + index) as u64, 1_000),
+                    "undo bytes differ for {relative}"
+                );
+            }
             // Undoing returns the changed bytes; restore the originals for the next sample.
             restore(&target, Some(&paths));
             unchanged(count);

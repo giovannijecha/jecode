@@ -2,12 +2,12 @@
 //! installation. Leases coordinate Jecode writers; external writers can still
 //! race the final check and filesystem operation.
 use super::{Planned, State, files};
-use crate::checkpoints::capture::{self, Observation, Observed};
+use crate::checkpoints::capture::{self, Observed};
 use crate::checkpoints::store::Store;
 use std::path::Path;
 
 pub(super) enum Failure {
-    Changed(Observed),
+    Changed(Box<Observed>),
     Io(String),
 }
 
@@ -54,29 +54,20 @@ pub(super) fn install(
     files::confined_parent(root, &planned.path)?;
     let path = crate::checkpoints::identity::absolute(root, &planned.path);
     let pending = match planned.target {
-        State::File { object, mode, .. } => Some(files::stage(&path, &store.bytes(object)?, mode)?),
-        _ => None,
-    };
-    // Load the expected bytes before the live read, so object reconstruction
-    // cannot widen the final check-to-install interval.
-    let before = match planned.current {
-        State::File { object, .. } => Some(store.bytes(object)?),
+        State::File { object, mode, .. } => {
+            Some(files::stage_reader(&path, store.reader(object)?, mode)?)
+        }
         _ => None,
     };
     #[cfg(test)]
     crate::checkpoints::tests::process::stage("restore-before-install");
     let observed = capture::observe(root, &planned.path, maximum);
-    let matches = match (&planned.current, &observed.kind) {
-        (State::Absent, Observation::Absent) => true,
-        (State::File { mode, .. }, Observation::File(bytes, current_mode)) => {
-            mode == current_mode && before.as_ref().is_some_and(|old| old[..] == bytes[..])
-        }
-        (State::Directory { mode }, Observation::Directory(current)) => mode == current,
-        (State::Link { target }, Observation::Link(current)) => target == current,
-        _ => false,
-    };
-    if !matches {
-        return Err(Failure::Changed(observed));
+    let matches = capture::matches_state(store, &observed, &planned.current, true);
+    if !matches || !capture::still_current(root, &observed) {
+        // Read the new state when the final metadata check detected a race;
+        // saving the earlier observation would misidentify the conflict.
+        let observed = capture::observe(root, &planned.path, maximum);
+        return Err(Failure::Changed(Box::new(observed)));
     }
     #[cfg(test)]
     crate::checkpoints::tests::process::stage("restore-after-check");

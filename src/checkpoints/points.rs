@@ -48,6 +48,7 @@ impl Workspace {
         pinned: bool,
         reuse: bool,
     ) -> Result<u64, String> {
+        super::lifecycle::touch_throttled(&self.archive)?;
         let summary = self.catch_up("external")?;
         let reused = {
             let store = self.store();
@@ -106,7 +107,7 @@ impl Workspace {
                 coverage(transaction, true, "scan");
             } else if let Some(reason) = &summary.limited {
                 // Persist the selected scope across process restarts. A
-                // later bounded verify can establish full coverage again.
+                // later full verification can establish full coverage again.
                 let reason = format!("selective: {reason}");
                 if transaction
                     .index()
@@ -163,7 +164,7 @@ impl Workspace {
             // A later successful full scan can recover an interrupted baseline
             // or offline reconciliation. Keep the failure visible until the
             // scan and its coverage record both succeed.
-            let summary = scan::scan(self, origin, true, &self.cancellation)?;
+            let summary = scan::scan_full(self, origin, true, &self.cancellation)?;
             if !self.polling() {
                 self.settle();
             }

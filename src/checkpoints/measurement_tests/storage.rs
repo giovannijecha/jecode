@@ -158,6 +158,9 @@ pub fn run(recorder: &mut Recorder) {
             let store = workspace.store();
             let state = store.index.current("s/data.rs").map(|version| version.state.clone());
             assert!(matches!(state, Some(State::File { digest, .. }) if digest == hash::digest(&current)));
+            if let Some(State::File { object, .. }) = state {
+                assert!(store.equal_reader(object, std::io::Cursor::new(&current)).unwrap());
+            }
             drop(store);
             close(workspace);
             time

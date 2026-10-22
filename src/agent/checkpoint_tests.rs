@@ -322,11 +322,12 @@ fn restores_during_request_preparation_reach_that_request() {
 }
 
 #[test]
-fn selective_coverage_reaches_the_model_and_exact_before_refs_still_restore() {
+fn large_scope_reaches_the_model_with_full_baseline_and_exact_before_refs_restore() {
     let fixture = Fixture::new();
     let http = HttpFixture::new(vec![
         (200, write("a.txt", "changed\n")),
         (200, response("Saved.", vec![])),
+        (200, response("Restored.", vec![])),
     ]);
     let mut agent = fixture.agent(&http);
     let workspace = agent
@@ -339,14 +340,16 @@ fn selective_coverage_reaches_the_model_and_exact_before_refs_still_restore() {
     workspace
         .configure(Some(1 << 20), Some(512 << 10), "user")
         .unwrap();
-    for number in 0..2 {
+    for number in 0..4 {
         fs::write(
             fixture.root.path().join(format!("bulk-{number}.bin")),
-            vec![number; 200 << 10],
+            vec![number; 384 << 10],
         )
         .unwrap();
     }
-    workspace.verify().unwrap();
+    let verified = workspace.verify().unwrap();
+    assert!(verified.limited.is_none());
+    assert!(workspace.selective().is_none());
     agent.run_turn("Change a.txt", &mut |_| Ok(())).unwrap();
     let before = last_before(&agent);
     fixture.cli(&["restore", &before, "a.txt"]);
@@ -354,10 +357,14 @@ fn selective_coverage_reaches_the_model_and_exact_before_refs_still_restore() {
         fs::read(fixture.root.path().join("a.txt")).unwrap(),
         b"one\n"
     );
+    agent.run_turn("Continue", &mut |_| Ok(())).unwrap();
     let requests = http.finish();
-    for request in requests {
+    for request in &requests {
         let context = system(&request.body);
-        assert!(context.contains("selective protection"), "{context}");
-        assert!(context.contains("checkpoint.before"), "{context}");
+        assert!(!context.contains("selective protection"), "{context}");
+        let tools = request.body.get("tools").unwrap().encode();
+        assert!(tools.contains("full in-scope baseline"));
+        assert!(tools.contains("checkpoint.before"));
     }
+    assert!(system(&requests[2].body).contains("Checkpoint notices"));
 }

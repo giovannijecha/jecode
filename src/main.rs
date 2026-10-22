@@ -27,6 +27,7 @@ mod setup;
 mod skills;
 mod tools;
 mod tui;
+mod utf8;
 
 #[cfg(test)]
 mod test_support;

@@ -4,6 +4,7 @@ pub mod processes;
 mod schema;
 mod shell;
 
+pub(crate) use files::read_source;
 pub(crate) use files::read_text_page;
 pub use schema::definitions;
 pub use shell::find_bash;
@@ -11,7 +12,7 @@ pub use shell::find_bash;
 use crate::cancel::Cancellation;
 use crate::checkpoints::actions::{self, Caller};
 use crate::checkpoints::session::{CommandGuard, Session};
-use crate::checkpoints::show::{self, Content};
+use crate::checkpoints::show;
 use crate::json::{self, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -171,13 +172,28 @@ impl Tools {
         arguments: &str,
         cancellation: &Cancellation,
     ) -> Value {
-        self.execute_begun(self.begin(name, arguments), name, arguments, cancellation)
-            .result
+        self.execute_begun(
+            self.begin_cancellable(name, arguments, cancellation),
+            name,
+            arguments,
+            cancellation,
+        )
+        .result
     }
 
     /// Records the checkpoint before a shell command, so its freshness can
     /// be shown while the command runs.
+    #[cfg(test)]
     pub fn begin(&self, name: &str, arguments: &str) -> Begun {
+        self.begin_cancellable(name, arguments, &Cancellation::default())
+    }
+
+    pub fn begin_cancellable(
+        &self,
+        name: &str,
+        arguments: &str,
+        cancellation: &Cancellation,
+    ) -> Begun {
         let command = self
             .checkpoints
             .as_ref()
@@ -185,7 +201,7 @@ impl Tools {
             .and_then(|session| {
                 let arguments = json::parse(arguments).ok()?;
                 let text = arguments.get("command")?.as_str()?;
-                Some(session.command(text))
+                Some(session.command_cancellable(text, cancellation))
             });
         Begun { command }
     }
@@ -341,22 +357,7 @@ impl Tools {
         cancellation: &Cancellation,
     ) -> Result<Value, String> {
         let session = self.enabled_checkpoints()?;
-        match show::content(session.workspace()?, path)? {
-            Content::Text(text) => files::read_text_page(&text, arguments, cancellation),
-            Content::Binary(bytes) => Ok(Value::object([
-                ("binary", Value::Bool(true)),
-                ("bytes", Value::number(bytes)),
-                (
-                    "note",
-                    Value::string("restore the path to use this content"),
-                ),
-            ])),
-            Content::Directory(entries) => Ok(Value::object([(
-                "entries",
-                Value::Array(entries.into_iter().map(Value::string).collect()),
-            )])),
-            Content::Link(target) => Ok(Value::object([("link", Value::string(target))])),
-        }
+        show::read_page(session.workspace()?, path, arguments, cancellation)
     }
 }
 

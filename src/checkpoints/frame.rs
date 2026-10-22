@@ -9,6 +9,9 @@ pub const VERSION: u8 = 1;
 pub const HEADER: usize = 24;
 /// Bound for metadata records; object frames carry their own length.
 pub const METADATA_LIMIT: u64 = 1 << 20;
+/// A bounded node fans out to 1024 chunks or child manifests.
+pub const MANIFEST_CHILDREN: usize = 1024;
+pub const MANIFEST_LIMIT: u64 = (MANIFEST_CHILDREN * 8) as u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -172,6 +175,10 @@ pub enum Encoding {
         prefix: u64,
         suffix: u64,
     },
+    /// The object payload lists this many u64 chunk object identifiers.
+    Chunks {
+        count: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,6 +203,7 @@ impl ObjectMeta {
                 prefix,
                 suffix,
             } => out.u8(1).u64(base).u64(prefix).u64(suffix),
+            Encoding::Chunks { count } => out.u8(2).u64(count).u64(0).u64(0),
         };
         out.0.extend_from_slice(data);
         encode(Kind::Object, &out.0)
@@ -215,6 +223,7 @@ impl ObjectMeta {
                 prefix,
                 suffix,
             },
+            2 if prefix == 0 && suffix == 0 => Encoding::Chunks { count: base },
             _ => return Err("unknown object encoding".into()),
         };
         Ok(Self {

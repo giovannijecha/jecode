@@ -4,14 +4,14 @@ use super::hash;
 use crate::json::{self, Value};
 use std::path::Path;
 
-pub const DEFAULT_MAX_FILE_BYTES: u64 = 10 * MIB;
+/// No per-file ceiling unless the user sets one.
+pub const DEFAULT_MAX_FILE_BYTES: u64 = u64::MAX;
 pub const DEFAULT_BUDGET_BYTES: u64 = 1024 * MIB;
+const LEGACY_DEFAULT_MAX_FILE_BYTES: u64 = 10 * MIB;
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * KIB;
 const GIB: u64 = 1024 * MIB;
 const MIN_BUDGET: u64 = MIB;
-const MAX_LIMIT: u64 = DEFAULT_BUDGET_BYTES;
-const MAX_FILE_LIMIT: u64 = DEFAULT_MAX_FILE_BYTES;
 const MAX_RULES: usize = 256;
 
 /// VCS metadata, Jecode output and generated build or cache directories.
@@ -66,26 +66,43 @@ impl Default for Policy {
 
 impl Policy {
     /// Reads `policy.json`, the file users edit; `None` when it does not exist.
+    #[cfg(test)]
     pub fn read(directory: &Path) -> Result<Option<Self>, String> {
+        Ok(Self::read_with_migration(directory)?.map(|(policy, _)| policy))
+    }
+
+    /// The flag requests canonical v2 persistence after a legacy default is
+    /// translated. Version 1 could not distinguish its generated 10 MiB value
+    /// from an explicit 10 MiB choice; version 2 makes that choice durable.
+    pub fn read_with_migration(directory: &Path) -> Result<Option<(Self, bool)>, String> {
         let path = directory.join("policy.json");
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(format!("Could not read checkpoint policy: {error}")),
         };
-        Self::parse(&text)
+        Self::parse_with_migration(&text)
             .map(Some)
             .map_err(|error| format!("{}: {error}", path.display()))
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
+        Self::parse_with_migration(text).map(|(policy, _)| policy)
+    }
+
+    fn parse_with_migration(text: &str) -> Result<(Self, bool), String> {
         let value = json::parse(text)?;
         let limit = |key: &str, default: u64| {
             value.get(key).map_or(Ok(default), |value| {
-                value
-                    .as_usize()
-                    .map(|value| value as u64)
-                    .ok_or(format!("{key} must be a byte count"))
+                if key == "max_file_bytes" && matches!(value, Value::Null) {
+                    return Ok(default);
+                }
+                match value {
+                    Value::Number(number) => number
+                        .parse::<u64>()
+                        .map_err(|_| format!("{key} must be a byte count")),
+                    _ => Err(format!("{key} must be a byte count")),
+                }
             })
         };
         let rules = |key: &str, default: &[&str]| -> Result<Vec<String>, String> {
@@ -103,24 +120,35 @@ impl Policy {
                 })
                 .collect()
         };
+        let max_file_bytes = limit("max_file_bytes", DEFAULT_MAX_FILE_BYTES)?;
+        let legacy = value.get("version").and_then(Value::as_usize).unwrap_or(1) < 2;
+        let migrated = legacy && max_file_bytes == LEGACY_DEFAULT_MAX_FILE_BYTES;
         let policy = Self {
-            // Old policy files may name larger values. Bound them while
-            // loading so their existing journal remains readable. New policy
-            // values supplied through `save` still undergo strict validation.
-            max_file_bytes: limit("max_file_bytes", DEFAULT_MAX_FILE_BYTES)?.min(MAX_FILE_LIMIT),
-            budget_bytes: limit("budget_bytes", DEFAULT_BUDGET_BYTES)?.min(MAX_LIMIT),
+            max_file_bytes: if migrated {
+                DEFAULT_MAX_FILE_BYTES
+            } else {
+                max_file_bytes
+            },
+            budget_bytes: limit("budget_bytes", DEFAULT_BUDGET_BYTES)?,
             exclude: rules("exclude", DEFAULT_EXCLUDE)?,
             include: rules("include", &[])?,
         };
         policy.validate()?;
-        Ok(policy)
+        Ok((policy, migrated))
     }
 
     pub fn encode(&self) -> String {
         let list = |rules: &[String]| Value::Array(rules.iter().map(Value::string).collect());
         Value::object([
-            ("version", Value::number(1)),
-            ("max_file_bytes", Value::number(self.max_file_bytes)),
+            ("version", Value::number(2)),
+            (
+                "max_file_bytes",
+                if self.max_file_bytes == DEFAULT_MAX_FILE_BYTES {
+                    Value::Null
+                } else {
+                    Value::number(self.max_file_bytes)
+                },
+            ),
             ("budget_bytes", Value::number(self.budget_bytes)),
             ("exclude", list(&self.exclude)),
             ("include", list(&self.include)),
@@ -130,7 +158,7 @@ impl Policy {
 
     #[cfg(test)]
     pub fn save(&self, directory: &Path) -> Result<(), String> {
-        let _lock = super::locks::Exclusive::acquire(&directory.join("store.lock"))
+        let _lock = super::locks::Exclusive::acquire(&super::layout::store_lock(directory))
             .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
         self.save_locked(directory)
     }
@@ -139,7 +167,6 @@ impl Policy {
     pub fn save_locked(&self, directory: &Path) -> Result<(), String> {
         self.validate()?;
         let text = self.encode();
-        super::quota::admit(directory, text.len() as u64, false, super::quota::LIMIT)?;
         super::files::atomic_write(&directory.join("policy.json"), text.as_bytes())
             .map_err(|error| format!("Could not save checkpoint policy: {error}"))
     }
@@ -155,7 +182,7 @@ impl Policy {
             changes.push(format!("budget {}", size(self.budget_bytes)));
         }
         if self.max_file_bytes != previous.max_file_bytes {
-            changes.push(format!("maximum file {}", size(self.max_file_bytes)));
+            changes.push(format!("maximum file {}", file_limit(self.max_file_bytes)));
         }
         for (name, now, before) in [
             ("exclude", &self.exclude, &previous.exclude),
@@ -170,21 +197,14 @@ impl Policy {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if !(MIN_BUDGET..=MAX_LIMIT).contains(&self.budget_bytes) {
+        if self.budget_bytes < MIN_BUDGET {
             return Err(format!(
-                "The archive budget must be between {} and {}",
-                size(MIN_BUDGET),
-                size(MAX_LIMIT)
+                "The archive retention budget must be at least {}",
+                size(MIN_BUDGET)
             ));
         }
-        if self.max_file_bytes == 0
-            || self.max_file_bytes > MAX_FILE_LIMIT
-            || self.max_file_bytes > self.budget_bytes
-        {
-            return Err(format!(
-                "The maximum file size must be between 1 B and {}, and not above the archive budget",
-                size(MAX_FILE_LIMIT)
-            ));
+        if self.max_file_bytes == 0 {
+            return Err("The maximum file size must be at least 1 B".into());
         }
         for rule in self.exclude.iter().chain(&self.include) {
             validate_rule(rule)?;
@@ -315,7 +335,7 @@ pub fn parse_size(text: &str) -> Result<u64, String> {
         .parse()
         .map_err(|_| format!("Invalid size {text:?}"))?;
     let bytes = value * multiplier as f64;
-    if !bytes.is_finite() || bytes < 0.0 || bytes > MAX_LIMIT as f64 {
+    if !bytes.is_finite() || bytes < 0.0 || bytes >= u64::MAX as f64 {
         return Err(format!("Invalid size {text:?}"));
     }
     Ok(bytes.round() as u64)
@@ -338,6 +358,14 @@ pub fn size(bytes: u64) -> String {
         }
     }
     format!("{bytes} B")
+}
+
+pub fn file_limit(bytes: u64) -> String {
+    if bytes == DEFAULT_MAX_FILE_BYTES {
+        "unlimited".into()
+    } else {
+        size(bytes)
+    }
 }
 
 #[cfg(test)]
@@ -381,7 +409,7 @@ mod tests {
     fn limits_are_validated_persisted_and_identified() {
         let directory = crate::test_support::Directory::new();
         let mut policy = Policy::default();
-        assert_eq!(policy.max_file_bytes, 10 * 1024 * 1024);
+        assert_eq!(policy.max_file_bytes, u64::MAX);
         assert_eq!(policy.budget_bytes, 1024 * 1024 * 1024);
         policy.max_file_bytes = parse_size("2 MiB").unwrap();
         policy.exclude.push("*.bin".into());
@@ -400,16 +428,45 @@ mod tests {
         assert!(Policy::parse(r#"{"max_file_bytes":0}"#).is_err());
         let legacy =
             Policy::parse(r#"{"max_file_bytes":4294967296,"budget_bytes":17179869184}"#).unwrap();
-        assert_eq!(legacy.max_file_bytes, DEFAULT_MAX_FILE_BYTES);
-        assert_eq!(legacy.budget_bytes, DEFAULT_BUDGET_BYTES);
+        assert_eq!(legacy.max_file_bytes, 4 * GIB);
+        assert_eq!(legacy.budget_bytes, 16 * GIB);
         policy.budget_bytes = DEFAULT_BUDGET_BYTES;
-        policy.max_file_bytes = DEFAULT_MAX_FILE_BYTES + 1;
-        assert!(policy.save(directory.path()).is_err());
+        policy.max_file_bytes = 4 * GIB;
+        assert!(policy.save(directory.path()).is_ok());
         policy.max_file_bytes = DEFAULT_MAX_FILE_BYTES;
-        policy.budget_bytes = DEFAULT_BUDGET_BYTES + 1;
-        assert!(policy.save(directory.path()).is_err());
+        policy.budget_bytes = 16 * GIB;
+        assert!(policy.save(directory.path()).is_ok());
+        assert_eq!(
+            Policy::read(directory.path()).unwrap(),
+            Some(policy.clone())
+        );
+        assert!(policy.encode().contains("\"max_file_bytes\": null"));
         assert_eq!(parse_size("1.5k").unwrap(), 1536);
         assert_eq!(size(10 * 1024 * 1024), "10 MiB");
+        assert_eq!(file_limit(DEFAULT_MAX_FILE_BYTES), "unlimited");
         assert!(parse_size("3 parsecs").is_err());
+    }
+
+    #[test]
+    fn only_the_legacy_generated_file_limit_migrates_to_unlimited() {
+        let directory = crate::test_support::Directory::new();
+        let old = r#"{"version":1,"max_file_bytes":10485760,"budget_bytes":1073741824}"#;
+        std::fs::write(directory.path().join("policy.json"), old).unwrap();
+        let (migrated, changed) = Policy::read_with_migration(directory.path())
+            .unwrap()
+            .unwrap();
+        assert!(changed);
+        assert_eq!(migrated.max_file_bytes, u64::MAX);
+        migrated.save(directory.path()).unwrap();
+        let (reloaded, changed) = Policy::read_with_migration(directory.path())
+            .unwrap()
+            .unwrap();
+        assert!(!changed);
+        assert_eq!(reloaded, migrated);
+
+        let lower = Policy::parse(r#"{"version":1,"max_file_bytes":1048576}"#).unwrap();
+        assert_eq!(lower.max_file_bytes, MIB);
+        let explicit = Policy::parse(r#"{"version":2,"max_file_bytes":10485760}"#).unwrap();
+        assert_eq!(explicit.max_file_bytes, 10 * MIB);
     }
 }

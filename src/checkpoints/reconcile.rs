@@ -1,6 +1,6 @@
 //! Classifies operations that processes left prepared but incomplete when
 //! they exited, by comparing the path with the recorded before and after.
-use super::capture::{self, Observation, Observed};
+use super::capture::{self, Observed};
 use super::locks::owner_gone;
 use super::record::{Event, Outcome, Prepare, Record, State};
 use super::store::Store;
@@ -88,32 +88,12 @@ pub fn incomplete(workspace: &Workspace) -> Result<usize, String> {
 }
 
 fn matches_state(store: &Store, observed: &Observed, state: &State) -> bool {
-    match (&observed.kind, state) {
-        (Observation::Absent, State::Absent) => true,
-        (
-            Observation::File(bytes, _),
-            State::File {
-                object,
-                length,
-                digest,
-                ..
-            },
-        ) => {
-            *length == bytes.len() as u64
-                && *digest == super::hash::digest(bytes)
-                && store
-                    .bytes(*object)
-                    .is_ok_and(|stored| stored[..] == bytes[..])
-        }
-        (Observation::Directory(_), State::Directory { .. }) => true,
-        (Observation::Link(target), State::Link { target: recorded }) => target == recorded,
-        _ => false,
-    }
+    capture::matches_state(store, observed, state, false)
 }
 
 /// Owner lock files of exited processes without pending operations.
 fn remove_owner_files(store: &Store) {
-    let directory = store.workspace.directory.join("owners");
+    let directory = super::layout::owners_directory(&store.workspace.directory);
     let Ok(entries) = std::fs::read_dir(&directory) else {
         return;
     };

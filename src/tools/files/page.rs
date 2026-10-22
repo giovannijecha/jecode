@@ -38,7 +38,7 @@ pub(crate) fn read_text_page(
     )
 }
 
-fn read_source(
+pub(crate) fn read_source(
     mut reader: impl BufRead + Seek,
     length: u64,
     arguments: &Value,

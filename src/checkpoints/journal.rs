@@ -3,6 +3,7 @@
 //! reads of immutable frames and need no lock.
 use super::files;
 use super::frame::{self, HEADER, Kind, ObjectMeta};
+use super::layout;
 use super::locks::Shared;
 use super::quota;
 use super::record::Record;
@@ -25,7 +26,7 @@ pub struct Location {
 
 pub enum Entry {
     Record(Record),
-    Object(ObjectMeta, Location),
+    Object(ObjectMeta, Location, Vec<u64>),
 }
 
 pub struct Journal {
@@ -56,15 +57,15 @@ pub struct Journal {
 }
 
 pub fn generation_directory(archive: &Path, generation: u64) -> PathBuf {
-    archive.join(format!("gen-{generation:06}"))
+    layout::generation_directory(archive, generation)
 }
 
 pub fn generation_lock(archive: &Path, generation: u64) -> PathBuf {
-    archive.join(format!("gen-{generation:06}.lock"))
+    layout::generation_lock(archive, generation)
 }
 
 pub fn current_generation(archive: &Path) -> Result<u64, String> {
-    match fs::read_to_string(archive.join("CURRENT")) {
+    match fs::read_to_string(layout::current(archive)) {
         Ok(text) => text
             .trim()
             .parse()
@@ -92,7 +93,7 @@ impl Journal {
     /// Opens the current generation. Callers hold the store lock.
     pub fn open(archive: &Path) -> Result<Self, String> {
         let generation = current_generation(archive)?;
-        if archive.join("CURRENT").exists() {
+        if layout::current(archive).exists() {
             Self::open_existing_generation(archive, generation)
         } else {
             Self::open_generation(archive, generation)
@@ -118,7 +119,7 @@ impl Journal {
             files::private_directory(&directory)
                 .map_err(|error| format!("Could not create checkpoint archive: {error}"))?;
             if created {
-                files::sync_directory(archive)
+                files::sync_directory(&layout::history(archive))
                     .map_err(|error| format!("Could not flush checkpoint archive: {error}"))?;
             }
         } else if !directory.join("000001.log").is_file() {
@@ -143,7 +144,7 @@ impl Journal {
             #[cfg(test)]
             sync_fault: None,
             #[cfg(test)]
-            quota_limit: quota::LIMIT,
+            quota_limit: u64::MAX,
         })
     }
 
@@ -246,9 +247,40 @@ impl Journal {
                     reader
                         .seek_relative((header.length - ObjectMeta::SIZE as u64) as i64)
                         .map_err(io)?;
-                    // Object data checksums are verified when the object is read.
                     match ObjectMeta::decode(&meta) {
-                        Ok(meta) => apply(Entry::Object(meta, location)),
+                        Ok(object) => {
+                            let chunks = if let frame::Encoding::Chunks { count } = object.encoding
+                            {
+                                let bytes = header.length - ObjectMeta::SIZE as u64;
+                                if bytes > frame::MANIFEST_LIMIT
+                                    || count.checked_mul(8) != Some(bytes)
+                                {
+                                    self.skip(location, "invalid chunk manifest length");
+                                    self.offset = end;
+                                    continue;
+                                }
+                                reader.seek_relative(-(bytes as i64)).map_err(io)?;
+                                let mut payload = Vec::with_capacity(header.length as usize);
+                                payload.extend_from_slice(&meta);
+                                payload.resize(header.length as usize, 0);
+                                reader
+                                    .read_exact(&mut payload[ObjectMeta::SIZE..])
+                                    .map_err(io)?;
+                                if frame::checksum(header.kind, &payload) != header.checksum {
+                                    self.skip(location, "chunk manifest checksum mismatch");
+                                    self.offset = end;
+                                    continue;
+                                }
+                                payload[ObjectMeta::SIZE..]
+                                    .chunks_exact(8)
+                                    .map(|id| u64::from_le_bytes(id.try_into().unwrap_or_default()))
+                                    .collect()
+                            } else {
+                                // Full and delta payload checksums are verified on reads.
+                                Vec::new()
+                            };
+                            apply(Entry::Object(object, location, chunks));
+                        }
                         Err(error) => self.skip(location, &error),
                     }
                 }
@@ -350,12 +382,18 @@ impl Journal {
         #[cfg(test)]
         let limit = self.quota_limit;
         #[cfg(not(test))]
-        let limit = quota::LIMIT;
-        match used {
-            Some(used) => {
-                quota::admit_generation(used, bytes.len() as u64, metadata_only, reserved, limit)?
+        let limit = u64::MAX;
+        if limit != u64::MAX {
+            match used {
+                Some(used) => quota::admit_generation(
+                    used,
+                    bytes.len() as u64,
+                    metadata_only,
+                    reserved,
+                    limit,
+                )?,
+                None => quota::admit(&self.archive, bytes.len() as u64, reserved, limit)?,
             }
-            None => quota::admit(&self.archive, bytes.len() as u64, reserved, limit)?,
         }
         frame::validate_lengths(bytes)?;
         let io = |error: std::io::Error| format!("Could not write checkpoint journal: {error}");

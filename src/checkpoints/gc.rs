@@ -6,6 +6,7 @@ use super::frame::{HEADER, ObjectMeta};
 use super::identity::Location;
 use super::index::Index;
 use super::journal::{self, Entry, Journal};
+use super::layout;
 use super::locks::Exclusive;
 use super::record::{Point, Record, State, Version};
 use super::store::{Store, Transaction};
@@ -32,7 +33,7 @@ pub struct Collection {
 /// Returns `None` when nothing is due or another process is collecting.
 pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, String> {
     let directory = &location.directory;
-    let lock = Exclusive::try_acquire(&directory.join("gc.lock"))
+    let lock = Exclusive::try_acquire(&layout::gc_lock(directory))
         .map_err(|error| format!("Could not lock checkpoint retention: {error}"))?;
     let Some(_collecting) = lock else {
         return Ok(None);
@@ -54,7 +55,7 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     // A collection that crashed before finishing left an unused generation.
     let leftover = journal::generation_directory(directory, generation);
     {
-        let _store = Exclusive::acquire(&directory.join("store.lock"))
+        let _store = Exclusive::acquire(&layout::store_lock(directory))
             .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
         if leftover.exists() {
             if let Ok(Some(_unused)) =
@@ -70,7 +71,7 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     }
     let mut output = Output {
         journal: Journal::open_generation(directory, generation)?,
-        lock_path: directory.join("store.lock"),
+        lock_path: layout::store_lock(directory),
         under_store_lock: false,
         buffer: Vec::new(),
         bytes: 0,
@@ -92,7 +93,7 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     })();
     if let Err(error) = copy {
         drop(output);
-        let _store = Exclusive::acquire(&directory.join("store.lock"))
+        let _store = Exclusive::acquire(&layout::store_lock(directory))
             .map_err(|lock| format!("{error}; could not lock unfinished compaction: {lock}"))?;
         std::fs::remove_dir_all(&leftover).map_err(|cleanup| {
             format!("{error}; could not remove unfinished compaction: {cleanup}")
@@ -115,13 +116,13 @@ pub fn collect(location: &Location, force: bool) -> Result<Option<Collection>, S
     #[cfg(test)]
     super::tests::process::stage("gc-moved");
     {
-        let _lock = Exclusive::acquire(&directory.join("store.lock"))
+        let _lock = Exclusive::acquire(&layout::store_lock(directory))
             .map_err(|error| format!("Could not lock checkpoint archive: {error}"))?;
         let next = generation.to_string();
-        super::quota::admit(directory, next.len() as u64, true, super::quota::LIMIT)?;
-        super::files::atomic_write(&directory.join("CURRENT"), next.as_bytes())
+        super::quota::admit(directory, next.len() as u64, true, u64::MAX)?;
+        super::files::atomic_write(&layout::current(directory), next.as_bytes())
             .map_err(|error| format!("Could not update checkpoint archive: {error}"))?;
-        super::files::sync_directory(directory)
+        super::files::sync_directory(&layout::history(directory))
             .map_err(|error| format!("Could not flush checkpoint archive directory: {error}"))?;
     }
     drop(input);
@@ -181,11 +182,16 @@ fn tail(
                 refer(&prepare.before, &mut missing);
                 refer(&prepare.after, &mut missing);
             }
-            Entry::Object(meta, _) => {
+            Entry::Object(meta, _, chunks) => {
                 if let super::frame::Encoding::Delta { base, .. } = meta.encoding
                     && base <= copied.latest
                 {
                     bases(index, base, &mut missing);
+                }
+                for chunk in chunks {
+                    if *chunk <= copied.latest {
+                        bases(index, *chunk, &mut missing);
+                    }
                 }
             }
             _ => {}
@@ -197,7 +203,7 @@ fn tail(
     for entry in entries {
         match entry {
             Entry::Record(record) => output.record(&record)?,
-            Entry::Object(meta, location) => {
+            Entry::Object(meta, location, _) => {
                 let payload = transaction.store.journal.read(&location)?;
                 output.raw(&meta.encode(&payload[ObjectMeta::SIZE.min(payload.len())..]))?;
             }
@@ -210,7 +216,7 @@ fn tail(
     transaction.refresh_admission();
     // The old journal must never publish Moved before the new directory entry
     // is stable; recovery follows that marker even if CURRENT is still old.
-    super::files::sync_directory(&transaction.store.workspace.directory)
+    super::files::sync_directory(&layout::history(&transaction.store.workspace.directory))
         .map_err(|error| format!("Could not flush checkpoint archive directory: {error}"))?;
     transaction.record(Record::Moved {
         seq: moved,
@@ -399,11 +405,20 @@ fn retained(index: &Index, horizon: u64) -> (BTreeSet<u64>, u64) {
     )
 }
 
-fn bases(index: &Index, mut id: u64, objects: &mut BTreeSet<u64>) {
-    while objects.insert(id) {
+fn bases(index: &Index, id: u64, objects: &mut BTreeSet<u64>) {
+    let mut pending = vec![id];
+    while let Some(id) = pending.pop() {
+        if !objects.insert(id) {
+            continue;
+        }
         match index.objects.get(&id).map(|object| object.meta.encoding) {
-            Some(super::frame::Encoding::Delta { base, .. }) => id = base,
-            _ => return,
+            Some(super::frame::Encoding::Delta { base, .. }) => pending.push(base),
+            Some(super::frame::Encoding::Chunks { .. }) => {
+                if let Some(chunks) = index.manifests.get(&id) {
+                    pending.extend(chunks.iter().copied());
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -518,7 +533,7 @@ fn snapshot(index: &Index, horizon: u64) -> Vec<Record> {
 
 /// Deletes generations older than `current` that no process still reads.
 fn remove_older(directory: &std::path::Path, current: u64) {
-    let Ok(_store) = Exclusive::acquire(&directory.join("store.lock")) else {
+    let Ok(_store) = Exclusive::acquire(&layout::store_lock(directory)) else {
         return;
     };
     for generation in 1..current {

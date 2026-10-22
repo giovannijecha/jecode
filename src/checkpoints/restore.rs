@@ -319,7 +319,7 @@ pub fn restore(
             Err(error) => {
                 let step = match error {
                     Failure::Changed(observed) => {
-                        let current = installing::save_conflict(store, observed)?;
+                        let current = installing::save_conflict(store, *observed)?;
                         report.conflicts.push(Conflict {
                             path: planned.path.clone(),
                             target,
@@ -477,10 +477,7 @@ fn expectation(index: &Index, path: &str, target: u64, request: &Request<'_>) ->
 fn same_bytes(store: &Store, a: &State, b: &State) -> bool {
     match (a, b) {
         (State::File { object: x, .. }, State::File { object: y, .. }) if x != y => {
-            match (store.bytes(*x), store.bytes(*y)) {
-                (Ok(x), Ok(y)) => x[..] == y[..],
-                _ => false,
-            }
+            store.objects_equal(*x, *y).unwrap_or(false)
         }
         _ => true,
     }

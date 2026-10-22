@@ -24,7 +24,7 @@ pub struct Registration {
 }
 
 fn directory(archive: &Path) -> PathBuf {
-    archive.join("activity")
+    super::layout::activity_directory(archive)
 }
 
 pub fn register(archive: &Path, origin: &str) -> Result<Registration, String> {
@@ -70,16 +70,12 @@ impl Registration {
             ("updated", Value::number(entry.updated)),
         ])
         .encode();
-        let Ok(_store) = Exclusive::acquire(&self.archive.join("store.lock")) else {
+        let Ok(_store) = Exclusive::acquire(&super::layout::store_lock(&self.archive)) else {
             return;
         };
         // Atomic replacement briefly owns both descriptions. Admission is
         // serialized with journal and compaction writes in other processes.
-        if super::quota::admit(&self.archive, text.len() as u64, false, super::quota::LIMIT)
-            .is_err()
-        {
-            return;
-        }
+        // Activity descriptions are tiny and never count as history payload.
         // A crashed session's description is removed with its lock anyway.
         let _ = files::replace_unsynced(&self.description, text.as_bytes());
     }
@@ -87,7 +83,7 @@ impl Registration {
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        let Ok(_store) = Exclusive::acquire(&self.archive.join("store.lock")) else {
+        let Ok(_store) = Exclusive::acquire(&super::layout::store_lock(&self.archive)) else {
             return;
         };
         let _ = std::fs::remove_file(&self.description);
@@ -96,7 +92,7 @@ impl Drop for Registration {
 
 /// Live entries; stale descriptions of exited processes are removed.
 pub fn list(archive: &Path) -> Vec<Entry> {
-    let Ok(_store) = Exclusive::acquire(&archive.join("store.lock")) else {
+    let Ok(_store) = Exclusive::acquire(&super::layout::store_lock(archive)) else {
         return Vec::new();
     };
     let directory = directory(archive);

@@ -280,7 +280,7 @@ fn a_move_without_an_updated_current_file_is_followed_and_repaired() {
     let points = history(&fixture, &workspace);
     let location = location(&fixture);
     let collection = gc::collect(&location, false).unwrap().unwrap();
-    let current = location.directory.join("CURRENT");
+    let current = crate::checkpoints::layout::current(&location.directory);
     fs::write(&current, b"1").unwrap();
 
     let store = Store::open(location.clone()).unwrap();
@@ -318,7 +318,11 @@ fn a_published_but_missing_generation_keeps_the_previous_history() {
     assert!(old.exists() && !new.exists());
 
     // CURRENT can also survive while its generation directory does not.
-    fs::write(location.directory.join("CURRENT"), b"2").unwrap();
+    fs::write(
+        crate::checkpoints::layout::current(&location.directory),
+        b"2",
+    )
+    .unwrap();
     let error = Store::open(location).err().unwrap();
     assert!(error.contains("generation 2 is missing"), "{error}");
     assert!(old.exists() && !new.exists());

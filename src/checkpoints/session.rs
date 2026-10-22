@@ -228,13 +228,17 @@ impl Session {
     }
 
     /// Records the point before a shell command.
-    pub fn command(&self, text: &str) -> CommandGuard {
+    pub fn command_cancellable(
+        &self,
+        text: &str,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> CommandGuard {
         let label: String = text.chars().take(80).collect();
         self.activity(&format!("running: {label}"));
         CommandGuard {
             command: self
                 .workspace()
-                .map(|workspace| workspace.command(&self.origin(), text)),
+                .map(|workspace| workspace.command_cancellable(&self.origin(), text, cancellation)),
         }
     }
 
@@ -279,6 +283,13 @@ impl FileGuard<'_> {
     pub fn prepare(&mut self, content: &[u8]) {
         if let Ok(mutation) = &mut self.mutation {
             mutation.prepare(content);
+        }
+    }
+
+    /// Saves an intended replacement before its source is staged on disk.
+    pub fn prepare_reader(&mut self, reader: impl std::io::Read, length: u64) {
+        if let Ok(mutation) = &mut self.mutation {
+            mutation.prepare_reader(reader, length);
         }
     }
 

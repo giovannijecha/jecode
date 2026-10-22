@@ -143,7 +143,7 @@ edited Windows source file. Real-time antivirus was enabled, but its
 contribution was not isolated from other filesystem or scheduling delays.
 The exact reread remains.
 
-Large scopes deliberately use selective protection:
+The measured revision deliberately used selective protection for large scopes:
 
 | Workload | Windows | Linux |
 | --- | ---: | ---: |
@@ -162,8 +162,10 @@ Linux; sampling does not establish a continuous allocation peak.
 Collection reduced a long turn's 69.6 MB archive to 3.4 MB: 95.1% released,
 in one 80.809 ms Windows sample and one 41.453 ms Linux sample. It retained
 current states and the last named point. These samples do not establish GC tail
-latency. The hard archive ceiling is 1 GiB in file lengths, with an active
-generation ceiling of 512 MiB to leave compaction space.
+latency. That revision imposed a hard archive ceiling of 1 GiB in file lengths
+and an active generation ceiling of 512 MiB to leave compaction space. These
+ceilings were subsequently replaced by streamed storage and a soft retention
+target; see [checkpoint capacity](../usage/CHECKPOINTS.md#scope-and-capacity).
 
 ### Explicit capture follow-up
 
@@ -231,8 +233,11 @@ edits twice in a row without it. Results go to
 changing the harness. To repeat selected workflows, set
 `JECODE_CHECKPOINT_MEASURE_ONLY` to comma-separated names: `capture`, `editing`,
 `recovery`, `storage`, `sessions`. The additional opt-in `large` workflow creates
-a 264 MiB content scope and 50,010 empty files to measure bounded discovery,
-selective points and recovery. Fixture creation is timed separately; archive
+a 264 MiB content scope and 50,010 empty files to measure complete acquisition,
+points and recovery beyond the former discovery limits. The opt-in `streaming`
+workflow captures, prepares, restores, undoes and compacts two unrelated 256 MiB
+file states in three fresh archives, verifying exact bytes outside timers.
+Its fixtures and comparisons also stream. Fixture creation is timed separately; archive
 peak figures are sampled between operations, not continuous allocation peaks.
 A copy without Git history can name its revision with
 `JECODE_CHECKPOINT_MEASURE_REVISION`.
@@ -240,6 +245,64 @@ A copy without Git history can name its revision with
 The journal keeps its followed segment open, and tool writes are recorded
 without reading the file back; see
 [workspace checkpoints](ARCHITECTURE.md#workspace-checkpoints).
+
+## Scalable checkpoint follow-up
+
+Recorded **2026-10-22**, Rust 1.95.0 release, source fingerprint
+`4e3f6ea7dcc110a9a4558fe93dc3cb29 over 409 files`. Windows NTFS fixtures and
+controls use warm OS cache. Probes ran serially after compilation. Default
+file, discovery and archive admission ceilings are removed; the retention
+budget is a soft target. Required current states, pins and recovery survive it.
+
+| Windows operation | Prior baseline median | Current median | Samples |
+| --- | ---: | ---: | ---: |
+| 4 KiB replacement, paired added cost | 4.446 ms | 2.632 ms | 200 |
+| Approximately 1 MiB line edit, paired added cost | 7.651 ms | 4.980 ms | 50 |
+| 1 MiB full rewrite, paired added cost | 11.984 ms | 8.384 ms | 50 |
+| Unchanged point, 10,000 files | 1.052 ms | 1.152 ms | 50 |
+| Restore one changed file | 6.882 ms | 5.746 ms | 50 |
+| Restore 100 changed files | 286.151 ms | 306.581 ms | 10 |
+| Restore whole scope, 120 changes | 482.230 ms | 567.325 ms | 10 |
+
+The current 1 MiB edit measured 13.392 ms with checkpoints versus 8.568 ms
+without them. The paired added range was -64.495 to 100.512 ms. A point
+immediately after that edit still waits for exact verification: 177.375 ms
+median, 62.152-224.887 ms over 50 samples. Bulk restore medians increased in
+these separate runs; the 100-file range was 225.496-677.335 ms. These results
+do not isolate causal differences from filesystem variation or establish tail
+latency. No antivirus or driver attribution is established.
+
+Full acquisition of 264 MiB took 1,112.645 ms median across three fresh
+archives and read all 276,824,064 payload bytes. Full acquisition of 50,010
+empty files took 5,591.108 ms across three archives. The earlier selective
+measurements copied zero payload and are not comparable full backups.
+
+The streaming probe used two unrelated 256 MiB states and compared exact
+bytes after restore, undo and compaction in three fresh archives. Windows
+medians were 937.519 ms for acquisition, 1,371.680 ms for durable replacement
+preparation, 1,872.448 ms for restore, 1,872.593 ms for undo and 1,753.179 ms
+for compaction. The archive held 536,919,409 logical bytes. The entire test
+process peaked at 85.20 MiB sampled private memory and 82.01 MiB working set,
+sampled every 100 ms; this is not a continuous or whole-system memory peak.
+
+Small revisions retain their previous storage efficiency: 2,138.12 bytes per
+40 KiB edit, 41,458 per rewrite and 417 for reused content. One collection
+sample reduced 69,643,385 to 3,407,857 logical bytes in 73.961 ms. Physical
+allocation differs, and compaction can temporarily retain both generations.
+
+On native WSL/ext4, three fresh archives measured 437.995 ms median for
+256 MiB acquisition, 665.283 ms restore and 646.227 ms undo; the streaming test
+reported 87.04 MiB maximum RSS. These are current measurements, without a fresh
+Linux baseline comparison. Separate offline CLI experiments verified a random
+1 GiB + 17-byte file through compaction and reopening, and 100,010 nonempty
+files across 101 directories through external changes, restore and undo.
+The 1 GiB archive occupied 1,073,837,810 logical / 1,073,934,336 allocated bytes
+afterward. Its GC observer sampled 2,147,672,053 logical / 2,147,819,520
+allocated bytes at peak, requesting 20 ms between samples. Sampling and `du`
+overhead prevent treating this as a continuous maximum or pure GC timing.
+Ten alternating CLI samples of 100-file restores measured 249.843 ms median
+in one directory and 262.040 ms in 100 directories, including startup and
+reconciliation, with exact manifests verified after every operation.
 
 ## Measurement conditions
 

@@ -153,7 +153,17 @@ fn edit(tools: &Tools, relative: &str, sample: usize) {
         ("old_text", Value::string(marker(sample))),
         ("new_text", Value::string(marker(sample + 1))),
     ];
-    call(tools, "edit", &fields);
+    let result = call(tools, "edit", &fields);
+    if tools.checkpoints().is_some() {
+        assert_eq!(
+            result
+                .get("checkpoint")
+                .and_then(|value| value.get("status"))
+                .and_then(Value::as_str),
+            Some("saved"),
+            "{result:?}"
+        );
+    }
 }
 
 fn utf8(bytes: Vec<u8>) -> String {

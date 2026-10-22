@@ -27,6 +27,7 @@ mod large;
 mod recovery;
 mod sessions;
 mod storage;
+mod streaming;
 
 const OUT: &str = "JECODE_CHECKPOINT_MEASURE_OUT";
 const QUICK: &str = "JECODE_CHECKPOINT_MEASURE_QUICK";
@@ -57,6 +58,7 @@ fn workflows() {
         ("storage", storage::run),
         ("sessions", sessions::run),
         ("large", large::run),
+        ("streaming", streaming::run),
     ] {
         if workflows.contains(&name) {
             run(&mut recorder);
@@ -70,7 +72,13 @@ fn workflows() {
 fn selected(value: Option<&str>) -> Result<Vec<&str>, String> {
     let default = ["capture", "editing", "recovery", "storage", "sessions"];
     let all = [
-        "capture", "editing", "recovery", "storage", "sessions", "large",
+        "capture",
+        "editing",
+        "recovery",
+        "storage",
+        "sessions",
+        "large",
+        "streaming",
     ];
     let Some(value) = value else {
         return Ok(default.to_vec());

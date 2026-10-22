@@ -94,7 +94,7 @@ impl Workspace {
                 text: format!(
                     "checkpoint limits changed: budget {}, maximum file {}",
                     size(policy.budget_bytes),
-                    size(policy.max_file_bytes)
+                    super::policy::file_limit(policy.max_file_bytes)
                 ),
                 paths: Vec::new(),
             }));
@@ -173,7 +173,7 @@ impl Workspace {
         let due = {
             let health = self.signals.lock();
             health.readiness == Readiness::Ready
-                && bytes > budget * 2 / 5
+                && bytes > budget / 5 * 2
                 && (bytes >= health.collected.saturating_add(budget / 10)
                     || health.collection_eligibility.as_ref() != Some(&eligibility))
         };

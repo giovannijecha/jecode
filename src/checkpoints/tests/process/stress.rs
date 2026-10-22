@@ -2,7 +2,6 @@
 use super::{HOME, MODE, ROOT};
 use crate::checkpoints::identity;
 use crate::checkpoints::mutation::Protection;
-use crate::checkpoints::quota;
 use crate::checkpoints::record::{Outcome, State};
 use crate::checkpoints::restore::Expected;
 use crate::checkpoints::store::Store;
@@ -17,7 +16,6 @@ const STAGE: &str = "JECODE_CHECKPOINT_TEST_STAGE";
 const TARGET: &str = "JECODE_CHECKPOINT_TEST_TARGET";
 const TIMEOUT: Duration = Duration::from_secs(90);
 const FILE_BYTES: usize = 80 << 10;
-const HEADROOM: u64 = 4 << 20;
 
 fn file(number: usize) -> String {
     format!("file-{number}.bin")
@@ -186,17 +184,8 @@ fn assert_bytes(fixture: &super::super::Fixture, initial: &[bool; 4]) {
     }
 }
 
-fn assert_capacity(archive: &Path) {
-    let used = quota::used(archive).unwrap();
-    assert!(
-        used <= quota::LIMIT,
-        "archive used {used} of {}",
-        quota::LIMIT
-    );
-}
-
 #[test]
-fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity() {
+fn four_sessions_survive_concurrent_collection_and_crashed_restore() {
     let fixture = super::super::Fixture::new();
     for number in 0..4 {
         fixture.write(&file(number), &bytes(number, true));
@@ -217,24 +206,13 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity
     let archive = workspace.archive.clone();
     drop(workspace);
 
-    // A single logical filler approaches the real 1 GiB hard cap. The journal
-    // itself is small; three revisions per file exercise retention separately.
-    // The filler lives only in this isolated archive and is never copied.
-    let filler = File::create(archive.join("test-owned-filler.bin")).unwrap();
-    let used = quota::used(&archive).unwrap();
-    filler.set_len(quota::LIMIT - HEADROOM - used).unwrap();
-    drop(filler);
-    assert_eq!(quota::used(&archive).unwrap(), quota::LIMIT - HEADROOM);
-    assert_capacity(&archive);
-
     let writers: Vec<_> = (0..3)
         .map(|number| Session::spawn(&fixture, &format!("stress-write-{number}"), None, 0))
         .collect();
     for writer in writers {
         writer.finish();
     }
-    assert_capacity(&archive);
-    let current = fs::read_to_string(archive.join("CURRENT")).ok();
+    let current = fs::read_to_string(crate::checkpoints::layout::current(&archive)).ok();
     let location = identity::locate(fixture.home.path(), fixture.root.path(), false)
         .unwrap()
         .unwrap();
@@ -251,7 +229,6 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity
     collector.ready(&fixture, "gc-first-object-copied");
     Session::spawn(&fixture, "stress-write-3", None, 0).finish();
     assert_bytes(&fixture, &[false; 4]);
-    assert_capacity(&archive);
     fs::write(
         marker(fixture.home.path(), "gc-first-object-copied", "release"),
         b"go",
@@ -260,8 +237,10 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity
     // The replacement generation and Moved marker are durable; CURRENT is old.
     // An OS kill here exercises discovery and repair on the next open.
     collector.ready(&fixture, "gc-moved");
-    assert_eq!(fs::read_to_string(archive.join("CURRENT")).ok(), current);
-    assert_capacity(&archive);
+    assert_eq!(
+        fs::read_to_string(crate::checkpoints::layout::current(&archive)).ok(),
+        current
+    );
     collector.kill();
     let location = identity::locate(fixture.home.path(), fixture.root.path(), false)
         .unwrap()
@@ -269,7 +248,7 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity
     let reopened = Store::open(location.clone()).unwrap();
     assert_eq!(reopened.journal.generation, old_generation + 1);
     assert_eq!(
-        fs::read_to_string(archive.join("CURRENT")).unwrap(),
+        fs::read_to_string(crate::checkpoints::layout::current(&archive)).unwrap(),
         (old_generation + 1).to_string()
     );
     assert!(
@@ -294,7 +273,6 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity
         assert_eq!(&reopened.bytes(*object).unwrap()[..], expected.as_slice());
     }
     assert_bytes(&fixture, &[false; 4]);
-    assert_capacity(&archive);
     drop(reopened);
 
     let mut restoring = Session::spawn(
@@ -307,7 +285,6 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity
     let pending = Store::open(location).unwrap().index.pending;
     assert_eq!(pending.len(), 4);
     assert_bytes(&fixture, &[true, false, false, false]);
-    assert_capacity(&archive);
     restoring.kill();
 
     let reopened = fixture.open();
@@ -359,5 +336,4 @@ fn four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity
         .unwrap();
     assert_bytes(&fixture, &[false; 4]);
     assert!(super::super::index(&reopened).pending.is_empty());
-    assert_capacity(&archive);
 }

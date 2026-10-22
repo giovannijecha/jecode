@@ -19,7 +19,7 @@ milestone LABEL [--pin]             record a named point
 restore cp-N PATH... [--exact-paths] [--preview] [--expected cp-M|latest]
 restore-all cp-N [--preview] [--expected cp-M|latest]
 pin cp-N [LABEL] | unpin cp-N       keep a point regardless of the budget
-config [--budget SIZE] [--max-file SIZE]
+config [--budget SIZE] [--max-file SIZE|unlimited]
 gc                                  release history beyond the budget now
 verify                              reread every file for disguised edits";
 
@@ -171,6 +171,12 @@ pub fn execute(
                 .to_string();
             Ok(match show::content(workspace, &reference)? {
                 Content::Text(text) => shown(title, text),
+                Content::Preview(text, length) => {
+                    let mut result = shown(title, text);
+                    result.raw = None;
+                    result.details.push(("preview".into(), format!("{length} bytes total; use checkpoint read pages or jecode checkpoints show for exact full content")));
+                    result
+                }
                 Content::Binary(length) => output(
                     title,
                     vec![(
@@ -264,4 +270,21 @@ pub fn offline(home: &Path, root: &Path, words: &[String]) -> Result<Output, Str
         workspace.initialize()?;
     }
     execute(&workspace, "cli", words, "jecode checkpoints")
+}
+
+/// Plain `show` streams complete text rather than building a giant panel.
+pub fn stream_show(
+    home: &Path,
+    root: &Path,
+    words: &[String],
+    output: &mut impl std::io::Write,
+) -> Result<bool, String> {
+    if words.first().is_none_or(|word| word != "show") {
+        return Ok(false);
+    }
+    let Parsed::Show(reference) = parse(words)? else {
+        return Ok(false);
+    };
+    let workspace = workspace::open(home, root, Options::offline())?;
+    show::write_text(&workspace, &reference, output)
 }

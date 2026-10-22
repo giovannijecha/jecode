@@ -1,5 +1,5 @@
-//! Opt-in measurements of bounded discovery and ordinary points in workspaces
-//! whose content or path count exceeds the default discovery limits.
+//! Opt-in measurements of complete acquisition and exact recovery beyond the
+//! former discovery limits, including an individually large streamed file.
 use super::*;
 use crate::checkpoints::hash;
 use crate::checkpoints::mutation::Protection;
@@ -49,6 +49,15 @@ fn content_limit(recorder: &mut Recorder) {
         initial.push(elapsed);
         if sample + 1 == INITIAL_SAMPLES {
             let protected = workspace.store().index.paths.len();
+            assert!(
+                protected >= BULK_FILES,
+                "the complete large scope was not captured"
+            );
+            assert!(workspace.store().index.paths.values().all(|versions| {
+                versions
+                    .last()
+                    .is_none_or(|version| version.state.recoverable())
+            }));
             recorder.metric(
                 "large",
                 "264 MiB initial capture",
@@ -213,6 +222,10 @@ fn path_limit(recorder: &mut Recorder) {
         });
         initial.push(elapsed);
         if sample + 1 == INITIAL_SAMPLES {
+            assert!(
+                workspace.store().index.paths.len() >= MANY_FILES,
+                "discovery silently truncated the scope"
+            );
             recorder.metric(
                 "large",
                 "50,010 files initial capture",

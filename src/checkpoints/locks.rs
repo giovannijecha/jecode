@@ -176,7 +176,7 @@ impl Drop for Lease {
 
 /// Whether the process that took `owners/<owner>.lock` has exited.
 pub fn owner_gone(directory: &Path, owner: &str) -> bool {
-    let path = directory.join("owners").join(format!("{owner}.lock"));
+    let path = super::layout::owner_lock(directory, owner);
     if !path.exists() {
         return true;
     }

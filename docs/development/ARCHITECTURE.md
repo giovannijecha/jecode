@@ -128,15 +128,15 @@ references them. Operational details live in [sessions](../usage/SESSIONS.md),
 ## Workspace checkpoints
 
 `checkpoints/` keeps file history for each canonical workspace root under
-`~/.jecode/checkpoints/<id>/`, independently of conversations and of the
+`~/.jecode/checkpoints/<project-name>-<id>/`, independently of conversations and of the
 terminal. User-facing behavior is in [checkpoints](../usage/CHECKPOINTS.md).
 
 | Part | Responsibility |
 | --- | --- |
-| `store.rs`, `journal.rs`, `frame.rs`, `record.rs`, `index.rs` | One archive generation: checksummed frames in 64 MiB append-only segments, objects stored whole or as bounded prefix/suffix deltas, and the in-memory index replayed from them. |
-| `locks.rs`, `activity.rs`, `identity.rs` | Operating-system file locks for archive writes and striped path leases; live-session descriptions; one archive per canonical root. |
-| `workspace.rs`, `inventory.rs`, `scan.rs`, `capture.rs`, `policy.rs` | Bounded background discovery, selective protection of large scopes, reconciliation and parallel capture with bounded live-content buffers. |
-| `quota.rs` | Admission under the shared store lock: one traversal counts total and active-generation logical bytes, with a hard 1 GiB archive ceiling and a 512 MiB active generation ceiling. |
+| `store.rs`, `journal.rs`, `frame.rs`, `record.rs`, `index.rs` | One archive generation: checksummed frames in 64 MiB append-only segments, small objects stored whole or as bounded prefix/suffix deltas, large objects as deduplicated chunks and hierarchical manifests, and the in-memory index replayed from them. |
+| `locks.rs`, `activity.rs`, `identity.rs`, `layout.rs`, `lifecycle.rs` | Operating-system file locks for archive writes and striped path leases; live-session descriptions; one archive per canonical root; resumable layout migration and inactive history expiration. |
+| `workspace.rs`, `inventory.rs`, `scan.rs`, `capture.rs`, `policy.rs` | Complete background discovery, reconciliation and parallel capture with bounded live-content buffers; cancellable Bash readiness wait. |
+| `quota.rs` | Logical archive accounting and explicit fixture quotas. Production retention is a soft target; required states are preserved above it. |
 | `watch.rs`, `watcher.cs` | Windows change notifications through an owned .NET helper. |
 | `mutation.rs`, `reconcile.rs`, `points.rs` | Tool file changes and commands, resolution of operations left prepared by exited processes, and points. |
 | `restore.rs`, `history.rs`, `gc.rs` | Restores with undo and conflict checks; pins, limits and generation compaction. |
@@ -149,7 +149,7 @@ afterward. A successful write completes from the tool's bytes and the file's
 metadata; the path is then reread off the call's path, or before the next
 point, to observe concurrent changes. Windows measurements show a delay when
 reopening newly written large files; its cause has not been isolated.
-Recovery resolves an interrupted operation by observing the file.
+Recovery resolves an interrupted operation by observing the file. Large-file preparation, restore and historical paging use bounded readers rather than complete content buffers.
 Parallel observation preserves path order and hands off bounded content batches,
 including during restores. Size hints from discovery cannot bound live data:
 another writer may have grown the files. A failed later batch can leave truthful

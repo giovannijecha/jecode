@@ -11,6 +11,7 @@ use std::sync::Arc;
 mod tests;
 
 pub const BATCH_BYTES: u64 = 8 << 20;
+pub const INLINE_BYTES: u64 = 1 << 20;
 const BATCH_PATHS: usize = 1024;
 
 /// One path's observed state, with the bytes needed to archive a file.
@@ -23,10 +24,43 @@ pub struct Observed {
 pub enum Observation {
     Absent,
     File(Arc<[u8]>, Mode),
+    Stream(StreamFile, Mode),
     Directory(Mode),
     Link(String),
     Oversized(u64),
     Unreadable(String),
+}
+
+/// A deferred read whose live path and opened handle must still describe the
+/// observation. Large observations retain metadata rather than file contents.
+pub struct StreamFile {
+    path: std::path::PathBuf,
+    stat: Stat,
+}
+
+impl StreamFile {
+    pub fn open(&self) -> Result<fs::File, String> {
+        let file = fs::File::open(&self.path).map_err(|error| error.to_string())?;
+        self.verify(&file)?;
+        Ok(file)
+    }
+
+    pub fn verify(&self, file: &fs::File) -> Result<(), String> {
+        let live = fs::symlink_metadata(&self.path).map_err(|error| error.to_string())?;
+        let opened = file.metadata().map_err(|error| error.to_string())?;
+        if !live.is_file()
+            || live.file_type().is_symlink()
+            || Stat::of(&live) != self.stat
+            || Stat::of(&opened) != self.stat
+        {
+            return Err("The file changed while its checkpoint was being read; retry".into());
+        }
+        Ok(())
+    }
+
+    pub fn length(&self) -> u64 {
+        self.stat.length
+    }
 }
 
 /// Reads a path without following links. Never mutates the workspace.
@@ -82,10 +116,37 @@ pub fn observe(root: &Path, relative: &str, max_file_bytes: u64) -> Observed {
     if metadata.len() > max_file_bytes {
         return observed(Observation::Oversized(metadata.len()), stat);
     }
+    if metadata.len() > INLINE_BYTES {
+        return observed(
+            Observation::Stream(
+                StreamFile {
+                    path,
+                    stat: Stat::of(&metadata),
+                },
+                Mode::of(&metadata),
+            ),
+            stat,
+        );
+    }
     match read_bounded(&path, max_file_bytes) {
-        Ok(Some(bytes)) => observed(Observation::File(bytes.into(), Mode::of(&metadata)), stat),
+        Ok(Some(bytes)) => {
+            if fs::symlink_metadata(&path)
+                .is_ok_and(|after| Stat::of(&after) == Stat::of(&metadata))
+            {
+                observed(Observation::File(bytes.into(), Mode::of(&metadata)), stat)
+            } else {
+                observed(
+                    Observation::Unreadable("the file changed while being read; retry".into()),
+                    stat,
+                )
+            }
+        }
+        Ok(None) if max_file_bytes <= INLINE_BYTES => observed(
+            Observation::Oversized(metadata.len().max(max_file_bytes.saturating_add(1))),
+            stat,
+        ),
         Ok(None) => observed(
-            Observation::Oversized(metadata.len().max(max_file_bytes + 1)),
+            Observation::Unreadable("the file grew while being read; retry".into()),
             stat,
         ),
         Err(error) => observed(Observation::Unreadable(error.to_string()), stat),
@@ -148,12 +209,19 @@ pub fn observe_batches<P: AsRef<str> + Sync>(
 
 /// A file this process just replaced with `bytes`, described by its metadata
 /// without reading it back. `None` when the metadata disagrees.
-pub fn written(root: &Path, relative: &str, bytes: Arc<[u8]>) -> Option<Observed> {
-    let metadata = fs::symlink_metadata(super::identity::absolute(root, relative)).ok()?;
-    let matches = metadata.file_type().is_file() && metadata.len() == bytes.len() as u64;
+pub fn written(root: &Path, relative: &str, length: u64) -> Option<Observed> {
+    let path = super::identity::absolute(root, relative);
+    let metadata = fs::symlink_metadata(&path).ok()?;
+    let matches = metadata.file_type().is_file() && metadata.len() == length;
     matches.then(|| Observed {
         path: relative.to_string(),
-        kind: Observation::File(bytes, Mode::of(&metadata)),
+        kind: Observation::Stream(
+            StreamFile {
+                path,
+                stat: Stat::of(&metadata),
+            },
+            Mode::of(&metadata),
+        ),
         stat: Some(Stat::of(&metadata)),
     })
 }
@@ -162,9 +230,65 @@ fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>> {
     use std::io::Read;
     let mut bytes = Vec::new();
     fs::File::open(path)?
-        .take(limit + 1)
+        .take(limit.saturating_add(1).min(INLINE_BYTES + 1))
         .read_to_end(&mut bytes)?;
-    Ok((bytes.len() as u64 <= limit).then_some(bytes))
+    Ok((bytes.len() as u64 <= limit.min(INLINE_BYTES)).then_some(bytes))
+}
+
+/// Byte-exact comparison without reconstructing a large archived file in RAM.
+/// Streaming observations are rechecked after the comparison, including on an
+/// early mismatch, so a displaced handle is never accepted as the live path.
+pub fn matches_file(store: &Store, object: u64, observed: &Observation) -> bool {
+    match observed {
+        Observation::File(bytes, _) => store
+            .equal_reader(object, std::io::Cursor::new(bytes.as_ref()))
+            .unwrap_or(false),
+        Observation::Stream(source, _) => source.open().is_ok_and(|mut file| {
+            let equal = store.equal_reader(object, &mut file).unwrap_or(false);
+            source.verify(&file).is_ok() && equal
+        }),
+        _ => false,
+    }
+}
+
+pub fn matches_state(store: &Store, observed: &Observed, state: &State, modes: bool) -> bool {
+    match (state, &observed.kind) {
+        (State::Absent, Observation::Absent) => true,
+        (
+            State::File {
+                object,
+                length,
+                mode,
+                ..
+            },
+            kind,
+        ) => {
+            let (actual_length, actual_mode) = match kind {
+                Observation::File(bytes, mode) => (bytes.len() as u64, *mode),
+                Observation::Stream(source, mode) => (source.length(), *mode),
+                _ => return false,
+            };
+            *length == actual_length
+                && (!modes || *mode == actual_mode)
+                && matches_file(store, *object, kind)
+        }
+        (State::Directory { mode }, Observation::Directory(actual)) => !modes || mode == actual,
+        (State::Link { target }, Observation::Link(actual)) => target == actual,
+        _ => false,
+    }
+}
+
+/// A final metadata check after comparing archived bytes, before installation.
+pub fn still_current(root: &Path, observed: &Observed) -> bool {
+    let live = fs::symlink_metadata(super::identity::absolute(root, &observed.path));
+    match (&observed.kind, &observed.stat, live) {
+        (Observation::Absent, _, Err(error)) => matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+        ),
+        (_, Some(stat), Ok(metadata)) => Stat::of(&metadata) == *stat,
+        _ => false,
+    }
 }
 
 /// The state a recording would produce, comparing bytes with the archive.
@@ -172,6 +296,9 @@ fn unchanged(store: &Store, index: &Index, observed: &Observed) -> bool {
     let Some(current) = index.current(&observed.path) else {
         return matches!(observed.kind, Observation::Absent);
     };
+    if matches!(&observed.kind, Observation::Stream(_, _)) {
+        return matches_state(store, observed, &current.state, true);
+    }
     match (&current.state, &observed.kind) {
         (State::Absent, Observation::Absent) => true,
         (
@@ -254,6 +381,20 @@ pub fn record(
                 mode,
             }
         }
+        Observation::Stream(source, mode) => {
+            let length = source.length();
+            let mut file = source.open()?;
+            let (object, digest) = transaction.object_reader(&mut file, length, base)?;
+            source.verify(&file)?;
+            transaction.store.counters.files_read += 1;
+            transaction.store.counters.bytes_read += length;
+            State::File {
+                object,
+                length,
+                digest,
+                mode,
+            }
+        }
         Observation::Directory(mode) => State::Directory { mode },
         Observation::Link(target) => State::Link { target },
         Observation::Oversized(length) => State::Oversized { length },
@@ -286,7 +427,7 @@ pub fn record_prepared(
     operation: u64,
 ) -> Result<Option<Recorded>, String> {
     let (
-        Observation::File(_, mode),
+        Observation::File(_, mode) | Observation::Stream(_, mode),
         State::File {
             object,
             length,

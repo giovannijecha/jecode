@@ -1,0 +1,288 @@
+//! Exact large-text edits with bounded working memory and a staged replacement.
+use super::*;
+use std::io::{Seek, SeekFrom};
+
+const BLOCK: usize = 64 * 1024;
+
+struct Temporary(PathBuf);
+
+impl Drop for Temporary {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// The intended bytes come from the original file and replacement text, so
+/// checkpoint preparation never reopens a newly written temporary file.
+struct Replacement<'a> {
+    source: &'a mut fs::File,
+    prefix: u64,
+    replacement: std::io::Cursor<&'a [u8]>,
+    suffix: u64,
+    skipped: bool,
+}
+
+impl<'a> Replacement<'a> {
+    fn new(
+        source: &'a mut fs::File,
+        position: u64,
+        old: usize,
+        new: &'a [u8],
+    ) -> std::io::Result<Self> {
+        source.rewind()?;
+        Ok(Self {
+            source,
+            prefix: position,
+            replacement: std::io::Cursor::new(new),
+            suffix: position + old as u64,
+            skipped: false,
+        })
+    }
+}
+
+impl Read for Replacement<'_> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        if output.is_empty() {
+            return Ok(0);
+        }
+        if self.prefix > 0 {
+            let count = self.prefix.min(output.len() as u64) as usize;
+            let read = self.source.read(&mut output[..count])?;
+            self.prefix -= read as u64;
+            return Ok(read);
+        }
+        let read = self.replacement.read(output)?;
+        if read != 0 {
+            return Ok(read);
+        }
+        if !self.skipped {
+            self.source.seek(SeekFrom::Start(self.suffix))?;
+            self.skipped = true;
+        }
+        self.source.read(output)
+    }
+}
+
+/// Streaming KMP includes overlapping occurrences and matches across reads.
+fn locate(mut source: impl Read, pattern: &[u8]) -> Result<(Option<u64>, bool), String> {
+    let mut failure = vec![0; pattern.len()];
+    for index in 1..pattern.len() {
+        let mut matched = failure[index - 1];
+        while matched > 0 && pattern[index] != pattern[matched] {
+            matched = failure[matched - 1];
+        }
+        if pattern[index] == pattern[matched] {
+            matched += 1;
+        }
+        failure[index] = matched;
+    }
+    let mut text = crate::utf8::Text::default();
+    let mut buffer = [0; BLOCK];
+    let mut matched = 0;
+    let mut offset = 0u64;
+    let mut position = None;
+    let mut ambiguous = false;
+    loop {
+        let count = source
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        text.push(&buffer[..count])?;
+        for byte in &buffer[..count] {
+            while matched > 0 && *byte != pattern[matched] {
+                matched = failure[matched - 1];
+            }
+            if *byte == pattern[matched] {
+                matched += 1;
+            }
+            offset += 1;
+            if matched == pattern.len() {
+                let found = offset - pattern.len() as u64;
+                if position.is_some() {
+                    ambiguous = true;
+                } else {
+                    position = Some(found);
+                }
+                matched = failure[matched - 1];
+            }
+        }
+    }
+    text.finish()?;
+    Ok((position, ambiguous))
+}
+
+fn mismatch(source: &mut fs::File, length: u64, error: &str) -> Result<Value, String> {
+    source.rewind().map_err(|error| error.to_string())?;
+    let mut context = Vec::new();
+    source
+        .take(8192)
+        .read_to_end(&mut context)
+        .map_err(|error| error.to_string())?;
+    let valid = match std::str::from_utf8(&context) {
+        Ok(_) => context.len(),
+        Err(error) => error.valid_up_to(),
+    };
+    let mut result =
+        super::mismatch::result(std::str::from_utf8(&context[..valid]).unwrap(), error);
+    if let Value::Object(fields) = &mut result {
+        fields.insert("current_bytes".into(), Value::number(length));
+        fields.insert(
+            "context_complete".into(),
+            Value::Bool(valid as u64 == length),
+        );
+    }
+    Ok(result)
+}
+
+fn unchanged(path: &Path, file: &fs::File, expected: &fs::Metadata) -> Result<(), String> {
+    // The public tool already resolved the path. Recheck both the live name
+    // and handle so a displaced file cannot be installed over a new writer.
+    let live = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    let opened = file.metadata().map_err(|error| error.to_string())?;
+    if !live.is_file()
+        || live.file_type().is_symlink()
+        || live.len() != expected.len()
+        || opened.len() != expected.len()
+        || live.modified().ok() != expected.modified().ok()
+        || opened.modified().ok() != expected.modified().ok()
+        || live.created().ok() != expected.created().ok()
+        || opened.created().ok() != expected.created().ok()
+        || live.permissions() != expected.permissions()
+        || opened.permissions() != expected.permissions()
+    {
+        return Err("The file changed while the edit was being prepared; read it and retry".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if live.ino() != expected.ino()
+            || live.dev() != expected.dev()
+            || live.ctime() != expected.ctime()
+            || live.ctime_nsec() != expected.ctime_nsec()
+            || opened.ctime() != expected.ctime()
+            || opened.ctime_nsec() != expected.ctime_nsec()
+        {
+            return Err(
+                "The file changed while the edit was being prepared; read it and retry".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn edit(
+    path: &Path,
+    old: &str,
+    new: &str,
+    mut guard: Option<FileGuard<'_>>,
+) -> Result<(Value, Option<crate::file_change::Change>), String> {
+    if new.contains('\0') {
+        return Err("File content must be UTF-8 text without NUL bytes".into());
+    }
+    let mut source = fs::File::open(path).map_err(|error| error.to_string())?;
+    let metadata = source.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("The path must refer to a regular file".into());
+    }
+    let (position, ambiguous) = locate(&mut source, old.as_bytes())?;
+    unchanged(path, &source, &metadata)?;
+    let reason = if position.is_none() {
+        Some("old_text was not found; read the file and use exact current text")
+    } else if ambiguous {
+        Some("old_text occurs more than once; include more exact surrounding text")
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        return Ok((mismatch(&mut source, metadata.len(), reason)?, None));
+    }
+    if metadata.permissions().readonly() {
+        return Err("File is read-only; its content was not changed".into());
+    }
+    let length = metadata
+        .len()
+        .checked_sub(old.len() as u64)
+        .and_then(|length| length.checked_add(new.len() as u64))
+        .ok_or("The replacement exceeds the filesystem length range")?;
+    if let Some(guard) = &mut guard {
+        guard.prepare_reader(
+            Replacement::new(&mut source, position.unwrap(), old.len(), new.as_bytes())
+                .map_err(|error| error.to_string())?,
+            length,
+        );
+    }
+    unchanged(path, &source, &metadata)?;
+    let temporary = Temporary(path.with_file_name(format!(
+        ".jecode-{}-{}.tmp",
+        std::process::id(),
+        NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+    )));
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary.0)
+        .map_err(|error| error.to_string())?;
+    let result = (|| -> std::io::Result<()> {
+        source.rewind()?;
+        std::io::copy(&mut (&mut source).take(position.unwrap()), &mut output)?;
+        output.write_all(new.as_bytes())?;
+        source.seek(SeekFrom::Start(position.unwrap() + old.len() as u64))?;
+        std::io::copy(&mut source, &mut output)?;
+        output.set_permissions(metadata.permissions())?;
+        output.sync_all()
+    })();
+    drop(output);
+    result.map_err(|error| format!("Could not stage file: {error}"))?;
+    unchanged(path, &source, &metadata)?;
+    drop(source);
+    let replaced = fs::rename(&temporary.0, path);
+    let checkpoint = guard.map(|guard| guard.finish(replaced.is_ok()));
+    replaced.map_err(|error| format!("Could not replace file: {error}"))?;
+    Ok((written(length, checkpoint), None))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_across_blocks_and_detects_overlaps() {
+        let mut text = vec![b'x'; BLOCK - 2];
+        text.extend_from_slice("é日🦀end".as_bytes());
+        assert_eq!(
+            locate(text.as_slice(), "é日🦀".as_bytes()).unwrap(),
+            (Some((BLOCK - 2) as u64), false)
+        );
+        assert_eq!(
+            locate(b"ababa".as_slice(), b"aba").unwrap(),
+            (Some(0), true)
+        );
+        assert!(locate(b"one\xfftwo".as_slice(), b"one").is_err());
+    }
+
+    #[test]
+    fn replacement_stream_preserves_prefix_suffix_and_utf8_at_every_read_size() {
+        let directory = crate::test_support::Directory::new();
+        let path = directory.path().join("source.txt");
+        fs::write(&path, "prefix-é日🦀-suffix").unwrap();
+        for replacement in ["new", "", "different é日 text"] {
+            for size in 1..17 {
+                let mut file = fs::File::open(&path).unwrap();
+                let mut reader =
+                    Replacement::new(&mut file, 7, "é日🦀".len(), replacement.as_bytes()).unwrap();
+                let mut output = Vec::new();
+                let mut buffer = vec![0; size];
+                loop {
+                    let count = reader.read(&mut buffer).unwrap();
+                    if count == 0 {
+                        break;
+                    }
+                    output.extend_from_slice(&buffer[..count]);
+                }
+                assert_eq!(output, format!("prefix-{replacement}-suffix").as_bytes());
+            }
+        }
+    }
+}

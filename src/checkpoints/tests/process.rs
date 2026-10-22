@@ -283,7 +283,7 @@ fn orderly_store_closes_remove_only_their_owner_locks() {
     let location = super::super::identity::locate(fixture.home.path(), fixture.root.path(), false)
         .unwrap()
         .unwrap();
-    let owners = location.directory.join("owners");
+    let owners = super::super::layout::owners_directory(&location.directory);
     let live = Store::open(location.clone()).unwrap();
     let live_path = owners.join(format!("{}.lock", live.owner));
     assert!(live_path.exists());

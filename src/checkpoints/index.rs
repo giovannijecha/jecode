@@ -22,6 +22,9 @@ pub struct Object {
 pub struct Index {
     pub next: u64,
     pub objects: HashMap<u64, Object>,
+    /// Chunk references of manifest objects; every referenced chunk is an
+    /// ordinary verified object in `objects`.
+    pub manifests: HashMap<u64, Vec<u64>>,
     pub contents: HashMap<(Digest, u64), Vec<u64>>,
     pub paths: BTreeMap<String, Vec<Version>>,
     pub stats: HashMap<String, Stat>,
@@ -45,15 +48,16 @@ pub struct Index {
 impl Index {
     pub fn apply(&mut self, entry: Entry) {
         match entry {
-            Entry::Object(meta, location) => self.object(meta, location),
+            Entry::Object(meta, location, chunks) => self.object(meta, location, chunks),
             Entry::Record(record) => self.record(record),
         }
     }
 
-    pub fn object(&mut self, meta: ObjectMeta, location: Location) {
+    pub fn object(&mut self, meta: ObjectMeta, location: Location, chunks: Vec<u64>) {
         self.next = self.next.max(meta.id + 1);
         let depth = match meta.encoding {
             Encoding::Full => 0,
+            Encoding::Chunks { .. } => 0,
             Encoding::Delta { base, .. } => self
                 .objects
                 .get(&base)
@@ -64,6 +68,9 @@ impl Index {
             .entry((meta.digest, meta.length))
             .or_default()
             .push(meta.id);
+        if matches!(meta.encoding, Encoding::Chunks { .. }) {
+            self.manifests.insert(meta.id, chunks);
+        }
         self.objects.insert(
             meta.id,
             Object {

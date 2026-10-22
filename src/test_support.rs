@@ -25,13 +25,20 @@ impl Directory {
     pub fn new() -> Self {
         let base = fixture_base();
         fs::create_dir_all(&base).unwrap();
-        let path = base.join(format!(
-            "{}-{}",
-            std::process::id(),
-            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&path).unwrap();
-        Self { path }
+        loop {
+            let path = base.join(format!(
+                "{}-{}",
+                std::process::id(),
+                NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => return Self { path },
+                // A prior crashed test can leave this name behind, and the
+                // operating system can later reuse its process identifier.
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("Could not create isolated fixture: {error}"),
+            }
+        }
     }
 
     pub fn path(&self) -> &Path {

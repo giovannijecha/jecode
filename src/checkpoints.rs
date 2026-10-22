@@ -13,6 +13,8 @@ mod identity;
 mod index;
 mod inventory;
 mod journal;
+mod layout;
+mod lifecycle;
 mod locks;
 #[cfg(test)]
 mod measurement_tests;

@@ -1,11 +1,11 @@
-//! Hard limit on logical bytes in files owned by one checkpoint archive.
-//! Call admission while holding its store lock, including during compaction.
+//! Logical archive usage and bounded admission for isolated test fixtures.
+//! Production uses `u64::MAX` to leave retention to the GC policy.
 use std::fs;
 use std::io;
 use std::path::{Component, Path};
 
+#[cfg(test)]
 pub const LIMIT: u64 = 1 << 30;
-pub const WORKING_LIMIT: u64 = LIMIT / 2;
 // Ordinary appends leave room for a pending operation's completion and the
 // compaction move. A reserved append still has to fit within LIMIT.
 pub const RESERVE: u64 = 64 << 10;
@@ -175,20 +175,6 @@ pub fn used(archive: &Path) -> Result<u64, String> {
     Ok(measure(archive, 0)?.total)
 }
 
-pub fn remaining(archive: &Path) -> Result<u64, String> {
-    // Discovery queries outside a transaction. Serialize with generation
-    // removal so a concurrent collection cannot turn the count into an I/O
-    // error halfway through walking the old generation.
-    let _lock = super::locks::Exclusive::acquire(&archive.join("store.lock"))
-        .map_err(|error| format!("Could not measure checkpoint capacity: {error}"))?;
-    let generation = super::journal::current_generation(archive)?;
-    let usage = measure(archive, generation)?;
-    let working = WORKING_LIMIT;
-    Ok((LIMIT - RESERVE)
-        .saturating_sub(usage.total)
-        .min((working - RESERVE).saturating_sub(usage.generation)))
-}
-
 /// An active generation leaves half the archive for a compacted replacement.
 /// Only terminal metadata can use the space held back for pending completions.
 pub fn admit_generation(
@@ -198,6 +184,14 @@ pub fn admit_generation(
     terminal: bool,
     limit: u64,
 ) -> Result<(), String> {
+    if limit == u64::MAX {
+        return usage
+            .total
+            .checked_add(added)
+            .zip(usage.generation.checked_add(added))
+            .map(|_| ())
+            .ok_or_else(|| "Checkpoint archive byte accounting overflow".into());
+    }
     admit_measured(usage.total, added, terminal, limit)?;
     let working = limit / 2;
     let ceiling = if metadata_only && terminal {
@@ -222,12 +216,21 @@ pub fn admit_generation(
 }
 
 pub fn admit(archive: &Path, added: u64, reserved: bool, limit: u64) -> Result<(), String> {
+    if limit == u64::MAX {
+        return Ok(());
+    }
     let used = used(archive)?;
     admit_measured(used, added, reserved, limit)
 }
 
 /// Reuse a measurement only while the caller keeps the archive store lock.
 pub fn admit_measured(used: u64, added: u64, reserved: bool, limit: u64) -> Result<(), String> {
+    if limit == u64::MAX {
+        return used
+            .checked_add(added)
+            .map(|_| ())
+            .ok_or_else(|| "Checkpoint archive byte accounting overflow".into());
+    }
     let ceiling = if reserved {
         limit
     } else {

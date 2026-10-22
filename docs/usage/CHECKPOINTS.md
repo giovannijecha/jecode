@@ -12,10 +12,12 @@ These workspace checkpoints are not the conversation saves described in
 ## What is saved and when
 
 Each canonical project directory has one archive under
-`~/.jecode/checkpoints/<id>/`, shared by every Jecode process that opens it.
-The first session discovers the scope in the background. When it fits the
-bounded baseline, Jecode captures it; otherwise it protects recorded paths
-and files touched by `write` and `edit`. Restores cover a path once captured.
+`~/.jecode/checkpoints/<project-name>-<id>/`, shared by every Jecode process
+that opens it. The first session captures the scope in the background. Bash
+waits for this capture before recording its starting point; cancellation also
+interrupts that wait. Later commands reconcile changes instead of recopying
+unchanged content. A failed save still allows the tool to run with an explicit
+`unprotected` result. Restores cover a path once its state has been captured.
 
 | Moment | What Jecode records |
 | --- | --- |
@@ -69,7 +71,7 @@ When a session opens an archive, it reconciles changes made while no session
 was running. Interactive sessions on Windows also reread each protected file once, to
 find edits that preserved size and modification time.
 
-## Scope and limits
+## Scope and capacity
 
 The scope is Jecode's own: every file under the project directory except the
 default exclusions, regardless of Git ignore rules. `.env` is included by
@@ -78,21 +80,22 @@ default; add a policy exclusion if the local archive should omit it.
 | Setting | Default |
 | --- | --- |
 | Excluded names | `.git`, `.hg`, `.svn`, `.jj`, `.bzr`, `_darcs`, `.jecode-output`, `.jecode-*.tmp`, `target`, `node_modules`, `__pycache__`, `.venv`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.gradle`, `.next`, `.nuxt`, `.turbo`, `.parcel-cache`, `.svelte-kit`, `.terraform`, `.cache` |
-| Maximum captured file | Hard ceiling of 10 MiB; larger files are recorded by size only and cannot be restored |
-| Archive content | Hard ceiling of 1 GiB in file lengths, across all generations and temporary files |
-| Active generation | At most 512 MiB; the other half is reserved for compaction |
-| Initial discovery | At most 50,000 visited paths and an estimated baseline of one quarter of the retention budget (256 MiB by default) |
+| Maximum captured file | No configured limit; an explicit limit remains available |
+| Retention budget | 1 GiB soft target for releasing old history; required current states, pins and recovery can exceed it |
+| Discovery | No configured path count or content-size ceiling; generated subtrees are pruned |
+| Inactive history | Released automatically after seven inactive days, subject to active-reader, pin and recovery protection |
 
 Symbolic links are recorded as links and directories by their permissions.
-Unreadable files are recorded with the reason, and their content cannot be
-restored.
+Unreadable files retain the reason; their content cannot be restored. Available
+disk space, filesystem support, permissions and memory for path/version/object metadata
+still constrain the archive. Check `status` and each tool's protection result.
 
-Edit `~/.jecode/checkpoints/<id>/policy.json` to change the scope:
+Edit the archive's `policy.json` to change the scope:
 
 ```json
 {
-  "version": 1,
-  "max_file_bytes": 10485760,
+  "version": 2,
+  "max_file_bytes": null,
   "budget_bytes": 1073741824,
   "exclude": [".git", "target", "node_modules", "*.log", "data/raw/"],
   "include": ["keep.log"]
@@ -108,45 +111,42 @@ unless an `include` rule matches the directory itself. An omitted `exclude`
 uses the defaults above.
 
 Edits apply when a session next opens the archive or records a point. Jecode
-then rescans and records the change in history; running conversations receive
-a notice. Edits never delete existing history. `config` can lower the retention
-budget and file limit; neither it nor `policy.json` can raise the hard ceilings.
-Legacy values above the ceilings are read at the ceilings.
+rescans and records the change in history; running conversations receive a
+notice. Scope changes preserve existing history. `config --budget SIZE` changes
+the soft retention target. `config --max-file SIZE` sets an explicit file limit;
+`config --max-file unlimited` restores the unlimited default. Policy version 1's
+former generated 10 MiB default migrates to unlimited. Other legacy values and
+explicit version 2 limits remain configured.
 
-### Large workspaces
+### Large workspaces and files
 
-Generated subtrees are pruned before discovery visits their contents. Discovery
-reads metadata and stops at its path or baseline estimate limit, before copying
-an arbitrary prefix of file contents. A scope that does not fit switches to
-**selective protection**: existing history remains available, `write` and `edit`
-save their own paths before changing them, and automatic observation follows
-recorded paths. Untouched files do not consume the reserve for actual work.
-Turn and Bash points still observe recorded paths automatically. Before a Bash
-command may edit a known file without a captured state, use `checkpoint` with
-`action: "capture"` and the exact workspace-relative file paths. Capture is
-also useful for an initial state or a precise preimage. The result
-reports `saved`, `skipped` or `unprotected` for each path. A `saved` path has a
-durable `saved_at` version; `ref` names a point after all saved paths. An absent
-path is saved as absent, so restoring it after Bash creates it removes it.
-Directory arguments are skipped with a request to name individual files; Jecode
-does not silently capture only part of a directory. Excluded, unreadable and
-oversized paths have no recoverable preimage. If a file changes during capture,
-it is reported unprotected and should be retried before Bash. External changes
-can still race after the final read; this is an observed point, not an atomic
-filesystem snapshot.
-Changes seen after Bash have `external` origin because Jecode cannot identify
-their writer. A model restore may report a version conflict; inspect the current
-state and pass `expected: "latest"` if replacing it is intended.
+Discovery visits the eligible tree without the former 50,000-path or estimated
+content-size cutoff. Captured content moves through bounded batches. Files
+larger than 1 MiB use deduplicated 1 MiB blocks and hierarchical manifests;
+acquisition, exact comparisons, historical reads and restore stream the bytes.
+Large text edits validate UTF-8 and locate an exact unique match across block
+boundaries before staging their replacement. Memory for file contents does not
+grow with the complete file size; path, version and block/object metadata remains
+in memory.
 
-Live acquisition and restores consume bounded batches, including when files
-grew after discovery; they do not retain the entire tree's content in memory.
+On Windows, subsequent ordinary points use delivered change notifications.
+Linux and macOS scan metadata at each point, then reread changed files. Tree
+size therefore still affects their point latency. The first complete acquisition
+must read the eligible content on every platform.
 
-`status`, Bash results and the model's request context report selective
-coverage. Bash can still edit any file, but an uncaptured file has no previous
-version to recover. Use a tool result's `checkpoint.before` for its exact
-previous state. Whole-scope restores skip unknown prior states; they never
-interpret an unacquired path as a file to delete. `verify` retries bounded
-discovery, so full coverage can return after the scope shrinks.
+`capture` remains useful for a precise preimage or partial coverage caused by
+unreadable paths. Name individual workspace-relative files or links; directories
+are skipped rather than captured partially. Each `saved` entry has a durable
+`saved_at`; `ref` names a point after the saved states. An absent path is saved
+as absent, so restoring it after Bash creates it removes it. Explicitly excluded,
+unreadable or configured oversized paths have no recoverable preimage. If a
+file changes while being captured, inspect the unprotected result and retry.
+
+Points record observed history rather than an atomic filesystem snapshot.
+External writers can race after observation. `status`, Bash results and request
+context expose incomplete coverage. Unknown prior states are never interpreted
+as permission to delete a file. `verify` retries complete discovery and rereads
+the scope; a later healthy scan can recover from an interrupted acquisition.
 
 ## Commands
 
@@ -248,28 +248,58 @@ accepts the current state when planning. Neither bypasses the immediate recheck.
 
 ## Storage and retention
 
-Content is deduplicated and small edits are stored as deltas against the
-previous version. Collection starts at 40% of the retention budget and targets
-25%, leaving room to copy retained data into a new generation. The current
-state, the latest named point, pins and unfinished operations remain protected.
-Older intermediate versions can be released even during a long turn. `gc` compacts now.
-Pins retain history; they never increase capacity.
+Content is deduplicated; small files can use prefix/suffix deltas and large
+files reuse unchanged blocks. Collection starts at 40% of the soft retention
+budget and targets 25%. The current state, latest named point, pins and
+unfinished operations remain protected even when they exceed that target.
+`gc` compacts now. Old generations remain readable until their readers release
+them. Compaction can temporarily require both old and new generations on disk;
+the budget is neither a hard archive cap nor a reservation of free space.
 
-Admission checks run under the shared archive lock before writing. The 1 GiB
-ceiling counts logical lengths of all archive files, including journal metadata,
-old generations still held by readers and compaction output. The active
-generation is limited to 512 MiB so a replacement can be copied within the
-1 GiB ceiling. A further 64 KiB within the active generation is reserved for
-metadata, including completion and coverage records. Idle sessions follow
-generation changes and release their old readers in the background.
-Filesystem allocation and filesystem metadata overhead are not file lengths.
-`status` shows total archive bytes, the current generation and its capacity
-separately.
+The archive layout separates durable history from live coordination:
 
-If required current states or pins cannot fit, collection fails without
-discarding them. At capacity, new captures report incomplete or unprotected
-results and normal tools continue. Existing history remains readable; an
-already oversized legacy archive is preserved rather than truncated.
+```text
+<project-name>-<id>/
+  workspace.json
+  policy.json
+  history/
+    CURRENT
+    gen-000001/
+    gen-000001.lock
+  runtime/
+    activity/
+    owners/
+    leases/
+    lifecycle.lock
+    last-use
+    high-water
+  store.lock
+  gc.lock
+```
+
+Lock files are internal process coordination and normally occupy no content
+bytes. Existing hashed archive directories keep their name and migrate their
+contents in place when no legacy reader is active. The migration is resumable;
+old binaries cannot open the migrated history. Root coordination locks stay
+stable across migration. A migrated archive also keeps a root `CURRENT`
+compatibility marker; the active generation is in `history/CURRENT`.
+
+Jecode checks inactive archives when it opens and periodically while running.
+After seven inactive days, it removes unpinned history with no unfinished
+recovery or active reader. This never deletes workspace files or conversation
+saves. Activity writes and sweeps are coalesced hourly, with a conservative
+margin so history cannot expire early; cleanup can occur later than the exact
+seven-day boundary. No operating-system scheduler or service is installed.
+Opening an expired archive checks it before renewing activity. Archives without
+an activity timestamp receive a fresh seven-day grace period. Background
+maintenance and automatic collection do not renew user activity. Identity,
+scope policy and the sequence watermark
+survive cleanup, so old `cp-N` references cannot resolve to unrelated new data.
+
+Filesystem allocation and metadata overhead differ from file lengths. `status`
+shows logical archive bytes and the active generation separately. A full disk
+or I/O error produces incomplete or unprotected results while normal tools
+continue; it never authorizes discarding required current states or pins.
 
 Archives contain unredacted file contents, including secrets in `.env` files,
 in private files under your Jecode home. Model-visible results use the same

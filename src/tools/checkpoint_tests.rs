@@ -4,6 +4,8 @@ use crate::test_support::Directory;
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod large;
+
 struct Fixture {
     _home: Directory,
     root: Directory,
@@ -274,23 +276,23 @@ fn bash_shows_its_point_first_and_reports_what_it_changed() {
 }
 
 #[test]
-fn explicit_capture_protects_selective_paths_before_bash() {
+fn explicit_capture_records_precise_preimages_before_bash() {
     let fixture = fixture();
     let workspace = fixture.tools.checkpoints().unwrap().workspace().unwrap();
     workspace
-        .configure(Some(1 << 20), Some(256 << 10), "test")
+        .configure(Some(1 << 20), Some(512 << 10), "test")
         .unwrap();
     fs::create_dir_all(fixture.root.path().join("data")).unwrap();
     for number in 0..4 {
         fs::write(
             fixture.root.path().join(format!("data/{number}.bin")),
-            vec![number as u8; 128 << 10],
+            vec![number as u8; 384 << 10],
         )
         .unwrap();
     }
     fs::write(fixture.root.path().join("work.txt"), b"original\0bytes").unwrap();
     workspace.initialize().unwrap();
-    assert!(workspace.selective().is_some());
+    assert!(workspace.selective().is_none());
     let captured = call(
         &fixture.tools,
         "checkpoint",
@@ -324,6 +326,8 @@ fn explicit_capture_protects_selective_paths_before_bash() {
         Some(0),
         "{ran:?}"
     );
+    assert_eq!(text(&ran, &["checkpoint", "status"]), "saved");
+    assert!(ran.get("checkpoint").unwrap().get("warning").is_none());
     let conflicted = call(
         &fixture.tools,
         "checkpoint",

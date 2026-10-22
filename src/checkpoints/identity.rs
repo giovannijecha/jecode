@@ -1,5 +1,6 @@
 //! Workspace identity: one archive directory per canonical workspace root.
 use super::files;
+use super::locks::Exclusive;
 use crate::json::{self, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,25 +35,70 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
         value.wrapping_mul(257).wrapping_add(u128::from(byte) + 1)
     });
     let archives = home.join("checkpoints");
+    if create {
+        files::private_directory(&archives)
+            .map_err(|error| format!("Could not create checkpoint archives: {error}"))?;
+    }
+    // Serializes archive creation across new processes. Existing version 1
+    // archives are looked up under their original hash before allocating a
+    // readable name for version 2.
+    let _identity = if create {
+        Some(
+            Exclusive::acquire(&archives.join(".identity.lock"))
+                .map_err(|error| format!("Could not lock checkpoint identities: {error}"))?,
+        )
+    } else {
+        None
+    };
     let node = node(&root);
+    let name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(safe_name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "workspace".into());
     let mut free = None;
+    let mut found = None;
     for suffix in 0..64 {
-        let id = if suffix == 0 {
-            format!("{base:032x}")
-        } else {
-            format!("{base:032x}-{suffix}")
-        };
-        let directory = archives.join(&id);
-        match read(&directory) {
-            Some(record) if record.root == key => {
-                return Ok(Some(Location { root, directory }));
-            }
-            Some(_) => {}
-            None if directory.exists() && directory.join("workspace.json").exists() => {}
-            None => {
-                free.get_or_insert(directory);
+        for (kind, prefix) in [format!("{base:032x}"), format!("{name}-{base:032x}")]
+            .into_iter()
+            .enumerate()
+        {
+            let id = if suffix == 0 {
+                prefix
+            } else {
+                format!("{prefix}-{suffix}")
+            };
+            let directory = archives.join(&id);
+            match read(&directory) {
+                Some(record) if record.root == key => {
+                    if found
+                        .as_ref()
+                        .is_some_and(|previous| previous != &directory)
+                    {
+                        return Err(format!(
+                            "Multiple checkpoint archives exist for {}; history was preserved",
+                            root.display()
+                        ));
+                    }
+                    found = Some(directory);
+                }
+                Some(_) => {}
+                None if directory.exists() => {
+                    return Err(format!(
+                        "Checkpoint identity at {} is damaged or incomplete; history was preserved",
+                        directory.display()
+                    ));
+                }
+                None if kind == 1 => {
+                    free.get_or_insert(directory);
+                }
+                None => {}
             }
         }
+    }
+    if let Some(directory) = found {
+        return Ok(Some(Location { root, directory }));
     }
     if let Some(location) = node.and_then(|node| alias(&archives, &root, node)) {
         return Ok(Some(location));
@@ -64,7 +110,7 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
     files::private_directory(&directory)
         .map_err(|error| format!("Could not create checkpoint archive: {error}"))?;
     let mut record = vec![
-        ("version", Value::number(1)),
+        ("version", Value::number(2)),
         ("root", Value::string(&key)),
         ("created", Value::number(crate::sessions::now())),
     ];
@@ -88,6 +134,44 @@ pub fn locate(home: &Path, workspace: &Path, create: bool) -> Result<Option<Loca
     Ok(Some(Location { root, directory }))
 }
 
+fn safe_name(name: &str) -> String {
+    name.chars()
+        .take(40)
+        .map(|character| match character {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => character,
+            _ => '-',
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+/// Rejects unrelated directories found during a global sweep. The workspace
+/// itself need not still exist: inactivity can expire an orphaned archive.
+pub fn recognized_archive(directory: &Path) -> bool {
+    let Some(record) = read(directory) else {
+        return false;
+    };
+    if !Path::new(&record.root).is_absolute() {
+        return false;
+    }
+    let hash = record.root.bytes().fold(0u128, |value, byte| {
+        value.wrapping_mul(257).wrapping_add(u128::from(byte) + 1)
+    });
+    let hash = format!("{hash:032x}");
+    let Some(name) = directory.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name == hash
+        || name
+            .strip_prefix(&format!("{hash}-"))
+            .is_some_and(|suffix| suffix.parse::<u32>().is_ok())
+        || name.ends_with(&format!("-{hash}"))
+        || name
+            .rsplit_once(&format!("-{hash}-"))
+            .is_some_and(|(_, suffix)| suffix.parse::<u32>().is_ok())
+}
+
 struct Record {
     root: String,
     node: Option<(u64, u64)>,
@@ -107,6 +191,10 @@ fn read(directory: &Path) -> Option<Record> {
             })
             .and_then(|text| text.parse::<u64>().ok())
     };
+    let version = number("version")?;
+    if version != 1 && version != 2 {
+        return None;
+    }
     Some(Record {
         root: value.get("root")?.as_str()?.to_string(),
         node: number("device").zip(number("inode")),
@@ -261,8 +349,43 @@ mod tests {
         .unwrap();
         let moved = locate(&home, &workspace, true).unwrap().unwrap();
         assert_ne!(moved.directory, first.directory);
-        assert!(moved.directory.to_string_lossy().ends_with("-1"));
+        assert!(
+            moved
+                .directory
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("Work-")
+        );
+        fs::write(moved.directory.join("workspace.json"), b"{broken").unwrap();
+        assert!(locate(&home, &workspace, true).is_err());
         assert!(locate(&home, &fixture.path().join("missing"), false).is_err());
+    }
+
+    #[test]
+    fn duplicate_legacy_and_new_roots_do_not_silently_split_history() {
+        let fixture = Directory::new();
+        let home = fixture.path().join("home");
+        let workspace = fixture.path().join("Work");
+        fs::create_dir(&workspace).unwrap();
+        let new = locate(&home, &workspace, true).unwrap().unwrap();
+        let hash = new
+            .directory
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .strip_prefix("Work-")
+            .unwrap()
+            .to_string();
+        let old = home.join("checkpoints").join(hash);
+        fs::create_dir(&old).unwrap();
+        let text = fs::read_to_string(new.directory.join("workspace.json")).unwrap();
+        fs::write(
+            old.join("workspace.json"),
+            text.replace("\"version\": 2", "\"version\": 1"),
+        )
+        .unwrap();
+        assert!(locate(&home, &workspace, false).is_err());
     }
 
     #[test]

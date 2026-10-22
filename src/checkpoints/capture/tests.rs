@@ -68,14 +68,40 @@ fn serial_observation_allows_one_file_larger_than_a_batch() {
     let mut observed = 0;
     observe_batches(directory.path(), &["large.bin"], 10 << 20, |batch| {
         assert_eq!(batch.len(), 1);
-        let Observation::File(bytes, _) = &batch[0].kind else {
-            panic!("the file should be within the hard per-file limit");
+        let Observation::Stream(source, _) = &batch[0].kind else {
+            panic!("the file should be streamed without buffering its contents");
         };
-        assert_eq!(bytes.len(), 9 << 20);
-        assert!(bytes.iter().all(|byte| *byte == 7));
+        assert_eq!(source.length(), 9 << 20);
+        let mut file = source.open().unwrap();
+        let mut bytes = [0; 64 << 10];
+        use std::io::Read;
+        while file.read(&mut bytes).unwrap() != 0 {
+            assert!(bytes.iter().all(|byte| *byte == 7));
+        }
+        source.verify(&file).unwrap();
         observed += 1;
         Ok(())
     })
     .unwrap();
     assert_eq!(observed, 1);
+}
+
+#[test]
+fn streamed_observation_rejects_a_displaced_live_path() {
+    let directory = Directory::new();
+    let path = directory.path().join("large.bin");
+    let mut output = fs::File::create(&path).unwrap();
+    output.set_len(INLINE_BYTES + 1).unwrap();
+    use std::io::Write;
+    output.write_all(b"original").unwrap();
+    drop(output);
+    let observed = observe(directory.path(), "large.bin", u64::MAX);
+    let Observation::Stream(source, _) = observed.kind else {
+        panic!("expected streaming observation");
+    };
+    let handle = source.open().unwrap();
+    fs::rename(&path, directory.path().join("displaced.bin")).unwrap();
+    fs::write(&path, b"a new live file").unwrap();
+    assert!(source.verify(&handle).is_err());
+    assert!(source.open().is_err());
 }

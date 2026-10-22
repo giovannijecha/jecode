@@ -17,7 +17,14 @@ fn selective(fixture: &Fixture) -> Arc<Workspace> {
     for number in 0..4 {
         fixture.write(&format!("data/{number}.bin"), &noise(number, 128 << 10));
     }
-    workspace.initialize().unwrap();
+    // Simulate a previously interrupted, selective capture. A soft budget no
+    // longer makes a healthy workspace selective merely because it is large.
+    workspace
+        .limit_scope("synthetic incomplete baseline")
+        .unwrap();
+    workspace
+        .signals
+        .update(|health| health.readiness = crate::checkpoints::workspace::Readiness::Ready);
     assert!(workspace.selective().is_some());
     workspace
 }
@@ -307,7 +314,12 @@ fn measure_explicit_capture_in_selective_workspace() {
     };
     let fresh_small = fresh_paths("first4k", 200, 4 << 10);
     let fresh_large = fresh_paths("first1m", 20, 1 << 20);
-    workspace.initialize().unwrap();
+    workspace
+        .limit_scope("synthetic incomplete baseline")
+        .unwrap();
+    workspace
+        .signals
+        .update(|health| health.readiness = crate::checkpoints::workspace::Readiness::Ready);
     assert!(workspace.selective().is_some());
 
     fn samples(workspace: &Arc<Workspace>, label: &str, names: &[String], first: bool) {

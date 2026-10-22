@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
+mod readiness;
+
 const TICK: Duration = Duration::from_millis(500);
 const DEBOUNCE: Duration = Duration::from_millis(20);
 const POLL_MIN: Duration = Duration::from_secs(2);
@@ -70,8 +72,8 @@ pub enum Watching {
 
 pub(super) struct Health {
     pub readiness: Readiness,
-    /// Large scopes protect known paths and tool mutations instead of
-    /// repeatedly walking or copying the entire workspace.
+    /// Incomplete scopes protect known paths and tool mutations while
+    /// unreadable or unsupported paths remain unresolved.
     pub selective: Option<String>,
     #[cfg(windows)]
     pub policy: super::policy::Policy,
@@ -153,6 +155,9 @@ static OPEN: Mutex<Vec<Weak<Workspace>>> = Mutex::new(Vec::new());
 
 /// Opens this process's shared handle on the workspace archive.
 pub fn open(home: &Path, root: &Path, options: Options) -> Result<Arc<Workspace>, String> {
+    // A separate archive can expire while this workspace is being opened.
+    // Sweep before locate creates or reuses this archive.
+    let _ = super::lifecycle::sweep(&home.join("checkpoints"));
     let location = identity::locate(home, root, true)?
         .ok_or("Could not create the workspace checkpoint archive")?;
     let mut open = OPEN.lock().unwrap_or_else(|e| e.into_inner());
@@ -162,9 +167,11 @@ pub fn open(home: &Path, root: &Path, options: Options) -> Result<Arc<Workspace>
         .filter_map(Weak::upgrade)
         .find(|workspace| workspace.archive == location.directory)
     {
+        super::lifecycle::touch(&found.archive)?;
         return Ok(found);
     }
     let workspace = Arc::new(Workspace::new(home, location, options)?);
+    super::lifecycle::touch(&workspace.archive)?;
     open.push(Arc::downgrade(&workspace));
     drop(open);
     workspace.start();
@@ -191,7 +198,7 @@ impl Workspace {
         let workspace = Self {
             root: location.root.clone(),
             archive: location.directory.clone(),
-            leases: Leases::new(location.directory.join("leases")),
+            leases: Leases::new(super::layout::leases_directory(&location.directory)),
             store: Mutex::new(store),
             excluded,
             signals: Arc::new(Signals {
@@ -260,39 +267,6 @@ impl Workspace {
         self.options
     }
 
-    pub(super) fn progress(&self, examined: usize) {
-        let mut health = self.signals.lock();
-        match health.readiness {
-            Readiness::Baseline(_) => health.readiness = Readiness::Baseline(examined),
-            Readiness::Reconciling(_) => health.readiness = Readiness::Reconciling(examined),
-            _ => {}
-        }
-    }
-
-    pub fn readiness(&self) -> Readiness {
-        self.signals.lock().readiness.clone()
-    }
-
-    pub fn selective(&self) -> Option<String> {
-        self.signals.lock().selective.clone()
-    }
-
-    pub(super) fn limit_scope(&self, reason: &str) -> Result<(), String> {
-        self.signals
-            .update(|health| health.selective = Some(reason.into()));
-        scan::coverage(&mut self.store(), false, &format!("selective: {reason}"))
-    }
-
-    #[cfg(test)]
-    pub fn watching(&self) -> Watching {
-        self.signals.lock().watching.clone()
-    }
-
-    /// Without live notifications, freshness comes from scans.
-    pub fn polling(&self) -> bool {
-        self.signals.lock().watching != Watching::Active
-    }
-
     /// Runs the first capture, or reconciles offline changes, on this thread.
     pub fn initialize(&self) -> Result<(), String> {
         #[cfg(windows)]
@@ -309,7 +283,7 @@ impl Workspace {
         });
         let origin = if baseline { "baseline" } else { "external" };
         let result = (|| {
-            let summary = scan::scan(
+            let summary = scan::scan_full(
                 self,
                 origin,
                 !baseline && self.options.verify,
@@ -533,5 +507,8 @@ fn worker(weak: Weak<Workspace>, signals: Arc<Signals>) {
             polled = Instant::now();
         }
         workspace.maintain();
+        let _ = super::lifecycle::sweep_throttled(
+            workspace.archive.parent().unwrap_or(&workspace.archive),
+        );
     }
 }

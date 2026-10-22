@@ -304,7 +304,17 @@ impl Drop for PendingFile {
 }
 
 /// Writes and syncs exact file bytes and mode in a temporary sibling.
+#[cfg(test)]
 pub fn stage(path: &Path, bytes: &[u8], mode: Mode) -> std::io::Result<PendingFile> {
+    stage_reader(path, &mut std::io::Cursor::new(bytes), mode)
+}
+
+/// Streams a replacement to its sibling without retaining its contents in RAM.
+pub fn stage_reader(
+    path: &Path,
+    mut source: impl std::io::Read,
+    mode: Mode,
+) -> std::io::Result<PendingFile> {
     let parent = path.parent().unwrap_or(Path::new("."));
     let temporary = parent.join(format!(
         ".jecode-{}-{}.tmp",
@@ -322,7 +332,7 @@ pub fn stage(path: &Path, bytes: &[u8], mode: Mode) -> std::io::Result<PendingFi
     };
     {
         let mut file = file;
-        file.write_all(bytes)?;
+        std::io::copy(&mut source, &mut file)?;
         #[cfg(unix)]
         mode.apply(&file)?;
         #[cfg(not(unix))]

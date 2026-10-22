@@ -1,5 +1,4 @@
-//! Bounded discovery. An oversized scope is rejected before copying an
-//! arbitrary prefix of its files into the archive.
+//! Scope discovery. Explicit limits remain available for isolated fixtures.
 use super::policy::Policy;
 use super::record::Stat;
 use super::scan::{WORKERS, in_scope};
@@ -8,7 +7,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
-pub const MAX_PATHS: usize = 50_000;
 const PATH_BYTES: u64 = 512;
 
 #[derive(Clone, Copy)]
@@ -18,10 +16,10 @@ pub struct Limits {
 }
 
 impl Limits {
-    pub fn for_policy(policy: &Policy) -> Self {
+    pub fn for_policy(_policy: &Policy) -> Self {
         Self {
-            paths: MAX_PATHS,
-            bytes: policy.budget_bytes / 4,
+            paths: usize::MAX,
+            bytes: u64::MAX,
         }
     }
 }
@@ -62,10 +60,13 @@ impl Budget {
     }
 
     fn admit(&self, length: u64) -> bool {
+        if self.limits.bytes == u64::MAX {
+            return true;
+        }
         if self
             .bytes
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
-                used.checked_add(length + PATH_BYTES)
+                used.checked_add(length.saturating_add(PATH_BYTES))
                     .filter(|total| *total <= self.limits.bytes)
             })
             .is_err()
@@ -214,7 +215,7 @@ fn read(
         } else {
             0
         };
-        if !budget.admit(length + path.len() as u64 * 2) {
+        if !budget.admit(length.saturating_add((path.len() as u64).saturating_mul(2))) {
             break;
         }
         if kind.is_err() || metadata.is_err() {

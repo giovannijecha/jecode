@@ -57,31 +57,6 @@ impl Entry {
     }
 }
 
-fn matches_saved(workspace: &Workspace, state: &State, observation: &Observation) -> bool {
-    match (state, observation) {
-        (State::Absent, Observation::Absent) => true,
-        (
-            State::File {
-                object,
-                length,
-                digest,
-                mode,
-            },
-            Observation::File(bytes, observed_mode),
-        ) => {
-            *length == bytes.len() as u64
-                && *digest == super::hash::digest(bytes)
-                && mode == observed_mode
-                && workspace
-                    .store()
-                    .bytes(*object)
-                    .is_ok_and(|old| old[..] == bytes[..])
-        }
-        (State::Link { target }, Observation::Link(observed)) => target == observed,
-        _ => false,
-    }
-}
-
 /// Capture the current states of explicit file or link names. Every saved_at
 /// names a durable version even if a later path or the final point fails.
 pub fn run(workspace: &Arc<Workspace>, origin: &str, paths: &[String]) -> Result<Value, String> {
@@ -217,7 +192,7 @@ fn run_with(
             for (index, state) in saved {
                 let entry = &mut entries[index];
                 let live = capture::observe(&workspace.root, &entry.path, policy.max_file_bytes);
-                if !matches_saved(workspace, &state, &live.kind) {
+                if !capture::matches_state(&workspace.store(), &live, &state, true) {
                     entry.finish(
                         "unprotected",
                         "path changed during capture; retry before Bash",

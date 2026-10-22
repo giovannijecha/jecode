@@ -78,8 +78,19 @@ pub fn scan(
     reconcile(workspace, origin, verify, false, cancellation)
 }
 
-/// Explicit verification also retries bounded discovery, so a workspace
-/// that became smaller can regain whole-scope protection.
+/// Retries full discovery, including archives that used selective protection
+/// under an earlier capacity policy.
+pub fn scan_full(
+    workspace: &Workspace,
+    origin: &str,
+    verify: bool,
+    cancellation: &crate::cancel::Cancellation,
+) -> Result<Summary, String> {
+    reconcile(workspace, origin, verify, true, cancellation)
+}
+
+/// Explicit verification retries full discovery, so a workspace that was
+/// previously selective can regain whole-scope protection.
 pub fn discover(
     workspace: &Workspace,
     origin: &str,
@@ -123,7 +134,6 @@ fn reconcile(
     }
     workspace.signals.update(|health| health.selective = None);
     let mut candidates = Vec::new();
-    let mut new_bytes = 0u64;
     {
         let store = workspace.store();
         let mut seen = HashSet::with_capacity(walk.entries.len());
@@ -139,15 +149,6 @@ fn reconcile(
                 )
             {
                 candidates.push((entry.path.clone(), entry.stat.length));
-                if !store.index.paths.contains_key(&entry.path) {
-                    new_bytes = new_bytes.saturating_add(
-                        512 + if entry.directory || entry.stat.length > policy.max_file_bytes {
-                            0
-                        } else {
-                            entry.stat.length
-                        },
-                    );
-                }
             }
         }
         for (path, versions) in &store.index.paths {
@@ -165,18 +166,6 @@ fn reconcile(
                 candidates.push((path.clone(), 0));
             }
         }
-    }
-    if new_bytes > 0 && new_bytes > super::quota::remaining(&workspace.archive)? / 2 {
-        let reason = "new paths would consume the reserve for tool changes and undo";
-        workspace.limit_scope(reason)?;
-        return tracked(
-            workspace,
-            &policy,
-            origin,
-            verify,
-            reason.into(),
-            cancellation,
-        );
     }
     let mut summary = Summary {
         scanned: walk.entries.len(),
@@ -259,7 +248,7 @@ fn tracked(
     Ok(summary)
 }
 
-/// Observes paths with bounded parallel reads and records them in batches,
+/// Observes paths with parallel reads and records them in batches,
 /// each under the paths' leases so tool mutations are never interleaved.
 /// Notification batches hold only a few lease stripes at a time, leaving
 /// other paths available to concurrent tool calls.
@@ -339,7 +328,7 @@ fn batch_end(
                 previous = Some(stripe);
             }
         }
-        bytes += candidates[end].1.min(max_file_bytes);
+        bytes = bytes.saturating_add(candidates[end].1.min(max_file_bytes));
         end += 1;
     }
     end

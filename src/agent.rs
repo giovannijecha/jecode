@@ -260,7 +260,9 @@ impl Agent {
                     self.cancel_calls(&completion.calls[index..]);
                     return Err(error);
                 }
-                let begun = self.tools.begin(&call.name, &call.arguments);
+                let begun =
+                    self.tools
+                        .begin_cancellable(&call.name, &call.arguments, &self.cancellation);
                 if let Some(note) = begun.note()
                     && let Err(error) = events.emit(Event::ToolNote {
                         id: self.redact(&call.id),
