@@ -1,8 +1,12 @@
 # Tools
 
-Jecode offers six tools to the model. A call runs only after the complete model
-response and its arguments validate; streamed partial calls never execute.
-Tool errors return as results so the model can correct the call.
+Jecode offers six tools to the model. Calls run only after the complete model
+response arrives; streamed partial calls never execute. Up to four consecutive
+`read` calls can run together when their arguments identify paths other than
+`history:` and `skill:`. A different tool or one of those references ends the
+batch. Results enter the conversation and saved session in call order before
+the next tool runs. Tool errors return as results so the model can correct the
+call.
 
 ## Tool arguments
 

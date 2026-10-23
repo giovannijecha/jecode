@@ -236,32 +236,26 @@ fn a_pin_is_exact_without_fallbacks_or_required_parameters() {
 }
 
 #[test]
-fn pinned_endpoint_limits_and_parameters_narrow_the_model_only_when_known() {
+fn pinned_endpoint_limits_narrow_the_model_only_when_known() {
     let model = Some(Limits {
         context: 200_000,
         output: Some(64_000),
     });
     let mut listed = endpoint("one");
     listed.output = Some(16_000);
-    listed.parameters = Some(vec!["tools".into()]);
     let mut unlisted = endpoint("two");
     unlisted.context = None;
-    unlisted.parameters = None;
     let endpoints = listing(vec![listed, unlisted]);
     let one = router(Routing::Endpoint("one".into()), Some(endpoints.clone()));
     let limits = one.limits(MODEL, model).unwrap();
     assert_eq!((limits.context, limits.output), (100_000, Some(16_000)));
-    assert!(!one.allows(MODEL, "response_format"));
-    assert!(one.allows(MODEL, "tools"));
     let two = router(Routing::Endpoint("two".into()), Some(endpoints.clone()));
     let limits = two.limits(MODEL, model).unwrap();
     assert_eq!((limits.context, limits.output), (200_000, Some(64_000)));
-    assert!(two.allows(MODEL, "response_format"));
     let limits = one.limits(MODEL, None).unwrap();
     assert_eq!((limits.context, limits.output), (100_000, Some(16_000)));
     let auto = router(Routing::Auto, Some(endpoints));
     assert_eq!(auto.limits(MODEL, model).unwrap().context, 200_000);
-    assert!(auto.allows(MODEL, "response_format"));
     assert_eq!(
         auto.limits("other/model", None)
             .map(|limits| limits.context),

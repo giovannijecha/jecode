@@ -69,6 +69,8 @@ mod journal_tests;
 #[cfg(all(test, windows))]
 mod measurement_tests;
 #[cfg(test)]
+mod read_batch_tests;
+#[cfg(test)]
 mod routing_tests;
 #[cfg(test)]
 mod tests;

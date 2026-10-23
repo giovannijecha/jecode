@@ -1,6 +1,6 @@
 use crate::cancel::Cancellation;
 use crate::effort::Effort;
-use crate::events::{Event, EventSink, tool_summary};
+use crate::events::{Event, EventSink};
 use crate::export::{Archive, Messages};
 use crate::json::Value;
 use crate::openrouter::{OpenRouter, ToolCall};
@@ -238,78 +238,7 @@ impl Agent {
                 }
                 return Ok(());
             }
-            for (index, call) in completion.calls.iter().enumerate() {
-                if self.cancellation.requested() {
-                    self.cancel_calls(&completion.calls[index..]);
-                    return Err("Operation cancelled".into());
-                }
-                let arguments = crate::json::parse(&call.arguments)
-                    .unwrap_or_else(|_| Value::string(&call.arguments));
-                if let Err(error) = self.checkpoint(crate::sessions::Stage::Tool(call.id.clone())) {
-                    self.cancel_calls(&completion.calls[index..]);
-                    return Err(error);
-                }
-                if let Err(error) = events.emit(Event::ToolStarted {
-                    id: self.redact(&call.id),
-                    name: self.redact(&call.name),
-                    arguments: self.redactor.value(&arguments),
-                }) {
-                    self.cancel_calls(&completion.calls[index..]);
-                    return Err(error);
-                }
-                let begun =
-                    self.tools
-                        .begin_cancellable(&call.name, &call.arguments, &self.cancellation);
-                if let Some(note) = begun.note()
-                    && let Err(error) = events.emit(Event::ToolNote {
-                        id: self.redact(&call.id),
-                        text: self.redact(&note),
-                    })
-                {
-                    self.cancel_calls(&completion.calls[index..]);
-                    return Err(error);
-                }
-                let outcome = self.execute_tool_with_change(call, begun);
-                let result = &outcome.result;
-                self.tool_result(call, result);
-                let change = outcome.change.map(|change| change.redacted(&self.redactor));
-                if let Some(change) = &change {
-                    self.events.lock().unwrap().push(Value::object([
-                        ("type", Value::string("tool_change")),
-                        (
-                            "after_message",
-                            Value::number(self.messages.lock().unwrap().len()),
-                        ),
-                        ("tool_call_id", Value::string(self.redact(&call.id))),
-                        ("change", change.value()),
-                    ]));
-                }
-                if let Err(error) = self.checkpoint(crate::sessions::Stage::ToolFinished) {
-                    self.cancel_calls(&completion.calls[index + 1..]);
-                    return Err(error);
-                }
-                if let Some(change) = change
-                    && let Err(error) = events.emit(Event::ToolChanged {
-                        id: self.redact(&call.id),
-                        change,
-                    })
-                {
-                    self.cancel_calls(&completion.calls[index + 1..]);
-                    return Err(error);
-                }
-                if let Err(error) = events
-                    .emit(Event::ToolFinished {
-                        id: self.redact(&call.id),
-                        name: self.redact(&call.name),
-                        summary: self.redact(&tool_summary(&call.name, result)),
-                        result: self.redactor.value(result),
-                    })
-                    .and_then(|()| self.emit_context(events))
-                {
-                    self.cancel_calls(&completion.calls[index + 1..]);
-                    return Err(error);
-                }
-            }
+            self.execute_calls(&completion.calls, events)?;
         }
     }
 
@@ -326,9 +255,6 @@ impl Agent {
             && let Ok((name, _)) = crate::skills::parse_reference(reference)
         {
             self.used_skills.insert(name.to_owned());
-            // The dynamic system projection now includes the skill reference.
-            self.context.input_tokens = None;
-            self.context.measured_end = 0;
         }
     }
 
@@ -446,6 +372,7 @@ impl Agent {
 pub(crate) mod checkpoints;
 mod compaction;
 mod environment;
+mod execution;
 mod history;
 mod input;
 mod persistence;

@@ -113,6 +113,13 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
                 vec![],
             ),
         ),
+        (
+            200,
+            completion(
+                "Original objective retained, including the last portion.",
+                vec![],
+            ),
+        ),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -135,10 +142,14 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
         Some(prompt.as_str())
     );
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 3);
-    assert!(requests[1].body.get("tools").is_none());
-    assert!(requests[2].body.get("tools").is_some());
-    assert!(requests[2].body.encode().contains("last portion"));
+    assert_eq!(requests.len(), 4);
+    assert!(
+        requests[1..3]
+            .iter()
+            .all(|request| request.body.get("tools").is_none())
+    );
+    assert!(requests[3].body.get("tools").is_some());
+    assert!(requests[3].body.encode().contains("last portion"));
     assert_eq!(
         agent
             .messages
@@ -243,6 +254,7 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
     assert!(memory.len() > 8192);
     let fixture = HttpFixture::new(vec![
         (200, completion(&memory, vec![])),
+        (200, completion(&memory, vec![])),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -284,5 +296,5 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
             < 28000
     );
     assert_eq!(agent.messages.lock().unwrap().len(), 6);
-    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(fixture.finish().len(), 3);
 }

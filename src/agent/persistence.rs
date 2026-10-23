@@ -195,6 +195,10 @@ impl Agent {
         *self.events.lock().unwrap() = document.events;
         self.compatible_from = document.compatible_from;
         self.context = document.context;
+        if self.context.from > 1 && self.context.skill_references.is_empty() {
+            self.refresh_skills();
+            self.context.skill_references = self.redact(&self.skill_checkpoint_instructions());
+        }
         let calibration = self.context.calibration;
         self.context.reset_usage();
         // A fresh request path invalidates the direct prompt measurement,

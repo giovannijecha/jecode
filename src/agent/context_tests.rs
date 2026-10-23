@@ -44,7 +44,8 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
         assert!(agent.context_estimate(&history) < 21000);
     }
     assert!(
-        text(&agent.transport_messages()).contains("history:3 — current original user request")
+        text(&agent.transport_messages())
+            .contains("Last user request in this checkpoint: history:3")
     );
     assert_eq!(*agent.messages.lock().unwrap(), original);
     agent.enable_sessions(home.path()).unwrap();
@@ -55,7 +56,8 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
     resumed.resume(&id).unwrap();
     assert_eq!(*resumed.messages.lock().unwrap(), original);
     assert!(
-        text(&resumed.transport_messages()).contains("history:3 — current original user request")
+        text(&resumed.transport_messages())
+            .contains("Last user request in this checkpoint: history:3")
     );
     resumed
         .prepare_turn("Audit without more code changes")

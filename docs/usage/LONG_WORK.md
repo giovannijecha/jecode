@@ -32,30 +32,35 @@ describes command output and process controls.
 ## Active context and original history
 
 Jecode keeps original messages and tool results in the saved conversation and
-export. The next model request uses a smaller view built from system
-instructions, recent original user requests, a summary when present, and work
-since the previous compaction. The context indicator in the TUI estimates the
-next request as a share of the effective model window; `Context unknown` means
-the window has not been established. It is an estimate, so a provider context
-rejection can still occur.
+export. After compaction, the next model request uses a smaller view built from
+system instructions, a fixed excerpt of archived user requests, a summary and
+recent original exchanges. The excerpt keeps the first request and the latest
+requests that fit its budget; `history:requests` retains the complete sequence.
+The context indicator in the TUI estimates the next request as a share of the
+effective model window; `Context unknown` means the window has not been
+established. It is an estimate, so a provider context rejection can still occur.
 
 The [Auto-compact at setting](CONFIGURATION.md#automatic-compaction-threshold)
 defaults to 80% of the effective window. Before each model request, reaching
 that input budget first turns large older tool results into previews containing
 `history_reference`. If that is insufficient, Jecode asks the same selected
-model, with tools disabled, to summarize work since the previous compaction.
-It carries prior summary and original user requests into that handoff; recent
-requests remain verbatim within the budget. The saved originals are not
-replaced. Use `read(path="history:N")` or `history:requests` to recover omitted
-content; [Tools](TOOLS.md#file-paths-and-paged-reads) explains pagination and
-other references.
+model, with tools disabled, to fold the work since the previous compaction into
+a plain-text handoff. It processes the transcript in chronological portions,
+including large records split across portions. It carries the prior summary
+and archived user requests into each portion. Recent original messages stay
+verbatim when they fit within a quarter of the input budget. A tool call and
+all its results stay together; an oversized group may leave no verbatim tail.
+The saved originals are not replaced. Use `read(path="history:N")` or
+`history:requests` to recover omitted content; [Tools](TOOLS.md#file-paths-and-paged-reads)
+explains pagination and other references.
 
-The summary retains goals, constraints, decisions, completed work, errors and
-next steps. Compaction stays within the current turn, so it does not submit a
-draft or replay a completed tool call. A provider context rejection can lower
-the effective window and trigger reduction earlier than the configured
-percentage suggests. A truncated ordinary response reports incomplete output
-without executing partial calls.
+The handoff asks the model to retain goals, constraints, decisions, completed
+work, errors and next steps. References to skills read before compaction are
+saved alongside it so the model can reread them when relevant. Compaction stays
+within the current turn, so it does not submit a draft or replay a completed
+tool call. A provider context rejection can lower the effective window and
+trigger reduction earlier than the configured percentage suggests. A truncated
+ordinary response reports incomplete output without executing partial calls.
 
 If the system instructions and original requests leave too little room for a
 useful summary, or the new summary does not fit, the turn stops with a resource

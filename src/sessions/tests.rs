@@ -113,6 +113,7 @@ fn interrupted_tool_is_unknown_unstarted_calls_are_not_executed_and_partial_is_d
     doc.pending = Pending {
         active: true,
         tool: Some("started".into()),
+        reads: Vec::new(),
         partial: "incomplete response".into(),
     };
     let lease = store.acquire(&doc.id).unwrap();
@@ -431,5 +432,23 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
     assert_eq!(
         &doc.input.paused[0].text[..doc.input.paused[0].cursor],
         "before [redacted]"
+    );
+}
+
+#[test]
+fn opening_a_session_redacts_saved_skill_references() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let store = store(&home, &directory);
+    let mut doc = document(&directory);
+    doc.context.skill_references = "skill:fixture-key".into();
+    let id = doc.id.clone();
+    let lease = store.acquire(&id).unwrap();
+    lease.save(&doc).unwrap();
+    drop(lease);
+    let (handle, _) = Handle::open(store, &id, Redactor::new("fixture-key".into())).unwrap();
+    assert_eq!(
+        handle.snapshot().context.skill_references,
+        "skill:[redacted]"
     );
 }

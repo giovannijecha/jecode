@@ -86,6 +86,19 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
     {
         return Err("Pending tool does not match the saved context".into());
     }
+    if !document.pending.reads.is_empty()
+        && (!document.pending.active
+            || document.pending.tool.is_some()
+            || document
+                .pending
+                .reads
+                .iter()
+                .any(|id| !outstanding.contains(id))
+            || document.pending.reads.iter().collect::<BTreeSet<_>>().len()
+                != document.pending.reads.len())
+    {
+        return Err("Pending reads do not match the saved context".into());
+    }
     for event in document.events.iter().skip(validated.events) {
         if let Some(kind) = event.get("kind")
             && !matches!(kind.as_str(), Some("notice" | "warning" | "error"))
@@ -179,12 +192,13 @@ impl Document {
                 if answered.contains(id) {
                     continue;
                 }
-                let unknown = self.pending.tool.as_deref() == Some(id);
+                let unknown = self.pending.tool.as_deref() == Some(id)
+                    || self.pending.reads.iter().any(|read| read == id);
                 let result = Value::object([
                     (
                         "error",
                         Value::string(if unknown {
-                            "Tool outcome is unknown: Jecode closed after execution started. Check the workspace before deciding whether to run it again."
+                            "Tool outcome is unknown: Jecode closed after execution may have started. Check the workspace before deciding whether to run it again."
                         } else {
                             "Tool was not executed: Jecode closed before execution started."
                         }),

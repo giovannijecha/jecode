@@ -3,8 +3,6 @@ use crate::{json::Value, openrouter::Limits};
 pub(crate) mod source;
 mod view;
 
-pub(crate) use view::excerpt;
-
 /// Introduces a compaction summary, which the same model wrote in an earlier context window.
 const SUMMARY_PREFIX: &str = "Another language model started this task and wrote the summary below. The work it did with tools is still in place: files, saved outputs and the original history. Build on it and avoid repeating finished work.";
 
@@ -51,6 +49,8 @@ impl Status {
 pub struct Context {
     pub from: usize,
     pub summary: String,
+    /// Operational references captured at compaction, independent of the model summary.
+    pub skill_references: String,
     pub ceiling: Option<usize>,
     pub input_tokens: Option<usize>,
     pub measured_end: usize,
@@ -68,6 +68,7 @@ impl Default for Context {
         Self {
             from: 1,
             summary: String::new(),
+            skill_references: String::new(),
             ceiling: None,
             input_tokens: None,
             measured_end: 0,
@@ -85,6 +86,7 @@ impl Context {
         Value::object([
             ("from", Value::number(self.from)),
             ("summary", Value::string(&self.summary)),
+            ("skill_references", Value::string(&self.skill_references)),
             ("ceiling", self.ceiling.map_or(Value::Null, Value::number)),
             (
                 "input_tokens",
@@ -134,6 +136,13 @@ impl Context {
                 .and_then(Value::as_str)
                 .ok_or("Invalid context summary")?
                 .into(),
+            skill_references: match value.get("skill_references") {
+                None => String::new(),
+                Some(value) => value
+                    .as_str()
+                    .ok_or("Invalid saved skill references")?
+                    .into(),
+            },
             ceiling: optional("ceiling")?,
             input_tokens: optional("input_tokens")?,
             measured_end: number("measured_end")?,
@@ -258,8 +267,9 @@ impl Context {
                 (
                     "content",
                     Value::string(format!(
-                        "{SUMMARY_PREFIX} It covers the conversation before history:{}; read history:N for any original message and history:requests for every user request.\n\n{}",
-                        self.from, self.summary
+                        "{SUMMARY_PREFIX} It covers the conversation before history:{}; messages from that boundary onward remain in the transcript below. Read history:N for any original message and history:requests for every user request.\n\n{}{}",
+                        self.from, self.summary,
+                        if self.skill_references.is_empty() { String::new() } else { format!("\n\n{}", self.skill_references) }
                     )),
                 ),
             ]));

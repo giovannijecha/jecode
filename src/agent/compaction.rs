@@ -224,14 +224,14 @@ impl Agent {
                 return Ok(false);
             }
         }
-        let end = original.len();
-        if self.context.from >= end {
+        if self.context.from >= original.len() {
             return Ok(false);
         }
-        // Like a context checkpoint: the summary replaces everything since the
-        // previous one, beside recent user requests kept verbatim.
+        let end = self.recent_boundary(&original, input_budget / 4);
+        // Summarize the older prefix and keep recent complete exchanges verbatim.
         let mut next = self.context.clone();
         next.from = end;
+        next.skill_references = self.redact(&self.skill_checkpoint_instructions());
         next.preview_until = end;
         next.preview_limit = (input_budget / 12).clamp(512, 2048);
         next.request_limit = (input_budget / 4).max(1024);
@@ -313,6 +313,30 @@ impl Agent {
         events.emit(Event::ContextCompacted { text })?;
         Ok(true)
     }
+
+    fn recent_boundary(&self, messages: &[Value], budget: usize) -> usize {
+        let mut boundary = messages.len();
+        let mut bytes = 0usize;
+        for index in (self.context.from..messages.len()).rev() {
+            bytes = bytes.saturating_add(context::bytes_for(
+                std::slice::from_ref(&messages[index]),
+                self.client.inputs(),
+            ));
+            if self.context.estimate_bytes(bytes) > budget {
+                break;
+            }
+            // A tool call and all its results must stay on the same side.
+            if messages[index].get("role").and_then(Value::as_str) != Some("tool") {
+                boundary = index;
+            }
+        }
+        if boundary == self.context.from {
+            // There is no older prefix to replace in this case.
+            messages.len()
+        } else {
+            boundary
+        }
+    }
 }
 
 #[cfg(test)]
@@ -322,5 +346,7 @@ mod summary_budget_tests;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod continuity_tests;
 #[cfg(test)]
 mod preview_tests;

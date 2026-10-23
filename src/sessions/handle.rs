@@ -36,7 +36,9 @@ pub enum Stage {
     Accept(Vec<crate::attachments::Prompt>),
     Completion,
     Tool(String),
+    ReadBatch(Vec<String>),
     ToolFinished,
+    ReadBatchFinished,
     Ready,
     Preserve,
 }
@@ -77,7 +79,14 @@ impl Handle {
             .collect();
         document.pending.partial = redactor.text(&document.pending.partial);
         document.context.summary = redactor.text(&document.context.summary);
+        document.context.skill_references = redactor.text(&document.context.skill_references);
         document.pending.tool = document.pending.tool.map(|id| redactor.text(&id));
+        document.pending.reads = document
+            .pending
+            .reads
+            .into_iter()
+            .map(|id| redactor.text(&id))
+            .collect();
         context::validate(&document)?;
         let interrupted = document.recover();
         context::validate(&document)?;
@@ -192,7 +201,11 @@ impl Handle {
             }
             Stage::Completion => live.document.pending.partial.clear(),
             Stage::Tool(id) => live.document.pending.tool = Some(live.redactor.text(&id)),
+            Stage::ReadBatch(ids) => {
+                live.document.pending.reads = ids.iter().map(|id| live.redactor.text(id)).collect();
+            }
             Stage::ToolFinished => live.document.pending.tool = None,
+            Stage::ReadBatchFinished => live.document.pending.reads.clear(),
             Stage::Ready => live.document.pending = Pending::default(),
             Stage::Accept(_) | Stage::Preserve => {}
         }

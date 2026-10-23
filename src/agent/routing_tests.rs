@@ -118,6 +118,7 @@ fn a_pin_reaches_summary_requests_and_its_failures_say_how_to_change_it() {
             )]),
         ),
         (200, completion("Original objective retained.", vec![])),
+        (200, completion("Original objective retained.", vec![])),
         (200, completion("Finished.", vec![])),
         error(404, "No endpoints found matching your data policy"),
     ]);
@@ -131,7 +132,7 @@ fn a_pin_reaches_summary_requests_and_its_failures_say_how_to_change_it() {
         "{failure}"
     );
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 5);
+    assert_eq!(requests.len(), 6);
     // The summary request is the one without tools.
     assert!(requests[2].body.get("tools").is_none());
     for request in &requests[1..] {

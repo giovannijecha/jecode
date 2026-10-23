@@ -122,7 +122,7 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         ("role", Value::string("assistant")),
         (
             "content",
-            Value::string("Recorded inspection result ".repeat(4000)),
+            Value::string("Recorded inspection result ".repeat(750)),
         ),
     ]));
     agent.context.observe(
@@ -134,11 +134,14 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
             >= crate::context::threshold(limits.context, crate::context::AUTO_COMPACT_DEFAULT)
     );
     let inbox = agent.inbox();
-    let update = "updated requirement ".repeat(10000);
+    let update = "updated requirement ".repeat(900);
     let mut sent = false;
     let mut summaries_started = 0;
     agent
         .run_turn("Continue the current inspection.", &mut |event| {
+            if matches!(event, Event::Recovering { .. }) {
+                return Err("Unexpected fixture request".into());
+            }
             if matches!(
                 &event,
                 Event::Maintenance { text } if text.starts_with("Compacting context")

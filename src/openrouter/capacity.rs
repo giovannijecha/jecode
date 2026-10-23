@@ -38,14 +38,6 @@ impl OpenRouter {
         let model = data
             .iter()
             .find(|model| model.get("id").and_then(Value::as_str) == Some(&self.model));
-        self.summary_json = model
-            .and_then(|model| model.get("supported_parameters"))
-            .and_then(Value::as_array)
-            .is_some_and(|parameters| {
-                parameters
-                    .iter()
-                    .any(|value| value.as_str() == Some("response_format"))
-            });
         self.inputs = model
             .and_then(|model| model.get("architecture"))
             .and_then(|architecture| architecture.get("input_modalities"))
