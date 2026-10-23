@@ -47,8 +47,8 @@ provider content from the copy just before a request.
 
 | Kind | Delivery |
 | --- | --- |
-| PNG, JPEG, WebP, GIF | Image part unchanged if at most 3.75 MB and 8000 pixels per dimension. |
-| Other or oversized images | Converted to PNG or JPEG, at most 2048 pixels on the long side. Without a converter, the original stays local and the manifest says so. |
+| PNG, JPEG, WebP, GIF | Original image bytes and dimensions, without a global provider-size cutoff. |
+| Other image formats | Converted to PNG or JPEG, at most 2048 pixels on the long side. Without a converter, the original stays local and the manifest says so. |
 | PDF | File part via OpenRouter's `file-parser`: `native` for a model with file input, otherwise `cloudflare-ai`. PDFs over 32 MiB stay local. |
 | Text | Read through `read attachment:ID` with normal pagination. |
 | Other binaries | Kept locally; the manifest gives the path for a suitable tool. |

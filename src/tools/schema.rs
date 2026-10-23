@@ -50,7 +50,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "write",
-            "Create or replace a complete UTF-8 file. Project paths require an existing parent directory. Use tmp:relative/path for disposable scripts and one-off verification files; it writes in this session's temporary area and creates parent directories there. Keep project deliverables, including useful durable tests, in the project.",
+            "Create or replace a complete UTF-8 file through this tool call; describing a write in assistant text does not execute it. Project paths require an existing parent directory. Use tmp:relative/path for disposable scripts and one-off verification files; it writes in this session's temporary area and creates parent directories there. Keep project deliverables, including useful durable tests, in the project.",
             Value::object([("path", string()), ("content", string())]),
             &["path", "content"],
         ),
@@ -66,7 +66,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run a Bash command from the project directory. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Recursive scopes skip generated and Git-ignored directories; name one explicitly to save it. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an execution deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
+            "Run a Bash command from the project directory. Shell syntax is Bash on every host, including Windows; invoke PowerShell explicitly if needed. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Recursive scopes skip generated and Git-ignored directories; name one explicitly to save it. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an optional execution deadline from launch; without it execution has no deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. wait_ms limits only the initial wait, not process lifetime; use process poll to check status and output and process stop to end it. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
             Value::object([
                 ("command", string()),
                 (
@@ -82,8 +82,32 @@ pub fn definitions() -> Value {
                         ),
                     ]),
                 ),
-                ("timeout_seconds", integer(1, None)),
-                ("wait_ms", integer(0, None)),
+                (
+                    "timeout_seconds",
+                    Value::object([
+                        ("type", Value::string("integer")),
+                        ("minimum", Value::number(1)),
+                        (
+                            "description",
+                            Value::string(
+                                "Optional execution deadline in seconds from launch; omitted means no deadline. Independent of wait_ms.",
+                            ),
+                        ),
+                    ]),
+                ),
+                (
+                    "wait_ms",
+                    Value::object([
+                        ("type", Value::string("integer")),
+                        ("minimum", Value::number(0)),
+                        (
+                            "description",
+                            Value::string(
+                                "Initial wait in milliseconds before returning a persistent process_id; does not end the process. Omit to wait for command completion.",
+                            ),
+                        ),
+                    ]),
+                ),
             ]),
             &["command"],
         ),

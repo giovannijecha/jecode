@@ -409,6 +409,8 @@ mod input_tests;
 #[cfg(test)]
 mod instruction_tests;
 #[cfg(test)]
+mod large_request_tests;
+#[cfg(test)]
 mod local_read_tests;
 #[cfg(test)]
 mod long_work_tests;

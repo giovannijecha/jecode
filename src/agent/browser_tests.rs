@@ -28,6 +28,7 @@ impl Site {
             while !stopping.requested() {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(Duration::from_secs(2)))
                             .unwrap();
@@ -38,6 +39,9 @@ impl Site {
                                 Ok(1) => request.push(byte[0]),
                                 _ => break,
                             }
+                        }
+                        if !request.ends_with(b"\r\n\r\n") {
+                            continue;
                         }
                         let body = r#"<!doctype html><html lang="en"><title>Native browser evidence</title>
 <style>body{font:20px sans-serif;background:#f5f2eb;padding:40px}button{padding:12px}</style>

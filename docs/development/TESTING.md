@@ -32,7 +32,7 @@ All four commands must exit successfully. Ignored tests require an explicit
 invocation; a normal test run does not establish their coverage.
 
 Tests use original Rust fixtures, synthetic credentials, isolated directories
-under `target` and loopback HTTP. They exercise installed curl and Bash without
+under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash without
 contacting OpenRouter or reading personal configuration.
 
 ## Run a focused check

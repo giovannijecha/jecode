@@ -90,7 +90,7 @@ pub(super) fn execute(
         Err(error) if !error.started => return Err(error.message),
         Err(error) => return Ok(unknown_outcome(&error.message, [stdout_ref, stderr_ref])),
     };
-    Ok(Value::object([
+    let mut result = Value::object([
         (
             "stdout",
             Value::string(String::from_utf8_lossy(&output.stdout)),
@@ -113,7 +113,19 @@ pub(super) fn execute(
         ("output_limit_bytes", Value::number(OUTPUT_LIMIT)),
         ("stdout_file", Value::string(stdout_ref)),
         ("stderr_file", Value::string(stderr_ref)),
-    ]))
+    ]);
+    if let Some(error) = output.input_error
+        && let Value::Object(fields) = &mut result
+    {
+        fields.insert("outcome".into(), Value::string("unknown"));
+        fields.insert(
+            "error".into(),
+            Value::string(format!(
+                "The command started but input delivery failed: {error}. Execution may already have changed the workspace; inspect it before repeating the command."
+            )),
+        );
+    }
+    Ok(result)
 }
 
 /// Declared workspace names whose preimages Bash may need. Command text is

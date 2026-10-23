@@ -232,9 +232,14 @@ credential material and account identity, while `backend::Services` exposes
 catalog, credential checks and optional routing choices to setup and the TUI.
 The existing user-scoped configuration stays readable.
 
-`backend/openrouter/` uses the fixed HTTPS OpenRouter API. Requests and
-credentials reach curl through stdin with curl's default configuration disabled
-and TLS certificate validation enabled. Test builds can use loopback endpoints.
+`backend/openrouter/` uses the fixed HTTPS OpenRouter API through curl 8.3+,
+with curl's default configuration disabled and TLS certificate validation enabled.
+The JSON body travels as raw stdin. The selected key reaches only the curl
+child's environment and expands into its authorization header; arguments and
+files contain neither the key nor the body. Test builds can use loopback endpoints.
+The request has no harness-imposed byte limit. Model context and service limits
+remain separate. Process input delivery errors retain the child's exit status
+and captured diagnostics, so a closed pipe cannot hide curl's failure reason.
 Native helpers and tool subprocesses remove credential environment variables
 registered by the available backends before launch.
 

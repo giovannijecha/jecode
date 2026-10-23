@@ -19,8 +19,8 @@ Build from this repository with Rust 1.95.0 and a native linker.
 
 | Platform | System requirements |
 | --- | --- |
-| Windows 10+ | Git Bash, HTTPS-enabled curl, Windows PowerShell with `Add-Type`. |
-| Linux / macOS | `bash`, HTTPS-enabled `curl`, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
+| Windows 10+ | Git Bash, HTTPS-enabled curl 8.3+, Windows PowerShell with `Add-Type`. |
+| Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
 
 The TUI uses 24-bit color. On macOS, install Apple's Command Line Tools for the
 native linker. See [platform verification](docs/development/PLATFORMS.md) for

@@ -228,6 +228,9 @@ fn run(
             output.exit_code.unwrap_or(-1)
         ));
     }
+    if let Some(error) = output.input_error {
+        return Err(error);
+    }
     if output.stdout_truncated {
         return Err("HTTP response metadata was too long".into());
     }

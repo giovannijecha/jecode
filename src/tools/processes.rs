@@ -233,7 +233,7 @@ impl Entry {
         fields.insert("process_id".into(), Value::string(&self.id));
         fields.insert("status".into(), Value::string(self.status_name(state)));
         if let Some(outcome) = &state.outcome {
-            if outcome.status == "exited" {
+            if outcome.exit_code.is_some() || outcome.status == "exited" {
                 fields.insert(
                     "exit_code".into(),
                     outcome.exit_code.map_or(Value::Null, Value::number),
@@ -282,6 +282,14 @@ impl From<Result<crate::process::Output, RunError>> for Outcome {
         let (status, exit_code, error) = match result {
             Ok(output) if output.cancelled => ("stopped", None, None),
             Ok(output) if output.timed_out => ("timed_out", None, None),
+            Ok(output) if output.input_error.is_some() => (
+                "unknown",
+                output.exit_code,
+                Some(format!(
+                    "The command started but input delivery failed: {}. Execution may already have changed the workspace; inspect it before repeating the command.",
+                    output.input_error.unwrap()
+                )),
+            ),
             Ok(output) => ("exited", output.exit_code, None),
             Err(error) => (
                 "unknown",

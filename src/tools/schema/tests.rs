@@ -65,3 +65,34 @@ fn web_and_browser_advertise_local_actions_and_signed_scroll() {
     assert_eq!(scroll.get("type").and_then(Value::as_str), Some("integer"));
     assert!(scroll.get("minimum").is_none());
 }
+
+#[test]
+fn bash_contract_distinguishes_wait_from_execution_deadline() {
+    let tools = definitions();
+    let bash = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool.get("name").and_then(Value::as_str) == Some("bash"))
+        .unwrap();
+    let description = bash.get("description").and_then(Value::as_str).unwrap();
+    assert!(description.contains("Bash on every host, including Windows"));
+    let properties = bash.get("parameters").unwrap().get("properties").unwrap();
+    let timeout = properties.get("timeout_seconds").unwrap();
+    let wait = properties.get("wait_ms").unwrap();
+    assert_eq!(timeout.get("minimum"), Some(&Value::number(1)));
+    assert_eq!(wait.get("minimum"), Some(&Value::number(0)));
+    assert!(
+        timeout
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("omitted means no deadline")
+    );
+    assert!(
+        wait.get("description")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("does not end the process")
+    );
+}

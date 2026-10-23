@@ -24,6 +24,14 @@ ordinary suite includes different-protocol backend switching, save failure,
 legacy origin retention, account credential masking and expired endpoint refresh. This change has no
 new native macOS execution evidence.
 
+The request-transport correction was checked on October 23, 2026 with curl
+8.21.0 on Windows and 8.18.0 on Ubuntu under WSL. Formatting, offline build,
+Clippy and the ordinary suite passed: 956 Windows tests and 950 Linux tests.
+Both native browser fixtures passed on each host, including three consecutive
+Windows runs, along with ConPTY and Linux PTY checks. Loopback regressions cover
+requests above 10 MiB, literal `@` data, exact image bytes, a native write followed
+by `avanti`, incomplete stdin diagnostics and Windows child environment overrides.
+
 ## Local web and browser tools
 
 The web HTTP, crawl recovery and WebSocket fixtures run in the ordinary suite.

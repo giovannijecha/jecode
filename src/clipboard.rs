@@ -172,6 +172,9 @@ fn native_copy(
         // arbitrary input or environment details.
         return Err("Clipboard command failed".into());
     }
+    if output.input_error.is_some() {
+        return Err("Clipboard command did not receive all input".into());
+    }
     Ok(Delivery::Confirmed)
 }
 

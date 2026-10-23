@@ -63,7 +63,7 @@ impl Browser {
             outcome = supervisor
                 .join()
                 .map_err(|_| "Browser process supervisor panicked".to_string())?
-                .map(|_| ());
+                .and_then(|output| output.input_error.map_or(Ok(()), Err));
             if outcome.as_ref().is_err_and(|e| e == "Operation cancelled") {
                 outcome = Ok(());
             }

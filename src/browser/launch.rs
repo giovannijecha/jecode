@@ -76,7 +76,7 @@ pub(super) fn start(
                 .map_err(|_| "Browser supervisor panicked".to_string())?;
             return Err(format!(
                 "Browser exited before DevTools started: {:?}",
-                result.map(|output| output.exit_code)
+                result.and_then(|output| output.input_error.map_or(Ok(output.exit_code), Err))
             ));
         }
         if let Ok(contents) = fs::read_to_string(browser.profile.join("DevToolsActivePort"))

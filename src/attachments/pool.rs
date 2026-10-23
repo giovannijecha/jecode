@@ -13,9 +13,6 @@ use std::time::{Duration, SystemTime};
 
 /// Largest file an attachment may hold.
 pub const LIMIT: u64 = 1024 * 1024 * 1024;
-/// Images above these bounds are sent as a derived, smaller copy.
-const VIEW_BYTES: u64 = 3_750_000;
-const VIEW_PIXELS: u32 = 8000;
 /// Unreferenced assets younger than this may belong to another process's
 /// draft that has not reached disk yet.
 const GRACE: Duration = Duration::from_secs(600);
@@ -250,9 +247,6 @@ pub fn references(bytes: &[u8]) -> BTreeSet<String> {
 
 fn direct(attachment: &Attachment) -> bool {
     media::VIEW_IMAGES.contains(&attachment.media.as_str())
-        && attachment.size <= VIEW_BYTES
-        && attachment.width.unwrap_or(0) <= VIEW_PIXELS
-        && attachment.height.unwrap_or(0) <= VIEW_PIXELS
 }
 
 fn describe(id: &str, name: &str, path: &Path, size: u64) -> Result<Attachment, String> {

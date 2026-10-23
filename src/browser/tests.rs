@@ -219,8 +219,21 @@ fn live_chromium_localhost_interaction_and_profile_persistence() {
     let server = thread::spawn(move || {
         while flag.load(Ordering::Relaxed) {
             if let Ok((mut socket, _)) = listener.accept() {
-                let mut input = [0; 4096];
-                let _ = socket.read(&mut input);
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut input = Vec::new();
+                while !input.ends_with(b"\r\n\r\n") && input.len() < 8192 {
+                    let mut byte = [0];
+                    match socket.read(&mut byte) {
+                        Ok(1) => input.push(byte[0]),
+                        _ => break,
+                    }
+                }
+                if !input.ends_with(b"\r\n\r\n") {
+                    continue;
+                }
                 let body = r#"<!doctype html><title>Browser fixture</title><input id="entry"><button id="go" style="margin-top:1600px" onclick="localStorage.setItem('saved',document.querySelector('#entry').value);document.querySelector('#out').textContent=document.querySelector('#entry').value">Go</button><p id="out"></p>"#;
                 let _ = write!(
                     socket,

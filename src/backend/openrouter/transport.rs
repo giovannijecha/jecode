@@ -3,6 +3,10 @@ use crate::json::Value;
 use crate::{json, process};
 use std::process::Command;
 
+#[cfg(test)]
+#[path = "transport_tests.rs"]
+mod tests;
+
 impl Api {
     pub(super) fn request(
         &self,
@@ -35,17 +39,8 @@ impl Api {
         body: Option<&str>,
         observer: &mut impl FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<String, Failure> {
-        // Credentials and request bodies are passed through stdin, never arguments or files.
-        let mut config = format!(
-            "header = {}\n",
-            config_string(&format!("Authorization: Bearer {}", self.api_key))
-        );
-        if let Some(body) = body {
-            config.push_str(&format!("header = \"Content-Type: application/json\"\nheader = \"Expect:\"\ndata-binary = {}\n", config_string(body)));
-        }
-        if path == "/chat/completions" {
-            config.push_str("header = \"X-OpenRouter-Metadata: enabled\"\n");
-        }
+        // The body travels on stdin; curl imports the key from its own child
+        // environment. Neither value appears in arguments or request files.
         let url = format!("{}{path}", self.base_url);
         let mut command = Command::new(curl_executable());
         command.args([
@@ -53,6 +48,10 @@ impl Api {
             "--silent",
             "--show-error",
             "--no-buffer",
+            "--variable",
+            "%OPENROUTER_API_KEY",
+            "--expand-header",
+            "Authorization: Bearer {{OPENROUTER_API_KEY}}",
             "--request",
             method,
             "--connect-timeout",
@@ -64,10 +63,24 @@ impl Api {
             "\n%{http_code}",
             "--url",
             &url,
-            "--config",
-            "-",
         ]);
         crate::auth::isolate_environment(&mut command);
+        command.env("OPENROUTER_API_KEY", &self.api_key);
+        if body.is_some() {
+            command.args([
+                "--header",
+                "Content-Type: application/json",
+                "--header",
+                "Accept: */*",
+                "--header",
+                "Expect:",
+                "--data-binary",
+                "@-",
+            ]);
+        }
+        if path == "/chat/completions" {
+            command.args(["--header", "X-OpenRouter-Metadata: enabled"]);
+        }
         if self.base_url == BASE_URL {
             command.args(["--proto", "=https"]);
         } else {
@@ -77,7 +90,7 @@ impl Api {
         let mut headers = Headers::default();
         let output = process::run_observed(
             &mut command,
-            Some(config.into_bytes()),
+            body.map(|body| body.as_bytes().to_vec()),
             None,
             usize::MAX,
             &self.cancellation,
@@ -89,18 +102,30 @@ impl Api {
             error.retry_after = headers.retry_after;
             error
         })?;
+        self.response(output, headers.retry_after)
+    }
+
+    fn response(
+        &self,
+        output: process::Output,
+        retry_after: Option<std::time::Duration>,
+    ) -> Result<String, Failure> {
         if output.cancelled {
             return Err("Operation cancelled".into());
         }
         if output.timed_out {
             return Err(Failure::temporary("OpenRouter connection became inactive"));
         }
+        let input_error = output.input_error.as_deref();
         if output.exit_code != Some(0) {
             let message = format!(
-                "Could not reach OpenRouter via curl: {}",
+                "Could not reach OpenRouter via curl (exit {}): {}",
+                output
+                    .exit_code
+                    .map_or_else(|| "unknown".into(), |code| code.to_string()),
                 String::from_utf8_lossy(&output.stderr).trim()
             );
-            return Err(
+            return Err(with_input_error(
                 if matches!(
                     output.exit_code,
                     Some(5 | 6 | 7 | 18 | 28 | 35 | 52 | 55 | 56 | 92)
@@ -109,26 +134,40 @@ impl Api {
                 } else {
                     Failure::from(message)
                 },
-            );
+                input_error,
+            ));
         }
-        let response =
-            String::from_utf8(output.stdout).map_err(|_| "OpenRouter returned invalid UTF-8")?;
+        let response = String::from_utf8(output.stdout).map_err(|_| {
+            with_input_error("OpenRouter returned invalid UTF-8".into(), input_error)
+        })?;
         let (body, status) = response
             .rsplit_once('\n')
-            .ok_or("curl returned no HTTP status")?;
-        let body = super::headers::body(body)?;
-        let status: u16 = status
-            .trim()
-            .parse()
-            .map_err(|_| "curl returned an invalid HTTP status")?;
+            .ok_or_else(|| with_input_error("curl returned no HTTP status".into(), input_error))?;
+        let body = super::headers::body(body)
+            .map_err(|error| with_input_error(error.into(), input_error))?;
+        let status: u16 = status.trim().parse().map_err(|_| {
+            with_input_error("curl returned an invalid HTTP status".into(), input_error)
+        })?;
         let parsed = json::parse(body);
         if !(200..300).contains(&status) {
             let mut failure = self.failure(parsed.as_ref().unwrap_or(&Value::Null), status);
-            failure.retry_after = headers.retry_after;
-            return Err(failure);
+            failure.retry_after = retry_after;
+            return Err(with_input_error(failure, input_error));
+        }
+        if let Some(error) = input_error {
+            return Err(Failure::from(format!(
+                "Could not send OpenRouter request to curl: {error}"
+            )));
         }
         Ok(body.into())
     }
+}
+
+fn with_input_error(mut failure: Failure, error: Option<&str>) -> Failure {
+    if let Some(error) = error {
+        failure.message.push_str(&format!("; {error}"));
+    }
+    failure
 }
 
 fn curl_executable() -> std::ffi::OsString {
@@ -140,20 +179,4 @@ fn curl_executable() -> std::ffi::OsString {
         }
     }
     "curl".into()
-}
-
-fn config_string(value: &str) -> String {
-    let mut output = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '"' => output.push_str("\\\""),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            character => output.push(character),
-        }
-    }
-    output.push('"');
-    output
 }

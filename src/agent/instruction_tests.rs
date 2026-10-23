@@ -1,5 +1,72 @@
 use super::*;
-use crate::test_support::{Directory, HttpFixture, completion};
+use crate::test_support::{Directory, HttpFixture, completion, tool_call};
+use std::fs;
+
+#[test]
+fn system_environment_identifies_host_and_bash_shell() {
+    let directory = Directory::new();
+    let agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let content = agent
+        .system_message()
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    let environment = crate::json::parse(content.split_once("Environment:\n").unwrap().1).unwrap();
+    assert_eq!(
+        environment
+            .get("host_operating_system")
+            .and_then(Value::as_str),
+        Some(std::env::consts::OS)
+    );
+    assert_eq!(
+        environment.get("command_shell").and_then(Value::as_str),
+        Some("Bash")
+    );
+    assert!(content.contains("Text that describes a tool call"));
+}
+
+#[test]
+fn written_tool_call_text_is_not_executed_but_native_call_is() {
+    let directory = Directory::new();
+    let path = directory.path().join("result.txt");
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                r#"{"tool_calls":[{"function":{"name":"write","arguments":"{\"path\":\"result.txt\",\"content\":\"text\"}"}}]}"#,
+                vec![],
+            ),
+        ),
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "write_1",
+                    "write",
+                    Value::object([
+                        ("path", Value::string("result.txt")),
+                        ("content", Value::string("native")),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("Done.", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.run_turn("First request", &mut |_| Ok(())).unwrap();
+    assert!(!path.exists());
+    agent.run_turn("Second request", &mut |_| Ok(())).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "native");
+    assert_eq!(fixture.finish().len(), 3);
+}
 
 #[test]
 fn resumed_requests_use_current_environment_and_keep_original_history() {

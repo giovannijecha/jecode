@@ -1,10 +1,13 @@
 # Tools
 
-Jecode offers eight tools to the model. Calls run only after the complete model
-response arrives; streamed partial calls never execute. Up to four consecutive
-`read` calls can run together when their arguments identify paths other than
-`history:` and `skill:`. A different tool or one of those references ends the
-batch. Results enter the conversation and saved session in call order before
+Jecode offers eight tools to the model. An assistant message describing a command
+or file change does not execute it; only a native tool call can do that. Check
+the tool result or resulting state before treating a change as complete. Calls
+run only after the complete model response arrives; streamed partial calls never
+execute. Up to four consecutive `read` calls can run together when their
+arguments identify paths other than `history:` and `skill:`. A different tool or
+one of those references ends the batch. Results enter the conversation and saved
+session in call order before
 the next tool runs. Tool errors return as results so the model can correct the
 call.
 
@@ -151,6 +154,8 @@ state. It has normal system access; the project working directory is not a
 sandbox. Startup profiles are disabled, and Jecode removes `BASH_ENV`, `ENV`
 and `OPENROUTER_API_KEY` from the command environment. No timeout is imposed
 unless `timeout_seconds` is a positive integer, measured from command start.
+Commands use Bash syntax on Windows too; use an explicit PowerShell invocation
+when a PowerShell command is needed.
 
 Without `wait_ms`, the call waits for completion. It returns `exit_code`,
 `cancelled`, `timed_out`, byte counts, and the last 64 KiB of each stdout/stderr

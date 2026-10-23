@@ -26,6 +26,8 @@ pub struct Output {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub exit_code: Option<i32>,
+    /// Input delivery failed after launch; the child's output and exit status remain available.
+    pub input_error: Option<String>,
     pub timed_out: bool,
     pub truncated: bool,
     pub stdout_bytes: usize,
@@ -361,16 +363,17 @@ impl Started {
             None
         };
 
-        if let Some(writer) = writer
-            && writer.is_finished()
-            && !timed_out
-            && !cancelled
-        {
+        let input_error = if !timed_out && !cancelled {
             writer
-                .join()
-                .map_err(|_| "Process input worker failed".to_string())?
-                .map_err(|error| format!("Could not send process input: {error}"))?;
-        }
+                .filter(JoinHandle::is_finished)
+                .and_then(|writer| match writer.join() {
+                    Ok(Ok(())) => None,
+                    Ok(Err(error)) => Some(format!("Could not send process input: {error}")),
+                    Err(_) => Some("Process input worker failed".into()),
+                })
+        } else {
+            None
+        };
         let mut stdout = stdout.lock().unwrap();
         let mut stderr = stderr.lock().unwrap();
         if let Some(error) = stdout.error.as_ref().or(stderr.error.as_ref()) {
@@ -379,6 +382,7 @@ impl Started {
         Ok(Output {
             stdout: std::mem::take(&mut stdout.bytes),
             stderr: std::mem::take(&mut stderr.bytes),
+            input_error,
             exit_code: {
                 #[cfg(windows)]
                 {
@@ -459,5 +463,7 @@ use unix::terminate;
 #[cfg(windows)]
 use windows::terminate;
 
+#[cfg(all(test, windows))]
+mod env_tests;
 #[cfg(test)]
 mod tests;

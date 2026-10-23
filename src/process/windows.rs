@@ -153,6 +153,7 @@ fn configure(helper: &mut Command, command: &Command) {
     if let Some(directory) = command.get_current_dir() {
         helper.current_dir(directory);
     }
+    crate::auth::isolate_environment(helper);
     for (key, value) in command.get_envs() {
         if let Some(value) = value {
             helper.env(key, value);
@@ -160,7 +161,6 @@ fn configure(helper: &mut Command, command: &Command) {
             helper.env_remove(key);
         }
     }
-    crate::auth::isolate_environment(helper);
 }
 
 fn encode_command(command: &Command, pipe_name: &str) -> Vec<u8> {

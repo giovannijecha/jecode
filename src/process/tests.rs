@@ -246,6 +246,91 @@ fn command(directory: &Directory, text: &str) -> Command {
     command
 }
 
+#[test]
+fn rejected_large_input_preserves_child_diagnostics() {
+    let directory = Directory::new();
+    let output = run_observed(
+        &mut command(
+            &directory,
+            "printf 'response'; printf 'input rejected' >&2; exit 23",
+        ),
+        Some(vec![b'x'; 16 * 1024 * 1024]),
+        Duration::from_secs(10),
+        4096,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, Some(23));
+    assert_eq!(output.stdout, b"response");
+    assert_eq!(output.stderr, b"input rejected");
+    assert!(output.input_error.is_some());
+    assert!(!output.timed_out && !output.cancelled);
+}
+
+#[test]
+fn successful_child_can_still_reject_incomplete_input() {
+    let directory = Directory::new();
+    let output = run_observed(
+        &mut command(&directory, "printf 'accepted'; exit 0"),
+        Some(vec![b'x'; 16 * 1024 * 1024]),
+        Duration::from_secs(10),
+        4096,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, Some(0));
+    assert_eq!(output.stdout, b"accepted");
+    assert!(output.input_error.is_some());
+    assert!(!output.timed_out && !output.cancelled);
+}
+
+#[test]
+fn fully_consumed_input_has_no_delivery_error() {
+    let directory = Directory::new();
+    let output = run_observed(
+        &mut command(&directory, "wc -c"),
+        Some(vec![b'x'; 256 * 1024]),
+        Duration::from_secs(10),
+        4096,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, Some(0));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "262144");
+    assert_eq!(output.input_error, None);
+}
+
+#[test]
+fn cancellation_during_large_input_does_not_wait_for_writer() {
+    let directory = Directory::new();
+    let cancellation = Cancellation::default();
+    let signal = cancellation.clone();
+    let started = Instant::now();
+    let output = run_observed(
+        &mut command(&directory, "printf 'ready'; sleep 20"),
+        Some(vec![b'x'; 16 * 1024 * 1024]),
+        None,
+        4096,
+        &cancellation,
+        None,
+        &mut |bytes| {
+            if bytes == b"ready" {
+                signal.cancel();
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(output.cancelled);
+    assert!(started.elapsed() < Duration::from_secs(8));
+}
+
 #[cfg(unix)]
 const BACKGROUND_CHILD: &str =
     "(sleep 2; printf child-finished; printf survived > survivor) & printf 'root-finished\\n'";
