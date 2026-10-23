@@ -142,43 +142,31 @@ pub(super) fn resume(
             }
         }
     }
-    if !document.input.draft.text.is_empty() {
+    if !document.input.draft.text.is_empty() || !document.input.draft.attachments.is_empty() {
         writeln!(
             output,
-            "\nRecovered draft (not sent; copy/edit before sending):\n{}",
+            "\nRecovered draft (not sent; {}):\n{}",
+            if document.input.draft.attachments.is_empty() {
+                "copy/edit before sending"
+            } else {
+                "open in the fullscreen composer to review or send"
+            },
             document.input.draft.prompt().display()
         )
         .map_err(|error| error.to_string())?;
-        recover_attachments(&document.input.draft, output)?;
     }
     for (index, draft) in document.input.paused.iter().enumerate() {
         writeln!(
             output,
-            "\nPaused draft {}/{} (not sent; copy/edit before sending):\n{}",
+            "\nPaused draft {}/{} (not sent; {}):\n{}",
             index + 1,
             document.input.paused.len(),
+            if draft.attachments.is_empty() {
+                "copy/edit before sending"
+            } else {
+                "open in the fullscreen composer to review or send"
+            },
             draft.prompt().display()
-        )
-        .map_err(|error| error.to_string())?;
-        recover_attachments(draft, output)?;
-    }
-    Ok(())
-}
-
-fn recover_attachments(
-    draft: &crate::sessions::Draft,
-    output: &mut impl Write,
-) -> Result<(), String> {
-    if !draft.attachments.is_empty() {
-        let references = draft
-            .attachments
-            .iter()
-            .map(crate::attachments::Attachment::reference)
-            .collect::<Vec<_>>()
-            .join(" ");
-        writeln!(
-            output,
-            "Restore these attachments before sending: /attach {references}"
         )
         .map_err(|error| error.to_string())?;
     }

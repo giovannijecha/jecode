@@ -36,6 +36,31 @@ pub(super) fn merge(previous: &mut Value, patch: &Value) {
     }
 }
 
+/// Older v3 writers omitted an empty attachment list. A marker-free text edit
+/// without that field cleared the draft's attachments; keep explicit lists and
+/// edits that still contain attachment markers intact.
+pub(super) fn clear_legacy_draft_attachments(state: &mut Value, patch: &Value) {
+    let Some(draft) = patch.get("input").and_then(|input| input.get("draft")) else {
+        return;
+    };
+    if draft.get("attachments").is_some()
+        || draft
+            .get("text")
+            .and_then(Value::as_str)
+            .is_none_or(|text| text.contains(crate::attachments::MARKER))
+    {
+        return;
+    }
+    let Value::Object(state) = state else {
+        return;
+    };
+    if let Some(Value::Object(input)) = state.get_mut("input")
+        && let Some(Value::Object(draft)) = input.get_mut("draft")
+    {
+        draft.insert("attachments".into(), Value::Array(vec![]));
+    }
+}
+
 pub(super) fn partial_delta(previous: &str, next: &str) -> Value {
     let keep = if next.starts_with(previous) {
         previous.len()

@@ -28,12 +28,11 @@ fn config(directory: &Directory) -> SessionConfig {
 }
 
 #[test]
-fn plain_resume_renders_and_recovers_saved_draft_attachments() {
+fn plain_resume_directs_saved_attachment_drafts_to_fullscreen_composer() {
     use crate::attachments::Prompt;
-    use crate::json::Value;
 
     let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![(200, completion("Recovered.", vec![]))]);
+    let fixture = HttpFixture::new(vec![]);
     let first = agent(&directory, &fixture.endpoint);
     let handle = first.sessions().unwrap();
     let pool = handle.store().attachments();
@@ -43,10 +42,10 @@ fn plain_resume_renders_and_recovers_saved_draft_attachments() {
     let file = pool.import_bytes("notes.txt", b"saved notes").unwrap();
     handle.input(Input {
         draft: Draft::from_prompt(Prompt::new("explain".into(), vec![image.clone()])),
-        paused: vec![Draft::from_prompt(Prompt::new(
-            "read".into(),
-            vec![file.clone()],
-        ))],
+        paused: vec![
+            Draft::from_prompt(Prompt::new("read".into(), vec![file.clone()])),
+            Draft::from_prompt(Prompt::new(String::new(), vec![file.clone()])),
+        ],
         ..Input::default()
     });
     handle.flush().unwrap();
@@ -57,53 +56,27 @@ fn plain_resume_renders_and_recovers_saved_draft_attachments() {
     let mut current = agent(&directory, &fixture.endpoint);
     let mut output = Vec::new();
     let mut status = Vec::new();
-    resume(
+    chat_with_resume(
         &mut current,
-        &config(&directory),
-        Some(&id),
-        &mut Cursor::new(""),
+        &mut config(&directory),
+        &mut Cursor::new("/exit\n"),
         &mut output,
         &mut status,
+        Some(id),
     )
     .unwrap();
     let rendered = String::from_utf8(output).unwrap();
     assert!(rendered.contains("explain [1# Image]"));
     assert!(rendered.contains("read [1# File: notes.txt]"));
-    assert!(rendered.contains(&format!("/attach {}", image.reference())));
-    assert!(rendered.contains(&format!("/attach {}", file.reference())));
+    assert!(rendered.contains("Paused draft 2/2 (not sent; open in the fullscreen composer to review or send):\n[1# File: notes.txt]"));
+    assert!(rendered.contains("open in the fullscreen composer to review or send"));
+    assert!(!rendered.contains("/attach"));
     assert!(!rendered.contains(crate::attachments::MARKER));
-    let mut response = Vec::new();
-    chat(
-        &mut current,
-        &mut config(&directory),
-        &mut Cursor::new(format!(
-            "/attach {} {}\nlook again\n/exit\n",
-            image.reference(),
-            file.reference()
-        )),
-        &mut response,
-        &mut status,
-        Vec::new(),
-    )
-    .unwrap();
-    assert!(String::from_utf8(response).unwrap().contains("Recovered."));
-    let requests = fixture.finish();
-    assert_eq!(requests.len(), 1);
-    let user = requests[0]
-        .body
-        .get("messages")
-        .and_then(Value::as_array)
-        .unwrap()
-        .last()
-        .unwrap();
-    assert!(user.encode().contains("image_url"));
-    assert!(user.encode().contains(&file.reference()));
-    let saved = current.archive().messages.lock().unwrap().clone();
-    let original = saved
-        .iter()
-        .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-        .unwrap();
-    assert_eq!(crate::attachments::of_message(original), vec![image, file]);
+    assert!(fixture.finish().is_empty());
+    let saved = current.sessions().unwrap().snapshot().input;
+    assert_eq!(saved.draft.attachments, vec![image]);
+    assert_eq!(saved.paused[0].attachments, vec![file]);
+    assert_eq!(saved.paused[1].attachments, saved.paused[0].attachments);
 }
 
 #[test]

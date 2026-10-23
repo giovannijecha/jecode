@@ -7,6 +7,8 @@ use crate::{
 };
 use std::{fs, io::Write};
 
+mod attachment_tests;
+
 fn message(role: &str, text: &str) -> Value {
     Value::object([
         ("role", Value::string(role)),

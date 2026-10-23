@@ -6,41 +6,8 @@
 
 use super::{Pool, base64};
 use crate::json::Value;
-use std::collections::BTreeSet;
 
 const REFERENCE: &str = "jecode_attachment";
-
-pub fn references(message: &Value) -> BTreeSet<String> {
-    let mut found = BTreeSet::new();
-    if let Some(annotations) = message.get("annotations") {
-        collect(annotations, &mut found);
-    }
-    found
-}
-
-fn collect(value: &Value, found: &mut BTreeSet<String>) {
-    match value {
-        Value::Object(fields) => {
-            if let Some(id) = fields
-                .get(REFERENCE)
-                .and_then(Value::as_str)
-                .and_then(|reference| reference.strip_prefix("attachment:"))
-                && super::valid_id(id)
-            {
-                found.insert(id.to_owned());
-            }
-            for value in fields.values() {
-                collect(value, found);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect(item, found);
-            }
-        }
-        _ => {}
-    }
-}
 
 pub fn store(message: &mut Value, pool: Option<&Pool>) -> Result<(), String> {
     let Value::Object(fields) = message else {

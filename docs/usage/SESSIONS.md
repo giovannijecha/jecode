@@ -40,6 +40,8 @@ still leaves a saved session if its initial checkpoint succeeded.
 The TUI saves the composer, caret, queued messages, paused drafts and sent
 prompt history after a session has a request or attachment. On resume, queued
 messages become separate paused drafts; the composer retains its own text.
+Sent attachments stay in the conversation and prompt history; only unsent
+input returns to the composer.
 Open `/drafts` or press Alt+Up to review them. Enter edits a draft; Ctrl+S
 sends it explicitly. Nothing pending runs automatically after resume or an
 interruption. In `--plain`, recovered drafts are displayed for copying and

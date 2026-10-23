@@ -121,18 +121,11 @@ fn local_media_tool_receipts_feed_provider_and_survive_resume_without_sources() 
     );
     let export = agent.archive().save().unwrap();
     let archive = json::parse(&std::fs::read_to_string(&export).unwrap()).unwrap();
-    let exported = archive
-        .get("attachments")
-        .and_then(Value::as_array)
-        .unwrap();
+    assert!(archive.get("attachments").is_none());
+    assert!(!export.with_extension("attachments").exists());
+    let exported = archive.get("messages").unwrap().encode();
     for reference in &references {
-        let id = reference.strip_prefix("attachment:").unwrap();
-        let asset = exported
-            .iter()
-            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(id))
-            .unwrap();
-        let relative = asset.get("path").and_then(Value::as_str).unwrap();
-        assert!(export.parent().unwrap().join(relative).exists());
+        assert!(exported.contains(reference));
     }
     let session_id = agent.sessions().unwrap().id();
     std::fs::remove_file(image_path).unwrap();

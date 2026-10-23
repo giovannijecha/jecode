@@ -153,7 +153,7 @@ fn slash_commands_replace_the_composer_with_one_panel_and_a_distinct_selection()
             .iter()
             .any(|line| line.plain().contains("model · default"))
     );
-    state.editor.replace("/unknown".into());
+    state.editor.replace("/attach".into());
     state.suggestions.refresh(&state.editor.text);
     assert_eq!(
         super::composer_frame(&state, "model", "dir").live[3]

@@ -1,57 +1,8 @@
-//! `/attach` in the line-based chat: files or saved references for the next message.
+//! Attachment staging for the line-based chat and saved sessions.
 
-use crate::{
-    agent::Agent,
-    attachments::{Attachment, paths},
-    sessions::Handle,
-};
+use crate::{agent::Agent, attachments::Attachment, sessions::Handle};
 use std::collections::BTreeMap;
 use std::io::Write;
-
-/// The path list of an `/attach` line.
-pub fn command(line: &str) -> Option<&str> {
-    let (name, arguments) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
-    name.eq_ignore_ascii_case("/attach").then_some(arguments)
-}
-
-pub fn stage(
-    agent: &Agent,
-    arguments: &str,
-    staged: &mut Vec<Attachment>,
-    output: &mut impl Write,
-) -> Result<(), String> {
-    if arguments.trim() == "--clear" {
-        staged.clear();
-        save(agent, staged)?;
-        return writeln!(output, "Staged attachments cleared.").map_err(|error| error.to_string());
-    }
-    let directory = std::env::current_dir().map_err(|error| error.to_string())?;
-    let imported = if arguments.contains("attachment:") {
-        let pool = agent
-            .sessions()
-            .ok_or("Attachment storage is unavailable")?
-            .store()
-            .attachments();
-        paths::words(arguments)?
-            .iter()
-            .map(|word| {
-                if let Some(id) = word.strip_prefix("attachment:") {
-                    pool.load(id).map(|stored| stored.attachment)
-                } else {
-                    pool.import_file(
-                        &paths::argument(word, &directory),
-                        &crate::cancel::Cancellation::default(),
-                    )
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    } else {
-        agent.import_attachments(&paths::typed(arguments, &directory)?)?
-    };
-    staged.extend(imported);
-    save(agent, staged)?;
-    announce(staged, output)
-}
 
 /// Keep plain-chat pending attachments in the session without changing its
 /// composer draft, queue or history.

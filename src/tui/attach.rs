@@ -82,13 +82,6 @@ impl App {
             .map(|handle| handle.store().attachments())
     }
 
-    pub(super) fn attach_command(&mut self, arguments: &str) {
-        match crate::attachments::paths::typed(arguments, &self.archive.directory) {
-            Ok(paths) => self.attach(Source::Paths(paths)),
-            Err(error) => self.warn(&error),
-        }
-    }
-
     pub(super) fn attach(&mut self, source: Source) {
         let Some(pool) = self.attachment_pool() else {
             self.warn("Attachments need session storage, which is unavailable.");

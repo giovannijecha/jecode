@@ -8,13 +8,13 @@ typing a label does not attach a file.
 
 | Where | How |
 | --- | --- |
-| Fullscreen composer | Drop files onto the terminal, press Alt+V for a clipboard image, or type `/attach PATH...`. |
-| `jecode --plain` | `/attach PATH...` stages files for the next message; Enter on an empty line sends only the attachments. |
+| Fullscreen composer | Drop files onto the terminal or press Alt+V for a clipboard image. |
+| `jecode --plain` | Start with `jecode --plain --attach PATH` to attach a file to the first message. Enter on an empty line sends only staged attachments. |
 | Single prompts and pipes | `jecode --attach PATH [--attach PATH]... "prompt"` attaches files to the first message. |
 
 Any regular file can be attached, including binaries and files outside the
-working directory, up to 1 GiB each. Drops and `/attach` accept at most 64
-paths at once. Elements appear at the caret after copying; Backspace or Delete
+working directory, up to 1 GiB each. A drop accepts at most 64 paths at once.
+Elements appear at the caret after copying; Backspace or Delete
 removes a whole element. A message can contain only attachments. Wait for the
 import to finish before sending; an early Enter keeps the draft and sends
 nothing.
@@ -33,13 +33,11 @@ Under WSL, Windows paths are converted with `wslpath` using the live mount
 table; paths through `\\wsl.localhost\<distro>\...` into the running
 distribution also map to Linux paths.
 
-`/attach` accepts quoted or bare paths, absolute or relative to the working
-directory. Backslashes in Windows paths need no escaping. In plain chat it
-also accepts saved references such as `/attach attachment:att-123-456-7`.
-A resumed draft prints these references so the stored copies can be restaged
-without the source files. Plain-chat staging survives exit, `/new`, `/resume`
-and deletion of the source conversation. Use `/attach --clear` to discard it;
-opening the session in the fullscreen composer shows the staged elements.
+`--attach PATH` accepts a path for the first message; repeat the flag for more
+files. Paths can be absolute or relative to the working directory. In plain
+chat, staged files remain available after exit, `/new`, `/resume`, and deletion
+of the source conversation. Open the session in the fullscreen composer to
+review or discard staged elements and saved drafts with attachments.
 
 ## What the model receives
 
@@ -92,9 +90,9 @@ them; inherited drafts retain their copies.
 
 ## Export
 
-`/export` copies attachments referenced by the conversation, including PDF
-annotation images, into a `.attachments` folder beside the JSON. If a copy
-fails, the export is not written. See [EXPORT.md](EXPORT.md).
+`/export` writes only the conversation JSON. Messages and PDF annotations keep
+their attachment references, but the referenced files are not copied. See
+[EXPORT.md](EXPORT.md).
 
 ## Native requirements
 

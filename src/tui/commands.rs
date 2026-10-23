@@ -97,7 +97,7 @@ impl App {
         if (self.worker.is_none()
             || matches!(
                 self.state.suggestions.chosen(),
-                Some("/copy" | "/drafts" | "/attach" | "/terminal")
+                Some("/copy" | "/drafts" | "/terminal")
             ))
             && self.state.suggestions.visible
             && prompt.attachments.is_empty()
@@ -117,13 +117,6 @@ impl App {
             self.edited();
             self.capture_input();
             self.copy_command(&prompt.text);
-            return Ok(false);
-        }
-        if command && let Some(arguments) = attach_arguments(&prompt.text) {
-            self.state.history.submitted(&mut self.state.editor);
-            self.edited();
-            self.capture_input();
-            self.attach_command(arguments);
             return Ok(false);
         }
         if command && prompt.text.trim().eq_ignore_ascii_case("/drafts") {
@@ -172,10 +165,6 @@ impl App {
             return Ok(false);
         }
         if command && self.copy_command(&prompt.text) {
-            return Ok(false);
-        }
-        if command && let Some(arguments) = attach_arguments(&prompt.text) {
-            self.attach_command(arguments);
             return Ok(false);
         }
         self.capture_input();
@@ -433,13 +422,6 @@ impl App {
         self.state.clear_notice();
         self.job = Some(Job::catalog(self.agent.as_ref().unwrap().api(), purpose));
     }
-}
-
-/// The path list of an `/attach` command.
-fn attach_arguments(text: &str) -> Option<&str> {
-    let text = text.trim_start();
-    let (name, arguments) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
-    name.eq_ignore_ascii_case("/attach").then_some(arguments)
 }
 
 /// The optional process ID of a `/terminal` command.

@@ -88,6 +88,7 @@ pub(super) fn read(path: &Path, id: &str, directory: &Path) -> Result<Read, Stri
                 return Err("Invalid journal state patch".into());
             }
             state::merge(&mut next, patch);
+            state::clear_legacy_draft_attachments(&mut next, patch);
             state::apply_partial(&mut position.partial, required(&value, "partial")?)?;
             next
         };

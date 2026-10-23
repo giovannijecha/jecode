@@ -80,9 +80,6 @@ fn chat_inner(
         let (name, arguments) = commands::split(line).unwrap_or(("", ""));
         let name = commands::canonical(name).to_ascii_lowercase();
         let result = match (name.as_str(), arguments) {
-            ("/attach", _) => {
-                attach::stage(agent, attach::command(line).unwrap(), &mut staged, output)
-            }
             ("/exit", "") => return agent.save_session(),
             ("/help", "") => {
                 agent.record_local_details(
