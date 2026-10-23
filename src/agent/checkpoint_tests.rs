@@ -22,10 +22,10 @@ fn recovery_instructions_describe_per_call_scope_without_history_events() {
 }
 
 #[test]
-fn restoring_jecode_instructions_requests_a_single_reload() {
+fn restoring_agents_instructions_requests_a_single_reload() {
     let home = Directory::new();
     let root = Directory::new();
-    let file = root.path().join("JECODE.md");
+    let file = root.path().join("AGENTS.md");
     fs::write(&file, "Use tabs.\n").unwrap();
     let mut agent = Agent::new(
         OpenRouter::fixture("http://127.0.0.1:9".into()),

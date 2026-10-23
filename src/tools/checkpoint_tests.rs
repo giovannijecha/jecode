@@ -306,14 +306,15 @@ fn checkpoint_tool_inspects_restores_and_returns_a_usable_undo() {
 }
 
 #[test]
-fn restoring_project_instructions_requests_reload_before_next_model_request() {
+fn restoring_nested_agents_instructions_requests_reload_but_legacy_name_does_not() {
     let fixture = fixture();
-    fs::write(fixture.root.path().join("JECODE.md"), "Original rule\n").unwrap();
+    fs::create_dir(fixture.root.path().join("src")).unwrap();
+    fs::write(fixture.root.path().join("src/AGENTS.md"), "Original rule\n").unwrap();
     let written = call(
         &fixture.tools,
         "write",
         &[
-            ("path", Value::string("JECODE.md")),
+            ("path", Value::string("src/AGENTS.md")),
             ("content", Value::string("Changed rule\n")),
         ],
     );
@@ -337,6 +338,36 @@ fn restoring_project_instructions_requests_reload_before_next_model_request() {
             .checkpoints()
             .unwrap()
             .take_restored_instructions()
+    );
+    assert!(
+        !fixture
+            .tools
+            .checkpoints()
+            .unwrap()
+            .take_restored_instructions()
+    );
+
+    fs::write(fixture.root.path().join("JECODE.md"), "Legacy rule\n").unwrap();
+    let written = call(
+        &fixture.tools,
+        "write",
+        &[
+            ("path", Value::string("JECODE.md")),
+            ("content", Value::string("Changed legacy rule\n")),
+        ],
+    );
+    let restored = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("restore")),
+            ("ref", Value::string(text(&written, &["checkpoint", "ref"]))),
+            ("expected", Value::string("latest")),
+        ],
+    );
+    assert_eq!(
+        restored.get("restored_count").and_then(Value::as_usize),
+        Some(1)
     );
     assert!(
         !fixture

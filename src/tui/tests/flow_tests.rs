@@ -172,7 +172,7 @@ fn queued_init_starts_after_the_active_turn_and_keeps_its_visible_name() {
 #[test]
 fn init_stays_retryable_when_project_instructions_cannot_be_read() {
     let directory = Directory::new();
-    fs::write(directory.path().join("JECODE.md"), [0xff, 0xfe]).unwrap();
+    fs::write(directory.path().join("AGENTS.md"), [0xff, 0xfe]).unwrap();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "/init");

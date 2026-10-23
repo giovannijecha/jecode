@@ -142,11 +142,11 @@ fn native_ctrl_o_waits_for_the_whole_turn_preserves_drafts_and_resets_on_accepte
     key(&mut app, 13, 0);
     assert_eq!(flags(&app.state), [true; 3]);
     app.state.editor.replace("Next request.".into());
-    std::fs::write(directory.path().join("JECODE.md"), [255]).unwrap();
+    std::fs::write(directory.path().join("AGENTS.md"), [255]).unwrap();
     key(&mut app, 13, 0);
     assert!(app.worker.is_none());
     assert_eq!(flags(&app.state), [true; 3]);
-    std::fs::remove_file(directory.path().join("JECODE.md")).unwrap();
+    std::fs::remove_file(directory.path().join("AGENTS.md")).unwrap();
     assert_eq!(app.state.queue.paused.len(), 1);
     app.state.editor.replace("Retry next request.".into());
     key(&mut app, 13, 0);

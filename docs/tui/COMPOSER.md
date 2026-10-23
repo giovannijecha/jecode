@@ -95,7 +95,7 @@ values remain marked independently of the highlighted row.
   and shows the result without a model request. See
   [Checkpoints](../usage/CHECKPOINTS.md#local-commands-and-previous-archives).
 - `/init` asks the current model to inspect the project and create or update the
-  launch directory's `JECODE.md`. See [Project instructions](../usage/PROJECT_INSTRUCTIONS.md).
+  launch directory's `AGENTS.md`. See [Project instructions](../usage/PROJECT_INSTRUCTIONS.md).
 - `/exit` quits after the current turn. Its hidden alias `/quit` follows the same
   queue and pause rules as other drafts. `Ctrl+Q` quits immediately, stopping any
   active work. A stopped or failed turn pauses an already queued `/exit` too.

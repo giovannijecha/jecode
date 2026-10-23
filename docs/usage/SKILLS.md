@@ -36,7 +36,7 @@ the model's catalog, while valid siblings remain available.
 The body contains the procedure. Keep substantial reference material in separate
 files and link to it from `SKILL.md`. Copying a complete skill directory preserves
 those relative references. The library is personal; project rules belong in
-[`JECODE.md`](PROJECT_INSTRUCTIONS.md).
+[`AGENTS.md`](PROJECT_INSTRUCTIONS.md).
 
 Jecode supplies the skill format and loader. Personal skill files are installed
 separately and can be edited without rebuilding the application. A skill copied

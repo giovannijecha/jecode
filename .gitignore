@@ -1,5 +1,4 @@
 /target/
-JECODE.md
 .jecode/
 JECODE-SESSION-*.json
 .env

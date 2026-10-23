@@ -61,7 +61,7 @@ pub const COMMANDS: [Command; 17] = [
     },
     Command {
         name: "/init",
-        description: "Inspect this project and create or update root JECODE.md",
+        description: "Inspect this project and create or update root AGENTS.md",
         tui_usage: "/init",
         plain_usage: Some("/init"),
     },
@@ -186,7 +186,7 @@ pub fn canonical(name: &str) -> &str {
     }
 }
 
-pub const INIT_PROMPT: &str = "/init\n\nInspect this project's files and conventions using the available tools. Create or update only the root JECODE.md with concise, verified instructions for future Jecode turns. Preserve useful existing content and make targeted updates instead of replacing it wholesale. Base every rule on what you observe in this project; do not invent commands or policies. Do not write other files.";
+pub const INIT_PROMPT: &str = "/init\n\nInspect this project's files and conventions using the available tools. Create or update only the root AGENTS.md with concise, verified project instructions for coding agents. Preserve useful existing content and make targeted updates instead of replacing it wholesale. Base every rule on what you observe in this project; do not invent commands or policies. Do not write other files.";
 /// Returns the ID after a local `/terminal stop ID` action, including an empty
 /// ID when `stop` was supplied without an argument.
 pub fn terminal_stop_id(arguments: &str) -> Option<&str> {

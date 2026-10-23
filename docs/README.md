@@ -9,7 +9,7 @@ scripts run from the Jecode repository root.
 | Task | Guide |
 | --- | --- |
 | Choose a model, reasoning effort or endpoint; edit defaults | [Configuration](usage/CONFIGURATION.md) |
-| Initialize project rules and scope `JECODE.md` files | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
+| Initialize project rules and scope `AGENTS.md` files | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
 | Add personal workflows and inspect the skill library | [Skills](usage/SKILLS.md) |
 | Understand file tools, command output and background processes | [Tools](usage/TOOLS.md) |
 | Recover files from a modifying tool call | [Checkpoints](usage/CHECKPOINTS.md) |

@@ -358,7 +358,7 @@ impl Tools {
                     entry
                         .get("path")
                         .and_then(Value::as_str)
-                        .is_some_and(|path| path.rsplit('/').next() == Some("JECODE.md"))
+                        .is_some_and(|path| path.rsplit('/').next() == Some("AGENTS.md"))
                 })
             })
         {
