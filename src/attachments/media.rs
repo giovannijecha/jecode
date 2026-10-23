@@ -3,8 +3,8 @@
 
 use super::Kind;
 
-/// Raster types OpenRouter accepts as image parts.
-pub const PROVIDER_IMAGES: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+/// Raster types the local view can embed without conversion.
+pub const VIEW_IMAGES: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 pub fn kind(media: &str) -> Kind {
     match media {

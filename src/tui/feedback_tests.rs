@@ -310,7 +310,7 @@ fn catalog_and_key_validation_use_one_correct_loading_title() {
     app.input(Decoded::Text("5".into())).unwrap();
     app.input(Decoded::Text("isolated-key".into())).unwrap();
     key(&mut app, 13, 0);
-    assert_eq!(live(&app).matches("Checking OpenRouter key…").count(), 1);
+    assert_eq!(live(&app).matches("Checking API key…").count(), 1);
     assert!(!live(&app).contains("Loading model catalog"));
     assert!(app.state.notice.is_none());
     wait_job(&mut app);

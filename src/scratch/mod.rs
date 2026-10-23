@@ -18,6 +18,7 @@ pub struct Info {
     pub files: usize,
     pub directories: usize,
     pub bytes: u64,
+    pub skipped: usize,
 }
 
 mod removal;
@@ -199,24 +200,46 @@ impl Area {
 
     pub fn info(&self) -> Result<Info, String> {
         let root = self.ensure()?;
-        self.inventory(&root)
+        self.inventory(&root, false)
     }
 
-    fn inventory(&self, root: &Path) -> Result<Info, String> {
+    fn inventory(&self, root: &Path, strict: bool) -> Result<Info, String> {
         let mut info = Info {
             path: environment_path(&self.path).to_string_lossy().into_owned(),
             files: 0,
             directories: 0,
             bytes: 0,
+            skipped: 0,
         };
         let mut pending = vec![root.to_path_buf()];
         while let Some(directory) = pending.pop() {
-            for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+            let entries = match fs::read_dir(&directory) {
+                Ok(entries) => entries,
+                Err(error) if !strict && error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.to_string()),
+            };
+            for entry in entries {
                 let path = entry.map_err(|error| error.to_string())?.path();
                 if path == root.join(MARKER) {
                     continue;
                 }
-                let metadata = inspect(&path)?;
+                let metadata = match fs::symlink_metadata(&path) {
+                    Ok(metadata) => metadata,
+                    Err(error) if !strict && error.kind() == std::io::ErrorKind::NotFound => {
+                        continue;
+                    }
+                    Err(error) => return Err(error.to_string()),
+                };
+                if crate::disk::linked(&metadata) {
+                    if strict {
+                        return Err(
+                            "Temporary area contains a link or junction; it was left unchanged"
+                                .into(),
+                        );
+                    }
+                    info.skipped += 1;
+                    continue;
+                }
                 if metadata.is_dir() {
                     info.directories += 1;
                     pending.push(path);
@@ -226,10 +249,12 @@ impl Area {
                         .bytes
                         .checked_add(metadata.len())
                         .ok_or("Temporary byte count overflow")?;
-                } else {
+                } else if strict {
                     return Err(
                         "Temporary area contains a special file; cleanup was not started".into(),
                     );
+                } else {
+                    info.skipped += 1;
                 }
             }
         }
@@ -239,7 +264,7 @@ impl Area {
     pub fn clean(&self) -> Result<Info, String> {
         let root = self.ensure()?;
         // Inspect the entire tree before deleting anything. Links are never followed.
-        let info = self.inventory(&root)?;
+        let info = self.inventory(&root, true)?;
         let entries = fs::read_dir(&root).map_err(|error| error.to_string())?;
         for entry in entries {
             let path = entry.map_err(|error| error.to_string())?.path();

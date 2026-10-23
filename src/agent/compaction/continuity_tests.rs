@@ -195,7 +195,7 @@ fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
     agent
         .compact_if_needed(
             Some(crate::openrouter::Limits {
-                context: 24000,
+                context: 28000,
                 output: Some(4096),
             }),
             true,

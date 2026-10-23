@@ -152,8 +152,8 @@ fn build(
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .env_remove("OPENROUTER_API_KEY");
+            .creation_flags(CREATE_NO_WINDOW);
+        crate::auth::isolate_environment(&mut compiler);
         run_compiler(&mut compiler, cancellation, COMPILE_LIMIT)?;
         if cancellation.requested() {
             return Err(CompileError::Cancelled);

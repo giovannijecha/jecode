@@ -90,7 +90,7 @@ pub(super) fn execute(
         Err(error) if !error.started => return Err(error.message),
         Err(error) => return Ok(unknown_outcome(&error.message, [stdout_ref, stderr_ref])),
     };
-    Ok(Value::object([
+    let mut result = Value::object([
         (
             "stdout",
             Value::string(String::from_utf8_lossy(&output.stdout)),
@@ -113,7 +113,19 @@ pub(super) fn execute(
         ("output_limit_bytes", Value::number(OUTPUT_LIMIT)),
         ("stdout_file", Value::string(stdout_ref)),
         ("stderr_file", Value::string(stderr_ref)),
-    ]))
+    ]);
+    if let Some(error) = output.input_error
+        && let Value::Object(fields) = &mut result
+    {
+        fields.insert("outcome".into(), Value::string("unknown"));
+        fields.insert(
+            "error".into(),
+            Value::string(format!(
+                "The command started but input delivery failed: {error}. Execution may already have changed the workspace; inspect it before repeating the command."
+            )),
+        );
+    }
+    Ok(result)
 }
 
 /// Declared workspace names whose preimages Bash may need. Command text is
@@ -163,11 +175,11 @@ fn command(bash: &Path, root: &Path, text: &str, temporary: Option<&Path>) -> Co
     command
         .args(["-c", text])
         .current_dir(root)
-        .env_remove("OPENROUTER_API_KEY")
         .env_remove("BASH_ENV")
         .env_remove("ENV")
         .env_remove("JECODE_TMP")
         .env("TERM", "dumb");
+    crate::auth::isolate_environment(&mut command);
     if let Some(temporary) = temporary {
         let temporary = crate::scratch::environment_path(temporary);
         command

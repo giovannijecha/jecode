@@ -1,6 +1,9 @@
 mod agent;
 mod attachments;
+mod auth;
+mod backend;
 mod bootstrap;
+mod browser;
 mod cancel;
 #[cfg(test)]
 mod checkpoint_bench;
@@ -10,7 +13,9 @@ mod clipboard;
 mod config;
 mod console;
 mod context;
+mod conversation;
 mod copy;
+mod curl;
 mod disk;
 mod effort;
 mod events;
@@ -19,6 +24,7 @@ mod file_change;
 mod inbox;
 mod input;
 mod json;
+#[cfg(test)]
 mod openrouter;
 mod output;
 mod process;
@@ -31,6 +37,7 @@ mod skills;
 mod tools;
 mod tui;
 mod utf8;
+mod web;
 
 #[cfg(test)]
 mod test_support;

@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 mod protocol;
+pub mod server;
 pub use protocol::{completion, tool_call};
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);

@@ -12,7 +12,8 @@ impl Terminal {
             output,
             code_page
         );
-        let recovery = Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        command
             .args([
                 "-NoLogo",
                 "-NoProfile",
@@ -22,9 +23,8 @@ impl Terminal {
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::null())
-            .env_remove("OPENROUTER_API_KEY")
-            .spawn();
+            .stderr(Stdio::null());
+        let recovery = crate::auth::isolate_environment(&mut command).spawn();
         let Ok(mut child) = recovery else {
             eprintln!("Could not restore Windows console modes.");
             return;

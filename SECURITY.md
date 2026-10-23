@@ -16,12 +16,20 @@ There is no guaranteed response time.
 ## Boundaries
 
 Jecode runs local tools with the invoking user's permissions. It is not a
-sandbox for untrusted projects or commands. Settings include a plaintext
-OpenRouter key in the user-scoped configuration; sessions, attachment copies
+sandbox for untrusted projects or commands. Settings include plaintext backend
+API keys in the user-scoped configuration; sessions, attachment copies
 and workspace checkpoint archives are also local data. Checkpoint archives hold
 unredacted project file contents, including Git-ignored secrets such as `.env`.
-Provider requests send the selected conversation
-and supported attachments to OpenRouter and the selected model provider.
+Model requests send the selected conversation and supported attachments to the
+active backend. OpenRouter currently forwards them to its selected model provider.
+The `web` tool makes direct HTTP(S) requests from the user's machine using local
+curl. The `browser` tool controls a locally installed Chromium-based browser
+through a loopback DevTools connection. Fetched content, browser snapshots,
+screenshots and logs may enter the conversation and provider request when the
+agent uses them. Temporary browser profiles and downloaded content live in the
+session area; named persistent profiles under `~/.jecode/browser/profiles/`
+can retain cookies and signed-in state. These tools have the same local user
+permissions as Jecode and can access destinations reachable from that machine.
 
 Relevant reports include unintended credential exposure, attachment or
 history access outside the documented scope, and failures to clean up owned

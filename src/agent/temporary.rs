@@ -42,8 +42,9 @@ impl Agent {
         }
         // Retain the conversation before performing the user's explicit deletion.
         self.save_session()?;
+        self.tools.stop_browsers();
         let info = self.temporary_info()?;
-        if info.files == 0 && info.directories == 0 {
+        if info.files == 0 && info.directories == 0 && info.skipped == 0 {
             return Ok(info);
         }
         self.record_temporary_cleanup(

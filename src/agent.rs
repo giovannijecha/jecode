@@ -1,18 +1,22 @@
+use crate::backend::{Backend, ToolCall};
 use crate::cancel::Cancellation;
 use crate::effort::Effort;
 use crate::events::{Event, EventSink};
 use crate::export::{Archive, Messages};
 use crate::json::Value;
-use crate::openrouter::{OpenRouter, ToolCall};
+#[cfg(test)]
+use crate::openrouter::OpenRouter;
 use crate::tools::Tools;
 use std::sync::{Arc, Mutex};
 
 pub struct Agent {
-    client: OpenRouter,
+    client: Box<dyn Backend>,
+    accounts: std::collections::BTreeMap<String, crate::backend::Services>,
     tools: Tools,
     messages: Messages,
     cancellation: Cancellation,
     compatible_from: usize,
+    legacy_origin: Option<crate::conversation::Origin>,
     redactor: crate::redact::Redactor,
     events: Messages,
     persistence: Option<crate::sessions::Handle>,
@@ -25,12 +29,18 @@ pub struct Agent {
     used_skills: std::collections::BTreeSet<String>,
     inbox: crate::inbox::Inbox,
     /// Saved per-model routing; `None` leaves routing unset.
-    routing_preferences: Option<std::collections::BTreeMap<String, crate::openrouter::Routing>>,
-    charges: Mutex<crate::openrouter::Charges>,
+    routing_preferences:
+        Option<std::collections::BTreeMap<(String, String), crate::backend::Routing>>,
+    charges: Mutex<crate::backend::Charges>,
 }
 
 impl Agent {
-    pub fn new(mut client: OpenRouter, tools: Tools) -> Self {
+    #[cfg(test)]
+    pub fn new<B: Backend + 'static>(client: B, tools: Tools) -> Self {
+        Self::with_backend(Box::new(client), tools)
+    }
+
+    pub fn with_backend(mut client: Box<dyn Backend>, tools: Tools) -> Self {
         let cancellation = Cancellation::default();
         client.set_cancellation(cancellation.clone());
         let redactor = client.redactor();
@@ -38,10 +48,12 @@ impl Agent {
         tools.include_credentials(redactor.clone());
         let mut agent = Self {
             client,
+            accounts: std::collections::BTreeMap::new(),
             tools,
             messages: Arc::new(Mutex::new(Vec::new())),
             cancellation,
             compatible_from: 0,
+            legacy_origin: None,
             redactor,
             events: Arc::new(Mutex::new(Vec::new())),
             persistence: None,
@@ -55,6 +67,7 @@ impl Agent {
             routing_preferences: None,
             charges: Mutex::default(),
         };
+        agent.register_backend(agent.client.services());
         agent.clear();
         agent
     }
@@ -74,62 +87,42 @@ impl Agent {
         self.client.set_effort(effort);
     }
 
-    pub fn api(&self) -> crate::openrouter::Api {
-        self.client.api()
-    }
-
     pub fn redact(&self, text: &str) -> String {
         self.redactor.text(text)
     }
 
-    pub fn replace_client(&mut self, mut client: OpenRouter) {
-        let changed_model = self.model() != client.model();
-        if changed_model || self.effort() != client.effort() {
-            self.context.summary_output_tokens = 0;
-        }
-        client.set_cancellation(self.cancellation.clone());
-        if changed_model {
-            client.set_routing(self.preferred_routing(client.model()));
-        } else {
-            client.set_router(self.client.router().clone());
-        }
-        self.redactor.include(client.redactor());
-        self.tools.include_credentials(self.redactor.clone());
-        self.client = client;
-        self.sync_conversation();
-        if changed_model {
-            self.compatible_from = self.messages.lock().unwrap().len();
-            self.context.reset_usage();
-        }
+    #[cfg(test)]
+    pub fn replace_client<B: Backend + 'static>(&mut self, client: B) {
+        self.replace_backend(Box::new(client)).unwrap();
     }
 
     /// A different model takes its saved routing preference, or Auto; the
     /// same model keeps the conversation's routing.
     pub fn set_model(&mut self, model: String) -> Result<(), String> {
         if model != self.model() {
-            let routing = self.preferred_routing(&model);
-            self.client.set_model(model)?;
-            self.client.set_routing(routing);
-            self.context.summary_output_tokens = 0;
-            self.compatible_from = self.messages.lock().unwrap().len();
-            self.context.reset_usage();
+            let mut next = self.services().create(model)?;
+            next.set_effort(self.effort());
+            self.install_backend(next, false)?;
         }
         Ok(())
     }
 
     pub fn clear(&mut self) {
-        *self.charges.lock().unwrap() = crate::openrouter::Charges::default();
+        *self.charges.lock().unwrap() = crate::backend::Charges::default();
         self.project_instructions.clear();
         self.used_skills.clear();
         self.prepared = None;
         self.context = crate::context::Context::default();
         self.compatible_from = 0;
+        self.legacy_origin = None;
         self.events.lock().unwrap().clear();
         *self.messages.lock().unwrap() = vec![self.system_message()];
     }
 
     pub fn archive(&self) -> Archive {
         Archive {
+            backend: self.backend_id().into(),
+            legacy_origin: self.legacy_origin.clone(),
             model: self.model().into(),
             directory: self.tools.root().to_path_buf(),
             messages: Arc::clone(&self.messages),
@@ -203,15 +196,7 @@ impl Agent {
                 return Err("Operation cancelled".into());
             }
             let completion = self.next_completion(limits, events)?;
-            let mut message = completion.message;
-            let annotation_error =
-                crate::attachments::annotations::store(&mut message, self.tools.attachments())
-                    .err();
-            if annotation_error.is_some()
-                && let Value::Object(fields) = &mut message
-            {
-                fields.remove("annotations");
-            }
+            let message = completion.message;
             self.messages.lock().unwrap().push(message);
             if let Err(error) = self.checkpoint(crate::sessions::Stage::Completion) {
                 self.cancel_calls(&completion.calls);
@@ -228,9 +213,9 @@ impl Agent {
                 self.cancel_calls(&completion.calls);
                 return Err(error);
             }
-            if let Some(error) = annotation_error {
+            if let Some(error) = completion.postprocess_error {
                 self.cancel_calls(&completion.calls);
-                return Err(format!("Could not store PDF annotations: {error}"));
+                return Err(error);
             }
             if completion.calls.is_empty() {
                 if self.continue_turn(events)? {
@@ -291,6 +276,22 @@ impl Agent {
         context: &crate::context::Context,
         messages: &[Value],
     ) -> Vec<Value> {
+        let stamped;
+        let messages = if let Some(origin) = &self.legacy_origin {
+            stamped = messages
+                .iter()
+                .cloned()
+                .map(|mut message| {
+                    if message.get("role").and_then(Value::as_str) == Some("assistant") {
+                        crate::conversation::stamp(&mut message, origin);
+                    }
+                    message
+                })
+                .collect::<Vec<_>>();
+            &stamped
+        } else {
+            messages
+        };
         let mut projected = context.project(messages, self.compatible_from);
         if let Some(system) = projected.first_mut() {
             // Send current native instructions while retaining original history verbatim.
@@ -369,12 +370,14 @@ impl Agent {
     }
 }
 
+mod backend;
 pub(crate) mod checkpoints;
 mod compaction;
 mod environment;
 mod execution;
 mod history;
 mod input;
+mod lifecycle;
 mod persistence;
 mod project_instructions;
 mod recovery;
@@ -385,6 +388,10 @@ mod temporary;
 
 #[cfg(test)]
 mod attachment_tests;
+#[cfg(test)]
+mod backend_tests;
+#[cfg(test)]
+mod browser_tests;
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]
@@ -402,9 +409,13 @@ mod input_tests;
 #[cfg(test)]
 mod instruction_tests;
 #[cfg(test)]
+mod large_request_tests;
+#[cfg(test)]
 mod local_read_tests;
 #[cfg(test)]
 mod long_work_tests;
+#[cfg(test)]
+mod network_tests;
 #[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]

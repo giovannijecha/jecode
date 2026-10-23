@@ -1,6 +1,6 @@
 //! Session-owned attachment storage. Each asset keeps the exact imported bytes
 //! under `<id>/<name>` and its metadata in `<id>.json`; an optional
-//! `<id>.view.png` or `.jpg` holds a provider-ready image derived from it.
+//! `<id>.view.png` or `.jpg` holds an embeddable image derived from it.
 
 use super::{Attachment, Kind, media};
 use crate::cancel::Cancellation;
@@ -13,9 +13,6 @@ use std::time::{Duration, SystemTime};
 
 /// Largest file an attachment may hold.
 pub const LIMIT: u64 = 1024 * 1024 * 1024;
-/// Images above these bounds are sent as a derived, smaller copy.
-const VIEW_BYTES: u64 = 3_750_000;
-const VIEW_PIXELS: u32 = 8000;
 /// Unreferenced assets younger than this may belong to another process's
 /// draft that has not reached disk yet.
 const GRACE: Duration = Duration::from_secs(600);
@@ -146,7 +143,7 @@ impl Pool {
         })
     }
 
-    /// The image bytes to send to a provider, if the pool has a usable form.
+    /// The image bytes for embedding, if the pool has a usable form.
     pub fn view(&self, attachment: &Attachment) -> Result<Option<(String, Vec<u8>)>, String> {
         let stored = self.load(&attachment.id)?;
         if direct(&stored.attachment) {
@@ -249,10 +246,7 @@ pub fn references(bytes: &[u8]) -> BTreeSet<String> {
 }
 
 fn direct(attachment: &Attachment) -> bool {
-    media::PROVIDER_IMAGES.contains(&attachment.media.as_str())
-        && attachment.size <= VIEW_BYTES
-        && attachment.width.unwrap_or(0) <= VIEW_PIXELS
-        && attachment.height.unwrap_or(0) <= VIEW_PIXELS
+    media::VIEW_IMAGES.contains(&attachment.media.as_str())
 }
 
 fn describe(id: &str, name: &str, path: &Path, size: u64) -> Result<Attachment, String> {

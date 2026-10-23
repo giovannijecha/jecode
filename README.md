@@ -2,13 +2,16 @@
 
 [![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
 
-A terminal coding agent written in Rust. Jecode connects to OpenRouter and works
-in your project through six tools: `read`, `write`, `edit`, `bash`, `process` and
-`checkpoint`.
+A terminal coding agent written in Rust. Jecode currently connects to OpenRouter and works
+in your project through eight tools: `read`, `write`, `edit`, `bash`, `process`,
+`checkpoint`, `web` and `browser`.
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
 One Cargo package, the Rust standard library, no external crates. Installed system
 tools provide HTTPS, Bash execution and native terminal support.
+`web` uses local curl for HTTP retrieval and crawling. `browser` controls an
+already installed Chromium-based browser through its local DevTools interface;
+set `JECODE_BROWSER` to its executable path if auto-discovery does not find it.
 
 ## Install
 
@@ -16,8 +19,15 @@ Build from this repository with Rust 1.95.0 and a native linker.
 
 | Platform | System requirements |
 | --- | --- |
-| Windows 10+ | Git Bash, HTTPS-enabled curl, Windows PowerShell with `Add-Type`. |
-| Linux / macOS | `bash`, HTTPS-enabled `curl`, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
+| Windows 10+ | Git Bash, HTTPS-enabled curl 8.3+, Windows PowerShell with `Add-Type`. |
+| Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
+
+Both installers verify the selected curl version and HTTPS support before
+installation. Set `JECODE_CURL` to an installed curl executable to override the
+default selection. Windows otherwise prefers `System32\curl.exe`; Linux and
+macOS use `curl` from PATH. Web tools and model requests use the same selection.
+Older Windows or Linux installations may need a newer curl even when the OS
+already provides one.
 
 The TUI uses 24-bit color. On macOS, install Apple's Command Line Tools for the
 native linker. See [platform verification](docs/development/PLATFORMS.md) for
@@ -79,6 +89,7 @@ saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard sh
 | `/new` | Start a fresh conversation with saved defaults. |
 | `/resume [ID]` | Choose a saved conversation from this project. |
 | `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
+| `/backend [ID [MODEL]]` | List available backends or switch this conversation to a configured backend and model. |
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
 | `/settings` | Edit saved defaults and the OpenRouter key. |
 | `/init` | Inspect this project and create or update its `JECODE.md`. |
@@ -143,7 +154,7 @@ for every command.
 The [documentation index](docs/README.md) links the usage guides and technical references.
 
 - [Configuration](docs/usage/CONFIGURATION.md): models, effort, routing and environment overrides.
-- [Tools](docs/usage/TOOLS.md): file operations, foreground commands and persistent processes.
+- [Tools](docs/usage/TOOLS.md): files, commands, processes, local web retrieval and browser control.
 - [Checkpoints](docs/usage/CHECKPOINTS.md): on-demand recovery, restores, scope and storage.
 - [Attachments](docs/usage/ATTACHMENTS.md), [copy](docs/usage/COPY.md) and [export](docs/usage/EXPORT.md).
 - [Architecture](docs/development/ARCHITECTURE.md) and [development checks](docs/development/TESTING.md).

@@ -1,7 +1,7 @@
 use crate::{
+    backend::{Endpoints, Model, Services},
     cancel::Cancellation,
     effort::Effort,
-    openrouter::{Api, Endpoints, Model},
 };
 use std::thread::{self, JoinHandle};
 
@@ -24,7 +24,7 @@ pub struct RoutingPurpose {
 pub enum ResultValue {
     Catalog(CatalogPurpose, Result<Vec<Model>, String>),
     Key(String, Result<(), String>),
-    Endpoints(RoutingPurpose, Result<Endpoints, String>),
+    Endpoints(RoutingPurpose, Result<Option<Endpoints>, String>),
 }
 pub struct Job {
     task: Option<JoinHandle<ResultValue>>,
@@ -32,22 +32,25 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn catalog(api: Api, purpose: CatalogPurpose) -> Self {
+    pub fn catalog(services: Services, purpose: CatalogPurpose) -> Self {
         Self::start(move |cancellation| {
-            ResultValue::Catalog(purpose, api.with_cancellation(cancellation).catalog())
+            ResultValue::Catalog(purpose, services.with_cancellation(cancellation).catalog())
         })
     }
-    pub fn endpoints(api: Api, purpose: RoutingPurpose) -> Self {
+    pub fn endpoints(services: Services, purpose: RoutingPurpose) -> Self {
         Self::start(move |cancellation| {
-            let result = api
+            let result = services
                 .with_cancellation(cancellation)
                 .endpoints(&purpose.model);
             ResultValue::Endpoints(purpose, result)
         })
     }
-    pub fn key(api: Api, key: String) -> Self {
+    pub fn key(services: Services, key: String) -> Self {
         Self::start(move |cancellation| {
-            ResultValue::Key(key, api.with_cancellation(cancellation).check_key())
+            ResultValue::Key(
+                key,
+                services.with_cancellation(cancellation).check_credential(),
+            )
         })
     }
     fn start(work: impl FnOnce(Cancellation) -> ResultValue + Send + 'static) -> Self {

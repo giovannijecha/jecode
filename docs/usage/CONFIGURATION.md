@@ -1,8 +1,9 @@
 # Personal configuration
 
 Start Jecode from the project directory. On the first interactive launch, setup
-asks for an OpenRouter key and model; `jecode setup` runs it again. In the TUI,
-use `/settings` to change saved defaults and the key. The key and defaults are
+asks for a backend API key and model; `jecode setup` runs it again. OpenRouter is
+the currently available backend. In the TUI, use `/settings` to change saved
+defaults and the key. The key and defaults are
 stored in plain text in `~/.jecode/config.json` (on Windows,
 `%USERPROFILE%\.jecode\config.json`). Keep this personal file private.
 
@@ -11,12 +12,14 @@ stored in plain text in `~/.jecode/config.json` (on Windows,
 | Action | Scope |
 | --- | --- |
 | `/model [ID]` | Choose a model and then its effort for this conversation. |
+| `/backend` or `/backend ID MODEL` | List available backends or switch this conversation to a configured backend and model. Plain chat also accepts `/backend ID` and prompts for a model. |
 | `/effort [NAME]` | Change this conversation's reasoning effort. |
 | `/settings` → **Default model** | Save the model and effort for future conversations and launches. |
 | `/settings` → **Default effort** | Change the saved model's default effort. |
 | `jecode --model provider/model-id "task"` | Override the model for one launch. |
 
-The effort selector shows the levels supported by the model. `default` leaves
+The effort selector shows the levels supported by the model. A direct model ID
+is accepted without a catalog lookup. `default` leaves
 reasoning effort to the provider. Model and effort changes preserve the conversation;
 saved defaults do not switch an existing conversation. Replace `provider/model-id`
 with the model's catalog ID.
@@ -27,6 +30,19 @@ The relevant fields are:
 
 ```json
 {
+  "selection": {
+    "backend": "openrouter",
+    "model": "provider/model-id",
+    "effort": "default"
+  },
+  "backends": {
+    "openrouter": {
+      "api_key": "your-key",
+      "routing": {
+        "provider/model-id": { "mode": "auto" }
+      }
+    }
+  },
   "openrouter": {
     "api_key": "your-key",
     "model": "provider/model-id",
@@ -39,7 +55,15 @@ The relevant fields are:
 }
 ```
 
-The model ID and key must be valid; `effort` defaults to `default` in older
+`selection` is the default for new conversations; switching a conversation does
+not change it. Backend credentials live under `backends.<id>`. The original
+`openrouter` block remains readable and is updated for compatibility. Its key,
+model, effort and routing take precedence for OpenRouter when both formats are
+present, so edits made by an older installed binary remain effective. Its
+values do not replace another backend's selection. Routing
+choices belong to a backend, so an OpenRouter pin cannot affect another backend
+using the same model ID. Other backend selections do not require
+an OpenRouter key. The model ID and key must be valid; `effort` defaults to `default` in older
 files. The file must be a JSON object of at most 64 KiB. Jecode retains unknown
 fields when saving. An invalid or unreadable file blocks setup and launch with
 an error; Jecode leaves it unchanged so you can correct it. Saves replace the
@@ -61,6 +85,7 @@ its own purpose:
 | `skills/` | Your reusable skill files; Jecode reads this library. |
 | `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
 | `tmp/` | Session working files, managed by Jecode's temporary-file actions. |
+| `browser/profiles/` | Named persistent Chromium profiles selected by the `browser` tool. |
 | `cache/` | Native helper binaries generated when needed. |
 | `checkpoints/<workspace>-<id>/` | Jecode-managed `rc-ID.rcp` packs and `.internal/` identity and lease metadata. |
 
@@ -155,6 +180,6 @@ temporary storage, checkpoint archives and the personal [skill library](SKILLS.m
 selects the Bash executable. These are
 useful for isolated development.
 
-`/model`, `/effort` and `/routing` change the conversation without changing
+`/backend`, `/model`, `/effort` and `/routing` change the conversation without changing
 saved defaults. Changing the key in `/settings` updates current authentication.
 For what resumes with a conversation, see [Sessions](SESSIONS.md).

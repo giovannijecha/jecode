@@ -23,6 +23,41 @@ fn response(text: &str) -> Value {
 }
 
 #[test]
+fn backend_command_keeps_the_conversation_and_saved_default() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    let mut config = SessionConfig {
+        store: Store::new(home.path().to_path_buf()),
+        settings: Settings::new("isolated-fixture-key".into(), "fixture/default".into()).unwrap(),
+        bash: crate::tools::find_bash().unwrap(),
+    };
+    let before = agent.archive().messages.lock().unwrap().len();
+    let mut output = Vec::new();
+    chat(
+        &mut agent,
+        &mut config,
+        &mut Cursor::new("/backend openrouter fixture/new\n/exit\n"),
+        &mut output,
+        &mut Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(agent.backend_id(), "openrouter");
+    assert_eq!(agent.model(), "fixture/new");
+    assert_eq!(config.settings.model, "fixture/default");
+    assert!(agent.archive().messages.lock().unwrap().len() >= before);
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("Backend set to openrouter / fixture/new")
+    );
+}
+
+#[test]
 fn skills_command_lists_local_catalog_and_skips_malformed_entries_without_an_api_request() {
     let home = Directory::new();
     let project = Directory::new();
@@ -183,23 +218,7 @@ fn interactive_session_recovers_from_api_errors_and_can_clear_history() {
 #[test]
 fn model_command_preserves_context_and_does_not_change_saved_defaults() {
     let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![
-        (200, response("Before.")),
-        (
-            200,
-            Value::object([(
-                "data",
-                Value::Array(vec![Value::object([
-                    ("id", Value::string("fixture/new")),
-                    (
-                        "supported_parameters",
-                        Value::Array(vec![Value::string("tools")]),
-                    ),
-                ])]),
-            )]),
-        ),
-        (200, response("After.")),
-    ]);
+    let fixture = HttpFixture::new(vec![(200, response("Before.")), (200, response("After."))]);
     let mut agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
@@ -228,11 +247,11 @@ fn model_command_preserves_context_and_does_not_change_saved_defaults() {
     assert!(output.contains("Model set to fixture/new"));
     let requests = fixture.finish();
     assert_eq!(
-        requests[2].body.get("model").and_then(Value::as_str),
+        requests[1].body.get("model").and_then(Value::as_str),
         Some("fixture/new")
     );
     assert_eq!(
-        requests[2]
+        requests[1]
             .body
             .get("messages")
             .and_then(Value::as_array)
@@ -275,7 +294,7 @@ fn routing_command_offers_the_shared_choices_and_applies_from_the_next_request()
     .unwrap();
     assert_eq!(
         agent.routing(),
-        &crate::openrouter::Routing::Endpoint("one/fp8".into())
+        crate::openrouter::Routing::Endpoint("one/fp8".into())
     );
     assert!(config.store.load().unwrap().is_none());
     let output = String::from_utf8(output).unwrap();

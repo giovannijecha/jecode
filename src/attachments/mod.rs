@@ -1,20 +1,22 @@
 //! Prompt attachments: the structured prompt shared by the composer, sessions,
-//! the agent and the provider, plus the session-owned asset pool.
+//! the agent and backend adapters, plus the session-owned asset pool.
 //!
 //! A prompt keeps its text and its attachments apart. Each attachment owns one
 //! object replacement character in the text; the n-th marker is the n-th
 //! attachment. Labels such as `[1# Image]` are derived for display only, so a
 //! typed lookalike label is plain text and never an attachment.
 
-pub mod annotations;
 pub mod base64;
 pub mod capture;
 pub(crate) mod media;
 pub mod paths;
 mod pool;
-pub mod provider;
+mod view;
 
 pub use pool::{Pool, references};
+#[cfg(test)]
+pub use view::weight;
+pub use view::{Inputs, requested, user_text, weight_for};
 
 use crate::json::Value;
 

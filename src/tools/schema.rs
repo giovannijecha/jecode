@@ -1,5 +1,7 @@
 use crate::json::Value;
 
+/// Executable tools in Jecode's neutral name, description and parameters shape.
+/// Each backend owns the wrapper required by its request protocol.
 pub fn definitions() -> Value {
     let string = || Value::object([("type", Value::string("string"))]);
     let integer = |min, max: Option<usize>| {
@@ -14,28 +16,22 @@ pub fn definitions() -> Value {
         }
         value
     };
+    let boolean = || Value::object([("type", Value::string("boolean"))]);
+    let strings = || Value::object([("type", Value::string("array")), ("items", string())]);
     let tool = |name, description, properties, required: &[&str]| {
         Value::object([
-            ("type", Value::string("function")),
+            ("name", Value::string(name)),
+            ("description", Value::string(description)),
             (
-                "function",
+                "parameters",
                 Value::object([
-                    ("name", Value::string(name)),
-                    ("description", Value::string(description)),
+                    ("type", Value::string("object")),
+                    ("properties", properties),
                     (
-                        "parameters",
-                        Value::object([
-                            ("type", Value::string("object")),
-                            ("properties", properties),
-                            (
-                                "required",
-                                Value::Array(
-                                    required.iter().map(|name| Value::string(*name)).collect(),
-                                ),
-                            ),
-                            ("additionalProperties", Value::Bool(false)),
-                        ]),
+                        "required",
+                        Value::Array(required.iter().map(|name| Value::string(*name)).collect()),
                     ),
+                    ("additionalProperties", Value::Bool(false)),
                 ]),
             ),
         ])
@@ -54,7 +50,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "write",
-            "Create or replace a complete UTF-8 file. Project paths require an existing parent directory. Use tmp:relative/path for disposable scripts and one-off verification files; it writes in this session's temporary area and creates parent directories there. Keep project deliverables, including useful durable tests, in the project.",
+            "Create or replace a complete UTF-8 file through this tool call; describing a write in assistant text does not execute it. Project paths require an existing parent directory. Use tmp:relative/path for disposable scripts and one-off verification files; it writes in this session's temporary area and creates parent directories there. Keep project deliverables, including useful durable tests, in the project.",
             Value::object([("path", string()), ("content", string())]),
             &["path", "content"],
         ),
@@ -70,7 +66,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run a Bash command from the project directory. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Recursive scopes skip generated and Git-ignored directories; name one explicitly to save it. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an execution deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
+            "Run a Bash command from the project directory. Shell syntax is Bash on every host, including Windows; invoke PowerShell explicitly if needed. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Recursive scopes skip generated and Git-ignored directories; name one explicitly to save it. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an optional execution deadline from launch; without it execution has no deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. wait_ms limits only the initial wait, not process lifetime; use process poll to check status and output and process stop to end it. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
             Value::object([
                 ("command", string()),
                 (
@@ -86,8 +82,32 @@ pub fn definitions() -> Value {
                         ),
                     ]),
                 ),
-                ("timeout_seconds", integer(1, None)),
-                ("wait_ms", integer(0, None)),
+                (
+                    "timeout_seconds",
+                    Value::object([
+                        ("type", Value::string("integer")),
+                        ("minimum", Value::number(1)),
+                        (
+                            "description",
+                            Value::string(
+                                "Optional execution deadline in seconds from launch; omitted means no deadline. Independent of wait_ms.",
+                            ),
+                        ),
+                    ]),
+                ),
+                (
+                    "wait_ms",
+                    Value::object([
+                        ("type", Value::string("integer")),
+                        ("minimum", Value::number(0)),
+                        (
+                            "description",
+                            Value::string(
+                                "Initial wait in milliseconds before returning a persistent process_id; does not end the process. Omit to wait for command completion.",
+                            ),
+                        ),
+                    ]),
+                ),
             ]),
             &["command"],
         ),
@@ -155,6 +175,97 @@ pub fn definitions() -> Value {
                     Value::object([("type", Value::string("boolean"))]),
                 ),
                 ("limit", integer(1, Some(200))),
+            ]),
+            &["action"],
+        ),
+        tool(
+            "web",
+            "Fetch/download HTTP(S) or crawl links with local curl. fetch returns status, final_url, MIME, raw path, text_path and a short preview. Text/HTML extraction reads at most 4 MiB; extraction_truncated marks partial results. HTML returns up to 100 links; links_count and links_path cover all extracted links. download saves raw bytes without parsing. Fetch/download require url; support method, headers and body. Headers stay at the requested origin across redirects. crawl uses GET without a body; requires urls to start or crawl_id to resume. Seed-origin headers, timeout_seconds and max_bytes are saved; resume with unchanged options. Crawl defaults: same_origin true, max_depth 1, max_pages 20 per call. Returns up to 20 page summaries and manifest_path for full JSONL records; use read paging. max_bytes limits each response only when set. This is ordinary HTTP; use browser for rendered pages or search sites.",
+            Value::object([
+                (
+                    "action",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(["fetch", "download", "crawl"].map(Value::string).into()),
+                        ),
+                    ]),
+                ),
+                ("url", string()),
+                ("urls", strings()),
+                ("crawl_id", string()),
+                ("method", string()),
+                (
+                    "headers",
+                    Value::object([
+                        ("type", Value::string("object")),
+                        ("additionalProperties", string()),
+                    ]),
+                ),
+                ("body", string()),
+                ("timeout_seconds", integer(1, None)),
+                ("max_bytes", integer(1, None)),
+                ("max_pages", integer(1, None)),
+                ("max_depth", integer(0, None)),
+                ("same_origin", boolean()),
+            ]),
+            &["action"],
+        ),
+        tool(
+            "browser",
+            "Control an installed Chromium-based browser locally through the Chrome DevTools Protocol. open launches an isolated headless browser by default and optionally navigates to url; visible:true opens a window. profile names select dedicated persistent profiles, while the default profile is temporary. Actions: tabs, navigate, snapshot, click, fill, press, scroll, wait, screenshot, evaluate, cdp, logs, close, stop. An omitted browser_id selects the newest browser; an omitted tab_id selects an available page tab, so pass tab_id for a specific tab. snapshot returns element refs such as @1; selector accepts a ref or CSS. wait uses selector and/or text. screenshot saves a tmp:browser/ image, imports it as an attachment and delivers it on the next model request; its attachment reference survives temporary cleanup. cdp calls a raw DevTools method for advanced operations. Use a visible browser for login and two-factor prompts. Chromium must already be installed; JECODE_BROWSER may point to its executable.",
+            Value::object([
+                (
+                    "action",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(
+                                [
+                                    "open",
+                                    "tabs",
+                                    "navigate",
+                                    "snapshot",
+                                    "click",
+                                    "fill",
+                                    "press",
+                                    "scroll",
+                                    "wait",
+                                    "screenshot",
+                                    "evaluate",
+                                    "cdp",
+                                    "logs",
+                                    "close",
+                                    "stop",
+                                ]
+                                .map(Value::string)
+                                .into(),
+                            ),
+                        ),
+                    ]),
+                ),
+                ("url", string()),
+                ("visible", boolean()),
+                ("profile", string()),
+                ("browser_id", string()),
+                ("tab_id", string()),
+                ("selector", string()),
+                ("text", string()),
+                ("key", string()),
+                ("expression", string()),
+                ("method", string()),
+                ("params", Value::object([("type", Value::string("object"))])),
+                ("timeout_ms", integer(1, None)),
+                ("x", integer(0, None)),
+                ("y", integer(0, None)),
+                (
+                    "delta_y",
+                    Value::object([("type", Value::string("integer"))]),
+                ),
+                ("width", integer(1, None)),
+                ("height", integer(1, None)),
             ]),
             &["action"],
         ),

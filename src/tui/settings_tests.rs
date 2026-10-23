@@ -43,6 +43,21 @@ fn wait(app: &mut App) {
 }
 
 #[test]
+fn backend_command_switches_model_without_changing_saved_defaults() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.dispatch("/backend".into()).unwrap();
+    assert!(app.state.items.iter().any(|item| matches!(item, state::Item::Local { result: Some(result), .. } if result.contains("Available backends"))));
+    app.dispatch("/backend openrouter fixture/manual".into())
+        .unwrap();
+    assert_eq!(app.agent.as_ref().unwrap().model(), "fixture/manual");
+    assert_eq!(app.config.settings.model, "fixture/model");
+    assert_eq!(app.archive.model, "fixture/manual");
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn validated_key_save_changes_authentication_preserves_context_and_never_displays_the_key() {
     let directory = Directory::new();
     let key = "replacement-fixture-key";

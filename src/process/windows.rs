@@ -149,11 +149,11 @@ fn configure(helper: &mut Command, command: &Command) {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .creation_flags(CREATE_NO_WINDOW)
-        .env_remove("OPENROUTER_API_KEY");
+        .creation_flags(CREATE_NO_WINDOW);
     if let Some(directory) = command.get_current_dir() {
         helper.current_dir(directory);
     }
+    crate::auth::isolate_environment(helper);
     for (key, value) in command.get_envs() {
         if let Some(value) = value {
             helper.env(key, value);

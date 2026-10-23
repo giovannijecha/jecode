@@ -14,6 +14,7 @@ fn sessions() -> Vec<Summary> {
             id: format!("1234-56-{index}"),
             title: format!("Saved request {index}"),
             updated: index,
+            backend: "openrouter".into(),
             model: "fixture/model".into(),
         })
         .collect()

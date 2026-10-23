@@ -1,8 +1,8 @@
 use super::Agent;
 use crate::{
+    backend::{Completion, Failure, FailureKind, Limits, Update},
     events::Event,
     json::Value,
-    openrouter::{Completion, Failure, FailureKind, Limits, Update},
 };
 use std::time::Duration;
 
@@ -45,14 +45,18 @@ impl Agent {
             return Err("Operation cancelled".into());
         }
         let mut partial = String::new();
-        let result = self
-            .client
-            .sample(messages, tools, output_tokens, &mut |update| {
+        let result = self.client.sample(
+            messages,
+            tools,
+            output_tokens,
+            self.tools.attachments(),
+            &mut |update| {
                 if let Update::Text(text) = &update {
                     partial = text.clone();
                 }
                 emit(update)
-            });
+            },
+        );
         if let Err(error) = &result
             && let Some(charges) = &error.charges
         {
@@ -68,7 +72,7 @@ impl Agent {
                     retries.empty_responses += 1;
                     if retries.empty_responses >= 3 {
                         return Err(format!(
-                            "OpenRouter returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
+                            "The backend returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
                             self.redact(&error.message)
                         ).into());
                     }

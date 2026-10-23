@@ -2,7 +2,10 @@ use super::{
     Document, Pending,
     document::{integer, string},
 };
-use crate::json::{self, Value};
+use crate::{
+    conversation::ToolCall,
+    json::{self, Value},
+};
 use std::collections::BTreeSet;
 
 pub(super) fn validate(document: &Document) -> Result<(), String> {
@@ -54,16 +57,10 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
                 }
                 if let Some(Value::Array(calls)) = message.get("tool_calls") {
                     for call in calls {
-                        let id = string(call, "id")?;
-                        if id.is_empty()
-                            || !outstanding.insert(id.to_string())
-                            || string(call, "type")? != "function"
-                        {
+                        let call = ToolCall::parse(call)?;
+                        if !outstanding.insert(call.id) {
                             return Err("Invalid saved tool call".into());
                         }
-                        let function = call.get("function").ok_or("Missing saved tool function")?;
-                        string(function, "name")?;
-                        string(function, "arguments")?;
                     }
                 } else if !matches!(message.get("tool_calls"), None | Some(Value::Null)) {
                     return Err("Invalid saved tool calls".into());

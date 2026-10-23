@@ -189,7 +189,7 @@ fn conversations_take_saved_preferences_while_resume_restores_their_own_routing(
     agent
         .start_new("fixture/model".into(), Effort::Default)
         .unwrap();
-    assert_eq!(agent.routing(), &pin);
+    assert_eq!(agent.routing(), pin);
     // A conversation choice leaves the saved preference alone.
     agent.set_routing(Routing::Auto);
     agent.run_turn("Auto task", &mut |_| Ok(())).unwrap();
@@ -197,19 +197,19 @@ fn conversations_take_saved_preferences_while_resume_restores_their_own_routing(
     assert_eq!(agent.preferred_routing("fixture/model"), pin);
 
     agent.resume(&pinned).unwrap();
-    assert_eq!(agent.routing(), &pin);
+    assert_eq!(agent.routing(), pin);
     agent.resume(&automatic).unwrap();
-    assert_eq!(agent.routing(), &Routing::Auto);
+    assert_eq!(agent.routing(), Routing::Auto);
     // A model switch never keeps another model's pin.
     agent.set_model("fixture/third".into()).unwrap();
-    assert_eq!(agent.routing(), &Routing::Auto);
+    assert_eq!(agent.routing(), Routing::Auto);
     agent.set_model("fixture/other".into()).unwrap();
-    assert_eq!(agent.routing(), &other);
+    assert_eq!(agent.routing(), other);
     let (_, current) = agent
         .delete_session(&automatic, "fixture/model".into(), Effort::Default)
         .unwrap();
     assert!(current);
-    assert_eq!(agent.routing(), &pin);
+    assert_eq!(agent.routing(), pin);
     assert_eq!(agent.sessions().unwrap().snapshot().routing, pin);
 
     let requests = fixture.finish();

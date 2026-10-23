@@ -138,6 +138,78 @@ fn outcome_summary(name: &str, result: &Value) -> String {
     if name == "checkpoint" {
         return checkpoint_summary(result);
     }
+    if name == "browser" {
+        if let Some(path) = result.get("screenshot_path").and_then(Value::as_str) {
+            return format!("screenshot saved to {path}");
+        }
+        if let Some(tabs) = result.get("tabs").and_then(Value::as_array) {
+            return counted(tabs.len(), "tab");
+        }
+        if result.get("closed") == Some(&Value::Bool(true)) {
+            return "closed".into();
+        }
+        if result.get("snapshot_path").is_some() {
+            return "snapshot captured".into();
+        }
+        if result.get("logs_path").is_some() {
+            return "logs saved".into();
+        }
+        for (key, summary) in [
+            ("clicked", "clicked"),
+            ("filled", "filled"),
+            ("scrolled", "scrolled"),
+            ("found", "found"),
+        ] {
+            if result.get(key) == Some(&Value::Bool(true)) {
+                return summary.into();
+            }
+        }
+        if let Some(key) = result.get("pressed").and_then(Value::as_str) {
+            return format!("pressed {key}");
+        }
+        if result.get("value").is_some() {
+            return "script evaluated".into();
+        }
+        if result.get("result").is_some() {
+            return "DevTools call complete".into();
+        }
+        if let Some(url) = result.get("url").and_then(Value::as_str) {
+            return format!("opened {url}");
+        }
+    }
+    if name == "web" {
+        if let Some(pages) = result.get("pages").and_then(Value::as_array) {
+            let count = result
+                .get("pages_in_call")
+                .and_then(Value::as_usize)
+                .unwrap_or(pages.len());
+            let mut summary = format!("crawled {}", counted(count, "page"));
+            let failed = pages
+                .iter()
+                .filter(|page| page.get("error").is_some())
+                .count();
+            if failed > 0 {
+                if result.get("pages_truncated") == Some(&Value::Bool(true)) {
+                    summary.push_str(&format!("; {failed} failed in preview"));
+                } else {
+                    summary.push_str(&format!("; {failed} failed"));
+                }
+            }
+            if result.get("complete") == Some(&Value::Bool(true)) {
+                summary.push_str("; complete");
+            } else if let Some(queued) = result.get("queued").and_then(Value::as_usize) {
+                summary.push_str(&format!("; {queued} queued"));
+            }
+            if result.get("manifest_repaired") == Some(&Value::Bool(true)) {
+                summary.push_str("; manifest repaired");
+            }
+            return summary;
+        }
+        if let Some(status) = result.get("status") {
+            let bytes = result.get("bytes").and_then(Value::as_usize).unwrap_or(0);
+            return format!("HTTP {} · {bytes} bytes", status.encode());
+        }
+    }
     if name == "process"
         && let Some(processes) = result.get("processes").and_then(Value::as_array)
     {
@@ -212,6 +284,38 @@ pub fn process_status(result: &Value) -> Option<&str> {
 }
 
 pub fn description(name: &str, arguments: &Value) -> String {
+    if name == "web" || name == "browser" {
+        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        let action = field("action");
+        let target = if name == "web" {
+            if action == "crawl" {
+                let urls = arguments
+                    .get("urls")
+                    .and_then(Value::as_array)
+                    .unwrap_or(&[]);
+                if let Some(first) = urls.first().and_then(Value::as_str) {
+                    return if urls.len() == 1 {
+                        format!("crawl {first}")
+                    } else {
+                        format!("crawl {first} (+{} URLs)", urls.len() - 1)
+                    };
+                }
+                field("crawl_id")
+            } else {
+                field("url")
+            }
+        } else {
+            match action {
+                "open" | "navigate" => field("url"),
+                "click" | "fill" | "wait" => field("selector"),
+                "press" => field("key"),
+                "evaluate" => field("expression"),
+                "cdp" => field("method"),
+                _ => field("tab_id"),
+            }
+        };
+        return format!("{action} {target}").trim_end().into();
+    }
     if name == "process" {
         let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
         return format!("{} {}", field("action"), field("process_id"))
@@ -326,6 +430,42 @@ mod tests {
         assert_eq!(
             tool_summary("checkpoint", &failed),
             "restored 1 path from rc-one; 2 conflicts; 3 paths failed"
+        );
+    }
+
+    #[test]
+    fn local_web_and_browser_cards_show_actions_and_artifacts() {
+        let fetch = Value::object([
+            ("action", Value::string("fetch")),
+            ("url", Value::string("https://example.org/")),
+        ]);
+        assert_eq!(description("web", &fetch), "fetch https://example.org/");
+        let fetched = Value::object([("status", Value::number(200)), ("bytes", Value::number(42))]);
+        assert_eq!(tool_summary("web", &fetched), "HTTP 200 · 42 bytes");
+
+        let screenshot = Value::object([
+            ("action", Value::string("screenshot")),
+            ("tab_id", Value::string("tab-1")),
+        ]);
+        assert_eq!(description("browser", &screenshot), "screenshot tab-1");
+        let captured = Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]);
+        assert_eq!(
+            tool_summary("browser", &captured),
+            "screenshot saved to tmp:browser/shot.png"
+        );
+        let crawl = Value::object([
+            ("pages_in_call", Value::number(35)),
+            ("pages_truncated", Value::Bool(true)),
+            ("manifest_repaired", Value::Bool(true)),
+            ("queued", Value::number(4)),
+            (
+                "pages",
+                Value::Array(vec![Value::object([("error", Value::string("offline"))])]),
+            ),
+        ]);
+        assert_eq!(
+            tool_summary("web", &crawl),
+            "crawled 35 pages; 1 failed in preview; 4 queued; manifest repaired"
         );
     }
 }

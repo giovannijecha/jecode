@@ -1,6 +1,6 @@
 use super::{canonical, identifier, now, valid_id};
 use crate::attachments::{Attachment, Prompt};
-use crate::openrouter::{Routing, validate_model};
+use crate::backend::{Routing, validate_model};
 use crate::{effort::Effort, json::Value, redact::Redactor};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -206,6 +206,8 @@ pub struct Document {
     pub updated: u64,
     pub directory: PathBuf,
     pub model: String,
+    pub backend: String,
+    pub legacy_origin: Option<crate::conversation::Origin>,
     pub effort: Effort,
     pub compatible_from: usize,
     pub messages: Vec<Value>,
@@ -226,6 +228,8 @@ impl Document {
             updated: timestamp,
             directory,
             model,
+            backend: "openrouter".into(),
+            legacy_origin: None,
             effort,
             compatible_from: 0,
             messages: vec![],
@@ -289,6 +293,13 @@ impl Document {
                 Value::string(self.directory.to_string_lossy()),
             ),
             ("model", Value::string(&self.model)),
+            ("backend", Value::string(&self.backend)),
+            (
+                "legacy_origin",
+                self.legacy_origin
+                    .as_ref()
+                    .map_or(Value::Null, crate::conversation::Origin::value),
+            ),
             ("effort", Value::string(self.effort.name())),
             ("compatible_from", Value::number(self.compatible_from)),
             (
@@ -343,6 +354,19 @@ impl Document {
             return Err("Session directory must be absolute".into());
         }
         let model = string(value, "model")?.to_string();
+        let backend = match value.get("backend") {
+            None => "openrouter".to_owned(),
+            Some(Value::String(id)) if !id.is_empty() && !id.chars().any(char::is_control) => {
+                id.clone()
+            }
+            _ => return Err("Invalid saved backend identifier".into()),
+        };
+        crate::backend::validate_id(&backend)?;
+        let legacy_origin = match value.get("legacy_origin") {
+            None => Some(crate::conversation::Origin::new(&backend, &model)),
+            Some(Value::Null) => None,
+            Some(value) => Some(crate::conversation::Origin::parse(value)?),
+        };
         validate_model(&model)?;
         let pending = required(value, "pending")?;
         let active = match required(pending, "active")? {
@@ -353,6 +377,8 @@ impl Document {
             id,
             directory,
             model,
+            backend,
+            legacy_origin,
             created: integer(value, "created_at_unix_ms")?,
             updated: integer(value, "updated_at_unix_ms")?,
             effort: Effort::parse(string(value, "effort")?)?,

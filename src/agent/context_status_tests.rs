@@ -127,7 +127,10 @@ fn preview_only_reduction_reports_the_reduced_projection() {
     ]);
     let original = agent.messages.lock().unwrap().clone();
     agent.context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(6000))])),
+        Some(&crate::backend::Usage {
+            input_tokens: Some(6000),
+            ..Default::default()
+        }),
         2,
     );
     agent.context.calibrate(36000);

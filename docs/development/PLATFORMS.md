@@ -16,6 +16,41 @@ isolated files.
 These are local verification boundaries. CI jobs and ignored/manual fixtures
 provide separate evidence; inspect the checks executed for the revision under review.
 
+The backend separation was checked locally on October 23, 2026: formatting,
+offline build and Clippy passed with 943 ordinary tests on Windows and 938 on
+Ubuntu under WSL using a fresh native-filesystem copy. Both installed-browser
+fixtures and the platform's native terminal fixture passed on each host. The
+ordinary suite includes different-protocol backend switching, save failure,
+legacy origin retention, account credential masking and expired endpoint refresh. This change has no
+new native macOS execution evidence.
+
+The request-transport correction was checked on October 23, 2026 with curl
+8.21.0 on Windows and 8.18.0 on Ubuntu under WSL. Formatting, offline build,
+Clippy and the ordinary suite passed: 956 Windows tests and 950 Linux tests.
+Both native browser fixtures passed on each host, including three consecutive
+Windows runs, along with ConPTY and Linux PTY checks. Loopback regressions cover
+requests above 10 MiB, literal `@` data, exact image bytes, a native write followed
+by `avanti`, incomplete stdin diagnostics and Windows child environment overrides.
+
+## Local web and browser tools
+
+The web HTTP, crawl recovery and WebSocket fixtures run in the ordinary suite.
+The installed-browser checks are opt-in and use loopback pages, synthetic state
+and dedicated profiles without a model API request or an automation package:
+
+```text
+cargo test --locked --offline agent::browser_tests::native_browser_tool_delivers_images_and_preserves_only_named_profile_state -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline browser::tests::live_chromium_localhost_interaction_and_profile_persistence -- --exact --ignored --nocapture --test-threads=1
+```
+
+On October 23, 2026, the browser checks passed on Windows with Chrome
+155.0.8059.86 and Ubuntu under WSL on a native Linux filesystem with Chrome
+155.0.8059.79. They exercise navigation, offscreen reference clicks, form input,
+screenshots and model attachment delivery, persistent local state, interrupted
+evaluation recovery, temporary cleanup and live-session deletion. The Windows
+ConPTY and Linux PTY fixtures also passed; the Windows renderer fixture includes
+the Web and Browser cards. Native browser execution on macOS remains unverified.
+
 ## Windows
 
 Requires Windows 10+, Git Bash, Windows PowerShell/.NET and ConPTY:

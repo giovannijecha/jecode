@@ -17,16 +17,24 @@ jecode --plain resume SESSION_ID
 `jecode resume` opens a folder-scoped picker. In the TUI, `/resume` opens the
 same picker and `/resume ID` opens a specific session. The picker shows the
 most recently updated sessions first, with the first request as the title,
-model, age and ID. Once saved, the active session appears as `current`;
+backend, model, age and ID. Once saved, the active session appears as `current`;
 selecting it returns to the composer. A session already open in another
 process cannot be resumed at the same time.
 
 The exit summary prints `jecode resume SESSION_ID` after a successful save.
-Resume restores the conversation, tool results, model, effort, routing, prompt
-history and saved input. It uses the currently configured OpenRouter key and
-does not rerun provider requests or tools. `/settings` defaults are unchanged.
+Resume restores the conversation, tool results, backend, model, effort, routing,
+prompt history and saved input. It uses the configured account for that backend
+and does not rerun requests or tools. `/settings` defaults are unchanged.
 Use `/new` to save the old conversation and start an independent one with those
 defaults. The unsent composer and pending drafts move to the new conversation.
+
+`/model` and `/backend` change the active selection within the same conversation.
+The session ID, original history, attachments, live processes and browser remain
+available. The next request uses the new selection and resets its token
+calibration. A failed selection save retains the previous backend and model.
+Native response metadata stays attributed to its original backend and model;
+only a compatible selection reuses it. Older sessions infer OpenRouter when
+backend identity is absent, without rewriting the original messages.
 
 A session is saved from its first sent request, before provider work starts.
 Adding an attachment to unsent input also saves it so the copied bytes remain

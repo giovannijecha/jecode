@@ -10,6 +10,8 @@ impl Agent {
                 "working_directory",
                 Value::string(self.tools.root().to_string_lossy()),
             ),
+            ("host_operating_system", Value::string(std::env::consts::OS)),
+            ("command_shell", Value::string("Bash")),
             (
                 "file_tool_access",
                 Value::string("project_directory_and_session_and_skill_references"),

@@ -41,11 +41,14 @@ fn failed_message_display_keeps_the_provider_message_and_cancels_its_tools() {
     let document = agent.archive().document();
     let messages = document.get("messages").unwrap().as_array().unwrap();
     assert_eq!(
-        &messages[2],
-        first.get("choices").unwrap().as_array().unwrap()[0]
-            .get("message")
-            .unwrap()
+        crate::conversation::portable(&messages[2]),
+        crate::conversation::portable(
+            first.get("choices").unwrap().as_array().unwrap()[0]
+                .get("message")
+                .unwrap()
+        )
     );
+    assert!(crate::conversation::has_origin(&messages[2]));
     assert_eq!(
         messages[3].get("tool_call_id").and_then(Value::as_str),
         Some("pending")
@@ -198,7 +201,7 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
         }
         assert_eq!(
             request.body.get("tools").unwrap().as_array().unwrap().len(),
-            6
+            8
         );
     }
     let fourth = requests[3]

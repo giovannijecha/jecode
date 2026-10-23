@@ -1,5 +1,6 @@
 mod attachment;
 mod files;
+mod network;
 pub mod processes;
 mod schema;
 mod shell;
@@ -46,6 +47,8 @@ pub struct Tools {
     attachments: Option<crate::attachments::Pool>,
     processes: processes::Registry,
     checkpoints: Option<Arc<Session>>,
+    browsers: crate::browser::Registry,
+    browser_profiles: Option<PathBuf>,
 }
 
 impl Tools {
@@ -66,6 +69,8 @@ impl Tools {
             attachments: None,
             processes: processes::Registry::default(),
             checkpoints: None,
+            browsers: crate::browser::Registry::default(),
+            browser_profiles: None,
         })
     }
 
@@ -109,6 +114,15 @@ impl Tools {
     /// Stops the persistent processes of the conversation that is ending.
     pub fn stop_processes(&self) {
         self.processes.stop_all();
+        self.stop_browsers();
+    }
+
+    pub fn stop_browsers(&self) {
+        self.browsers.stop_all();
+    }
+
+    pub fn configure_browser_profiles(&mut self, home: &Path) {
+        self.browser_profiles = Some(home.join("browser/profiles"));
     }
 
     /// Local inspection and stop control for the current conversation's processes.
@@ -304,6 +318,11 @@ impl Tools {
                         .map(|value| (value, None)),
                     "checkpoint" => self
                         .checkpoint(&arguments, cancellation)
+                        .map(|value| (value, None)),
+                    "web" => crate::web::execute(self.temporary()?, &arguments, cancellation)
+                        .map(|value| (value, None)),
+                    "browser" => self
+                        .browser(&arguments, cancellation)
                         .map(|value| (value, None)),
                     _ => Err(format!("Unknown tool: {name}")),
                 }

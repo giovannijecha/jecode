@@ -45,6 +45,28 @@ fn summaries_track_the_committed_journal_and_bound_large_titles() {
 }
 
 #[test]
+fn cached_summary_identifies_backend_and_accepts_legacy_missing_field() {
+    let (_home, _directory, store, mut document) = fixture();
+    document.backend = "future".into();
+    let lease = store.create(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    let current = stamp(&store, &document.id).unwrap();
+    let summary = load(&store, &document.id, &current).unwrap();
+    assert_eq!(summary.backend, "future");
+    assert!(summary.description().contains("future / fixture/model"));
+    let cache = path(&store, &document.id);
+    let mut value = json::parse(&fs::read_to_string(&cache).unwrap()).unwrap();
+    if let Value::Object(fields) = &mut value {
+        fields.remove("backend");
+    }
+    fs::write(&cache, value.encode()).unwrap();
+    assert_eq!(
+        load(&store, &document.id, &current).unwrap().backend,
+        "openrouter"
+    );
+}
+
+#[test]
 fn missing_corrupt_or_stale_caches_fall_back_to_the_journal() {
     let (_home, _directory, store, document) = fixture();
     let lease = store.create(&document.id).unwrap();

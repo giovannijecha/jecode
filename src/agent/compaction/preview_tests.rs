@@ -46,7 +46,10 @@ fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_
     let original = agent.messages.lock().unwrap().clone();
     let old_summary = agent.context.summary.clone();
     agent.context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(6000))])),
+        Some(&crate::backend::Usage {
+            input_tokens: Some(6000),
+            ..Default::default()
+        }),
         2,
     );
     agent.context.calibrate(36000);

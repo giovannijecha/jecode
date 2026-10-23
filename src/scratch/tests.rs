@@ -253,6 +253,8 @@ fn links_or_junctions_are_rejected_before_any_cleanup() {
     }
     #[cfg(unix)]
     std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+    let info = temporary.info().unwrap();
+    assert_eq!(info.skipped, 1);
     assert!(temporary.file("linked/outside.txt", true).is_err());
     assert!(temporary.file("linked/outside.txt", false).is_err());
     assert!(temporary.clean().unwrap_err().contains("link"));

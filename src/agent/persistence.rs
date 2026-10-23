@@ -1,8 +1,7 @@
 use super::Agent;
 use crate::{
-    effort::Effort,
     json::Value,
-    sessions::{Document, Handle, Input, Stage, Store},
+    sessions::{Document, Handle, Stage, Store},
 };
 use std::path::Path;
 
@@ -10,6 +9,7 @@ impl Agent {
     pub fn enable_sessions(&mut self, home: &Path) -> Result<(), String> {
         if self.persistence.is_none() {
             self.skills.configure(home);
+            self.tools.configure_browser_profiles(home);
             let store = Store::new(home.to_path_buf(), self.tools.root())?;
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
@@ -17,6 +17,7 @@ impl Agent {
                 self.effort(),
             )?;
             document.routing = self.routing().clone();
+            document.backend = self.backend_id().into();
             self.tools.configure_session_output(
                 store.output_directory(),
                 &document.id,
@@ -59,7 +60,7 @@ impl Agent {
                 &self.archive(),
                 self.compatible_from,
                 &self.context,
-                self.routing(),
+                &self.routing(),
                 stage,
             ),
             None => Ok(()),
@@ -99,58 +100,6 @@ impl Agent {
         Ok(())
     }
 
-    /// Starts a conversation with `model`'s saved routing preference.
-    pub fn start_new(&mut self, model: String, effort: Effort) -> Result<(), String> {
-        crate::openrouter::validate_model(&model)?;
-        self.save_session()?;
-        let routing = self.preferred_routing(&model);
-        let next = if let Some(old) = &self.persistence {
-            let input = old.snapshot().input;
-            let mut document =
-                Document::new(self.tools.root().to_path_buf(), model.clone(), effort)?;
-            document.routing = routing.clone();
-            document.input = input.clone();
-            document.messages = vec![self.system_message()];
-            let next = Handle::new(old.store(), document, self.redactor.clone());
-            next.flush()?;
-            old.input(Input {
-                history: input.history.clone(),
-                ..Input::default()
-            });
-            if let Err(error) = old.flush() {
-                old.input(input);
-                return Err(error);
-            }
-            Some(next)
-        } else {
-            None
-        };
-        let temporary = next
-            .as_ref()
-            .map(|handle| handle.store().temporary_area(&handle.id()))
-            .transpose()?;
-        self.client.set_model(model)?;
-        self.client.set_effort(effort);
-        self.client.set_routing(routing);
-        // The switch is committed; the previous conversation's processes end with it.
-        self.tools.stop_processes();
-        self.clear();
-        self.persistence = next;
-        self.sync_conversation();
-        self.begin_checkpoints();
-        if let Some(handle) = &self.persistence {
-            self.tools.configure_session_output(
-                handle.store().output_directory(),
-                &handle.id(),
-                self.redactor.clone(),
-            )?;
-        }
-        if let Some(temporary) = temporary {
-            self.tools.configure_temporary(temporary);
-        }
-        Ok(())
-    }
-
     pub(super) fn record_turn_error(&self, error: &str, partial: &str) {
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("turn_error")),
@@ -169,101 +118,5 @@ impl Agent {
                 Value::number(self.messages.lock().unwrap().len()),
             ),
         ]));
-    }
-
-    pub fn resume(&mut self, id: &str) -> Result<String, String> {
-        let current = self
-            .persistence
-            .as_ref()
-            .ok_or("Session storage is unavailable")?;
-        if current.id() == id {
-            return Err("This session is already open".into());
-        }
-        self.save_session()?;
-        let (handle, status) = Handle::open(current.store(), id, self.redactor.clone())?;
-        let document = handle.snapshot();
-        let temporary = handle.store().temporary_area(&document.id)?;
-        self.client.set_model(document.model)?;
-        self.client.set_effort(document.effort);
-        // The session's own routing; saved defaults are unchanged.
-        self.client.set_routing(document.routing);
-        *self.charges.lock().unwrap() = crate::openrouter::Charges::default();
-        // The switch is committed; historical process IDs never become live handles.
-        self.tools.stop_processes();
-        *self.messages.lock().unwrap() = document.messages;
-        self.rebuild_used_skills();
-        *self.events.lock().unwrap() = document.events;
-        self.compatible_from = document.compatible_from;
-        self.context = document.context;
-        if self.context.from > 1 && self.context.skill_references.is_empty() {
-            self.refresh_skills();
-            self.context.skill_references = self.redact(&self.skill_checkpoint_instructions());
-        }
-        let calibration = self.context.calibration;
-        self.context.reset_usage();
-        // A fresh request path invalidates the direct prompt measurement,
-        // while the saved model's conservative token density remains useful.
-        self.context.calibration = calibration;
-        self.prepared = None;
-        self.project_instructions.clear();
-        self.cancellation.reset();
-        self.persistence = Some(handle);
-        self.sync_conversation();
-        self.begin_checkpoints();
-        let handle = self.persistence.as_ref().unwrap();
-        self.tools.configure_session_output(
-            handle.store().output_directory(),
-            &handle.id(),
-            self.redactor.clone(),
-        )?;
-        self.tools.configure_temporary(temporary);
-        Ok(status)
-    }
-
-    pub(crate) fn delete_session(
-        &mut self,
-        id: &str,
-        model: String,
-        effort: Effort,
-    ) -> Result<(crate::sessions::DeleteReport, bool), String> {
-        let current = self
-            .persistence
-            .as_ref()
-            .ok_or("Session storage is unavailable")?;
-        if current.id() != id {
-            return current.store().delete(id).map(|report| (report, false));
-        }
-        if self.prepared.is_some() || current.active() {
-            return Err("Session deletion is available only when the turn is ready".into());
-        }
-        crate::openrouter::validate_model(&model)?;
-        let store = current.store();
-        let routing = self.preferred_routing(&model);
-        let mut document = Document::new(self.tools.root().to_path_buf(), model.clone(), effort)?;
-        document.routing = routing.clone();
-        document.input = current.snapshot().input;
-        document.input.history.clear();
-        let temporary = store.temporary_area(&document.id)?;
-        let outputs = crate::output::Store::for_session(
-            store.output_directory(),
-            self.tools.root().to_path_buf(),
-            &document.id,
-            self.redactor.clone(),
-        )?;
-        let next = Handle::new(store, document, self.redactor.clone());
-        let live_attachments = next.snapshot().input.attachment_ids();
-        // Validate deletion before stopping processes that write into its output.
-        let report = current.delete(&live_attachments, || self.tools.stop_processes())?;
-        self.client.set_model(model)?;
-        self.client.set_effort(effort);
-        self.client.set_routing(routing);
-        self.clear();
-        self.cancellation.reset();
-        self.persistence = Some(next);
-        self.sync_conversation();
-        self.begin_checkpoints();
-        self.tools.configure_output_store(outputs);
-        self.tools.configure_temporary(temporary);
-        Ok((report, true))
     }
 }

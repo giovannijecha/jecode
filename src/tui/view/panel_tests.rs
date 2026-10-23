@@ -27,6 +27,7 @@ fn sessions() -> Vec<Summary> {
             id: format!("1234-56-{index}"),
             title: format!("Saved request {index}"),
             updated: 0,
+            backend: "openrouter".into(),
             model: "fixture/model".into(),
         })
         .collect()
@@ -224,7 +225,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
         super::frame(&state, "fixture/model", "directory")
             .live
             .iter()
-            .any(|line| line.plain().contains("OpenRouter key"))
+            .any(|line| line.plain().contains("API key"))
     );
 }
 

@@ -72,9 +72,9 @@ fn guided_setup_validates_searches_saves_and_reopens_without_environment() {
     let store = Store::new(directory.path().join(".jecode"));
     let fixture = HttpFixture::new(vec![(200, key_response()), (200, catalog())]);
     let mut ui = Prompts::new(&["fixture & tools", "9", "1"], &["isolated-fixture-key"]);
-    let saved = configure_with(&store, None, &mut ui, |key| {
-        Api::new(key.into())?;
-        Ok(Api::fixture(&fixture.endpoint))
+    let saved = configure_with(&store, None, &mut ui, |_, key| {
+        crate::config::validate_key(key)?;
+        Ok(Services::fixture(&fixture.endpoint))
     })
     .unwrap()
     .unwrap();
@@ -118,9 +118,9 @@ fn cancelling_or_rejecting_a_key_preserves_existing_settings() {
         &["invalid whitespace key", "isolated-fixture-key", "/cancel"],
     );
     assert!(
-        configure_with(&store, Some(&settings), &mut ui, |key| {
-            Api::new(key.into())?;
-            Ok(Api::fixture(&fixture.endpoint))
+        configure_with(&store, Some(&settings), &mut ui, |_, key| {
+            crate::config::validate_key(key)?;
+            Ok(Services::fixture(&fixture.endpoint))
         })
         .unwrap()
         .is_none()
@@ -141,15 +141,15 @@ fn keeping_settings_and_manual_selection_do_not_require_a_catalog() {
     store.save(&settings).unwrap();
     let fixture = HttpFixture::new(vec![(200, key_response()), (200, key_response())]);
     let mut keep = Prompts::new(&[""], &[""]);
-    let saved = configure_with(&store, Some(&settings), &mut keep, |_| {
-        Ok(Api::fixture(&fixture.endpoint))
+    let saved = configure_with(&store, Some(&settings), &mut keep, |_, _| {
+        Ok(Services::fixture(&fixture.endpoint))
     })
     .unwrap()
     .unwrap();
     assert_eq!(saved.model, "fixture/original");
     let mut change = Prompts::new(&["=fixture/new"], &[""]);
-    let saved = configure_with(&store, Some(&settings), &mut change, |_| {
-        Ok(Api::fixture(&fixture.endpoint))
+    let saved = configure_with(&store, Some(&settings), &mut change, |_, _| {
+        Ok(Services::fixture(&fixture.endpoint))
     })
     .unwrap()
     .unwrap();
@@ -172,7 +172,7 @@ fn catalog_failure_can_be_retried_and_cancelled_without_saving() {
         &["isolated-fixture-key"],
     );
     assert!(
-        configure_with(&store, None, &mut ui, |_| Ok(Api::fixture(
+        configure_with(&store, None, &mut ui, |_, _| Ok(Services::fixture(
             &fixture.endpoint
         )))
         .unwrap()
@@ -190,7 +190,7 @@ fn eof_at_first_prompt_leaves_no_directory_or_config() {
     let store = Store::new(directory.path().join("absent"));
     let mut ui = Prompts::new(&[], &[]);
     assert!(
-        configure_with(&store, None, &mut ui, |_| panic!(
+        configure_with(&store, None, &mut ui, |_, _| panic!(
             "no API request after cancellation"
         ))
         .unwrap()
@@ -213,8 +213,8 @@ fn setup_keeps_the_auto_compact_preference_across_key_and_model_changes() {
         (&[""][..], "fixture/original"),
     ] {
         let mut ui = Prompts::new(inputs, &["replacement-fixture-key"]);
-        let saved = configure_with(&store, Some(&settings), &mut ui, |_| {
-            Ok(Api::fixture(&fixture.endpoint))
+        let saved = configure_with(&store, Some(&settings), &mut ui, |_, _| {
+            Ok(Services::fixture(&fixture.endpoint))
         })
         .unwrap()
         .unwrap();

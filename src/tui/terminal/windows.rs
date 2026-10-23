@@ -31,7 +31,8 @@ impl Terminal {
         let script = include_str!("../terminal.ps1")
             .replace("__JECODE_NATIVE_SOURCE__", include_str!("../terminal.cs"))
             .replace("__JECODE_CHANNEL__", &name);
-        let mut child = Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        command
             .args([
                 "-NoLogo",
                 "-NoProfile",
@@ -39,10 +40,10 @@ impl Terminal {
                 "-Command",
                 &script,
             ])
-            .env_remove("OPENROUTER_API_KEY")
             .stdin(Stdio::piped())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = crate::auth::isolate_environment(&mut command)
             .spawn()
             .map_err(|error| {
                 format!("Could not start Windows terminal input: {error}. Use jecode --plain.")

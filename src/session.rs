@@ -142,13 +142,18 @@ fn chat_inner(
                     .map_err(|error| error.to_string())
             }),
             ("/new", "") => {
-                agent.start_new(config.settings.model.clone(), config.settings.effort)?;
+                agent.start_new_selection(
+                    &config.settings.backend_id,
+                    config.settings.model.clone(),
+                    config.settings.effort,
+                )?;
                 agent.record_local("/new", "New conversation · saved defaults applied");
                 writeln!(output, "Conversation cleared.").map_err(|error| error.to_string())
             }
             ("/settings", "") => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");
             }),
+            ("/backend", _) => config.change_backend(agent, arguments, input, output),
             ("/routing", "") => config.change_routing(agent, input, output),
             ("/effort", "") => config.change_effort(agent, None, input, output),
             ("/effort", _) => config.change_effort(agent, Some(arguments), input, output),

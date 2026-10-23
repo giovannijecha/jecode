@@ -1,14 +1,16 @@
 use super::Agent;
-use crate::openrouter::{Charges, Completion, Endpoints, Router, Routing};
+use crate::backend::{Charges, Completion, Endpoints, Routing};
 use std::collections::BTreeMap;
 
 impl Agent {
-    pub fn routing(&self) -> &Routing {
+    pub fn routing(&self) -> Routing {
         self.client.routing()
     }
 
-    pub fn router(&self) -> &Router {
-        self.client.router()
+    pub fn cached_endpoints(&self, model: &str) -> Option<Endpoints> {
+        self.client
+            .cached_endpoints()
+            .filter(|cached| cached.model == model)
     }
 
     /// Applies from this conversation's next request; saved defaults are unchanged.
@@ -18,14 +20,34 @@ impl Agent {
 
     /// Saved per-model preferences, applied when the model changes and to new
     /// conversations. Without them, as in isolated tests, routing stays unset.
+    #[cfg(test)]
     pub fn set_routing_preferences(&mut self, preferences: BTreeMap<String, Routing>) {
-        self.routing_preferences = Some(preferences);
+        let backend = self.backend_id().to_owned();
+        self.set_backend_routing_preferences(&backend, preferences);
+    }
+
+    pub fn set_backend_routing_preferences(
+        &mut self,
+        backend: &str,
+        preferences: BTreeMap<String, Routing>,
+    ) {
+        let saved = self.routing_preferences.get_or_insert_with(BTreeMap::new);
+        saved.retain(|(id, _), _| id != backend);
+        saved.extend(
+            preferences
+                .into_iter()
+                .map(|(model, routing)| ((backend.into(), model), routing)),
+        );
     }
 
     /// The saved preference for `model`; Auto when none is saved.
+    #[cfg(test)]
     pub(super) fn preferred_routing(&self, model: &str) -> Routing {
         match &self.routing_preferences {
-            Some(preferences) => preferences.get(model).cloned().unwrap_or(Routing::Auto),
+            Some(preferences) => preferences
+                .get(&(self.backend_id().into(), model.into()))
+                .cloned()
+                .unwrap_or(Routing::Auto),
             None => Routing::Default,
         }
     }
@@ -41,25 +63,20 @@ impl Agent {
     }
 
     pub(super) fn record_charges(&self, completion: &Completion) {
-        self.charges
-            .lock()
-            .unwrap()
-            .record(completion.provider.as_deref(), completion.usage.as_ref());
+        if let Some(charges) = &completion.charges {
+            self.charges.lock().unwrap().include(charges);
+        }
     }
 
     /// Prepares routing for a turn: clears the previous turn's charges and
     /// refreshes stale endpoint metadata, at most once per freshness window.
     pub(super) fn prepare_routing(&mut self) -> Result<(), String> {
         *self.charges.lock().unwrap() = Charges::default();
-        self.client.refresh_endpoints();
+        self.client.prepare()?;
         if self.cancellation.requested() {
             return Err("Operation cancelled".into());
         }
-        self.client.router().validate_pin(
-            self.model(),
-            self.effort().reasons(),
-            std::time::Instant::now(),
-        )
+        Ok(())
     }
 
     /// Auto's `session_id` follows the saved conversation it belongs to.

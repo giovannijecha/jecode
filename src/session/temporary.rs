@@ -9,7 +9,8 @@ pub struct Report {
 pub fn run(agent: &mut Agent, arguments: &str) -> Result<Report, String> {
     if arguments.is_empty() {
         let info = agent.temporary_info()?;
-        Ok(Report {
+        let skipped = info.skipped;
+        let mut report = Report {
             message: "Session temporary files".into(),
             details: vec![
                 ("path".into(), info.path),
@@ -21,7 +22,14 @@ pub fn run(agent: &mut Agent, arguments: &str) -> Result<Report, String> {
                     "Kept until /tmp clean, including after resume".into(),
                 ),
             ],
-        })
+        };
+        if skipped > 0 {
+            report.details.push((
+                "skipped".into(),
+                format!("{skipped} links or special files (not followed)"),
+            ));
+        }
+        Ok(report)
     } else if arguments.eq_ignore_ascii_case("clean") {
         let removed = agent.clean_temporary()?;
         Ok(Report {

@@ -1,9 +1,9 @@
 use super::Agent;
 use crate::{
+    backend::{Completion, FailureKind, Limits, Update},
     context,
     events::{Event, EventSink},
     json::Value,
-    openrouter::{Completion, FailureKind, Limits, Update},
     sessions::Stage,
 };
 
@@ -67,11 +67,7 @@ impl Agent {
                 return Err("No output space remains in the model context; the original session is preserved".into());
             }
             let persistence = self.persistence.clone();
-            let request = crate::attachments::provider::materialize(
-                messages.clone(),
-                self.tools.attachments(),
-                self.client.inputs(),
-            )?;
+            let request = messages.clone();
             let mut emit = |update: Update| {
                 match &update {
                     Update::Text(text) => {

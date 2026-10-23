@@ -41,6 +41,8 @@ pub enum Stage {
     ReadBatchFinished,
     Ready,
     Preserve,
+    /// A backend selection must either be saved in full or leave its old state.
+    Selection,
 }
 
 impl Handle {
@@ -144,7 +146,7 @@ impl Handle {
         archive: &Archive,
         compatible_from: usize,
         context: &crate::context::Context,
-        routing: &crate::openrouter::Routing,
+        routing: &crate::backend::Routing,
         stage: Stage,
     ) -> Result<(), String> {
         let messages = archive.messages.lock().unwrap();
@@ -160,6 +162,8 @@ impl Handle {
         {
             return Err("Session history cannot shrink; start a new conversation instead".into());
         }
+        let selection = matches!(stage, Stage::Selection)
+            .then(|| (live.document.clone(), live.validated.clone()));
         let preparation = matches!(stage, Stage::Begin | Stage::Accept(_)).then(|| {
             (
                 live.document.messages.len(),
@@ -182,6 +186,8 @@ impl Handle {
             .collect::<Vec<_>>();
         live.document.events.extend(appended);
         live.document.model = live.redactor.text(&archive.model);
+        live.document.backend = archive.backend.clone();
+        live.document.legacy_origin = archive.legacy_origin.clone();
         if let Stage::Accept(queued) = &stage {
             // Accepted messages leave the queue in the same save that adds them.
             live.document.input.queued = queued.clone();
@@ -207,13 +213,24 @@ impl Handle {
             Stage::ToolFinished => live.document.pending.tool = None,
             Stage::ReadBatchFinished => live.document.pending.reads.clear(),
             Stage::Ready => live.document.pending = Pending::default(),
-            Stage::Accept(_) | Stage::Preserve => {}
+            Stage::Accept(_) | Stage::Preserve | Stage::Selection => {}
         }
         live.dirty.get_or_insert_with(Instant::now);
         live.revision = live.revision.wrapping_add(1);
         let revision = live.revision;
         drop(live);
         let result = self.save_locked_io();
+        if result.is_err()
+            && let Some((document, validated)) = selection
+        {
+            let mut live = self.0.live.lock().unwrap();
+            // UI input can be captured during the save; retain its latest value.
+            let input = live.document.input.clone();
+            live.document = document;
+            live.document.input = input;
+            live.validated = validated;
+            live.revision = live.revision.wrapping_add(1);
+        }
         if result.is_err()
             && let Some((messages, events, pending, validated, input)) = preparation
         {

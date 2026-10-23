@@ -1,8 +1,8 @@
 use crate::{
     agent::Agent,
+    backend::{self, Model},
     config::{Settings, Store},
     effort::Effort,
-    openrouter::{Model, OpenRouter, routing},
     setup::{self, Prompter, Terminal},
 };
 use std::io::{BufRead, Write};
@@ -23,14 +23,21 @@ impl SessionConfig {
     ) -> Result<(), String> {
         let mut ui = Terminal::new(input, output, &self.bash);
         if let Some(settings) = setup::configure(&self.store, Some(&self.settings), &mut ui)? {
-            let mut client = OpenRouter::with_api(
-                agent.api().with_key(settings.api_key.clone())?,
-                agent.model().into(),
-            )?;
-            client.set_effort(agent.effort());
-            agent.replace_client(client);
+            for (id, key) in &settings.credentials {
+                if let Ok(services) = backend::Services::for_backend(id, key.clone()) {
+                    agent.register_backend(services);
+                }
+            }
+            if agent.backend_id() == settings.backend_id {
+                let mut client = agent
+                    .services()
+                    .with_credential(settings.api_key.clone())?
+                    .create(agent.model().into())?;
+                client.set_effort(agent.effort());
+                agent.replace_backend(client)?;
+            }
             agent.set_auto_compact(settings.auto_compact);
-            agent.set_routing_preferences(settings.routing.clone());
+            agent.set_backend_routing_preferences(&settings.backend_id, settings.routing.clone());
             self.settings = settings;
             writeln!(
                 output,
@@ -48,24 +55,28 @@ impl SessionConfig {
         input: &mut impl BufRead,
         output: &mut impl Write,
     ) -> Result<(), String> {
-        let api = agent.api();
+        let services = agent.services();
         let mut ui = Terminal::new(input, output, &self.bash);
+        let manual = id.is_some();
         let id = if let Some(id) = id {
-            crate::openrouter::validate_model(id)?;
+            crate::config::validate_model(id)?;
             id.into()
         } else {
-            let Some(id) = setup::choose_model(&api, Some(agent.model()), &mut ui)? else {
+            let Some(id) = setup::choose_model(&services, Some(agent.model()), &mut ui)? else {
                 return Ok(());
             };
             id
         };
-        let catalog = api.catalog()?;
-        let model = catalog
-            .iter()
-            .find(|model| model.id == id)
-            .ok_or_else(|| format!("Model not found or does not support tools: {id}"))?;
-        let Some(effort) = choose_effort(model, &mut ui)? else {
-            return Ok(());
+        let effort = match (!manual)
+            .then(|| services.catalog().ok())
+            .flatten()
+            .and_then(|catalog| catalog.into_iter().find(|model| model.id == id))
+        {
+            Some(model) => match choose_effort(&model, &mut ui)? {
+                Some(effort) => effort,
+                None => return Ok(()),
+            },
+            None => Effort::Default,
         };
         let previous = format!("{} · {}", agent.model(), agent.effort().name());
         agent.set_model(id)?;
@@ -79,6 +90,88 @@ impl SessionConfig {
         writeln!(output, "{result}").map_err(|error| error.to_string())
     }
 
+    pub fn change_backend(
+        &mut self,
+        agent: &mut Agent,
+        argument: &str,
+        input: &mut impl BufRead,
+        output: &mut impl Write,
+    ) -> Result<(), String> {
+        let mut ui = Terminal::new(input, output, &self.bash);
+        let (backend_id, model) = match argument.split_once(char::is_whitespace) {
+            Some((id, model)) => (id.trim().to_string(), Some(model.trim().to_string())),
+            None if !argument.is_empty() => (argument.into(), None),
+            None => {
+                ui.message("Available backends:")?;
+                for (index, backend) in backend::available().iter().enumerate() {
+                    ui.message(&format!("{}. {}", index + 1, backend.name))?;
+                }
+                let Some(answer) = ui.input("Choose a backend number (Enter cancels): ")? else {
+                    return Ok(());
+                };
+                let Some(info) = answer
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|number| number.checked_sub(1))
+                    .and_then(|index| backend::available().get(index))
+                else {
+                    return Ok(());
+                };
+                (info.id.into(), None)
+            }
+        };
+        if !backend::available()
+            .iter()
+            .any(|info| info.id == backend_id)
+        {
+            return Err(format!("Backend is not available: {backend_id}"));
+        }
+        let key = self
+            .settings
+            .credential_for(&backend_id)
+            .ok_or_else(|| format!("{backend_id} has no saved credentials; run jecode setup"))?;
+        let services = backend::Services::for_backend(&backend_id, key.into())?;
+        let manual = model.is_some();
+        let model = match model {
+            Some(model) => {
+                crate::config::validate_model(&model)?;
+                model
+            }
+            None => match setup::choose_model(
+                &services,
+                (backend_id == agent.backend_id()).then(|| agent.model()),
+                &mut ui,
+            )? {
+                Some(model) => model,
+                None => return Ok(()),
+            },
+        };
+        let effort = match (!manual)
+            .then(|| services.catalog().ok())
+            .flatten()
+            .and_then(|models| models.into_iter().find(|entry| entry.id == model))
+        {
+            Some(model) => match choose_effort(&model, &mut ui)? {
+                Some(effort) => effort,
+                None => return Ok(()),
+            },
+            None => Effort::Default,
+        };
+        let previous = format!("{} / {}", agent.backend_id(), agent.model());
+        if backend_id == agent.backend_id() {
+            agent.set_model(model.clone())?;
+            agent.set_effort(effort);
+        } else {
+            let mut client = backend::create(&backend_id, key.into(), model.clone())?;
+            client.set_effort(effort);
+            agent.replace_backend(client)?;
+        }
+        let result = format!("Backend set to {backend_id} / {model} · was {previous}");
+        agent.record_local("/backend", &result);
+        ui.message(&result)
+    }
+
     /// Chooses this conversation's routing from the shared entries; saved
     /// defaults are unchanged. Without a listing, Auto and the current choice remain.
     pub fn change_routing(
@@ -88,20 +181,17 @@ impl SessionConfig {
         output: &mut impl Write,
     ) -> Result<(), String> {
         let model = agent.model().to_owned();
-        let fresh = agent
-            .router()
-            .endpoints(&model)
-            .filter(|endpoints| endpoints.fresh(std::time::Instant::now()))
-            .cloned();
+        let fresh = agent.cached_endpoints(&model);
         let listing = match fresh {
-            Some(endpoints) => Ok(endpoints),
-            None => agent.api().endpoints(&model),
+            Some(endpoints) => Ok(Some(endpoints)),
+            None => agent.services().endpoints(&model),
         };
         let endpoints = match listing {
-            Ok(endpoints) => {
+            Ok(Some(endpoints)) => {
                 agent.offer_endpoints(endpoints.clone());
                 Some(endpoints)
             }
+            Ok(None) => return Err("Endpoint routing is unavailable for this backend".into()),
             Err(error) => {
                 writeln!(
                     output,
@@ -112,11 +202,14 @@ impl SessionConfig {
                 None
             }
         };
-        let entries = routing::entries(
-            endpoints.as_ref(),
-            agent.routing(),
-            agent.effort().reasons(),
-        );
+        let entries = agent
+            .services()
+            .routing_entries(
+                endpoints.as_ref(),
+                &agent.routing(),
+                agent.effort().reasons(),
+            )
+            .ok_or("Endpoint routing is unavailable for this backend")?;
         let mut ui = Terminal::new(input, output, &self.bash);
         ui.message(&format!("Routing for {model}"))?;
         for (index, entry) in entries.iter().enumerate() {
@@ -178,7 +271,7 @@ impl SessionConfig {
         let effort = if requested == Some(Effort::Default) {
             Effort::Default
         } else {
-            let catalog = agent.api().catalog()?;
+            let catalog = agent.services().catalog()?;
             let model = catalog
                 .iter()
                 .find(|model| model.id == agent.model())

@@ -9,7 +9,10 @@ fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent
         .prepare_turn("Continue the current inspection")
         .unwrap();
     agent.context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(16635))])),
+        Some(&crate::backend::Usage {
+            input_tokens: Some(16635),
+            ..Default::default()
+        }),
         2,
     );
     agent.context.calibrate(73239);
@@ -254,7 +257,6 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
     assert!(memory.len() > 8192);
     let fixture = HttpFixture::new(vec![
         (200, completion(&memory, vec![])),
-        (200, completion(&memory, vec![])),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -262,7 +264,9 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
         Tools::new(directory.path()).unwrap(),
     );
     agent.context.summary = memory;
-    agent.client.fixture_limits(32000, Some(4096));
+    // Leave room for the native tool catalog as well as the carried summary.
+    const WINDOW: usize = 36000;
+    agent.client.fixture_limits(WINDOW, Some(4096));
     agent.messages.lock().unwrap().extend([
         Value::object([
             ("role", Value::string("user")),
@@ -293,8 +297,18 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
         agent
             .context
             .estimate(&agent.messages.lock().unwrap(), 0, Default::default())
-            < 28000
+            < WINDOW
     );
     assert_eq!(agent.messages.lock().unwrap().len(), 6);
-    assert_eq!(fixture.finish().len(), 3);
+    assert_eq!(
+        agent
+            .messages
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .get("content"),
+        Some(&Value::string("Finished."))
+    );
+    assert_eq!(fixture.finish().len(), 2);
 }

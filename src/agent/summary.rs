@@ -1,8 +1,8 @@
 use super::Agent;
 use crate::{
+    backend::{FailureKind, Limits, Update},
     events::{Event, EventSink},
     json::Value,
-    openrouter::{FailureKind, Limits, Update},
 };
 
 mod parts;

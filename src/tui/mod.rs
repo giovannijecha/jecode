@@ -42,7 +42,7 @@ mod view;
 mod viewport;
 mod worker;
 
-use crate::{agent::Agent, export::Archive, openrouter::Model, session::SessionConfig};
+use crate::{agent::Agent, backend::Model, export::Archive, session::SessionConfig};
 use feedback::Feedback;
 use jobs::Job;
 use keys::{Decoded, Decoder};

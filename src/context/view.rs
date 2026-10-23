@@ -18,7 +18,7 @@ pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Opti
         let label = format!("history:{index} — archived user request:\n");
         let allowance = budget / 3;
         if allowance > label.len() {
-            let text = crate::attachments::provider::user_text(message);
+            let text = crate::attachments::user_text(message);
             let entry = format!("{label}{}", excerpt(&text, allowance - label.len()));
             used = entry.len() + 2;
             entries.push((index, entry));
@@ -28,7 +28,7 @@ pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Opti
         if entries.first().is_some_and(|(first, _)| *first == index) {
             continue;
         }
-        let text = crate::attachments::provider::user_text(message);
+        let text = crate::attachments::user_text(message);
         let text = text.as_str();
         let label = format!("history:{index} — archived user request:\n");
         let available = budget.saturating_sub(used + label.len());

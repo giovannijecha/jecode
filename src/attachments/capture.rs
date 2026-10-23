@@ -70,7 +70,13 @@ fn run(
         return Err("The image is too large".into());
     }
     match output.exit_code {
-        Some(0) => Ok(output.stdout),
+        Some(0) => {
+            if let Some(error) = output.input_error {
+                Err(format!("{program} could not run: {error}"))
+            } else {
+                Ok(output.stdout)
+            }
+        }
         Some(3) => Err("The clipboard has no image".into()),
         _ => Err(format!("{program} failed")),
     }
