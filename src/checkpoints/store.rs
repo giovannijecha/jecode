@@ -263,11 +263,9 @@ fn cleanup_directory(
             Ok(file) => file,
             Err(_) => continue,
         };
-        match file.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => continue,
-            Err(std::fs::TryLockError::Error(e)) => return Err(e.to_string()),
-        }
+        let Some(_lease) = locks::Exclusive::try_from_file(file).map_err(|e| e.to_string())? else {
+            continue;
+        };
         // The generated reference is the creation clock. Strict names and an
         // exclusive lock identify both intact packs and crashed/corrupt ones,
         // so damaged contents do not outlive the same fixed retention window.

@@ -16,6 +16,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 const COPY_BUFFER: usize = 256 * 1024;
 
+#[cfg(test)]
+type CaptureHook = Box<dyn FnOnce(&File)>;
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static BEFORE_RELEASE: std::cell::RefCell<Option<CaptureHook>> = std::cell::RefCell::new(None);
+}
+
 struct CaptureRequest<'a> {
     reference: &'a str,
     created: u64,
@@ -86,7 +94,7 @@ impl Store {
             });
         }
         let created = super::clock::now();
-        let (reference, temporary, mut file) = loop {
+        let (reference, temporary, file) = loop {
             let reference = format!(
                 "rc-{created:016x}-{:08x}-{:016x}",
                 std::process::id(),
@@ -115,20 +123,22 @@ impl Store {
                 }
             }
         };
-        if let Err(error) = file.lock() {
-            drop(file);
-            let _ = fs::remove_file(&temporary);
-            partial.push((
-                String::new(),
-                format!("Could not lock recovery pack: {error}"),
-            ));
-            return Ok(Capture {
-                reference: None,
-                created: 0,
-                saved: 0,
-                partial,
-            });
-        }
+        let mut writer = match locks::Exclusive::from_file(file) {
+            Ok(writer) => writer,
+            Err(error) => {
+                let _ = fs::remove_file(&temporary);
+                partial.push((
+                    String::new(),
+                    format!("Could not lock recovery pack: {error}"),
+                ));
+                return Ok(Capture {
+                    reference: None,
+                    created: 0,
+                    saved: 0,
+                    partial,
+                });
+            }
+        };
         let request = CaptureRequest {
             reference: &reference,
             created,
@@ -136,8 +146,14 @@ impl Store {
             origin,
             selection: &selection,
         };
-        let result = self.capture_into(&mut file, &request, &mut partial, cancel);
-        drop(file);
+        let result = self.capture_into(writer.file_mut(), &request, &mut partial, cancel);
+        #[cfg(test)]
+        BEFORE_RELEASE.with(|hook| {
+            if let Some(action) = hook.borrow_mut().take() {
+                action(writer.file_mut());
+            }
+        });
+        drop(writer);
         let result = result.and_then(|saved| {
             self.publish(&reference, cancel)?;
             Ok(saved)

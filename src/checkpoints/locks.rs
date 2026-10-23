@@ -25,13 +25,23 @@ pub struct Exclusive(File);
 
 impl Exclusive {
     pub fn acquire(path: &Path) -> std::io::Result<Self> {
-        let file = open(path)?;
+        Self::from_file(open(path)?)
+    }
+
+    pub fn from_file(file: File) -> std::io::Result<Self> {
         file.lock()?;
         Ok(Self(file))
     }
 
+    pub fn file_mut(&mut self) -> &mut File {
+        &mut self.0
+    }
+
     pub fn try_acquire(path: &Path) -> std::io::Result<Option<Self>> {
-        let file = open(path)?;
+        Self::try_from_file(open(path)?)
+    }
+
+    pub fn try_from_file(file: File) -> std::io::Result<Option<Self>> {
         match file.try_lock() {
             Ok(()) => Ok(Some(Self(file))),
             Err(std::fs::TryLockError::WouldBlock) => Ok(None),
