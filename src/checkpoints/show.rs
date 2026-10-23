@@ -26,7 +26,7 @@ fn resolve(
         .split_once(':')
         .ok_or("Use checkpoint:rc-ID:workspace-relative-path")?;
     if reference.starts_with("cp-") {
-        return Err("This is a legacy cp-N reference. Its archive is preserved; read it using the previous Jecode version".into());
+        return Err("This is an obsolete cp-N reference. Use an rc-ID reference from the current workspace checkpoint list".into());
     }
     let loaded = store.load(reference, cancel)?;
     let path = paths::resolve_saved(&store.root, &loaded.snapshot, path)?;

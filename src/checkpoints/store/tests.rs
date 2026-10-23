@@ -403,15 +403,14 @@ fn explicit_internal_storage_is_never_captured() {
 }
 
 #[test]
-fn broad_scope_excludes_all_recovery_and_legacy_archives_under_home() {
+fn broad_scope_excludes_all_checkpoint_and_retired_archives_under_home() {
     let fixture = Fixture::new();
     let home = fixture.workspace().join(".jecode");
     let store = Store::open(&home, &fixture.workspace()).unwrap();
     let other = home.join("recovery").join("another-workspace");
-    fs::create_dir(&other).unwrap();
+    fs::create_dir_all(&other).unwrap();
     fs::write(other.join("other.rcp"), b"other project").unwrap();
     let legacy = home.join("checkpoints");
-    fs::create_dir(&legacy).unwrap();
     fs::write(legacy.join("old.bin"), b"old archive").unwrap();
     fs::write(fixture.workspace().join("source.txt"), b"source").unwrap();
     let cancel = Cancellation::default();
@@ -455,7 +454,7 @@ fn home_sweep_expires_inactive_workspace_without_touching_foreign_data() {
         .0
         .path()
         .join("home")
-        .join("recovery")
+        .join("checkpoints")
         .join("foreign-00000000000000000000000000000000");
     fs::create_dir(&foreign).unwrap();
     fs::write(foreign.join("workspace.id"), b"not that digest").unwrap();
@@ -472,3 +471,6 @@ fn home_sweep_expires_inactive_workspace_without_touching_foreign_data() {
 
 #[path = "process_tests.rs"]
 mod process_tests;
+
+#[path = "layout_tests.rs"]
+mod layout_tests;

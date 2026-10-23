@@ -128,8 +128,10 @@ references them. Operational details live in [sessions](../usage/SESSIONS.md),
 ## Workspace checkpoints
 
 `checkpoints/` saves the before state of one modifying tool call under
-`~/.jecode/recovery/<project-name>-<canonical-root-id>/`. The user contract is in
-[checkpoints](../usage/CHECKPOINTS.md). No baseline scan or global history is kept.
+`~/.jecode/checkpoints/<project-name>-<canonical-root-id>/`. Packs sit directly
+in that directory; `.internal/` holds `workspace.id`, `identity.lock` and
+`leases/`. The user contract is in [checkpoints](../usage/CHECKPOINTS.md). No
+baseline scan or global history is kept.
 
 | Part | Responsibility |
 | --- | --- |
@@ -157,12 +159,13 @@ progress and undo for exactly the mutated paths; a file's replacement is staged
 before destructive cross-type operations. A crash leaves the published preimage
 available without needing completion classification.
 
-Creation fixes expiry at 24 hours. Reads and activity do not renew it. The
-session's weak maintenance worker sweeps recognized new-format workspace
-archives once per minute; offline commands sweep too. Shared pack readers delay
-physical removal, and stopped applications clean up on next use. Expiry removes
-individual packs without copying retained data. Legacy `~/.jecode/checkpoints`
-archives remain unchanged and require the previous reader.
+Creation fixes pack expiry at 24 hours. Reads and activity do not renew it. The
+session's weak maintenance worker sweeps recognized workspace directories once
+per minute; offline commands sweep too. Shared pack readers delay physical
+removal, and stopped applications clean up on next use. Expiry removes individual
+packs without copying retained data; workspace identity and lease metadata are
+not subject to the 24-hour deadline. Old `cp-N` archives and preview
+`~/.jecode/recovery/` packs are not imported.
 
 ## Native boundaries
 

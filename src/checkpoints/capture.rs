@@ -360,9 +360,11 @@ impl Store {
         if super::clock::now() >= created.saturating_add(super::types::TTL_MILLIS) {
             return Err("Recovery expired during capture".into());
         }
-        let _coordination =
-            locks::Exclusive::acquire_cancellable(&self.directory.join(".publish.lock"), cancel)
-                .map_err(|e| e.to_string())?;
+        let _coordination = locks::Exclusive::acquire_cancellable(
+            &self.directory.join(".internal/identity.lock"),
+            cancel,
+        )
+        .map_err(|e| e.to_string())?;
         let target = self.directory.join(format!("{reference}.rcp"));
         if fs::symlink_metadata(&target).is_ok() {
             return Err("Recovery reference collision".into());

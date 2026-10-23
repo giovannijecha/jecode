@@ -105,6 +105,9 @@ Recorded **2026-10-22** on Windows 11 build 26300, NTFS, Intel Core Ultra 9
 275HX (24 logical processors), Rust 1.95.0 `x86_64-pc-windows-gnullvm`, release
 builds. The baseline is the previous PR head `6679d6c`; the candidate is the
 independent per-call engine documented in [Checkpoints](../usage/CHECKPOINTS.md).
+The per-call column was measured at `76b214e`, before the checkpoint directory
+was consolidated under `~/.jecode/checkpoints/`. That later layout change is
+not timed here.
 These compare complete tool workflows with different retention contracts, not
 an isolated storage optimization: the baseline maintains history and after
 states; the candidate saves only preimages for a fixed 24 hours.

@@ -87,8 +87,13 @@ to the saved entry without traversing a final link.
 ## Scope and storage
 
 Snapshots are private files under
-`~/.jecode/recovery/<project-name>-<canonical-root-id>/`. Each call creates one
-immutable `.rcp` file containing its streamed preimages and checked metadata.
+`~/.jecode/checkpoints/<project-name>-<canonical-root-id>/`. Each call creates
+one immutable `rc-ID.rcp` file directly in that workspace directory, containing
+its streamed preimages and checked metadata. Jecode keeps `workspace.id`,
+`identity.lock` and path leases inside `.internal/` in the same workspace
+directory. There are no daily or conversation subdirectories. Configured TUI
+and CLI launches create the workspace checkpoint directory; provider-free
+`jecode checkpoints` actions also create it when needed.
 There is no global journal replay, content-object graph, delta chain or copying
 compaction. Repeated calls store independent copies; frequently editing a very
 large file can consume more space than deduplicated history.
@@ -125,12 +130,13 @@ and refuses new access. Reads, commands, processes, activity and restarts do not
 extend it. Time is sampled from the wall clock so suspension counts; persisted
 timestamps do not decrease within a process. Correct UTC time is required.
 
-While Jecode runs, maintenance checks recognized new-format workspace archives
-once a minute and deletes expired snapshots individually. Readers temporarily
-hold a shared lease, so physical removal may wait until a reader releases it.
-Offline commands also sweep expired files. When Jecode is closed, cleanup runs
-on the next launch; no background system service is installed. Workspace files
-are never removed by expiry. Old-format and unrecognized data are untouched.
+While Jecode runs, maintenance checks recognized workspace checkpoint directories
+once a minute and deletes expired packs individually. Readers temporarily hold
+a shared lease, so physical removal may wait until a reader releases it. Offline
+commands also sweep expired packs. When Jecode is closed, cleanup runs on the
+next launch; no background system service is installed. The 24-hour deadline
+applies to packs, not workspace identity or lease metadata. Workspace files and
+unrecognized data are never removed by expiry.
 
 ## Local commands and previous archives
 
@@ -152,9 +158,6 @@ Explicit paging flags work in both interfaces. Suggested offline commands use
 PowerShell quoting on Windows and POSIX shell quoting on Unix; `--` separates
 paths beginning with dashes from options.
 
-Archives from the previous format remain unchanged under `~/.jecode/checkpoints`.
-They are not imported, expired or read by this engine. Old `cp-N` references give
-a legacy-format error; use the previous Jecode version to inspect that history.
-The new cleanup never deletes the old archives automatically. The previous PR
-head, [`6679d6c`](https://github.com/giovannijecha/jecode/tree/6679d6cacb5de25f54a42d18dd7015b2659da625),
-retains the legacy reader.
+Old `cp-N` archives and preview packs under `~/.jecode/recovery/` are obsolete.
+This layout does not import them. A `cp-N` reference produces a legacy-format
+error; only `rc-ID` packs in the current workspace directory are readable.

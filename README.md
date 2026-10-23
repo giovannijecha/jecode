@@ -101,7 +101,8 @@ Jecode saves local preimages of modifying tool calls in
 before `write` and `edit` change it. Bash saves declared files and recursive
 directories through `protect`; use `"."` to opt into the whole eligible
 workspace. Startup and turns do not scan the project. You or the model can
-inspect and restore saved states; restores can be undone. Every snapshot expires after 24 hours.
+inspect and restore saved states; restores can be undone. Jecode manages packs
+under `~/.jecode/checkpoints/`, and each pack expires after 24 hours.
 
 Conversations autosave under `~/.jecode/sessions/`. To resume, run
 `jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)

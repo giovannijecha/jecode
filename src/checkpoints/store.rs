@@ -15,9 +15,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 mod identity;
-use identity::{
-    add_exclusion, identity_bytes, ordinary_directory, ordinary_file, recognized_workspace,
-};
+use identity::{add_exclusion, ordinary_directory, ordinary_file, recognized_workspace};
 
 pub struct Store {
     pub root: PathBuf,
@@ -36,44 +34,11 @@ impl Store {
         if !root.is_dir() {
             return Err("Workspace is not a directory".into());
         }
-        let identity = identity_bytes(&root);
-        let key = hash::digest(&identity);
-        let leaf = root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("workspace");
-        let friendly: String = leaf
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-            .take(32)
-            .collect();
-        let friendly = if friendly.is_empty() {
-            "workspace"
-        } else {
-            &friendly
-        };
-        let directory = home
-            .join("recovery")
-            .join(format!("{friendly}-{:016x}{:016x}", key.0[0], key.0[1]));
-        files::private_directory(&directory)
-            .map_err(|e| format!("Could not create recovery directory: {e}"))?;
-        let directory = fs::canonicalize(&directory).map_err(|e| e.to_string())?;
-        let _identity_lock = locks::Exclusive::acquire(&directory.join(".identity.lock"))
-            .map_err(|e| format!("Could not lock recovery identity: {e}"))?;
-        let marker = directory.join("workspace.id");
-        match fs::read(&marker) {
-            Ok(saved) if saved == identity => {}
-            Ok(_) => return Err("Recovery directory belongs to another workspace".into()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                files::atomic_write(&marker, &identity)
-                    .map_err(|e| format!("Could not establish recovery identity: {e}"))?;
-            }
-            Err(error) => return Err(format!("Could not read recovery identity: {error}")),
-        }
+        let directory = identity::open_workspace(home, &root)?;
         let home =
             fs::canonicalize(home).map_err(|e| format!("Could not locate recovery home: {e}"))?;
         let mut excluded = Vec::new();
-        // Exclude every recovery archive if the workspace contains the user's
+        // Exclude every checkpoint archive if the workspace contains the user's
         // home. The logical names cover symlink aliases; canonical targets
         // cover storage physically located elsewhere inside the workspace.
         for path in [
@@ -84,7 +49,7 @@ impl Store {
         ] {
             add_exclusion(&root, &path, &mut excluded);
         }
-        match fs::canonicalize(home.join("checkpoints")) {
+        match fs::canonicalize(home.join("recovery")) {
             Ok(path) => add_exclusion(&root, &path, &mut excluded),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
@@ -95,7 +60,7 @@ impl Store {
         }
         excluded.sort();
         excluded.dedup();
-        let leases = locks::Leases::new(directory.join("leases"));
+        let leases = locks::Leases::new(directory.join(".internal/leases"));
         Ok(Arc::new(Self {
             root,
             directory,
@@ -232,19 +197,26 @@ impl Store {
     /// inactive workspaces without opening their sessions or old archives.
     pub fn sweep_home(home: &Path, now: u64, cancel: &Cancellation) -> Result<usize, String> {
         check_sweep(Some(cancel))?;
-        let recovery = home.join("recovery");
-        if !ordinary_directory(&recovery)? {
+        let checkpoints = home.join("checkpoints");
+        if !ordinary_directory(&checkpoints)? {
             return Ok(0);
         }
         let mut removed = 0;
-        for entry in fs::read_dir(&recovery).map_err(|e| e.to_string())? {
+        for entry in fs::read_dir(&checkpoints).map_err(|e| e.to_string())? {
             check_sweep(Some(cancel))?;
-            let entry = entry.map_err(|e| e.to_string())?;
+            let Ok(entry) = entry else { continue };
             let directory = entry.path();
-            if ordinary_directory(&directory)? && recognized_workspace(&directory)? {
-                removed += cleanup_directory(&directory, now, Some(cancel))?;
+            if ordinary_directory(&directory).unwrap_or(false)
+                && recognized_workspace(&directory).unwrap_or(false)
+            {
+                let result = cleanup_directory(&directory, now, Some(cancel));
+                check_sweep(Some(cancel))?;
+                if let Ok(count) = result {
+                    removed += count;
+                }
             }
         }
+        check_sweep(Some(cancel))?;
         Ok(removed)
     }
 }
