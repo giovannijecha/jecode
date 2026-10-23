@@ -135,8 +135,21 @@ fn cancelled_background_wait_keeps_the_prelaunch_receipt() {
     let fixture = fixture();
     let cancellation = Cancellation::default();
     let interrupt = cancellation.clone();
+    let observer = fixture
+        .tools
+        .observe_processes(crate::redact::Redactor::empty());
     let worker = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(500));
+        let started = std::time::Instant::now();
+        while observer
+            .processes()
+            .is_none_or(|processes| processes.is_empty())
+        {
+            if started.elapsed() >= Duration::from_secs(10) {
+                interrupt.cancel();
+                panic!("Process was not registered before the cancellation deadline");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         interrupt.cancel();
     });
     let result = fixture.tools.execute_with_cancel(
@@ -144,9 +157,9 @@ fn cancelled_background_wait_keeps_the_prelaunch_receipt() {
         &Value::object([
             (
                 "command",
-                Value::string("sleep 5; printf changed > notes.txt"),
+                Value::string("sleep 30; printf changed > notes.txt"),
             ),
-            ("wait_ms", Value::number(5_000)),
+            ("wait_ms", Value::number(15_000)),
             ("protect", Value::Array(vec![Value::string("notes.txt")])),
         ])
         .encode(),
@@ -154,7 +167,11 @@ fn cancelled_background_wait_keeps_the_prelaunch_receipt() {
     );
     worker.join().unwrap();
     fixture.tools.stop_processes();
-    assert_eq!(result.get("wait_cancelled"), Some(&Value::Bool(true)));
+    assert_eq!(
+        result.get("wait_cancelled"),
+        Some(&Value::Bool(true)),
+        "{result:?}"
+    );
     assert_eq!(text(&result, &["checkpoint", "status"]), "saved");
     let reference = text(&result, &["checkpoint", "ref"]);
     assert_eq!(

@@ -173,7 +173,7 @@ fn unreadable_foreign_archive_does_not_stop_other_expiry() {
     let foreign = home.join("checkpoints/foreign-00000000000000000000000000000000/.internal");
     fs::create_dir_all(&foreign).unwrap();
     fs::write(foreign.join("workspace.id"), b"unreadable").unwrap();
-    fs::set_permissions(&foreign, fs::Permissions::from_mode(0)).unwrap();
+    fs::set_permissions(&foreign, fs::Permissions::from_mode(0o0)).unwrap();
     let restricted = fs::symlink_metadata(foreign.join("workspace.id")).is_err();
     let result = Store::sweep_home(
         &home,
