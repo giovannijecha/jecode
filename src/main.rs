@@ -15,6 +15,7 @@ mod console;
 mod context;
 mod conversation;
 mod copy;
+mod curl;
 mod disk;
 mod effort;
 mod events;

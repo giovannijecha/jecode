@@ -13,6 +13,42 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     throw 'Cargo was not found. Install the Rust toolchain, open a new terminal, and retry.'
 }
+$curlExecutable = $null
+if (-not [string]::IsNullOrEmpty($env:JECODE_CURL)) {
+    $curlExecutable = $env:JECODE_CURL
+}
+if (-not $curlExecutable -and -not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+    $systemCurl = Join-Path $env:SystemRoot 'System32/curl.exe'
+    if (Test-Path -LiteralPath $systemCurl -PathType Leaf) {
+        $curlExecutable = $systemCurl
+    }
+}
+if (-not $curlExecutable) {
+    $curlCommand = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
+    if ($curlCommand) { $curlExecutable = $curlCommand.Source }
+}
+if (-not $curlExecutable) {
+    throw 'curl was not found. Install an HTTPS-enabled curl 8.3 or newer and retry.'
+}
+if (-not (Get-Command $curlExecutable -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw "Selected curl was not found: $curlExecutable. Check JECODE_CURL or PATH and retry."
+}
+$curlDetails = @(& $curlExecutable --version 2>&1)
+if ($LASTEXITCODE -ne 0 -or $curlDetails.Count -eq 0) {
+    throw "Could not inspect curl at $curlExecutable. Install an HTTPS-enabled curl 8.3 or newer and retry."
+}
+$curlBanner = [string] $curlDetails[0]
+$curlVersion = [regex]::Match($curlBanner, '^curl (\d+)\.(\d+)\.(\d+)(?:\s|$)')
+if (-not $curlVersion.Success -or
+    [int] $curlVersion.Groups[1].Value -lt 8 -or
+    ([int] $curlVersion.Groups[1].Value -eq 8 -and [int] $curlVersion.Groups[2].Value -lt 3)) {
+    throw "curl at $curlExecutable must be version 8.3 or newer. Found: $curlBanner"
+}
+$protocolLine = @($curlDetails | Where-Object { [string] $_ -match '^Protocols:' })
+$protocols = if ($protocolLine.Count) { ([string] $protocolLine[0] -replace '^Protocols:\s*', '') -split '\s+' } else { @() }
+if ($protocols -cnotcontains 'https') {
+    throw "curl at $curlExecutable lacks HTTPS support. Install an HTTPS-enabled curl 8.3 or newer and retry."
+}
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         throw 'LOCALAPPDATA is unavailable. Supply an absolute -InstallRoot directory.'

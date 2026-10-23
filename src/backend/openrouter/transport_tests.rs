@@ -152,3 +152,15 @@ fn request_failures_retain_native_http_and_input_diagnostics() {
         .unwrap_err();
     assert!(success.message.contains("pipe closed"));
 }
+
+#[test]
+fn old_curl_reports_the_required_version() {
+    let api = Api::fixture("http://127.0.0.1:1/chat/completions");
+    let mut output = incomplete_output(b"", b"curl: option --variable: is unknown", 2);
+    output.input_error = None;
+    let error = api.response(output, None).unwrap_err();
+    assert!(error.message.contains("--variable"));
+    assert!(error.message.contains("curl (exit 2)"));
+    assert!(error.message.contains("version 8.3 or newer"));
+    assert!(error.message.contains("JECODE_CURL"));
+}

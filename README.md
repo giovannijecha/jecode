@@ -22,6 +22,13 @@ Build from this repository with Rust 1.95.0 and a native linker.
 | Windows 10+ | Git Bash, HTTPS-enabled curl 8.3+, Windows PowerShell with `Add-Type`. |
 | Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
 
+Both installers verify the selected curl version and HTTPS support before
+installation. Set `JECODE_CURL` to an installed curl executable to override the
+default selection. Windows otherwise prefers `System32\curl.exe`; Linux and
+macOS use `curl` from PATH. Web tools and model requests use the same selection.
+Older Windows or Linux installations may need a newer curl even when the OS
+already provides one.
+
 The TUI uses 24-bit color. On macOS, install Apple's Command Line Tools for the
 native linker. See [platform verification](docs/development/PLATFORMS.md) for
 executed coverage and checks that still need a native host.

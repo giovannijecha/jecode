@@ -42,7 +42,7 @@ impl Api {
         // The body travels on stdin; curl imports the key from its own child
         // environment. Neither value appears in arguments or request files.
         let url = format!("{}{path}", self.base_url);
-        let mut command = Command::new(curl_executable());
+        let mut command = Command::new(crate::curl::executable());
         command.args([
             "--disable",
             "--silent",
@@ -118,12 +118,23 @@ impl Api {
         }
         let input_error = output.input_error.as_deref();
         if output.exit_code != Some(0) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let unsupported_option = output.exit_code == Some(2)
+                && ["--variable", "--expand-header"].iter().any(|option| {
+                    stderr.contains(option)
+                        && (stderr.contains("unknown") || stderr.contains("unsupported"))
+                });
             let message = format!(
-                "Could not reach OpenRouter via curl (exit {}): {}",
+                "Could not reach OpenRouter via curl (exit {}): {}{}",
                 output
                     .exit_code
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
-                String::from_utf8_lossy(&output.stderr).trim()
+                stderr.trim(),
+                if unsupported_option {
+                    " Upgrade the selected curl to version 8.3 or newer with HTTPS support, or set JECODE_CURL to a compatible executable."
+                } else {
+                    ""
+                }
             );
             return Err(with_input_error(
                 if matches!(
@@ -168,15 +179,4 @@ fn with_input_error(mut failure: Failure, error: Option<&str>) -> Failure {
         failure.message.push_str(&format!("; {error}"));
     }
     failure
-}
-
-fn curl_executable() -> std::ffi::OsString {
-    #[cfg(windows)]
-    if let Some(root) = std::env::var_os("SystemRoot") {
-        let path = std::path::PathBuf::from(root).join("System32/curl.exe");
-        if path.is_file() {
-            return path.into_os_string();
-        }
-    }
-    "curl".into()
 }
