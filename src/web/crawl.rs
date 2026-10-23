@@ -7,6 +7,7 @@ use crate::scratch::Area;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
 
+mod options;
 mod state;
 use state::{append, boolean, integer, load, manifest_file, replay, save};
 
@@ -27,6 +28,7 @@ struct State {
     queue: VecDeque<Pending>,
     visited: HashSet<String>,
     pages_total: usize,
+    options: Options,
 }
 
 struct Record {
@@ -42,6 +44,7 @@ pub(super) fn execute(
     let (mut state, manifest_repaired) =
         if let Some(id) = arguments.get("crawl_id").and_then(Value::as_str) {
             let mut state = load(area, id)?;
+            options::resume(arguments, &state.options)?;
             let repaired = replay(area, &mut state)?;
             (state, repaired)
         } else {
@@ -77,6 +80,7 @@ pub(super) fn execute(
                 queue,
                 visited: HashSet::new(),
                 pages_total: 0,
+                options: options::parse(arguments)?,
             };
             let path = manifest_file(area, &state.id)?;
             OpenOptions::new()
@@ -87,7 +91,11 @@ pub(super) fn execute(
             (state, false)
         };
     let max_pages = integer(arguments, "max_pages", 20, true)?;
-    let options = Options::from(arguments)?;
+    let header_origins = state
+        .seeds
+        .iter()
+        .map(|seed| Url::parse(seed))
+        .collect::<Result<Vec<_>, _>>()?;
     save(area, &mut state)?;
     let mut pages_in_call = 0;
     let mut fresh = Vec::new();
@@ -109,7 +117,8 @@ pub(super) fn execute(
         let result = transport::fetch(
             area,
             &url,
-            &options,
+            &state.options,
+            &header_origins,
             &format!("web/crawls/{}/pages", state.id),
             cancellation,
         )

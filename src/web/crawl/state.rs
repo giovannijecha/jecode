@@ -198,6 +198,7 @@ fn encode(state: &State, sequence: usize) -> Value {
             Value::Array(visited.iter().map(Value::string).collect()),
         ),
         ("pages_total", Value::number(state.pages_total)),
+        ("options", super::options::encode(&state.options)),
     ])
 }
 
@@ -294,5 +295,6 @@ fn decode(value: Value, id: &str) -> Result<State, String> {
         queue,
         visited,
         pages_total,
+        options: super::options::parse(value.get("options").unwrap_or(&Value::Null))?,
     })
 }

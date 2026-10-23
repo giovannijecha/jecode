@@ -74,6 +74,10 @@ without text or link extraction. Requests use GET by default, or POST when
 `body`, `timeout_seconds` and `max_bytes` as needed. A missing `max_bytes` does
 not impose a size limit. The saved files can be read with `read` or used with
 `bash`; they follow the active [session temporary area](TEMPORARY.md).
+HEAD returns metadata and saves the response headers without reading a body.
+POST redirects use GET after 301, 302 or 303; 307 and 308 preserve the method
+and body. Other methods use GET after 303, except HEAD. Custom headers follow
+redirects only within the requested origin (scheme, host and port).
 
 `crawl` starts with `urls` or continues with a returned `crawl_id`. It extracts
 links from HTML and reports `pages_in_call`, `pages_total`, `queued` and
@@ -82,8 +86,14 @@ links from HTML and reports `pages_in_call`, `pages_total`, `queued` and
 append-only JSONL file contains one `{page,discovered}` object per fetched page;
 page it with `read`. On resume, `manifest_repaired` reports recovery of an
 incomplete last record. `same_origin` defaults to true, `max_depth` to 1 and
-`max_pages` to 20 per call. `timeout_seconds` and `max_bytes` apply to each
-page. Crawl state and fetched artifacts stay in the active temporary area.
+`max_pages` to 20 per call. Crawls use GET without a body; use `fetch` or
+`download` for requests with other methods. Headers are sent only to the seed
+origins, including during redirects, even when `same_origin` is false.
+Headers, `timeout_seconds` and `max_bytes` are saved with the crawl and apply
+to each page. Resume with `crawl_id` and optionally `max_pages`; conflicting
+request options require a new crawl. An omitted `max_bytes` leaves downloads
+unlimited. Crawl state, including supplied headers, and fetched artifacts stay
+in the active temporary area.
 Authentication, dynamic content and network errors can limit the pages returned.
 For a public search, use `browser` to navigate to a search site; Jecode
 provides no search service or search API.

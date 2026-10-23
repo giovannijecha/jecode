@@ -42,8 +42,21 @@ pub fn execute(
                     .ok_or("url is required")?,
             )?;
             let options = Options::from(arguments)?;
-            let response = transport::fetch(area, &url, &options, "web/fetches", cancellation)?;
-            describe(area, &url, &response, action == "fetch", cancellation)
+            let response = transport::fetch(
+                area,
+                &url,
+                &options,
+                std::slice::from_ref(&url),
+                "web/fetches",
+                cancellation,
+            )?;
+            describe(
+                area,
+                &url,
+                &response,
+                action == "fetch" && options.method != "HEAD",
+                cancellation,
+            )
         }
         "crawl" => crawl::execute(area, arguments, cancellation),
         _ => Err("action must be fetch, download, or crawl".into()),
@@ -129,9 +142,7 @@ fn describe_page(
         fs::write(&path, text.as_bytes())
             .map_err(|error| format!("Could not save page text: {error}"))?;
         preview_truncated = text.len() > PREVIEW_BYTES || extraction_truncated;
-        if include_preview {
-            preview = Some(first_bytes(&text, PREVIEW_BYTES));
-        }
+        preview = Some(first_bytes(&text, PREVIEW_BYTES));
         text_alias = Some(alias);
     }
     let mut fields = Value::object([

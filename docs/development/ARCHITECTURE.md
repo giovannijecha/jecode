@@ -47,8 +47,12 @@ Paths are relative to `src/`.
 The harness supplies tools, context and history. It adds no completion gates,
 repeated-command refusals or model-output validation.
 The `web` tool uses system curl for HTTP(S) requests and keeps responses and
-crawl state in the session temporary area. The `browser` tool launches an
-installed Chromium-based executable and communicates with its local DevTools
+crawl state in the session temporary area. `curl.rs` selects the executable for
+both web retrieval and model transport. Web redirects are followed one hop at a
+time under one request deadline, applying HTTP method changes and origin-scoped
+headers. Crawls save GET request options with their queue for consistent resume.
+The `browser` tool launches an installed Chromium-based executable and communicates
+with its local DevTools
 endpoint. Isolated profiles and browser artifacts use the session area; named
 profiles use dedicated storage under the Jecode home. Neither path uses an
 OpenRouter web service. Browser and curl availability are native host boundaries.

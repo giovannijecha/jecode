@@ -5,7 +5,10 @@ use std::io::Write;
 use std::thread;
 use std::time::Duration;
 
+mod crawl_options;
+mod http;
 mod server;
+mod transport;
 use server::Server;
 fn area() -> (Directory, Directory, Area) {
     let home = Directory::new();
