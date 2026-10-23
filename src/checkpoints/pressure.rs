@@ -324,7 +324,6 @@ fn run(mut command: Command, cancellation: Option<&Cancellation>) -> Result<Stri
 #[cfg(windows)]
 fn sample_free(path: &Path, cancellation: Option<&Cancellation>) -> Result<u64, String> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const SOURCE: &str = include_str!("space.cs");
     static HELPER: OnceLock<PathBuf> = OnceLock::new();
     let fallback = Cancellation::default();
@@ -340,7 +339,7 @@ fn sample_free(path: &Path, cancellation: Option<&Cancellation>) -> Result<u64, 
     command
         .arg(path)
         .env_remove("OPENROUTER_API_KEY")
-        .creation_flags(CREATE_NO_WINDOW);
+        .creation_flags(crate::process::CREATE_NO_WINDOW);
     run(command, cancellation)?
         .trim()
         .parse()

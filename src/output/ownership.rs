@@ -1,6 +1,5 @@
 use crate::json::{self, Value};
-use std::collections::BTreeSet;
-use std::fs::{self, Metadata, OpenOptions};
+use std::fs::{self, Metadata};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -58,14 +57,9 @@ pub(super) fn ensure(root: &Path, identity: &Identity) -> Result<PathBuf, String
                 "Output directory has no ownership record; files were left unchanged".into(),
             );
         }
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options
+        let mut file = crate::disk::private_options()
+            .write(true)
+            .create_new(true)
             .open(&marker)
             .map_err(|error| format!("Could not establish output ownership: {error}"))?;
         let result = file
@@ -119,14 +113,12 @@ pub(crate) struct Removal {
     identity: Identity,
     files: Vec<PathBuf>,
     directories: Vec<PathBuf>,
-    legacy_references: usize,
     present: bool,
 }
 
 pub(crate) struct Removed {
     pub files: usize,
     pub directories: usize,
-    pub legacy_references: usize,
 }
 
 pub(crate) fn prepare_removal(
@@ -145,13 +137,11 @@ pub(crate) fn prepare_removal(
         return Err("Output directory must be absolute".into());
     }
     checked_ancestors(root)?;
-    let legacy_references = legacy_references(root, document)?;
     let mut removal = Removal {
         root: root.to_path_buf(),
         identity,
         files: Vec::new(),
         directories: Vec::new(),
-        legacy_references,
         present: false,
     };
     if inspect_optional(root)?.is_none() {
@@ -179,7 +169,6 @@ impl Removal {
             return Ok(Removed {
                 files: 0,
                 directories: 0,
-                legacy_references: self.legacy_references,
             });
         }
         checked_ancestors(&self.root)?;
@@ -219,7 +208,6 @@ impl Removal {
         Ok(Removed {
             files,
             directories: self.directories.len(),
-            legacy_references: self.legacy_references,
         })
     }
 }
@@ -233,14 +221,9 @@ fn restore_marker(directory: &Path, identity: &Identity) -> Result<(), String> {
     if inspect_optional(&marker)?.is_some() {
         return Err("Output ownership path was replaced after cleanup failure".into());
     }
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
+    let mut file = crate::disk::private_options()
+        .write(true)
+        .create_new(true)
         .open(&marker)
         .map_err(|error| format!("Could not recreate output ownership record: {error}"))?;
     file.write_all(identity.value().encode().as_bytes())
@@ -273,46 +256,6 @@ fn inventory(
     }
     directories.push(path.to_path_buf());
     Ok(())
-}
-
-fn legacy_references(root: &Path, document: &crate::sessions::Document) -> Result<usize, String> {
-    fn collect(value: &Value, references: &mut BTreeSet<String>) {
-        match value {
-            Value::Object(fields) => {
-                for (key, value) in fields {
-                    if matches!(key.as_str(), "stdout_file" | "stderr_file")
-                        && let Some(reference) = value.as_str()
-                        && let Some(rest) = reference.strip_prefix("output:")
-                        && let Some((id, stream)) = rest.split_once(':')
-                        && crate::sessions::valid_id(id)
-                        && matches!(stream, "stdout" | "stderr")
-                    {
-                        references.insert(format!("{id}.{stream}"));
-                    }
-                    collect(value, references);
-                }
-            }
-            Value::Array(values) => values.iter().for_each(|value| collect(value, references)),
-            _ => {}
-        }
-    }
-    let mut references = BTreeSet::new();
-    for value in document.messages.iter().chain(&document.events) {
-        collect(value, &mut references);
-        if value.get("role").and_then(Value::as_str) == Some("tool")
-            && let Some(content) = value.get("content").and_then(Value::as_str)
-            && let Ok(result) = json::parse(content)
-        {
-            collect(&result, &mut references);
-        }
-    }
-    let mut count = 0;
-    for name in references {
-        if inspect_optional(&root.join(name))?.is_some_and(|metadata| metadata.is_file()) {
-            count += 1;
-        }
-    }
-    Ok(count)
 }
 
 fn marker_project(directory: &Path) -> Result<PathBuf, String> {
@@ -349,14 +292,8 @@ fn read_marker(directory: &Path) -> Result<Value, String> {
 
 fn private_directory(path: &Path) -> Result<(), String> {
     if inspect_optional(path)?.is_none() {
-        fs::create_dir_all(path)
+        crate::disk::private_directory(path)
             .map_err(|error| format!("Could not create output directory: {error}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-                .map_err(|error| format!("Could not protect output directory: {error}"))?;
-        }
     }
     if !inspect(path)?.is_dir() {
         return Err("Output path must be a directory".into());
@@ -381,21 +318,10 @@ fn inspect(path: &Path) -> Result<Metadata, String> {
 
 fn inspect_optional(path: &Path) -> Result<Option<Metadata>, String> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            #[cfg(windows)]
-            let linked = {
-                use std::os::windows::fs::MetadataExt;
-                metadata.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT
-            };
-            #[cfg(not(windows))]
-            let linked = metadata.file_type().is_symlink();
-            if linked {
-                return Err(
-                    "Output path contains a link or junction; files were left unchanged".into(),
-                );
-            }
-            Ok(Some(metadata))
+        Ok(metadata) if crate::disk::linked(&metadata) => {
+            Err("Output path contains a link or junction; files were left unchanged".into())
         }
+        Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(format!("Could not inspect saved output: {error}")),
     }

@@ -37,16 +37,16 @@ pub(super) fn render(
             Body::new(read(arguments, result, columns))
         }
         "write" => written(arguments, columns, expanded),
-        "edit" => selected(&payload(field(arguments, "new_text")), columns, expanded, 3),
+        "edit" => selected(&payload(field(arguments, "new_text")), columns, expanded),
         _ if result.get("processes").is_some() => processes(result, columns, expanded),
         "bash" | "process" => streams(result, columns, failed, expanded),
         "checkpoint" => {
             let lines = payload(&crate::checkpoints::render::text(result, "/checkpoints"));
-            selected(&lines, columns, expanded, 3)
+            selected(&lines, columns, expanded)
         }
         _ => {
             let lines = payload(&result.pretty());
-            selected(&lines, columns, expanded, 3)
+            selected(&lines, columns, expanded)
         }
     }
 }
@@ -200,14 +200,15 @@ fn processes(result: &Value, columns: usize, expanded: bool) -> Body {
             )
         })
         .collect();
-    selected(&lines, columns, expanded, 3)
+    selected(&lines, columns, expanded)
 }
 
-fn selected(lines: &[String], columns: usize, expanded: bool, limit: usize) -> Body {
+fn selected(lines: &[String], columns: usize, expanded: bool) -> Body {
+    // A collapsed card previews three lines.
     let count = if expanded {
         lines.len()
     } else {
-        lines.len().min(limit)
+        lines.len().min(3)
     };
     let rows = lines
         .iter()

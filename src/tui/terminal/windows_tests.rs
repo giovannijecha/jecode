@@ -390,15 +390,13 @@ fn decodes_native_modifiers_and_unicode_paste() {
         matches!(parse("P|55357,56898,9,13,10"), Input::Paste(units) if units == [55357, 56898, 9, 13, 10])
     );
     assert!(matches!(
-        parse("S|32|12|5|9"),
+        parse("S|32|12"),
         Input::Size(Geometry {
             width: 32,
-            height: 12,
-            row: 5,
-            column: 9
+            height: 12
         })
     ));
-    assert!(matches!(parse("S|0|12|5|9"), Input::Error(_)));
-    assert!(matches!(parse("S|32|12"), Input::Error(_)));
-    assert!(matches!(parse("S|32|12|bad|9"), Input::Error(_)));
+    assert!(matches!(parse("S|0|12"), Input::Error(_)));
+    assert!(matches!(parse("S|32"), Input::Error(_)));
+    assert!(matches!(parse("S|32|bad"), Input::Error(_)));
 }

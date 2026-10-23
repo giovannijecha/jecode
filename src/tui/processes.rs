@@ -336,12 +336,12 @@ impl App {
         };
         let (id, index) = (logs.id.clone(), logs.stream);
         let stream = &mut logs.views[index];
-        let mut starts = super::view::log_row_starts(&stream.text(), width);
+        let mut starts = super::view::processes::row_starts(&stream.text(), width);
         let bottom = starts.len().saturating_sub(capacity);
         let offset = if stream.follow {
             bottom
         } else {
-            super::view::log_row_at(&starts, stream.anchor).min(bottom)
+            super::view::processes::row_at(&starts, stream.anchor).min(bottom)
         };
         let mut anchor = starts.get(offset).copied().unwrap_or(0);
         if delta < 0 {
@@ -354,13 +354,13 @@ impl App {
                         if page.end == stream.start() {
                             stream.prepend(page);
                             anchor += added;
-                            starts = super::view::log_row_starts(&stream.text(), width);
+                            starts = super::view::processes::row_starts(&stream.text(), width);
                         }
                     }
                     Err(error) => stream.error = Some(error),
                 }
             }
-            let row = super::view::log_row_at(&starts, anchor).saturating_sub(up);
+            let row = super::view::processes::row_at(&starts, anchor).saturating_sub(up);
             stream.select_row(&starts, row);
             return;
         }
@@ -382,8 +382,8 @@ impl App {
                 } else {
                     anchor = 0;
                 }
-                starts = super::view::log_row_starts(&stream.text(), width);
-                let row = super::view::log_row_at(&starts, anchor)
+                starts = super::view::processes::row_starts(&stream.text(), width);
+                let row = super::view::processes::row_at(&starts, anchor)
                     .saturating_add(delta as usize)
                     .min(starts.len().saturating_sub(capacity));
                 stream.select_row(&starts, row);

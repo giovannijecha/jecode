@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use super::super::files;
 use super::*;
 use crate::test_support::Directory;
@@ -351,7 +352,7 @@ fn corrupt_saved_file_never_removes_live_entry() {
     let offset = *offset;
     drop(loaded);
     fs::write(&file, b"after").unwrap();
-    let mut pack = files::options()
+    let mut pack = crate::disk::private_options()
         .write(true)
         .open(store.directory.join(format!("{reference}.rcp")))
         .unwrap();

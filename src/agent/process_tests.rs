@@ -192,16 +192,17 @@ fn failed_live_session_deletion_preserves_its_processes() {
     assert!(alive(&directory));
     let session = agent.sessions().unwrap();
     let session_id = session.id();
-    let backup = session
+    // A directory where a session sidecar belongs blocks deletion.
+    let blocker = session
         .store()
         .bucket()
-        .join(format!("{session_id}.json.bak"));
-    std::fs::write(&backup, b"not a session backup").unwrap();
+        .join(format!("{session_id}.tmp-1-2-3"));
+    std::fs::create_dir(&blocker).unwrap();
 
     let error = agent
         .delete_session(&session_id, agent.model().into(), agent.effort())
         .unwrap_err();
-    assert!(error.contains("backup is corrupt"), "{error}");
+    assert!(error.contains("special entry"), "{error}");
     assert_eq!(agent.sessions().unwrap().id(), session_id);
     assert_eq!(
         poll(&agent, &process_id)
@@ -211,5 +212,5 @@ fn failed_live_session_deletion_preserves_its_processes() {
     );
     assert!(alive(&directory));
 
-    std::fs::remove_file(backup).unwrap();
+    std::fs::remove_dir(blocker).unwrap();
 }

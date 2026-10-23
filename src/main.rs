@@ -11,6 +11,7 @@ mod config;
 mod console;
 mod context;
 mod copy;
+mod disk;
 mod effort;
 mod events;
 mod export;

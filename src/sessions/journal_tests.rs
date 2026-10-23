@@ -118,97 +118,14 @@ fn a_torn_final_transaction_recovers_prior_work_and_preserves_the_uncommitted_by
 }
 
 #[test]
-fn legacy_sessions_migrate_on_resume_without_replacing_the_original_file() {
-    let (_directory, _home, store, doc) = fixture();
-    store.acquire(&doc.id).unwrap().save_legacy(&doc).unwrap();
-    let path = storage::file_path(&store, &doc.id);
-    let original = fs::read(&path).unwrap();
-    let (handle, _) =
-        Handle::open(store.clone(), &doc.id, Redactor::new("fixture-key".into())).unwrap();
-    assert_eq!(handle.snapshot().messages, doc.messages);
-    assert_eq!(fs::read(path).unwrap(), original);
-    assert!(store.journal_path(&doc.id).exists());
-    assert_eq!(store.list().unwrap().sessions.len(), 1);
-}
-
-#[test]
-fn empty_or_torn_first_journal_restores_legacy_without_listing_mutations() {
-    for initial in [b"".as_slice(), b"{\"sequence\":0,unfinished".as_slice()] {
-        let (_directory, _home, store, doc) = fixture();
-        store.acquire(&doc.id).unwrap().save_legacy(&doc).unwrap();
-        let legacy = storage::file_path(&store, &doc.id);
-        let original = fs::read(&legacy).unwrap();
-        let journal = store.journal_path(&doc.id);
-        fs::write(&journal, initial).unwrap();
-
-        let listing = store.list().unwrap();
-        assert_eq!(listing.sessions.len(), 1);
-        assert!(listing.warnings.is_empty());
-        assert_eq!(fs::read(&journal).unwrap(), initial);
-        assert_eq!(fs::read(&legacy).unwrap(), original);
-        assert!(
-            !store
-                .bucket
-                .join(format!("{}.summary.json", doc.id))
-                .exists()
-        );
-
-        let (handle, _) = Handle::open(store.clone(), &doc.id, Redactor::empty()).unwrap();
-        assert_eq!(handle.snapshot().messages, doc.messages);
-        assert_eq!(fs::read(&legacy).unwrap(), original);
-        assert_eq!(store.fixture_load(&doc.id).unwrap().messages, doc.messages);
-        let damaged = fs::read_dir(journal.parent().unwrap())
-            .unwrap()
-            .flatten()
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .contains("jsonl.damaged-")
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(damaged.len(), usize::from(!initial.is_empty()));
-        if let Some(damaged) = damaged.first() {
-            assert_eq!(fs::read(damaged.path()).unwrap(), initial);
-        }
-        drop(handle);
-        let (reopened, _) = Handle::open(store, &doc.id, Redactor::empty()).unwrap();
-        assert_eq!(reopened.snapshot().messages, doc.messages);
-    }
-}
-
-#[test]
-fn torn_first_journal_can_restore_a_valid_legacy_backup() {
-    let (_directory, _home, store, mut doc) = fixture();
-    let lease = store.acquire(&doc.id).unwrap();
-    lease.save_legacy(&doc).unwrap();
-    let legacy = storage::file_path(&store, &doc.id);
-    let original = fs::read(&legacy).unwrap();
-    doc.messages.push(message("assistant", "Later version"));
-    lease.save_legacy(&doc).unwrap();
-    drop(lease);
-    fs::write(&legacy, b"damaged primary").unwrap();
-    let backup = legacy.with_extension("json.bak");
-    assert_eq!(fs::read(&backup).unwrap(), original);
-    let torn = b"incomplete first checkpoint";
-    let journal = store.journal_path(&doc.id);
-    fs::write(&journal, torn).unwrap();
-    assert_eq!(store.list().unwrap().sessions.len(), 1);
-    assert_eq!(fs::read(&journal).unwrap(), torn);
-    let (handle, _) = Handle::open(store.clone(), &doc.id, Redactor::empty()).unwrap();
-    assert_eq!(handle.snapshot().messages.len(), 2);
-    assert_eq!(fs::read(&legacy).unwrap(), b"damaged primary");
-    assert_eq!(fs::read(&backup).unwrap(), original);
-    assert_eq!(store.fixture_load(&doc.id).unwrap().messages.len(), 2);
-}
-
-#[test]
-fn complete_invalid_or_future_first_record_never_falls_back_to_legacy() {
-    for variant in 0..3 {
+fn incomplete_invalid_or_unsupported_first_record_is_rejected_unchanged() {
+    for variant in 0..5 {
         let (_directory, _home, store, doc) = fixture();
         let record = match variant {
-            0 => b"not json\n".to_vec(),
-            1 => b"{\"format\":\"jecode.session.journal\",\"format_version\":4}\n".to_vec(),
+            0 => Vec::new(),
+            1 => b"{\"sequence\":0,unfinished".to_vec(),
+            2 => b"not json\n".to_vec(),
+            3 => b"{\"format\":\"jecode.session.journal\",\"format_version\":4}\n".to_vec(),
             _ => {
                 let mut state = doc.state_value();
                 let Value::Object(fields) = &mut state else {
@@ -232,17 +149,14 @@ fn complete_invalid_or_future_first_record_never_falls_back_to_legacy() {
                 .into_bytes()
             }
         };
-        store.acquire(&doc.id).unwrap().save_legacy(&doc).unwrap();
-        let legacy = storage::file_path(&store, &doc.id);
-        let original = fs::read(&legacy).unwrap();
         let journal = store.journal_path(&doc.id);
+        fs::create_dir_all(journal.parent().unwrap()).unwrap();
         fs::write(&journal, &record).unwrap();
         let listing = store.list().unwrap();
         assert!(listing.sessions.is_empty());
         assert_eq!(listing.warnings.len(), 1);
         assert!(Handle::open(store, &doc.id, Redactor::empty()).is_err());
         assert_eq!(fs::read(&journal).unwrap(), record);
-        assert_eq!(fs::read(&legacy).unwrap(), original);
     }
 }
 
@@ -338,40 +252,6 @@ fn a_completed_stream_keeps_the_final_message_and_has_bounded_journal_growth() {
         bytes < text.len() as u64 * 3,
         "Completed journal contains {bytes} bytes"
     );
-}
-
-#[test]
-fn version_two_journals_accept_new_deltas_without_losing_their_state() {
-    let (_directory, _home, store, mut doc) = fixture();
-    doc.pending.active = true;
-    doc.pending.partial = "Original 🦀".into();
-    let lease = store.acquire(&doc.id).unwrap();
-    let record = Value::object([
-        ("format", Value::string("jecode.session.journal")),
-        ("format_version", Value::number(2)),
-        ("sequence", Value::number(0)),
-        ("messages_from", Value::number(0)),
-        ("events_from", Value::number(0)),
-        ("messages", Value::Array(doc.messages.clone())),
-        ("events", Value::Array(doc.events.clone())),
-        ("state", doc.state_value()),
-    ]);
-    fs::write(
-        store.journal_path(&doc.id),
-        format!("{}\n", record.encode()),
-    )
-    .unwrap();
-    doc.pending.partial.push_str(" continued");
-    doc.input.draft = Draft {
-        text: "Unsent work".into(),
-        cursor: 6,
-        ..Default::default()
-    };
-    lease.save(&doc).unwrap();
-    let saved = store.fixture_load(&doc.id).unwrap();
-    assert_eq!(saved.pending.partial, doc.pending.partial);
-    assert!(saved.input == doc.input);
-    assert_eq!(saved.messages, doc.messages);
 }
 
 #[test]

@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-const MAGIC: &[u8; 8] = b"JECRCP02";
-const END: &[u8; 8] = b"RCPEND02";
+const MAGIC: &[u8; 8] = b"JECRCP04";
+const END: &[u8; 8] = b"RCPEND04";
 pub const HEADER: u64 = 32;
 const FOOTER: u64 = 24;
 
@@ -36,7 +36,13 @@ pub fn read(file: &mut File) -> Result<Snapshot, String> {
     file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     let mut head = [0u8; HEADER as usize];
     file.read_exact(&mut head).map_err(|e| e.to_string())?;
-    if &head[..8] != MAGIC || head[16..].iter().any(|b| *b != 0) {
+    let (version, end) = match &head[..8] {
+        b"JECRCP02" => (2, b"RCPEND02"),
+        b"JECRCP03" => (3, b"RCPEND03"),
+        b"JECRCP04" => (4, END),
+        _ => return Err("Invalid recovery header".into()),
+    };
+    if head[16..].iter().any(|b| *b != 0) {
         return Err("Invalid recovery header".into());
     }
     let created = u64::from_le_bytes(head[8..16].try_into().unwrap());
@@ -44,7 +50,7 @@ pub fn read(file: &mut File) -> Result<Snapshot, String> {
         .map_err(|e| e.to_string())?;
     let mut foot = [0u8; FOOTER as usize];
     file.read_exact(&mut foot).map_err(|e| e.to_string())?;
-    if &foot[16..] != END {
+    if &foot[16..] != end {
         return Err("Invalid recovery footer".into());
     }
     let length = u64::from_le_bytes(foot[..8].try_into().unwrap());
@@ -63,10 +69,10 @@ pub fn read(file: &mut File) -> Result<Snapshot, String> {
         .map_err(|_| "Could not allocate recovery metadata")?;
     bytes.resize(allocation, 0);
     file.read_exact(&mut bytes).map_err(|e| e.to_string())?;
-    if hash::checksum(&[MAGIC, &bytes]) != checksum {
+    if hash::checksum(&[&head[..8], &bytes]) != checksum {
         return Err("Corrupt recovery metadata".into());
     }
-    let snapshot = decode(&bytes)?;
+    let snapshot = decode(&bytes, version)?;
     if snapshot.created != created {
         return Err("Recovery creation time mismatch".into());
     }
@@ -127,11 +133,21 @@ pub(super) fn encode(snapshot: &Snapshot) -> Result<Vec<u8>, String> {
             }
         }
     }
-    for strings in [&snapshot.roots, &snapshot.excluded] {
+    for strings in [&snapshot.roots, &snapshot.excluded, &snapshot.ignored] {
         put_count(&mut out, strings.len())?;
         for string in strings {
             put_text(&mut out, string)?;
         }
+    }
+    put_count(&mut out, snapshot.ignore_rules.local.len())?;
+    for (directory, text) in &snapshot.ignore_rules.local {
+        put_text(&mut out, directory)?;
+        put_text(&mut out, text)?;
+    }
+    put_count(&mut out, snapshot.ignore_rules.outer.len())?;
+    for (prefix, text) in &snapshot.ignore_rules.outer {
+        put_text(&mut out, prefix)?;
+        put_text(&mut out, text)?;
     }
     put_count(&mut out, snapshot.partial.len())?;
     for (path, reason) in &snapshot.partial {
@@ -141,7 +157,7 @@ pub(super) fn encode(snapshot: &Snapshot) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn decode(bytes: &[u8]) -> Result<Snapshot, String> {
+fn decode(bytes: &[u8], version: u8) -> Result<Snapshot, String> {
     let mut input = Input { bytes, at: 0 };
     let reference = input.text()?;
     let created = input.u64()?;
@@ -184,9 +200,36 @@ fn decode(bytes: &[u8]) -> Result<Snapshot, String> {
     }
     let roots = input.strings()?;
     let excluded = input.strings()?;
+    let ignored = if version >= 3 {
+        input.strings()?
+    } else {
+        Vec::new()
+    };
+    let mut ignore_rules = super::paths::IgnoreRules::default();
+    if version >= 4 {
+        for _ in 0..input.count()? {
+            let directory = input.text()?;
+            let text = input.text()?;
+            if !valid_path(&directory, true) || ignore_rules.local.insert(directory, text).is_some()
+            {
+                return Err("Invalid recovery ignore directory".into());
+            }
+        }
+        for _ in 0..input.count()? {
+            let prefix = input.text()?;
+            let text = input.text()?;
+            if !valid_path(&prefix, true) {
+                return Err("Invalid recovery ignore prefix".into());
+            }
+            ignore_rules.outer.push((prefix, text));
+        }
+    }
     if roots.iter().any(|root| !valid_path(root, true))
         || roots.windows(2).any(|pair| pair[0] >= pair[1])
-        || excluded.iter().any(|path| !valid_path(path, false))
+        || excluded
+            .iter()
+            .chain(&ignored)
+            .any(|path| !valid_path(path, false))
     {
         return Err("Invalid recovery scope path".into());
     }
@@ -206,6 +249,8 @@ fn decode(bytes: &[u8]) -> Result<Snapshot, String> {
         entries,
         roots,
         excluded,
+        ignored,
+        ignore_rules,
         partial,
     })
 }
@@ -280,3 +325,7 @@ impl Input<'_> {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+#[path = "format_tests.rs"]
+mod tests;

@@ -39,12 +39,6 @@ pub(crate) fn message(title: &str, report: &DeleteReport, current: bool) -> Stri
     if current {
         text.push_str(" · new conversation opened");
     }
-    if report.legacy_references > 0 {
-        text.push_str(&format!(
-            " · {} older shared output references kept",
-            report.legacy_references
-        ));
-    }
     text
 }
 
@@ -69,16 +63,7 @@ pub(super) fn confirm(
     let (report, current) =
         agent.delete_session(id, config.settings.model.clone(), config.settings.effort)?;
     let text = message(&session.title, &report, current);
-    agent.record_local_details(
-        &format!("/resume · delete {id}"),
-        &text,
-        if report.legacy_references > 0 {
-            "warning"
-        } else {
-            "notice"
-        },
-        &[],
-    );
+    agent.record_local_details(&format!("/resume · delete {id}"), &text, "notice", &[]);
     writeln!(output, "{}", agent.redact(&text)).map_err(|e| e.to_string())?;
     Ok(Some(current))
 }

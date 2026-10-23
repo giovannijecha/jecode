@@ -80,9 +80,9 @@ impl Body {
 
 pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
     let status = Status::of(&tool);
-    let expanded = tool.presentation.expanded == Some(true);
-    // Old conversations retain replacement arguments but have no file snapshot.
-    // Their coordinates stay absent rather than being reconstructed from disk.
+    let expanded = tool.presentation.expanded;
+    // An edit without a recorded change (beyond the diff limits) shows its
+    // replacement text; coordinates stay absent rather than read from disk.
     let legacy = (tool.change.is_none() && tool.name == "edit" && status == Status::Done)
         .then(|| {
             let mut change = Change::between(
@@ -204,19 +204,15 @@ fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
     let mut title = Line::new(&format!("{name}("), EMPHASIS.bold()).at_source(0);
     title.push(&text::clean(&target).replace('\n', " ↵ "), EMPHASIS);
     title.push(")", EMPHASIS.bold());
-    preview(
-        title,
-        columns.saturating_sub(2),
-        tool.presentation.expanded == Some(true),
-    )
-    .wrap(columns.saturating_sub(2).max(1), false)
-    .into_iter()
-    .enumerate()
-    .map(|(index, row)| {
-        row.gutter(if index == 0 { "● " } else { "  " }, status.style())
-            .shortened(columns)
-    })
-    .collect()
+    preview(title, columns.saturating_sub(2), tool.presentation.expanded)
+        .wrap(columns.saturating_sub(2).max(1), false)
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| {
+            row.gutter(if index == 0 { "● " } else { "  " }, status.style())
+                .shortened(columns)
+        })
+        .collect()
 }
 
 fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {

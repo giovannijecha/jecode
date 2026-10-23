@@ -74,7 +74,7 @@ fn saved_states_stay_quiet_until_expanded() {
         "{collapsed:?}"
     );
     let expanded = Presentation {
-        expanded: Some(true),
+        expanded: true,
         ..Presentation::default()
     };
     let rows = plain(&draw("write", &arguments, Some(&saved()), 80, &expanded));

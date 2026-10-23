@@ -83,9 +83,6 @@ impl Terminal {
         })
     }
 
-    pub fn take_initial(&mut self) -> Vec<Input> {
-        vec![]
-    }
     pub fn check(&mut self) -> Result<(), String> {
         self.mode.check()
     }
@@ -107,8 +104,6 @@ fn geometry(size: (usize, usize)) -> Geometry {
     Geometry {
         width: size.0,
         height: size.1,
-        row: 0,
-        column: 0,
     }
 }
 

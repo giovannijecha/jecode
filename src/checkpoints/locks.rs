@@ -1,23 +1,38 @@
 //! Cross-process coordination through operating-system file locks, released
 //! automatically when a process exits.
-use super::files;
+use crate::cancel::Cancellation;
 use std::collections::HashSet;
-use std::fs::File;
+use std::fs::{File, TryLockError};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 const STRIPES: usize = 256;
 
 pub fn open(path: &Path) -> std::io::Result<File> {
     if let Some(parent) = path.parent() {
-        files::private_directory(parent)?;
+        crate::disk::private_directory(parent)?;
     }
-    files::options()
+    crate::disk::private_options()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .open(path)
+}
+
+fn lock_cancellable(file: &File, cancellation: &Cancellation) -> std::io::Result<()> {
+    loop {
+        if cancellation.requested() {
+            return Err(std::io::Error::other("Operation cancelled"));
+        }
+        match file.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(TryLockError::WouldBlock) => cancellation
+                .wait(std::time::Duration::from_millis(10))
+                .map_err(std::io::Error::other)?,
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
+    }
 }
 
 /// An exclusive lock held until drop.
@@ -37,33 +52,18 @@ impl Exclusive {
         &mut self.0
     }
 
-    pub fn try_acquire(path: &Path) -> std::io::Result<Option<Self>> {
-        Self::try_from_file(open(path)?)
-    }
-
     pub fn try_from_file(file: File) -> std::io::Result<Option<Self>> {
         match file.try_lock() {
             Ok(()) => Ok(Some(Self(file))),
-            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-            Err(std::fs::TryLockError::Error(error)) => Err(error),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(error)) => Err(error),
         }
     }
 
-    pub fn acquire_cancellable(
-        path: &Path,
-        cancellation: &crate::cancel::Cancellation,
-    ) -> std::io::Result<Self> {
-        loop {
-            if cancellation.requested() {
-                return Err(std::io::Error::other("Operation cancelled"));
-            }
-            if let Some(lock) = Self::try_acquire(path)? {
-                return Ok(lock);
-            }
-            cancellation
-                .wait(std::time::Duration::from_millis(10))
-                .map_err(std::io::Error::other)?;
-        }
+    pub fn acquire_cancellable(path: &Path, cancellation: &Cancellation) -> std::io::Result<Self> {
+        let file = open(path)?;
+        lock_cancellable(&file, cancellation)?;
+        Ok(Self(file))
     }
 }
 
@@ -77,22 +77,25 @@ impl Drop for Exclusive {
 /// Striped path leases. Paths are folded to lowercase so aliases on
 /// case-insensitive volumes share a stripe; unrelated paths sharing a stripe
 /// only serialize. File locks are per handle, so one process also coordinates
-/// its own threads before taking the cross-process lock.
+/// its own threads before taking the cross-process lock. Stripe handles stay
+/// open with the store, so a whole-workspace lease only locks and unlocks.
 pub struct Leases {
     directory: PathBuf,
+    handles: Vec<OnceLock<File>>,
     held: Mutex<HashSet<usize>>,
     released: Condvar,
 }
 
 pub struct Lease {
     leases: Arc<Leases>,
-    stripes: Vec<(usize, Exclusive)>,
+    stripes: Vec<usize>,
 }
 
 impl Leases {
     pub fn new(directory: PathBuf) -> Arc<Self> {
         Arc::new(Self {
             directory,
+            handles: (0..STRIPES).map(|_| OnceLock::new()).collect(),
             held: Mutex::new(HashSet::new()),
             released: Condvar::new(),
         })
@@ -107,35 +110,35 @@ impl Leases {
     pub fn acquire_cancellable(
         self: &Arc<Self>,
         paths: &[&str],
-        cancellation: &crate::cancel::Cancellation,
+        cancellation: &Cancellation,
     ) -> std::io::Result<Lease> {
         let mut stripes: Vec<usize> = paths.iter().map(|path| Self::stripe(path)).collect();
         stripes.sort_unstable();
         stripes.dedup();
-        self.stripes_cancellable(stripes, Some(cancellation))
+        self.stripes_cancellable(stripes, cancellation)
     }
 
     pub fn acquire_all_cancellable(
         self: &Arc<Self>,
-        cancellation: &crate::cancel::Cancellation,
+        cancellation: &Cancellation,
     ) -> std::io::Result<Lease> {
-        self.stripes_cancellable((0..STRIPES).collect(), Some(cancellation))
+        self.stripes_cancellable((0..STRIPES).collect(), cancellation)
     }
 
     fn stripes_cancellable(
         self: &Arc<Self>,
         stripes: Vec<usize>,
-        cancellation: Option<&crate::cancel::Cancellation>,
+        cancellation: &Cancellation,
     ) -> std::io::Result<Lease> {
         let mut lease = Lease {
             leases: self.clone(),
-            stripes: Vec::new(),
+            stripes: Vec::with_capacity(stripes.len()),
         };
         for stripe in stripes {
             {
                 let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
                 while held.contains(&stripe) {
-                    if cancellation.is_some_and(|token| token.requested()) {
+                    if cancellation.requested() {
                         return Err(std::io::Error::other("Operation cancelled"));
                     }
                     held = self
@@ -146,13 +149,8 @@ impl Leases {
                 }
                 held.insert(stripe);
             }
-            let path = self.directory.join(format!("{stripe:02x}.lock"));
-            let acquired = match cancellation {
-                Some(token) => Exclusive::acquire_cancellable(&path, token),
-                None => Exclusive::acquire(&path),
-            };
-            match acquired {
-                Ok(lock) => lease.stripes.push((stripe, lock)),
+            match self.lock(stripe, cancellation) {
+                Ok(()) => lease.stripes.push(stripe),
                 Err(error) => {
                     self.release(stripe);
                     return Err(error);
@@ -160,6 +158,19 @@ impl Leases {
             }
         }
         Ok(lease)
+    }
+
+    /// Takes the cross-process lock of a stripe this thread already holds.
+    fn lock(&self, stripe: usize, cancellation: &Cancellation) -> std::io::Result<()> {
+        let slot = &self.handles[stripe];
+        let file = match slot.get() {
+            Some(file) => file,
+            None => {
+                let file = open(&self.directory.join(format!("{stripe:02x}.lock")))?;
+                slot.get_or_init(|| file)
+            }
+        };
+        lock_cancellable(file, cancellation)
     }
 
     fn release(&self, stripe: usize) {
@@ -173,8 +184,11 @@ impl Leases {
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        for (stripe, lock) in self.stripes.drain(..).rev() {
-            drop(lock);
+        for stripe in self.stripes.drain(..).rev() {
+            // A concurrent Unix fork can retain a duplicate descriptor until exec.
+            if let Some(file) = self.leases.handles[stripe].get() {
+                let _ = file.unlock();
+            }
             self.leases.release(stripe);
         }
     }

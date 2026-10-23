@@ -1,5 +1,5 @@
 use crate::json::{self, Value};
-use std::fs::{self, Metadata, OpenOptions};
+use std::fs::{self, Metadata};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
@@ -119,16 +119,13 @@ impl Area {
                         .into(),
                 );
             }
-            let mut options = OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&marker).map_err(|error| {
-                format!("Could not establish temporary area ownership: {error}")
-            })?;
+            let mut file = crate::disk::private_options()
+                .write(true)
+                .create_new(true)
+                .open(&marker)
+                .map_err(|error| {
+                    format!("Could not establish temporary area ownership: {error}")
+                })?;
             let result = file
                 .write_all(self.identity().encode().as_bytes())
                 .and_then(|()| file.sync_all());
@@ -279,14 +276,8 @@ fn private_directory(path: &Path) -> Result<(), String> {
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir_all(path)
+            crate::disk::private_directory(path)
                 .map_err(|error| format!("Could not create temporary area: {error}"))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-                    .map_err(|error| error.to_string())?;
-            }
             inspect(path)?;
         }
         Err(error) => return Err(format!("Could not inspect temporary area: {error}")),
@@ -297,14 +288,7 @@ fn private_directory(path: &Path) -> Result<(), String> {
 fn inspect(path: &Path) -> Result<Metadata, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect temporary path: {error}"))?;
-    #[cfg(windows)]
-    let linked = {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT
-    };
-    #[cfg(not(windows))]
-    let linked = metadata.file_type().is_symlink();
-    if linked {
+    if crate::disk::linked(&metadata) {
         return Err("Temporary area contains a link or junction; it was left unchanged".into());
     }
     Ok(metadata)

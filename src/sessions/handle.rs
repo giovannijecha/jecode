@@ -63,11 +63,7 @@ impl Handle {
 
     pub fn open(store: Store, id: &str, redactor: Redactor) -> Result<(Self, String), String> {
         let lease = store.acquire(id)?;
-        let (document, backup) = store.load(id)?;
-        if backup {
-            store.preserve_legacy_damage(id)?;
-        }
-        let mut document = document;
+        let (mut document, damaged) = store.load(id)?;
         document.input = document.input.redacted(&redactor);
         document.messages = document
             .messages
@@ -106,7 +102,7 @@ impl Handle {
             handle,
             format!(
                 "{}{}",
-                if backup {
+                if damaged {
                     "Recovered the last valid checkpoint. "
                 } else {
                     ""

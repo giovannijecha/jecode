@@ -1,4 +1,4 @@
-//! Stream before bytes into one unpublished pack, then publish once durable.
+//! Stream before bytes into one unpublished pack, then publish once synced.
 use super::files::{self, Mode};
 use super::format;
 use super::hash;
@@ -47,15 +47,18 @@ impl Store {
             paths::discover(&self.root, requested, &self.excluded, cancel),
             cancel,
         )
+        .map(|(capture, _)| capture)
     }
 
-    pub fn capture_exact(
+    /// Saves exactly the named entries and returns the published snapshot, so
+    /// a restore can guard its undo without reopening the new pack.
+    pub(super) fn capture_exact(
         &self,
         tool: &str,
         origin: &str,
         requested: &[String],
         cancel: &Cancellation,
-    ) -> Result<Capture, String> {
+    ) -> Result<(Capture, Option<Snapshot>), String> {
         check(cancel)?;
         self.capture_selected(
             tool,
@@ -71,27 +74,15 @@ impl Store {
         origin: &str,
         selection: Result<paths::Selection, String>,
         cancel: &Cancellation,
-    ) -> Result<Capture, String> {
+    ) -> Result<(Capture, Option<Snapshot>), String> {
         let selection = match selection {
             Ok(selection) => selection,
             Err(_) if cancel.requested() => return Err("Operation cancelled".into()),
-            Err(error) => {
-                return Ok(Capture {
-                    reference: None,
-                    created: 0,
-                    saved: 0,
-                    partial: vec![(String::new(), error)],
-                });
-            }
+            Err(error) => return Ok((Capture::failed(vec![(String::new(), error)]), None)),
         };
         let mut partial = selection.partial.clone();
         if selection.paths.is_empty() && selection.roots.is_empty() {
-            return Ok(Capture {
-                reference: None,
-                created: 0,
-                saved: 0,
-                partial,
-            });
+            return Ok((Capture::failed(partial), None));
         }
         let created = super::clock::now();
         let (reference, temporary, file) = loop {
@@ -101,7 +92,7 @@ impl Store {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             );
             let temporary = self.directory.join(format!(".{reference}.pending"));
-            match files::options()
+            match crate::disk::private_options()
                 .read(true)
                 .write(true)
                 .create_new(true)
@@ -114,12 +105,7 @@ impl Store {
                         String::new(),
                         format!("Could not create recovery pack: {error}"),
                     ));
-                    return Ok(Capture {
-                        reference: None,
-                        created: 0,
-                        saved: 0,
-                        partial,
-                    });
+                    return Ok((Capture::failed(partial), None));
                 }
             }
         };
@@ -131,12 +117,7 @@ impl Store {
                     String::new(),
                     format!("Could not lock recovery pack: {error}"),
                 ));
-                return Ok(Capture {
-                    reference: None,
-                    created: 0,
-                    saved: 0,
-                    partial,
-                });
+                return Ok((Capture::failed(partial), None));
             }
         };
         let request = CaptureRequest {
@@ -158,23 +139,23 @@ impl Store {
             self.publish(&reference, cancel)?;
             Ok(saved)
         });
-        let _ = fs::remove_file(&temporary);
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
         match result {
-            Ok(saved) => Ok(Capture {
-                reference: Some(reference),
-                created,
-                saved,
-                partial,
-            }),
+            Ok((saved, snapshot)) => Ok((
+                Capture {
+                    reference: Some(reference),
+                    created,
+                    saved,
+                    partial,
+                },
+                Some(snapshot),
+            )),
             Err(error) if error == "Operation cancelled" => Err(error),
             Err(error) => {
                 partial.push((String::new(), error));
-                Ok(Capture {
-                    reference: None,
-                    created: 0,
-                    saved: 0,
-                    partial,
-                })
+                Ok((Capture::failed(partial), None))
             }
         }
     }
@@ -185,10 +166,11 @@ impl Store {
         request: &CaptureRequest<'_>,
         partial: &mut Vec<Issue>,
         cancel: &Cancellation,
-    ) -> Result<usize, String> {
+    ) -> Result<(usize, Snapshot), String> {
         self.claim(format::HEADER, cancel)?;
         format::header(file, request.created)?;
         let mut entries = BTreeMap::new();
+        let mut buffer = vec![0u8; COPY_BUFFER];
         for path in &request.selection.paths {
             check(cancel)?;
             if blocked_ancestor(path, &entries) {
@@ -196,7 +178,7 @@ impl Store {
                 continue;
             }
             let at = file.stream_position().map_err(|e| e.to_string())?;
-            match self.capture_one(file, path, cancel) {
+            match self.capture_one(file, path, &mut buffer, cancel) {
                 Ok(state) => {
                     entries.insert(path.clone(), state);
                 }
@@ -262,6 +244,8 @@ impl Store {
             entries,
             roots,
             excluded: self.excluded.clone(),
+            ignored: request.selection.ignored.clone(),
+            ignore_rules: request.selection.ignore_rules.clone(),
             partial: partial.clone(),
         };
         let metadata = format::encode(&snapshot)?;
@@ -271,13 +255,14 @@ impl Store {
         file.sync_all()
             .map_err(|e| format!("Could not sync recovery pack: {e}"))?;
         check(cancel)?;
-        Ok(saved)
+        Ok((saved, snapshot))
     }
 
     fn capture_one(
         &self,
         pack: &mut File,
         relative: &str,
+        buffer: &mut [u8],
         cancel: &Cancellation,
     ) -> Result<State, String> {
         let path = paths::absolute(&self.root, relative);
@@ -331,7 +316,6 @@ impl Store {
         let offset = pack.stream_position().map_err(|e| e.to_string())?;
         let mut hasher = hash::Hasher::new(length);
         let mut remaining = length;
-        let mut buffer = [0u8; COPY_BUFFER];
         while remaining != 0 {
             check(cancel)?;
             let count = buffer.len().min(remaining as usize);
@@ -387,13 +371,7 @@ impl Store {
         }
         let source = self.directory.join(format!(".{reference}.pending"));
         check(cancel)?;
-        fs::rename(&source, &target)
-            .map_err(|e| format!("Could not publish recovery pack: {e}"))?;
-        if let Err(error) = files::sync_directory(&self.directory) {
-            let _ = fs::remove_file(&target);
-            return Err(format!("Could not sync recovery directory: {error}"));
-        }
-        Ok(())
+        fs::rename(&source, &target).map_err(|e| format!("Could not publish recovery pack: {e}"))
     }
 }
 

@@ -193,9 +193,9 @@ impl Tools {
             .filter(|_| name == "bash")
             .and_then(|session| {
                 let arguments = json::parse(arguments).ok()?;
-                let text = arguments.get("command")?.as_str()?;
+                arguments.get("command")?.as_str()?;
                 let paths = shell::protect_paths(&arguments).ok()?;
-                Some(session.command_scoped_cancellable(text, &paths, cancellation))
+                Some(session.command_scoped_cancellable(&paths, cancellation))
             });
         Begun { command }
     }

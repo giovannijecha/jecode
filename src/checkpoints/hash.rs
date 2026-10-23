@@ -1,5 +1,6 @@
-//! Owned non-cryptographic checksums and content fingerprints.
-//! Destructive restore guards also compare the live bytes with saved undo.
+//! Owned non-cryptographic checksums and content fingerprints. Restore guards
+//! compare live digests with the saved undo; they detect accidental concurrent
+//! changes, not crafted collisions.
 
 const LANE: [u64; 2] = [0x9e37_79b9_7f4a_7c15, 0xc2b2_ae3d_27d4_eb4f];
 

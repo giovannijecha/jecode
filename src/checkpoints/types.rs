@@ -13,6 +13,9 @@ pub struct Snapshot {
     pub entries: BTreeMap<String, State>,
     pub roots: Vec<String>,
     pub excluded: Vec<String>,
+    /// Git-ignored directories the walks skipped; absence inside is unproven.
+    pub ignored: Vec<String>,
+    pub ignore_rules: super::paths::IgnoreRules,
     pub partial: Vec<Issue>,
 }
 
@@ -28,6 +31,16 @@ pub struct Capture {
     pub created: u64,
     pub saved: usize,
     pub partial: Vec<Issue>,
+}
+
+impl Capture {
+    /// A call for which no recovery pack was published.
+    pub fn failed(partial: Vec<Issue>) -> Self {
+        Self {
+            partial,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

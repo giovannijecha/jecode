@@ -6,7 +6,8 @@ use std::path::{Component, Path, PathBuf};
 /// Establish the only current layout. A missing ownership marker may be
 /// completed after interrupted initialization, but never over unrelated data.
 pub(super) fn open_workspace(home: &Path, root: &Path) -> Result<PathBuf, String> {
-    files::private_directory(home).map_err(|e| format!("Could not create Jecode home: {e}"))?;
+    crate::disk::private_directory(home)
+        .map_err(|e| format!("Could not create Jecode home: {e}"))?;
     let home = fs::canonicalize(home).map_err(|e| e.to_string())?;
     let checkpoints = home.join("checkpoints");
     private_directory(&checkpoints)?;
@@ -112,7 +113,7 @@ fn private_directory(path: &Path) -> Result<(), String> {
             path.display()
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            files::private_directory(path).map_err(|e| e.to_string())?;
+            crate::disk::private_directory(path).map_err(|e| e.to_string())?;
             if !ordinary_directory(path)? {
                 return Err("Checkpoint storage changed during creation".into());
             }
@@ -154,17 +155,7 @@ pub(super) fn ordinary_directory(path: &Path) -> Result<bool, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(format!("Could not inspect recovery directory: {error}")),
     };
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Ok(false);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+    Ok(metadata.is_dir() && !crate::disk::linked(&metadata))
 }
 
 pub(super) fn ordinary_file(path: &Path) -> Result<bool, String> {
@@ -173,17 +164,7 @@ pub(super) fn ordinary_file(path: &Path) -> Result<bool, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(format!("Could not inspect recovery pack: {error}")),
     };
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Ok(false);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+    Ok(metadata.is_file() && !crate::disk::linked(&metadata))
 }
 
 pub(super) fn recognized_workspace(directory: &Path) -> Result<bool, String> {
@@ -212,15 +193,8 @@ pub(super) fn recognized_workspace(directory: &Path) -> Result<bool, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(format!("Could not inspect recovery identity: {error}")),
     };
-    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 65_536 {
+    if !metadata.is_file() || crate::disk::linked(&metadata) || metadata.len() > 65_536 {
         return Ok(false);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return Ok(false);
-        }
     }
     let bytes = fs::read(&marker).map_err(|e| format!("Could not read recovery identity: {e}"))?;
     let key = hash::digest(&bytes);

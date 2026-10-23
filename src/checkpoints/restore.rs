@@ -118,15 +118,14 @@ fn inspect_loaded(
     let (names, mut partial) = selected(snapshot, &store.root, requested, cancel)?;
     let mut selected = Vec::new();
     let mut observed = BTreeMap::<String, State>::new();
+    let mut rules = paths::Ignore::saved(&snapshot.ignore_rules);
     for path in names {
         if cancel.requested() {
             return Err("Recovery inspection was cancelled".into());
         }
-        let saved = snapshot
-            .entries
-            .get(&path)
-            .cloned()
-            .or_else(|| absence_proven(snapshot, &path).then_some(State::Absent));
+        let saved = snapshot.entries.get(&path).cloned().or_else(|| {
+            absence_proven(snapshot, &store.root, &path, &mut rules).then_some(State::Absent)
+        });
         let Some(saved) = saved else {
             partial.push((path, "Not protected by this call".into()));
             continue;
@@ -179,7 +178,7 @@ fn inspect_loaded(
 }
 
 mod installing;
-use installing::{finalize_directory, install, order, same_live, stage_file, stage_link};
+use installing::{finalize_directory, install, order, stage_file, stage_link};
 
 impl Store {
     pub fn inspect(
@@ -285,25 +284,25 @@ impl Store {
                 action();
             }
         });
-        let undo = self.capture_exact(&format!("undo {reference}"), "restore", &names, cancel)?;
-        let Some(undo_reference) = undo.reference else {
+        let (undo, undo_snapshot) =
+            self.capture_exact(&format!("undo {reference}"), "restore", &names, cancel)?;
+        let (Some(undo_reference), Some(undo_snapshot)) = (undo.reference, undo_snapshot) else {
             return Err("Could not save the current state before restore".into());
         };
         if !undo.partial.is_empty() {
             return Err("Undo capture was incomplete; restore was not started".into());
         }
-        let undo_pack = self.load(&undo_reference, cancel)?;
         let mut undo_names = BTreeMap::new();
         let mut unique_undo = BTreeSet::new();
         for entry in &plan {
-            let saved_name = paths::resolve_saved(&self.root, &undo_pack.snapshot, &entry.path)
+            let saved_name = paths::resolve_saved(&self.root, &undo_snapshot, &entry.path)
                 .map_err(|_| "Undo capture omitted a selected path; restore was not started")?;
             if !unique_undo.insert(saved_name.clone()) {
                 return Err(
                     "Undo capture merged distinct selected paths; restore was not started".into(),
                 );
             }
-            let before = &undo_pack.snapshot.entries[&saved_name];
+            let before = &undo_snapshot.entries[&saved_name];
             if !before.same(&entry.current) {
                 report.conflicts.push((
                     entry.path.clone(),
@@ -341,7 +340,9 @@ impl Store {
                     break;
                 }
             };
-            let before = &undo_pack.snapshot.entries[&undo_names[&entry.path]];
+            // Observation digests the live bytes; equality with the undo
+            // digest proves nothing changed after the undo was saved.
+            let before = &undo_snapshot.entries[&undo_names[&entry.path]];
             let current = match state::observe(&self.root, &entry.path, cancel) {
                 Ok(current) => current,
                 Err(error) => {
@@ -349,20 +350,12 @@ impl Store {
                     break;
                 }
             };
-            let path = paths::absolute(&self.root, &entry.path);
-            match same_live(&undo_pack, before, &current, &path, cancel) {
-                Ok(true) => {}
-                Ok(false) => {
-                    report.conflicts.push((
-                        entry.path.clone(),
-                        "Current bytes changed after the undo was saved".into(),
-                    ));
-                    break;
-                }
-                Err(error) => {
-                    report.failed.push((entry.path.clone(), error));
-                    break;
-                }
+            if !before.same(&current) {
+                report.conflicts.push((
+                    entry.path.clone(),
+                    "Current bytes changed after the undo was saved".into(),
+                ));
+                break;
             }
             match install(entry, &self.root, staged_file, staged_link) {
                 Ok(()) => {
@@ -393,13 +386,10 @@ impl Store {
                 }
                 Err(error) => {
                     let after = state::observe(&self.root, &entry.path, &Cancellation::default());
-                    let changed = match &after {
-                        Ok(after) => {
-                            !same_live(&undo_pack, before, after, &path, &Cancellation::default())
-                                .unwrap_or(true)
-                        }
-                        Err(_) => true,
-                    };
+                    let changed = after
+                        .as_ref()
+                        .map(|after| !before.same(after))
+                        .unwrap_or(true);
                     if changed {
                         mutated.insert(entry.path.clone());
                         installed.insert(
@@ -430,7 +420,7 @@ impl Store {
                         ));
                     }
                     Err(error) => {
-                        let before = &undo_pack.snapshot.entries[&undo_names[&path]];
+                        let before = &undo_snapshot.entries[&undo_names[&path]];
                         let after = state::observe(&self.root, &path, &Cancellation::default());
                         let changed = after
                             .as_ref()
@@ -465,7 +455,7 @@ impl Store {
                         reason: "Installed state could not be verified".into(),
                     });
                 undo_states.push(Inspected {
-                    saved: undo_pack.snapshot.entries[&name].clone(),
+                    saved: undo_snapshot.entries[&name].clone(),
                     path: name,
                     current,
                     action: None,

@@ -1,4 +1,4 @@
-use super::{Item, Kind, State};
+use super::{Item, State};
 use std::ops::Range;
 
 #[derive(Default)]
@@ -24,25 +24,6 @@ impl State {
             self.tool_details.active = false;
             self.changed();
         }
-    }
-
-    // Legacy sessions have no execution-turn markers. Use their last request.
-    pub fn restore_tool_turn(&mut self) {
-        self.reset_tool_details();
-        let start = self
-            .items
-            .iter()
-            .rposition(|item| {
-                matches!(
-                    item,
-                    Item::Text {
-                        kind: Kind::User,
-                        ..
-                    }
-                )
-            })
-            .unwrap_or(0);
-        self.tool_details.turn = Some(start..self.items.len());
     }
 
     pub fn tool_details_available(&self) -> bool {
@@ -82,7 +63,7 @@ impl State {
                 ..
             } = item
             {
-                presentation.expanded = expanded.then_some(true);
+                presentation.expanded = expanded;
             }
         }
         self.tool_details.expanded = expanded;
@@ -96,9 +77,9 @@ impl State {
         let mut first = None;
         for (index, item) in self.items.iter_mut().enumerate() {
             if let Item::Tool { presentation, .. } = item
-                && presentation.expanded.is_some()
+                && presentation.expanded
             {
-                presentation.expanded = None;
+                presentation.expanded = false;
                 first.get_or_insert(index);
             }
         }

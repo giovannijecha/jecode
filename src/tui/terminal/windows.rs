@@ -117,10 +117,6 @@ impl Terminal {
         Ok(terminal)
     }
 
-    pub fn take_initial(&mut self) -> Vec<Input> {
-        vec![]
-    }
-
     pub fn check(&mut self) -> Result<(), String> {
         match self.child.try_wait() {
             Ok(None) => Ok(()),
@@ -180,19 +176,12 @@ fn parse(line: &str) -> Input {
                 Err(_) => Input::Error("Invalid console paste".into()),
             }
         }
-        ["S", width, height, row, column] => {
-            match (width.parse(), height.parse(), row.parse(), column.parse()) {
-                (Ok(width), Ok(height), Ok(row), Ok(column)) if width > 0 && height > 0 => {
-                    Input::Size(Geometry {
-                        width,
-                        height,
-                        row,
-                        column,
-                    })
-                }
-                _ => Input::Error("Invalid console size".into()),
+        ["S", width, height] => match (width.parse(), height.parse()) {
+            (Ok(width), Ok(height)) if width > 0 && height > 0 => {
+                Input::Size(Geometry { width, height })
             }
-        }
+            _ => Input::Error("Invalid console size".into()),
+        },
         ["K", code, modifiers, character] => {
             match (code.parse(), modifiers.parse(), character.parse()) {
                 (Ok(code), Ok(modifiers), Ok(character)) => Input::Key(super::Key {

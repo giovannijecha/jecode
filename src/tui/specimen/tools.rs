@@ -175,9 +175,9 @@ fn states() -> Vec<(&'static str, Call)> {
         ]),
         9,
     );
-    selected.presentation.expanded = Some(true);
+    selected.presentation.expanded = true;
     let mut expanded = sequence().remove(1);
-    expanded.presentation.expanded = Some(true);
+    expanded.presentation.expanded = true;
     vec![
         ("Running", running),
         (

@@ -78,10 +78,24 @@ pub(super) fn in_root(path: &str, root: &str) -> bool {
 }
 
 /// A complete walk proves absence only within its original eligible scope.
-/// A later explicit selection cannot widen that proof into excluded content.
-pub(super) fn absence_proven(snapshot: &Snapshot, path: &str) -> bool {
+/// A later explicit selection cannot widen that proof into excluded or
+/// Git-ignored content.
+pub(super) fn absence_proven(
+    snapshot: &Snapshot,
+    root: &Path,
+    path: &str,
+    rules: &mut paths::Ignore,
+) -> bool {
+    let directory = fs::symlink_metadata(paths::absolute(root, path))
+        .is_ok_and(|metadata| metadata.is_dir() && !crate::disk::linked(&metadata));
     snapshot.roots.iter().any(|scope| {
-        in_root(path, scope) && paths::eligible_beneath(path, scope, &snapshot.excluded)
+        in_root(path, scope)
+            && paths::eligible_beneath(path, scope, &snapshot.excluded)
+            && !rules.ignored_beneath(path, scope, directory)
+            && !snapshot
+                .ignored
+                .iter()
+                .any(|skipped| in_root(path, skipped) && !in_root(scope, skipped))
     })
 }
 
@@ -93,6 +107,7 @@ pub(super) fn selected(
 ) -> Result<(Vec<String>, Vec<Issue>), String> {
     let mut names = BTreeSet::new();
     let mut issues = snapshot.partial.clone();
+    let mut rules = paths::Ignore::saved(&snapshot.ignore_rules);
     let exact_undo = snapshot.tool.starts_with("undo ");
     let requests: Vec<String> = requested.map_or_else(
         || {
@@ -155,22 +170,24 @@ pub(super) fn selected(
             issues.push((relative, "Internal recovery storage is excluded".into()));
             continue;
         }
-        let saved = snapshot.entries.contains_key(&relative) || absence_proven(snapshot, &relative);
+        let saved = snapshot.entries.contains_key(&relative)
+            || absence_proven(snapshot, root, &relative, &mut rules);
         if !saved && !relative.is_empty() {
             issues.push((relative, "Not protected by this call".into()));
             continue;
         }
-        let discovery = paths::discover(
+        let discovery = paths::discover_saved(
             root,
             std::slice::from_ref(&relative),
             &snapshot.excluded,
             cancel,
+            &snapshot.ignore_rules,
         )?;
         issues.extend(discovery.partial);
         for path in discovery.paths {
             if let Some(saved) = paths::saved_alias(root, snapshot, &path) {
                 names.insert(saved);
-            } else if absence_proven(snapshot, &path) {
+            } else if absence_proven(snapshot, root, &path, &mut rules) {
                 names.insert(path);
             }
         }

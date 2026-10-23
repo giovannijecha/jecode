@@ -116,8 +116,7 @@ impl App {
             self.warn("The draft is empty. Edit it or discard it in /drafts.");
             return Ok(false);
         }
-        let busy =
-            self.worker.is_some() || self.deletion_job.is_some() || self.checkpoint_job.is_some();
+        let busy = self.busy();
         if busy && let Err(error) = self.state.queue.push(text.clone()) {
             self.warn(&error);
             return Ok(false);

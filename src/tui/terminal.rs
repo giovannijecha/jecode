@@ -51,6 +51,4 @@ pub(super) const LEAVE: &str =
 pub struct Geometry {
     pub width: usize,
     pub height: usize,
-    pub row: usize,
-    pub column: usize,
 }

@@ -6,29 +6,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-pub fn options() -> OpenOptions {
-    #[allow(unused_mut)]
-    let mut options = OpenOptions::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options
-}
-
-pub fn private_directory(path: &Path) -> std::io::Result<()> {
-    if !path.is_dir() {
-        fs::create_dir_all(path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-        }
-    }
-    Ok(())
-}
-
 pub fn unique(prefix: &str) -> String {
     format!(
         "{prefix}-{}-{}-{}",
@@ -91,10 +68,13 @@ pub fn normal_component(part: &str) -> bool {
 /// Replaces a private archive file through a synced temporary file.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
-    private_directory(parent)?;
+    crate::disk::private_directory(parent)?;
     let temporary = parent.join(format!(".{}.tmp", unique("write")));
     let result = (|| {
-        let mut file = options().write(true).create_new(true).open(&temporary)?;
+        let mut file = crate::disk::private_options()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
@@ -266,17 +246,13 @@ impl Drop for PendingLink {
 }
 
 impl PendingFile {
-    /// Replaces the destination after all content, metadata, and file syncing
-    /// have completed. The directory entry is synced on Unix after the rename.
     #[cfg(test)]
     pub fn install(self) -> std::io::Result<()> {
-        let path = self.path.clone();
-        self.install_deferred()?;
-        sync_parent(&path)
+        self.install_deferred()
     }
 
-    /// Installs the staged file; the caller must sync its parent before
-    /// completing the durable operation. Restores batch shared parents.
+    /// Replaces the destination with the synced staged file by an atomic
+    /// rename. Like write and edit, the directory entry itself is not synced.
     pub fn install_deferred(mut self) -> std::io::Result<()> {
         #[cfg(windows)]
         let original_permissions = clear_readonly_file(&self.path)?;
@@ -325,12 +301,7 @@ pub fn stage_reader(
     mut source: impl std::io::Read,
     mode: Mode,
 ) -> std::io::Result<PendingFile> {
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let temporary = parent.join(format!(
-        ".jecode-{}-{}.tmp",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
+    let temporary = crate::disk::temporary_beside(path);
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -345,8 +316,11 @@ pub fn stage_reader(
         std::io::copy(&mut source, &mut file)?;
         #[cfg(unix)]
         mode.apply(&file)?;
+        // A new file starts writable, so only read-only needs applying.
         #[cfg(not(unix))]
-        mode.apply_path(&pending.temporary)?;
+        if mode.0 & Mode::READONLY != 0 {
+            mode.apply_path(&pending.temporary)?;
+        }
         file.sync_all()?;
         drop(file);
     }
@@ -367,8 +341,7 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
         Ok(metadata) => metadata,
     };
     if metadata.is_dir() {
-        fs::remove_dir(path)?;
-        return sync_parent(path);
+        return fs::remove_dir(path);
     }
     #[cfg(windows)]
     let original_permissions = clear_readonly_file_with_metadata(path, &metadata)?;
@@ -380,7 +353,7 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
         result => result,
     };
     match result {
-        Ok(()) => sync_parent(path),
+        Ok(()) => Ok(()),
         #[cfg(windows)]
         Err(error) => Err(restore_permissions_on_error(
             path,
@@ -413,12 +386,7 @@ pub fn stage_link(target: &str, directory: bool, path: &Path) -> std::io::Result
             std::os::windows::fs::symlink_file(target, &pending.temporary)?;
         }
     }
-    sync_parent(&pending.temporary)?;
     Ok(pending)
-}
-
-fn sync_parent(path: &Path) -> std::io::Result<()> {
-    sync_directory(path.parent().unwrap_or(Path::new(".")))
 }
 
 #[cfg(windows)]

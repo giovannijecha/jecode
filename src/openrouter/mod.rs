@@ -86,6 +86,17 @@ impl Api {
         })
     }
 
+    /// A loopback endpoint starts with unbounded limits; OpenRouter limits
+    /// are looked up per model.
+    fn initial_limits(&self) -> Option<Option<Limits>> {
+        self.base_url
+            .starts_with("http://127.0.0.1:")
+            .then_some(Some(Limits {
+                context: usize::MAX,
+                output: None,
+            }))
+    }
+
     pub fn redact(&self, text: &str) -> String {
         self.redactor().text(text)
     }
@@ -131,14 +142,7 @@ impl OpenRouter {
     pub fn with_api(api: Api, model: String) -> Result<Self, String> {
         validate_model(&model)?;
         Ok(Self {
-            limits: if api.base_url.starts_with("http://127.0.0.1:") {
-                Some(Some(Limits {
-                    context: usize::MAX,
-                    output: None,
-                }))
-            } else {
-                None
-            },
+            limits: api.initial_limits(),
             api,
             model,
             effort: Effort::Default,
@@ -197,14 +201,7 @@ impl OpenRouter {
                 routing => routing.clone(),
             });
             self.router.session = session;
-            self.limits = if self.api.base_url.starts_with("http://127.0.0.1:") {
-                Some(Some(Limits {
-                    context: usize::MAX,
-                    output: None,
-                }))
-            } else {
-                None
-            };
+            self.limits = self.api.initial_limits();
         }
         self.model = model;
         Ok(())

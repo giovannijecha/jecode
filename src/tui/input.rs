@@ -6,10 +6,9 @@ impl App {
             // Terminals deliver a file drop as a paste of its paths.
             // The process panel keeps typed and pasted text out of the hidden
             // draft.
-            Decoded::Text(_) if self.state.processes.is_some() => {
+            Decoded::Text(_) | Decoded::Paste(_) if self.state.processes.is_some() => {
                 return Ok(false);
             }
-            Decoded::Paste(_) if self.state.processes.is_some() => return Ok(false),
             Decoded::Paste(text) => {
                 if self.state.selector.is_none()
                     && self.deletion_job.is_none()

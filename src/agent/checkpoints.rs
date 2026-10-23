@@ -57,7 +57,7 @@ impl Agent {
 
     /// Keep project instructions fresh after this conversation restores
     /// JECODE.md. Recovery has no cross-session event feed.
-    pub(super) fn deliver_checkpoint_notices(&mut self) {
+    pub(super) fn reload_restored_instructions(&mut self) {
         if self
             .tools
             .checkpoints()

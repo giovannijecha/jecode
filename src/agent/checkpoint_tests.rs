@@ -17,7 +17,7 @@ fn recovery_instructions_describe_per_call_scope_without_history_events() {
     assert!(instructions.contains("inspect"));
     assert!(!instructions.contains("recovery group"));
     assert!(agent.events.lock().unwrap().is_empty());
-    agent.deliver_checkpoint_notices();
+    agent.reload_restored_instructions();
     assert!(agent.events.lock().unwrap().is_empty());
 }
 
@@ -35,7 +35,7 @@ fn restoring_jecode_instructions_requests_a_single_reload() {
     agent.refresh_project_instructions().unwrap();
     fs::write(&file, "Use spaces.\n").unwrap();
     agent.tools.checkpoints().unwrap().restored_instructions();
-    agent.deliver_checkpoint_notices();
+    agent.reload_restored_instructions();
     assert!(agent.project_instructions.contains("Use spaces."));
     assert!(agent.events.lock().unwrap().is_empty());
     assert!(

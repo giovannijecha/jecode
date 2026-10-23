@@ -121,10 +121,7 @@ impl super::Api {
         // Redact before clipping: otherwise a clipped key could retain a secret prefix.
         failure.message = self.redact(&failure.message);
         if failure.message.len() > 8192 {
-            let mut end = 8192;
-            while !failure.message.is_char_boundary(end) {
-                end -= 1;
-            }
+            let end = failure.message.floor_char_boundary(8192);
             failure.message.truncate(end);
             failure.message.push_str(" [provider diagnostic truncated]");
         }

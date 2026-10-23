@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 pub struct Presentation {
     pub started: Option<Instant>,
     pub elapsed: Option<Duration>,
-    pub expanded: Option<bool>,
+    pub expanded: bool,
     /// Shown while the call runs, such as the checkpoint before a command.
     pub note: Option<String>,
 }

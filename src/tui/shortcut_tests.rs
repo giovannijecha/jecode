@@ -107,7 +107,7 @@ fn control_o_toggles_completed_tool_details_without_editing_the_draft() {
         let state::Item::Tool { presentation, .. } = app.state.items.last().unwrap() else {
             panic!("tool is present");
         };
-        assert_eq!(presentation.expanded, expanded.then_some(true));
+        assert_eq!(presentation.expanded, expanded);
         assert_eq!(app.state.editor.text, "draft kept");
     }
     assert!(!app.state.tool_details.active);

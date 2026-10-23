@@ -49,7 +49,7 @@ that remained present. Native tmpfs runs passed; standalone save/read probes did
 not isolate the cause. Treat a `/mnt/c` failure as unresolved evidence and retain
 its fixture rather than masking it with retries.
 
-Checkpoint capture has no notification helper or background command scan on any platform. Unix admission uses the system df command; directory publication/installation uses directory fsync. Platform CI runs the ordinary suite and its native terminal fixture for the checked-out revision.
+Checkpoint capture has no notification helper or background command scan on any platform. Unix admission uses the system df command. Platform CI runs the ordinary suite and its native terminal fixture for the checked-out revision.
 
 ## macOS
 

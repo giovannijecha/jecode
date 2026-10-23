@@ -7,10 +7,10 @@ use std::sync::{Mutex, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use super::CREATE_NO_WINDOW;
 use crate::cancel::Cancellation;
 
 const SOURCE: &str = include_str!("../windows.cs");
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const COMPILE_LIMIT: Duration = Duration::from_secs(15);
 static SUPERVISOR: Mutex<State> = Mutex::new(State::Uninitialized);
 
@@ -99,13 +99,7 @@ fn fingerprint(source: &str) -> String {
 }
 
 fn compile(cancellation: &Cancellation) -> Result<PathBuf, CompileError> {
-    if cancellation.requested() {
-        return Err(CompileError::Cancelled);
-    }
-    compile_at(root().map_err(|_| CompileError::Failed)?, cancellation)
-}
-
-fn compile_at(root: PathBuf, cancellation: &Cancellation) -> Result<PathBuf, CompileError> {
+    let root = root().map_err(|_| CompileError::Failed)?;
     build(root, "supervisor-v1", SOURCE, cancellation)
 }
 
@@ -239,7 +233,7 @@ mod tests {
         let cancellation = Cancellation::default();
         cancellation.cancel();
         assert_eq!(
-            compile_at(cache.clone(), &cancellation),
+            build(cache.clone(), "supervisor-v1", SOURCE, &cancellation),
             Err(CompileError::Cancelled)
         );
         assert!(!cache.exists());

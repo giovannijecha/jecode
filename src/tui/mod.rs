@@ -131,6 +131,16 @@ impl App {
             self.state.context = Some(agent.context_status());
         }
     }
+
+    /// A turn, deletion or restore is running; new prompts wait in the queue.
+    fn busy(&self) -> bool {
+        self.worker.is_some() || self.deletion_job.is_some() || self.checkpoint_job.is_some()
+    }
+
+    /// Nothing runs in the background, including other jobs.
+    fn idle(&self) -> bool {
+        !self.busy() && self.job.is_none()
+    }
 }
 
 /// Opens the TUI; a non-empty `draft` starts the composer, as `--attach` does.
@@ -173,7 +183,6 @@ fn run_inner(
     let mut decoder = Decoder::default();
     let mut dirty = true;
     let mut pending = None;
-    let mut initial = app.terminal.as_mut().unwrap().take_initial();
     loop {
         app.terminal.as_mut().unwrap().check()?;
         dirty |= app.poll()?;
@@ -182,9 +191,9 @@ fn run_inner(
         }
         // Consume complete geometry snapshots before painting. Bound this pass
         // so key bursts cannot starve worker events or the display.
-        let events: Vec<_> = initial
-            .drain(..)
-            .chain(pending.take())
+        let events: Vec<_> = pending
+            .take()
+            .into_iter()
             .chain(app.terminal.as_ref().unwrap().input.try_iter().take(64))
             .collect();
         for event in events {

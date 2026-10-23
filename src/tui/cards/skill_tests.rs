@@ -9,7 +9,7 @@ fn draw(path: &str, result: Option<&Value>, expanded: bool) -> Vec<Line> {
             result,
             change: None,
             presentation: &Presentation {
-                expanded: expanded.then_some(true),
+                expanded,
                 ..Presentation::default()
             },
         },
