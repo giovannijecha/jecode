@@ -474,3 +474,6 @@ mod process_tests;
 
 #[path = "layout_tests.rs"]
 mod layout_tests;
+
+#[path = "reader_tests.rs"]
+mod reader_tests;

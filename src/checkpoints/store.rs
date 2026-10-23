@@ -102,7 +102,7 @@ impl Store {
         if !ordinary_file(&path)? {
             return Err("Recovery pack is missing or is not an ordinary file".into());
         }
-        let mut file =
+        let file =
             File::open(&path).map_err(|e| format!("Could not open recovery {reference}: {e}"))?;
         loop {
             if cancel.requested() {
@@ -118,7 +118,8 @@ impl Store {
                 }
             }
         }
-        let snapshot = format::read(&mut file)?;
+        let mut lease = ReadLease { file };
+        let snapshot = format::read(&mut lease.file)?;
         if snapshot.reference != reference
             || snapshot.created != created_from_reference(reference).unwrap()
         {
@@ -130,7 +131,10 @@ impl Store {
         if cancel.requested() {
             return Err("Operation cancelled".into());
         }
-        Ok(Loaded { snapshot, file })
+        Ok(Loaded {
+            snapshot,
+            lease: Arc::new(lease),
+        })
     }
 
     pub fn list(&self, limit: usize, cancel: &Cancellation) -> Result<Vec<Summary>, String> {
@@ -285,9 +289,21 @@ fn check_sweep(cancel: Option<&Cancellation>) -> Result<(), String> {
     }
 }
 
+struct ReadLease {
+    file: File,
+}
+
+impl Drop for ReadLease {
+    fn drop(&mut self) {
+        // A concurrent Unix fork may retain a descriptor until exec. Release
+        // the lock when our last reader ends, including failed loads.
+        let _ = self.file.unlock();
+    }
+}
+
 pub struct Loaded {
     pub snapshot: Snapshot,
-    file: File,
+    lease: Arc<ReadLease>,
 }
 
 impl Loaded {
@@ -295,9 +311,8 @@ impl Loaded {
         let State::File { offset, length, .. } = state else {
             return Err("Recovery state has no file bytes".into());
         };
-        let file = self.file.try_clone().map_err(|e| e.to_string())?;
         Ok(Reader {
-            file,
+            lease: Arc::clone(&self.lease),
             start: *offset,
             length: *length,
             at: 0,
@@ -329,7 +344,7 @@ impl Loaded {
 }
 
 pub struct Reader {
-    file: File,
+    lease: Arc<ReadLease>,
     start: u64,
     length: u64,
     at: u64,
@@ -341,7 +356,7 @@ impl Read for Reader {
         if n == 0 {
             return Ok(0);
         }
-        let read = read_at(&self.file, &mut buffer[..n], self.start + self.at)?;
+        let read = read_at(&self.lease.file, &mut buffer[..n], self.start + self.at)?;
         if read == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,

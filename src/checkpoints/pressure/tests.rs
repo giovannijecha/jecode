@@ -2,6 +2,7 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static LOW_SPACE_PROBES: AtomicUsize = AtomicUsize::new(0);
+static PATH_PROBES: AtomicUsize = AtomicUsize::new(0);
 
 fn counted_low_space(_: &Path, _: Option<&Cancellation>) -> Result<u64, String> {
     LOW_SPACE_PROBES.fetch_add(1, Ordering::SeqCst);
@@ -10,6 +11,15 @@ fn counted_low_space(_: &Path, _: Option<&Cancellation>) -> Result<u64, String> 
 
 fn free_1k(_: &Path, _: Option<&Cancellation>) -> Result<u64, String> {
     Ok(1024)
+}
+
+fn fail_first_archive(path: &Path, _: Option<&Cancellation>) -> Result<u64, String> {
+    PATH_PROBES.fetch_add(1, Ordering::SeqCst);
+    if path == Path::new("removed-archive") {
+        Err("archive disappeared".into())
+    } else {
+        Ok(1024)
+    }
 }
 
 fn settled(free: u64) -> Arc<Pressure> {
@@ -86,7 +96,7 @@ fn waiting_for_an_initial_sample_observes_cancellation() {
 #[test]
 fn transient_probe_failure_can_recover_after_the_sample_interval() {
     let pressure = settled(0);
-    pressure.set_sample(Err("temporary query failure".into()));
+    pressure.set_sample(Path::new("unused"), Err("temporary query failure".into()));
     assert!(
         pressure
             .claim(Path::new("unused"), 1, 1, None)
@@ -101,6 +111,22 @@ fn transient_probe_failure_can_recover_after_the_sample_interval() {
         *pressure.sample.lock().unwrap(),
         Sample::Ready(Estimate { free: 624, .. })
     ));
+}
+
+#[test]
+fn failed_archive_does_not_throttle_another_archive_on_the_same_volume() {
+    PATH_PROBES.store(0, Ordering::SeqCst);
+    let first = Path::new("removed-archive");
+    let second = Path::new("live-archive");
+    let pressure = Pressure::for_test(first, fail_first_archive);
+
+    assert!(pressure.claim(first, 1, 1, None).is_err());
+    assert_eq!(PATH_PROBES.load(Ordering::SeqCst), 1);
+    assert!(pressure.claim(first, 1, 1, None).is_err());
+    assert_eq!(PATH_PROBES.load(Ordering::SeqCst), 1);
+
+    pressure.claim(second, 1, 1, None).unwrap();
+    assert_eq!(PATH_PROBES.load(Ordering::SeqCst), 2);
 }
 
 #[cfg(windows)]

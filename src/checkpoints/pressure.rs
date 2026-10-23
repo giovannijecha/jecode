@@ -27,7 +27,11 @@ enum Volume {
 enum Sample {
     Pending,
     Ready(Estimate),
-    Failed { error: String, since: Instant },
+    Failed {
+        error: String,
+        since: Instant,
+        path: PathBuf,
+    },
 }
 
 struct Estimate {
@@ -80,18 +84,21 @@ impl Pressure {
             .name("jecode-checkpoint-space".into())
             .spawn(move || worker.finish_probe())
         {
-            pressure.set_sample(Err(format!(
-                "Could not start checkpoint disk-space probe: {error}"
-            )));
+            pressure.set_sample(
+                &pressure.path,
+                Err(format!(
+                    "Could not start checkpoint disk-space probe: {error}"
+                )),
+            );
         }
         pressure
     }
 
     fn finish_probe(&self) {
-        self.set_sample((self.probe)(&self.path, None));
+        self.set_sample(&self.path, (self.probe)(&self.path, None));
     }
 
-    fn set_sample(&self, result: Result<u64, String>) {
+    fn set_sample(&self, path: &Path, result: Result<u64, String>) {
         let mut sample = self
             .sample
             .lock()
@@ -107,6 +114,7 @@ impl Pressure {
             Err(error) => Sample::Failed {
                 error,
                 since: Instant::now(),
+                path: path.to_path_buf(),
             },
         };
         self.changed.notify_all();
@@ -141,15 +149,19 @@ impl Pressure {
                             .unwrap_or_else(|error| error.into_inner()),
                     );
                 }
-                Sample::Failed { error, since } => {
-                    if since.elapsed() < MAX_SAMPLE_AGE {
+                Sample::Failed {
+                    error,
+                    since,
+                    path: failed_path,
+                } => {
+                    if failed_path.as_path() == path && since.elapsed() < MAX_SAMPLE_AGE {
                         return Err(format!("Could not check checkpoint disk space: {error}"));
                     }
                     // A temporary OS query failure must not disable every
                     // archive sharing this estimate until the process exits.
                     *sample = Sample::Pending;
                     drop(sample);
-                    self.set_sample((self.probe)(path, cancellation));
+                    self.set_sample(path, (self.probe)(path, cancellation));
                     refreshed = true;
                 }
                 Sample::Ready(estimate) => {
@@ -187,10 +199,10 @@ impl Pressure {
                     drop(sample);
                     let result = (self.probe)(path, cancellation);
                     if cancellation.is_some_and(Cancellation::requested) {
-                        self.set_sample(Ok(prior));
+                        self.set_sample(path, Ok(prior));
                         return Err("Operation cancelled".into());
                     }
-                    self.set_sample(result);
+                    self.set_sample(path, result);
                     refreshed = true;
                 }
             }
@@ -199,6 +211,7 @@ impl Pressure {
 
     fn refresh_in_background(self: &Arc<Self>, path: PathBuf) {
         let pressure = Arc::clone(self);
+        let fallback_path = path.clone();
         if let Err(error) = thread::Builder::new()
             .name("jecode-checkpoint-space-refresh".into())
             .spawn(move || {
@@ -224,14 +237,18 @@ impl Pressure {
                     Err(error) => Sample::Failed {
                         error,
                         since: Instant::now(),
+                        path,
                     },
                 };
                 pressure.changed.notify_all();
             })
         {
-            self.set_sample(Err(format!(
-                "Could not start checkpoint disk-space probe: {error}"
-            )));
+            self.set_sample(
+                &fallback_path,
+                Err(format!(
+                    "Could not start checkpoint disk-space probe: {error}"
+                )),
+            );
         }
     }
 }
