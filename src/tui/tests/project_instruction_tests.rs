@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn tui_submission_keeps_a_failed_draft_and_loads_rules_when_retried() {
     let directory = Directory::new();
-    let path = directory.path().join("JECODE.md");
+    let path = directory.path().join("AGENTS.md");
     fs::write(&path, [0xff, 0xfe]).unwrap();
     let fixture = HttpFixture::new(vec![(200, completion("Ready", vec![]))]);
     let mut app = app(&directory, &fixture);

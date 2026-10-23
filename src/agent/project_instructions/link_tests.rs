@@ -37,7 +37,7 @@ fn directory_symlinks_are_not_traversed_even_when_they_point_inside_root() {
     let outside = Directory::new();
     let root = fs::canonicalize(directory.path()).unwrap();
     fs::create_dir(root.join("real")).unwrap();
-    fs::write(root.join("real/JECODE.md"), "Real directory rules").unwrap();
+    fs::write(root.join("real/AGENTS.md"), "Real directory rules").unwrap();
     fs::write(outside.path().join(FILE_NAME), "Outside rules").unwrap();
     symlink(root.join("real"), root.join("linked-inside")).unwrap();
     symlink(outside.path(), root.join("linked-outside")).unwrap();
@@ -54,7 +54,7 @@ fn junctions_are_not_traversed_even_when_they_point_inside_root() {
     let outside = Directory::new();
     let root = fs::canonicalize(directory.path()).unwrap();
     fs::create_dir(root.join("real")).unwrap();
-    fs::write(root.join("real/JECODE.md"), "Real directory rules").unwrap();
+    fs::write(root.join("real/AGENTS.md"), "Real directory rules").unwrap();
     fs::write(outside.path().join(FILE_NAME), "Outside rules").unwrap();
     for (name, target) in [
         ("linked-inside", root.join("real")),

@@ -27,20 +27,24 @@ fn only_files_inside_launch_root_are_loaded_and_utf8_bom_is_accepted() {
     fs::create_dir_all(project.join("src")).unwrap();
     fs::write(directory.path().join(FILE_NAME), "Parent rules").unwrap();
     fs::write(project.join("src").join(FILE_NAME), "Child rules").unwrap();
-    fs::write(project.join("src").join("AGENTS.md"), "Ignored agent rules").unwrap();
+    fs::write(
+        project.join("src").join("JECODE.md"),
+        "Ignored legacy rules",
+    )
+    .unwrap();
     for name in ["RULES.md", "INSTRUCTIONS.md"] {
         fs::write(project.join(name), "Other project rules").unwrap();
     }
     let root = fs::canonicalize(project).unwrap();
     let loaded = load(&root).unwrap();
-    assert!(loaded.contains("Source: src/JECODE.md\nDirectory scope: src and its descendants"));
+    assert!(loaded.contains("Source: src/AGENTS.md\nDirectory scope: src and its descendants"));
     assert!(loaded.contains("Child rules"));
     assert!(!loaded.contains("Parent rules"));
-    assert!(!loaded.contains("Ignored agent rules"));
+    assert!(!loaded.contains("Ignored legacy rules"));
     let path = root.join(FILE_NAME);
     fs::write(&path, "\u{feff}# Project\r\nKeep café names.\r\n").unwrap();
     let loaded = load(&root).unwrap();
-    assert!(loaded.starts_with("Source: JECODE.md\nDirectory scope: the entire project tree\n\n# Project\r\nKeep café names.\r\n"));
+    assert!(loaded.starts_with("Source: AGENTS.md\nDirectory scope: the entire project tree\n\n# Project\r\nKeep café names.\r\n"));
     assert!(loaded.contains("Child rules"));
     for empty in ["", "\u{feff} \r\n\t"] {
         fs::write(&path, empty).unwrap();
@@ -58,30 +62,48 @@ fn nested_sections_are_parent_first_and_keep_literal_references() {
         fs::create_dir_all(root.join(path)).unwrap();
     }
     fs::write(root.join(FILE_NAME), "Root @missing.md").unwrap();
-    fs::write(root.join("a/JECODE.md"), "A instructions").unwrap();
-    fs::write(root.join("a/deep/JECODE.md"), "Deep instructions").unwrap();
-    fs::write(root.join("z/JECODE.md"), "Z instructions").unwrap();
+    fs::write(root.join("a/AGENTS.md"), "A instructions").unwrap();
+    fs::write(root.join("a/deep/AGENTS.md"), "Deep instructions").unwrap();
+    fs::write(root.join("z/AGENTS.md"), "Z instructions").unwrap();
     fs::write(
-        root.join("target/JECODE.md"),
+        root.join("target/AGENTS.md"),
         "Ignored by Git, still loaded",
     )
     .unwrap();
-    fs::write(root.join(".git/hooks/JECODE.md"), "Git metadata rules").unwrap();
-    fs::write(root.join("AGENTS.md"), "AGENTS rules").unwrap();
+    fs::write(root.join(".git/hooks/AGENTS.md"), "Git metadata rules").unwrap();
+    fs::write(root.join("JECODE.md"), "Legacy rules").unwrap();
     let loaded = load(&root).unwrap();
     let positions = [
-        "Source: JECODE.md",
-        "Source: a/JECODE.md",
-        "Source: a/deep/JECODE.md",
-        "Source: target/JECODE.md",
-        "Source: z/JECODE.md",
+        "Source: AGENTS.md",
+        "Source: a/AGENTS.md",
+        "Source: a/deep/AGENTS.md",
+        "Source: target/AGENTS.md",
+        "Source: z/AGENTS.md",
     ]
     .map(|source| loaded.find(source).unwrap());
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(loaded.contains("Root @missing.md"));
     assert!(loaded.contains("Ignored by Git, still loaded"));
     assert!(!loaded.contains("Git metadata rules"));
-    assert!(!loaded.contains("AGENTS rules"));
+    assert!(!loaded.contains("Legacy rules"));
+}
+
+#[test]
+fn legacy_instruction_files_are_ignored_without_a_fallback() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("JECODE.md"), [0xff, 0xfe]).unwrap();
+    fs::write(root.join("src/JECODE.md"), "Legacy child rules").unwrap();
+    assert!(load(&root).unwrap().is_empty());
+
+    fs::write(root.join(FILE_NAME), " \n").unwrap();
+    assert!(load(&root).unwrap().is_empty());
+
+    fs::write(root.join(FILE_NAME), "Current project rules").unwrap();
+    let loaded = load(&root).unwrap();
+    assert!(loaded.contains("Current project rules"));
+    assert!(!loaded.contains("Legacy child rules"));
 }
 
 #[test]
@@ -187,7 +209,7 @@ fn each_turn_keeps_one_snapshot_and_the_next_turn_reloads_creation_edits_and_del
     assert!(!system(&requests[0]).contains("Project instructions from"));
     for request in &requests[1..3] {
         assert!(system(request).contains("Original project rules"));
-        assert!(system(request).contains("Source: src/JECODE.md"));
+        assert!(system(request).contains("Source: src/AGENTS.md"));
         assert!(system(request).contains("Directory scope: src and its descendants"));
         assert!(!system(request).contains("Revised project rules"));
         assert_eq!(
@@ -369,7 +391,7 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     for request in [&requests[0], &requests[3]] {
         assert!(system(request).contains("Compaction project rules"));
         assert!(!system(request).contains("Changed during compaction"));
-        assert!(system(request).contains("Source: src/JECODE.md"));
+        assert!(system(request).contains("Source: src/AGENTS.md"));
         assert!(system(request).contains(&temporary));
         assert!(system(request).contains("useful durable tests"));
         assert!(system(request).contains("one-off verification"));

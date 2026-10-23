@@ -356,7 +356,7 @@ fn plain_quit_alias_is_local_and_accepts_mixed_case() {
 #[test]
 fn init_runs_a_model_tool_turn_for_root_project_instructions() {
     let directory = Directory::new();
-    let path = directory.path().join("JECODE.md");
+    let path = directory.path().join("AGENTS.md");
     std::fs::write(&path, "# Existing\n\nKeep this verified rule.\n").unwrap();
     let fixture = HttpFixture::new(vec![
         (
@@ -367,7 +367,7 @@ fn init_runs_a_model_tool_turn_for_root_project_instructions() {
                     "update-instructions",
                     "write",
                     Value::object([
-                        ("path", Value::string("JECODE.md")),
+                        ("path", Value::string("AGENTS.md")),
                         (
                             "content",
                             Value::string(
@@ -378,7 +378,7 @@ fn init_runs_a_model_tool_turn_for_root_project_instructions() {
                 )],
             ),
         ),
-        (200, response("Updated root JECODE.md.")),
+        (200, response("Updated root AGENTS.md.")),
     ]);
     let mut agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
@@ -407,7 +407,7 @@ fn init_runs_a_model_tool_turn_for_root_project_instructions() {
     assert!(
         String::from_utf8(output)
             .unwrap()
-            .contains("Updated root JECODE.md.")
+            .contains("Updated root AGENTS.md.")
     );
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
@@ -425,5 +425,5 @@ fn init_runs_a_model_tool_turn_for_root_project_instructions() {
         .as_str()
         .unwrap();
     assert!(request.starts_with("/init\n\n"));
-    assert!(request.contains("update only the root JECODE.md"));
+    assert!(request.contains("update only the root AGENTS.md"));
 }

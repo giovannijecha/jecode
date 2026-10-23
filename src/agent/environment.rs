@@ -39,7 +39,7 @@ impl Agent {
         {
             let native = fields.get("content").and_then(Value::as_str).unwrap_or("");
             let content = format!(
-                "{native}\n\nProject instructions from JECODE.md:\nEach source below applies only to its stated directory scope. More specific directory instructions take precedence on conflicts. Explicit user requests take precedence over project instructions; Jecode's tool contracts still apply.\n\n{}",
+                "{native}\n\nProject instructions from AGENTS.md:\nEach source below applies only to its stated directory scope. More specific directory instructions take precedence on conflicts. Explicit user requests take precedence over project instructions; Jecode's tool contracts still apply.\n\n{}",
                 self.redact(&self.project_instructions)
             );
             fields.insert("content".into(), Value::string(content));

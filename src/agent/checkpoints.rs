@@ -56,7 +56,7 @@ impl Agent {
     }
 
     /// Keep project instructions fresh after this conversation restores
-    /// JECODE.md. Recovery has no cross-session event feed.
+    /// AGENTS.md. Recovery has no cross-session event feed.
     pub(super) fn reload_restored_instructions(&mut self) {
         if self
             .tools

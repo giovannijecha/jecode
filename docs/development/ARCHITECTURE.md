@@ -29,7 +29,7 @@ Paths are relative to `src/`.
 
 1. `bootstrap.rs` resolves configuration, working directory and execution mode.
    Interactive stdin/stdout selects the TUI; prompts, pipes and `--plain` use the CLI.
-2. The agent snapshots `JECODE.md` files in the launch directory and its real
+2. The agent snapshots `AGENTS.md` files in the launch directory and its real
    subdirectories before recording the request. Each file carries its directory
    scope; the combined snapshot applies throughout the turn, including after
    compaction. Parent directories are never searched.

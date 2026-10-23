@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 
-const FILE_NAME: &str = "JECODE.md";
+const FILE_NAME: &str = "AGENTS.md";
 const BYTE_LIMIT: usize = 64 * 1024;
 
 impl Agent {
@@ -43,7 +43,7 @@ fn scan(
         *total += text.len();
         if *total > BYTE_LIMIT {
             return Err(format!(
-                "JECODE.md instructions exceed the combined 64 KiB source-text limit (at {})",
+                "{FILE_NAME} instructions exceed the combined 64 KiB source-text limit (at {})",
                 file.display()
             ));
         }
@@ -82,7 +82,10 @@ fn scan(
                 directory.display()
             )
         })?;
-        if entry.file_name() == ".git" {
+        if matches!(
+            entry.file_name().to_str(),
+            Some(".git" | "node_modules" | ".venv" | "vendor")
+        ) {
             continue;
         }
         let file_type = entry
@@ -155,3 +158,6 @@ mod tests;
 
 #[cfg(test)]
 mod link_tests;
+
+#[cfg(test)]
+mod dependency_tests;
