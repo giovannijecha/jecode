@@ -68,7 +68,10 @@ fn calibrated_projection_uses_a_margin_and_resets_on_model_change() {
     let mut context = Context::default();
     assert_eq!(context.estimate_bytes(12000), 12000);
     context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(1000))])),
+        Some(&Usage {
+            input_tokens: Some(1000),
+            ..Usage::default()
+        }),
         2,
     );
     context.calibrate(6000);
@@ -79,7 +82,10 @@ fn calibrated_projection_uses_a_margin_and_resets_on_model_change() {
     context.reset_usage();
     assert_eq!(context.estimate_bytes(12000), 12000);
     context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(4000))])),
+        Some(&Usage {
+            input_tokens: Some(4000),
+            ..Usage::default()
+        }),
         2,
     );
     context.calibrate(6000);
@@ -112,7 +118,10 @@ fn measured_history_uses_calibrated_growth_and_falls_back_without_density() {
     let mut messages = vec![message("system", "Agent"), message("user", "Inspect")];
     let mut context = Context::default();
     context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(1000))])),
+        Some(&Usage {
+            input_tokens: Some(1000),
+            ..Usage::default()
+        }),
         2,
     );
     context.calibrate(6000);
@@ -131,13 +140,64 @@ fn measured_history_uses_calibrated_growth_and_falls_back_without_density() {
 }
 
 #[test]
+fn opaque_native_fields_do_not_consume_portable_context_budget() {
+    let mut assistant = message("assistant", "Short answer");
+    if let Value::Object(fields) = &mut assistant {
+        fields.insert(
+            "encrypted_reasoning".into(),
+            Value::string("x".repeat(100_000)),
+        );
+    }
+    crate::conversation::stamp(
+        &mut assistant,
+        &crate::conversation::Origin::new("openrouter", "original-model"),
+    );
+    assert_eq!(
+        bytes(&[assistant.clone()]),
+        portable(&assistant).encode().len()
+    );
+    assert!(assistant.encode().len() > bytes(&[assistant]) + 100_000);
+}
+
+#[test]
+fn model_switch_keeps_stamped_history_for_return_to_original_model() {
+    let mut original = message("assistant", "First model answer");
+    if let Value::Object(fields) = &mut original {
+        fields.insert("reasoning_details".into(), Value::string("opaque"));
+    }
+    crate::conversation::stamp(
+        &mut original,
+        &crate::conversation::Origin::new("openrouter", "model-a"),
+    );
+    let legacy = Value::object([
+        ("role", Value::string("assistant")),
+        ("content", Value::string("Legacy answer")),
+        ("reasoning_details", Value::string("legacy opaque")),
+    ]);
+    let context = Context::default();
+    assert_eq!(context.project_message(&original, 1, 3), original);
+    let projected_legacy = context.project_message(&legacy, 2, 3);
+    assert!(projected_legacy.get("reasoning_details").is_none());
+    assert_eq!(projected_legacy.get("content"), legacy.get("content"));
+}
+
+#[test]
 fn missing_or_invalid_usage_cannot_recalibrate_a_larger_request_with_old_tokens() {
-    let missing = Value::object([("completion_tokens", Value::number(20))]);
-    let zero = Value::object([("prompt_tokens", Value::number(0))]);
+    let missing = Usage {
+        output_tokens: Some(20),
+        ..Usage::default()
+    };
+    let zero = Usage {
+        input_tokens: Some(0),
+        ..Usage::default()
+    };
     for usage in [None, Some(&missing), Some(&zero)] {
         let mut context = Context::default();
         context.observe(
-            Some(&Value::object([("prompt_tokens", Value::number(1000))])),
+            Some(&Usage {
+                input_tokens: Some(1000),
+                ..Usage::default()
+            }),
             2,
         );
         context.calibrate(6000);

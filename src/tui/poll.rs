@@ -60,8 +60,6 @@ impl App {
                         },
                         if cancelled {
                             "Interrupted · pending drafts paused · Alt+↑ to review".into()
-                        } else if error.contains("HTTP 401") {
-                            "Account disconnected · /settings to update the OpenRouter key".into()
                         } else {
                             format!(
                                 "{} · pending drafts paused · Alt+↑ to review",

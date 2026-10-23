@@ -64,7 +64,10 @@ impl Store {
     }
 
     pub fn save(&self, settings: &Settings) -> Result<(), String> {
-        super::validate_key(&settings.api_key)?;
+        super::validate_backend_id(&settings.backend_id)?;
+        if settings.backend_id == "openrouter" {
+            super::validate_key(&settings.api_key)?;
+        }
         super::validate_model(&settings.model)?;
         crate::context::auto_compact_percent(settings.auto_compact.into())?;
         let existing = self.document()?;
@@ -76,24 +79,85 @@ impl Store {
         let Value::Object(root) = &mut document else {
             unreachable!()
         };
-        let provider = root
-            .entry("openrouter".into())
+        let selection = root
+            .entry("selection".into())
             .or_insert_with(|| Value::object([]));
-        let Value::Object(provider) = provider else {
-            return Err(self.invalid("openrouter must be an object"));
+        let Value::Object(selection) = selection else {
+            return Err(self.invalid("selection must be an object"));
         };
-        provider.insert("api_key".into(), Value::string(&settings.api_key));
-        provider.insert("model".into(), Value::string(&settings.model));
-        provider.insert("effort".into(), Value::string(settings.effort.name()));
+        selection.insert("backend".into(), Value::string(&settings.backend_id));
+        selection.insert("model".into(), Value::string(&settings.model));
+        selection.insert("effort".into(), Value::string(settings.effort.name()));
+        let backends = root
+            .entry("backends".into())
+            .or_insert_with(|| Value::object([]));
+        let Value::Object(backends) = backends else {
+            return Err(self.invalid("backends must be an object"));
+        };
+        for (id, key) in settings
+            .credentials
+            .iter()
+            .chain(std::iter::once((&settings.backend_id, &settings.api_key)))
+        {
+            if key.is_empty() {
+                continue;
+            }
+            super::validate_backend_id(id)?;
+            let provider = backends
+                .entry(id.clone())
+                .or_insert_with(|| Value::object([]));
+            let Value::Object(provider) = provider else {
+                return Err(self.invalid(&format!("backends.{id} must be an object")));
+            };
+            provider.insert("api_key".into(), Value::string(key));
+        }
         if !settings.routing.is_empty() {
+            let provider = backends
+                .entry(settings.backend_id.clone())
+                .or_insert_with(|| Value::object([]));
+            let Value::Object(provider) = provider else {
+                return Err(self.invalid(&format!(
+                    "backends.{} must be an object",
+                    settings.backend_id
+                )));
+            };
             let routing = provider
                 .entry("routing".into())
                 .or_insert_with(|| Value::object([]));
             let Value::Object(routing) = routing else {
-                return Err(self.invalid("openrouter.routing must be an object"));
+                return Err(self.invalid(&format!(
+                    "backends.{}.routing must be an object",
+                    settings.backend_id
+                )));
             };
             for (model, preference) in &settings.routing {
                 routing.insert(model.clone(), preference.value());
+            }
+        }
+        // Maintain the original OpenRouter object for installed versions and
+        // preserve every unrelated field when changing the selected backend.
+        if settings.backend_id == "openrouter" || root.contains_key("openrouter") {
+            let provider = root
+                .entry("openrouter".into())
+                .or_insert_with(|| Value::object([]));
+            let Value::Object(provider) = provider else {
+                return Err(self.invalid("openrouter must be an object"));
+            };
+            if settings.backend_id == "openrouter" {
+                provider.insert("api_key".into(), Value::string(&settings.api_key));
+                provider.insert("model".into(), Value::string(&settings.model));
+                provider.insert("effort".into(), Value::string(settings.effort.name()));
+            }
+            if settings.backend_id == "openrouter" && !settings.routing.is_empty() {
+                let routing = provider
+                    .entry("routing".into())
+                    .or_insert_with(|| Value::object([]));
+                let Value::Object(routing) = routing else {
+                    return Err(self.invalid("openrouter.routing must be an object"));
+                };
+                for (model, preference) in &settings.routing {
+                    routing.insert(model.clone(), preference.value());
+                }
             }
         }
         // Kept beside, not inside, the credentials and model object.

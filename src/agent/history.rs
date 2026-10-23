@@ -1,8 +1,8 @@
 use super::Agent;
 use crate::{
+    backend::ToolCall,
     context,
     json::{self, Value},
-    openrouter::ToolCall,
 };
 
 impl Agent {
@@ -67,7 +67,7 @@ impl Agent {
                 .map(|(index, message)| {
                     format!(
                         "history:{index} — user request:\n{}\n",
-                        crate::attachments::provider::user_text(message)
+                        crate::attachments::user_text(message)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -85,14 +85,12 @@ impl Agent {
                 .ok_or("History message does not exist in this session")?;
             source = Some(context::source::record(&messages, index));
             if message.get("role").and_then(Value::as_str) == Some("user") {
-                crate::attachments::provider::user_text(message)
+                crate::attachments::user_text(message)
             } else if message.get("role").and_then(Value::as_str) == Some("tool") {
                 let content = message.get("content").and_then(Value::as_str).unwrap_or("");
                 json::parse(content).map_or_else(|_| content.to_owned(), |value| value.pretty())
             } else {
-                let mut portable = context::portable(message);
-                crate::attachments::annotations::history(&mut portable);
-                portable.pretty()
+                crate::conversation::history(message).pretty()
             }
         };
         drop(messages);

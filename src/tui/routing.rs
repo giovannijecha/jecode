@@ -3,8 +3,7 @@ use super::{
     jobs::{Job, RoutingPurpose},
     selector::{Purpose, Selector},
 };
-use crate::openrouter::{Endpoints, routing};
-use std::time::Instant;
+use crate::backend::Endpoints;
 
 /// How to read the endpoint rows.
 pub(super) const LEGEND: &str =
@@ -22,21 +21,36 @@ impl App {
             agent.model().to_owned()
         };
         let purpose = RoutingPurpose { defaults, model };
-        let fresh = agent
-            .router()
-            .endpoints(&purpose.model)
-            .filter(|endpoints| endpoints.fresh(Instant::now()))
-            .cloned();
-        match fresh {
-            Some(endpoints) => self.show_routing(purpose, Ok(endpoints)),
-            None => {
-                let mut menu = Selector::loading();
-                menu.title = "Loading endpoints…".into();
-                self.state.selector = Some(menu);
-                self.state.clear_notice();
-                self.job = Some(Job::endpoints(agent.api(), purpose));
-            }
+        if (!defaults || agent.backend_id() == self.config.settings.backend_id)
+            && let Some(endpoints) = agent.cached_endpoints(&purpose.model)
+        {
+            return self.show_routing(purpose, Ok(Some(endpoints)));
         }
+        let services = if defaults {
+            let id = &self.config.settings.backend_id;
+            if id == agent.backend_id() {
+                agent.services()
+            } else {
+                let Some(key) = self.config.settings.credential_for(id) else {
+                    return self.finish_setting(
+                        Kind::Error,
+                        &format!("{id} has no saved credentials"),
+                        vec![],
+                    );
+                };
+                match crate::backend::Services::for_backend(id, key.into()) {
+                    Ok(services) => services,
+                    Err(error) => return self.finish_setting(Kind::Error, &error, vec![]),
+                }
+            }
+        } else {
+            agent.services()
+        };
+        let mut menu = Selector::loading();
+        menu.title = "Loading endpoints…".into();
+        self.state.selector = Some(menu);
+        self.state.clear_notice();
+        self.job = Some(Job::endpoints(services, purpose));
     }
 
     /// Shows the choices once a listing arrives or fails. Without a listing,
@@ -44,7 +58,7 @@ impl App {
     pub(super) fn show_routing(
         &mut self,
         purpose: RoutingPurpose,
-        result: Result<Endpoints, String>,
+        result: Result<Option<Endpoints>, String>,
     ) {
         let RoutingPurpose { defaults, model } = purpose;
         let agent = self.agent.as_mut().unwrap();
@@ -68,11 +82,20 @@ impl App {
         };
         let mut notes = Vec::new();
         let endpoints = match result {
-            Ok(endpoints) => {
+            Ok(Some(endpoints)) => {
                 // Ignored unless the conversation uses this model.
-                agent.offer_endpoints(endpoints.clone());
+                if !defaults || agent.backend_id() == self.config.settings.backend_id {
+                    agent.offer_endpoints(endpoints.clone());
+                }
                 notes.push(LEGEND.to_owned());
                 Some(endpoints)
+            }
+            Ok(None) => {
+                return self.finish_setting(
+                    Kind::Error,
+                    "Endpoint routing is unavailable for this backend",
+                    vec![],
+                );
             }
             Err(error) => {
                 notes.push(format!("Endpoint listing unavailable · {error}"));
@@ -87,7 +110,34 @@ impl App {
             .map(|note| self.archive.redactor.text(note))
             .collect();
         self.state.clear_progress();
-        let entries = routing::entries(endpoints.as_ref(), &current, reasoning);
+        let services = if defaults {
+            let id = &self.config.settings.backend_id;
+            if id == agent.backend_id() {
+                agent.services()
+            } else {
+                let Some(key) = self.config.settings.credential_for(id) else {
+                    return self.finish_setting(
+                        Kind::Error,
+                        &format!("{id} has no saved credentials"),
+                        vec![],
+                    );
+                };
+                match crate::backend::Services::for_backend(id, key.into()) {
+                    Ok(services) => services,
+                    Err(error) => return self.finish_setting(Kind::Error, &error, vec![]),
+                }
+            }
+        } else {
+            agent.services()
+        };
+        let Some(entries) = services.routing_entries(endpoints.as_ref(), &current, reasoning)
+        else {
+            return self.finish_setting(
+                Kind::Error,
+                "Endpoint routing is unavailable for this backend",
+                vec![],
+            );
+        };
         self.state.selector = Some(Selector::routing(
             &model, defaults, entries, &current, notes,
         ));
@@ -122,7 +172,10 @@ impl App {
                     self.agent
                         .as_mut()
                         .unwrap()
-                        .set_routing_preferences(self.config.settings.routing.clone());
+                        .set_backend_routing_preferences(
+                            &self.config.settings.backend_id,
+                            self.config.settings.routing.clone(),
+                        );
                     self.finish_setting(
                         Kind::Notice,
                         &format!(

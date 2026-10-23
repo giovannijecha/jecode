@@ -1,18 +1,7 @@
 use super::{Completion, api_error, completion::parse_completion};
+use crate::backend::Update;
 use crate::json::{self, Value};
 use std::collections::BTreeMap;
-
-pub enum Update {
-    Reasoning,
-    Text(String),
-    Working,
-    Retry {
-        attempt: usize,
-        delay: std::time::Duration,
-        error: String,
-    },
-    RetryFinished,
-}
 
 #[derive(Default)]
 pub struct Stream {

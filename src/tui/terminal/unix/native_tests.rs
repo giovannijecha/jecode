@@ -92,7 +92,7 @@ fn controls_and_terminal_lifetime() {
     terminal.wait("Commands and controls");
     terminal.send(b"/settings\r");
     let settings = terminal.wait("Settings · saved defaults");
-    terminal.wait_after("5. OpenRouter key", settings);
+    terminal.wait_after("5. API key", settings);
     terminal.send(b"5");
     let key = terminal.wait_after("Enter validate and save", settings);
     terminal.send(b"\x03");

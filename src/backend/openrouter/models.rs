@@ -1,15 +1,7 @@
 use super::{Api, validate_model};
+use crate::backend::Model;
 use crate::effort::Effort;
 use crate::json::Value;
-
-#[derive(Clone)]
-pub struct Model {
-    pub id: String,
-    pub name: String,
-    pub prompt_price: Option<f64>,
-    pub completion_price: Option<f64>,
-    pub efforts: Vec<Effort>,
-}
 
 impl Api {
     pub fn models(&self, query: &str) -> Result<Vec<Model>, String> {

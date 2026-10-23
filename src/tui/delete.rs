@@ -29,10 +29,11 @@ impl App {
             .ok_or("Session deletion requires a ready turn")?;
         let model = self.config.settings.model.clone();
         let effort = self.config.settings.effort;
+        let backend = self.config.settings.backend_id.clone();
         let selected = id.to_string();
         self.deletion_job = Some(Job {
             task: thread::spawn(move || {
-                let result = agent.delete_session(&selected, model, effort);
+                let result = agent.delete_session_selection(&selected, &backend, model, effort);
                 (agent, result)
             }),
             id: id.into(),

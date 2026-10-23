@@ -14,7 +14,10 @@ fn resume_keeps_saved_model_calibration_but_discards_direct_request_measurements
     first.enable_sessions(home.path()).unwrap();
     first.prepare_turn("Continue the same work").unwrap();
     first.context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(1000))])),
+        Some(&crate::backend::Usage {
+            input_tokens: Some(1000),
+            ..Default::default()
+        }),
         2,
     );
     first.context.calibrate(6000);

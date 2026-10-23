@@ -14,6 +14,8 @@ static NEXT_EXPORT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 pub struct Archive {
+    pub backend: String,
+    pub legacy_origin: Option<crate::conversation::Origin>,
     pub model: String,
     pub directory: PathBuf,
     pub messages: Messages,
@@ -35,6 +37,13 @@ impl Archive {
             ("jecode_version", Value::string(env!("CARGO_PKG_VERSION"))),
             ("exported_at_unix_ms", Value::number(timestamp)),
             ("model", Value::string(&self.model)),
+            ("backend", Value::string(&self.backend)),
+            (
+                "legacy_origin",
+                self.legacy_origin
+                    .as_ref()
+                    .map_or(Value::Null, crate::conversation::Origin::value),
+            ),
             ("effort", Value::string(&self.effort)),
             ("events", Value::Array(self.events.lock().unwrap().clone())),
             (

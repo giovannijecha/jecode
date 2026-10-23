@@ -1,8 +1,8 @@
 use crate::agent::Agent;
 use crate::attachments::Prompt;
+use crate::backend;
 use crate::config::{self, Settings, Store};
 use crate::console::Console;
-use crate::openrouter::OpenRouter;
 use crate::session::{self, SessionConfig};
 use crate::{setup, tools::Tools};
 use std::io::{self, IsTerminal, Read, Write};
@@ -107,13 +107,19 @@ fn launch(
         }
     };
     let model = model_override.unwrap_or_else(|| settings.model.clone());
-    let mut client = OpenRouter::new(settings.api_key.clone(), model)?;
+    let key = settings.credential_for(&settings.backend_id).unwrap_or("");
+    let mut client = backend::create(&settings.backend_id, key.into(), model)?;
     if client.model() == settings.model {
         client.set_effort(settings.effort);
     }
-    let mut agent = Agent::new(client, tools);
+    let mut agent = Agent::with_backend(client, tools);
+    for (id, key) in &settings.credentials {
+        if let Ok(services) = backend::Services::for_backend(id, key.clone()) {
+            agent.register_backend(services);
+        }
+    }
     agent.set_auto_compact(settings.auto_compact);
-    agent.set_routing_preferences(settings.routing.clone());
+    agent.set_backend_routing_preferences(&settings.backend_id, settings.routing.clone());
     agent.set_routing(settings.routing_for(agent.model()));
     let config_home = store.path().parent().expect("configuration directory");
     if let Err(error) = std::fs::create_dir_all(config_home.join("skills")) {

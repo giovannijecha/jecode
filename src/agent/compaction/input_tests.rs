@@ -56,7 +56,10 @@ fn input_during_a_tool_preview_joins_the_immediately_following_request() {
         ]),
     ]);
     agent.context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(6000))])),
+        Some(&crate::backend::Usage {
+            input_tokens: Some(6000),
+            ..Default::default()
+        }),
         2,
     );
     agent.context.calibrate(36000);
@@ -126,7 +129,10 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         ),
     ]));
     agent.context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(22000))])),
+        Some(&crate::backend::Usage {
+            input_tokens: Some(22000),
+            ..Default::default()
+        }),
         2,
     );
     assert!(

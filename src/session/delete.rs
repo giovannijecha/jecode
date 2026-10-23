@@ -19,6 +19,7 @@ pub(crate) fn sessions(agent: &Agent) -> Result<(Vec<Summary>, Vec<String>), Str
                 id: document.id.clone(),
                 title: document.title(),
                 updated: document.updated,
+                backend: document.backend,
                 model: document.model,
             },
         );
@@ -60,8 +61,12 @@ pub(super) fn confirm(
     if value.trim() != "delete" {
         return Ok(None);
     }
-    let (report, current) =
-        agent.delete_session(id, config.settings.model.clone(), config.settings.effort)?;
+    let (report, current) = agent.delete_session_selection(
+        id,
+        &config.settings.backend_id,
+        config.settings.model.clone(),
+        config.settings.effort,
+    )?;
     let text = message(&session.title, &report, current);
     agent.record_local_details(&format!("/resume · delete {id}"), &text, "notice", &[]);
     writeln!(output, "{}", agent.redact(&text)).map_err(|e| e.to_string())?;

@@ -1,4 +1,10 @@
-use crate::{json::Value, openrouter::Limits};
+use crate::{
+    attachments::Inputs,
+    backend::{Limits, Usage},
+    json::Value,
+};
+
+pub use crate::conversation::portable;
 
 pub(crate) mod source;
 mod view;
@@ -210,10 +216,9 @@ impl Context {
         self.ceiling = None;
         self.calibration = None;
     }
-    pub fn observe(&mut self, usage: Option<&Value>, end: usize) {
+    pub fn observe(&mut self, usage: Option<&Usage>, end: usize) {
         self.input_tokens = usage
-            .and_then(|usage| usage.get("prompt_tokens"))
-            .and_then(Value::as_usize)
+            .and_then(|usage| usage.input_tokens)
             .filter(|tokens| *tokens > 0);
         self.measured_end = if self.input_tokens.is_some() { end } else { 0 };
         if self.input_tokens.is_none() {
@@ -297,6 +302,7 @@ impl Context {
             view::preview(message, index, self.preview_limit)
         } else if index < compatible_from
             && message.get("role").and_then(Value::as_str) == Some("assistant")
+            && !crate::conversation::has_origin(message)
         {
             portable(message)
         } else {
@@ -323,12 +329,7 @@ impl Context {
             })
             .unwrap_or_default()
     }
-    pub fn estimate(
-        &self,
-        messages: &[Value],
-        compatible_from: usize,
-        inputs: crate::attachments::provider::Inputs,
-    ) -> usize {
+    pub fn estimate(&self, messages: &[Value], compatible_from: usize, inputs: Inputs) -> usize {
         if let Some(tokens) = self.input_tokens
             && self.measured_end >= self.from
             && self.measured_end <= messages.len()
@@ -343,7 +344,7 @@ impl Context {
         )
     }
     /// The effective window: declared capacity lowered by any ceiling learned
-    /// from provider rejections, or that ceiling alone without catalog metadata.
+    /// from backend rejections, or that ceiling alone without catalog metadata.
     pub fn capacity(&self, limits: Option<Limits>) -> Option<usize> {
         match (self.ceiling, limits) {
             (Some(ceiling), Some(limits)) => Some(ceiling.min(limits.context)),
@@ -360,38 +361,16 @@ impl Context {
         )
     }
 }
-pub fn portable(message: &Value) -> Value {
-    match message {
-        Value::Object(fields) => Value::Object(
-            fields
-                .iter()
-                .filter(|(key, _)| {
-                    matches!(
-                        key.as_str(),
-                        "role"
-                            | "content"
-                            | "tool_calls"
-                            | "tool_call_id"
-                            | "attachments"
-                            | "annotations"
-                    )
-                })
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect(),
-        ),
-        _ => message.clone(),
-    }
-}
 pub fn bytes(messages: &[Value]) -> usize {
-    bytes_for(messages, crate::attachments::provider::Inputs::default())
+    bytes_for(messages, Inputs::default())
 }
 
-pub fn bytes_for(messages: &[Value], inputs: crate::attachments::provider::Inputs) -> usize {
+pub fn bytes_for(messages: &[Value], inputs: Inputs) -> usize {
     messages.iter().fold(0usize, |total, message| {
         // Attachments are sent as content parts whose cost the stored text omits.
         total
-            .saturating_add(message.encode().len())
-            .saturating_add(crate::attachments::provider::weight_for(message, inputs))
+            .saturating_add(portable(message).encode().len())
+            .saturating_add(crate::attachments::weight_for(message, inputs))
     })
 }
 

@@ -65,13 +65,21 @@ pub(super) fn load(store: &Store, id: &str, stamp: &Stamp) -> Option<Summary> {
         return None;
     }
     let title = string(&value, "title").ok()?;
+    let backend = value
+        .get("backend")
+        .map(Value::as_str)
+        .unwrap_or(Some("openrouter"))?;
     let model = string(&value, "model").ok()?;
-    if title.chars().count() > 100 || crate::openrouter::validate_model(model).is_err() {
+    if title.chars().count() > 100
+        || crate::backend::validate_model(model).is_err()
+        || crate::backend::validate_id(backend).is_err()
+    {
         return None;
     }
     Some(Summary {
         id: id.into(),
         title: title.into(),
+        backend: backend.into(),
         model: model.into(),
         updated: integer(&value, "updated_at_unix_ms").ok()?,
     })
@@ -90,6 +98,7 @@ pub(super) fn save(store: &Store, document: &Document, observed: &Stamp) -> Resu
             Value::string(document.directory.to_string_lossy()),
         ),
         ("title", Value::string(document.title())),
+        ("backend", Value::string(&document.backend)),
         ("model", Value::string(&document.model)),
         ("updated_at_unix_ms", Value::number(document.updated)),
         ("journal_bytes", Value::number(observed.bytes)),

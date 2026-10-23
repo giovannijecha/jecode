@@ -41,14 +41,15 @@ impl<R: BufRead, W: Write> Prompter for Terminal<'_, R, W> {
         // Bash's native terminal input hides the key; it returns through a private stdout pipe.
         // Interactive stdin stays attached. No credential is included in a command argument.
         let script = "IFS= read -r -s credential || exit 2; printf '\\n' >&2; if (( ${#credential} > 512 )); then exit 3; fi; printf '%s' \"$credential\"";
-        let output = Command::new(self.bash)
+        let mut command = Command::new(self.bash);
+        command
             .args(["--noprofile", "--norc", "-c", script])
-            .env_remove("OPENROUTER_API_KEY")
             .env_remove("BASH_ENV")
             .env_remove("ENV")
             .stdin(Stdio::inherit())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        let output = crate::auth::isolate_environment(&mut command)
             .output()
             .map_err(|error| format!("Could not read the key using Bash: {error}"))?;
         match output.status.code() {

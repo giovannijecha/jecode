@@ -17,11 +17,13 @@ pub(super) struct Mode {
 }
 
 pub(super) fn stty(tty: &File, arguments: &[&str]) -> Result<String, String> {
-    let output = Command::new("stty")
+    let mut command = Command::new("stty");
+    command
         .args(arguments)
         .env("LC_ALL", "C")
         .stdin(Stdio::from(tty.try_clone().map_err(|e| e.to_string())?))
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    let output = crate::auth::isolate_environment(&mut command)
         .output()
         .map_err(|error| format!("Could not run stty: {error}"))?;
     if !output.status.success() {
@@ -35,14 +37,15 @@ pub(super) fn stty(tty: &File, arguments: &[&str]) -> Result<String, String> {
 impl Mode {
     pub(super) fn open(tty: File, bash: &Path) -> Result<Self, String> {
         let saved = stty(&tty, &["-g"])?;
-        let mut child = Command::new(bash)
+        let mut command = Command::new(bash);
+        command
             .args(["--noprofile", "--norc", "-c", include_str!("../unix.sh")])
             .env_remove("BASH_ENV")
             .env_remove("ENV")
-            .env_remove("OPENROUTER_API_KEY")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = crate::auth::isolate_environment(&mut command)
             .spawn()
             .map_err(|error| format!("Could not start Unix terminal input: {error}"))?;
         let control = child.stdin.take();

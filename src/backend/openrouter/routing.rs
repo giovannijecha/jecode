@@ -9,10 +9,12 @@
 
 mod options;
 
-pub use options::{Entry, entries};
+pub use crate::backend::Routing;
+pub use options::entries;
 
 use super::Limits;
 use super::endpoints::{Endpoint, Endpoints};
+use crate::backend::{price, quantity};
 use crate::json::Value;
 use std::time::Instant;
 
@@ -33,51 +35,6 @@ pub mod policy {
     pub const FRESH: Duration = Duration::from_secs(10 * 60);
     /// How long a failed metadata fetch waits before the next attempt.
     pub const RETRY: Duration = Duration::from_secs(60);
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Routing {
-    /// Auto — Best balance.
-    Auto,
-    /// One endpoint tag, without fallbacks.
-    Endpoint(String),
-    /// No routing fields, as conversations saved before routing existed.
-    Default,
-}
-
-impl Routing {
-    /// A saved routing; None for unknown modes, which callers treat by context.
-    pub fn parse(value: &Value) -> Option<Self> {
-        match value.get("mode")?.as_str()? {
-            "auto" => Some(Self::Auto),
-            "default" => Some(Self::Default),
-            "endpoint" => value
-                .get("endpoint")
-                .and_then(Value::as_str)
-                .filter(|tag| valid_tag(tag))
-                .map(|tag| Self::Endpoint(tag.into())),
-            _ => None,
-        }
-    }
-
-    pub fn value(&self) -> Value {
-        match self {
-            Self::Auto => Value::object([("mode", Value::string("auto"))]),
-            Self::Default => Value::object([("mode", Value::string("default"))]),
-            Self::Endpoint(tag) => Value::object([
-                ("mode", Value::string("endpoint")),
-                ("endpoint", Value::string(tag)),
-            ]),
-        }
-    }
-
-    pub fn label(&self) -> String {
-        match self {
-            Self::Auto => "Auto — Best balance".into(),
-            Self::Endpoint(tag) => format!("Endpoint {tag}"),
-            Self::Default => "OpenRouter default".into(),
-        }
-    }
 }
 
 pub fn valid_tag(tag: &str) -> bool {
@@ -170,46 +127,6 @@ pub fn describe(endpoint: &Endpoint, reasoning: bool) -> String {
         parts.push(format!("{} ctx", quantity(context)));
     }
     parts.join(" · ")
-}
-
-/// USD with about three significant digits; `?` when unknown.
-pub(super) fn price(value: Option<f64>) -> String {
-    let Some(value) = value else {
-        return "?".into();
-    };
-    if value == 0.0 {
-        return "$0".into();
-    }
-    let digits = if value >= 100.0 {
-        0
-    } else if value >= 1.0 {
-        2
-    } else {
-        (2 - value.log10().floor() as i32).clamp(2, 6) as usize
-    };
-    let text = format!("{value:.digits$}");
-    let text = if text.contains('.') {
-        text.trim_end_matches('0').trim_end_matches('.')
-    } else {
-        &text
-    };
-    format!("${text}")
-}
-
-pub(super) fn quantity(count: usize) -> String {
-    let (value, unit) = if count >= 1_000_000 {
-        (count as f64 / 1_000_000.0, "M")
-    } else if count >= 1_000 {
-        (count as f64 / 1_000.0, "K")
-    } else {
-        return count.to_string();
-    };
-    let text = if value >= 100.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.1}")
-    };
-    format!("{}{unit}", text.trim_end_matches(".0"))
 }
 
 fn median(values: impl Iterator<Item = f64>) -> f64 {

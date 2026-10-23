@@ -338,8 +338,8 @@ fn sample_free(path: &Path, cancellation: Option<&Cancellation>) -> Result<u64, 
     let mut command = Command::new(executable);
     command
         .arg(path)
-        .env_remove("OPENROUTER_API_KEY")
         .creation_flags(crate::process::CREATE_NO_WINDOW);
+    crate::auth::isolate_environment(&mut command);
     run(command, cancellation)?
         .trim()
         .parse()

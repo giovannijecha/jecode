@@ -1,0 +1,262 @@
+use super::url::Url;
+use crate::cancel::Cancellation;
+use crate::json::Value;
+use crate::scratch::Area;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone)]
+pub(super) struct Options {
+    pub method: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+    pub timeout_seconds: usize,
+    pub max_bytes: Option<usize>,
+}
+
+impl Options {
+    pub fn from(arguments: &Value) -> Result<Self, String> {
+        let method = arguments.get("method").and_then(Value::as_str).unwrap_or(
+            if arguments.get("body").is_some() {
+                "POST"
+            } else {
+                "GET"
+            },
+        );
+        if !is_token(method) {
+            return Err("method must be an HTTP token".into());
+        }
+        let mut headers = Vec::new();
+        if let Some(value) = arguments.get("headers") {
+            let Value::Object(entries) = value else {
+                return Err("headers must be an object of strings".into());
+            };
+            for (name, value) in entries {
+                let Some(value) = value.as_str() else {
+                    return Err("headers must be an object of strings".into());
+                };
+                if !is_token(name) || value.contains(['\r', '\n']) {
+                    return Err("Invalid HTTP header".into());
+                }
+                headers.push((name.clone(), value.to_string()));
+            }
+        }
+        let body = arguments
+            .get("body")
+            .map(|value| value.as_str().ok_or("body must be a string"))
+            .transpose()?
+            .map(str::to_string);
+        let timeout_seconds = positive(arguments, "timeout_seconds", 30)?;
+        let max_bytes = arguments
+            .get("max_bytes")
+            .map(|_| positive(arguments, "max_bytes", 0))
+            .transpose()?;
+        Ok(Self {
+            method: method.to_string(),
+            headers,
+            body,
+            timeout_seconds,
+            max_bytes,
+        })
+    }
+}
+
+fn is_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+fn positive(arguments: &Value, key: &str, default: usize) -> Result<usize, String> {
+    match arguments.get(key) {
+        None => Ok(default),
+        Some(value) => value
+            .as_usize()
+            .filter(|number| *number > 0)
+            .ok_or_else(|| format!("{key} must be a positive integer")),
+    }
+}
+
+pub(super) struct Response {
+    pub final_url: Url,
+    pub status: u16,
+    pub mime: Option<String>,
+    pub bytes: u64,
+    pub fetched_at: u64,
+    pub alias: String,
+    pub path: PathBuf,
+}
+
+pub(super) fn fetch(
+    area: &Area,
+    url: &Url,
+    options: &Options,
+    prefix: &str,
+    cancellation: &Cancellation,
+) -> Result<Response, String> {
+    if cancellation.requested() {
+        return Err("Operation cancelled".into());
+    }
+    let alias = format!("{prefix}/{}.body", unique_id());
+    let (_, path) = area.file(&alias, true)?;
+    let result = run(&path, url, options, cancellation);
+    match result {
+        Ok((status, final_url, mime)) => {
+            let bytes = fs::metadata(&path)
+                .map_err(|error| format!("Could not inspect downloaded file: {error}"))?
+                .len();
+            if options.max_bytes.is_some_and(|limit| bytes > limit as u64) {
+                let _ = fs::remove_file(&path);
+                return Err("Response exceeds max_bytes".into());
+            }
+            Ok(Response {
+                final_url,
+                status,
+                mime,
+                bytes,
+                fetched_at: now(),
+                alias,
+                path,
+            })
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&path);
+            Err(error)
+        }
+    }
+}
+
+fn run(
+    path: &PathBuf,
+    url: &Url,
+    options: &Options,
+    cancellation: &Cancellation,
+) -> Result<(u16, Url, Option<String>), String> {
+    let mut command = Command::new("curl");
+    command
+        .args([
+            "--disable",
+            "--globoff",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--proto",
+            "=http,https",
+            "--proto-redir",
+            "=http,https",
+            "--max-time",
+        ])
+        .arg(options.timeout_seconds.to_string())
+        .args(["--request", &options.method, "--output"])
+        .arg(path)
+        .args([
+            "--write-out",
+            "%{http_code}\n%{url_effective}\n%{content_type}\n",
+        ]);
+    crate::auth::isolate_environment(&mut command);
+    if let Some(limit) = options.max_bytes {
+        command.args(["--max-filesize", &limit.to_string()]);
+    }
+    for (name, value) in &options.headers {
+        command.args(["--header", &format!("{name}: {value}")]);
+    }
+    if options.body.is_some() {
+        command.args(["--data-binary", "@-"]);
+    }
+    command.arg("--url").arg(&url.value);
+    let output = crate::process::run_observed(
+        &mut command,
+        options.body.as_ref().map(|body| body.as_bytes().to_vec()),
+        Some(Duration::from_secs(
+            (options.timeout_seconds as u64).saturating_add(1),
+        )),
+        4096,
+        cancellation,
+        None,
+        &mut |_| Ok(()),
+    )?;
+    if output.cancelled {
+        return Err("Operation cancelled".into());
+    }
+    if output.timed_out {
+        return Err("HTTP transfer timed out".into());
+    }
+    if output.exit_code != Some(0) {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = detail
+            .lines()
+            .next()
+            .unwrap_or("")
+            .replace(&url.value, "[URL]");
+        let detail = detail
+            .split_whitespace()
+            .map(|word| {
+                if word.contains("http://") || word.contains("https://") {
+                    "[URL]"
+                } else {
+                    word
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let detail = detail.chars().take(300).collect::<String>();
+        return Err(format!(
+            "HTTP transfer failed (curl exit {}): {detail}",
+            output.exit_code.unwrap_or(-1)
+        ));
+    }
+    if output.stdout_truncated {
+        return Err("HTTP response metadata was too long".into());
+    }
+    let output = String::from_utf8(output.stdout).map_err(|_| "Invalid HTTP response metadata")?;
+    let mut lines = output.lines();
+    let status = lines
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or("Could not read HTTP status")?;
+    let final_url = Url::parse(lines.next().ok_or("Could not read final URL")?)?;
+    let mime = lines
+        .next()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    Ok((status, final_url, mime))
+}
+
+pub(super) fn unique_id() -> String {
+    format!(
+        "{}-{}-{}",
+        now(),
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}

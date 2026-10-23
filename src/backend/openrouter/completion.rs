@@ -66,8 +66,12 @@ pub(super) fn parse_completion(value: Value) -> Result<Completion, String> {
         message: message.clone(),
         text,
         calls,
-        usage: value.get("usage").cloned(),
-        provider: super::served::provider(&value),
+        usage: super::served::usage(value.get("usage")),
+        charges: super::Charges::reported(
+            super::served::provider(&value).as_deref(),
+            value.get("usage"),
+        ),
+        postprocess_error: None,
     })
 }
 

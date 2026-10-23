@@ -1,5 +1,7 @@
 use crate::json::Value;
 
+/// Executable tools in Jecode's neutral name, description and parameters shape.
+/// Each backend owns the wrapper required by its request protocol.
 pub fn definitions() -> Value {
     let string = || Value::object([("type", Value::string("string"))]);
     let integer = |min, max: Option<usize>| {
@@ -14,28 +16,22 @@ pub fn definitions() -> Value {
         }
         value
     };
+    let boolean = || Value::object([("type", Value::string("boolean"))]);
+    let strings = || Value::object([("type", Value::string("array")), ("items", string())]);
     let tool = |name, description, properties, required: &[&str]| {
         Value::object([
-            ("type", Value::string("function")),
+            ("name", Value::string(name)),
+            ("description", Value::string(description)),
             (
-                "function",
+                "parameters",
                 Value::object([
-                    ("name", Value::string(name)),
-                    ("description", Value::string(description)),
+                    ("type", Value::string("object")),
+                    ("properties", properties),
                     (
-                        "parameters",
-                        Value::object([
-                            ("type", Value::string("object")),
-                            ("properties", properties),
-                            (
-                                "required",
-                                Value::Array(
-                                    required.iter().map(|name| Value::string(*name)).collect(),
-                                ),
-                            ),
-                            ("additionalProperties", Value::Bool(false)),
-                        ]),
+                        "required",
+                        Value::Array(required.iter().map(|name| Value::string(*name)).collect()),
                     ),
+                    ("additionalProperties", Value::Bool(false)),
                 ]),
             ),
         ])
@@ -155,6 +151,97 @@ pub fn definitions() -> Value {
                     Value::object([("type", Value::string("boolean"))]),
                 ),
                 ("limit", integer(1, Some(200))),
+            ]),
+            &["action"],
+        ),
+        tool(
+            "web",
+            "Use local curl to fetch an HTTP(S) URL, download its bytes, or crawl links from starting URLs. fetch returns metadata, a short text preview, complete raw path, and extracted text_path when available. Extraction reads at most 4 MiB; extraction_truncated marks a partial extraction. HTML returns the first 100 links, links_count and links_path to all links extracted from that portion. download returns raw metadata and path without parsing text. crawl returns crawl_id, pages_in_call, up to 20 page summaries, and manifest_path to full JSONL records; use read paging for the manifest. Continue with crawl_id. This is ordinary HTTP, not browser rendering or a search API. For public search, navigate a search site with browser. Fetch/download require url; crawl requires urls or crawl_id. max_bytes limits each raw response when supplied. Crawl defaults: same_origin true, max_depth 1, max_pages 20 per call. Site access depends on the target and local network.",
+            Value::object([
+                (
+                    "action",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(["fetch", "download", "crawl"].map(Value::string).into()),
+                        ),
+                    ]),
+                ),
+                ("url", string()),
+                ("urls", strings()),
+                ("crawl_id", string()),
+                ("method", string()),
+                (
+                    "headers",
+                    Value::object([
+                        ("type", Value::string("object")),
+                        ("additionalProperties", string()),
+                    ]),
+                ),
+                ("body", string()),
+                ("timeout_seconds", integer(1, None)),
+                ("max_bytes", integer(1, None)),
+                ("max_pages", integer(1, None)),
+                ("max_depth", integer(0, None)),
+                ("same_origin", boolean()),
+            ]),
+            &["action"],
+        ),
+        tool(
+            "browser",
+            "Control an installed Chromium-based browser locally through the Chrome DevTools Protocol. open launches an isolated headless browser by default and optionally navigates to url; visible:true opens a window. profile names select dedicated persistent profiles, while the default profile is temporary. Actions: tabs, navigate, snapshot, click, fill, press, scroll, wait, screenshot, evaluate, cdp, logs, close, stop. An omitted browser_id selects the newest browser; an omitted tab_id selects an available page tab, so pass tab_id for a specific tab. snapshot returns element refs such as @1; selector accepts a ref or CSS. wait uses selector and/or text. screenshot saves a tmp:browser/ image, imports it as an attachment and delivers it on the next model request; its attachment reference survives temporary cleanup. cdp calls a raw DevTools method for advanced operations. Use a visible browser for login and two-factor prompts. Chromium must already be installed; JECODE_BROWSER may point to its executable.",
+            Value::object([
+                (
+                    "action",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(
+                                [
+                                    "open",
+                                    "tabs",
+                                    "navigate",
+                                    "snapshot",
+                                    "click",
+                                    "fill",
+                                    "press",
+                                    "scroll",
+                                    "wait",
+                                    "screenshot",
+                                    "evaluate",
+                                    "cdp",
+                                    "logs",
+                                    "close",
+                                    "stop",
+                                ]
+                                .map(Value::string)
+                                .into(),
+                            ),
+                        ),
+                    ]),
+                ),
+                ("url", string()),
+                ("visible", boolean()),
+                ("profile", string()),
+                ("browser_id", string()),
+                ("tab_id", string()),
+                ("selector", string()),
+                ("text", string()),
+                ("key", string()),
+                ("expression", string()),
+                ("method", string()),
+                ("params", Value::object([("type", Value::string("object"))])),
+                ("timeout_ms", integer(1, None)),
+                ("x", integer(0, None)),
+                ("y", integer(0, None)),
+                (
+                    "delta_y",
+                    Value::object([("type", Value::string("integer"))]),
+                ),
+                ("width", integer(1, None)),
+                ("height", integer(1, None)),
             ]),
             &["action"],
         ),

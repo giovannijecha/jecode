@@ -1,33 +1,7 @@
+use crate::backend::{Failure, FailureKind as Kind};
 use crate::json::Value;
-use std::time::Duration;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Temporary,
-    Empty,
-    Context,
-    Length,
-    Terminal,
-}
-
-#[derive(Clone, Debug)]
-pub struct Failure {
-    pub kind: Kind,
-    pub message: String,
-    pub retry_after: Option<Duration>,
-    /// Charges reported even when the completion cannot be accepted.
-    pub charges: Option<super::Charges>,
-}
 
 impl Failure {
-    pub fn temporary(message: impl Into<String>) -> Self {
-        Self {
-            kind: Kind::Temporary,
-            message: message.into(),
-            retry_after: None,
-            charges: None,
-        }
-    }
     pub fn response(message: impl Into<String>) -> Self {
         let message = message.into();
         if message.contains("stream ended before [DONE]") {
@@ -174,21 +148,5 @@ fn field<'a>(value: Option<&'a Value>, name: &str) -> Option<&'a str> {
         .and_then(|value| value.get(name))
         .and_then(Value::as_str)
 }
-impl From<String> for Failure {
-    fn from(message: String) -> Self {
-        Self {
-            kind: Kind::Terminal,
-            message,
-            retry_after: None,
-            charges: None,
-        }
-    }
-}
-impl From<&str> for Failure {
-    fn from(message: &str) -> Self {
-        message.to_string().into()
-    }
-}
-
 #[cfg(test)]
 mod tests;

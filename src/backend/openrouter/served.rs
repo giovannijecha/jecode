@@ -1,22 +1,24 @@
 //! What OpenRouter reported about served requests: the provider and the
 //! charged cost. Nothing here is inferred from the routing preference.
 
+use crate::backend::Charges;
 use crate::json::Value;
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Charges {
-    /// Provider names as responses report them, in first-served order.
-    pub providers: Vec<String>,
-    pub requests: usize,
-    /// Requests whose usage reported a charged cost.
-    pub priced: usize,
-    /// Credits charged, in USD, over the priced requests.
-    pub cost: f64,
-    pub cached: usize,
-    /// Whether a request used the account's own provider key.
-    pub byok: bool,
-    /// Provider charges BYOK responses reported, billed outside OpenRouter credits.
-    pub upstream: f64,
+pub(super) fn usage(value: Option<&Value>) -> Option<crate::backend::Usage> {
+    let value = value?;
+    let input_tokens = value.get("prompt_tokens").and_then(Value::as_usize);
+    let output_tokens = value.get("completion_tokens").and_then(Value::as_usize);
+    let cached_tokens = value
+        .get("prompt_tokens_details")
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_usize);
+    (input_tokens.is_some() || output_tokens.is_some() || cached_tokens.is_some()).then_some(
+        crate::backend::Usage {
+            input_tokens,
+            output_tokens,
+            cached_tokens,
+        },
+    )
 }
 
 impl Charges {
@@ -29,26 +31,7 @@ impl Charges {
         Some(charges)
     }
 
-    /// Adds a reported attempt, including one whose completion was rejected.
-    pub fn extend(&mut self, other: &Self) {
-        for provider in &other.providers {
-            if !self
-                .providers
-                .iter()
-                .any(|known| known.eq_ignore_ascii_case(provider))
-            {
-                self.providers.push(provider.clone());
-            }
-        }
-        self.requests += other.requests;
-        self.priced += other.priced;
-        self.cost += other.cost;
-        self.cached += other.cached;
-        self.byok |= other.byok;
-        self.upstream += other.upstream;
-    }
-
-    pub fn record(&mut self, provider: Option<&str>, usage: Option<&Value>) {
+    fn record(&mut self, provider: Option<&str>, usage: Option<&Value>) {
         self.requests += 1;
         if let Some(provider) = provider.map(str::trim).filter(|name| !name.is_empty())
             && !self
@@ -80,42 +63,6 @@ impl Charges {
             .filter(|cost| *cost >= 0.0)
             .unwrap_or(0.0);
         }
-    }
-
-    /// For example `Served by Baidu · $0.0031 charged · 12K cached`.
-    pub fn describe(&self) -> Option<String> {
-        let mut parts = Vec::new();
-        if !self.providers.is_empty() {
-            let mut names = self.providers[..self.providers.len().min(2)].join(", ");
-            if self.providers.len() > 2 {
-                names.push_str(&format!(" +{}", self.providers.len() - 2));
-            }
-            parts.push(format!("Served by {names}"));
-        }
-        if self.priced > 0 {
-            let mut cost = format!("{} charged", super::routing::price(Some(self.cost)));
-            if self.priced < self.requests {
-                cost.push_str(&format!(
-                    " for {} of {} requests",
-                    self.priced, self.requests
-                ));
-            }
-            parts.push(cost);
-        }
-        if self.byok {
-            parts.push(if self.upstream > 0.0 {
-                format!(
-                    "BYOK {} upstream",
-                    super::routing::price(Some(self.upstream))
-                )
-            } else {
-                "BYOK".into()
-            });
-        }
-        if self.cached > 0 {
-            parts.push(format!("{} cached", super::routing::quantity(self.cached)));
-        }
-        (!parts.is_empty()).then(|| parts.join(" · "))
     }
 }
 

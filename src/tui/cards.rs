@@ -194,11 +194,15 @@ fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
         "bash" => "Bash",
         "process" => "Process",
         "checkpoint" => "Checkpoint",
+        "web" => "Web",
+        "browser" => "Browser",
         other => other,
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
-        "process" | "checkpoint" => crate::events::description(tool.name, tool.arguments),
+        "process" | "checkpoint" | "web" | "browser" => {
+            crate::events::description(tool.name, tool.arguments)
+        }
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
     let mut title = Line::new(&format!("{name}("), EMPHASIS.bold()).at_source(0);

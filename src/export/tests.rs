@@ -34,6 +34,8 @@ fn exports_exact_protocol_messages_and_masks_the_key_in_nested_arguments() {
         ]),
     ];
     let archive = Archive {
+        backend: "fixture".into(),
+        legacy_origin: None,
         effort: "default".into(),
         events: Arc::new(Mutex::new(vec![])),
         model: "fixture/model".into(),
@@ -121,6 +123,8 @@ fn exports_only_the_transcript_when_messages_reference_attachments() {
         vec![blob.clone(), blob.clone()],
     );
     let archive = Archive {
+        backend: "fixture".into(),
+        legacy_origin: None,
         effort: "default".into(),
         events: Arc::new(Mutex::new(vec![])),
         model: "fixture/model".into(),

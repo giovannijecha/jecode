@@ -1,65 +1,13 @@
 //! Endpoint metadata from `GET /models/{author}/{slug}/endpoints`.
 
 use super::Api;
+pub use crate::backend::{Endpoint, Endpoints};
 use crate::json::Value;
 use std::time::Instant;
-
-/// One endpoint of a model. `None` always means unknown, never zero or free:
-/// OpenRouter omits or nulls what it has not measured.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Endpoint {
-    /// The full endpoint slug, `provider[/variant][/region][/tier]`.
-    pub tag: String,
-    pub provider: Option<String>,
-    /// Listed USD per million tokens. Listed prices already include `discount`.
-    pub prompt: Option<f64>,
-    pub completion: Option<f64>,
-    pub cache_read: Option<f64>,
-    pub cache_write: Option<f64>,
-    /// The fraction already applied to the listed prices; informational only.
-    pub discount: Option<f64>,
-    pub context: Option<usize>,
-    pub output: Option<usize>,
-    pub quantization: Option<String>,
-    /// A non-standard service tier such as `flex` or `priority`.
-    pub tier: Option<String>,
-    /// 0 is normal; OpenRouter uses negative codes for degraded endpoints.
-    pub status: Option<i64>,
-    /// Percentage of successful requests over the last 30 minutes.
-    pub uptime: Option<f64>,
-    /// Median time to first token over the last 30 minutes, in milliseconds.
-    pub latency: Option<f64>,
-    /// Median output tokens per second over the last 30 minutes.
-    pub throughput: Option<f64>,
-    /// Requests behind the 30-minute statistics, when reported.
-    pub requests: Option<u64>,
-    pub parameters: Option<Vec<String>>,
-}
-
-impl Endpoint {
-    /// Whether the endpoint accepts a request parameter; None when unlisted.
-    pub fn supports(&self, parameter: &str) -> Option<bool> {
-        self.parameters
-            .as_ref()
-            .map(|parameters| parameters.iter().any(|value| value == parameter))
-    }
-}
-
-/// The endpoints listed for one model when they were fetched.
-#[derive(Clone, Debug)]
-pub struct Endpoints {
-    pub model: String,
-    pub list: Vec<Endpoint>,
-    pub fetched: Instant,
-}
 
 impl Endpoints {
     pub fn fresh(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.fetched) < super::routing::policy::FRESH
-    }
-
-    pub fn find(&self, tag: &str) -> Option<&Endpoint> {
-        self.list.iter().find(|endpoint| endpoint.tag == tag)
     }
 }
 

@@ -6,21 +6,13 @@
 //! parts, and a manifest that tells the model what each element is and how to
 //! reach it again. Nothing here changes the stored history.
 
-use super::{Attachment, Kind, Pool, base64};
+use crate::attachments::{Attachment, Inputs, Kind, Pool, base64, requested};
+#[cfg(test)]
+pub use crate::attachments::{user_text, weight, weight_for};
 use crate::json::Value;
 
 /// PDFs above this size stay local; the manifest points at them instead.
 const PDF_BYTES: u64 = 32 * 1024 * 1024;
-/// Estimated tokens for an image whose dimensions are unknown.
-const IMAGE_TOKENS: usize = 1600;
-
-/// What the selected model accepts, from the model catalog. `None` is unknown.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Inputs {
-    pub image: Option<bool>,
-    pub file: Option<bool>,
-}
-
 /// The OpenRouter PDF engine. Models with native file input read the PDF
 /// themselves; the others use the free Cloudflare parser instead of the
 /// paid OCR default.
@@ -90,7 +82,7 @@ pub fn materialize(
 }
 
 fn user(message: Value, pool: Option<&Pool>, inputs: Inputs) -> Value {
-    let attachments = super::of_message(&message);
+    let attachments = crate::attachments::of_message(&message);
     let Value::Object(mut fields) = message else {
         return message;
     };
@@ -144,7 +136,7 @@ fn content(
             None,
             format!(
                 "not sent: larger than {}; the original stays local",
-                super::size(PDF_BYTES)
+                crate::attachments::size(PDF_BYTES)
             ),
         ),
         Kind::Pdf => match pool
@@ -186,52 +178,6 @@ fn line(number: usize, attachment: &Attachment, pool: Option<&Pool>, status: &st
         attachment.details(),
         attachment.reference()
     )
-}
-
-/// A user message as text, with a manifest of its attachments so their
-/// references stay reachable from history and after compaction.
-pub fn user_text(message: &Value) -> String {
-    let text = message.get("content").and_then(Value::as_str).unwrap_or("");
-    let attachments = super::of_message(message);
-    if attachments.is_empty() {
-        text.to_owned()
-    } else {
-        format!("{text}\n\nAttachments:\n{}", manifest(&attachments))
-    }
-}
-
-/// A plain-text manifest for views that cannot carry content parts, such as
-/// history reads and the request list kept after compaction.
-pub fn manifest(attachments: &[Attachment]) -> String {
-    attachments
-        .iter()
-        .enumerate()
-        .map(|(index, attachment)| {
-            format!(
-                "{} {} ({}): {}",
-                attachment.label(index + 1),
-                attachment.name,
-                attachment.details(),
-                attachment.reference()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn requested(message: &Value) -> Option<Attachment> {
-    let content = message.get("content").and_then(Value::as_str)?;
-    if !content.contains("\"view\"") {
-        return None;
-    }
-    let value = crate::json::parse(content).ok()?;
-    if !matches!(
-        value.get("view").and_then(Value::as_str),
-        Some("image" | "pdf")
-    ) {
-        return None;
-    }
-    Attachment::parse(value.get("attachment")?).ok()
 }
 
 /// A user message with the images and PDFs that read results asked to show.
@@ -297,49 +243,6 @@ fn file_part(name: &str, bytes: &[u8]) -> Value {
             ]),
         ),
     ])
-}
-
-/// Estimated tokens the materialized form adds beyond the stored message.
-/// Payload size says nothing useful here: a 4 MB PNG and a 40 KB JPEG of the
-/// same dimensions cost the same, so images are weighed by pixels.
-#[cfg(test)]
-pub fn weight(message: &Value) -> usize {
-    weight_for(message, Inputs::default())
-}
-
-/// Apply the same model capability decision used by `content` before adding
-/// the cost of image parts to a request estimate.
-pub fn weight_for(message: &Value, inputs: Inputs) -> usize {
-    let attachments = match message.get("role").and_then(Value::as_str) {
-        Some("user") => super::of_message(message),
-        Some("tool") => requested(message).into_iter().collect(),
-        _ => return 0,
-    };
-    attachments
-        .iter()
-        .filter(|attachment| attachment.kind() != Kind::Image || inputs.image != Some(false))
-        .map(tokens)
-        .sum()
-}
-
-fn tokens(attachment: &Attachment) -> usize {
-    match attachment.kind() {
-        Kind::Image => match (attachment.width, attachment.height) {
-            (Some(width), Some(height)) => {
-                // Views are bounded to 2048 pixels on the long side.
-                let scale = (2048.0 / f64::from(width.max(height))).min(1.0);
-                let pixels = f64::from(width) * scale * f64::from(height) * scale;
-                ((pixels / 750.0) as usize).clamp(85, IMAGE_TOKENS)
-            }
-            _ => IMAGE_TOKENS,
-        },
-        Kind::Pdf if attachment.size <= PDF_BYTES => attachment
-            .pages
-            .map_or((attachment.size / 64) as usize, |pages| {
-                pages as usize * 1500
-            }),
-        _ => 0,
-    }
 }
 
 #[cfg(test)]

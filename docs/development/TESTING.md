@@ -41,6 +41,8 @@ Pass a test-name filter after the Cargo options:
 
 ```text
 cargo test --locked --offline agent::routing_tests::
+cargo test --locked --offline agent::backend_tests::
+cargo test --locked --offline backend::openrouter::calls::tests::
 cargo test --locked --offline tools::processes::tests::
 cargo test --locked --offline sessions::journal_tests::
 cargo test --locked --offline checkpoint
@@ -51,7 +53,7 @@ verified the change. Use `-- --list` to inspect available names.
 
 | Change | Relevant checks |
 | --- | --- |
-| Agent/context/provider | Tests beside `agent/`, `context/` and `openrouter/`; use loopback responses. |
+| Agent/context/backend | `agent::backend_tests` uses two synthetic protocols across tool execution, compaction, save and resume. `backend/openrouter/` tests use loopback responses for the adapter. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |

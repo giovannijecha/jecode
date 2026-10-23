@@ -7,6 +7,7 @@ use super::{
 };
 use crate::{
     attachments::Prompt,
+    backend,
     effort::Effort,
     session::commands::{self, COMMANDS},
 };
@@ -200,7 +201,8 @@ impl App {
         }
         if name == "/new" && arguments.is_empty() {
             self.cancel_copy();
-            let result = self.agent.as_mut().unwrap().start_new(
+            let result = self.agent.as_mut().unwrap().start_new_selection(
+                &self.config.settings.backend_id,
                 self.config.settings.model.clone(),
                 self.config.settings.effort,
             );
@@ -250,9 +252,82 @@ impl App {
                 ));
             }
             "/routing" if arguments.is_empty() => self.open_routing(false),
+            "/backend" => {
+                if arguments.is_empty() {
+                    let details = backend::available()
+                        .iter()
+                        .map(|info| {
+                            (
+                                info.id.into(),
+                                format!(
+                                    "{}{}",
+                                    info.name,
+                                    if info.id == self.agent.as_ref().unwrap().backend_id() {
+                                        " · current"
+                                    } else {
+                                        ""
+                                    }
+                                ),
+                            )
+                        })
+                        .collect();
+                    self.local_finish(
+                        Kind::Notice,
+                        "Available backends · use /backend ID MODEL to switch",
+                        details,
+                    );
+                } else {
+                    let mut parts = arguments.split_whitespace();
+                    let (Some(id), Some(model), None) = (parts.next(), parts.next(), parts.next())
+                    else {
+                        self.local_finish(Kind::Error, "Usage: /backend ID MODEL", vec![]);
+                        return Ok(false);
+                    };
+                    if !backend::available().iter().any(|info| info.id == id) {
+                        self.local_finish(
+                            Kind::Error,
+                            &format!("Backend is not available: {id}"),
+                            vec![],
+                        );
+                    } else if let Err(error) = crate::config::validate_model(model) {
+                        self.local_finish(Kind::Error, &error, vec![]);
+                    } else if let Some(key) = self.config.settings.credential_for(id) {
+                        let result = if self.agent.as_ref().unwrap().backend_id() == id {
+                            let agent = self.agent.as_mut().unwrap();
+                            agent
+                                .set_model(model.into())
+                                .map(|()| agent.set_effort(Effort::Default))
+                        } else {
+                            backend::create(id, key.into(), model.into()).and_then(|mut client| {
+                                client.set_effort(Effort::Default);
+                                self.agent.as_mut().unwrap().replace_backend(client)
+                            })
+                        };
+                        match result {
+                            Ok(()) => {
+                                self.archive = self.agent.as_ref().unwrap().archive();
+                                self.state.effort = Effort::Default.name().into();
+                                self.refresh_context();
+                                self.local_finish(
+                                    Kind::Notice,
+                                    &format!("Backend set to {id} / {model}"),
+                                    vec![],
+                                );
+                            }
+                            Err(error) => self.local_finish(Kind::Error, &error, vec![]),
+                        }
+                    } else {
+                        self.local_finish(
+                            Kind::Error,
+                            &format!("{id} has no saved credentials; run jecode setup"),
+                            vec![],
+                        );
+                    }
+                }
+            }
             "/model" => {
                 if !arguments.is_empty()
-                    && let Err(error) = crate::openrouter::validate_model(arguments)
+                    && let Err(error) = crate::config::validate_model(arguments)
                 {
                     self.local_finish(Kind::Error, &error, vec![]);
                     return Ok(false);
@@ -389,7 +464,10 @@ impl App {
     pub(super) fn load_catalog(&mut self, purpose: CatalogPurpose) {
         self.state.selector = Some(Selector::loading());
         self.state.clear_notice();
-        self.job = Some(Job::catalog(self.agent.as_ref().unwrap().api(), purpose));
+        self.job = Some(Job::catalog(
+            self.agent.as_ref().unwrap().services(),
+            purpose,
+        ));
     }
 
     /// Runs `/copy`, `/drafts` or `/terminal`; returns false for other text.

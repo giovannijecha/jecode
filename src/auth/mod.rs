@@ -1,0 +1,77 @@
+//! User-scoped credential material and its backend identity.
+//!
+//! This boundary describes a saved API key today. A future account session
+//! can use another secret variant without changing the inference contract.
+
+use std::process::Command;
+
+/// Prevent backend credentials from reaching child tools and native helpers.
+pub fn isolate_environment(command: &mut Command) -> &mut Command {
+    for backend in crate::backend::available() {
+        for name in backend.credential_env {
+            command.env_remove(name);
+        }
+    }
+    command
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Identity {
+    pub backend: String,
+    pub account: Option<String>,
+}
+
+#[derive(Clone)]
+pub enum Secret {
+    ApiKey(String),
+}
+
+#[derive(Clone)]
+pub struct Credential {
+    pub identity: Identity,
+    secret: Secret,
+}
+
+impl Credential {
+    pub fn api_key(backend: impl Into<String>, key: String) -> Self {
+        Self {
+            identity: Identity {
+                backend: backend.into(),
+                account: None,
+            },
+            secret: Secret::ApiKey(key),
+        }
+    }
+
+    pub fn api_key_material(&self) -> Option<&str> {
+        match &self.secret {
+            Secret::ApiKey(key) => Some(key),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_environment_excludes_every_registered_backend_credential() {
+        let mut command = Command::new("fixture-only");
+        command.env("JECODE_TEST_UNRELATED", "kept");
+        isolate_environment(&mut command);
+        let env: Vec<_> = command.get_envs().collect();
+        for name in crate::backend::available()
+            .iter()
+            .flat_map(|backend| backend.credential_env)
+        {
+            assert!(
+                env.iter()
+                    .any(|(key, value)| key.to_string_lossy() == *name && value.is_none())
+            );
+        }
+        assert!(env.iter().any(|(key, value)| {
+            key.to_string_lossy() == "JECODE_TEST_UNRELATED"
+                && value == &Some(std::ffi::OsStr::new("kept"))
+        }));
+    }
+}

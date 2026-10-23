@@ -354,15 +354,9 @@ fn checkpoint_schema_offers_only_call_recovery_actions() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|tool| {
-            tool.get("function")
-                .and_then(|function| function.get("name"))
-                == Some(&Value::string("checkpoint"))
-        })
+        .find(|tool| tool.get("name") == Some(&Value::string("checkpoint")))
         .unwrap();
     let actions = checkpoint
-        .get("function")
-        .unwrap()
         .get("parameters")
         .unwrap()
         .get("properties")

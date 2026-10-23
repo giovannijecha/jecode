@@ -1,4 +1,4 @@
-use crate::json::Value;
+use crate::{conversation::ToolCall, json::Value};
 
 /// Describes where a history message came from: its role, the user request it
 /// answers and, for tool results, the originating call.
@@ -53,8 +53,8 @@ pub fn record(messages: &[Value], index: usize) -> Value {
         ),
         (
             "tool",
-            call.and_then(|(_, call)| call.get("function")?.get("name")?.as_str())
-                .map_or(Value::Null, Value::string),
+            call.and_then(|(_, call)| ToolCall::parse(call).ok())
+                .map_or(Value::Null, |call| Value::string(call.name)),
         ),
     ])
 }

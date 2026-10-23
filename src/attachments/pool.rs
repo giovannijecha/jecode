@@ -1,6 +1,6 @@
 //! Session-owned attachment storage. Each asset keeps the exact imported bytes
 //! under `<id>/<name>` and its metadata in `<id>.json`; an optional
-//! `<id>.view.png` or `.jpg` holds a provider-ready image derived from it.
+//! `<id>.view.png` or `.jpg` holds an embeddable image derived from it.
 
 use super::{Attachment, Kind, media};
 use crate::cancel::Cancellation;
@@ -146,7 +146,7 @@ impl Pool {
         })
     }
 
-    /// The image bytes to send to a provider, if the pool has a usable form.
+    /// The image bytes for embedding, if the pool has a usable form.
     pub fn view(&self, attachment: &Attachment) -> Result<Option<(String, Vec<u8>)>, String> {
         let stored = self.load(&attachment.id)?;
         if direct(&stored.attachment) {
@@ -249,7 +249,7 @@ pub fn references(bytes: &[u8]) -> BTreeSet<String> {
 }
 
 fn direct(attachment: &Attachment) -> bool {
-    media::PROVIDER_IMAGES.contains(&attachment.media.as_str())
+    media::VIEW_IMAGES.contains(&attachment.media.as_str())
         && attachment.size <= VIEW_BYTES
         && attachment.width.unwrap_or(0) <= VIEW_PIXELS
         && attachment.height.unwrap_or(0) <= VIEW_PIXELS

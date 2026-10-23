@@ -262,27 +262,58 @@ fn a_failed_stream_exports_partial_text_as_evidence_and_does_not_execute_partial
 }
 
 #[test]
-fn replacing_a_key_keeps_all_prior_credentials_redacted_in_the_archive() {
+fn replacing_a_key_keeps_all_prior_credentials_redacted_in_archive_and_session() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.messages.lock().unwrap().push(Value::object([
+        ("role", Value::string("user")),
+        (
+            "content",
+            Value::string("isolated-fixture-key and replacement-fixture-key"),
+        ),
+    ]));
+    let services = agent
+        .services()
+        .with_credential("replacement-fixture-key".into())
+        .unwrap();
+    let client = services.create(agent.model().into()).unwrap();
+    agent.replace_backend(client).unwrap();
+    let exported = agent.archive().document().encode();
+    assert!(!exported.contains("isolated-fixture-key"));
+    assert!(!exported.contains("replacement-fixture-key"));
+    assert_eq!(agent.messages.lock().unwrap().len(), 2);
+    let handle = agent.sessions().unwrap();
+    let journal = std::fs::read_to_string(
+        handle
+            .store()
+            .bucket()
+            .join(format!("{}.jsonl", handle.id())),
+    )
+    .unwrap();
+    assert!(!journal.contains("isolated-fixture-key"));
+    assert!(!journal.contains("replacement-fixture-key"));
+}
+
+#[test]
+fn registering_an_account_masks_its_credentials_before_selection() {
     let directory = Directory::new();
     let mut agent = Agent::new(
         OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
         Tools::new(directory.path()).unwrap(),
     );
-    agent.messages.lock().unwrap().push(Value::object([(
-        "content",
-        Value::string("isolated-fixture-key and replacement-fixture-key"),
-    )]));
-    let client = OpenRouter::with_api(
-        agent
-            .api()
-            .with_key("replacement-fixture-key".into())
-            .unwrap(),
-        agent.model().into(),
-    )
-    .unwrap();
-    agent.replace_client(client);
-    let exported = agent.archive().document().encode();
-    assert!(!exported.contains("isolated-fixture-key"));
-    assert!(!exported.contains("replacement-fixture-key"));
-    assert_eq!(agent.messages.lock().unwrap().len(), 2);
+    let services = agent
+        .services()
+        .with_credential("other-account-secret".into())
+        .unwrap();
+    agent.register_backend(services);
+    assert_eq!(
+        agent.redact("isolated-fixture-key other-account-secret"),
+        "[redacted] [redacted]"
+    );
+    assert_eq!(agent.model(), "fixture/model");
 }

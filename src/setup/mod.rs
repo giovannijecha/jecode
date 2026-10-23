@@ -4,8 +4,9 @@ mod terminal;
 pub use models::choose_model;
 pub use terminal::Terminal;
 
+use crate::backend::{self, Services};
 use crate::config::{Settings, Store};
-use crate::openrouter::Api;
+use crate::redact::Redactor;
 
 pub trait Prompter {
     fn message(&mut self, text: &str) -> Result<(), String>;
@@ -18,57 +19,113 @@ pub fn configure(
     current: Option<&Settings>,
     ui: &mut impl Prompter,
 ) -> Result<Option<Settings>, String> {
-    configure_with(store, current, ui, |key| Api::new(key.into()))
+    configure_with(store, current, ui, |id, key| {
+        Services::for_backend(id, key.into())
+    })
 }
 
 fn configure_with(
     store: &Store,
     current: Option<&Settings>,
     ui: &mut impl Prompter,
-    make_api: impl Fn(&str) -> Result<Api, String>,
+    make_services: impl Fn(&str, &str) -> Result<Services, String>,
 ) -> Result<Option<Settings>, String> {
-    ui.message(&format!("Jecode setup\nKey and model are saved in plain text in {}.\nGet a key at https://openrouter.ai/settings/keys. Type /cancel to leave setup.", store.path().display()))?;
-    let (api_key, api) = loop {
+    let available = backend::available();
+    let backend_id = if available.len() == 1 {
+        available[0].id
+    } else {
+        loop {
+            ui.message("Available backends:")?;
+            for (index, backend) in available.iter().enumerate() {
+                ui.message(&format!("{}. {}", index + 1, backend.name))?;
+            }
+            let Some(answer) = answer(ui.input("Choose a backend number: ")?) else {
+                return cancelled(ui);
+            };
+            if let Some(backend) = answer
+                .parse::<usize>()
+                .ok()
+                .and_then(|number| number.checked_sub(1))
+                .and_then(|index| available.get(index))
+            {
+                break backend.id;
+            }
+            ui.message("Choose one of the displayed backends.")?;
+        }
+    };
+    let selected = available
+        .iter()
+        .find(|backend| backend.id == backend_id)
+        .unwrap();
+    let name = selected.name;
+    let note = selected
+        .key_url
+        .map_or(String::new(), |url| format!("Get a key at {url}. "));
+    ui.message(&format!("Jecode setup\nCredentials and model are saved in plain text in {}.\n{note}Type /cancel to leave setup.", store.path().display()))?;
+    let (api_key, services) = loop {
         let prompt = if current.is_some() {
-            "OpenRouter API key (hidden; Enter keeps the saved key): "
+            format!("{name} API key (hidden; Enter keeps the saved key): ")
         } else {
-            "OpenRouter API key (hidden): "
+            format!("{name} API key (hidden): ")
         };
-        let Some(key) = answer(ui.secret(prompt)?) else {
+        let Some(key) = answer(ui.secret(&prompt)?) else {
             return cancelled(ui);
         };
         let key = if key.is_empty() {
-            current.map_or_else(String::new, |settings| settings.api_key.clone())
+            current
+                .and_then(|settings| settings.credential_for(backend_id))
+                .unwrap_or("")
+                .into()
         } else {
             key
         };
-        let api = match make_api(&key) {
-            Ok(api) => api,
+        let services = match make_services(backend_id, &key) {
+            Ok(services) => services,
             Err(error) => {
-                ui.message(&error)?;
+                ui.message(&Redactor::new(key).text(&error))?;
                 continue;
             }
         };
-        ui.message("Checking the key with OpenRouter...")?;
-        match api.check_key() {
-            Ok(()) => break (key, api),
-            Err(error) => ui.message(&format!("{error}\nTry another key, or /cancel."))?,
+        ui.message(&format!("Checking the key with {name}..."))?;
+        match services.check_credential() {
+            Ok(()) => break (key, services),
+            Err(error) => ui.message(
+                &Redactor::new(key.clone()).text(&format!("{error}\nTry another key, or /cancel.")),
+            )?,
         }
     };
-    let Some(model) = choose_model(&api, current.map(|settings| settings.model.as_str()), ui)?
-    else {
+    let current_model = current
+        .filter(|settings| settings.backend_id == backend_id)
+        .map(|settings| settings.model.as_str());
+    let Some(model) = choose_model(&services, current_model, ui)? else {
         return cancelled(ui);
     };
-    let mut settings = Settings::new(api_key, model)?;
+    let mut settings = match current {
+        Some(current) => current.clone(),
+        None => Settings::selected(backend_id, api_key.clone(), model.clone())?,
+    };
+    settings.select_backend(backend_id, api_key.clone())?;
+    settings.model = model;
     if let Some(current) = current {
         settings.auto_compact = current.auto_compact;
-        settings.routing = current.routing.clone();
-        if current.model == settings.model {
+        if current.backend_id == settings.backend_id {
+            settings.routing = current.routing.clone();
+        }
+        if current.backend_id == settings.backend_id && current.model == settings.model {
             settings.effort = current.effort;
+        } else {
+            settings.effort = crate::effort::Effort::Default;
         }
     }
-    store.save(&settings).map_err(|error| api.redact(&error))?;
-    ui.message(&api.redact(&format!("Saved. Model: {}", settings.model)))?;
+    let redactor = Redactor::new(api_key);
+    store
+        .save(&settings)
+        .map_err(|error| redactor.text(&error))?;
+    let settings = store
+        .load()
+        .map_err(|error| redactor.text(&error))?
+        .ok_or("Saved configuration could not be reopened")?;
+    ui.message(&redactor.text(&format!("Saved. Model: {}", settings.model)))?;
     Ok(Some(settings))
 }
 

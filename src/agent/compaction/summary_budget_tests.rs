@@ -255,7 +255,8 @@ fn output_regression_normal_turn_uses_declared_output_and_selected_effort() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion("Ready", vec![]))]);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(24000, Some(9000));
+    // Leave room for the native tool catalog so this isolates the output ceiling.
+    client.fixture_limits(32000, Some(9000));
     client.set_effort(Effort::High);
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent.run_turn("Reply Ready", &mut |_| Ok(())).unwrap();

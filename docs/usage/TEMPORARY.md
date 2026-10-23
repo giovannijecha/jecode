@@ -1,7 +1,7 @@
 # Session temporary files
 
 Jecode provides an owned working area for disposable scripts, experiments, dumps,
-one-off verification files and browser profiles:
+one-off verification files and isolated browser profiles:
 
 ```text
 ~/.jecode/tmp/FOLDER_BUCKET/SESSION_ID/
@@ -18,6 +18,12 @@ Keep source code and reusable tests in the project. Put one-off verification
 scripts, fixtures, logs, reports, screenshots and browser traces in the active
 session area. Use `tmp:` with file tools or quoted `$JECODE_TMP` paths in Bash.
 Honor explicit user or project output requirements.
+The `web` and `browser` tools also save fetched responses, snapshots, screenshots
+and logs here. A named persistent browser profile lives separately under
+`~/.jecode/browser/profiles/` and survives `/tmp clean` and session deletion.
+Browser screenshots are also copied into session attachment storage and shown
+to the model on the next request. Their returned `attachment:ID` references
+survive temporary cleanup.
 
 Set output paths explicitly: `TMPDIR`, `TEMP` and `TMP` affect only programs
 that use them. Jecode does not move or classify files automatically.
@@ -76,6 +82,9 @@ Completed turns, interruption and application exit keep working files. Explicit
 resume reuses the same area. `/new` selects a new area and preserves the previous
 one for its saved session. There is no age limit or automatic eviction.
 
+Jecode stops browsers using the active session before cleaning its temporary area.
+Read-only inventory skips links and special files without following them and
+reports their count; Chromium can create such entries in a live profile.
 `/tmp` shows the current path, file/directory counts, logical file bytes and
 retention policy. `/tmp clean` clears only that session's working files, keeping
 its ownership record so the area can be reused. It does not clear project files,

@@ -8,15 +8,17 @@ not a file that `jecode resume` can open. Use [saved sessions](SESSIONS.md) to
 continue work.
 
 The JSON uses `format: "jecode.conversation"` and `format_version: 1`. It
-includes the Jecode version, export time, model, effort, working directory,
-provider `messages` and local `events`. Messages retain the system prompt,
-user messages, completed assistant content and reasoning fields, tool calls
-and results. Events retain local command results, compaction summaries,
+includes the Jecode version, export time, backend, model, effort, working directory,
+conversation `messages` and local `events`. Messages retain the system prompt,
+user messages, completed assistant content, tool calls and results. New tool calls
+use Jecode's flat `id`, `name` and `arguments` fields. Native response metadata,
+including reasoning fields, stays in `jecode_origin` with its backend and model;
+legacy original messages retain their stored shape. Events retain local command results, compaction summaries,
 recovery and turn errors, including incomplete streamed text. An export taken
 during an operation can contain a tool call whose result has not arrived yet.
 Unsent composer text and paused drafts are not included.
 
-The configured Jecode API key is masked, but other conversation content is
+Credentials from registered backend accounts are masked, but other conversation content is
 retained. Review the export before sharing it. Bash tool results contain the
 last 64 KiB of each output stream and references to the complete streams in
 the personal session store; those files are not embedded in the JSON. See

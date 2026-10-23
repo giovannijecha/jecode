@@ -16,7 +16,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 16] = [
+pub const COMMANDS: [Command; 17] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -28,6 +28,12 @@ pub const COMMANDS: [Command; 16] = [
         description: "Resume or delete a conversation in this folder",
         tui_usage: "/resume [ID]",
         plain_usage: Some("/resume [ID]"),
+    },
+    Command {
+        name: "/backend",
+        description: "Choose the backend and model for this conversation",
+        tui_usage: "/backend [ID MODEL]",
+        plain_usage: Some("/backend [ID [MODEL]]"),
     },
     Command {
         name: "/model",
@@ -43,13 +49,13 @@ pub const COMMANDS: [Command; 16] = [
     },
     Command {
         name: "/routing",
-        description: "Choose how OpenRouter routes this conversation to endpoints",
+        description: "Choose endpoint routing when the backend supports it",
         tui_usage: "/routing",
         plain_usage: Some("/routing"),
     },
     Command {
         name: "/settings",
-        description: "Change saved defaults and the OpenRouter key",
+        description: "Change saved defaults and account credentials",
         tui_usage: "/settings",
         plain_usage: Some("/settings"),
     },

@@ -83,8 +83,40 @@ fn result(app: &App) -> Option<&str> {
     })
 }
 
-fn routing(app: &App) -> &Routing {
+fn routing(app: &App) -> Routing {
     app.agent.as_ref().unwrap().routing()
+}
+
+#[test]
+fn opening_routing_refreshes_an_expired_listing() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(200, listing())]);
+    let mut app = app(&home, &directory, &fixture, Routing::Auto);
+    app.agent
+        .as_mut()
+        .unwrap()
+        .offer_endpoints(crate::backend::Endpoints {
+            model: "fixture/model".into(),
+            list: vec![],
+            fetched: Instant::now() - crate::openrouter::routing::policy::FRESH,
+        });
+    app.dispatch("/routing".into()).unwrap();
+    assert_eq!(
+        app.state.selector.as_ref().unwrap().title,
+        "Loading endpoints…"
+    );
+    wait(&mut app);
+    assert!(
+        app.state
+            .selector
+            .as_ref()
+            .unwrap()
+            .options
+            .iter()
+            .any(|option| option.name == "one/fp8")
+    );
+    assert_eq!(fixture.finish().len(), 1);
 }
 
 #[test]
@@ -142,7 +174,7 @@ fn routing_focuses_the_current_choice_and_applies_from_the_next_request() {
     );
     app.input(Decoded::Text("1".into())).unwrap();
     assert!(app.state.selector.is_none());
-    assert_eq!(routing(&app), &Routing::Auto);
+    assert_eq!(routing(&app), Routing::Auto);
     assert_eq!(
         notice(&app),
         "Routing set to Auto — Best balance · was Endpoint two/fp8 · applies from the next request"
@@ -212,7 +244,7 @@ fn without_a_listing_auto_and_the_current_pin_remain_and_blocked_endpoints_keep_
         notice(&app),
         "notools/x does not accept tool calls, which every Jecode request includes · routing unchanged"
     );
-    assert_eq!(routing(&app), &pin);
+    assert_eq!(routing(&app), pin.clone());
     assert_eq!(fixture.finish().len(), 2);
 }
 
@@ -230,7 +262,7 @@ fn routing_selection_keeps_the_current_choice_when_reasoning_is_unsupported() {
     wait(&mut app);
     app.input(Decoded::Text("2".into())).unwrap();
     assert!(app.state.selector.is_some());
-    assert_eq!(routing(&app), &Routing::Auto);
+    assert_eq!(routing(&app), Routing::Auto);
     assert!(notice(&app).contains("does not accept reasoning"));
     assert_eq!(fixture.finish().len(), 1);
 }
@@ -265,7 +297,7 @@ fn escape_cancels_the_listing_request_and_results_for_a_previous_model_are_disca
         notice(&app),
         "Endpoints for fixture/previous discarded · the model changed meanwhile"
     );
-    assert_eq!(routing(&app), &Routing::Auto);
+    assert_eq!(routing(&app), Routing::Auto);
     assert!(fixture.finish().is_empty());
 }
 
@@ -290,7 +322,7 @@ fn default_routing_is_saved_per_model_without_changing_the_conversation_or_a_fai
         notice(&app),
         "Default routing for fixture/model: Endpoint one/fp8 · was Auto — Best balance · applies to new conversations and model switches"
     );
-    assert_eq!(routing(&app), &Routing::Auto);
+    assert_eq!(routing(&app), Routing::Auto);
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::Settings));
     assert_eq!(menu.selected, 2);
@@ -318,7 +350,7 @@ fn default_routing_is_saved_per_model_without_changing_the_conversation_or_a_fai
         app.state.selector.as_ref().unwrap().purpose,
         selector::Purpose::Settings
     ));
-    assert_eq!(routing(&app), &Routing::Auto);
+    assert_eq!(routing(&app), Routing::Auto);
     assert_eq!(fixture.finish().len(), 1);
 }
 

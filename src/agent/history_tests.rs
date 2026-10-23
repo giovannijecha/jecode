@@ -97,7 +97,7 @@ fn history_is_read_only_and_bad_references_never_fall_back_to_filesystem_access(
 }
 
 #[test]
-fn history_omits_provider_reasoning_and_masks_configured_credentials() {
+fn explicit_history_reads_preserve_native_metadata_and_mask_configured_credentials() {
     let directory = Directory::new();
     let agent = Agent::new(
         OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
@@ -110,7 +110,7 @@ fn history_omits_provider_reasoning_and_masks_configured_credentials() {
     ]));
     let page = read(&agent, "history:1", 0).encode();
     assert!(!page.contains("isolated-fixture-key"));
-    assert!(!page.contains("private-provider-state"));
+    assert!(page.contains("private-provider-state"));
     assert!(page.contains("[redacted]"));
     agent.messages.lock().unwrap().extend([
         Value::object([

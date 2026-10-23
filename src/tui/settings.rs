@@ -3,7 +3,7 @@ use super::{
     jobs::{CatalogPurpose, Job, ResultValue},
     selector::{Choice, Purpose, Selector, Setting},
 };
-use crate::{effort::Effort, openrouter::OpenRouter};
+use crate::{backend, effort::Effort};
 
 impl App {
     pub(super) fn choose(&mut self, choice: Choice) -> Result<(), String> {
@@ -169,7 +169,15 @@ impl App {
         match result {
             ResultValue::Catalog(purpose, result) => {
                 match result {
-                    Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
+                    Err(error) => match purpose {
+                        CatalogPurpose::Models {
+                            defaults,
+                            id: Some(id),
+                        } => {
+                            self.apply_selection(id, Effort::Default, defaults);
+                        }
+                        _ => self.finish_setting(Kind::Error, &error, vec![]),
+                    },
                     Ok(models) => {
                         self.catalog = models;
                         self.state.clear_progress();
@@ -203,11 +211,7 @@ impl App {
                                     self.state.selector =
                                         Some(Selector::efforts(model, defaults, Effort::Default));
                                 } else {
-                                    self.finish_setting(
-                                        Kind::Error,
-                                        &format!("Model not found or does not support tools: {id}"),
-                                        vec![],
-                                    );
+                                    self.apply_selection(id, Effort::Default, defaults);
                                 }
                             }
                             CatalogPurpose::Effort {
@@ -254,24 +258,31 @@ impl App {
                 Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
                 Ok(()) => {
                     let mut settings = self.config.settings.clone();
-                    settings.api_key = key;
+                    settings.select_backend(&self.config.settings.backend_id, key)?;
                     match self.config.store.save(&settings) {
                         Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
                         Ok(()) => {
                             let agent = self.agent.as_mut().unwrap();
-                            let mut client = OpenRouter::with_api(
-                                agent.api().with_key(settings.api_key.clone())?,
-                                agent.model().into(),
-                            )?;
-                            client.set_effort(agent.effort());
-                            agent.replace_client(client);
+                            if agent.backend_id() == settings.backend_id {
+                                let mut client = agent
+                                    .services()
+                                    .with_credential(settings.api_key.clone())?
+                                    .create(agent.model().into())?;
+                                client.set_effort(agent.effort());
+                                agent.replace_backend(client)?;
+                            } else {
+                                agent.register_backend(backend::Services::for_backend(
+                                    &settings.backend_id,
+                                    settings.api_key.clone(),
+                                )?);
+                            }
                             self.config.settings = settings;
                             self.archive = agent.archive();
                             self.catalog.clear();
                             self.refresh_context();
                             self.finish_setting(
                                 Kind::Notice,
-                                "OpenRouter key validated and saved",
+                                "API key validated and saved",
                                 vec![],
                             );
                         }
@@ -292,15 +303,24 @@ impl App {
             .text
             .trim()
             .to_string();
-        let api = self.agent.as_ref().unwrap().api().with_key(key.clone());
-        match api {
+        let backend_id = &self.config.settings.backend_id;
+        let services = if self.agent.as_ref().unwrap().backend_id() == backend_id {
+            self.agent
+                .as_ref()
+                .unwrap()
+                .services()
+                .with_credential(key.clone())
+        } else {
+            backend::Services::for_backend(backend_id, key.clone())
+        };
+        match services {
             Err(error) => self.warn(&error),
-            Ok(api) => {
+            Ok(services) => {
                 self.state.clear_notice();
                 let mut menu = Selector::loading();
-                menu.title = "Checking OpenRouter key…".into();
+                menu.title = "Checking API key…".into();
                 self.state.selector = Some(menu);
-                self.job = Some(Job::key(api, key));
+                self.job = Some(Job::key(services, key));
             }
         }
     }

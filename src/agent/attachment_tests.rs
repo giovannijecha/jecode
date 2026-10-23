@@ -299,7 +299,7 @@ fn legacy_inline_pdf_image_is_hidden_from_history_reads() {
     });
     let content = history.get("content").and_then(Value::as_str).unwrap();
     assert!(content.contains("The report says hello."));
-    assert!(content.contains("[inline PDF image omitted]"));
+    assert!(content.contains("[inline binary data omitted]"));
     assert!(!content.contains("base64,"));
 }
 
@@ -330,7 +330,7 @@ fn text_only_model_does_not_budget_for_unsent_image_parts() {
         + crate::tools::definitions().encode().len()
         + agent.request_environment().len();
     assert_eq!(agent.context_estimate(&messages), bare);
-    let request = crate::attachments::provider::materialize(
+    let request = crate::openrouter::attachments::materialize(
         projected,
         agent.tools.attachments(),
         agent.client.inputs(),

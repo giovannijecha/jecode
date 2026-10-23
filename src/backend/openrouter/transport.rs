@@ -1,4 +1,4 @@
-use super::{Api, BASE_URL, api_error, failure::Failure, headers::Headers};
+use super::{Api, BASE_URL, Failure, api_error, headers::Headers};
 use crate::json::Value;
 use crate::{json, process};
 use std::process::Command;
@@ -48,27 +48,26 @@ impl Api {
         }
         let url = format!("{}{path}", self.base_url);
         let mut command = Command::new(curl_executable());
-        command
-            .args([
-                "--disable",
-                "--silent",
-                "--show-error",
-                "--no-buffer",
-                "--request",
-                method,
-                "--connect-timeout",
-                "10",
-                "--suppress-connect-headers",
-                "--dump-header",
-                "-",
-                "--write-out",
-                "\n%{http_code}",
-                "--url",
-                &url,
-                "--config",
-                "-",
-            ])
-            .env_remove("OPENROUTER_API_KEY");
+        command.args([
+            "--disable",
+            "--silent",
+            "--show-error",
+            "--no-buffer",
+            "--request",
+            method,
+            "--connect-timeout",
+            "10",
+            "--suppress-connect-headers",
+            "--dump-header",
+            "-",
+            "--write-out",
+            "\n%{http_code}",
+            "--url",
+            &url,
+            "--config",
+            "-",
+        ]);
+        crate::auth::isolate_environment(&mut command);
         if self.base_url == BASE_URL {
             command.args(["--proto", "=https"]);
         } else {

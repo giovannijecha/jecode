@@ -163,11 +163,11 @@ fn command(bash: &Path, root: &Path, text: &str, temporary: Option<&Path>) -> Co
     command
         .args(["-c", text])
         .current_dir(root)
-        .env_remove("OPENROUTER_API_KEY")
         .env_remove("BASH_ENV")
         .env_remove("ENV")
         .env_remove("JECODE_TMP")
         .env("TERM", "dumb");
+    crate::auth::isolate_environment(&mut command);
     if let Some(temporary) = temporary {
         let temporary = crate::scratch::environment_path(temporary);
         command

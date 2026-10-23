@@ -1,19 +1,6 @@
 use super::{Failure, OpenRouter};
+pub use crate::backend::Limits;
 use crate::json::Value;
-
-#[derive(Clone, Copy, Debug)]
-pub struct Limits {
-    pub context: usize,
-    pub output: Option<usize>,
-}
-
-impl Limits {
-    pub fn output_allowance(self, input_tokens: usize) -> usize {
-        self.output
-            .unwrap_or(self.context)
-            .min(self.context.saturating_sub(input_tokens))
-    }
-}
 
 #[cfg(test)]
 mod tests;

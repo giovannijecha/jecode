@@ -15,6 +15,7 @@ pub struct Summary {
     pub id: String,
     pub title: String,
     pub updated: u64,
+    pub backend: String,
     pub model: String,
 }
 
@@ -27,7 +28,7 @@ impl Summary {
             3600..86400 => format!("{}h ago", age / 3600),
             _ => format!("{}d ago", age / 86400),
         };
-        format!("{age} · {} · {}", self.model, self.id)
+        format!("{age} · {} / {} · {}", self.backend, self.model, self.id)
     }
 }
 
@@ -131,6 +132,7 @@ impl Store {
                     listing.sessions.push(Summary {
                         title: document.title(),
                         updated: document.updated,
+                        backend: document.backend,
                         model: document.model,
                         id: document.id,
                     });

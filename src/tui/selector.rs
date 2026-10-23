@@ -1,7 +1,7 @@
 use super::editor::Editor;
 use crate::{
+    backend::{Entry, Model, Routing},
     effort::Effort,
-    openrouter::{Model, Routing, routing::Entry},
     session::commands::match_text,
 };
 
@@ -236,7 +236,7 @@ impl Selector {
                     choice: Choice::Setting(Setting::AutoCompact),
                 },
                 OptionRow {
-                    name: "OpenRouter key".into(),
+                    name: "API key".into(),
                     description: "Configured · replace key (hidden input)".into(),
                     choice: Choice::Setting(Setting::Key),
                 },
@@ -298,7 +298,7 @@ impl Selector {
         }
     }
     pub fn key() -> Self {
-        Self::new("OpenRouter key", Purpose::Key, vec![])
+        Self::new("API key", Purpose::Key, vec![])
     }
     pub fn auto_compact(current: u8) -> Self {
         let mut menu = Self::new("Auto-compact at", Purpose::AutoCompact, vec![]);

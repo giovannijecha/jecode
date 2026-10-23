@@ -166,9 +166,15 @@ fn the_serving_provider_and_reported_usage_survive_streaming() {
     let mut stream = Stream::default();
     stream.feed(wire.as_bytes(), &mut |_| Ok(())).unwrap();
     let completion = stream.finish(&wire).unwrap();
-    assert_eq!(completion.provider.as_deref(), Some("Baidu"));
-    let mut charges = crate::openrouter::Charges::default();
-    charges.record(completion.provider.as_deref(), completion.usage.as_ref());
+    assert_eq!(
+        completion
+            .charges
+            .as_ref()
+            .and_then(|charges| charges.providers.first())
+            .map(String::as_str),
+        Some("Baidu")
+    );
+    let charges = completion.charges.as_ref().unwrap();
     assert_eq!(
         charges.describe().unwrap(),
         "Served by Baidu · $0.0004 charged · 64 cached"
@@ -180,7 +186,14 @@ fn the_serving_provider_and_reported_usage_survive_streaming() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(plain.provider.as_deref(), Some("DeepInfra"));
+    assert_eq!(
+        plain
+            .charges
+            .as_ref()
+            .and_then(|charges| charges.providers.first())
+            .map(String::as_str),
+        Some("DeepInfra")
+    );
 }
 
 #[test]
@@ -189,11 +202,13 @@ fn routing_metadata_reports_only_the_selected_provider_for_json_and_streams() {
     let response = format!(
         r#"{{"choices":[{{"finish_reason":"stop","message":{{"role":"assistant","content":"ok"}}}}],"openrouter_metadata":{metadata}}}"#
     );
+    let parsed = parse_completion(crate::json::parse(&response).unwrap()).unwrap();
     assert_eq!(
-        parse_completion(crate::json::parse(&response).unwrap())
-            .unwrap()
-            .provider
-            .as_deref(),
+        parsed
+            .charges
+            .as_ref()
+            .and_then(|charges| charges.providers.first())
+            .map(String::as_str),
         Some("Baidu")
     );
     let wire = delta(
@@ -206,12 +221,16 @@ fn routing_metadata_reports_only_the_selected_provider_for_json_and_streams() {
     let mut stream = Stream::default();
     stream.feed(wire.as_bytes(), &mut |_| Ok(())).unwrap();
     let completion = stream.finish(&wire).unwrap();
-    assert_eq!(completion.provider.as_deref(), Some("Baidu"));
     assert_eq!(
         completion
-            .usage
+            .charges
             .as_ref()
-            .and_then(|usage| usage.get("cost")),
-        Some(&Value::number(0.002))
+            .and_then(|charges| charges.providers.first())
+            .map(String::as_str),
+        Some("Baidu")
+    );
+    assert_eq!(
+        completion.charges.as_ref().map(|charges| charges.cost),
+        Some(0.002)
     );
 }

@@ -4,7 +4,7 @@
 //! attachment references for binary content. Request materialization restores
 //! those URLs so OpenRouter can reuse the parsed result on later turns.
 
-use super::{Pool, base64};
+use crate::attachments::{Pool, base64};
 use crate::json::Value;
 
 const REFERENCE: &str = "jecode_attachment";
@@ -75,7 +75,7 @@ fn restore_value(value: &mut Value, pool: Option<&Pool>) -> Result<(), String> {
             if let Some(reference) = fields.get(REFERENCE).and_then(Value::as_str) {
                 let id = reference
                     .strip_prefix("attachment:")
-                    .filter(|id| super::valid_id(id))
+                    .filter(|id| crate::attachments::valid_id(id))
                     .ok_or("Invalid PDF annotation reference")?;
                 let media = fields
                     .get("media")
@@ -100,35 +100,6 @@ fn restore_value(value: &mut Value, pool: Option<&Pool>) -> Result<(), String> {
         _ => {}
     }
     Ok(())
-}
-
-/// Historical sessions may already contain inline annotation images. Hide
-/// those bytes from the history read tool without changing provider replay.
-pub fn history(message: &mut Value) {
-    if let Value::Object(fields) = message
-        && let Some(annotations) = fields.get_mut("annotations")
-    {
-        history_value(annotations);
-    }
-}
-
-fn history_value(value: &mut Value) {
-    match value {
-        Value::String(url) if data_url(url).is_some() => {
-            *value = Value::string("[inline PDF image omitted]");
-        }
-        Value::Array(items) => {
-            for item in items {
-                history_value(item);
-            }
-        }
-        Value::Object(fields) => {
-            for value in fields.values_mut() {
-                history_value(value);
-            }
-        }
-        _ => {}
-    }
 }
 
 fn data_url(url: &str) -> Option<(&str, &str)> {

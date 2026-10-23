@@ -1,20 +1,8 @@
 //! The routing choices offered for one model, shared by every interface.
 
 use super::{Routing, compatible, describe, explain, guard};
-use crate::openrouter::endpoints::Endpoints;
-
-/// One selectable routing with the words that present it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Entry {
-    pub routing: Routing,
-    pub name: String,
-    /// Prefixed with `current · ` for the routing in effect.
-    pub description: String,
-    /// What choosing it does.
-    pub help: String,
-    /// Why every request would fail with it, when the listing shows that.
-    pub problem: Option<String>,
-}
+use crate::backend::Endpoints;
+use crate::backend::Entry;
 
 /// Auto first, then listed endpoints in OpenRouter's order with compatible
 /// ones first, then a current choice the listing does not show.

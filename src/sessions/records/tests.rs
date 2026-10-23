@@ -32,12 +32,15 @@ fn records_keep_event_order_at_each_boundary_and_match_reused_tool_ids() {
     doc.messages.push(message("system", "Fixture"));
     doc.messages.push(message("user", "Request"));
     for name in ["read", "write"] {
+        let legacy = tool_call("reused", name, Value::object([]));
+        let call = if name == "write" {
+            ToolCall::parse(&legacy).unwrap().value()
+        } else {
+            legacy
+        };
         doc.messages.push(Value::object([
             ("role", Value::string("assistant")),
-            (
-                "tool_calls",
-                Value::Array(vec![tool_call("reused", name, Value::object([]))]),
-            ),
+            ("tool_calls", Value::Array(vec![call])),
         ]));
         doc.messages.push(Value::object([
             ("role", Value::string("tool")),

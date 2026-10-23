@@ -1,5 +1,6 @@
 use super::{Document, document::string};
 use crate::{
+    conversation::ToolCall,
     events::tool_summary,
     json::{self, Value},
 };
@@ -61,15 +62,15 @@ impl Document {
             }
             if let Some(batch) = message.get("tool_calls").and_then(Value::as_array) {
                 for call in batch {
-                    calls.insert(string(call, "id").unwrap(), call);
+                    let call = ToolCall::parse(call).unwrap();
+                    calls.insert(call.id.clone(), call);
                 }
             }
             if role == "tool" {
                 let id = string(message, "tool_call_id").unwrap();
                 let call = calls.remove(id).unwrap();
-                let function = call.get("function").unwrap();
-                let name = string(function, "name").unwrap();
-                let arguments = string(function, "arguments").unwrap();
+                let name = call.name.as_str();
+                let arguments = call.arguments.as_str();
                 let result = json::parse(string(message, "content").unwrap()).unwrap();
                 latest_tool = Some(records.len());
                 records.push(Record::Tool {

@@ -96,6 +96,7 @@ fn sessions() -> Vec<Summary> {
         id: id.into(),
         title: title.into(),
         updated: now - age * 1000,
+        backend: "openrouter".into(),
         model: MODEL.into(),
     })
     .collect()
@@ -184,13 +185,14 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
 
     let listing = endpoints();
     let legend = crate::tui::routing::LEGEND.to_owned();
-    let mut charges = Charges::default();
-    charges.record(
-        Some("DeepInfra"),
-        crate::json::parse(r#"{"cost":0.0031,"prompt_tokens_details":{"cached_tokens":12000}}"#)
-            .ok()
-            .as_ref(),
-    );
+    let charges = Charges {
+        providers: vec!["DeepInfra".into()],
+        requests: 1,
+        priced: 1,
+        cost: 0.0031,
+        cached: 12_000,
+        ..Charges::default()
+    };
     let served = charges.describe().unwrap();
 
     vec![

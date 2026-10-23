@@ -1,17 +1,16 @@
 use super::{Prompter, answer};
-use crate::openrouter::{Api, Model, validate_model};
+use crate::backend::{Model, Services};
+use crate::config::validate_model;
 
 pub fn choose_model(
-    api: &Api,
+    services: &Services,
     current: Option<&str>,
     ui: &mut impl Prompter,
 ) -> Result<Option<String>, String> {
     if let Some(model) = current {
-        ui.message(&api.redact(&format!("Current model: {model}. Enter keeps it.")))?;
+        ui.message(&services.redact(&format!("Current model: {model}. Enter keeps it.")))?;
     }
-    ui.message(
-        "Search tool-capable models by name. Use =provider/model-id to enter a tool-capable ID directly.",
-    )?;
+    ui.message("Search tool-capable models by name. Use =model-id to enter an ID directly.")?;
     loop {
         let Some(query) = answer(ui.input("Model search: ")?) else {
             return Ok(None);
@@ -32,13 +31,13 @@ pub fn choose_model(
                 }
             }
         }
-        ui.message("Searching OpenRouter...")?;
-        let models = match api.models(&query) {
+        ui.message("Searching models...")?;
+        let models = match services.models(&query) {
             Ok(models) => models,
             Err(error) => {
-                ui.message(&format!(
-                    "{error}\nRetry the search or enter =provider/model-id."
-                ))?;
+                ui.message(
+                    &services.redact(&format!("{error}\nRetry the search or enter =model-id.")),
+                )?;
                 continue;
             }
         };
@@ -47,7 +46,7 @@ pub fn choose_model(
             continue;
         }
         for (index, model) in models.iter().enumerate() {
-            ui.message(&api.redact(&format!(
+            ui.message(&services.redact(&format!(
                 "{}. {} ({}){}",
                 index + 1,
                 clean(&model.name),

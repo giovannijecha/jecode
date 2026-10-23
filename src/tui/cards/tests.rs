@@ -32,6 +32,48 @@ fn ok() -> Value {
 }
 
 #[test]
+fn web_and_browser_cards_show_action_target_and_result() {
+    let cases = [
+        (
+            "web",
+            Value::object([
+                ("action", Value::string("fetch")),
+                ("url", Value::string("https://example.org/")),
+            ]),
+            Value::object([("status", Value::number(200)), ("bytes", Value::number(42))]),
+            "Web(fetch https://example.org/)",
+            "HTTP 200 · 42 bytes",
+        ),
+        (
+            "browser",
+            Value::object([
+                ("action", Value::string("screenshot")),
+                ("tab_id", Value::string("tab-1")),
+            ]),
+            Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]),
+            "Browser(screenshot tab-1)",
+            "screenshot saved to tmp:browser/shot.png",
+        ),
+    ];
+    for (name, arguments, result, title, outcome) in cases {
+        let rows = render(
+            Tool {
+                name,
+                arguments: &arguments,
+                summary: &crate::events::tool_summary(name, &result),
+                result: Some(&result),
+                change: None,
+                presentation: &Presentation::default(),
+            },
+            80,
+        );
+        let text = plain(&rows);
+        assert!(text.contains(title), "{text}");
+        assert!(text.contains(outcome), "{text}");
+    }
+}
+
+#[test]
 fn title_and_result_are_left_aligned_without_a_tree_or_status_column() {
     let rows = draw(
         "bash",

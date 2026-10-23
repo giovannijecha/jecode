@@ -1,8 +1,8 @@
 use super::Agent;
 use crate::{
+    backend::ToolCall,
     events::{Event, EventSink, tool_summary},
     json::{self, Value},
-    openrouter::ToolCall,
     sessions::Stage,
     tools::{Begun, Execution},
 };

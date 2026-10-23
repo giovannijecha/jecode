@@ -58,7 +58,7 @@ fn native_curl_sends_json_and_bearer_auth() {
             .as_array()
             .unwrap()
             .len(),
-        6
+        8
     );
     assert!(
         requests[0]

@@ -11,16 +11,17 @@ Paths are relative to `src/`.
 | Area | Modules |
 | --- | --- |
 | Entry and setup | `main.rs`, `cli.rs`, `bootstrap.rs`, `setup/` |
-| Settings and model effort | `config/`, `effort.rs` |
-| Agent and context | `agent.rs`, `agent/`, `context.rs`, `context/`, `events.rs` |
+| Settings, credentials and model effort | `config/`, `auth/`, `effort.rs` |
+| Agent, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
+| Local web and browser | `web/`, `browser/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments | `attachments/`, `tools/attachment.rs` |
-| OpenRouter | `openrouter/` |
+| Model backends | `backend/`, `backend/openrouter/` |
 | Interfaces | `session.rs`, `session/`, `console.rs`, `tui/` |
 | Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs` |
 
@@ -32,8 +33,9 @@ Paths are relative to `src/`.
    subdirectories before recording the request. Each file carries its directory
    scope; the combined snapshot applies throughout the turn, including after
    compaction. Parent directories are never searched.
-3. The context layer projects the active conversation for OpenRouter. The client
-   streams text, reasoning fields and tool calls through agent events.
+3. The context layer projects the active conversation. The selected `Backend`
+   translates that canonical transcript and neutral tool catalog into its wire
+   request, then streams text and progress through agent events.
 4. The agent saves tool boundaries, executes calls and records their results.
    Up to four adjacent eligible read calls run together after the complete
    model response; history and skill reads, or any non-read call, break the
@@ -44,6 +46,12 @@ Paths are relative to `src/`.
 
 The harness supplies tools, context and history. It adds no completion gates,
 repeated-command refusals or model-output validation.
+The `web` tool uses system curl for HTTP(S) requests and keeps responses and
+crawl state in the session temporary area. The `browser` tool launches an
+installed Chromium-based executable and communicates with its local DevTools
+endpoint. Isolated profiles and browser artifacts use the session area; named
+profiles use dedicated storage under the Jecode home. Neither path uses an
+OpenRouter web service. Browser and curl availability are native host boundaries.
 
 File writes and exact edits capture contextual changes at execution time.
 `file_change.rs` owns their text alignment and serializable hunks, independently
@@ -212,17 +220,38 @@ Native fixture commands and host-specific checks are in [platform verification](
 
 ## Provider transport
 
-`openrouter/` uses the fixed HTTPS OpenRouter API. Requests and credentials reach
-curl through stdin with curl's default configuration disabled and TLS certificate
-validation enabled. Test builds can use loopback endpoints.
+`backend/` owns the inference contract: completion text and flat tool calls,
+typed input/output/cached-token usage, context limits, progress updates and
+failures. The agent can retain its transcript, execute tools, compact context
+and save a session without importing an OpenRouter type. `conversation/` keeps
+portable message fields and tags native extras with their backend and model.
+Only the matching adapter receives those extras on a later request. Legacy
+untagged OpenRouter messages are assigned their archived origin on a transient
+request copy; the saved originals remain intact. `auth/` represents user-scoped
+credential material and account identity, while `backend::Services` exposes
+catalog, credential checks and optional routing choices to setup and the TUI.
+The existing user-scoped configuration stays readable.
 
-The client preserves assistant content, tool calls and ordered reasoning fields
-for compatible follow-up requests. It applies the selected model, effort and
-endpoint routing to ordinary and summary requests. Summary requests ask for
+`backend/openrouter/` uses the fixed HTTPS OpenRouter API. Requests and
+credentials reach curl through stdin with curl's default configuration disabled
+and TLS certificate validation enabled. Test builds can use loopback endpoints.
+Native helpers and tool subprocesses remove credential environment variables
+registered by the available backends before launch.
+
+The adapter wraps flat tool calls and the neutral tool catalog in OpenRouter's
+function-call wire shape. It retains ordered reasoning fields and any native
+tool-call extensions only for a matching backend and model. Attachment references
+are materialized at this boundary; PDFs use native model input when supported
+and OpenRouter's free Cloudflare parser otherwise. The adapter applies the model,
+effort and endpoint routing to ordinary and summary requests. Summary requests ask for
 plain text without `response_format`; Jecode sets no explicit prompt-cache
 markers. Provider diagnostics retain the underlying code, parameter and message
 after credential masking and length bounding. See
 [configuration](../usage/CONFIGURATION.md) for routing and overrides.
+
+`agent/backend_tests.rs` exercises two synthetic backends with different wire
+layouts through tool execution, compaction, save, resume and a failed switch.
+The OpenRouter adapter keeps loopback fixtures for its HTTP and streaming path.
 
 Auto routing keeps OpenRouter fallbacks. With enough fresh comparable endpoint
 statistics, it requests throughput near or above half the median and first-token

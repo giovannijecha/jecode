@@ -9,7 +9,10 @@ fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent
         .prepare_turn("Continue the current inspection")
         .unwrap();
     agent.context.observe(
-        Some(&Value::object([("prompt_tokens", Value::number(16635))])),
+        Some(&crate::backend::Usage {
+            input_tokens: Some(16635),
+            ..Default::default()
+        }),
         2,
     );
     agent.context.calibrate(73239);
