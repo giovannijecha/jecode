@@ -141,17 +141,11 @@ impl Session {
 
     pub fn command_scoped_cancellable(
         &self,
-        _text: &str,
         paths: &[String],
         cancellation: &Cancellation,
     ) -> CommandGuard {
         let capture = if paths.is_empty() {
-            Ok(Capture {
-                reference: None,
-                created: 0,
-                saved: 0,
-                partial: Vec::new(),
-            })
+            Ok(Capture::default())
         } else {
             self.store().and_then(|store| {
                 let exact = exact_paths(store, paths);
@@ -258,18 +252,7 @@ fn exact_paths(store: &Store, requested: &[String]) -> Option<Vec<String>> {
 }
 
 fn recursive_directory(metadata: &fs::Metadata) -> bool {
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 == 0
-    }
-    #[cfg(not(windows))]
-    {
-        true
-    }
+    metadata.is_dir() && !crate::disk::linked(metadata)
 }
 
 pub struct FileGuard<'a> {

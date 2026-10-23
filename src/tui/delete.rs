@@ -88,19 +88,11 @@ impl App {
                 self.agent.as_ref().unwrap().record_local_details(
                     &format!("/resume · delete {}", job.id),
                     &text,
-                    if report.legacy_references > 0 {
-                        "warning"
-                    } else {
-                        "notice"
-                    },
+                    "notice",
                     &[],
                 );
                 self.state.notify(Feedback::result(
-                    if report.legacy_references > 0 {
-                        Kind::Warning
-                    } else {
-                        Kind::Notice
-                    },
+                    Kind::Notice,
                     self.archive.redactor.text(&text),
                 ));
                 if let Err(error) = self.agent.as_ref().unwrap().save_session() {

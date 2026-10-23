@@ -338,22 +338,11 @@ fn commands(state: &State, columns: usize, height: usize) -> (Vec<Line>, Option<
         .position(|line| line.background == Some(SELECTED_SURFACE));
     let working = state.activity.is_some();
     let immediate = if state.suggestions.visible {
-        matches!(
-            state.suggestions.chosen(),
-            Some("/copy" | "/drafts" | "/terminal")
-        )
+        state.suggestions.chosen()
     } else {
-        state
-            .editor
-            .text
-            .split_whitespace()
-            .next()
-            .is_some_and(|name| {
-                ["/copy", "/drafts", "/terminal"]
-                    .iter()
-                    .any(|command| name.eq_ignore_ascii_case(command))
-            })
-    };
+        state.editor.text.split_whitespace().next()
+    }
+    .is_some_and(crate::tui::commands::immediate);
     let action = if working && !immediate {
         "queue"
     } else {

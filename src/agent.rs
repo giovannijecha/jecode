@@ -193,7 +193,7 @@ impl Agent {
             self.prepare_turn(prompt)?;
         }
         self.prepared = None;
-        // Workspace reconciliation may read many files. Run it here on the
+        // Endpoint refresh may wait on the network. Run it here on the
         // execution worker, not while the TUI prepares the submitted prompt.
         self.prepare_routing()?;
         let limits = self.model_limits(events)?;

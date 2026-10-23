@@ -12,7 +12,7 @@ mod unix;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub(crate) use windows::helper as compile_helper;
+pub(crate) use windows::{CREATE_NO_WINDOW, helper as compile_helper};
 
 #[derive(Default)]
 struct Capture {
@@ -123,7 +123,6 @@ fn run_inner(
 /// cancellation that owns the running process.
 pub fn start_logged(
     command: &mut Command,
-    output_limit: usize,
     cancellation: &Cancellation,
     spools: [crate::output::Spool; 2],
 ) -> Result<Started, RunError> {
@@ -133,7 +132,8 @@ pub fn start_logged(
         None,
         cancellation,
         CaptureOptions {
-            limit: output_limit,
+            // Output lives in the spools; nothing is kept in memory.
+            limit: 0,
             tail: true,
             spools: [Some(stdout), Some(stderr)],
             observed: false,

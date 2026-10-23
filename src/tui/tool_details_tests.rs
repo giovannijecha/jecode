@@ -41,7 +41,7 @@ fn finish(app: &mut App) {
     }
 }
 
-fn flags(state: &State) -> Vec<Option<bool>> {
+fn flags(state: &State) -> Vec<bool> {
     state
         .items
         .iter()
@@ -125,37 +125,37 @@ fn native_ctrl_o_waits_for_the_whole_turn_preserves_drafts_and_resets_on_accepte
     key(&mut app, 79, 4);
     assert!(!app.state.tool_details.expanded);
     finish(&mut app);
-    assert_eq!(flags(&app.state), [None, None, None]);
+    assert_eq!(flags(&app.state), [false, false, false]);
     assert!(app.state.tool_details_available());
     app.state.suggestions.panel = true;
     key(&mut app, 79, 4);
     assert!(!app.state.tool_details.expanded && app.state.suggestions.panel);
     app.state.suggestions.panel = false;
     key(&mut app, 79, 4);
-    assert_eq!(flags(&app.state), [Some(true); 3]);
+    assert_eq!(flags(&app.state), [true; 3]);
     app.input(Decoded::Text("next draft".into())).unwrap();
-    assert_eq!(flags(&app.state), [Some(true); 3]);
+    assert_eq!(flags(&app.state), [true; 3]);
     key(&mut app, 32, 0);
     assert_eq!(app.state.editor.text, "next draft ");
-    assert_eq!(flags(&app.state), [Some(true); 3]);
+    assert_eq!(flags(&app.state), [true; 3]);
     app.state.editor.replace(String::new());
     key(&mut app, 13, 0);
-    assert_eq!(flags(&app.state), [Some(true); 3]);
+    assert_eq!(flags(&app.state), [true; 3]);
     app.state.editor.replace("Next request.".into());
     std::fs::write(directory.path().join("JECODE.md"), [255]).unwrap();
     key(&mut app, 13, 0);
     assert!(app.worker.is_none());
-    assert_eq!(flags(&app.state), [Some(true); 3]);
+    assert_eq!(flags(&app.state), [true; 3]);
     std::fs::remove_file(directory.path().join("JECODE.md")).unwrap();
     assert_eq!(app.state.queue.paused.len(), 1);
     app.state.editor.replace("Retry next request.".into());
     key(&mut app, 13, 0);
     assert!(app.worker.is_some());
-    assert_eq!(flags(&app.state), [None; 3]);
+    assert_eq!(flags(&app.state), [false; 3]);
     finish(&mut app);
     assert!(!app.state.tool_details_available());
     key(&mut app, 79, 4);
-    assert_eq!(flags(&app.state), [None; 3]);
+    assert_eq!(flags(&app.state), [false; 3]);
     assert_eq!(fixture.finish().len(), 4);
 }
 
@@ -190,9 +190,9 @@ fn an_errored_turn_can_expand_its_completed_tools() {
     assert_eq!(app.state.status, "Turn interrupted");
     assert!(app.state.tool_details_available());
     key(&mut app, 79, 4);
-    assert_eq!(flags(&app.state), [Some(true)]);
+    assert_eq!(flags(&app.state), [true]);
     key(&mut app, 79, 4);
-    assert_eq!(flags(&app.state), [None]);
+    assert_eq!(flags(&app.state), [false]);
     assert_eq!(fixture.finish().len(), 2);
 }
 
@@ -260,11 +260,11 @@ fn resume_keeps_one_execution_turn_across_accepted_follow_up_messages() {
         .unwrap();
     resumed.persistence = resumed.agent.as_ref().unwrap().sessions();
     resumed.resume_session(&id);
-    assert_eq!(flags(&resumed.state), [None, None]);
+    assert_eq!(flags(&resumed.state), [false, false]);
     key(&mut resumed, 79, 4);
-    assert_eq!(flags(&resumed.state), [Some(true), Some(true)]);
+    assert_eq!(flags(&resumed.state), [true, true]);
     key(&mut resumed, 79, 4);
-    assert_eq!(flags(&resumed.state), [None, None]);
+    assert_eq!(flags(&resumed.state), [false, false]);
     let requests = fixture.finish();
     assert_eq!(requests.len(), 3);
     assert!(
@@ -293,7 +293,7 @@ fn all_cards_in_a_turn_toggle_together_and_previous_turns_keep_their_previews() 
     complete(&mut state);
     let compact = state.rows();
     assert_eq!(state.toggle_tools(), Some((true, 1)));
-    assert_eq!(flags(&state), [None, Some(true), Some(true)]);
+    assert_eq!(flags(&state), [false, true, true]);
     assert_eq!(state.rows()[0], previous);
     assert_eq!(state.toggle_tools(), Some((false, 1)));
     assert_eq!(state.rows(), compact);

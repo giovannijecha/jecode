@@ -56,13 +56,11 @@ not rerun either kind. Partial streamed text is retained as incomplete
 evidence; the conversation reopens ready for a new request. A forced exit can
 lose the latest unsaved draft edit or streaming tail.
 
-Older version 1 snapshots and backups remain readable. Explicit resume
-migrates them to the current journal while preserving the originals. A damaged
-legacy primary can be recovered from a valid backup. An incomplete final
-journal transaction is recovered from the last complete checkpoint, with the
-incomplete bytes preserved separately. Corrupt complete records, unsupported
-formats and records belonging to another folder are reported and left
-unchanged. Save and recovery errors remain visible; retry only after checking
+An incomplete final journal transaction is recovered from the last complete
+checkpoint, with the incomplete bytes preserved separately. Corrupt complete
+records, unsupported formats and records belonging to another folder are
+reported and left unchanged. Session files from before the version 3 journal
+are not read. Save and recovery errors remain visible; retry only after checking
 the reported files. See [architecture](../development/ARCHITECTURE.md) for the
 journal format and transaction details.
 
@@ -74,14 +72,13 @@ deletion, including when the last saved session is removed. In `--plain`, enter
 `d NUMBER` or `d ID` in `/resume`, then type `delete` to confirm. A session
 open in another process cannot be deleted.
 
-Deletion removes that session's journal, legacy snapshots and backups,
-recovery copies, listing cache, [temporary area](TEMPORARY.md) and owned
-complete tool outputs. Attachments no longer referenced by another saved
-session are also eligible for removal; see
+Deletion removes that session's journal, recovery copies, listing cache,
+[temporary area](TEMPORARY.md) and owned complete tool outputs. Attachments no
+longer referenced by another saved session are also eligible for removal; see
 [attachment retention](ATTACHMENTS.md#storage-and-retention). Project files and
-manual [exports](EXPORT.md) remain. Older shared output files cannot be
-reliably assigned to a session and may remain; Jecode reports retained
-references.
+manual [exports](EXPORT.md) remain.
+Original snapshots and backups left by a previous migration are removed too;
+an unreadable or foreign original blocks deletion and remains untouched.
 
 Deleting the current session opens a fresh conversation with the saved
 model and effort defaults. Its context and sent prompt history are cleared;
@@ -89,8 +86,8 @@ unsent composer text, queued messages and paused drafts are kept. The new
 session is saved when a request is sent or inherited input contains
 attachments. If deletion fails partway through, some owned files may already
 be gone. Read the error and retry from `/resume`; Jecode removes the last valid
-conversation record last. Foreign or unreadable legacy records block deletion
-and remain untouched.
+conversation record last. A foreign or unreadable journal blocks deletion and
+remains untouched.
 
 Saved sessions have no automatic retention period. Temporary files and their
 explicit cleanup are described in [TEMPORARY.md](TEMPORARY.md); exports are

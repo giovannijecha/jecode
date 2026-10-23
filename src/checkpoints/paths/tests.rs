@@ -90,6 +90,8 @@ fn trailing_directory_separator_selects_a_complete_scope_and_exact_entry() {
             .collect(),
         roots: Vec::new(),
         excluded: Vec::new(),
+        ignored: Vec::new(),
+        ignore_rules: IgnoreRules::default(),
         partial: Vec::new(),
     };
     assert_eq!(

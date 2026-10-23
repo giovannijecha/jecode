@@ -1,6 +1,6 @@
 use super::{Area, MARKER, inspect};
 use crate::json::{self, Value};
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -96,14 +96,9 @@ impl Removal {
             }
             Err(error) => return Err(error.to_string()),
         }
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options
+        let mut file = crate::disk::private_options()
+            .write(true)
+            .create_new(true)
             .open(&marker)
             .map_err(|error| format!("Could not recreate temporary ownership: {error}"))?;
         file.write_all(self.identity.encode().as_bytes())

@@ -3,17 +3,12 @@ use crate::json::Value;
 /// A rejected edit supplies bounded literal context, never a fuzzy replacement.
 pub(super) fn result(content: &str, error: &str) -> Value {
     const LIMIT: usize = 8192;
-    let mut end = content.len().min(LIMIT);
-    if content.len() > LIMIT {
-        end = LIMIT / 2;
-    }
-    while !content.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut start = content.len().saturating_sub(LIMIT / 2);
-    while !content.is_char_boundary(start) {
-        start += 1;
-    }
+    let end = if content.len() > LIMIT {
+        content.floor_char_boundary(LIMIT / 2)
+    } else {
+        content.len()
+    };
+    let start = content.ceil_char_boundary(content.len().saturating_sub(LIMIT / 2));
     let mut result = Value::object([
         ("error", Value::string(error)),
         ("outcome", Value::string("not_started")),

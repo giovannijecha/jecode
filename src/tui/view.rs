@@ -3,7 +3,7 @@ mod footer;
 mod information;
 mod menus;
 mod panel;
-mod processes;
+pub(super) mod processes;
 use super::{line::Line, state::State, text, theme::MUTED};
 
 pub struct Frame {
@@ -22,9 +22,9 @@ pub(super) struct Chrome {
 }
 
 impl Chrome {
-    pub fn capacity(&self, height: usize, has_content: bool) -> usize {
+    pub fn capacity(&self, height: usize) -> usize {
         let available = height.saturating_sub(self.lines.len());
-        available.saturating_sub(usize::from(has_content && available >= 2))
+        available.saturating_sub(usize::from(available >= 2))
     }
 }
 
@@ -45,7 +45,6 @@ pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
     let mut history = state.rows();
     let end = state.settled_len();
     let pending = history.split_off(end);
-    let has_content = history.iter().chain(&pending).any(|rows| !rows.is_empty());
     let mut frame = lower(
         state,
         model,
@@ -55,7 +54,6 @@ pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
             .chain(history.iter().flatten().cloned())
             .chain(pending.into_iter().flatten())
             .collect(),
-        has_content,
         state.height,
         false,
     );
@@ -89,24 +87,18 @@ pub(super) fn lower(
     model: &str,
     directory: &str,
     live: Vec<Line>,
-    has_content: bool,
     height: usize,
     back_to_bottom: bool,
 ) -> Frame {
     let chrome = chrome(state, model, directory, back_to_bottom);
-    lower_with_chrome(live, has_content, height, chrome)
+    lower_with_chrome(live, height, chrome)
 }
 
-pub(super) fn lower_with_chrome(
-    mut live: Vec<Line>,
-    has_content: bool,
-    height: usize,
-    mut chrome: Chrome,
-) -> Frame {
+pub(super) fn lower_with_chrome(mut live: Vec<Line>, height: usize, mut chrome: Chrome) -> Frame {
     let available = height.saturating_sub(chrome.lines.len());
     // Keep room for a content row as well as the gap. The gap belongs to the
     // temporary input area, so it never becomes saved history on its own.
-    let separated = has_content && available >= 2;
+    let separated = available >= 2;
     let capacity = available.saturating_sub(usize::from(separated));
     if live.len() > capacity {
         live.drain(..live.len() - capacity);
@@ -146,7 +138,7 @@ pub(super) fn chrome_height(state: &State) -> usize {
 
 #[cfg(test)]
 pub(super) fn capacity(state: &State, model: &str, directory: &str) -> usize {
-    chrome(state, model, directory, false).capacity(state.height, true)
+    chrome(state, model, directory, false).capacity(state.height)
 }
 
 pub(super) fn fitted(left: &str, right: &str, columns: usize) -> Line {
@@ -185,14 +177,6 @@ pub(super) fn process_log_rows(state: &State) -> (usize, usize) {
             composer::information_height(state),
         )
     })
-}
-
-pub(super) fn log_row_starts(text: &str, width: usize) -> Vec<usize> {
-    processes::row_starts(text, width)
-}
-
-pub(super) fn log_row_at(starts: &[usize], anchor: usize) -> usize {
-    processes::row_at(starts, anchor)
 }
 
 pub(super) fn scroll_information(state: &mut State, code: u16) {

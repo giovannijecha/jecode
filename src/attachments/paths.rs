@@ -4,7 +4,7 @@
 //! paths with spaces and double-quotes paths containing spaces; WSL profiles
 //! single-quote every translated path with `'\''` for an embedded quote; Unix
 //! terminals use single quotes, backslash escapes or `file://` URIs. Quotes
-//! from PowerShell use doubled apostrophes inside single-quoted paths.
+//! from PowerShell use doubled apostrophes inside single-quoted paths. Quotes
 //! and escapes are only removed, never evaluated: no expansion, globbing or
 //! command execution. The paste counts as a drop only when every path is an
 //! existing regular file, so prose and directories stay text.

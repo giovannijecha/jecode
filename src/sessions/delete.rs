@@ -1,4 +1,4 @@
-use super::{Document, Store, journal, same_directory, valid_id};
+use super::{Document, Store, same_directory, valid_id};
 use crate::{output, scratch};
 use std::collections::BTreeSet;
 use std::fs;
@@ -9,13 +9,12 @@ use std::path::{Path, PathBuf};
 pub(crate) struct DeleteReport {
     pub files: usize,
     pub directories: usize,
-    pub legacy_references: usize,
 }
 
 pub(crate) struct Removal {
     bucket: PathBuf,
     ancillary: Vec<PathBuf>,
-    durable: Vec<PathBuf>,
+    durable: Option<PathBuf>,
     output: output::Removal,
     scratch: Option<scratch::Removal>,
     /// Attachments the deleted conversation sent; no grace period applies.
@@ -51,61 +50,29 @@ impl Store {
         self.deletion_scope()?;
         let id = &document.id;
         let mut ancillary = Vec::new();
-        let mut durable = Vec::new();
+        let mut durable = None;
         let entries = fs::read_dir(&self.bucket)
             .map_err(|error| format!("Could not inspect session directory: {error}"))?;
         for entry in entries {
             let entry = entry.map_err(|error| error.to_string())?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = entry.path();
-            if name == format!("{id}.json")
-                || name == format!("{id}.json.bak")
-                || name == format!("{id}.jsonl")
-            {
+            if name == format!("{id}.jsonl") {
                 inspect_file(&path)?;
-                durable.push(path);
+                durable = Some(path);
+            } else if name == format!("{id}.json") || name == format!("{id}.json.bak") {
+                inspect_file(&path)?;
+                inspect_original(&path, document)?;
+                ancillary.push(path);
             } else if sidecar(&name, id) {
                 inspect_file(&path)?;
                 ancillary.push(path);
             }
         }
-        let primary = self.bucket.join(format!("{id}.json"));
-        let backup = self.bucket.join(format!("{id}.json.bak"));
-        let journal_path = self.bucket.join(format!("{id}.jsonl"));
-        let primary_state = legacy_state(&primary, id, &self.directory)?;
-        let backup_state = legacy_state(&backup, id, &self.directory)?;
-        // A corrupt backup may be a stale migration artifact, but its content
-        // cannot establish ownership. Preserve it even when the journal loads.
-        if backup_state == Legacy::Corrupt {
-            return Err("Session backup is corrupt; files were left unchanged".into());
-        }
-        if primary_state == Legacy::Corrupt && backup_state != Legacy::Valid {
-            return Err("Session snapshot is corrupt; files were left unchanged".into());
-        }
-        let journal_valid = if journal_path.exists() {
-            matches!(
-                journal::read(&journal_path, id, &self.directory)?,
-                journal::Read::Saved(_)
-            )
-        } else {
-            false
-        };
         // A fresh active session has no durable file. An inactive caller has
         // already loaded and validated its record before reaching this point.
-        if !durable.is_empty() {
+        if durable.is_some() {
             self.load(id)?;
-        }
-        let last = if journal_valid {
-            &journal_path
-        } else if primary_state == Legacy::Valid {
-            &primary
-        } else {
-            &backup
-        };
-        durable.sort();
-        if let Some(index) = durable.iter().position(|path| path == last) {
-            let last = durable.remove(index);
-            durable.push(last);
         }
         ancillary.sort();
         let output =
@@ -142,7 +109,7 @@ impl Removal {
         let output = self.output.remove().map_err(incomplete)?;
         report.files += output.files;
         report.directories += output.directories;
-        report.legacy_references = output.legacy_references;
+
         if let Some(scratch) = self.scratch {
             let (files, directories) = scratch.remove().map_err(incomplete)?;
             report.files += files;
@@ -185,6 +152,28 @@ fn sidecar(name: &str, id: &str) -> bool {
     .any(|prefix| name.strip_prefix(prefix).is_some_and(generated_id))
 }
 
+/// Migration kept these originals beside the current journal. Deletion must
+/// release their conversation data without restoring the old resume path.
+fn inspect_original(path: &Path, document: &Document) -> Result<(), String> {
+    use crate::json::{self, Value};
+    let value = fs::read_to_string(path)
+        .map_err(|error| error.to_string())
+        .and_then(|text| json::parse(&text))
+        .map_err(|error| format!("Could not verify original session copy: {error}"))?;
+    let directory = value
+        .get("working_directory")
+        .and_then(Value::as_str)
+        .map(Path::new);
+    if value.get("format").and_then(Value::as_str) != Some("jecode.session")
+        || value.get("format_version") != Some(&Value::number(1))
+        || value.get("id").and_then(Value::as_str) != Some(document.id.as_str())
+        || !directory.is_some_and(|path| same_directory(path, &document.directory))
+    {
+        return Err("Original session copy belongs to another identity or folder; files were left unchanged".into());
+    }
+    Ok(())
+}
+
 fn generated_id(value: &str) -> bool {
     let mut parts = value.split('-');
     (0..3).all(|_| {
@@ -192,41 +181,6 @@ fn generated_id(value: &str) -> bool {
             .next()
             .is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
     }) && parts.next().is_none()
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Legacy {
-    Missing,
-    Valid,
-    Corrupt,
-}
-
-fn legacy_state(path: &Path, id: &str, directory: &Path) -> Result<Legacy, String> {
-    let Some(_) = file_metadata(path)? else {
-        return Ok(Legacy::Missing);
-    };
-    let text = fs::read_to_string(path)
-        .map_err(|error| format!("Could not read session snapshot: {error}"))?;
-    let value = match crate::json::parse(&text) {
-        Ok(value) => value,
-        Err(_) => return Ok(Legacy::Corrupt),
-    };
-    if value.get("format").and_then(crate::json::Value::as_str) != Some("jecode.session")
-        || value.get("format_version") != Some(&crate::json::Value::number(1))
-    {
-        return Err("Unsupported session snapshot format; files were left unchanged".into());
-    }
-    let document = match Document::parse(&value) {
-        Ok(document) => document,
-        Err(_) => return Ok(Legacy::Corrupt),
-    };
-    if document.id != id || !same_directory(&document.directory, directory) {
-        return Err(
-            "Session snapshot belongs to another identity or folder; files were left unchanged"
-                .into(),
-        );
-    }
-    Ok(Legacy::Valid)
 }
 
 fn inspect_parent(path: &Path) -> Result<(), String> {
@@ -240,7 +194,7 @@ fn inspect_parent(path: &Path) -> Result<(), String> {
         .rev()
     {
         match fs::symlink_metadata(parent) {
-            Ok(metadata) if linked(&metadata) || !metadata.is_dir() => {
+            Ok(metadata) if crate::disk::linked(&metadata) || !metadata.is_dir() => {
                 return Err(format!(
                     "Owned directory is not a regular directory: {}",
                     parent.display()
@@ -255,36 +209,17 @@ fn inspect_parent(path: &Path) -> Result<(), String> {
 }
 
 fn inspect_file(path: &Path) -> Result<(), String> {
-    if file_metadata(path)?.is_none() {
-        return Err(format!(
-            "Session file disappeared during deletion: {}",
-            path.display()
-        ));
-    }
-    Ok(())
-}
-
-fn file_metadata(path: &Path) -> Result<Option<fs::Metadata>, String> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if linked(&metadata) || !metadata.is_file() => Err(format!(
+        Ok(metadata) if crate::disk::linked(&metadata) || !metadata.is_file() => Err(format!(
             "Owned session path is a link or special entry: {}",
             path.display()
         )),
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Err(format!(
+            "Session file disappeared during deletion: {}",
+            path.display()
+        )),
         Err(error) => Err(format!("Could not inspect session file: {error}")),
-    }
-}
-
-fn linked(metadata: &fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        metadata.file_type().is_symlink()
     }
 }
 

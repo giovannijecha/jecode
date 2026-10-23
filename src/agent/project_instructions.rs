@@ -93,7 +93,7 @@ fn scan(
         }
         let metadata = fs::symlink_metadata(entry.path())
             .map_err(|error| format!("Could not inspect {}: {error}", entry.path().display()))?;
-        if metadata.is_dir() && !is_directory_link(&metadata) {
+        if metadata.is_dir() && !crate::disk::linked(&metadata) {
             children.push(entry.path());
         }
     }
@@ -102,17 +102,6 @@ fn scan(
         scan(root, &child, sections, total)?;
     }
     Ok(())
-}
-
-#[cfg(windows)]
-fn is_directory_link(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT
-}
-
-#[cfg(not(windows))]
-fn is_directory_link(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
 }
 
 fn read_instruction(root: &Path, path: &Path) -> Result<Option<String>, String> {

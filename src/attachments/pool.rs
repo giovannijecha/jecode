@@ -364,10 +364,7 @@ pub fn disk_name(name: &str) -> String {
             .filter(|extension| extension.len() <= 16)
             .map(|extension| format!(".{extension}"))
             .unwrap_or_default();
-        let mut end = 120 - extension.len();
-        while !clean.is_char_boundary(end) {
-            end -= 1;
-        }
+        let end = clean.floor_char_boundary(120 - extension.len());
         clean = format!("{}{extension}", &clean[..end]);
     }
     clean

@@ -1,6 +1,6 @@
 use super::{Settings, directory};
 use crate::json::{self, Value};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -130,27 +130,16 @@ impl Store {
             ));
         }
         let parent = self.path.parent().expect("configuration parent");
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
-            }
-        }
+        crate::disk::private_directory(parent)?;
         let temporary = parent.join(format!(
             ".config-{}-{}.tmp",
             std::process::id(),
             NEXT_SAVE.fetch_add(1, Ordering::Relaxed)
         ));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary)?;
+        let mut file = crate::disk::private_options()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
         let result = (|| {
             file.write_all(bytes)?;
             file.sync_all()?;

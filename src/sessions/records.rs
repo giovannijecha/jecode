@@ -89,32 +89,28 @@ impl Document {
 fn append_event(records: &mut Vec<Record>, event: &Value, latest_tool: Option<usize>) {
     match event.get("type").and_then(Value::as_str) {
         Some("turn_start") => records.push(Record::TurnStart),
-        Some("local_command")
-            if event.get("receipt").and_then(Value::as_str) != Some("report_delivery") =>
-        {
-            records.push(Record::Local {
-                command: string(event, "command").unwrap().into(),
-                result: string(event, "result").unwrap().into(),
-                kind: event
-                    .get("kind")
-                    .and_then(Value::as_str)
-                    .unwrap_or("notice")
-                    .into(),
-                details: event
-                    .get("details")
-                    .and_then(Value::as_array)
-                    .unwrap_or(&[])
-                    .iter()
-                    .map(|row| {
-                        let row = row.as_array().unwrap();
-                        (
-                            row[0].as_str().unwrap().into(),
-                            row[1].as_str().unwrap().into(),
-                        )
-                    })
-                    .collect(),
-            })
-        }
+        Some("local_command") => records.push(Record::Local {
+            command: string(event, "command").unwrap().into(),
+            result: string(event, "result").unwrap().into(),
+            kind: event
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("notice")
+                .into(),
+            details: event
+                .get("details")
+                .and_then(Value::as_array)
+                .unwrap_or(&[])
+                .iter()
+                .map(|row| {
+                    let row = row.as_array().unwrap();
+                    (
+                        row[0].as_str().unwrap().into(),
+                        row[1].as_str().unwrap().into(),
+                    )
+                })
+                .collect(),
+        }),
         Some("turn_error") => {
             let partial = string(event, "partial_text").unwrap();
             if !partial.trim().is_empty() {

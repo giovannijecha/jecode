@@ -70,7 +70,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run a Bash command from the project directory. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an execution deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
+            "Run a Bash command from the project directory. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Recursive scopes skip generated and Git-ignored directories; name one explicitly to save it. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an execution deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
             Value::object([
                 ("command", string()),
                 (
@@ -86,13 +86,7 @@ pub fn definitions() -> Value {
                         ),
                     ]),
                 ),
-                (
-                    "timeout_seconds",
-                    Value::object([
-                        ("type", Value::string("integer")),
-                        ("minimum", Value::number(1)),
-                    ]),
-                ),
+                ("timeout_seconds", integer(1, None)),
                 ("wait_ms", integer(0, None)),
             ]),
             &["command"],

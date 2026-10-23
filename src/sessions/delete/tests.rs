@@ -137,17 +137,13 @@ fn linked_bucket_is_rejected_before_writing_to_its_target() {
 }
 
 #[test]
-fn legacy_recovery_and_known_sidecars_are_removed() {
+fn known_sidecars_are_removed_with_the_journal() {
     let (_home, _project, store, document) = fixture();
     let lease = store.acquire(&document.id).unwrap();
-    lease.save_legacy(&document).unwrap();
-    lease.save_legacy(&document).unwrap();
+    lease.save(&document).unwrap();
     drop(lease);
-    let primary = store.bucket.join(format!("{}.json", document.id));
-    let backup = store.bucket.join(format!("{}.json.bak", document.id));
-    fs::write(&primary, "{broken primary").unwrap();
+    let journal = store.journal_path(&document.id);
     let sidecars = [
-        format!("{}.json.damaged-1-2-3", document.id),
         format!("{}.jsonl.damaged-1-2-3", document.id),
         format!("{}.summary.json", document.id),
         format!("{}.summary.tmp-1-2-3", document.id),
@@ -157,11 +153,50 @@ fn legacy_recovery_and_known_sidecars_are_removed() {
         fs::write(store.bucket.join(name), "owned").unwrap();
     }
     let report = store.delete(&document.id).unwrap();
-    assert_eq!(report.files, 7);
-    assert!(!primary.exists());
-    assert!(!backup.exists());
+    assert_eq!(report.files, 5);
+    assert!(!journal.exists());
     for name in &sidecars {
         assert!(!store.bucket.join(name).exists());
+    }
+}
+
+#[test]
+fn deleting_a_migrated_session_removes_its_original_copies() {
+    let (_home, _project, store, document) = fixture();
+    let lease = store.acquire(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    drop(lease);
+    let originals = [
+        format!("{}.json", document.id),
+        format!("{}.json.bak", document.id),
+        format!("{}.json.damaged-1-2-3", document.id),
+    ];
+    for name in &originals {
+        fs::write(store.bucket.join(name), document.value().encode()).unwrap();
+    }
+    store.delete(&document.id).unwrap();
+    assert!(!store.journal_path(&document.id).exists());
+    for name in originals {
+        assert!(!store.bucket.join(&name).exists(), "Retained {name}");
+    }
+}
+
+#[test]
+fn unverified_original_copies_block_deletion_before_removing_the_journal() {
+    let (_home, _project, store, document) = fixture();
+    let lease = store.acquire(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    drop(lease);
+    let original = store.bucket.join(format!("{}.json", document.id));
+    let mut foreign = document.value();
+    if let crate::json::Value::Object(ref mut fields) = foreign {
+        fields.insert("id".into(), crate::json::Value::string("999-1-1"));
+    }
+    for text in [foreign.encode(), "{broken".into()] {
+        fs::write(&original, &text).unwrap();
+        assert!(store.delete(&document.id).is_err());
+        assert!(store.journal_path(&document.id).exists());
+        assert_eq!(fs::read_to_string(&original).unwrap(), text);
     }
 }
 
@@ -172,21 +207,17 @@ fn corrupt_or_foreign_durable_record_is_rejected_before_cleanup() {
     lease.save(&document).unwrap();
     drop(lease);
     let journal = store.journal_path(&document.id);
-    let primary = store.bucket.join(format!("{}.json", document.id));
-    fs::write(&primary, "{broken").unwrap();
     let sidecar = store.bucket.join(format!("{}.summary.json", document.id));
-    fs::write(&sidecar, "cache").unwrap();
-    assert!(store.delete(&document.id).is_err());
-    assert!(journal.exists());
-    assert!(sidecar.exists());
-    let mut foreign = document.value();
-    if let crate::json::Value::Object(ref mut fields) = foreign {
-        fields.insert("format_version".into(), crate::json::Value::number(99));
+    for record in [
+        "{broken\n",
+        "{\"format\":\"jecode.session.journal\",\"format_version\":99}\n",
+    ] {
+        fs::write(&journal, record).unwrap();
+        fs::write(&sidecar, "cache").unwrap();
+        assert!(store.delete(&document.id).is_err());
+        assert_eq!(fs::read_to_string(&journal).unwrap(), record);
+        assert!(sidecar.exists());
     }
-    fs::write(&primary, foreign.encode()).unwrap();
-    assert!(store.delete(&document.id).is_err());
-    assert!(journal.exists());
-    assert!(sidecar.exists());
 }
 
 #[test]

@@ -119,7 +119,7 @@ fn recovery_child_process() {
         }
         "pending" => {
             let path = store.directory.join(format!(".{reference}.pending"));
-            let mut file = files::options()
+            let mut file = crate::disk::private_options()
                 .write(true)
                 .create_new(true)
                 .open(path)

@@ -103,12 +103,8 @@ pub(crate) fn read_source(
         } else {
             format!("{next_line}: ")
         };
-        let mut keep = line
-            .len()
-            .min(OUTPUT_LIMIT.saturating_sub(output.len() + prefix.len()));
-        while !line.is_char_boundary(keep) {
-            keep -= 1;
-        }
+        let keep =
+            line.floor_char_boundary(OUTPUT_LIMIT.saturating_sub(output.len() + prefix.len()));
         if keep == 0 {
             break;
         }

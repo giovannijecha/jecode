@@ -101,13 +101,7 @@ pub(crate) fn excerpt(text: &str, limit: usize) -> String {
     }
     let marker = "\n[... context excerpt; full original remains in history ...]\n";
     let available = limit.saturating_sub(marker.len());
-    let mut head = available * 2 / 3;
-    while !text.is_char_boundary(head) {
-        head -= 1;
-    }
-    let mut tail = text.len().saturating_sub(available / 3);
-    while !text.is_char_boundary(tail) {
-        tail += 1;
-    }
+    let head = text.floor_char_boundary(available * 2 / 3);
+    let tail = text.ceil_char_boundary(text.len().saturating_sub(available / 3));
     format!("{}{marker}{}", &text[..head], &text[tail..])
 }

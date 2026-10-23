@@ -10,6 +10,9 @@ pub struct Selection {
     pub paths: Vec<String>,
     /// Directory roots whose eligible descendants were completely visited.
     pub roots: Vec<String>,
+    /// Directories a walk skipped because Git ignores them.
+    pub ignored: Vec<String>,
+    pub ignore_rules: IgnoreRules,
     pub partial: Vec<Issue>,
 }
 
@@ -36,6 +39,7 @@ pub(super) fn normalized_request(request: &str) -> String {
 }
 
 /// Resolve ancestors but retain the final directory entry, including a link.
+/// `root` must be canonical, as the store's root is.
 pub fn relative(root: &Path, path: &Path) -> Option<String> {
     let mut missing = vec![path.file_name()?.to_os_string()];
     if let Some(spelling) = existing_name(path) {
@@ -53,7 +57,6 @@ pub fn relative(root: &Path, path: &Path) -> Option<String> {
         .into_iter()
         .rev()
         .fold(resolved, |path, name| path.join(name));
-    let root = fs::canonicalize(root).ok()?;
     let rest = path.strip_prefix(root).ok()?;
     let parts: Option<Vec<_>> = rest
         .components()
@@ -243,11 +246,8 @@ const GENERATED: &[&str] = &[
     ".cache",
 ];
 
-/// Eligibility for an implicit recursive walk. Explicit paths only need `protected`.
-pub fn eligible(_root: &Path, path: &str, excluded: &[String]) -> bool {
-    eligible_beneath(path, "", excluded)
-}
-
+/// Eligibility for an implicit recursive walk below `selected_root`. Explicit
+/// paths only need `protected`.
 pub(super) fn eligible_beneath(path: &str, selected_root: &str, excluded: &[String]) -> bool {
     let below = if selected_root.is_empty() {
         path
@@ -264,230 +264,17 @@ pub(super) fn eligible_beneath(path: &str, selected_root: &str, excluded: &[Stri
 }
 
 fn ordinary_dir(metadata: &fs::Metadata) -> bool {
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 == 0
-    }
-    #[cfg(not(windows))]
-    {
-        true
-    }
+    metadata.is_dir() && !crate::disk::linked(metadata)
 }
 
-pub fn discover(
-    root: &Path,
-    requested: &[String],
-    excluded: &[String],
-    cancel: &Cancellation,
-) -> Result<Selection, String> {
-    let requested: Vec<String> = requested
-        .iter()
-        .map(|path| normalized_request(path))
-        .collect();
-    let mut paths = BTreeSet::new();
-    let mut roots = BTreeSet::new();
-    let mut partial = Vec::new();
-    for request in &requested {
-        if cancel.requested() {
-            return Err("Recovery discovery was cancelled".into());
-        }
-        // A descendant shadowed by an explicitly requested file/link ancestor
-        // is logically absent in that tree. Capture records the ancestor first
-        // and may then save this absence without following a link target.
-        if !Path::new(request).is_absolute() && request.split('/').all(files::normal_component) {
-            let paired = requested.iter().any(|ancestor| {
-                !ancestor.is_empty()
-                    && request
-                        .strip_prefix(ancestor)
-                        .is_some_and(|rest| rest.starts_with('/'))
-                    && fs::symlink_metadata(absolute(root, ancestor))
-                        .is_ok_and(|metadata| !ordinary_dir(&metadata))
-            });
-            if paired && protected(request, excluded) {
-                paths.insert(request.clone());
-                continue;
-            }
-        }
-        let name = if request.is_empty() || request == "." {
-            String::new()
-        } else if Path::new(request).is_absolute() {
-            if Path::new(request)
-                .components()
-                .any(|part| part == Component::ParentDir)
-            {
-                partial.push((
-                    request.clone(),
-                    format!("Invalid workspace path: {request}"),
-                ));
-                continue;
-            }
-            if let Ok(rest) = Path::new(request).strip_prefix(root) {
-                let lexical = rest
-                    .components()
-                    .filter_map(|part| match part {
-                        Component::Normal(name) => name.to_str(),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("/");
-                if !lexical.is_empty()
-                    && let Err(error) = files::confined_parent(root, &lexical)
-                {
-                    partial.push((request.clone(), error));
-                    continue;
-                }
-            }
-            let Some(name) = relative(root, Path::new(request)) else {
-                partial.push((
-                    request.clone(),
-                    format!("Path outside workspace: {request}"),
-                ));
-                continue;
-            };
-            name
-        } else {
-            let requested_path = absolute(root, request);
-            if !request.split('/').all(files::normal_component) {
-                partial.push((
-                    request.clone(),
-                    format!("Invalid workspace path: {request}"),
-                ));
-                continue;
-            }
-            if let Err(error) = files::confined_parent(root, request) {
-                partial.push((request.clone(), error));
-                continue;
-            }
-            let Some(name) = relative(root, &requested_path) else {
-                partial.push((
-                    request.clone(),
-                    format!("Path outside workspace: {request}"),
-                ));
-                continue;
-            };
-            name
-        };
-        if !name.is_empty() && !protected(&name, excluded) {
-            partial.push((name, "Internal recovery storage is excluded".into()));
-            continue;
-        }
-        if !name.is_empty()
-            && let Err(error) = files::confined_parent(root, &name)
-        {
-            partial.push((name, error));
-            continue;
-        }
-        let path = absolute(root, &name);
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => Some(metadata),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => {
-                partial.push((name.clone(), format!("Could not inspect path: {error}")));
-                continue;
-            }
-        };
-        if !name.is_empty() {
-            paths.insert(name.clone());
-        }
-        if metadata.as_ref().is_some_and(ordinary_dir) || name.is_empty() {
-            let before = partial.len();
-            let mut pending = vec![name.clone()];
-            while let Some(directory) = pending.pop() {
-                if cancel.requested() {
-                    return Err("Recovery discovery was cancelled".into());
-                }
-                let directory_path = absolute(root, &directory);
-                let entries = match fs::read_dir(&directory_path) {
-                    Ok(entries) => entries,
-                    Err(error) => {
-                        partial.push((directory, format!("Could not traverse directory: {error}")));
-                        continue;
-                    }
-                };
-                for entry in entries {
-                    if cancel.requested() {
-                        return Err("Recovery discovery was cancelled".into());
-                    }
-                    let entry = match entry {
-                        Ok(entry) => entry,
-                        Err(error) => {
-                            partial.push((
-                                directory.clone(),
-                                format!("Could not read directory entry: {error}"),
-                            ));
-                            continue;
-                        }
-                    };
-                    let Some(part) = entry.file_name().to_str().map(str::to_owned) else {
-                        partial.push((
-                            directory.clone(),
-                            "A directory entry has an unsupported name".into(),
-                        ));
-                        continue;
-                    };
-                    let child = if directory.is_empty() {
-                        part
-                    } else {
-                        format!("{directory}/{part}")
-                    };
-                    let eligible = if name.is_empty() {
-                        eligible(root, &child, excluded)
-                    } else {
-                        eligible_beneath(&child, &name, excluded)
-                    };
-                    if !eligible {
-                        continue;
-                    }
-                    let metadata = match fs::symlink_metadata(entry.path()) {
-                        Ok(metadata) => metadata,
-                        Err(error) => {
-                            partial.push((child, format!("Could not inspect entry: {error}")));
-                            continue;
-                        }
-                    };
-                    let traverse = ordinary_dir(&metadata);
-                    #[cfg(windows)]
-                    if metadata.is_dir() && !traverse {
-                        use std::os::windows::fs::MetadataExt;
-                        if metadata.file_attributes() & 0x400 != 0
-                            && !metadata.file_type().is_symlink()
-                        {
-                            partial.push((
-                                child.clone(),
-                                "Reparse directory was not traversed".into(),
-                            ));
-                        }
-                    }
-                    paths.insert(child.clone());
-                    if traverse {
-                        pending.push(child);
-                    }
-                }
-            }
-            if partial.len() == before {
-                roots.insert(name);
-            }
-        } else if metadata.is_none() {
-            // The named entry was absent. That is complete evidence that all
-            // descendants were absent too, if this entry later becomes a tree.
-            roots.insert(name);
-        } else if metadata.as_ref().is_some_and(|m| m.is_dir()) {
-            partial.push((name, "Directory was not traversed".into()));
-        }
-    }
-    Ok(Selection {
-        paths: paths.into_iter().collect(),
-        roots: roots.into_iter().collect(),
-        partial,
-    })
-}
+mod discovery;
+pub use discovery::discover;
+pub(super) use discovery::discover_saved;
 
 mod exact;
+mod ignore;
 pub use exact::discover_exact;
+pub use ignore::{Ignore, IgnoreRules};
 
 #[cfg(test)]
 #[path = "paths/tests.rs"]

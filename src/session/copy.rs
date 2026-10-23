@@ -153,22 +153,8 @@ mod tests {
         assert!(output.contains("Copy to clipboard"));
         assert!(output.contains("2. Code block 1 · rust"));
         assert_eq!(fixture.finish().len(), 1);
-        assert!(
-            agent
-                .archive()
-                .events
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|event| {
-                    event.get("type").and_then(crate::json::Value::as_str) == Some("local_command")
-                })
-                .all(|event| {
-                    event.get("command").and_then(crate::json::Value::as_str)
-                        == Some("Report delivery")
-                        && event.get("receipt").and_then(crate::json::Value::as_str)
-                            == Some("report_delivery")
-                })
-        );
+        assert!(agent.archive().events.lock().unwrap().iter().all(|event| {
+            event.get("type").and_then(crate::json::Value::as_str) != Some("local_command")
+        }));
     }
 }

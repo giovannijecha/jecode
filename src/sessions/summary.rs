@@ -2,8 +2,9 @@ use super::{
     Document, Store, Summary,
     document::{integer, string},
     identifier, same_directory,
-    storage::{options, reject_special},
+    storage::reject_special,
 };
+use crate::disk::private_options;
 use crate::json::{self, Value};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -101,7 +102,7 @@ pub(super) fn save(store: &Store, document: &Document, observed: &Stamp) -> Resu
     let path = path(store, &document.id);
     reject_special(&path)?;
     let temporary = path.with_extension(format!("tmp-{}", identifier()));
-    let mut file = options()
+    let mut file = private_options()
         .write(true)
         .create_new(true)
         .open(&temporary)

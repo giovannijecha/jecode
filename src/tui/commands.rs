@@ -94,46 +94,23 @@ impl App {
         if prompt.is_empty() {
             return Ok(false);
         }
-        if (self.worker.is_none()
-            || matches!(
-                self.state.suggestions.chosen(),
-                Some("/copy" | "/drafts" | "/terminal")
-            ))
+        if (self.worker.is_none() || self.state.suggestions.chosen().is_some_and(immediate))
             && self.state.suggestions.visible
             && prompt.attachments.is_empty()
             && let Some(chosen) = self.state.suggestions.chosen()
         {
             prompt = Prompt::plain(chosen);
         }
-        let command = prompt.attachments.is_empty();
-        if command
-            && prompt
-                .text
-                .split_whitespace()
-                .next()
-                .is_some_and(|name| name.eq_ignore_ascii_case("/copy"))
+        if prompt.attachments.is_empty()
+            && prompt.text.split_whitespace().next().is_some_and(immediate)
         {
             self.state.history.submitted(&mut self.state.editor);
             self.edited();
-            self.capture_input();
-            self.copy_command(&prompt.text);
-            return Ok(false);
-        }
-        if command && prompt.text.trim().eq_ignore_ascii_case("/drafts") {
-            self.state.history.submitted(&mut self.state.editor);
-            self.edited();
-            self.open_drafts();
+            self.run_immediate(&prompt.text);
             self.capture_input();
             return Ok(false);
         }
-        if command && let Some(id) = terminal_arguments(&prompt.text) {
-            self.state.history.submitted(&mut self.state.editor);
-            self.edited();
-            self.capture_input();
-            self.open_processes(id);
-            return Ok(false);
-        }
-        if self.worker.is_some() || self.deletion_job.is_some() || self.checkpoint_job.is_some() {
+        if self.busy() {
             if let Err(error) = self.state.queue.push(prompt.clone()) {
                 self.warn(&error);
                 return Ok(false);
@@ -156,15 +133,7 @@ impl App {
             && commands::split(&prompt.text).is_some_and(|(name, arguments)| {
                 name.eq_ignore_ascii_case("/init") && arguments.is_empty()
             });
-        if command && prompt.text.trim().eq_ignore_ascii_case("/drafts") {
-            self.open_drafts();
-            return Ok(false);
-        }
-        if command && let Some(id) = terminal_arguments(&prompt.text) {
-            self.open_processes(id);
-            return Ok(false);
-        }
-        if command && self.copy_command(&prompt.text) {
+        if command && self.run_immediate(&prompt.text) {
             return Ok(false);
         }
         self.capture_input();
@@ -422,12 +391,31 @@ impl App {
         self.state.clear_notice();
         self.job = Some(Job::catalog(self.agent.as_ref().unwrap().api(), purpose));
     }
+
+    /// Runs `/copy`, `/drafts` or `/terminal`; returns false for other text.
+    fn run_immediate(&mut self, text: &str) -> bool {
+        let text = text.trim();
+        let (name, arguments) = text
+            .split_once(char::is_whitespace)
+            .map_or((text, ""), |(name, arguments)| (name, arguments.trim()));
+        if name.eq_ignore_ascii_case("/drafts") {
+            if arguments.is_empty() {
+                self.open_drafts();
+            } else {
+                self.warn("Usage: /drafts");
+            }
+        } else if name.eq_ignore_ascii_case("/terminal") {
+            self.open_processes(arguments);
+        } else {
+            return self.copy_command(text);
+        }
+        true
+    }
 }
 
-/// The optional process ID of a `/terminal` command.
-fn terminal_arguments(text: &str) -> Option<&str> {
-    let text = text.trim();
-    let (name, arguments) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
-    name.eq_ignore_ascii_case("/terminal")
-        .then_some(arguments.trim())
+/// Commands that run at once, even while a turn is busy.
+pub(super) fn immediate(name: &str) -> bool {
+    ["/copy", "/drafts", "/terminal"]
+        .iter()
+        .any(|command| name.eq_ignore_ascii_case(command))
 }

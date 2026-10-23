@@ -181,7 +181,8 @@ impl Prompt {
         ])
     }
 
-    /// Accepts the object form and the plain strings of older sessions.
+    /// Accepts the object form and the plain string written for prompts
+    /// without attachments.
     pub fn parse(value: &Value) -> Result<Self, String> {
         if let Some(text) = value.as_str() {
             return Ok(Self::plain(text));

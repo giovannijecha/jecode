@@ -63,30 +63,31 @@ pub fn discover_exact(
         let name = if paired {
             lexical
         } else {
-            match relative(root, &absolute(root, &lexical)) {
-                Some(name) => name,
-                None => {
-                    partial.push((
-                        lexical.clone(),
-                        format!("Path outside workspace: {lexical}"),
-                    ));
-                    continue;
-                }
+            let Some(name) = relative(root, &absolute(root, &lexical)) else {
+                partial.push((
+                    lexical.clone(),
+                    format!("Path outside workspace: {lexical}"),
+                ));
+                continue;
+            };
+            // Only a different live spelling needs its parents checked again.
+            if name != lexical
+                && let Err(error) = files::confined_parent(root, &name)
+            {
+                partial.push((name, error));
+                continue;
             }
+            name
         };
         if !protected(&name, excluded) {
             partial.push((name, "Internal recovery storage is excluded".into()));
-            continue;
-        }
-        if !paired && let Err(error) = files::confined_parent(root, &name) {
-            partial.push((name, error));
             continue;
         }
         paths.insert(name);
     }
     Ok(Selection {
         paths: paths.into_iter().collect(),
-        roots: Vec::new(),
         partial,
+        ..Selection::default()
     })
 }

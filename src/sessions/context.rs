@@ -126,13 +126,7 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
             "temporary_cleanup" => {
                 string(event, "result")?;
             }
-            "checkpoint_notice" => {
-                string(event, "text")?;
-                integer(event, "cursor")?;
-            }
-            "checkpoint_cursor" => {
-                integer(event, "cursor")?;
-            }
+
             "tool_change" => {
                 let index = integer(event, "after_message")? as usize;
                 let Some(message) = index.checked_sub(1).and_then(|index| messages.get(index))
@@ -148,7 +142,8 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
                     event.get("change").ok_or("Missing file change")?,
                 )?;
             }
-            _ => return Err("Unsupported saved conversation event".into()),
+            // Retired event types stay in old journals; nothing reads them.
+            _ => {}
         }
     }
     next.messages = messages.len();

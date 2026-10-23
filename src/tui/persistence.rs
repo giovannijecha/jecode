@@ -241,8 +241,6 @@ impl App {
                 // Saved records do not contain execution timings.
                 if turn_recorded {
                     self.state.finish_tool_turn();
-                } else {
-                    self.state.restore_tool_turn();
                 }
                 for item in &mut self.state.items {
                     if let Item::Tool { presentation, .. } = item {

@@ -100,7 +100,7 @@ impl Display {
         let columns = state.width;
         let was_reading = !self.viewport.following();
         let mut chrome = view::chrome(state, model, directory, was_reading);
-        let capacity = chrome.capacity(state.height, true);
+        let capacity = chrome.capacity(state.height);
         let mut reading = false;
         let dragging = self.resize.pending() && !self.resize.take_due(now);
         if !dragging {
@@ -129,7 +129,7 @@ impl Display {
         if was_reading == self.viewport.following() {
             chrome = view::chrome(state, model, directory, !self.viewport.following());
         }
-        let mut frame = view::lower_with_chrome(lines, true, state.height, chrome);
+        let mut frame = view::lower_with_chrome(lines, state.height, chrome);
         if frame.composer >= 2 {
             let gap = &mut frame.live[frame.composer - 1];
             if reading || !self.viewport.following() {

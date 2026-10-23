@@ -41,9 +41,8 @@ without tools has no toggle, and earlier turns are never substituted. Typing
 an unsent draft keeps details open. Accepting a new user prompt collapses the
 old details until the new turn finishes.
 Expansion is temporary. Resumed sessions start compact and retain execution-turn
-boundaries, including messages accepted during generation. Legacy sessions use
-the last saved request block for the toggle. The shortcut is listed in `/help`;
-it adds no persistent composer hint.
+boundaries, including messages accepted during generation. The shortcut is
+listed in `/help`; it adds no persistent composer hint.
 
 ## Activity and queue
 

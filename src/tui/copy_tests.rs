@@ -202,7 +202,6 @@ fn searchable_copy_menu_and_small_dimensions_preserve_full_text() {
             "fixture/model",
             "fixture",
             vec![],
-            false,
             height,
             false,
         );

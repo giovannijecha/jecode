@@ -117,8 +117,7 @@ checkpoints; they are unrelated to the workspace checkpoints below.
 | Failed append | Attempt rollback to the last acknowledged journal length; require reopening if rollback fails. |
 | Torn final transaction | Preserve incomplete bytes separately and recover the preceding complete checkpoint. |
 | Corrupt complete transaction | Report the error and leave the file unchanged. |
-| Version 2 journal | Read existing records and append version 3 continuations. |
-| Version 1 snapshot | Migrate on explicit resume, retaining the original snapshot and backup. |
+| Earlier format | Report it as unsupported and leave the file unchanged. |
 
 Session-owned output and temporary directories have ownership markers. Attachments
 share a pool within the project bucket and are collected when no saved session
@@ -142,30 +141,34 @@ baseline scan or global history is kept.
 | `session.rs`, `actions.rs`, `show.rs`, `command.rs`, `render.rs` | File/Bash preflight receipts, three model actions, saved reads and local commands. |
 
 Each call writes one `.rcp` file: a small header, raw file bytes, checksummed
-metadata with offsets and a footer. Publication syncs the pack before rename
-and syncs its directory on Unix. There is no shared object graph, global replay,
-after-state payload, delta, watcher, group, acceptance action or compaction.
+metadata with offsets and a footer. Publication syncs the pack before rename;
+like the file tools, it leaves the directory entry unsynced. There is no shared
+object graph, global replay, after-state payload, delta, watcher, group,
+acceptance action or compaction.
 
 File-tool leases span reading through installation. Bash captures declared files
 and eligible directory trees before launch, then releases its capture lease;
 completion and background-process monitoring do no checkpoint work. Only a
 fully visited and rechecked directory scope establishes absence for new children.
-Unsupported/reparse or unreadable directories cannot establish completeness.
+Walks skip Git-ignored directories using an owned `.gitignore` reader and record
+the rules with the skipped paths. Restores use those captured rules, including
+for later-created directories, while explicit scopes can override implicit
+exclusions. Unsupported/reparse or unreadable
+directories cannot establish completeness.
 
 Inspection hashes selected current states into a stateless expectation token.
 Restore requires it or explicit `latest`, verifies source content, captures undo
-and rechecks current bytes before each install. The result describes partial
-progress and undo for exactly the mutated paths; a file's replacement is staged
-before destructive cross-type operations. A crash leaves the published preimage
-available without needing completion classification.
+and rechecks the digest of current bytes before each install. The result
+describes partial progress and undo for exactly the mutated paths; a file's
+replacement is staged before destructive cross-type operations. A crash leaves
+the published preimage available without needing completion classification.
 
 Creation fixes pack expiry at 24 hours. Reads and activity do not renew it. The
 session's weak maintenance worker sweeps recognized workspace directories once
 per minute; offline commands sweep too. Shared pack readers delay physical
 removal, and stopped applications clean up on next use. Expiry removes individual
 packs without copying retained data; workspace identity and lease metadata are
-not subject to the 24-hour deadline. Old `cp-N` archives and preview
-`~/.jecode/recovery/` packs are not imported.
+not subject to the 24-hour deadline.
 
 ## Native boundaries
 

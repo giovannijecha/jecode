@@ -483,7 +483,6 @@ fn foreground_bash_without_wait_keeps_its_result_shape() {
     let result = bash(&tools, "printf out; exit 4", &[]);
     assert!(result.get("process_id").is_none());
     assert_eq!(number(&result, "exit_code"), 4);
-    assert_eq!(text(&result, "capture"), "tail");
     let listed = tools.execute("process", r#"{"action":"list"}"#);
     assert_eq!(
         listed

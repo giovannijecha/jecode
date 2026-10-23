@@ -1,5 +1,5 @@
 use crate::redact::Redactor;
-use std::fs::{self, File, OpenOptions};
+use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -61,16 +61,8 @@ impl Store {
         Ok(if let Some(owner) = &self.owner {
             ownership::ensure(&self.root, owner)?
         } else {
-            if !self.root.exists() {
-                fs::create_dir_all(&self.root)
-                    .map_err(|error| format!("Could not create tool output directory: {error}"))?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700))
-                        .map_err(|error| error.to_string())?;
-                }
-            }
+            crate::disk::private_directory(&self.root)
+                .map_err(|error| format!("Could not create tool output directory: {error}"))?;
             self.root.clone()
         })
     }
@@ -79,14 +71,9 @@ impl Store {
         let directory = self.owned_directory()?;
         let id = crate::sessions::identifier();
         let make = |stream: &str| {
-            let mut options = OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let file = options
+            let file = crate::disk::private_options()
+                .write(true)
+                .create_new(true)
                 .open(directory.join(format!("{id}.{stream}")))
                 .map_err(|error| format!("Could not save tool output: {error}"))?;
             Ok::<_, String>(Spool {

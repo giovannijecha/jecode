@@ -55,8 +55,7 @@ pub struct Context {
     pub input_tokens: Option<usize>,
     pub measured_end: usize,
     pub calibration: Option<(usize, usize)>,
-    /// Size of the last completion, kept in saved sessions; budgets do not use it.
-    pub reply_tokens: usize,
+
     /// Output allowance learned from summary truncation, independent of live prompt usage.
     pub summary_output_tokens: usize,
     pub preview_until: usize,
@@ -73,7 +72,7 @@ impl Default for Context {
             input_tokens: None,
             measured_end: 0,
             calibration: None,
-            reply_tokens: 0,
+
             summary_output_tokens: 0,
             preview_until: 0,
             preview_limit: 0,
@@ -101,7 +100,6 @@ impl Context {
                     ])
                 }),
             ),
-            ("reply_tokens", Value::number(self.reply_tokens)),
             (
                 "summary_output_tokens",
                 Value::number(self.summary_output_tokens),
@@ -154,7 +152,7 @@ impl Context {
                         .ok_or("Invalid saved byte calibration")?,
                 )),
             },
-            reply_tokens: number("reply_tokens")?,
+
             summary_output_tokens: value.get("summary_output_tokens").map_or(Ok(0), |value| {
                 value
                     .as_usize()
@@ -201,7 +199,6 @@ impl Context {
         self.input_tokens = None;
         self.measured_end = 0;
         self.ceiling = None;
-        self.reply_tokens = 0;
         self.calibration = None;
     }
     pub fn observe(&mut self, usage: Option<&Value>, end: usize) {
@@ -210,10 +207,6 @@ impl Context {
             .and_then(Value::as_usize)
             .filter(|tokens| *tokens > 0);
         self.measured_end = if self.input_tokens.is_some() { end } else { 0 };
-        self.reply_tokens = usage
-            .and_then(|usage| usage.get("completion_tokens"))
-            .and_then(Value::as_usize)
-            .unwrap_or(0);
         if self.input_tokens.is_none() {
             // A later request cannot reuse tokens measured for a different projection.
             self.calibration = None;

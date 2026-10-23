@@ -284,8 +284,7 @@ public static class JecodeConsole {
                     string current = (info.Right - info.Left + 1) + "|" + (info.Bottom - info.Top + 1);
                     if (current != size) {
                         size = current;
-                        // One native snapshot and one event: dimensions and position cannot split.
-                        writer.WriteLine("S|" + size + "|" + Math.Max(0, info.CursorY - info.Top) + "|" + Math.Max(0, info.CursorX - info.Left));
+                        writer.WriteLine("S|" + size);
                     }
                     uint available;
                     Check(GetNumberOfConsoleInputEvents(input, out available));

@@ -319,35 +319,6 @@ fn five_identical_pending_inputs_stay_separate_after_repeated_recovery() {
 }
 
 #[test]
-fn damaged_primary_recovers_backup_and_preserves_the_damaged_bytes() {
-    let home = Directory::new();
-    let directory = Directory::new();
-    let store = store(&home, &directory);
-    let mut doc = document(&directory);
-    let lease = store.acquire(&doc.id).unwrap();
-    lease.save_legacy(&doc).unwrap();
-    doc.messages.push(message("user", "Later request"));
-    lease.save_legacy(&doc).unwrap();
-    drop(lease);
-    let path = storage::file_path(&store, &doc.id);
-    fs::write(&path, "{broken primary").unwrap();
-    let (handle, status) =
-        Handle::open(store.clone(), &doc.id, Redactor::new("fixture-key".into())).unwrap();
-    assert!(status.contains("last valid"));
-    assert_eq!(handle.snapshot().messages.len(), 3);
-    assert_eq!(store.load(&doc.id).unwrap().0.messages.len(), 3);
-    let damaged = fs::read_dir(path.parent().unwrap())
-        .unwrap()
-        .flatten()
-        .find(|entry| entry.file_name().to_string_lossy().contains("damaged"))
-        .unwrap();
-    assert_eq!(
-        fs::read_to_string(damaged.path()).unwrap(),
-        "{broken primary"
-    );
-}
-
-#[test]
 fn a_new_session_cannot_replace_an_existing_identifier() {
     let home = Directory::new();
     let directory = Directory::new();
@@ -363,30 +334,6 @@ fn a_new_session_cannot_replace_an_existing_identifier() {
     );
     assert!(handle.flush().unwrap_err().contains("already exists"));
     assert_eq!(store.load(&doc.id).unwrap().0.messages, doc.messages);
-}
-
-#[test]
-fn a_future_format_is_not_downgraded_from_an_older_backup() {
-    let home = Directory::new();
-    let directory = Directory::new();
-    let store = store(&home, &directory);
-    let doc = document(&directory);
-    let lease = store.acquire(&doc.id).unwrap();
-    lease.save_legacy(&doc).unwrap();
-    lease.save_legacy(&doc).unwrap();
-    drop(lease);
-    let path = storage::file_path(&store, &doc.id);
-    let Value::Object(mut future) = doc.value() else {
-        unreachable!()
-    };
-    future.insert("format_version".into(), Value::number(2));
-    let future = Value::Object(future).pretty();
-    fs::write(&path, &future).unwrap();
-    let result = Handle::open(store.clone(), &doc.id, Redactor::new("fixture-key".into()));
-    assert!(matches!(result, Err(error) if error.contains("Unsupported session")));
-    assert_eq!(fs::read_to_string(path).unwrap(), future);
-    assert!(store.list().unwrap().sessions.is_empty());
-    assert_eq!(store.list().unwrap().warnings.len(), 1);
 }
 
 #[test]
@@ -447,7 +394,7 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
         ..Input::default()
     });
     handle.flush().unwrap();
-    let saved = fs::read_to_string(storage::file_path(&store, &id)).unwrap();
+    let saved = fs::read_to_string(store.journal_path(&id)).unwrap();
     assert!(!saved.contains(key));
     let doc = store.fixture_load(&id).unwrap();
     assert_eq!(
@@ -478,7 +425,7 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
         ..Input::default()
     });
     handle.flush().unwrap();
-    let saved = fs::read_to_string(storage::file_path(&store, &id)).unwrap();
+    let saved = fs::read_to_string(store.journal_path(&id)).unwrap();
     assert!(!saved.contains(key));
     let doc = store.fixture_load(&id).unwrap();
     assert_eq!(

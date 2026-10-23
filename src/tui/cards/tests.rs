@@ -66,7 +66,7 @@ fn wrapped_titles_retain_long_unicode_commands_and_fit_narrow_views() {
             None,
             columns,
             &Presentation {
-                expanded: Some(true),
+                expanded: true,
                 ..Presentation::default()
             },
         );
@@ -118,7 +118,7 @@ fn compact_long_lines_stay_bounded_and_expansion_retains_the_tail() {
             None,
             columns,
             &Presentation {
-                expanded: Some(true),
+                expanded: true,
                 ..Presentation::default()
             },
         );
@@ -171,7 +171,7 @@ fn read_expansion_preserves_numbered_source_and_syntax() {
         None,
         40,
         &Presentation {
-            expanded: Some(true),
+            expanded: true,
             ..Presentation::default()
         },
     );
@@ -204,7 +204,7 @@ fn byte_reads_do_not_invent_line_numbers() {
         None,
         80,
         &Presentation {
-            expanded: Some(true),
+            expanded: true,
             ..Presentation::default()
         },
     );
@@ -245,7 +245,7 @@ fn failed_commands_prioritize_errors_and_expand_both_streams() {
         None,
         80,
         &Presentation {
-            expanded: Some(true),
+            expanded: true,
             ..Presentation::default()
         },
     );
@@ -273,7 +273,7 @@ fn capture_notices_survive_collapse_and_expansion() {
         ("output_limit_bytes", Value::number(65536)),
         ("stdout_file", Value::string("output:s1:c1:stdout")),
     ]);
-    for expanded in [None, Some(false), Some(true)] {
+    for expanded in [false, true] {
         let rows = draw(
             "bash",
             &args("command", "cargo test"),
@@ -287,8 +287,8 @@ fn capture_notices_survive_collapse_and_expansion() {
         );
         let text = plain(&rows);
         assert!(text.contains("last") && text.contains("full output saved"));
-        assert_eq!(text.contains("    old"), expanded == Some(true));
-        assert_eq!(text.contains("1 more output line"), expanded != Some(true));
+        assert_eq!(text.contains("    old"), expanded);
+        assert_eq!(text.contains("1 more output line"), !expanded);
     }
 }
 
@@ -321,7 +321,7 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
         Some(&change),
         80,
         &Presentation {
-            expanded: Some(false),
+            expanded: false,
             ..Presentation::default()
         },
     );
@@ -438,7 +438,7 @@ fn non_text_attachments_keep_their_view_and_expandable_metadata() {
                 None,
                 80,
                 &Presentation {
-                    expanded: Some(expanded),
+                    expanded,
                     ..Presentation::default()
                 },
             );

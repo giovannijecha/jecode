@@ -58,9 +58,9 @@ If the inspected state changed, restore reports a conflict. `preview: true`
 reports the plan without changing files or creating an undo.
 
 Before restoring, Jecode verifies saved content and durably saves the current
-states as an undo. It rechecks current bytes before each installation. The
-returned undo includes only paths actually changed, including a failed
-installation if it modified that path. Use its supplied `ref`, `paths` and
+states as an undo. It rechecks the digest of current bytes before each
+installation. The returned undo includes only paths actually changed, including
+a failed installation if it modified that path. Use its supplied `ref`, `paths` and
 `expected` to undo. Restore is per path, not an atomic transaction across files;
 a partial result reports restored, conflicted, failed and skipped paths.
 
@@ -89,7 +89,8 @@ to the saved entry without traversing a final link.
 Snapshots are private files under
 `~/.jecode/checkpoints/<project-name>-<canonical-root-id>/`. Each call creates
 one immutable `rc-ID.rcp` file directly in that workspace directory, containing
-its streamed preimages and checked metadata. Jecode keeps `workspace.id`,
+its streamed preimages and checked metadata. New packs use format 4; formats 2
+and 3 remain readable until their original expiry. Jecode keeps `workspace.id`,
 `identity.lock` and path leases inside `.internal/` in the same workspace
 directory. There are no daily or conversation subdirectories. Configured TUI
 and CLI launches create the workspace checkpoint directory; provider-free
@@ -105,23 +106,29 @@ keeps a 256 MiB free-space margin based on advisory OS samples. A failed or
 unreadable path is reported as partial coverage and never as protected absence.
 
 Recursive discovery skips version-control metadata, generated/cache directories
-such as `target`, `node_modules`, `.venv` and `.cache`, and internal recovery
-storage. An explicitly protected file or directory can select generated content;
-internal storage stays excluded. Symlinks are saved as links without traversing
-their targets. Unsupported entries, unreadable directories and untraversed
-Windows reparse directories make their scope incomplete. A complete directory
-proof is recorded only after capture and a membership recheck agree. Only such
-a proof can establish that a later-created eligible child should be deleted by
-restore. A later selection cannot expand the scope originally captured.
+such as `target`, `node_modules`, `.venv` and `.cache`, directories Git ignores,
+and internal recovery storage. Ignore rules come from `.gitignore` files and the
+repository's `info/exclude`, read directly so Git need not be installed; the
+global excludes file is not read. Only directories are skipped: an ignored file
+such as `.env` is still saved. The captured rules and skipped directories are
+recorded, so later rule changes cannot widen or narrow the saved scope. This
+also covers ignored directories created after capture. An explicitly protected file
+or directory can select generated or ignored content; internal storage stays
+excluded. Symlinks are saved as links without traversing their targets.
+Unsupported entries, unreadable directories and untraversed Windows reparse
+directories make their scope incomplete. A complete directory proof is recorded
+only after capture and a membership recheck agree. Only such a proof can
+establish that a later-created eligible child should be deleted by restore. A
+later selection cannot expand the scope originally captured.
 An explicitly protected path that is absent throughout capture also proves its
 eligible subtree was absent, so a newly created directory can be recovered too.
 
 Path leases coordinate Jecode sessions on the same archive. Arbitrary external
 programs do not honor them; restores check live states and bytes, but filesystem
 operations cannot provide a transaction against an uncooperative external writer.
-On Unix, publication and installation sync their directories. Windows std does
-not provide equivalent directory flushing, so power-loss durability is limited
-by the operating system and filesystem.
+Packs and staged files are synced before they are renamed into place. Like
+`write` and `edit`, checkpoints do not sync directory entries, so a power loss
+right after a call can lose the newest pack or installation.
 
 ## Expiry
 
@@ -157,7 +164,3 @@ In the conversation, `show` displays a bounded page with a next-page command.
 Explicit paging flags work in both interfaces. Suggested offline commands use
 PowerShell quoting on Windows and POSIX shell quoting on Unix; `--` separates
 paths beginning with dashes from options.
-
-Old `cp-N` archives and preview packs under `~/.jecode/recovery/` are obsolete.
-This layout does not import them. A `cp-N` reference produces a legacy-format
-error; only `rc-ID` packs in the current workspace directory are readable.

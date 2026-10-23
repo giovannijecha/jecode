@@ -5,9 +5,6 @@ use crate::{file_change::MAX_DIFF_BYTES, json::Value};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 mod mismatch;
 mod page;
@@ -102,17 +99,13 @@ pub(super) fn edit_with_change(
             None,
         ));
     }
-    let updated_len = content.len() - old.len() + new.len();
-    let include_change = content.len() <= MAX_DIFF_BYTES && updated_len <= MAX_DIFF_BYTES;
     let mut updated = content.clone();
     updated.replace_range(position..position + old.len(), new);
     let outcome = replace_protected(guard, &path, &content, &updated, cancellation);
     if let Err(error) = outcome.result {
         return Ok((failed(error, outcome.checkpoint), None));
     }
-    let change = include_change
-        .then(|| crate::file_change::Change::between(Some(&content), &updated))
-        .flatten();
+    let change = crate::file_change::Change::between(Some(&content), &updated);
     Ok((written(updated.len() as u64, outcome.checkpoint), change))
 }
 
@@ -295,11 +288,7 @@ fn replace_file(path: &Path, content: &str, cancellation: &Cancellation) -> Resu
     {
         return Err("File is read-only; its content was not changed".into());
     }
-    let temporary = path.with_file_name(format!(
-        ".jecode-{}-{}.tmp",
-        std::process::id(),
-        NEXT_FILE.fetch_add(1, Ordering::Relaxed)
-    ));
+    let temporary = crate::disk::temporary_beside(path);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

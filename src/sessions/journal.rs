@@ -2,8 +2,9 @@ use super::{
     Document, context,
     document::{array, integer, required},
     identifier, same_directory,
-    storage::{options, reject_special},
+    storage::reject_special,
 };
+use crate::disk::private_options;
 use crate::json::{self, Value};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
@@ -55,9 +56,8 @@ pub(super) fn read(path: &Path, id: &str, directory: &Path) -> Result<Read, Stri
         }
         let value =
             json::parse(std::str::from_utf8(&line).map_err(|_| "Invalid session journal UTF-8")?)?;
-        let version = integer(&value, "format_version")?;
         if value.get("format").and_then(Value::as_str) != Some("jecode.session.journal")
-            || !matches!(version, 2 | 3)
+            || integer(&value, "format_version")? != 3
         {
             return Err("Unsupported session format or version; file left unchanged".into());
         }
@@ -72,26 +72,14 @@ pub(super) fn read(path: &Path, id: &str, directory: &Path) -> Result<Read, Stri
             .map_or((vec![], vec![]), |doc| (doc.messages, doc.events));
         messages.extend_from_slice(array(&value, "messages")?);
         events.extend_from_slice(array(&value, "events")?);
-        let next_state = if version == 2 {
-            let state = required(&value, "state")?;
-            position.partial = state
-                .get("pending")
-                .and_then(|pending| pending.get("partial_text"))
-                .and_then(Value::as_str)
-                .ok_or("Missing journal partial response")?
-                .into();
-            state::without_partial(state.clone())
-        } else {
-            let mut next = position.state.take().unwrap_or_else(|| Value::object([]));
-            let patch = required(&value, "state")?;
-            if !matches!(patch, Value::Object(_)) {
-                return Err("Invalid journal state patch".into());
-            }
-            state::merge(&mut next, patch);
-            state::clear_legacy_draft_attachments(&mut next, patch);
-            state::apply_partial(&mut position.partial, required(&value, "partial")?)?;
-            next
-        };
+        let mut next_state = position.state.take().unwrap_or_else(|| Value::object([]));
+        let patch = required(&value, "state")?;
+        if !matches!(patch, Value::Object(_)) {
+            return Err("Invalid journal state patch".into());
+        }
+        state::merge(&mut next_state, patch);
+        state::clear_legacy_draft_attachments(&mut next_state, patch);
+        state::apply_partial(&mut position.partial, required(&value, "partial")?)?;
         let next = Document::parse_state(
             &state::with_partial(next_state.clone(), &position.partial)?,
             messages,
@@ -185,7 +173,7 @@ pub(super) fn append(
         ),
     ]);
     let bytes = format!("{}\n", record.encode()).into_bytes();
-    let mut file = options()
+    let mut file = private_options()
         .read(true)
         .write(true)
         .create_new(current.bytes == 0 && !path.exists())
@@ -225,7 +213,7 @@ fn preserve_tail(path: &Path, length: u64) -> Result<(), String> {
         .seek(SeekFrom::Start(length))
         .map_err(|error| error.to_string())?;
     let damaged = path.with_extension(format!("jsonl.damaged-{}", identifier()));
-    let mut copy = options()
+    let mut copy = private_options()
         .write(true)
         .create_new(true)
         .open(damaged)
@@ -233,7 +221,7 @@ fn preserve_tail(path: &Path, length: u64) -> Result<(), String> {
     std::io::copy(&mut source, &mut copy)
         .and_then(|_| copy.sync_all())
         .map_err(|error| format!("Could not preserve incomplete checkpoint: {error}"))?;
-    options()
+    private_options()
         .write(true)
         .open(path)
         .and_then(|file| {

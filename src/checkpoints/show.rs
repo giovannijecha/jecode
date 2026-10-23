@@ -25,9 +25,6 @@ fn resolve(
     let (reference, path) = rest
         .split_once(':')
         .ok_or("Use checkpoint:rc-ID:workspace-relative-path")?;
-    if reference.starts_with("cp-") {
-        return Err("This is an obsolete cp-N reference. Use an rc-ID reference from the current workspace checkpoint list".into());
-    }
     let loaded = store.load(reference, cancel)?;
     let path = paths::resolve_saved(&store.root, &loaded.snapshot, path)?;
     let state = loaded

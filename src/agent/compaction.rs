@@ -34,7 +34,7 @@ impl Agent {
     ) -> Result<Completion, String> {
         let mut retries = super::recovery::Retries::default();
         loop {
-            self.deliver_checkpoint_notices();
+            self.reload_restored_instructions();
             self.accept_input(events)?;
             self.compact_if_needed(limits, false, events)?;
             if self.accept_input(events)? {
@@ -47,7 +47,7 @@ impl Agent {
             })?;
             // Summarization and event delivery can take time. Include restores
             // observed during that work before constructing the next request.
-            self.deliver_checkpoint_notices();
+            self.reload_restored_instructions();
             let messages = self.transport_messages();
             let output_tokens = limits.and_then(|limits| {
                 limits.output.map(|_| {

@@ -61,12 +61,7 @@ pub(super) fn execute(
             },
         ];
         // The turn cancellation applies only to launch; the registry owns the process.
-        return match process::start_logged(
-            &mut command,
-            0,
-            cancellation,
-            [logs.stdout, logs.stderr],
-        ) {
+        return match process::start_logged(&mut command, cancellation, [logs.stdout, logs.stderr]) {
             Ok(started) => processes.adopt(
                 text,
                 streams,
@@ -118,7 +113,6 @@ pub(super) fn execute(
         ("output_limit_bytes", Value::number(OUTPUT_LIMIT)),
         ("stdout_file", Value::string(stdout_ref)),
         ("stderr_file", Value::string(stderr_ref)),
-        ("capture", Value::string("tail")),
     ]))
 }
 

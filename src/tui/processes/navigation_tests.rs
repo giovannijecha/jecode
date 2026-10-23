@@ -115,7 +115,7 @@ fn page_down_advances_by_the_visible_log_rows() {
 
 #[test]
 fn one_column_log_rows_keep_each_ascii_character() {
-    assert_eq!(view::log_row_starts("ABCD", 1).len(), 4);
+    assert_eq!(view::processes::row_starts("ABCD", 1).len(), 4);
 }
 
 #[test]

@@ -30,25 +30,19 @@ fn capture(tools: &Tools, paths: &[String]) -> String {
     let checkpoint = result.get("checkpoint").expect("missing capture receipt");
     checkpoint
         .get("ref")
-        .or_else(|| checkpoint.get("before"))
         .and_then(Value::as_str)
         .unwrap_or_else(|| panic!("{result:?}"))
         .into()
 }
 
 fn restore(tools: &Tools, reference: &str, paths: &[String]) -> Value {
-    let whole_scope = paths == ["."];
-    let action = if whole_scope && reference.starts_with("cp-") {
-        "restore_all"
-    } else {
-        "restore"
-    };
     let mut fields = vec![
-        ("action", Value::string(action)),
+        ("action", Value::string("restore")),
         ("ref", Value::string(reference)),
         ("expected", Value::string("latest")),
     ];
-    if !whole_scope {
+    // The whole scope is the default restore selection.
+    if paths != ["."] {
         fields.push((
             "paths",
             Value::Array(paths.iter().map(Value::string).collect()),
@@ -202,11 +196,7 @@ fn matched_tools() {
                 .get("checkpoint")
                 .unwrap_or_else(|| panic!("{result:?}"));
             assert!(
-                receipt
-                    .get("ref")
-                    .or_else(|| receipt.get("before"))
-                    .and_then(Value::as_str)
-                    .is_some(),
+                receipt.get("ref").and_then(Value::as_str).is_some(),
                 "{result:?}"
             );
         }
@@ -218,7 +208,7 @@ fn matched_tools() {
     println!("FOOTPRINT,{case},{enabled},{}", bytes(home.path()));
     println!(
         "ARCHIVE,{case},{enabled},{}",
-        bytes(&home.path().join("checkpoints")) + bytes(&home.path().join("recovery"))
+        bytes(&home.path().join("checkpoints"))
     );
 }
 
@@ -278,6 +268,6 @@ fn large(count: usize, enabled: bool) {
     println!("FOOTPRINT,large256m,{enabled},{}", bytes(home.path()));
     println!(
         "ARCHIVE,large256m,{enabled},{}",
-        bytes(&home.path().join("checkpoints")) + bytes(&home.path().join("recovery"))
+        bytes(&home.path().join("checkpoints"))
     );
 }

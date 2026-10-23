@@ -174,12 +174,7 @@ fn string<'a>(args: &'a Value, name: &str) -> Result<Option<&'a str>, String> {
 }
 
 fn reference(args: &Value) -> Result<&str, String> {
-    let reference =
-        string(args, "ref")?.ok_or("ref is required; use a receipt or checkpoint list")?;
-    if reference.starts_with("cp-") {
-        return Err("cp-N belongs to an obsolete checkpoint format. Use an rc-ID reference from the current workspace checkpoint list".into());
-    }
-    Ok(reference)
+    string(args, "ref")?.ok_or_else(|| "ref is required; use a receipt or checkpoint list".into())
 }
 
 fn paths(args: &Value) -> Result<Option<Vec<String>>, String> {

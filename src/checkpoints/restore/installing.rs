@@ -3,56 +3,6 @@ use super::*;
 use std::fs;
 use std::io::Read;
 
-pub(super) fn same_file_bytes(
-    loaded: &super::super::store::Loaded,
-    saved: &State,
-    path: &std::path::Path,
-    cancel: &Cancellation,
-) -> Result<bool, String> {
-    let mut archived = loaded.reader(saved)?;
-    let mut current = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(format!("Could not recheck {}: {error}", path.display())),
-    };
-    let mut left = [0u8; 64 * 1024];
-    let mut right = [0u8; 64 * 1024];
-    loop {
-        if cancel.requested() {
-            return Err("Recovery restore was cancelled".into());
-        }
-        let count = archived
-            .read(&mut left)
-            .map_err(|error| format!("Could not read undo: {error}"))?;
-        if count == 0 {
-            return Ok(current
-                .read(&mut right[..1])
-                .map_err(|error| error.to_string())?
-                == 0);
-        }
-        if current.read_exact(&mut right[..count]).is_err() || left[..count] != right[..count] {
-            return Ok(false);
-        }
-    }
-}
-
-pub(super) fn same_live(
-    loaded: &super::super::store::Loaded,
-    before: &State,
-    current: &State,
-    path: &std::path::Path,
-    cancel: &Cancellation,
-) -> Result<bool, String> {
-    if !before.same(current) {
-        return Ok(false);
-    }
-    if matches!(before, State::File { .. }) {
-        same_file_bytes(loaded, before, path, cancel)
-    } else {
-        Ok(true)
-    }
-}
-
 pub(super) fn install(
     entry: &Inspected,
     root: &std::path::Path,
@@ -78,8 +28,6 @@ pub(super) fn install(
                         entry.path
                     )
                 })?;
-                files::sync_directory(path.parent().unwrap_or(root))
-                    .map_err(|error| error.to_string())?;
             }
             Ok(())
         }
@@ -91,8 +39,7 @@ pub(super) fn install(
             }
             staged
                 .install_deferred()
-                .map_err(|error| format!("Could not install {}: {error}", entry.path))?;
-            files::sync_directory(path.parent().unwrap_or(root)).map_err(|error| error.to_string())
+                .map_err(|error| format!("Could not install {}: {error}", entry.path))
         }
         State::Link { .. } => {
             let staged = staged_link.ok_or_else(|| format!("No staged link for {}", entry.path))?;
@@ -102,8 +49,7 @@ pub(super) fn install(
             }
             staged
                 .install_deferred()
-                .map_err(|error| format!("Could not install link {}: {error}", entry.path))?;
-            files::sync_directory(path.parent().unwrap_or(root)).map_err(|error| error.to_string())
+                .map_err(|error| format!("Could not install link {}: {error}", entry.path))
         }
         State::Unreadable { reason } => Err(format!("{} was not captured: {reason}", entry.path)),
     }

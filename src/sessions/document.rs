@@ -1,4 +1,4 @@
-use super::{canonical, context, identifier, now, valid_id};
+use super::{canonical, identifier, now, valid_id};
 use crate::attachments::{Attachment, Prompt};
 use crate::openrouter::{Routing, validate_model};
 use crate::{effort::Effort, json::Value, redact::Redactor};
@@ -310,13 +310,14 @@ impl Document {
         ])
     }
 
+    #[cfg(test)]
     pub fn parse(value: &Value) -> Result<Self, String> {
         let document = Self::parse_state(
             value,
             array(value, "messages")?.to_vec(),
             array(value, "events")?.to_vec(),
         )?;
-        context::validate(&document)?;
+        super::context::validate(&document)?;
         Ok(document)
     }
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::{effort::Effort, json::Value, test_support::Directory};
+use std::fs;
 use std::path::Path;
 
 fn document(project: &Path) -> crate::sessions::Document {
@@ -119,7 +120,7 @@ fn removal_cleans_orphans_and_keeps_legacy_flat_files() {
     let removed = prepared.remove().unwrap();
     assert_eq!(removed.files, 5); // two streams, orphan, nested file, marker
     assert_eq!(removed.directories, 2);
-    assert_eq!(removed.legacy_references, 1);
+
     assert!(!owned.exists());
     assert_eq!(
         fs::read(root.join("8-8-8.stdout")).unwrap(),

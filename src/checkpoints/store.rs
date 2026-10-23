@@ -42,21 +42,11 @@ impl Store {
         // home. The logical names cover symlink aliases; canonical targets
         // cover storage physically located elsewhere inside the workspace.
         for path in [
-            home.join("recovery"),
             directory.parent().unwrap().to_path_buf(),
             home.join("checkpoints"),
             directory.clone(),
         ] {
             add_exclusion(&root, &path, &mut excluded);
-        }
-        match fs::canonicalize(home.join("recovery")) {
-            Ok(path) => add_exclusion(&root, &path, &mut excluded),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "Could not resolve legacy archive location: {error}"
-                ));
-            }
         }
         excluded.sort();
         excluded.dedup();
@@ -259,7 +249,11 @@ fn cleanup_directory(
         if !ordinary_file(&path)? {
             continue;
         }
-        let file = match files::options().read(true).write(true).open(&path) {
+        let file = match crate::disk::private_options()
+            .read(true)
+            .write(true)
+            .open(&path)
+        {
             Ok(file) => file,
             Err(_) => continue,
         };

@@ -81,10 +81,7 @@ impl App {
             dirty = true;
         }
         dirty |= self.poll_copy();
-        while self.worker.is_none()
-            && self.job.is_none()
-            && self.deletion_job.is_none()
-            && self.checkpoint_job.is_none()
+        while self.idle()
             && self.state.selector.is_none()
             && self.state.information.is_none()
             && !self.state.queue.is_editing()

@@ -86,7 +86,7 @@ fn listing_applies_limit_after_skipping_corrupt_newer_and_expired_packs() {
         .unwrap()
         .reference
         .unwrap();
-    let mut file = files::options()
+    let mut file = crate::disk::private_options()
         .read(true)
         .write(true)
         .open(store.directory.join(format!("{newer}.rcp")))
@@ -124,7 +124,11 @@ fn payload_and_metadata_corruption_are_distinguished() {
         panic!("expected file")
     };
     drop(loaded);
-    let mut file = files::options().read(true).write(true).open(&pack).unwrap();
+    let mut file = crate::disk::private_options()
+        .read(true)
+        .write(true)
+        .open(&pack)
+        .unwrap();
     file.seek(SeekFrom::Start(offset)).unwrap();
     file.write_all(b"Z").unwrap();
     drop(file);
@@ -136,7 +140,11 @@ fn payload_and_metadata_corruption_are_distinguished() {
             .contains("Corrupt recovery payload")
     );
     drop(loaded);
-    let mut file = files::options().read(true).write(true).open(&pack).unwrap();
+    let mut file = crate::disk::private_options()
+        .read(true)
+        .write(true)
+        .open(&pack)
+        .unwrap();
     file.seek(SeekFrom::End(-24)).unwrap();
     file.write_all(&u64::MAX.to_le_bytes()).unwrap();
     drop(file);
@@ -160,7 +168,11 @@ fn changed_metadata_fails_checksum_before_decoding() {
         .reference
         .unwrap();
     let pack = store.directory.join(format!("{reference}.rcp"));
-    let mut file = files::options().read(true).write(true).open(&pack).unwrap();
+    let mut file = crate::disk::private_options()
+        .read(true)
+        .write(true)
+        .open(&pack)
+        .unwrap();
     file.seek(SeekFrom::End(-25)).unwrap();
     file.write_all(&[1]).unwrap();
     drop(file);
@@ -177,7 +189,7 @@ fn changed_metadata_fails_checksum_before_decoding() {
 fn format_preserves_directory_link_kind_and_rejects_older_version() {
     let fixture = Fixture::new();
     let pack = fixture.0.path().join("link.rcp");
-    let mut file = files::options()
+    let mut file = crate::disk::private_options()
         .read(true)
         .write(true)
         .create_new(true)
@@ -199,6 +211,8 @@ fn format_preserves_directory_link_kind_and_rejects_older_version() {
         entries,
         roots: Vec::new(),
         excluded: Vec::new(),
+        ignored: Vec::new(),
+        ignore_rules: crate::checkpoints::paths::IgnoreRules::default(),
         partial: Vec::new(),
     };
     format::header(&mut file, snapshot.created).unwrap();
@@ -276,7 +290,7 @@ fn exact_undo_capture_does_not_expand_directory_or_claim_membership() {
     fs::write(fixture.workspace().join("d").join("untouched"), b"keep").unwrap();
     let store = fixture.store();
     let cancel = Cancellation::default();
-    let captured = store
+    let (captured, _) = store
         .capture_exact("undo restore", "test", &["d".into()], &cancel)
         .unwrap();
     let loaded = store
@@ -296,7 +310,7 @@ fn exact_undo_capture_synthesizes_absent_below_saved_file() {
     fs::write(fixture.workspace().join("d"), b"parent file").unwrap();
     let store = fixture.store();
     let cancel = Cancellation::default();
-    let captured = store
+    let (captured, _) = store
         .capture_exact(
             "undo restore",
             "test",
@@ -403,15 +417,11 @@ fn explicit_internal_storage_is_never_captured() {
 }
 
 #[test]
-fn broad_scope_excludes_all_checkpoint_and_retired_archives_under_home() {
+fn broad_scope_excludes_all_checkpoint_storage_under_home() {
     let fixture = Fixture::new();
     let home = fixture.workspace().join(".jecode");
     let store = Store::open(&home, &fixture.workspace()).unwrap();
-    let other = home.join("recovery").join("another-workspace");
-    fs::create_dir_all(&other).unwrap();
-    fs::write(other.join("other.rcp"), b"other project").unwrap();
-    let legacy = home.join("checkpoints");
-    fs::write(legacy.join("old.bin"), b"old archive").unwrap();
+    fs::write(home.join("checkpoints").join("old.bin"), b"old archive").unwrap();
     fs::write(fixture.workspace().join("source.txt"), b"source").unwrap();
     let cancel = Cancellation::default();
     let captured = store
@@ -421,19 +431,23 @@ fn broad_scope_excludes_all_checkpoint_and_retired_archives_under_home() {
         .load(captured.reference.as_deref().unwrap(), &cancel)
         .unwrap();
     assert!(loaded.snapshot.entries.contains_key("source.txt"));
-    assert!(!loaded.snapshot.entries.keys().any(
-        |path| path.starts_with(".jecode/recovery") || path.starts_with(".jecode/checkpoints")
-    ));
-    for path in [
-        ".jecode/recovery/another-workspace/other.rcp",
-        ".jecode/checkpoints/old.bin",
-    ] {
-        let blocked = store
-            .capture("write", "test", &[path.into()], &cancel)
-            .unwrap();
-        assert!(blocked.reference.is_none());
-        assert!(!blocked.partial.is_empty());
-    }
+    assert!(
+        !loaded
+            .snapshot
+            .entries
+            .keys()
+            .any(|path| path.starts_with(".jecode/checkpoints"))
+    );
+    let blocked = store
+        .capture(
+            "write",
+            "test",
+            &[".jecode/checkpoints/old.bin".into()],
+            &cancel,
+        )
+        .unwrap();
+    assert!(blocked.reference.is_none());
+    assert!(!blocked.partial.is_empty());
 }
 
 #[test]

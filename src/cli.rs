@@ -235,8 +235,8 @@ mod tests {
     #[test]
     fn checkpoints_pass_their_words_through_unparsed() {
         assert!(matches!(
-            parse(arguments(&["checkpoints", "restore", "cp-3", "a b.txt", "--preview"])).unwrap(),
-            Action::Checkpoints(words) if words == ["restore", "cp-3", "a b.txt", "--preview"]
+            parse(arguments(&["checkpoints", "restore", "rc-3", "a b.txt", "--preview"])).unwrap(),
+            Action::Checkpoints(words) if words == ["restore", "rc-3", "a b.txt", "--preview"]
         ));
         assert!(
             matches!(parse(arguments(&["checkpoints"])).unwrap(), Action::Checkpoints(words) if words.is_empty())

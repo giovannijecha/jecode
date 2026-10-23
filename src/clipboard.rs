@@ -121,8 +121,6 @@ pub fn copy(
 // OSC 52 data travels through terminal output, so keep the request bounded.
 #[cfg(any(not(windows), test))]
 const MAX_OSC52_INPUT_BYTES: usize = 100_000;
-#[cfg(any(not(windows), test))]
-const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 #[cfg(any(not(windows), test))]
 fn terminal_packet(
@@ -142,27 +140,10 @@ fn terminal_packet(
     if cancellation.requested() {
         return Err("Operation cancelled".into());
     }
-    let mut packet = String::with_capacity(7 + data.len().div_ceil(3) * 4);
-    packet.push_str("\x1b]52;c;");
-    for chunk in data.chunks(3) {
-        let a = chunk[0];
-        let b = *chunk.get(1).unwrap_or(&0);
-        let c = *chunk.get(2).unwrap_or(&0);
-        packet.push(BASE64[(a >> 2) as usize] as char);
-        packet.push(BASE64[(((a & 3) << 4) | (b >> 4)) as usize] as char);
-        packet.push(if chunk.len() > 1 {
-            BASE64[(((b & 15) << 2) | (c >> 6)) as usize] as char
-        } else {
-            '='
-        });
-        packet.push(if chunk.len() > 2 {
-            BASE64[(c & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    packet.push('\x07');
-    Ok(Delivery::Terminal(packet))
+    Ok(Delivery::Terminal(format!(
+        "\x1b]52;c;{}\x07",
+        crate::attachments::base64::encode(data)
+    )))
 }
 
 #[cfg(any(windows, target_os = "macos"))]

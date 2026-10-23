@@ -168,11 +168,7 @@ pub(super) fn edit(
     let result = (|| -> Result<(), String> {
         check_guard(guard.as_ref(), cancellation)?;
         unchanged(path, &source, &metadata)?;
-        let temporary = Temporary(path.with_file_name(format!(
-            ".jecode-{}-{}.tmp",
-            std::process::id(),
-            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
-        )));
+        let temporary = Temporary(crate::disk::temporary_beside(path));
         let mut output = OpenOptions::new()
             .write(true)
             .create_new(true)
