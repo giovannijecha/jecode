@@ -55,9 +55,12 @@ remain in force. Each loaded section identifies its source and scope for the
 model; rules from sibling directories do not override each other.
 
 Launching in `project/web/` excludes `project/AGENTS.md`. A Bash tool changing its
-own directory does not move this boundary. Discovery skips `.git` metadata and
-does not traverse directory symbolic links or junctions. Other real subdirectories
-are searched even if ignored by Git, so local instruction files remain usable.
+own directory does not move this boundary. Discovery skips subdirectories named
+`.git`, `node_modules`, `.venv` or `vendor` at every level and does not traverse
+directory symbolic links or junctions. Other real subdirectories, including
+`target`, are searched even if ignored by Git, so local instruction files remain
+usable. An explicitly selected launch directory is always included, even if it
+has one of those names.
 
 ## Updates and saved sessions
 

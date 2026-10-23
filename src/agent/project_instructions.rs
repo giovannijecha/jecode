@@ -82,7 +82,10 @@ fn scan(
                 directory.display()
             )
         })?;
-        if entry.file_name() == ".git" {
+        if matches!(
+            entry.file_name().to_str(),
+            Some(".git" | "node_modules" | ".venv" | "vendor")
+        ) {
             continue;
         }
         let file_type = entry
@@ -155,3 +158,6 @@ mod tests;
 
 #[cfg(test)]
 mod link_tests;
+
+#[cfg(test)]
+mod dependency_tests;
