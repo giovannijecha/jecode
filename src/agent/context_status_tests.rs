@@ -8,6 +8,7 @@ fn trace(agent: &mut Agent, prompt: &str) -> (Result<(), String>, Vec<(&'static 
     let mut last = None;
     let result = agent.run_turn(prompt, &mut |event| {
         let label = match event {
+            Event::Recovering { .. } => return Err("Unexpected fixture request".into()),
             Event::Context(status) => {
                 last = Some(status);
                 "context"
@@ -154,6 +155,7 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
+        (200, completion("Goal kept; next action: finish.", vec![])),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -184,7 +186,7 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
     assert!(reduced.tokens > 0 && reduced.tokens < budget);
     assert_eq!(reduced.capacity, Some(32000));
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(fixture.finish().len(), 3);
 }
 
 #[test]
@@ -202,6 +204,7 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
                 ]),
             )]),
         ),
+        (200, completion("Original objective retained.", vec![])),
         (200, completion("Original objective retained.", vec![])),
         (200, completion("Finished.", vec![])),
     ]);
@@ -229,7 +232,7 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
         .1;
     assert_eq!(learned.capacity, Some(ceiling));
     assert!(trace.iter().any(|(label, _)| *label == "compacted"));
-    assert_eq!(fixture.finish().len(), 3);
+    assert_eq!(fixture.finish().len(), 4);
 }
 
 #[test]
@@ -289,7 +292,7 @@ fn accepted_input_updates_context_before_a_summary_starts() {
         client.fixture_limits(32000, Some(4096));
         let mut agent = Agent::new(client, Tools::new(&workspace).unwrap());
         let inbox = agent.inbox();
-        let update = "Updated requirement. ".repeat(4000);
+        let update = "Updated requirement. ".repeat(800);
         let mut submitted = false;
         let mut accepted = false;
         let mut accepted_context = None;

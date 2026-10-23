@@ -47,11 +47,12 @@ fn supplied(request: &crate::test_support::Request) -> &str {
 }
 
 #[test]
-fn one_summary_request_keeps_the_newest_records_that_fit_and_the_previous_summary() {
+fn chronological_portions_include_every_record_and_carry_the_previous_summary() {
     for calibrated in [false, true] {
         let directory = Directory::new();
         let candidate = String::from("Continue the original task.");
-        let fixture = HttpFixture::new(vec![(200, completion(&candidate, vec![]))]);
+        let expected = if calibrated { 1 } else { 2 };
+        let fixture = HttpFixture::new(vec![(200, completion(&candidate, vec![])); expected]);
         let mut agent = Agent::new(
             OpenRouter::fixture(fixture.endpoint.clone()),
             Tools::new(directory.path()).unwrap(),
@@ -79,7 +80,7 @@ fn one_summary_request_keeps_the_newest_records_that_fit_and_the_previous_summar
         assert_eq!(summary, candidate);
         assert_eq!(*agent.messages.lock().unwrap(), original);
         let requests = fixture.finish();
-        assert_eq!(requests.len(), 1);
+        assert_eq!(requests.len(), expected);
         let request = &requests[0];
         assert!(request.body.get("tools").is_none());
         assert_eq!(
@@ -96,21 +97,28 @@ fn one_summary_request_keeps_the_newest_records_that_fit_and_the_previous_summar
                 request_bytes
             } <= 21000
         );
-        let supplied = supplied(request);
-        assert!(supplied.contains(&previous));
-        let (newest, _) = records.last().unwrap();
-        assert!(supplied.contains(&format!("history:{newest}")));
-        // Calibration fits every record; without it the oldest are left out.
-        assert_eq!(
-            records.iter().all(|(_, record)| supplied.contains(record)),
-            calibrated
+        let supplied_text = supplied(request);
+        assert!(supplied_text.contains(&previous));
+        for (_, record) in &records {
+            assert!(
+                requests
+                    .iter()
+                    .any(|request| supplied(request).contains(record))
+            );
+        }
+        if !calibrated {
+            assert!(supplied(&requests[1]).contains(&candidate));
+        }
+        assert!(
+            requests
+                .iter()
+                .all(|request| !request.body.encode().contains("Older messages are omitted"))
         );
-        assert_eq!(supplied.contains("Older messages are omitted"), !calibrated);
     }
 }
 
 #[test]
-fn a_rejected_summary_request_retries_with_fewer_old_records() {
+fn a_rejected_summary_retries_a_smaller_portion_without_skipping_older_records() {
     let directory = Directory::new();
     let candidate = String::from("Continue the original task.");
     let fixture = HttpFixture::new(vec![
@@ -124,6 +132,7 @@ fn a_rejected_summary_request_retries_with_fewer_old_records() {
                 ]),
             )]),
         ),
+        (200, completion(&candidate, vec![])),
         (200, completion(&candidate, vec![])),
     ]);
     let mut agent = Agent::new(
@@ -150,11 +159,17 @@ fn a_rejected_summary_request_retries_with_fewer_old_records() {
         .unwrap();
     assert_eq!(*agent.messages.lock().unwrap(), original);
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert!(requests[1].body.encode().len() < requests[0].body.encode().len());
-    let retried = supplied(&requests[1]);
-    assert!(retried.contains(&records.last().unwrap().1));
-    assert!(retried.contains("Older messages are omitted"));
+    assert!(supplied(&requests[1]).contains(&records[0].1));
+    for (_, record) in &records {
+        assert!(
+            requests[1..]
+                .iter()
+                .any(|request| supplied(request).contains(record))
+        );
+    }
+    assert!(supplied(&requests[2]).contains(&candidate));
 }
 
 fn large_read() -> Value {

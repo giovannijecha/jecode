@@ -313,14 +313,6 @@ impl Router {
         Ok(())
     }
 
-    /// Whether requests may use a parameter: false only when a pinned
-    /// endpoint is known not to accept it.
-    pub fn allows(&self, model: &str, parameter: &str) -> bool {
-        self.pinned(model)
-            .and_then(|endpoint| endpoint.supports(parameter))
-            != Some(false)
-    }
-
     /// Model limits narrowed to a pinned endpoint's known limits.
     pub fn limits(&self, model: &str, limits: Option<Limits>) -> Option<Limits> {
         let Some(endpoint) = self.pinned(model) else {

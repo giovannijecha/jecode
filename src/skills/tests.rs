@@ -34,8 +34,8 @@ fn empty_and_malformed_siblings_keep_a_sorted_useful_catalog() {
     );
     assert_eq!(library.warnings().len(), 1);
     assert!(library.warnings()[0].contains("broken"));
-    assert!(library.instructions(&[]).contains("skill:alpha"));
-    assert!(!library.instructions(&[]).contains("No frontmatter"));
+    assert!(library.instructions().contains("skill:alpha"));
+    assert!(!library.instructions().contains("No frontmatter"));
 }
 
 #[test]

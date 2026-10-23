@@ -46,7 +46,8 @@ from another agent may need changes for Jecode's available tools and environment
 
 The model receives the library's names, descriptions and read references. It
 chooses relevant skills for the task and loads their bodies through `read`, rather
-than receiving every procedure on every request. You can also ask it in ordinary
+than receiving every procedure on every request. Reading a skill does not change
+that catalog in the system instructions. You can also ask it in ordinary
 text to use a named skill. There is no per-skill slash command or composer expansion.
 Jecode continues to work when the library is empty.
 
@@ -54,10 +55,11 @@ The catalog is refreshed for a new turn and when `/skills` lists it. Skill
 procedures support the current request; they do not override your instructions
 or grant permission for additional work.
 
-Read references from earlier skill use remain identifiable after compaction and
-resume, so the model can reread the current files when relevant. They do not
-automatically apply an old workflow to a new request. Each resource's first read
-is kept stable for the rest of that turn; a later turn reads from disk again.
+At compaction, Jecode saves the references of skills already read alongside the
+summary. They remain identifiable after resume, so the model can reread the
+current files when relevant. They do not automatically apply an old workflow to
+a new request. Each resource's first read is kept stable for the rest of that
+turn; a later turn reads from disk again.
 
 The TUI presents a skill load as `● Skill(name)`, using the existing tool-card
 states: green after success, red after failure and the tool accent while running.

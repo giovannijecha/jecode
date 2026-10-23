@@ -215,8 +215,9 @@ fn recent_requests_stay_verbatim_newest_first_within_the_budget() {
         .join("\n");
     assert!(encoded.contains("Latest correction: exclusive upper date bound"));
     assert!(encoded.contains(&format!("Correction 29: {}", "detail ".repeat(70))));
-    // The oldest requests leave the view; history:requests still returns them.
-    assert!(!encoded.contains("Original objective"));
+    // Keep the original goal beside recent corrections; middle requests can leave the view.
+    assert!(encoded.contains("Original objective: preserve protected.txt"));
+    assert!(!encoded.contains("Correction 0:"));
     assert!(encoded.contains("Earlier requests are omitted"));
     assert!(encoded.contains("history:requests"));
 }

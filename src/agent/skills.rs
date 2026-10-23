@@ -20,8 +20,12 @@ impl Agent {
     }
 
     pub(super) fn skill_instructions(&self) -> String {
+        self.skills.instructions()
+    }
+
+    pub(super) fn skill_checkpoint_instructions(&self) -> String {
         let used = self.used_skills.iter().cloned().collect::<Vec<_>>();
-        self.skills.instructions(&used)
+        self.skills.checkpoint_instructions(&used)
     }
 
     pub(super) fn rebuild_used_skills(&mut self) {

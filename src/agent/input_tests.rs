@@ -295,6 +295,7 @@ fn messages_sent_during_compaction_join_the_request_after_it() {
             )]),
         ),
         (200, completion("Original objective retained.", vec![])),
+        (200, completion("Original objective retained.", vec![])),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = agent(&directory, &fixture);
@@ -302,6 +303,9 @@ fn messages_sent_during_compaction_join_the_request_after_it() {
     let mut sent = false;
     agent
         .run_turn(prompt.as_str(), &mut |event| {
+            if matches!(event, Event::Recovering { .. }) {
+                return Err("Unexpected fixture request".into());
+            }
             if matches!(event, Event::Maintenance { .. }) && !sent {
                 send(&inbox, &["during compaction"]);
                 sent = true;
@@ -310,10 +314,10 @@ fn messages_sent_during_compaction_join_the_request_after_it() {
         })
         .unwrap();
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     assert!(!requests[1].body.encode().contains("during compaction"));
     assert_eq!(
-        users(&requests[2]).last().map(String::as_str),
+        users(&requests[3]).last().map(String::as_str),
         Some("during compaction")
     );
 }

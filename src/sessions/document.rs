@@ -195,6 +195,7 @@ impl Input {
 pub struct Pending {
     pub active: bool,
     pub tool: Option<String>,
+    pub reads: Vec<String>,
     pub partial: String,
 }
 
@@ -301,6 +302,10 @@ impl Document {
                             .as_ref()
                             .map_or(Value::Null, Value::string),
                     ),
+                    (
+                        "reads",
+                        Value::Array(self.pending.reads.iter().map(Value::string).collect()),
+                    ),
                     ("partial_text", Value::string(&self.pending.partial)),
                 ]),
             ),
@@ -361,6 +366,19 @@ impl Document {
                     Value::Null => None,
                     Value::String(id) if !id.is_empty() => Some(id.clone()),
                     _ => return Err("Invalid pending tool".into()),
+                },
+                reads: match pending.get("reads") {
+                    None => Vec::new(),
+                    Some(Value::Array(reads)) => reads
+                        .iter()
+                        .map(|id| {
+                            id.as_str()
+                                .filter(|id| !id.is_empty())
+                                .map(str::to_owned)
+                                .ok_or_else(|| "Invalid pending read".to_owned())
+                        })
+                        .collect::<Result<_, _>>()?,
+                    _ => return Err("Invalid pending reads".into()),
                 },
                 partial: string(pending, "partial_text")?.into(),
             },

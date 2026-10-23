@@ -1,7 +1,7 @@
 use crate::json::{self, Value};
 
-/// Recent user requests before `before`, newest first within `budget`. They stay
-/// verbatim; the request crossing the budget is shortened and older ones are omitted.
+/// A fixed checkpoint of the first and recent user requests before `before`.
+/// Later messages never change this prefix; long requests retain history references.
 pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Option<Value> {
     let is_user = |message: &Value| message.get("role").and_then(Value::as_str) == Some("user");
     let requests = messages
@@ -10,24 +10,34 @@ pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Opti
         .take(before)
         .filter(|(_, message)| is_user(message))
         .collect::<Vec<_>>();
-    let latest_index = messages.iter().rposition(is_user)?;
+    let latest_index = requests.last()?.0;
     let mut entries = Vec::new();
     let mut used = 0;
+    if requests.len() > 1 {
+        let (index, message) = requests[0];
+        let label = format!("history:{index} — archived user request:\n");
+        let allowance = budget / 3;
+        if allowance > label.len() {
+            let text = crate::attachments::provider::user_text(message);
+            let entry = format!("{label}{}", excerpt(&text, allowance - label.len()));
+            used = entry.len() + 2;
+            entries.push((index, entry));
+        }
+    }
     for &(index, message) in requests.iter().rev() {
+        if entries.first().is_some_and(|(first, _)| *first == index) {
+            continue;
+        }
         let text = crate::attachments::provider::user_text(message);
         let text = text.as_str();
-        let label = if index == latest_index {
-            format!("history:{index} — current original user request:\n")
-        } else {
-            format!("history:{index} — archived user request:\n")
-        };
+        let label = format!("history:{index} — archived user request:\n");
         let available = budget.saturating_sub(used + label.len());
         if available == 0 {
             break;
         }
         let entry = format!("{label}{}", excerpt(text, available));
         used += entry.len() + 2;
-        entries.push(entry);
+        entries.push((index, entry));
         if text.len() > available {
             break;
         }
@@ -40,19 +50,18 @@ pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Opti
     } else {
         ""
     };
-    entries.reverse();
-    let location = if latest_index >= before {
-        "retained in the live transcript"
-    } else {
-        "included below"
-    };
+    entries.sort_by_key(|(index, _)| *index);
     Some(Value::object([
         ("role", Value::string("user")),
         (
             "content",
             Value::string(format!(
-                "Recent original user requests, in chronological order.\nLatest original user request: history:{latest_index} ({location}).\nComplete original request history: history:requests.\n\n{omitted}{}",
-                entries.join("\n\n")
+                "Archived original user requests, in chronological order.\nLast user request in this checkpoint: history:{latest_index}. Later user messages continue or update this work; an earlier request does not override a later correction or cancellation.\nComplete original request history: history:requests.\n\n{omitted}{}",
+                entries
+                    .into_iter()
+                    .map(|(_, text)| text)
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
             )),
         ),
     ]))
@@ -100,6 +109,9 @@ pub(crate) fn excerpt(text: &str, limit: usize) -> String {
         return text.into();
     }
     let marker = "\n[... context excerpt; full original remains in history ...]\n";
+    if limit < marker.len() {
+        return text[..text.floor_char_boundary(limit)].into();
+    }
     let available = limit.saturating_sub(marker.len());
     let head = text.floor_char_boundary(available * 2 / 3);
     let tail = text.ceil_char_boundary(text.len().saturating_sub(available / 3));

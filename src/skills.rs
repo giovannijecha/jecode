@@ -69,7 +69,7 @@ impl Library {
         &self.warnings
     }
 
-    pub fn instructions(&self, used: &[String]) -> String {
+    pub fn instructions(&self) -> String {
         if self.entries.is_empty() && self.warnings.is_empty() {
             return String::new();
         }
@@ -85,23 +85,25 @@ impl Library {
                 ));
             }
         }
-        if !used.is_empty() {
-            let available = used
-                .iter()
-                .filter(|name| self.entries.contains_key(*name))
-                .map(|name| format!("skill:{name}"))
-                .collect::<Vec<_>>();
-            if !available.is_empty() {
-                lines.push(format!(
-                    "Skills read in this conversation (reread if relevant): {}",
-                    available.join(", ")
-                ));
-            }
-        }
         for warning in &self.warnings {
             lines.push(format!("Skill catalog warning: {warning}"));
         }
         lines.join("\n")
+    }
+
+    pub fn checkpoint_instructions(&self, used: &[String]) -> String {
+        let available = used
+            .iter()
+            .filter(|name| self.entries.contains_key(*name))
+            .map(|name| format!("skill:{name}"))
+            .collect::<Vec<_>>();
+        if available.is_empty() {
+            return String::new();
+        }
+        format!(
+            "Skills read in this conversation (reread if relevant): {}",
+            available.join(", ")
+        )
     }
 
     pub fn read(

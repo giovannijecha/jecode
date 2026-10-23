@@ -35,7 +35,10 @@ Paths are relative to `src/`.
 3. The context layer projects the active conversation for OpenRouter. The client
    streams text, reasoning fields and tool calls through agent events.
 4. The agent saves tool boundaries, executes calls and records their results.
-   Follow-up messages from the shared inbox join before the next model request.
+   Up to four adjacent eligible read calls run together after the complete
+   model response; history and skill reads, or any non-read call, break the
+   batch. Results and checkpoints keep model call order. Follow-up messages
+   from the shared inbox join before the next model request.
 5. Completion, cancellation or failure checkpoints the conversation. The interface
    renders the result and keeps unsent input available.
 
@@ -58,21 +61,28 @@ effective model window, lowered when a provider rejection reveals a smaller
 ceiling. The trigger, result previews, retained requests and summary sizing use
 that budget. Prompt estimates calibrate from provider usage when available.
 
-`agent/summary.rs` asks the same model for a plain-text handoff containing the
-previous summary, original user requests and the newest transcript records that
-fit. Older omitted records remain readable. A learned summary output allowance
-survives resume and resets when the model or effort changes.
+`agent/compaction.rs` keeps a verbatim tail within one quarter of the input
+budget. An assistant tool call and all its results stay on the same side of the
+boundary; an oversized group can leave no verbatim tail.
+`agent/summary.rs` asks the same model for a plain-text handoff. It folds every
+supplied transcript record into the previous summary in chronological portions;
+an oversized record continues at a UTF-8 boundary in the next portion. Failed
+compaction leaves the previous context in place. A learned summary output
+allowance survives resume and resets when the model or effort changes.
 
-`context/view.rs` preserves recent user requests verbatim within its byte budget
-and replaces large older tool results with previews and history references.
+`context/view.rs` creates a stable archived-request prefix at each compaction,
+retaining the first and latest user requests within its byte budget. It also
+replaces large older tool results with previews and history references.
 `context/source.rs` tracks original roles, user requests and tool ownership;
 `agent/history.rs` exposes paged original messages through `read`.
 
 The native communication and behavior instructions live in `agent/PROMPT.md`
 and are compiled into the application. The current environment, project
 instructions and personal skill catalog are projected separately from
-the original saved system message. Skill bodies are read on demand through the
-agent's `read` dispatch, alongside history references; terminal presentation
+the original saved system message. Reading a skill leaves that catalog stable;
+at compaction, references to skills already read are saved separately from the
+model-written summary. Skill bodies are read on demand through the agent's
+`read` dispatch, alongside history references; terminal presentation
 remains in the TUI. Compaction changes the active context without
 rewriting original history. `Event::Context` carries the next-request estimate
 to the TUI footer. See [long-running work](../usage/LONG_WORK.md) for user-visible behavior.
@@ -111,6 +121,9 @@ saved immediately; later streaming updates and TUI input use a 250 ms save
 interval. Periodic saves serialize disk access in a worker; explicit saves and
 clean exit flush synchronously. The session journal calls these saves
 checkpoints; they are unrelated to the workspace checkpoints below.
+An in-progress read batch records its call IDs in `pending.reads` until all
+results are saved in call order. Earlier journals without this field load with
+an empty list.
 
 | Condition | Recovery |
 | --- | --- |
@@ -205,9 +218,11 @@ validation enabled. Test builds can use loopback endpoints.
 
 The client preserves assistant content, tool calls and ordered reasoning fields
 for compatible follow-up requests. It applies the selected model, effort and
-endpoint routing to ordinary and summary requests. Provider diagnostics retain
-the underlying code, parameter and message after credential masking and length
-bounding. See [configuration](../usage/CONFIGURATION.md) for routing and overrides.
+endpoint routing to ordinary and summary requests. Summary requests ask for
+plain text without `response_format`; Jecode sets no explicit prompt-cache
+markers. Provider diagnostics retain the underlying code, parameter and message
+after credential masking and length bounding. See
+[configuration](../usage/CONFIGURATION.md) for routing and overrides.
 
 Auto routing keeps OpenRouter fallbacks. With enough fresh comparable endpoint
 statistics, it requests throughput near or above half the median and first-token

@@ -37,7 +37,6 @@ pub struct OpenRouter {
     model: String,
     effort: Effort,
     limits: Option<Option<Limits>>,
-    summary_json: bool,
     /// The model's input modalities from the catalog; None when unknown.
     inputs: Option<Vec<String>>,
     router: Router,
@@ -146,7 +145,6 @@ impl OpenRouter {
             api,
             model,
             effort: Effort::Default,
-            summary_json: false,
             inputs: None,
             router: Router::new(Routing::Default),
         })
@@ -193,7 +191,6 @@ impl OpenRouter {
     pub fn set_model(&mut self, model: String) -> Result<(), String> {
         validate_model(&model)?;
         if model != self.model {
-            self.summary_json = false;
             self.inputs = None;
             let session = self.router.session.take();
             self.router = Router::new(match &self.router.routing {
@@ -296,11 +293,6 @@ impl OpenRouter {
         if let Value::Object(fields) = &mut body {
             if with_tools {
                 fields.insert("tools".into(), tools::definitions());
-            } else if self.summary_json && self.router.allows(&self.model, "response_format") {
-                fields.insert(
-                    "response_format".into(),
-                    Value::object([("type", Value::string("json_object"))]),
-                );
             }
             if let Some(tokens) = output_tokens {
                 fields.insert("max_completion_tokens".into(), Value::number(tokens));

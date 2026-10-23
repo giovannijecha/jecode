@@ -333,6 +333,7 @@ fn live_requests_keep_the_rules_after_context_compaction() {
             200,
             completion(&String::from("Continue inspection"), vec![]),
         ),
+        (200, completion("Continue inspection", vec![])),
         (200, completion("Finished", vec![])),
     ]);
     let mut agent = agent(&directory, &fixture);
@@ -364,8 +365,8 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     assert!(!notices.is_empty());
     assert!(!agent.context.summary.is_empty());
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(requests.len(), 3);
-    for request in [&requests[0], &requests[2]] {
+    assert_eq!(requests.len(), 4);
+    for request in [&requests[0], &requests[3]] {
         assert!(system(request).contains("Compaction project rules"));
         assert!(!system(request).contains("Changed during compaction"));
         assert!(system(request).contains("Source: src/JECODE.md"));

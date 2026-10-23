@@ -22,7 +22,7 @@ fn output_allowance_respects_both_model_output_and_remaining_context() {
 }
 
 #[test]
-fn summary_json_is_negotiated_for_the_exact_model_and_never_applied_to_tool_turns() {
+fn summary_requests_use_plain_text_regardless_of_model_json_support() {
     for supported in [false, true] {
         let parameters = if supported {
             vec![Value::string("response_format")]
@@ -48,16 +48,16 @@ fn summary_json_is_negotiated_for_the_exact_model_and_never_applied_to_tool_turn
         )]);
         let fixture = HttpFixture::new(vec![
             (200, catalog),
-            (200, completion("{}", vec![])),
+            (200, completion("Handoff summary", vec![])),
             (200, completion("Done", vec![])),
-            (200, completion("{}", vec![])),
+            (200, completion("Another summary", vec![])),
         ]);
         let mut client = OpenRouter::fixture(fixture.endpoint.clone());
         client.limits = None;
         client.limits().unwrap();
         let messages = [Value::object([
             ("role", Value::string("user")),
-            ("content", Value::string("JSON")),
+            ("content", Value::string("Summarize")),
         ])];
         client
             .sample(&messages, false, Some(3000), &mut |_| Ok(()))
@@ -71,14 +71,7 @@ fn summary_json_is_negotiated_for_the_exact_model_and_never_applied_to_tool_turn
             .unwrap();
         let requests = fixture.finish();
         assert_eq!(requests.len(), 4);
-        let format = requests[1].body.get("response_format");
-        assert_eq!(format.is_some(), supported);
-        if supported {
-            assert_eq!(
-                format.unwrap().get("type").and_then(Value::as_str),
-                Some("json_object")
-            );
-        }
+        assert!(requests[1].body.get("response_format").is_none());
         assert!(requests[1].body.get("tools").is_none());
         assert!(requests[2].body.get("response_format").is_none());
         assert!(requests[2].body.get("tools").is_some());
@@ -87,7 +80,7 @@ fn summary_json_is_negotiated_for_the_exact_model_and_never_applied_to_tool_turn
 }
 
 #[test]
-fn summaries_skip_json_output_only_on_a_pinned_endpoint_known_to_lack_it() {
+fn pinned_endpoints_do_not_add_json_output_to_summary_requests() {
     let catalog = Value::object([(
         "data",
         Value::Array(vec![Value::object([
@@ -100,7 +93,7 @@ fn summaries_skip_json_output_only_on_a_pinned_endpoint_known_to_lack_it() {
         ])]),
     )]);
     let mut responses = vec![(200, catalog)];
-    responses.extend((0..3).map(|_| (200, completion("{}", vec![]))));
+    responses.extend((0..3).map(|_| (200, completion("Handoff summary", vec![]))));
     let fixture = HttpFixture::new(responses);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     client.limits = None;
@@ -116,9 +109,8 @@ fn summaries_skip_json_output_only_on_a_pinned_endpoint_known_to_lack_it() {
     );
     let messages = [Value::object([
         ("role", Value::string("user")),
-        ("content", Value::string("JSON")),
+        ("content", Value::string("Summarize")),
     ])];
-    // Unlisted endpoints are not assumed to lack the parameter.
     for tag in ["plain/one", "json/two", "unlisted/three"] {
         client.set_routing(crate::openrouter::Routing::Endpoint(tag.into()));
         client
@@ -130,5 +122,5 @@ fn summaries_skip_json_output_only_on_a_pinned_endpoint_known_to_lack_it() {
         .iter()
         .map(|request| request.body.get("response_format").is_some())
         .collect();
-    assert_eq!(formats, [false, true, true]);
+    assert_eq!(formats, [false, false, false]);
 }
