@@ -4,7 +4,7 @@ use crate::tui::{
     keys::Decoder,
     terminal::{Input, Key},
 };
-use crate::{agent::Agent, openrouter::OpenRouter, test_support::Directory, tools::Tools};
+use crate::{agent::Agent, backend::openrouter::OpenRouter, test_support::Directory, tools::Tools};
 use std::time::Instant;
 
 fn app(directory: &Directory) -> App {

@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
     agent::Agent,
+    backend::openrouter::OpenRouter,
     json::Value,
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
     tui::{Decoded, terminal, tests, view},

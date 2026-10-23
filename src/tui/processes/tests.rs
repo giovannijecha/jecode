@@ -1,8 +1,8 @@
 use super::super::*;
 use super::{Logs, Panel, RETAINED, Stream};
 use crate::{
+    backend::openrouter::OpenRouter,
     json::Value,
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::{
         Tools,

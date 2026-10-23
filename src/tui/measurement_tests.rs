@@ -6,8 +6,8 @@ use super::{
     viewport::Scroll,
 };
 use crate::{
-    agent::Agent, events::Event, json::Value, openrouter::OpenRouter, test_support::Directory,
-    tools::Tools,
+    agent::Agent, backend::openrouter::OpenRouter, events::Event, json::Value,
+    test_support::Directory, tools::Tools,
 };
 use std::{hint::black_box, time::Instant};
 

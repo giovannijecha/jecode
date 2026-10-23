@@ -1,8 +1,8 @@
 use super::Agent;
 use crate::{
+    backend::openrouter::OpenRouter,
     cancel::Cancellation,
     json::{self, Value},
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
 };

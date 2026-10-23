@@ -13,8 +13,6 @@ mod served;
 mod stream;
 mod transport;
 
-#[cfg(test)]
-pub use crate::backend::Model;
 pub use crate::backend::{
     Charges, Completion, Failure, FailureKind, Limits, ToolCall, Update, validate_model,
 };

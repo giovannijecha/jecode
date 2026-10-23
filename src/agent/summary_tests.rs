@@ -63,7 +63,7 @@ fn chronological_portions_include_every_record_and_carry_the_previous_summary() 
             .summarize(
                 &records,
                 "Preserve every original test byte.",
-                crate::openrouter::Limits {
+                crate::backend::openrouter::Limits {
                     context: 24000,
                     output: None,
                 },
@@ -144,7 +144,7 @@ fn a_rejected_summary_retries_a_smaller_portion_without_skipping_older_records()
         .summarize(
             &records,
             "Preserve every original test byte.",
-            crate::openrouter::Limits {
+            crate::backend::openrouter::Limits {
                 context: 24000,
                 output: None,
             },

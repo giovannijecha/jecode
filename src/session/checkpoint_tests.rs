@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
+    backend::openrouter::OpenRouter,
     checkpoints::session::Session,
     config::{Settings, Store},
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture},
     tools::Tools,
 };

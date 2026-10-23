@@ -241,7 +241,7 @@ fn exact_paths(store: &Store, requested: &[String]) -> Option<Vec<String>> {
         };
         let name = paths::relative(&store.root, &absolute)?;
         match fs::symlink_metadata(paths::absolute(&store.root, &name)) {
-            Ok(metadata) if recursive_directory(&metadata) => return None,
+            Ok(metadata) if crate::disk::ordinary_directory(&metadata) => return None,
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return None,
@@ -249,10 +249,6 @@ fn exact_paths(store: &Store, requested: &[String]) -> Option<Vec<String>> {
         names.push(name);
     }
     Some(names)
-}
-
-fn recursive_directory(metadata: &fs::Metadata) -> bool {
-    metadata.is_dir() && !crate::disk::linked(metadata)
 }
 
 pub struct FileGuard<'a> {

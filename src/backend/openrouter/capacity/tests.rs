@@ -104,15 +104,19 @@ fn pinned_endpoints_do_not_add_json_output_to_summary_requests() {
     )
     .unwrap();
     client.offer_endpoints(
-        crate::openrouter::endpoints::parse("fixture/model", &listing, std::time::Instant::now())
-            .unwrap(),
+        crate::backend::openrouter::endpoints::parse(
+            "fixture/model",
+            &listing,
+            std::time::Instant::now(),
+        )
+        .unwrap(),
     );
     let messages = [Value::object([
         ("role", Value::string("user")),
         ("content", Value::string("Summarize")),
     ])];
     for tag in ["plain/one", "json/two", "unlisted/three"] {
-        client.set_routing(crate::openrouter::Routing::Endpoint(tag.into()));
+        client.set_routing(crate::backend::openrouter::Routing::Endpoint(tag.into()));
         client
             .sample(&messages, false, Some(3000), &mut |_| Ok(()))
             .unwrap();

@@ -1,7 +1,7 @@
 use super::*;
+use crate::backend::openrouter::OpenRouter;
 use crate::events::Event;
 use crate::json::Value;
-use crate::openrouter::OpenRouter;
 use crate::test_support::{Directory, HttpFixture, Request, completion, tool_call};
 use crate::tools::Tools;
 

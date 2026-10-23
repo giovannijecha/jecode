@@ -1,9 +1,9 @@
 use super::*;
 use crate::{
     agent::Agent,
+    backend::openrouter::OpenRouter,
     cancel::Cancellation,
     config::{Settings, Store},
-    openrouter::OpenRouter,
     process,
     session::SessionConfig,
     test_support::{Directory, HttpFixture, completion, tool_call},

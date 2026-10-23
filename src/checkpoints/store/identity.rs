@@ -106,21 +106,12 @@ fn initialization_temporary(path: &Path) -> bool {
 }
 
 fn private_directory(path: &Path) -> Result<(), String> {
-    match fs::symlink_metadata(path) {
-        Ok(_) if ordinary_directory(path)? => Ok(()),
-        Ok(_) => Err(format!(
-            "Checkpoint storage {} is not an ordinary directory",
-            path.display()
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            crate::disk::private_directory(path).map_err(|e| e.to_string())?;
-            if !ordinary_directory(path)? {
-                return Err("Checkpoint storage changed during creation".into());
-            }
-            files::sync_directory(path.parent().unwrap()).map_err(|e| e.to_string())
-        }
-        Err(error) => Err(format!("Could not inspect checkpoint storage: {error}")),
+    if crate::disk::ensure_private_directory(path)
+        .map_err(|error| format!("Could not prepare checkpoint storage: {error}"))?
+    {
+        files::sync_directory(path.parent().unwrap()).map_err(|e| e.to_string())?;
     }
+    Ok(())
 }
 
 pub(super) fn add_exclusion(root: &Path, path: &Path, excluded: &mut Vec<String>) {
@@ -150,21 +141,17 @@ pub(super) fn add_exclusion(root: &Path, path: &Path, excluded: &mut Vec<String>
 }
 
 pub(super) fn ordinary_directory(path: &Path) -> Result<bool, String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(format!("Could not inspect recovery directory: {error}")),
-    };
-    Ok(metadata.is_dir() && !crate::disk::linked(&metadata))
+    let metadata = crate::disk::metadata_if_present(path)
+        .map_err(|error| format!("Could not inspect recovery directory: {error}"))?;
+    Ok(metadata
+        .as_ref()
+        .is_some_and(crate::disk::ordinary_directory))
 }
 
 pub(super) fn ordinary_file(path: &Path) -> Result<bool, String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(format!("Could not inspect recovery pack: {error}")),
-    };
-    Ok(metadata.is_file() && !crate::disk::linked(&metadata))
+    let metadata = crate::disk::metadata_if_present(path)
+        .map_err(|error| format!("Could not inspect recovery pack: {error}"))?;
+    Ok(metadata.is_some_and(|metadata| metadata.is_file() && !crate::disk::linked(&metadata)))
 }
 
 pub(super) fn recognized_workspace(directory: &Path) -> Result<bool, String> {

@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::openrouter::Limits;
+use crate::backend::openrouter::Limits;
 use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 
 fn message(role: &str, text: &str) -> Value {
@@ -194,7 +194,7 @@ fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
     ]);
     agent
         .compact_if_needed(
-            Some(crate::openrouter::Limits {
+            Some(crate::backend::openrouter::Limits {
                 context: 28000,
                 output: Some(4096),
             }),

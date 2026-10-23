@@ -60,7 +60,7 @@ impl Agent {
         if let Err(error) = &result
             && let Some(charges) = &error.charges
         {
-            self.charges.lock().unwrap().extend(charges);
+            self.charges.lock().unwrap().include(charges);
         }
         match result {
             Ok(completion) => {

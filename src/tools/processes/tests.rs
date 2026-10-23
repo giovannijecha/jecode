@@ -395,14 +395,14 @@ fn live_reads_mask_credentials_split_across_chunks() {
     let directory = Directory::new();
     let secret = "fixture-secret-value";
     let tools = tools(&directory, Redactor::new(secret.into()));
-    let (id, _) = start(
+    let (id, first) = start(
         &tools,
         &format!(
             "printf 'ready fixture-sec'; {}; printf 'ret-value done'",
             gate("go")
         ),
     );
-    let mut stdout = String::new();
+    let mut stdout = text(&first, "stdout");
     wait_for(|| {
         stdout += &text(&process(&tools, "poll", &id, None), "stdout");
         stdout == "ready "

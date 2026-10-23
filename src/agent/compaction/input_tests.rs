@@ -1,6 +1,6 @@
 use super::*;
+use crate::backend::openrouter::OpenRouter;
 use crate::inbox::Inbox;
-use crate::openrouter::OpenRouter;
 use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 use crate::tools::Tools;
 

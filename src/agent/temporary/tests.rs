@@ -1,9 +1,9 @@
 use crate::{
     agent::Agent,
+    backend::openrouter::OpenRouter,
     effort::Effort,
     events::Event,
     json::Value,
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
 };

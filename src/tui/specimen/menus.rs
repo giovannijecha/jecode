@@ -1,9 +1,12 @@
 // The command panel and every selector painted by the real renderer for review
 // in a native terminal: cargo test --locked --offline specimen::menus -- --ignored --nocapture
 use crate::{
+    backend::{
+        Charges, Endpoints, Model, Routing,
+        openrouter::{endpoints::Endpoint, routing},
+    },
     copy::Target,
     effort::Effort,
-    openrouter::{Charges, Endpoints, Model, Routing, endpoints::Endpoint, routing},
     sessions::Summary,
     tui::{
         line::Line,
@@ -219,7 +222,12 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             "Settings",
             selecting(
                 columns,
-                Selector::settings(MODEL, Effort::High, 80, &crate::openrouter::Routing::Auto),
+                Selector::settings(
+                    MODEL,
+                    Effort::High,
+                    80,
+                    &crate::backend::openrouter::Routing::Auto,
+                ),
             ),
         ),
         (

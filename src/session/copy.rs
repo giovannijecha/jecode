@@ -121,8 +121,8 @@ mod tests {
     #[test]
     fn plain_chat_opens_copy_without_an_extra_request_and_accepts_cancel() {
         use crate::{
+            backend::openrouter::OpenRouter,
             config::{Settings, Store},
-            openrouter::OpenRouter,
             session::{SessionConfig, chat},
             test_support::{Directory, HttpFixture, completion},
             tools::Tools,

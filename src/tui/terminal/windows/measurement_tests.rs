@@ -1,9 +1,9 @@
 //! Isolated child of the native ConPTY latency measurement. Only the parent
 //! host times input delivery through the real TUI to its observed VT output.
 use crate::agent::Agent;
+use crate::backend::openrouter::OpenRouter;
 use crate::checkpoints::session::Session as CheckpointSession;
 use crate::config::{Settings, Store};
-use crate::openrouter::OpenRouter;
 use crate::session::SessionConfig;
 use crate::test_support::HttpFixture;
 use crate::tools::Tools;

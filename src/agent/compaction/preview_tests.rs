@@ -7,7 +7,7 @@ fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut agent = Agent::new(
-        crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
+        crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
         crate::tools::Tools::new(directory.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();
@@ -87,7 +87,7 @@ fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_
     let saved = handle.store().fixture_load(&handle.id()).unwrap();
     assert_eq!(saved.messages, original);
     assert_eq!(saved.context.preview_until, 4);
-    let retrieved = agent.execute_tool(&crate::openrouter::ToolCall {
+    let retrieved = agent.execute_tool(&crate::backend::openrouter::ToolCall {
         id: "original".into(),
         name: "read".into(),
         arguments: Value::object([("path", Value::string("history:3"))]).encode(),
