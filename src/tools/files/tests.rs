@@ -16,6 +16,38 @@ fn arguments(entries: &[(&str, &str)]) -> Value {
 }
 
 #[test]
+fn cancellation_preserves_files_before_write_or_edit_installation() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    fs::write(root.join("source.txt"), "original").unwrap();
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+    let write = write_with_change(
+        &root,
+        &arguments(&[("path", "source.txt"), ("content", "replacement")]),
+        None,
+        &cancellation,
+    );
+    let edit = edit_with_change(
+        &root,
+        &arguments(&[
+            ("path", "source.txt"),
+            ("old_text", "original"),
+            ("new_text", "replacement"),
+        ]),
+        None,
+        &cancellation,
+    );
+    assert!(write.unwrap_err().contains("cancelled"));
+    assert!(edit.unwrap_err().contains("cancelled"));
+    assert_eq!(
+        fs::read_to_string(root.join("source.txt")).unwrap(),
+        "original"
+    );
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}
+
+#[test]
 fn file_change_is_captured_only_after_successful_text_modification() {
     let directory = Directory::new();
     let root = fs::canonicalize(directory.path()).unwrap();
@@ -23,6 +55,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
         &root,
         &arguments(&[("path", "source.txt"), ("content", "one\ntwo\n")]),
         None,
+        &Cancellation::default(),
     )
     .unwrap();
     assert_eq!(result.get("bytes_written"), Some(&Value::number(8)));
@@ -37,6 +70,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
             ("new_text", "three"),
         ]),
         None,
+        &Cancellation::default(),
     )
     .unwrap();
     let edit_change = edit_change.unwrap();
@@ -49,6 +83,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
             ("new_text", "x"),
         ]),
         None,
+        &Cancellation::default(),
     )
     .unwrap();
     assert!(mismatch.get("error").is_some());
@@ -64,6 +99,7 @@ fn replacing_binary_content_keeps_write_available_without_claiming_a_creation() 
         &root,
         &arguments(&[("path", "binary"), ("content", "text\n")]),
         None,
+        &Cancellation::default(),
     )
     .unwrap();
     assert_eq!(result.get("bytes_written"), Some(&Value::number(5)));
@@ -80,6 +116,7 @@ fn oversized_previous_text_does_not_prevent_a_write_or_claim_a_diff() {
         &root,
         &arguments(&[("path", "large.txt"), ("content", "replacement\n")]),
         None,
+        &Cancellation::default(),
     )
     .unwrap();
     assert_eq!(result.get("bytes_written"), Some(&Value::number(12)));
@@ -104,6 +141,7 @@ fn editing_large_text_preserves_exact_content_without_a_diff_payload() {
             ("new_text", "new"),
         ]),
         None,
+        &Cancellation::default(),
     )
     .unwrap();
     assert_eq!(
@@ -380,7 +418,13 @@ fn read_only_files_are_preserved_without_leaving_temporary_files() {
         &arguments(&[("path", "source"), ("content", "changed")]),
     );
     fs::set_permissions(&path, original_permissions).unwrap();
-    assert!(result.unwrap_err().contains("read-only"));
+    assert!(
+        result
+            .unwrap()
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|error| error.contains("read-only"))
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), "unchanged");
     assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
 }

@@ -11,13 +11,13 @@ Tool errors return as results so the model can correct the call.
 | `read` | `path` | `offset`, `limit`, `byte_offset` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
 | `edit` | `path`, `old_text`, `new_text` | — | Replaces exactly one nonempty match; returns `bytes_written`. A missing or ambiguous match leaves the file unchanged. |
-| `bash` | `command` | `timeout_seconds`, `wait_ms` | Runs a Bash command from the project directory. With `wait_ms`, it returns a persistent `process_id`. |
+| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
 | `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll` | Lists, polls or stops this conversation's persistent processes. |
-| `checkpoint` | `action` | `ref`, `paths`, `label`, `pin`, `expected`, `preview`, `limit` | Captures named paths before Bash, and inspects, marks and restores workspace history. See [Checkpoints](CHECKPOINTS.md#the-models-checkpoint-tool). |
+| `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
 
-`write`, `edit` and `bash` results include a `checkpoint` object whose
-`status` is `saved`, `not_tracked` or `unprotected`; see
-[Checkpoints](CHECKPOINTS.md#what-is-saved-and-when).
+`write`, `edit` and protected `bash` calls return a `checkpoint` receipt whose
+`status` is `saved`, `partial` or `none`. Saved references expire 24 hours after
+capture; see [Checkpoints](CHECKPOINTS.md#what-is-saved).
 
 ## File paths and paged reads
 
@@ -64,7 +64,7 @@ The `path` argument also accepts these read-only references:
 | `history:requests` / `history:memory` | Ordered original user requests / current compaction summary. |
 | `skill:NAME` / `skill:NAME/relative/path` | A personal skill's `SKILL.md` / a resource inside that skill. See [Skills](SKILLS.md). |
 | `attachment:ID` | An attached text file, or a re-shown image/PDF; other binaries return their local path. See [Attachments](ATTACHMENTS.md#what-the-model-receives). |
-| `checkpoint:cp-N:path` | A project file as recorded at checkpoint `cp-N`. See [Checkpoints](CHECKPOINTS.md). |
+| `checkpoint:rc-ID:path` | A file saved before one modifying call. See [Checkpoints](CHECKPOINTS.md). |
 
 History pages remain available after compaction and resume and exclude
 provider-specific reasoning fields. Reading a tool result can also return

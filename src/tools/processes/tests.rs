@@ -91,6 +91,45 @@ fn gate(name: &str) -> String {
 }
 
 #[test]
+fn persistent_bash_reports_only_its_prelaunch_capture() {
+    use crate::checkpoints::session::Session;
+
+    let home = Directory::new();
+    let root = Directory::new();
+    let session = Session::open(home.path(), root.path());
+    session.begin("model");
+    let mut tools = tools(&root, Redactor::empty());
+    tools.configure_checkpoints(std::sync::Arc::clone(&session));
+    let started = bash(
+        &tools,
+        &format!(
+            "{}; mkdir -p generated; printf final > generated/result.txt",
+            gate("go")
+        ),
+        &[
+            ("wait_ms", Value::number(0)),
+            ("protect", Value::Array(vec![Value::string("generated/")])),
+        ],
+    );
+    assert_eq!(text(&started, "status"), "running");
+    let checkpoint = started.get("checkpoint").unwrap();
+    assert_eq!(
+        checkpoint.get("status").and_then(Value::as_str),
+        Some("saved")
+    );
+    assert!(text(checkpoint, "ref").starts_with("rc-"));
+    release(&root, "go");
+    let finished = process(&tools, "poll", &text(&started, "process_id"), Some(10_000));
+    assert_eq!(text(&finished, "status"), "exited");
+    assert!(finished.get("checkpoint_finalized").is_none());
+    assert!(finished.get("checkpoint_error").is_none());
+    assert_eq!(
+        std::fs::read(root.path().join("generated/result.txt")).unwrap(),
+        b"final"
+    );
+}
+
+#[test]
 fn a_running_process_returns_control_and_later_reports_all_output_and_its_exit() {
     let directory = Directory::new();
     let tools = tools(&directory, Redactor::empty());

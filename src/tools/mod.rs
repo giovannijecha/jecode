@@ -4,14 +4,15 @@ pub mod processes;
 mod schema;
 mod shell;
 
+pub(crate) use files::read_source;
 pub(crate) use files::read_text_page;
 pub use schema::definitions;
 pub use shell::find_bash;
 
 use crate::cancel::Cancellation;
-use crate::checkpoints::actions::{self, Caller};
+use crate::checkpoints::actions;
 use crate::checkpoints::session::{CommandGuard, Session};
-use crate::checkpoints::show::{self, Content};
+use crate::checkpoints::show;
 use crate::json::{self, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -141,7 +142,7 @@ impl Tools {
         }
         if show::is_reference(path) {
             return Err(
-                "Checkpoint history is read-only; restore it with the checkpoint tool".into(),
+                "Saved recovery files are read-only; restore them with the checkpoint tool".into(),
             );
         }
         let absolute = self
@@ -171,13 +172,21 @@ impl Tools {
         arguments: &str,
         cancellation: &Cancellation,
     ) -> Value {
-        self.execute_begun(self.begin(name, arguments), name, arguments, cancellation)
-            .result
+        self.execute_begun(
+            self.begin_cancellable(name, arguments, cancellation),
+            name,
+            arguments,
+            cancellation,
+        )
+        .result
     }
 
-    /// Records the checkpoint before a shell command, so its freshness can
-    /// be shown while the command runs.
-    pub fn begin(&self, name: &str, arguments: &str) -> Begun {
+    pub fn begin_cancellable(
+        &self,
+        name: &str,
+        arguments: &str,
+        cancellation: &Cancellation,
+    ) -> Begun {
         let command = self
             .checkpoints
             .as_ref()
@@ -185,7 +194,8 @@ impl Tools {
             .and_then(|session| {
                 let arguments = json::parse(arguments).ok()?;
                 let text = arguments.get("command")?.as_str()?;
-                Some(session.command(text))
+                let paths = shell::protect_paths(&arguments).ok()?;
+                Some(session.command_scoped_cancellable(text, &paths, cancellation))
             });
         Begun { command }
     }
@@ -235,9 +245,9 @@ impl Tools {
                         // Session temporary files are outside the workspace scope.
                         let checkpoints = self.checkpoints.as_deref().filter(|_| root == self.root);
                         let result = if name == "write" {
-                            files::write_with_change(&root, &arguments, checkpoints)
+                            files::write_with_change(&root, &arguments, checkpoints, cancellation)
                         } else {
-                            files::edit_with_change(&root, &arguments, checkpoints)
+                            files::edit_with_change(&root, &arguments, checkpoints, cancellation)
                         };
                         result.map(|(mut value, change)| {
                             if self.checkpoints.is_some()
@@ -248,7 +258,8 @@ impl Tools {
                                 fields.insert(
                                 "checkpoint".into(),
                                 Value::object([
-                                    ("status", Value::string("not_tracked")),
+                                    ("status", Value::string("none")),
+                                    ("saved_paths", Value::number(0)),
                                     (
                                         "reason",
                                         Value::string(
@@ -268,21 +279,19 @@ impl Tools {
                             .map(|area| area.ensure())
                             .transpose()?;
                         let mut result = shell::execute(
-                            &self.bash,
-                            &self.root,
+                            shell::Context {
+                                bash: &self.bash,
+                                root: &self.root,
+                                outputs: &self.outputs,
+                                temporary: temporary.as_deref(),
+                                processes: &self.processes,
+                            },
                             &arguments,
                             cancellation,
-                            &self.outputs,
-                            temporary.as_deref(),
-                            &self.processes,
                         )
                         .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
                         if let Some(command) = begun.command {
-                            let running = matches!(
-                                result.get("status").and_then(Value::as_str),
-                                Some("running" | "stopping")
-                            );
-                            let checkpoint = command.finish(running);
+                            let checkpoint = command.finish();
                             if let Value::Object(fields) = &mut result {
                                 fields.insert("checkpoint".into(), checkpoint);
                             }
@@ -293,7 +302,9 @@ impl Tools {
                         .processes
                         .execute(&arguments, cancellation)
                         .map(|value| (value, None)),
-                    "checkpoint" => self.checkpoint(&arguments).map(|value| (value, None)),
+                    "checkpoint" => self
+                        .checkpoint(&arguments, cancellation)
+                        .map(|value| (value, None)),
                     _ => Err(format!("Unknown tool: {name}")),
                 }
             });
@@ -304,9 +315,6 @@ impl Tools {
 
     /// Protects workspace changes from this conversation's tools.
     pub fn configure_checkpoints(&mut self, session: Arc<Session>) {
-        let listener = Arc::clone(&session);
-        self.processes
-            .listen(Arc::new(move |running| listener.set_background(running)));
         self.checkpoints = Some(session);
     }
 
@@ -320,15 +328,21 @@ impl Tools {
             .ok_or_else(|| "Checkpoints are not enabled in this session".into())
     }
 
-    fn checkpoint(&self, arguments: &Value) -> Result<Value, String> {
+    fn checkpoint(&self, arguments: &Value, cancellation: &Cancellation) -> Result<Value, String> {
         let session = self.enabled_checkpoints()?;
-        let origin = session.origin();
-        let caller = Caller {
-            origin: &origin,
-            user: false,
-        };
-        let result = actions::run(session.workspace()?, &caller, arguments)?;
-        if result.get("instructions_changed") == Some(&Value::Bool(true)) {
+        let result = actions::run(session.store()?, arguments, cancellation)?;
+        if result
+            .get("restored")
+            .and_then(Value::as_array)
+            .is_some_and(|paths| {
+                paths.iter().any(|entry| {
+                    entry
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| path.rsplit('/').next() == Some("JECODE.md"))
+                })
+            })
+        {
             session.restored_instructions();
         }
         Ok(result)
@@ -341,22 +355,7 @@ impl Tools {
         cancellation: &Cancellation,
     ) -> Result<Value, String> {
         let session = self.enabled_checkpoints()?;
-        match show::content(session.workspace()?, path)? {
-            Content::Text(text) => files::read_text_page(&text, arguments, cancellation),
-            Content::Binary(bytes) => Ok(Value::object([
-                ("binary", Value::Bool(true)),
-                ("bytes", Value::number(bytes)),
-                (
-                    "note",
-                    Value::string("restore the path to use this content"),
-                ),
-            ])),
-            Content::Directory(entries) => Ok(Value::object([(
-                "entries",
-                Value::Array(entries.into_iter().map(Value::string).collect()),
-            )])),
-            Content::Link(target) => Ok(Value::object([("link", Value::string(target))])),
-        }
+        show::read(session.store()?, path, arguments, cancellation)
     }
 }
 

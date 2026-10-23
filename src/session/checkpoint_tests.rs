@@ -19,22 +19,30 @@ fn plain_checkpoint_commands_restore_without_a_provider_request() {
         Tools::new(project.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();
-    agent.use_checkpoints(Session::offline(home.path(), project.path()));
+    let recovery = Session::offline(home.path(), project.path());
+    recovery.begin("fixture");
+    let reference = recovery
+        .store()
+        .unwrap()
+        .capture(
+            "write",
+            "fixture",
+            &["a.txt".into()],
+            &crate::cancel::Cancellation::default(),
+        )
+        .unwrap()
+        .reference
+        .unwrap();
+    agent.use_checkpoints(recovery);
     let mut config = SessionConfig {
         store: Store::new(home.path().join("config.json")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
         bash: crate::tools::find_bash().unwrap(),
     };
-    let baseline = agent.checkpoints_command("list a.txt").unwrap().text();
-    let reference = baseline
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-        .rfind(|word| word.starts_with("cp-"))
-        .unwrap_or_else(|| panic!("{baseline}"))
-        .to_string();
     fs::write(project.path().join("a.txt"), "two\n").unwrap();
 
     let mut input = Cursor::new(format!(
-        "/checkpoints\n/checkpoints show {reference} a.txt\n/checkpoints restore {reference} a.txt\n/checkpoints explode\n/exit\n"
+        "/checkpoints list\n/checkpoints show {reference} a.txt\n/checkpoints restore {reference} a.txt --expected latest\n/checkpoints explode\n/exit\n"
     ));
     let mut output = Vec::new();
     let mut status = Vec::new();
@@ -54,7 +62,7 @@ fn plain_checkpoint_commands_restore_without_a_provider_request() {
         output.contains("one"),
         "the recorded file is printed: {output}"
     );
-    assert!(output.contains("restored 1 path from"), "{output}");
+    assert!(output.contains("restored"), "{output}");
     assert!(!output.contains(r"\\?\"), "{output}");
     assert!(status.contains("explode"), "{status}");
     assert_eq!(

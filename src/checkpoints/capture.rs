@@ -1,354 +1,409 @@
-//! Observing workspace paths and recording changed versions.
-use super::files::Mode;
-use super::index::Index;
-use super::record::{Discovery, Record, Stat, State, Version};
-use super::store::{Store, Transaction};
-use std::fs;
-use std::path::Path;
-use std::sync::Arc;
+//! Stream before bytes into one unpublished pack, then publish once durable.
+use super::files::{self, Mode};
+use super::format;
+use super::hash;
+use super::locks;
+use super::paths;
+use super::state::State;
+use super::store::Store;
+use super::types::{Capture, Issue, Snapshot};
+use crate::cancel::Cancellation;
+use std::collections::BTreeMap;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(test)]
-mod tests;
+static NEXT: AtomicU64 = AtomicU64::new(0);
+const COPY_BUFFER: usize = 256 * 1024;
 
-pub const BATCH_BYTES: u64 = 8 << 20;
-const BATCH_PATHS: usize = 1024;
-
-/// One path's observed state, with the bytes needed to archive a file.
-pub struct Observed {
-    pub path: String,
-    pub kind: Observation,
-    pub stat: Option<Stat>,
+struct CaptureRequest<'a> {
+    reference: &'a str,
+    created: u64,
+    tool: &'a str,
+    origin: &'a str,
+    selection: &'a paths::Selection,
 }
 
-pub enum Observation {
-    Absent,
-    File(Arc<[u8]>, Mode),
-    Directory(Mode),
-    Link(String),
-    Oversized(u64),
-    Unreadable(String),
-}
-
-/// Reads a path without following links. Never mutates the workspace.
-pub fn observe(root: &Path, relative: &str, max_file_bytes: u64) -> Observed {
-    let path = super::identity::absolute(root, relative);
-    let observed = |kind, stat| Observed {
-        path: relative.to_string(),
-        kind,
-        stat,
-    };
-    if let Err(reason) = super::files::confined_parent(root, relative) {
-        return observed(Observation::Unreadable(reason), None);
+impl Store {
+    pub fn capture(
+        &self,
+        tool: &str,
+        origin: &str,
+        requested: &[String],
+        cancel: &Cancellation,
+    ) -> Result<Capture, String> {
+        check(cancel)?;
+        self.capture_selected(
+            tool,
+            origin,
+            paths::discover(&self.root, requested, &self.excluded, cancel),
+            cancel,
+        )
     }
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) =>
-        {
-            return observed(Observation::Absent, None);
+
+    pub fn capture_exact(
+        &self,
+        tool: &str,
+        origin: &str,
+        requested: &[String],
+        cancel: &Cancellation,
+    ) -> Result<Capture, String> {
+        check(cancel)?;
+        self.capture_selected(
+            tool,
+            origin,
+            paths::discover_exact(&self.root, requested, &self.excluded, cancel),
+            cancel,
+        )
+    }
+
+    fn capture_selected(
+        &self,
+        tool: &str,
+        origin: &str,
+        selection: Result<paths::Selection, String>,
+        cancel: &Cancellation,
+    ) -> Result<Capture, String> {
+        let selection = match selection {
+            Ok(selection) => selection,
+            Err(_) if cancel.requested() => return Err("Operation cancelled".into()),
+            Err(error) => {
+                return Ok(Capture {
+                    reference: None,
+                    created: 0,
+                    saved: 0,
+                    partial: vec![(String::new(), error)],
+                });
+            }
+        };
+        let mut partial = selection.partial.clone();
+        if selection.paths.is_empty() && selection.roots.is_empty() {
+            return Ok(Capture {
+                reference: None,
+                created: 0,
+                saved: 0,
+                partial,
+            });
         }
-        Err(error) => return observed(Observation::Unreadable(error.to_string()), None),
-    };
-    let stat = Some(Stat::of(&metadata));
-    let file_type = metadata.file_type();
-    if file_type.is_symlink() {
-        return match fs::read_link(&path) {
-            Ok(target) => match target.to_str() {
-                Some(target) => {
-                    let target = if cfg!(windows) {
-                        target.replace('\\', "/")
-                    } else {
-                        target.to_owned()
-                    };
-                    observed(Observation::Link(target), stat)
+        let created = super::clock::now();
+        let (reference, temporary, mut file) = loop {
+            let reference = format!(
+                "rc-{created:016x}-{:08x}-{:016x}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            );
+            let temporary = self.directory.join(format!(".{reference}.pending"));
+            match files::options()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+            {
+                Ok(file) => break (reference, temporary, file),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    partial.push((
+                        String::new(),
+                        format!("Could not create recovery pack: {error}"),
+                    ));
+                    return Ok(Capture {
+                        reference: None,
+                        created: 0,
+                        saved: 0,
+                        partial,
+                    });
                 }
-                None => observed(
-                    Observation::Unreadable("link target is not Unicode".into()),
-                    stat,
-                ),
-            },
-            Err(error) => observed(Observation::Unreadable(error.to_string()), stat),
+            }
         };
+        if let Err(error) = file.lock() {
+            drop(file);
+            let _ = fs::remove_file(&temporary);
+            partial.push((
+                String::new(),
+                format!("Could not lock recovery pack: {error}"),
+            ));
+            return Ok(Capture {
+                reference: None,
+                created: 0,
+                saved: 0,
+                partial,
+            });
+        }
+        let request = CaptureRequest {
+            reference: &reference,
+            created,
+            tool,
+            origin,
+            selection: &selection,
+        };
+        let result = self.capture_into(&mut file, &request, &mut partial, cancel);
+        drop(file);
+        let result = result.and_then(|saved| {
+            self.publish(&reference, cancel)?;
+            Ok(saved)
+        });
+        let _ = fs::remove_file(&temporary);
+        match result {
+            Ok(saved) => Ok(Capture {
+                reference: Some(reference),
+                created,
+                saved,
+                partial,
+            }),
+            Err(error) if error == "Operation cancelled" => Err(error),
+            Err(error) => {
+                partial.push((String::new(), error));
+                Ok(Capture {
+                    reference: None,
+                    created: 0,
+                    saved: 0,
+                    partial,
+                })
+            }
+        }
     }
-    if file_type.is_dir() {
-        return observed(Observation::Directory(Mode::of(&metadata)), stat);
-    }
-    if !file_type.is_file() {
-        return observed(Observation::Unreadable("special file".into()), stat);
-    }
-    if metadata.len() > max_file_bytes {
-        return observed(Observation::Oversized(metadata.len()), stat);
-    }
-    match read_bounded(&path, max_file_bytes) {
-        Ok(Some(bytes)) => observed(Observation::File(bytes.into(), Mode::of(&metadata)), stat),
-        Ok(None) => observed(
-            Observation::Oversized(metadata.len().max(max_file_bytes + 1)),
-            stat,
-        ),
-        Err(error) => observed(Observation::Unreadable(error.to_string()), stat),
-    }
-}
 
-/// Delivers observations in path order, in bounded batches. Size hints from a
-/// prior walk cannot bound live file sizes: files may grow before this read.
-/// Each worker has one queued result, so a large restore or dirty burst never
-/// retains the entire workspace's contents before recording its first batch.
-pub fn observe_batches<P: AsRef<str> + Sync>(
-    root: &Path,
-    paths: &[P],
-    max: u64,
-    mut consume: impl FnMut(Vec<Observed>) -> Result<(), String>,
-) -> Result<(), String> {
-    std::thread::scope(|scope| {
-        let workers = if paths.len() < 16 {
-            0
-        } else {
-            super::scan::WORKERS.min(paths.len())
-        };
-        let mut receivers = Vec::with_capacity(workers);
-        for worker in 0..workers {
-            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-            receivers.push(receiver);
-            scope.spawn(move || {
-                for path in paths.iter().skip(worker).step_by(workers) {
-                    if sender.send(observe(root, path.as_ref(), max)).is_err() {
-                        break;
+    fn capture_into(
+        &self,
+        file: &mut File,
+        request: &CaptureRequest<'_>,
+        partial: &mut Vec<Issue>,
+        cancel: &Cancellation,
+    ) -> Result<usize, String> {
+        self.claim(format::HEADER, cancel)?;
+        format::header(file, request.created)?;
+        let mut entries = BTreeMap::new();
+        for path in &request.selection.paths {
+            check(cancel)?;
+            if blocked_ancestor(path, &entries) {
+                entries.insert(path.clone(), State::Absent);
+                continue;
+            }
+            let at = file.stream_position().map_err(|e| e.to_string())?;
+            match self.capture_one(file, path, cancel) {
+                Ok(state) => {
+                    entries.insert(path.clone(), state);
+                }
+                Err(_) if cancel.requested() => return Err("Operation cancelled".into()),
+                Err(error) => {
+                    file.set_len(at).map_err(|e| e.to_string())?;
+                    file.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
+                    partial.push((path.clone(), error.clone()));
+                    entries.insert(path.clone(), State::Unreadable { reason: error });
+                }
+            }
+        }
+        let mut roots = Vec::new();
+        for root in &request.selection.roots {
+            check(cancel)?;
+            if partial.iter().any(|(path, _)| within_scope(root, path)) {
+                continue;
+            }
+            match paths::discover(
+                &self.root,
+                std::slice::from_ref(root),
+                &self.excluded,
+                cancel,
+            ) {
+                Ok(recheck) => {
+                    let before: Vec<_> = request
+                        .selection
+                        .paths
+                        .iter()
+                        .filter(|p| within_scope(root, p))
+                        .collect();
+                    let after: Vec<_> = recheck
+                        .paths
+                        .iter()
+                        .filter(|p| within_scope(root, p))
+                        .collect();
+                    if recheck.roots.contains(root) && recheck.partial.is_empty() && before == after
+                    {
+                        roots.push(root.clone());
+                    } else {
+                        partial.push((
+                            root.clone(),
+                            "Directory membership changed during capture".into(),
+                        ));
                     }
                 }
+                Err(_) if cancel.requested() => return Err("Operation cancelled".into()),
+                Err(error) => partial.push((
+                    root.clone(),
+                    format!("Could not verify directory scope: {error}"),
+                )),
+            }
+        }
+        let saved = entries.values().filter(|state| state.recoverable()).count();
+        if saved == 0 && roots.is_empty() {
+            return Err("No recoverable before state was saved".into());
+        }
+        let snapshot = Snapshot {
+            reference: request.reference.into(),
+            created: request.created,
+            tool: request.tool.into(),
+            origin: request.origin.into(),
+            entries,
+            roots,
+            excluded: self.excluded.clone(),
+            partial: partial.clone(),
+        };
+        let metadata = format::encode(&snapshot)?;
+        self.claim(metadata.len() as u64 + 24, cancel)?;
+        format::finish(file, &metadata)?;
+        check(cancel)?;
+        file.sync_all()
+            .map_err(|e| format!("Could not sync recovery pack: {e}"))?;
+        check(cancel)?;
+        Ok(saved)
+    }
+
+    fn capture_one(
+        &self,
+        pack: &mut File,
+        relative: &str,
+        cancel: &Cancellation,
+    ) -> Result<State, String> {
+        let path = paths::absolute(&self.root, relative);
+        files::confined_parent(&self.root, relative)?;
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(State::Absent),
+            Err(error) => return Err(format!("Could not inspect {relative}: {error}")),
+        };
+        if metadata.file_type().is_symlink() {
+            #[cfg(windows)]
+            let directory = {
+                use std::os::windows::fs::FileTypeExt;
+                metadata.file_type().is_symlink_dir()
+            };
+            #[cfg(not(windows))]
+            let directory = false;
+            let target =
+                fs::read_link(&path).map_err(|e| format!("Could not read link {relative}: {e}"))?;
+            let target = target
+                .to_str()
+                .ok_or_else(|| format!("Non-UTF-8 link target at {relative}"))?;
+            return Ok(State::Link {
+                target: target.to_owned(),
+                directory,
             });
         }
-        let mut batch = Vec::new();
-        let mut bytes = 0;
-        for (index, path) in paths.iter().enumerate() {
-            let observed = if workers == 0 {
-                observe(root, path.as_ref(), max)
-            } else {
-                receivers[index % workers]
-                    .recv()
-                    .map_err(|_| "A checkpoint read worker stopped")?
-            };
-            if let Observation::File(content, _) = &observed.kind {
-                bytes += content.len() as u64;
-            }
-            batch.push(observed);
-            if bytes >= BATCH_BYTES || batch.len() >= BATCH_PATHS {
-                consume(std::mem::take(&mut batch))?;
-                bytes = 0;
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if metadata.file_attributes() & 0x400 != 0 {
+                return Err(format!("Unsupported reparse point at {relative}"));
             }
         }
-        if !batch.is_empty() {
-            consume(batch)?;
+        if metadata.is_dir() {
+            return Ok(State::Directory {
+                mode: Mode::of(&metadata),
+            });
+        }
+        if !metadata.is_file() {
+            return Err(format!("Unsupported file type at {relative}"));
+        }
+        let length = metadata.len();
+        self.claim(length, cancel)?;
+        let mut source =
+            File::open(&path).map_err(|e| format!("Could not open {relative}: {e}"))?;
+        let opened = source.metadata().map_err(|e| e.to_string())?;
+        if !opened.is_file() || opened.len() != length {
+            return Err(format!("{relative} changed during capture"));
+        }
+        let offset = pack.stream_position().map_err(|e| e.to_string())?;
+        let mut hasher = hash::Hasher::new(length);
+        let mut remaining = length;
+        let mut buffer = [0u8; COPY_BUFFER];
+        while remaining != 0 {
+            check(cancel)?;
+            let count = buffer.len().min(remaining as usize);
+            let n = source
+                .read(&mut buffer[..count])
+                .map_err(|e| format!("Could not read {relative}: {e}"))?;
+            if n == 0 {
+                return Err(format!("{relative} shortened during capture"));
+            }
+            pack.write_all(&buffer[..n])
+                .map_err(|e| format!("Could not save {relative}: {e}"))?;
+            #[cfg(test)]
+            if self.cancel_after_chunk.load(Ordering::Relaxed) {
+                cancel.cancel();
+            }
+            hasher.update(&buffer[..n]);
+            remaining -= n as u64;
+        }
+        check(cancel)?;
+        let after = fs::symlink_metadata(&path)
+            .map_err(|e| format!("Could not recheck {relative}: {e}"))?;
+        let source_after = source.metadata().map_err(|e| e.to_string())?;
+        if !after.is_file()
+            || after.len() != length
+            || source_after.len() != length
+            || metadata.modified().ok() != after.modified().ok()
+            || metadata.modified().ok() != source_after.modified().ok()
+        {
+            return Err(format!("{relative} changed during capture"));
+        }
+        Ok(State::File {
+            offset,
+            length,
+            digest: hasher.finish(),
+            mode: Mode::of(&metadata),
+        })
+    }
+
+    pub(super) fn publish(&self, reference: &str, cancel: &Cancellation) -> Result<(), String> {
+        let created =
+            u64::from_str_radix(&reference[3..19], 16).map_err(|_| "Invalid recovery reference")?;
+        if super::clock::now() >= created.saturating_add(super::types::TTL_MILLIS) {
+            return Err("Recovery expired during capture".into());
+        }
+        let _coordination = locks::Exclusive::acquire_cancellable(
+            &self.directory.join(".internal/identity.lock"),
+            cancel,
+        )
+        .map_err(|e| e.to_string())?;
+        let target = self.directory.join(format!("{reference}.rcp"));
+        if fs::symlink_metadata(&target).is_ok() {
+            return Err("Recovery reference collision".into());
+        }
+        let source = self.directory.join(format!(".{reference}.pending"));
+        check(cancel)?;
+        fs::rename(&source, &target)
+            .map_err(|e| format!("Could not publish recovery pack: {e}"))?;
+        if let Err(error) = files::sync_directory(&self.directory) {
+            let _ = fs::remove_file(&target);
+            return Err(format!("Could not sync recovery directory: {error}"));
         }
         Ok(())
+    }
+}
+
+fn within_scope(root: &str, path: &str) -> bool {
+    root.is_empty()
+        || root == path
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn blocked_ancestor(path: &str, entries: &BTreeMap<String, State>) -> bool {
+    path.match_indices('/').any(|(at, _)| {
+        entries.get(&path[..at]).is_some_and(|state| {
+            matches!(
+                state,
+                State::Absent | State::File { .. } | State::Link { .. }
+            )
+        })
     })
 }
 
-/// A file this process just replaced with `bytes`, described by its metadata
-/// without reading it back. `None` when the metadata disagrees.
-pub fn written(root: &Path, relative: &str, bytes: Arc<[u8]>) -> Option<Observed> {
-    let metadata = fs::symlink_metadata(super::identity::absolute(root, relative)).ok()?;
-    let matches = metadata.file_type().is_file() && metadata.len() == bytes.len() as u64;
-    matches.then(|| Observed {
-        path: relative.to_string(),
-        kind: Observation::File(bytes, Mode::of(&metadata)),
-        stat: Some(Stat::of(&metadata)),
-    })
-}
-
-fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    fs::File::open(path)?
-        .take(limit + 1)
-        .read_to_end(&mut bytes)?;
-    Ok((bytes.len() as u64 <= limit).then_some(bytes))
-}
-
-/// The state a recording would produce, comparing bytes with the archive.
-fn unchanged(store: &Store, index: &Index, observed: &Observed) -> bool {
-    let Some(current) = index.current(&observed.path) else {
-        return matches!(observed.kind, Observation::Absent);
-    };
-    match (&current.state, &observed.kind) {
-        (State::Absent, Observation::Absent) => true,
-        (
-            State::File {
-                object,
-                length,
-                digest,
-                mode,
-            },
-            Observation::File(bytes, observed_mode),
-        ) => {
-            *length == bytes.len() as u64
-                && mode == observed_mode
-                && *digest == super::hash::digest(bytes)
-                && store.bytes(*object).is_ok_and(|old| old[..] == bytes[..])
-        }
-        (State::Directory { mode }, Observation::Directory(observed)) => mode == observed,
-        (State::Link { target }, Observation::Link(observed)) => target == observed,
-        // Content that is never read changed when its metadata did.
-        (State::Oversized { length }, Observation::Oversized(observed_length)) => {
-            length == observed_length
-                && observed
-                    .stat
-                    .as_ref()
-                    .is_none_or(|stat| index.stats.get(&observed.path) == Some(stat))
-        }
-        (State::Unreadable { reason }, Observation::Unreadable(observed)) => reason == observed,
-        _ => false,
-    }
-}
-
-pub struct Recorded {
-    pub seq: u64,
-    pub state: State,
-}
-
-/// Records `observed` if it differs from the current version. Returns the
-/// new version, or `None` when the archive already holds this state.
-pub fn record(
-    transaction: &mut Transaction<'_>,
-    observed: Observed,
-    origin: &str,
-    operation: u64,
-) -> Result<Option<Recorded>, String> {
-    if unchanged(transaction.store, transaction.index(), &observed) {
-        if let Some(stat) = observed.stat
-            && transaction.index().stats.get(&observed.path) != Some(&stat)
-            && transaction.index().current(&observed.path).is_some()
-        {
-            let seq = transaction.seq();
-            transaction.record(Record::Stat {
-                seq,
-                path: observed.path,
-                stat,
-            });
-        }
-        return Ok(None);
-    }
-    let previous = transaction.index().current(&observed.path);
-    let discovery = match previous {
-        Some(_) => Discovery::Known,
-        None if transaction.index().coverage_complete() => Discovery::Created,
-        None => Discovery::Found,
-    };
-    let base = previous.and_then(|version| match version.state {
-        State::File { object, .. } => Some(object),
-        _ => None,
-    });
-    let state = match observed.kind {
-        Observation::Absent => State::Absent,
-        Observation::File(bytes, mode) => {
-            let length = bytes.len() as u64;
-            let digest = super::hash::digest(&bytes);
-            transaction.store.counters.files_read += 1;
-            transaction.store.counters.bytes_read += length;
-            State::File {
-                object: transaction.object(bytes, base)?,
-                length,
-                digest,
-                mode,
-            }
-        }
-        Observation::Directory(mode) => State::Directory { mode },
-        Observation::Link(target) => State::Link { target },
-        Observation::Oversized(length) => State::Oversized { length },
-        Observation::Unreadable(reason) => State::Unreadable { reason },
-    };
-    let seq = transaction.seq();
-    transaction.record(Record::Version(Version {
-        seq,
-        path: observed.path,
-        state: state.clone(),
-        stat: observed.stat,
-        time: crate::sessions::now(),
-        origin: origin.into(),
-        operation,
-        discovery,
-    }));
-    Ok(Some(Recorded { seq, state }))
-}
-
-/// Records the file bytes already archived by a mutation's durable Prepare.
-/// `written` supplies the mode and stat after the tool's replacement. This
-/// avoids reconstructing and hashing the same intended object again. The
-/// mutation queues a later disk reread because another writer can still race
-/// the replacement, including with content of the same length.
-pub fn record_prepared(
-    transaction: &mut Transaction<'_>,
-    written: Observed,
-    prepared: &State,
-    origin: &str,
-    operation: u64,
-) -> Result<Option<Recorded>, String> {
-    let (
-        Observation::File(_, mode),
-        State::File {
-            object,
-            length,
-            digest,
-            ..
-        },
-    ) = (written.kind, prepared)
-    else {
-        return Err("The prepared checkpoint is not a file".into());
-    };
-    let state = State::File {
-        object: *object,
-        length: *length,
-        digest: *digest,
-        mode,
-    };
-    let current = transaction.index().current(&written.path);
-    if current.is_some_and(|version| version.state == state) {
-        if let Some(stat) = written.stat
-            && transaction.index().stats.get(&written.path) != Some(&stat)
-        {
-            let seq = transaction.seq();
-            transaction.record(Record::Stat {
-                seq,
-                path: written.path,
-                stat,
-            });
-        }
-        return Ok(None);
-    }
-    let discovery = match current {
-        Some(_) => Discovery::Known,
-        None if transaction.index().coverage_complete() => Discovery::Created,
-        None => Discovery::Found,
-    };
-    let seq = transaction.seq();
-    transaction.record(Record::Version(Version {
-        seq,
-        path: written.path,
-        state: state.clone(),
-        stat: written.stat,
-        time: crate::sessions::now(),
-        origin: origin.into(),
-        operation,
-        discovery,
-    }));
-    Ok(Some(Recorded { seq, state }))
-}
-
-/// Whether a scan entry's metadata matches what the archive last saw. On
-/// Unix the change time moves with every content write, so a preserved
-/// modification time cannot hide one; Windows relies on notifications and
-/// content verification instead. An oversized file is due once the limit
-/// admits it.
-pub fn fresh(index: &Index, path: &str, stat: &Stat, directory: bool, max: u64) -> bool {
-    let Some(current) = index.current(path) else {
-        return false;
-    };
-    match current.state {
-        State::Directory { mode } => directory && mode.0 == stat.mode,
-        State::Unreadable { .. } | State::Absent => false,
-        State::Oversized { .. } if stat.length <= max => false,
-        _ => !directory && index.stats.get(path) == Some(stat),
+fn check(cancel: &Cancellation) -> Result<(), String> {
+    if cancel.requested() {
+        Err("Operation cancelled".into())
+    } else {
+        Ok(())
     }
 }

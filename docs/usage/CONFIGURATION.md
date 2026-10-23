@@ -46,8 +46,30 @@ an error; Jecode leaves it unchanged so you can correct it. Saves replace the
 file atomically. New Unix configuration directories and files use permissions
 `0700` and `0600`; Windows inherits permissions from the user's directory.
 Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
-storage and resume. Each project's checkpoint scope and storage budget live in
-its archive's `policy.json`; see [Checkpoints](CHECKPOINTS.md#scope-and-limits).
+storage and resume. Per-call checkpoints have a fixed 24-hour lifetime and no
+policy file; see [Checkpoints](CHECKPOINTS.md).
+
+## Personal storage layout
+
+Jecode uses `~/.jecode/` as its personal home (`%USERPROFILE%\.jecode\` on
+Windows). `JECODE_HOME` can select another absolute directory. Each part has
+its own purpose:
+
+| Path | Contents and owner |
+| --- | --- |
+| `config.json` | Your key and saved settings; Jecode updates it through setup and settings. |
+| `skills/` | Your reusable skill files; Jecode reads this library. |
+| `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
+| `tmp/` | Session working files, managed by Jecode's temporary-file actions. |
+| `cache/` | Native helper binaries generated when needed. |
+| `checkpoints/<workspace>-<id>/` | Jecode-managed `rc-ID.rcp` packs and `.internal/` identity and lease metadata. |
+
+Normal configured launches create the checkpoint directory for the current
+workspace, even before a modifying tool call; this does not scan or capture
+workspace files. Provider-free checkpoint commands also open the workspace
+directory. Each pack expires 24 hours after capture and Jecode removes expired
+packs while running or on the next use. The deadline does not apply to
+`.internal/` metadata. Checkpoint cleanup does not manage the other home paths.
 
 ## Automatic compaction threshold
 

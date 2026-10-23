@@ -54,27 +54,36 @@ verified the change. Use `-- --list` to inspect available names.
 | Agent/context/provider | Tests beside `agent/`, `context/` and `openrouter/`; use loopback responses. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
-| Checkpoints | Tests beside `checkpoints/` and the `checkpoint_tests` modules in `agent/`, `session/`, `tools/` and `tui/`. Cover total and active-generation admission, four processes sharing a reduced test quota, selective discovery, polling coverage, long-turn pruning, idle-reader cleanup, retries after points or unpins, crash recovery, conflicts and exact undo. Children re-enter the test binary with isolated archive homes; reduced test ceilings have no production configuration path. |
+| Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
 
 Run the applicable normal checks after focused verification. Keep credentials,
 logs, screenshots and temporary drivers out of tracked files; use ignored `.tmp/`
 or `target` directories.
 
-The combined checkpoint regression runs in the ordinary suite. To isolate it:
+Focused recovery checks run without a provider:
 
 ```text
-cargo test --locked --offline checkpoints::tests::process::stress::four_sessions_survive_concurrent_collection_and_crashed_restore_near_capacity -- --exact --nocapture --test-threads=1
+cargo test --locked --offline checkpoint
 ```
 
-It places an isolated archive 4 MiB below the real 1 GiB logical limit, with a
-4 MiB retention policy and four writer processes. The fourth writer commits
-while collection is paused inside its copy. The fixture kills the collector
-after its durable move but before `CURRENT` is updated, then kills a restore
-after its first file installation. Reopening must preserve the concurrent
-write, repair the pointer, classify pending work and support exact undo. Stage
-barriers exist only under `cfg(test)`; the filler uses file length, not a GiB
-of generated contents. Capacity and retention pruning are asserted separately.
+Storage subprocess fixtures terminate a writer or reader and verify released OS
+locks, retained live reads and cleanup of expired pending data. Normal tests use
+isolated homes; no real archive is read or deleted. Free-space probes have
+separate cancellation, insufficient-space and failed-helper checks.
+
+The opt-in matched tool workload uses release binaries with identical fixtures:
+
+```text
+cargo test --locked --offline --release checkpoint_bench::matched_tools -- --exact --ignored --nocapture --test-threads=1
+```
+
+Set `JECODE_BENCH_CASE` to `write4k`, `edit1m`, `bash1`, `bash100`, `bash1000`,
+`restore1`, `restore100`, `restore1000` or `large256m`; set `JECODE_BENCH_COUNT`
+for measured samples. Two warmups precede them. `JECODE_BENCH_ENABLED=0` disables
+capture for control cases. Exact output validation and restore setup are outside
+the timed interval. Run variants serially with no builds/CI in progress and
+alternate their order. See [performance](PERFORMANCE.md) for evidence and limits.
 
 ## Development binary and installation
 

@@ -17,7 +17,7 @@ Paths are relative to `src/`.
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
-| Workspace checkpoints | `checkpoints.rs`, `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
+| Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments | `attachments/`, `tools/attachment.rs` |
 | OpenRouter | `openrouter/` |
@@ -127,46 +127,45 @@ references them. Operational details live in [sessions](../usage/SESSIONS.md),
 
 ## Workspace checkpoints
 
-`checkpoints/` keeps file history for each canonical workspace root under
-`~/.jecode/checkpoints/<id>/`, independently of conversations and of the
-terminal. User-facing behavior is in [checkpoints](../usage/CHECKPOINTS.md).
+`checkpoints/` saves the before state of one modifying tool call under
+`~/.jecode/checkpoints/<project-name>-<canonical-root-id>/`. Packs sit directly
+in that directory; `.internal/` holds `workspace.id`, `identity.lock` and
+`leases/`. The user contract is in [checkpoints](../usage/CHECKPOINTS.md). No
+baseline scan or global history is kept.
 
 | Part | Responsibility |
 | --- | --- |
-| `store.rs`, `journal.rs`, `frame.rs`, `record.rs`, `index.rs` | One archive generation: checksummed frames in 64 MiB append-only segments, objects stored whole or as bounded prefix/suffix deltas, and the in-memory index replayed from them. |
-| `locks.rs`, `activity.rs`, `identity.rs` | Operating-system file locks for archive writes and striped path leases; live-session descriptions; one archive per canonical root. |
-| `workspace.rs`, `inventory.rs`, `scan.rs`, `capture.rs`, `policy.rs` | Bounded background discovery, selective protection of large scopes, reconciliation and parallel capture with bounded live-content buffers. |
-| `quota.rs` | Admission under the shared store lock: one traversal counts total and active-generation logical bytes, with a hard 1 GiB archive ceiling and a 512 MiB active generation ceiling. |
-| `watch.rs`, `watcher.cs` | Windows change notifications through an owned .NET helper. |
-| `mutation.rs`, `reconcile.rs`, `points.rs` | Tool file changes and commands, resolution of operations left prepared by exited processes, and points. |
-| `restore.rs`, `history.rs`, `gc.rs` | Restores with undo and conflict checks; pins, limits and generation compaction. |
-| `actions.rs`, `command.rs`, `render.rs`, `session.rs`, `show.rs` | The model tool, `jecode checkpoints` and `/checkpoints` over shared actions; notices; historical reads. |
+| `store.rs`, `format.rs`, `capture.rs` | Independent immutable packs, streamed preimages, checked metadata, atomic durable publication, readers and individual expiry. |
+| `paths.rs`, `state.rs`, `files.rs` | Explicit scope discovery, complete-directory proofs, path identity/confinement, bounded observation and staged installation. |
+| `restore.rs`, `restore/` | Stateless inspection tokens, current-byte checks and restore with precise per-path undo. |
+| `locks.rs`, `pressure.rs` | Cancellable striped path leases and advisory free-space admission. |
+| `session.rs`, `actions.rs`, `show.rs`, `command.rs`, `render.rs` | File/Bash preflight receipts, three model actions, saved reads and local commands. |
 
-Every archive write runs under the archive lock and first replays frames that
-other processes appended. A tool's file change durably records a prepare frame
-with the previous and intended state before the file changes, and a completion
-afterward. A successful write completes from the tool's bytes and the file's
-metadata; the path is then reread off the call's path, or before the next
-point, to observe concurrent changes. Windows measurements show a delay when
-reopening newly written large files; its cause has not been isolated.
-Recovery resolves an interrupted operation by observing the file.
-Parallel observation preserves path order and hands off bounded content batches,
-including during restores. Size hints from discovery cannot bound live data:
-another writer may have grown the files. A failed later batch can leave truthful
-earlier observations in history, while no restore installation has begun.
-Restores durably plan per-path progress, save the current state, install
-targets and record a point with undo. Compaction copies retained history into a
-new generation, publishes it through `CURRENT` and leaves the old one to its
-readers until they move on. Idle workers follow these moves and remove released
-generations. The latest named point remains a state anchor even when the
-retention horizon advances through versions from a long turn. A new point or
-an unpin can retry a blocked collection without waiting for more byte growth.
+Each call writes one `.rcp` file: a small header, raw file bytes, checksummed
+metadata with offsets and a footer. Publication syncs the pack before rename
+and syncs its directory on Unix. There is no shared object graph, global replay,
+after-state payload, delta, watcher, group, acceptance action or compaction.
 
-The agent records a point at each turn, wraps each tool call and delivers
-notices about history changed outside its own calls before the next request.
-Failures make a call unprotected and never block it. `tools/` returns each
-protection status, the TUI renders it, and the offline CLI opens the archive
-without a background worker or provider.
+File-tool leases span reading through installation. Bash captures declared files
+and eligible directory trees before launch, then releases its capture lease;
+completion and background-process monitoring do no checkpoint work. Only a
+fully visited and rechecked directory scope establishes absence for new children.
+Unsupported/reparse or unreadable directories cannot establish completeness.
+
+Inspection hashes selected current states into a stateless expectation token.
+Restore requires it or explicit `latest`, verifies source content, captures undo
+and rechecks current bytes before each install. The result describes partial
+progress and undo for exactly the mutated paths; a file's replacement is staged
+before destructive cross-type operations. A crash leaves the published preimage
+available without needing completion classification.
+
+Creation fixes pack expiry at 24 hours. Reads and activity do not renew it. The
+session's weak maintenance worker sweeps recognized workspace directories once
+per minute; offline commands sweep too. Shared pack readers delay physical
+removal, and stopped applications clean up on next use. Expiry removes individual
+packs without copying retained data; workspace identity and lease metadata are
+not subject to the 24-hour deadline. Old `cp-N` archives and preview
+`~/.jecode/recovery/` packs are not imported.
 
 ## Native boundaries
 
@@ -177,7 +176,7 @@ unsafe Rust FFI.
 | Boundary | Implementation and requirements |
 | --- | --- |
 | Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. |
-| Windows file notifications | An owned C# helper reports paths through `FileSystemWatcher` over stdin/stdout. Its marker echo checks helper responsiveness, not filesystem ordering. Ordinary points drain delivered observations; Bash preparation and completion use a bounded settling window. Queue overflow requests reconciliation. Without the helper, checkpoints scan. |
+| Checkpoint disk space | Windows uses an owned cached C# helper and `GetDiskFreeSpaceExW` at the archive path; requires Windows PowerShell and `Add-Type`. Unix uses the installed `df -Pk` command. Failed queries prevent payload admission and can retry after five seconds. |
 | Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
 | Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
 | Unix terminal | Bash and `stty` save terminal modes, read `/dev/tty` and restore the terminal through a guardian. Requires a VT-compatible terminal. |

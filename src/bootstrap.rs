@@ -41,8 +41,11 @@ pub fn checkpoints(words: &[String]) -> Result<(), String> {
     let home = store.path().parent().expect("configuration directory");
     let root =
         std::env::current_dir().map_err(|error| format!("Invalid working directory: {error}"))?;
-    let output = crate::checkpoints::command::offline(home, &root, words)?;
     let mut stdout = io::stdout().lock();
+    if crate::checkpoints::command::stream_show(home, &root, words, &mut stdout)? {
+        return stdout.flush().map_err(|error| error.to_string());
+    }
+    let output = crate::checkpoints::command::offline(home, &root, words)?;
     let written = match &output.raw {
         Some(raw) => stdout.write_all(raw.as_bytes()),
         None => writeln!(stdout, "{}", output.text()),

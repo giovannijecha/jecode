@@ -99,153 +99,122 @@ supervised launch and then three alternating direct/supervised pairs. A cached
 supervisor may already exist, so the initial launch is not necessarily a fresh
 compile. Recorded historical results above came from separate comparison runs.
 
-## Workspace checkpoints
+## Per-call recovery
 
-Recorded **2026-10-21**, source fingerprint
-`8bd94daa978e2b964bc67f58277ff822 over 384 files`, with Rust 1.95.0 release
-builds and a warm OS cache. Windows uses `x86_64-pc-windows-gnullvm`, NTFS and
-real-time antivirus; Linux uses WSL2 and native ext4. Added time is the median
-paired difference against the same call without checkpoints; other values are
-medians. Parentheses give the actual sample counts.
+Recorded **2026-10-22** on Windows 11 build 26300, NTFS, Intel Core Ultra 9
+275HX (24 logical processors), Rust 1.95.0 `x86_64-pc-windows-gnullvm`, release
+builds. The baseline is the previous PR head `6679d6c`; the candidate is the
+independent per-call engine documented in [Checkpoints](../usage/CHECKPOINTS.md).
+The per-call column was measured at `76b214e`, before the checkpoint directory
+was consolidated under `~/.jecode/checkpoints/`. That later layout change is
+not timed here.
+These compare complete tool workflows with different retention contracts, not
+an isolated storage optimization: the baseline maintains history and after
+states; the candidate saves only preimages for a fixed 24 hours.
 
-| Operation | Windows | Linux |
+| Operation | Samples per variant | Baseline median | Per-call median | Median change |
+| --- | ---: | ---: | ---: | ---: |
+| Write 4 KiB | 60 | 3.89 ms | 4.85 ms | +24.5% |
+| Edit 1 MiB | 40 | 34.73 ms | 33.22 ms | -4.4% |
+| Bash, protect 1 file | 20 | 142.01 ms | 135.73 ms | -4.4% |
+| Bash, protect 100 files | 20 | 210.58 ms | 175.70 ms | -16.6% |
+| Bash, protect 1,000 files | 12 | 712.88 ms | 382.27 ms | -46.4% |
+| Restore 1 file | 60 | 7.57 ms | 18.11 ms | +139.3% |
+| Restore 100 files | 20 | 362.99 ms | 335.21 ms | -7.7% |
+| Restore 1,000 files | 12 | 3,310.25 ms | 2,944.20 ms | -11.1% |
+| Edit 256 MiB | 6 | 1,473.01 ms | 1,269.55 ms | -13.8% |
+
+Small operations show no consistent speedup. Single-file restore remains slower
+than the baseline, even after narrower path leases and avoiding a final reread
+reduced its earlier observed median of 46.54 ms. The modest differences on short
+calls and bulk restore overlap observed variation and do not establish a general
+speedup.
+Bash includes native process startup; it runs `:` and protects its declared
+files. There is no post-command scan in the candidate.
+
+Observed sample ranges, including outliers:
+
+| Operation | Baseline range | Per-call range |
 | --- | ---: | ---: |
-| `write` 4 KiB, added | 4.834 ms (200) | 5.314 ms (20) |
-| `edit` one line of 1 MiB text, added | 11.637 ms (50) | 2.941 ms (5) |
-| Bash command changing one file, added | 30.593 ms (30) | 15.735 ms (3) |
-| Reused point, 1,000 unchanged files | 0.788 ms (200) | 2.804 ms (200) |
-| Reused point, 10,000 unchanged files | 1.017 ms (50) | 18.446 ms (50) |
-| Point right after a 1 MiB edit | 214.645 ms (50) | 13.902 ms (5) |
-| Initial capture, 10,000 files | 886.654 ms (5) | 201.098 ms (5) |
-| Restore one / 100 files | 8.424 / 265.021 ms (50 / 10) | 10.793 / 241.205 ms (50 / 10) |
-| Four processes, shared paths, per write | 9.263 ms (400) | 14.475 ms (400) |
+| Write 4 KiB | 3.57-12.30 ms | 4.45-7.31 ms |
+| Edit 1 MiB | 25.61-43.24 ms | 25.66-338.74 ms |
+| Bash, 1 file | 90.92-428.41 ms | 129.57-146.38 ms |
+| Bash, 100 files | 197.57-269.64 ms | 124.00-371.85 ms |
+| Bash, 1,000 files | 416.84-1,199.63 ms | 221.12-1,904.70 ms |
+| Restore 1 file | 4.71-93.59 ms | 8.42-128.51 ms |
+| Restore 100 files | 169.53-1,096.59 ms | 242.74-887.47 ms |
+| Restore 1,000 files | 2,395.40-3,788.37 ms | 2,457.29-3,999.76 ms |
+| Edit 256 MiB | 1,207.47-1,600.75 ms | 1,027.11-1,548.48 ms |
 
-Linux tool-call measurements used the quick workload; the small samples do not
-establish tail percentiles or a speedup over prior measurements. Capture,
-ordinary points, recovery, storage and sessions used full sample counts on
-both platforms. The 1,000-file point p95 was 0.992 ms on Windows and 3.258 ms
-on Linux. Four shared-path processes had p95 54.392 / 25.522 ms respectively;
-every variant reported zero failed or unprotected writes and verified all final
-files byte for byte. The Windows maximum was 499.931 ms.
+### Method
 
-A fresh run of starting source fingerprint `d67d22b744038f484770ba000c041244`
-measured 11.544 ms for the Windows
-1,000-file reused point: the final median is 14.6 times faster. Ordinary native
-points drain delivered notifications without a quiet wait; they are observed
-history, not atomic filesystem snapshots. Windows polling fallback measured
-11.496 ms for 1,000 files and 53.666 ms for 10,000 files. Small writes and
-concurrent writes cost more than in the earlier source without hard admission;
-the point speedup does not apply to every operation.
+Both versions use the same opt-in `checkpoint_bench::matched_tools` workload.
+The baseline changes only the session setup arity; the shared restore adapter
+selects its old `restore_all` action for a whole captured scope. Each case runs
+in A/B/B/A order in separate processes, with two warmups before each block.
+Reported medians pool both blocks for each variant and average the middle two
+samples when the count is even. Builds and CI did not run during timing.
 
-A point right after a large write waits for the write's verification reread.
-An integrated trace placed about 199 ms inside `File::open` on the recently
-edited Windows source file. Real-time antivirus was enabled, but its
-contribution was not isolated from other filesystem or scheduling delays.
-The exact reread remains.
+Fixtures and resets are outside the timer. Ordinary files are 4 KiB; the 1 MiB
+edit replaces one unique five-byte prefix. Restore acquires the same protection
+scope before **every** sample in both versions, outside the timer, then changes
+the files directly. Every workload checks exact resulting bytes outside the
+timed interval. The 256 MiB fixture is generated and verified with 64 KiB buffers,
+without allocating a file-sized fixture. Tests use isolated homes, no provider,
+and no maintenance worker. Helpers and filesystem caches are warm; cold native
+helper compilation, cold-disk behavior and full TUI latency are not measured.
+No tail percentile or general throughput claim follows from these sample sizes.
 
-Large scopes deliberately use selective protection:
+### Memory and disk tradeoff
 
-| Workload | Windows | Linux |
+Peak main-process working set, sampled every 20 ms over each whole workload,
+was 29.4 -> 8.8 MiB for 1,000-file restore and 13.0 -> 6.8 MiB for the 256 MiB
+edit. These exclude child processes and the OS page cache; sampling can miss
+shorter peaks. Payload buffering stays bounded, while metadata and traversal
+memory still grow with the selected path count.
+
+Independent packs remove global replay, after-state capture, shared object
+bookkeeping and copying compaction. They deliberately give up deduplication.
+Archive **file lengths**, including warmups, illustrate the cost:
+
+| Repeated calls in one block | Baseline archive | Per-call archive |
 | --- | ---: | ---: |
-| 264 MiB eligible content, readiness | 73.618 ms (3) | 15.791 ms (3) |
-| Reused point with two protected work files in that scope | 0.727 ms (200) | 0.372 ms (200) |
-| 50,010 empty files, bounded discovery until readiness | 1,416.317 ms (3) | 842.909 ms (3) |
+| 32 writes of 4 KiB | 36.9 KiB | 134.5 KiB |
+| 22 edits of 1 MiB | 1.02 MiB | 22.00 MiB |
+| 5 edits of 256 MiB | 3.03 MiB | 1,280.00 MiB |
 
-These baselines copied zero file payload bytes and reported selective coverage;
-they do not measure a complete 264 MiB backup. The Windows content startup
-ranged from 72.428 to 625.138 ms, including the first cold helper. Fixture
-creation is outside readiness timers. Restoring the two protected files verified
-their exact bytes and left an eligible 8 MiB sentinel untouched. The sampled
-archive peak after those operations was 4,876 bytes on Windows and 4,932 on
-Linux; sampling does not establish a continuous allocation peak.
+The fixtures are highly repetitive: one prefix followed by repeated `x` bytes.
+The old store reuses identical chunks within and across files, giving it an
+especially large advantage in the last row. These are not typical source-tree
+space ratios, filesystem allocated bytes or a claim that all archives shrink.
+The new engine stores a complete independent preimage for each call. A 24-hour
+TTL bounds retention time, not bytes; the advisory 256 MiB free-space margin
+can result in partial coverage. Restore additionally needs its undo and staged
+replacement space. Expiry unlinks individual packs without a full archive copy;
+physical deletion waits for maintenance or the next launch and active readers.
 
-Collection reduced a long turn's 69.6 MB archive to 3.4 MB: 95.1% released,
-in one 80.809 ms Windows sample and one 41.453 ms Linux sample. It retained
-current states and the last named point. These samples do not establish GC tail
-latency. The hard archive ceiling is 1 GiB in file lengths, with an active
-generation ceiling of 512 MiB to leave compaction space.
+The checkpoint subtree changed from 107 files / 28,106 lines at `6679d6c` to
+31 files / 7,322 lines, including its tests. Startup and new turns perform no
+workspace acquisition; this is covered by behavioral tests rather than a
+startup timing claim. The merged base `2239186` had 68 files / 18,242 lines in
+that subtree, so the replacement is about 60% smaller than the base too.
 
-### Explicit capture follow-up
+### Reproduce
 
-Recorded **2026-10-22**, Rust 1.95.0 release builds, source fingerprint
-`aed942d290528925d84a579be98bb33e over 388 files`. The offline workspace API
-fixture uses an already open archive, a reduced 128 MiB budget and selective
-coverage. Files are prepared before timing and remain in the OS cache. First
-capture stores distinct, previously unrecorded contents; repeated capture
-reuses an existing state. Process/archive startup is excluded.
-
-| Capture | Windows median / p95 | Linux median / p95 | Samples |
-| --- | ---: | ---: | ---: |
-| First protection, 4 KiB | 2.898 / 3.354 ms | 4.968 / 5.888 ms | 200 |
-| First protection, 1 MiB | 8.259 ms | 12.360 ms | 20 |
-| Repeated state, 4 KiB | 1.757 / 2.075 ms | 2.422 / 2.888 ms | 200 |
-| Repeated state, 1 MiB | 4.359 ms | 3.220 ms | 20 |
-
-The opt-in measurement checks captured bytes outside timed spans and exercises
-capture → Bash → restore:
+Build before timing, using the platform setup in [Testing](TESTING.md). Set
+`JECODE_BENCH_CASE` to `write4k`, `edit1m`, `bash1`, `bash100`, `bash1000`,
+`restore1`, `restore100`, `restore1000` or `large256m`; set `JECODE_BENCH_COUNT`
+to the measured samples per block (30, 20, 10, 10, 6, 30, 10, 6, 3 respectively).
+Then run:
 
 ```text
-cargo test --locked --offline --release checkpoints::targeted::tests::measure_explicit_capture_in_selective_workspace -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline --release checkpoint_bench::matched_tools -- --exact --ignored --nocapture --test-threads=1
 ```
 
-Native Windows ConPTY input-to-VT measurements took 100 samples per mode.
-Single-key median/p95 was 12.258/20.208 ms idle and 12.662/20.652 ms while
-checkpoint writes progressed. Four-character bursts measured about 58/70 ms
-because the existing Windows paste-coalescing interval applies. This measures
-VT output, not physical keyboard-to-pixel latency. Rust fixture child peak RSS
-was 8.24 MiB idle and 16.60 MiB active; helper processes are excluded.
-
-Three Windows baseline/final comparisons with four shared-path processes had
-p95 values 58.396/64.792/68.237 ms before and 57.897/57.347/57.602 ms after.
-Only notification capture batches now limit simultaneous lease stripes;
-full scans keep their prior batching. Throughput varies and outliers remain.
-The final session harness additionally compares decoded archive objects with
-filesystem bytes; 1,400 mutations per platform reported no failed or
-unprotected writes. The integrated timings and TUI measurements used source
-`8da1d08577c8c4638ce6bb532e922e02`; the final fingerprint changes only ignored
-measurement fixtures, and the release product binary is identical.
-
-A guided live-provider check using the configured model completed restore/undo,
-selective capture/Bash/recovery and conflict preservation in 3/3 cases. It is
-an explicitly opted-in test, not a general reliability estimate or an offline
-test. Native macOS execution remains unverified.
-
-Run the integrated checkpoint workflows against the optimized build:
-
-```text
-cargo test --locked --offline --release checkpoints::measurement_tests::workflows -- --exact --ignored --nocapture --test-threads=1
-```
-
-The run covers initial capture and reopen, points, tool calls and Bash with and
-without checkpoints, history reads, restores, storage growth and collection,
-and concurrent sessions as separate processes. Tool comparisons use two
-identical synthetic workspaces in alternating order after two untimed warm-up
-pairs, and every file-tool call writes content the archive does not hold yet;
-the storage workflow measures reused content separately. File-tool pairs
-follow an untimed pause, as model latency separates real calls; one series
-edits twice in a row without it. Results go to
-`.tmp/checkpoint-measurements/<os>/` as `samples.csv`, `summary.csv`,
-`metrics.csv` and `environment.json`; set
-`JECODE_CHECKPOINT_MEASURE_OUT` to choose another directory, or
-`JECODE_CHECKPOINT_MEASURE_QUICK=1` to take a tenth of the samples while
-changing the harness. To repeat selected workflows, set
-`JECODE_CHECKPOINT_MEASURE_ONLY` to comma-separated names: `capture`, `editing`,
-`recovery`, `storage`, `sessions`. The additional opt-in `large` workflow creates
-a 264 MiB content scope and 50,010 empty files to measure bounded discovery,
-selective points and recovery. Fixture creation is timed separately; archive
-peak figures are sampled between operations, not continuous allocation peaks.
-A copy without Git history can name its revision with
-`JECODE_CHECKPOINT_MEASURE_REVISION`.
-
-The journal keeps its followed segment open, and tool writes are recorded
-without reading the file back; see
-[workspace checkpoints](ARCHITECTURE.md#workspace-checkpoints).
-
-## Measurement conditions
-
-Run from the repository root with Rust 1.95.0. Release builds keep Cargo
-compilation outside timed spans. Run probes serially; process/filesystem caches
-are not cleared. Each CSV run replaces the corresponding file, so copy results
-within `target` before comparing runs.
-
-For platform and physical-terminal checks, see [platform verification](PLATFORMS.md).
+`JECODE_BENCH_ENABLED=0` provides a write/edit/Bash control without recovery.
+For comparisons, build both binaries first and invoke their test executables
+serially in A/B/B/A order. Retain every `BENCH`, `FOOTPRINT` and `ARCHIVE` row;
+measure process working set separately. Do not compile or run other probes at
+the same time. Wall-clock expiry tests advance injected timestamps instead of
+waiting 24 hours. Performance figures above were measured on Windows; CI tests
+on other platforms do not establish their performance.

@@ -1,4 +1,4 @@
-use super::{Mode, install, remove, stage};
+use super::{Mode, install, remove, stage, stage_link};
 use crate::test_support::Directory;
 use std::fs;
 
@@ -20,6 +20,16 @@ fn dropping_staged_file_leaves_destination_untouched() {
     let pending = stage(&path, b"replacement", Mode::default()).unwrap();
     assert_eq!(fs::read(&path).unwrap(), b"original");
     drop(pending);
+    assert_eq!(fs::read(&path).unwrap(), b"original");
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn failed_link_staging_leaves_live_file_untouched() {
+    let directory = Directory::new();
+    let path = directory.path().join("live");
+    fs::write(&path, b"original").unwrap();
+    assert!(stage_link("invalid\0target", false, &path).is_err());
     assert_eq!(fs::read(&path).unwrap(), b"original");
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
 }

@@ -33,7 +33,7 @@ pub fn unique(prefix: &str) -> String {
     format!(
         "{prefix}-{}-{}-{}",
         std::process::id(),
-        crate::sessions::now(),
+        super::clock::now(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     )
 }
@@ -63,19 +63,14 @@ pub fn confined_parent(root: &Path, relative: &str) -> Result<(), String> {
         if !metadata.is_dir() {
             break;
         }
-        // The root is canonical and ordinary directory entries cannot redirect
-        // traversal. Resolve only Windows reparse directories; avoid reopening
-        // every ordinary ancestor once for each file in a full capture.
+        // A reparse directory may redirect traversal or expose opaque contents;
+        // never infer the state of descendants through it.
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt;
             const REPARSE_POINT: u32 = 0x400;
             if metadata.file_attributes() & REPARSE_POINT != 0 {
-                let resolved = fs::canonicalize(&parent)
-                    .map_err(|error| format!("Could not resolve parent of {relative}: {error}"))?;
-                if !resolved.starts_with(root) {
-                    return Err(format!("{relative} has a parent outside the workspace"));
-                }
+                return Err(format!("{relative} has a reparse parent"));
             }
         }
     }
@@ -95,30 +90,16 @@ pub fn normal_component(part: &str) -> bool {
 
 /// Replaces a private archive file through a synced temporary file.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    replace(path, bytes, true)
-}
-
-/// Replaces a private archive file whole without waiting for the disk; a
-/// crash can leave the previous content.
-pub fn replace_unsynced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    replace(path, bytes, false)
-}
-
-fn replace(path: &Path, bytes: &[u8], sync: bool) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
     private_directory(parent)?;
     let temporary = parent.join(format!(".{}.tmp", unique("write")));
     let result = (|| {
         let mut file = options().write(true).create_new(true).open(&temporary)?;
         file.write_all(bytes)?;
-        if sync {
-            file.sync_all()?;
-        }
+        file.sync_all()?;
         drop(file);
         fs::rename(&temporary, path)?;
-        if sync {
-            sync_directory(parent)?;
-        }
+        sync_directory(parent)?;
         Ok(())
     })();
     if result.is_err() {
@@ -255,10 +236,39 @@ pub struct PendingFile {
     installed: bool,
 }
 
+/// A link created beside its destination. Creation failure never touches the
+/// live entry; dropping an uninstalled link removes only the staged sibling.
+pub struct PendingLink {
+    path: PathBuf,
+    temporary: PathBuf,
+    directory: bool,
+    installed: bool,
+}
+
+impl PendingLink {
+    pub fn install_deferred(mut self) -> std::io::Result<()> {
+        fs::rename(&self.temporary, &self.path)?;
+        self.installed = true;
+        Ok(())
+    }
+}
+
+impl Drop for PendingLink {
+    fn drop(&mut self) {
+        if !self.installed {
+            if self.directory {
+                let _ = fs::remove_dir(&self.temporary);
+            } else {
+                let _ = fs::remove_file(&self.temporary);
+            }
+        }
+    }
+}
+
 impl PendingFile {
     /// Replaces the destination after all content, metadata, and file syncing
     /// have completed. The directory entry is synced on Unix after the rename.
-    #[cfg(any(test, not(unix)))]
+    #[cfg(test)]
     pub fn install(self) -> std::io::Result<()> {
         let path = self.path.clone();
         self.install_deferred()?;
@@ -304,7 +314,17 @@ impl Drop for PendingFile {
 }
 
 /// Writes and syncs exact file bytes and mode in a temporary sibling.
+#[cfg(test)]
 pub fn stage(path: &Path, bytes: &[u8], mode: Mode) -> std::io::Result<PendingFile> {
+    stage_reader(path, &mut std::io::Cursor::new(bytes), mode)
+}
+
+/// Streams a replacement to its sibling without retaining its contents in RAM.
+pub fn stage_reader(
+    path: &Path,
+    mut source: impl std::io::Read,
+    mode: Mode,
+) -> std::io::Result<PendingFile> {
     let parent = path.parent().unwrap_or(Path::new("."));
     let temporary = parent.join(format!(
         ".jecode-{}-{}.tmp",
@@ -322,7 +342,7 @@ pub fn stage(path: &Path, bytes: &[u8], mode: Mode) -> std::io::Result<PendingFi
     };
     {
         let mut file = file;
-        file.write_all(bytes)?;
+        std::io::copy(&mut source, &mut file)?;
         #[cfg(unix)]
         mode.apply(&file)?;
         #[cfg(not(unix))]
@@ -372,21 +392,29 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
     }
 }
 
-pub fn symlink(target: &str, path: &Path) -> std::io::Result<()> {
+pub fn stage_link(target: &str, directory: bool, path: &Path) -> std::io::Result<PendingLink> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let temporary = parent.join(format!(".jecode-{}.tmp", unique("link")));
+    let pending = PendingLink {
+        path: path.to_path_buf(),
+        temporary,
+        directory,
+        installed: false,
+    };
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(target, path)?;
+        std::os::unix::fs::symlink(target, &pending.temporary)?;
     }
     #[cfg(windows)]
     {
-        let resolved = path.parent().unwrap_or(Path::new(".")).join(target);
-        if resolved.is_dir() {
-            std::os::windows::fs::symlink_dir(target, path)?;
+        if directory {
+            std::os::windows::fs::symlink_dir(target, &pending.temporary)?;
         } else {
-            std::os::windows::fs::symlink_file(target, path)?;
+            std::os::windows::fs::symlink_file(target, &pending.temporary)?;
         }
     }
-    sync_parent(path)
+    sync_parent(&pending.temporary)?;
+    Ok(pending)
 }
 
 fn sync_parent(path: &Path) -> std::io::Result<()> {

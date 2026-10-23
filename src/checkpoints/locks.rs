@@ -1,6 +1,5 @@
 //! Cross-process coordination through operating-system file locks, released
-//! automatically when a process exits. Unique owner locks are removed on
-//! orderly exit; recovery removes files left by crashed processes.
+//! automatically when a process exits.
 use super::files;
 use std::collections::HashSet;
 use std::fs::File;
@@ -39,52 +38,28 @@ impl Exclusive {
             Err(std::fs::TryLockError::Error(error)) => Err(error),
         }
     }
+
+    pub fn acquire_cancellable(
+        path: &Path,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> std::io::Result<Self> {
+        loop {
+            if cancellation.requested() {
+                return Err(std::io::Error::other("Operation cancelled"));
+            }
+            if let Some(lock) = Self::try_acquire(path)? {
+                return Ok(lock);
+            }
+            cancellation
+                .wait(std::time::Duration::from_millis(10))
+                .map_err(std::io::Error::other)?;
+        }
+    }
 }
 
 impl Drop for Exclusive {
     fn drop(&mut self) {
         // A concurrent Unix fork can retain a duplicate descriptor until exec.
-        let _ = self.0.unlock();
-    }
-}
-
-/// One store's unique lock file, removed after its handle closes.
-pub struct Owner {
-    path: PathBuf,
-    held: Option<Exclusive>,
-}
-
-impl Owner {
-    pub fn acquire(path: PathBuf) -> std::io::Result<Self> {
-        Ok(Self {
-            held: Some(Exclusive::acquire(&path)?),
-            path,
-        })
-    }
-}
-
-impl Drop for Owner {
-    fn drop(&mut self) {
-        // Windows cannot remove an open lock file. A crash skips this drop;
-        // the next workspace recovery still cleans that stale file.
-        drop(self.held.take());
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-/// A shared lock held until drop.
-pub struct Shared(File);
-
-impl Shared {
-    pub fn acquire(path: &Path) -> std::io::Result<Self> {
-        let file = open(path)?;
-        file.lock_shared()?;
-        Ok(Self(file))
-    }
-}
-
-impl Drop for Shared {
-    fn drop(&mut self) {
         let _ = self.0.unlock();
     }
 }
@@ -118,21 +93,30 @@ impl Leases {
         (super::hash::digest(folded.as_bytes()).0[0] as usize) % STRIPES
     }
 
-    /// Acquires every path's stripe in ascending order, so concurrent
-    /// multi-path holders cannot deadlock.
-    pub fn acquire(self: &Arc<Self>, paths: &[&str]) -> std::io::Result<Lease> {
+    /// Acquire path stripes in ascending order to avoid multi-path deadlocks.
+    pub fn acquire_cancellable(
+        self: &Arc<Self>,
+        paths: &[&str],
+        cancellation: &crate::cancel::Cancellation,
+    ) -> std::io::Result<Lease> {
         let mut stripes: Vec<usize> = paths.iter().map(|path| Self::stripe(path)).collect();
         stripes.sort_unstable();
         stripes.dedup();
-        self.stripes(stripes)
+        self.stripes_cancellable(stripes, Some(cancellation))
     }
 
-    /// Every stripe, for whole-scope operations.
-    pub fn acquire_all(self: &Arc<Self>) -> std::io::Result<Lease> {
-        self.stripes((0..STRIPES).collect())
+    pub fn acquire_all_cancellable(
+        self: &Arc<Self>,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> std::io::Result<Lease> {
+        self.stripes_cancellable((0..STRIPES).collect(), Some(cancellation))
     }
 
-    fn stripes(self: &Arc<Self>, stripes: Vec<usize>) -> std::io::Result<Lease> {
+    fn stripes_cancellable(
+        self: &Arc<Self>,
+        stripes: Vec<usize>,
+        cancellation: Option<&crate::cancel::Cancellation>,
+    ) -> std::io::Result<Lease> {
         let mut lease = Lease {
             leases: self.clone(),
             stripes: Vec::new(),
@@ -141,11 +125,23 @@ impl Leases {
             {
                 let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
                 while held.contains(&stripe) {
-                    held = self.released.wait(held).unwrap_or_else(|e| e.into_inner());
+                    if cancellation.is_some_and(|token| token.requested()) {
+                        return Err(std::io::Error::other("Operation cancelled"));
+                    }
+                    held = self
+                        .released
+                        .wait_timeout(held, std::time::Duration::from_millis(10))
+                        .unwrap_or_else(|e| e.into_inner())
+                        .0;
                 }
                 held.insert(stripe);
             }
-            match Exclusive::acquire(&self.directory.join(format!("{stripe:02x}.lock"))) {
+            let path = self.directory.join(format!("{stripe:02x}.lock"));
+            let acquired = match cancellation {
+                Some(token) => Exclusive::acquire_cancellable(&path, token),
+                None => Exclusive::acquire(&path),
+            };
+            match acquired {
                 Ok(lock) => lease.stripes.push((stripe, lock)),
                 Err(error) => {
                     self.release(stripe);
@@ -172,13 +168,4 @@ impl Drop for Lease {
             self.leases.release(stripe);
         }
     }
-}
-
-/// Whether the process that took `owners/<owner>.lock` has exited.
-pub fn owner_gone(directory: &Path, owner: &str) -> bool {
-    let path = directory.join("owners").join(format!("{owner}.lock"));
-    if !path.exists() {
-        return true;
-    }
-    matches!(Exclusive::try_acquire(&path), Ok(Some(_)))
 }

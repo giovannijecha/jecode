@@ -2,6 +2,8 @@ mod agent;
 mod attachments;
 mod bootstrap;
 mod cancel;
+#[cfg(test)]
+mod checkpoint_bench;
 mod checkpoints;
 mod cli;
 mod clipboard;
@@ -27,6 +29,7 @@ mod setup;
 mod skills;
 mod tools;
 mod tui;
+mod utf8;
 
 #[cfg(test)]
 mod test_support;

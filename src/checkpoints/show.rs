@@ -1,71 +1,107 @@
-//! Recorded content addressed as `checkpoint:cp-N:path`, read without
-//! changing the workspace.
-use super::index::{parse_reference, reference};
-use super::record::State;
-use super::restore::normalize;
-use super::workspace::Workspace;
+//! Read a call's saved file without changing the workspace.
+use super::Store;
+use super::paths;
+use super::state::State;
+use super::store::Loaded;
+use crate::cancel::Cancellation;
+use crate::json::Value;
+use std::io::{BufReader, Read, Write};
+use std::sync::Arc;
 
 pub const PREFIX: &str = "checkpoint:";
-
-pub enum Content {
-    Text(String),
-    Binary(usize),
-    Directory(Vec<String>),
-    Link(String),
-}
 
 pub fn is_reference(path: &str) -> bool {
     path.starts_with(PREFIX)
 }
 
-/// The state of a path at a checkpoint.
-pub fn content(workspace: &Workspace, path: &str) -> Result<Content, String> {
-    let rest = path
+fn resolve(
+    store: &Store,
+    reference: &str,
+    cancel: &Cancellation,
+) -> Result<(Loaded, String, State), String> {
+    let rest = reference
         .strip_prefix(PREFIX)
         .ok_or("Not a checkpoint reference")?;
-    let (target, relative) = rest
+    let (reference, path) = rest
         .split_once(':')
-        .ok_or("Use checkpoint:cp-<number>:<workspace-relative path>")?;
-    let target = parse_reference(target)?;
-    let relative = normalize(relative)?;
-    let mut store = workspace.store();
-    store.refresh()?;
-    let index = &store.index;
-    if !index.retained(target) || target > index.latest() {
-        return Err(format!(
-            "{} is not available; retained history runs from {} to {}",
-            reference(target),
-            reference(index.horizon),
-            reference(index.latest())
-        ));
+        .ok_or("Use checkpoint:rc-ID:workspace-relative-path")?;
+    if reference.starts_with("cp-") {
+        return Err("This is an obsolete cp-N reference. Use an rc-ID reference from the current workspace checkpoint list".into());
     }
-    match index.state_at(&relative, target) {
-        State::File { object, .. } => {
-            let bytes = store.bytes(object)?;
-            match std::str::from_utf8(&bytes) {
-                Ok(text) if !text.contains('\0') => Ok(Content::Text(text.into())),
-                _ => Ok(Content::Binary(bytes.len())),
-            }
+    let loaded = store.load(reference, cancel)?;
+    let path = paths::resolve_saved(&store.root, &loaded.snapshot, path)?;
+    let state = loaded
+        .snapshot
+        .entries
+        .get(&path)
+        .cloned()
+        .ok_or_else(|| format!("{path} was not saved by this call"))?;
+    Ok((loaded, path, state))
+}
+
+pub fn read(
+    store: &Arc<Store>,
+    reference: &str,
+    args: &Value,
+    cancel: &Cancellation,
+) -> Result<Value, String> {
+    let (loaded, path, state) = resolve(store, reference, cancel)?;
+    match &state {
+        State::File { length, .. } => {
+            loaded.verify(&state, cancel)?;
+            crate::tools::read_source(
+                BufReader::new(loaded.reader(&state)?),
+                *length,
+                args,
+                cancel,
+            )
         }
         State::Directory { .. } => {
-            let prefix = format!("{relative}/");
-            let children = index
-                .existing_at(target)
-                .filter_map(|version| {
-                    let child = version.path.strip_prefix(&prefix)?;
-                    let directory = matches!(version.state, State::Directory { .. });
-                    (!child.contains('/'))
-                        .then(|| format!("{child}{}", if directory { "/" } else { "" }))
+            let prefix = format!("{path}/");
+            let entries = loaded
+                .snapshot
+                .entries
+                .iter()
+                .filter_map(|(name, state)| {
+                    let child = name.strip_prefix(&prefix)?;
+                    (!child.contains('/') && state.exists()).then(|| Value::string(child))
                 })
                 .collect();
-            Ok(Content::Directory(children))
+            Ok(Value::object([("entries", Value::Array(entries))]))
         }
-        State::Link { target } => Ok(Content::Link(target)),
-        State::Absent => Err(format!("{relative} did not exist at {}", reference(target))),
-        other => Err(format!(
-            "{relative} was not captured at {}: {}",
-            reference(target),
-            super::actions::describe(&other)
-        )),
+        State::Link { target, .. } => Ok(Value::object([("link", Value::string(target))])),
+        State::Absent => Err(format!("{path} did not exist before this call")),
+        State::Unreadable { reason } => Err(format!("{path} was not captured: {reason}")),
     }
+}
+
+/// CLI output is streamed, with integrity checked before emitting saved bytes.
+pub fn write_text(
+    store: &Arc<Store>,
+    reference: &str,
+    output: &mut impl Write,
+) -> Result<(), String> {
+    let cancel = Cancellation::default();
+    let (loaded, path, state) = resolve(store, reference, &cancel)?;
+    if !matches!(state, State::File { .. }) {
+        return Err(format!("{path} is not a saved regular file"));
+    }
+    loaded.verify(&state, &cancel)?;
+    let mut reader = loaded.reader(&state)?;
+    if !crate::utf8::is_text(loaded.reader(&state)?).map_err(|error| error.to_string())? {
+        return Err("Saved file contains binary data; restore it to use its content".into());
+    }
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        output
+            .write_all(&buffer[..count])
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
