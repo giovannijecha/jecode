@@ -93,5 +93,6 @@ are in [copy](../usage/COPY.md).
 
 Drop a file with spaces in its path and import an image with Alt+V. Wait for
 importing, submit, then resume and export the conversation. Confirm the owned
-attachment survives and the exported copy matches. See
+attachment survives and the export contains its reference in the JSON without
+copying the file. See
 [attachments](../usage/ATTACHMENTS.md) for platform-specific capture requirements.

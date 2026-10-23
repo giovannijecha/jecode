@@ -195,7 +195,7 @@ fn pdf_annotation_images_stay_in_pool_across_save_resume_history_and_replay() {
     let encoded = Value::Array(saved.clone()).encode();
     assert!(!encoded.contains("base64,"));
     assert!(encoded.contains("fixture-hash"));
-    let refs = crate::attachments::annotations::references(&saved[2]);
+    let refs = crate::attachments::references(saved[2].encode().as_bytes());
     assert_eq!(refs.len(), 1);
     let asset = refs.iter().next().unwrap();
     let pool = agent.sessions().unwrap().store().attachments();
@@ -212,19 +212,12 @@ fn pdf_annotation_images_stay_in_pool_across_save_resume_history_and_replay() {
     let export_text = std::fs::read_to_string(&export).unwrap();
     assert!(!export_text.contains("base64,"));
     let export_document = json::parse(&export_text).unwrap();
-    let listed = export_document
-        .get("attachments")
-        .and_then(Value::as_array)
-        .unwrap();
-    let parsed_page = listed
-        .iter()
-        .find(|entry| entry.get("id").and_then(Value::as_str) == Some(asset))
-        .unwrap();
-    let path = parsed_page.get("path").and_then(Value::as_str).unwrap();
-    assert_eq!(
-        std::fs::read(export.parent().unwrap().join(path)).unwrap(),
-        png
-    );
+    assert!(export_document.get("attachments").is_none());
+    assert!(!export.with_extension("attachments").exists());
+    let exported = export_document.get("messages").unwrap().encode();
+    assert!(exported.contains("fixture-hash"));
+    assert!(exported.contains(&format!("attachment:{asset}")));
+    assert_eq!(std::fs::read(pool.load(asset).unwrap().path).unwrap(), png);
     first.finish();
     drop(agent);
 

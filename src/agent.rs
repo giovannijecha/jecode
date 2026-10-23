@@ -136,7 +136,6 @@ impl Agent {
             redactor: self.redactor.clone(),
             effort: self.effort().name().into(),
             events: Arc::clone(&self.events),
-            attachments: self.tools.attachments().cloned(),
         }
     }
 

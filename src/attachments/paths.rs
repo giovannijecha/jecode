@@ -49,37 +49,6 @@ pub fn argument(word: &str, directory: &std::path::Path) -> PathBuf {
     local(word).map_or_else(|| directory.join(word), PathBuf::from)
 }
 
-/// Paths typed after `/attach`: quoted or bare, absolute or relative to
-/// `directory`. Backslashes stay literal so Windows paths need no escaping.
-pub fn typed(text: &str, directory: &std::path::Path) -> Result<Vec<PathBuf>, String> {
-    let resolve = |word: &str| argument(word, directory);
-    let text = text.trim();
-    let words = split(text, false).ok_or("A quote in the path list is not closed")?;
-    if words.is_empty() {
-        return Err("Usage: /attach PATH...".into());
-    }
-    let paths: Vec<_> = words.iter().map(|word| resolve(word)).collect();
-    if paths.len() > 1 && !paths.iter().all(|path| path.is_file()) && resolve(text).is_file() {
-        return Ok(vec![resolve(text)]);
-    }
-    if paths.len() > MAX_PATHS {
-        return Err(format!("Attach at most {MAX_PATHS} files at once"));
-    }
-    Ok(paths)
-}
-
-/// Quoted path or attachment-reference arguments, without shell evaluation.
-pub fn words(text: &str) -> Result<Vec<String>, String> {
-    let words = split(text.trim(), false).ok_or("A quote in the path list is not closed")?;
-    if words.is_empty() {
-        return Err("Usage: /attach PATH...".into());
-    }
-    if words.len() > MAX_PATHS {
-        return Err(format!("Attach at most {MAX_PATHS} files at once"));
-    }
-    Ok(words)
-}
-
 /// Shell-like word splitting limited to quote removal.
 fn split(text: &str, escapes: bool) -> Option<Vec<String>> {
     let mut words = Vec::new();
@@ -358,36 +327,6 @@ mod tests {
         let file = directory.path().join("report ' $x ` $(1+2) β.bin");
         fs::write(&file, b"exact bytes").unwrap();
         let quoted = format!("'{}'", file.display().to_string().replace('\'', "''"));
-        assert_eq!(dropped(&quoted), Some(vec![file.clone()]));
-        assert_eq!(typed(&quoted, directory.path()).unwrap(), vec![file]);
-    }
-
-    #[test]
-    fn typed_paths_resolve_relative_names_and_unquoted_spaces() {
-        let directory = Directory::new();
-        let root = directory.path();
-        fs::write(root.join("a.txt"), "a").unwrap();
-        fs::write(root.join("my file.txt"), "b").unwrap();
-        assert_eq!(
-            typed("a.txt \"my file.txt\"", root).unwrap(),
-            [root.join("a.txt"), root.join("my file.txt")]
-        );
-        assert_eq!(
-            typed(" my file.txt ", root).unwrap(),
-            [root.join("my file.txt")]
-        );
-        // A missing file reaches the import, which names it in its error.
-        assert_eq!(
-            typed("missing.txt", root).unwrap(),
-            [root.join("missing.txt")]
-        );
-        assert!(typed("  ", root).is_err());
-        assert!(typed("\"open", root).is_err());
-        let absolute = root.join("a.txt");
-        let elsewhere = Directory::new();
-        assert_eq!(
-            typed(&format!("\"{}\"", absolute.display()), elsewhere.path()).unwrap(),
-            [absolute]
-        );
+        assert_eq!(dropped(&quoted), Some(vec![file]));
     }
 }

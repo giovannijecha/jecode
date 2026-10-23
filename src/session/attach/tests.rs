@@ -17,7 +17,7 @@ fn config(home: &Directory) -> SessionConfig {
 }
 
 #[test]
-fn plain_chat_stages_files_until_the_next_message() {
+fn plain_chat_sends_initial_attachment_once() {
     let home = Directory::new();
     let project = Directory::new();
     std::fs::write(project.path().join("notes.txt"), "staged text").unwrap();
@@ -29,29 +29,22 @@ fn plain_chat_stages_files_until_the_next_message() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(project.path()).unwrap(),
     );
-    let mut config = SessionConfig {
-        store: Store::new(home.path().join("config.json")),
-        settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
-    };
+    agent.enable_sessions(home.path()).unwrap();
     let notes = project.path().join("notes.txt");
-    let mut input = Cursor::new(format!(
-        "/attach missing.txt\n/attach \"{}\"\n\nthen plain\n/exit\n",
-        notes.display()
-    ));
+    let staged = agent.import_attachments(&[notes]).unwrap();
+    let mut input = Cursor::new("\nthen plain\n/exit\n");
     let mut output = Vec::new();
     let mut status = Vec::new();
     chat(
         &mut agent,
-        &mut config,
+        &mut config(&home),
         &mut input,
         &mut output,
         &mut status,
-        Vec::new(),
+        staged,
     )
     .unwrap();
     let output = String::from_utf8(output).unwrap();
-    assert!(String::from_utf8(status).unwrap().contains("Cannot attach"));
     assert!(output.contains("Staged [1# File: notes.txt] for your next message."));
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
@@ -65,7 +58,7 @@ fn plain_chat_stages_files_until_the_next_message() {
             .unwrap()
             .encode()
     };
-    // Enter alone sends only the staged attachment; the next line is plain.
+    // Enter alone sends only the initial attachment; the next line is plain.
     assert!(last(0).contains("attachment:att-"));
     assert!(!last(1).contains("attachment:att-"));
 }
@@ -80,13 +73,17 @@ fn staged_file_survives_exit_source_removal_and_plain_resume() {
         OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
         Tools::new(project.path()).unwrap(),
     );
+    first.enable_sessions(home.path()).unwrap();
+    let staged = first
+        .import_attachments(std::slice::from_ref(&source))
+        .unwrap();
     chat(
         &mut first,
         &mut config(&home),
-        &mut Cursor::new(format!("/attach \"{}\"\n/exit\n", source.display())),
+        &mut Cursor::new("/exit\n"),
         &mut Vec::new(),
         &mut Vec::new(),
-        Vec::new(),
+        staged,
     )
     .unwrap();
     let handle = first.sessions().unwrap();
@@ -158,13 +155,15 @@ fn new_conversation_keeps_plain_staging_for_its_next_message() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(project.path()).unwrap(),
     );
+    agent.enable_sessions(home.path()).unwrap();
+    let staged = agent.import_attachments(&[source]).unwrap();
     chat(
         &mut agent,
         &mut config(&home),
-        &mut Cursor::new(format!("/attach \"{}\"\n/new\n\n/exit\n", source.display())),
+        &mut Cursor::new("/new\n\n/exit\n"),
         &mut Vec::new(),
         &mut Vec::new(),
-        Vec::new(),
+        staged,
     )
     .unwrap();
     assert!(agent.sessions().unwrap().snapshot().input.staged.is_empty());
@@ -177,7 +176,7 @@ fn new_conversation_keeps_plain_staging_for_its_next_message() {
 }
 
 #[test]
-fn plain_staging_can_be_cleared_without_sending() {
+fn plain_attach_command_is_unknown() {
     let home = Directory::new();
     let project = Directory::new();
     let source = project.path().join("discard.txt");
@@ -200,10 +199,12 @@ fn plain_staging_can_be_cleared_without_sending() {
     )
     .unwrap();
     assert!(agent.sessions().unwrap().snapshot().input.staged.is_empty());
-    assert!(
+    assert_eq!(
         String::from_utf8(output)
             .unwrap()
-            .contains("Staged attachments cleared.")
+            .matches("Unknown command. Use /help to see commands.")
+            .count(),
+        2
     );
 }
 
@@ -240,18 +241,17 @@ fn resuming_another_session_transfers_plain_staging() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(project.path()).unwrap(),
     );
+    current.enable_sessions(home.path()).unwrap();
+    let staged = current.import_attachments(&[source]).unwrap();
     let mut output = Vec::new();
     let mut status = Vec::new();
     chat(
         &mut current,
         &mut config(&home),
-        &mut Cursor::new(format!(
-            "/attach \"{}\"\n/resume {resume_id}\n\n/exit\n",
-            source.display()
-        )),
+        &mut Cursor::new(format!("/resume {resume_id}\n\n/exit\n")),
         &mut output,
         &mut status,
-        Vec::new(),
+        staged,
     )
     .unwrap();
     assert_eq!(
@@ -299,17 +299,14 @@ fn deleting_current_plain_session_keeps_staged_reference_until_send() {
     );
     agent.run_turn(prompt, &mut |_| Ok(())).unwrap();
     let old_id = agent.sessions().unwrap().id();
-    let input = format!(
-        "/attach {}\n/resume\nd {old_id}\ndelete\n/cancel\n\n/exit\n",
-        attachment.reference()
-    );
+    let input = format!("/resume\nd {old_id}\ndelete\n/cancel\n\n/exit\n");
     chat(
         &mut agent,
         &mut config(&home),
         &mut Cursor::new(input),
         &mut Vec::new(),
         &mut Vec::new(),
-        Vec::new(),
+        vec![attachment.clone()],
     )
     .unwrap();
     assert_ne!(agent.sessions().unwrap().id(), old_id);
@@ -350,14 +347,8 @@ fn deleting_another_session_keeps_a_plain_staged_reference() {
         Tools::new(project.path()).unwrap(),
     );
     other.enable_sessions(home.path()).unwrap();
-    let mut staged = Vec::new();
-    super::stage(
-        &other,
-        &attachment.reference(),
-        &mut staged,
-        &mut Vec::new(),
-    )
-    .unwrap();
+    let staged = vec![attachment.clone()];
+    super::save(&other, &staged).unwrap();
     let current_id = other.sessions().unwrap().id();
     assert!(
         other

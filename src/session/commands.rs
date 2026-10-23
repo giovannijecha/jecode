@@ -8,7 +8,6 @@ pub struct Command {
 impl Command {
     pub fn description(&self, tui: bool) -> &'static str {
         match (tui, self.name) {
-            (false, "/attach") => "Attach files to the next message",
             (false, "/terminal") => "List active processes, or show saved output by ID",
             (false, "/help") => "Show commands",
             (false, "/exit") => "Quit",
@@ -17,7 +16,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 17] = [
+pub const COMMANDS: [Command; 16] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -85,12 +84,6 @@ pub const COMMANDS: [Command; 17] = [
         plain_usage: Some("/copy"),
     },
     Command {
-        name: "/attach",
-        description: "Attach files to the draft; drop files or press Alt+V for an image",
-        tui_usage: "/attach PATH",
-        plain_usage: Some("/attach PATH"),
-    },
-    Command {
         name: "/tmp",
         description: "Show session temporary files; /tmp clean clears them",
         tui_usage: "/tmp [clean]",
@@ -123,7 +116,7 @@ pub const COMMANDS: [Command; 17] = [
 ];
 
 const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Cancel active work and quit\nCtrl+D        In /terminal, mark stop; in /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
-const PLAIN_CONTROLS: &str = "/attach --clear Discard staged files without sending\n/terminal stop ID Request a stop for a background process\n\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
+const PLAIN_CONTROLS: &str = "/terminal stop ID Request a stop for a background process\n\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
 
 pub fn help(tui: bool) -> String {
     let mut rows = COMMANDS
@@ -321,7 +314,6 @@ mod tests {
         assert_eq!(canonical("/CLEAR"), "/new");
         assert_eq!(canonical("/SETUP"), "/settings");
         assert_eq!(split("  /InIt \t "), Some(("/InIt", "")));
-        assert!(help(false).contains("Attach files to the next message"));
         assert!(!help(false).contains("Alt+V"));
         assert!(help(true).contains("Alt+V"));
         assert!(help(true).contains("/skills"));

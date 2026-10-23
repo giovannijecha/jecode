@@ -166,16 +166,6 @@ impl Pool {
         self.directory.join(format!("{id}.view.{extension}"))
     }
 
-    pub fn copy_to(&self, attachment: &Attachment, target: &Path) -> Result<PathBuf, String> {
-        let stored = self.load(&attachment.id)?;
-        let folder = target.join(&attachment.id);
-        fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
-        let destination = folder.join(stored.path.file_name().unwrap_or_default());
-        fs::copy(&stored.path, &destination)
-            .map_err(|error| format!("Could not copy attachment {}: {error}", attachment.id))?;
-        Ok(destination)
-    }
-
     fn remove(&self, id: &str) {
         let _ = fs::remove_dir_all(self.directory.join(id));
         for suffix in ["json", "partial", "view.png", "view.jpg", "view.partial"] {

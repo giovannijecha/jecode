@@ -28,9 +28,11 @@ impl Draft {
 
     fn value(&self) -> Value {
         let Value::Object(mut fields) = self.prompt().value() else {
+            // Journal deltas merge object fields, so clearing a list must be explicit.
             return Value::object([
                 ("text", Value::string(&self.text)),
                 ("cursor", Value::number(self.cursor)),
+                ("attachments", Value::Array(vec![])),
             ]);
         };
         fields.insert("cursor".into(), Value::number(self.cursor));

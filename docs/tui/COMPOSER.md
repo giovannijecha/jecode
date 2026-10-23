@@ -10,8 +10,8 @@ Use `Ctrl+J` for a newline. `Shift+Enter` and `Alt+Enter` also work when the
 terminal reports them as distinct keys. Pasted text keeps its line breaks.
 The caret follows long drafts through at most five visible rows; the top rule
 shows a range when some text is hidden. Attachment labels are edited as one
-unit. See [Attachments](../usage/ATTACHMENTS.md) for file drops, `/attach`,
-and clipboard images.
+unit. See [Attachments](../usage/ATTACHMENTS.md) for file drops and clipboard
+images.
 
 ## Editing keys
 
@@ -51,7 +51,7 @@ The activity line names the current phase and elapsed time. While a turn is
 running, the composer stays editable. Pending messages appear above it as
 `queued`; Jecode accepts ordinary messages before the active turn's next model
 request. Most local commands wait for the turn to finish; `/copy`, `/drafts`,
-`/attach`, and `/terminal` open immediately. If the turn stops or fails,
+and `/terminal` open immediately. If the turn stops or fails,
 messages that have not joined it become `paused` and require review.
 
 Open `/drafts` or press `Alt+Up` to review pending messages, even during a

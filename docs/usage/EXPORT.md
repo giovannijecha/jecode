@@ -22,8 +22,6 @@ last 64 KiB of each output stream and references to the complete streams in
 the personal session store; those files are not embedded in the JSON. See
 [TOOLS.md](TOOLS.md) for output references.
 
-Attachments referenced by the conversation, including PDF annotation images,
-are copied into a `.attachments` folder beside the JSON and listed with
-relative paths in the top-level `attachments` array. If an attachment cannot
-be copied, Jecode does not write the export. See
-[ATTACHMENTS.md](ATTACHMENTS.md#export).
+The export writes only this JSON file. References to attachments remain in
+messages and annotations, but the referenced files are not copied into the
+export. See [ATTACHMENTS.md](ATTACHMENTS.md#export).

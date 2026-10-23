@@ -83,7 +83,6 @@ mod tests {
             effort: "default".into(),
             redactor: Redactor::empty(),
             events: Arc::new(Mutex::new(vec![])),
-            attachments: None,
             messages: Arc::new(Mutex::new(vec![Value::object([
                 ("role", Value::string("assistant")),
                 (

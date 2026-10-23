@@ -181,17 +181,17 @@ fn alt_v_reads_the_clipboard_only_on_request_and_failures_keep_the_draft() {
 }
 
 #[test]
-fn attach_command_and_attachment_only_messages_reach_the_provider_as_parts() {
+fn dropped_attachment_only_messages_reach_the_provider_as_parts() {
     let home = Directory::new();
     let directory = Directory::new();
     std::fs::write(directory.path().join("shot.png"), png()).unwrap();
     let fixture = HttpFixture::new(vec![(200, completion("Seen", vec![]))]);
     let mut app = app(&home, &directory, &fixture.endpoint);
-    app.dispatch(Prompt::plain("/attach missing.png")).unwrap();
-    settle(&mut app);
-    assert!(notice(&app).contains("Your draft was kept."));
-    assert!(app.state.editor.attachments.is_empty());
-    app.dispatch(Prompt::plain("/attach shot.png")).unwrap();
+    app.input(Decoded::Paste(format!(
+        "\"{}\"",
+        directory.path().join("shot.png").display()
+    )))
+    .unwrap();
     settle(&mut app);
     assert_eq!(app.state.editor.display(), "[1# Image] ");
     assert!(!app.submit().unwrap());
@@ -225,6 +225,41 @@ fn attach_command_and_attachment_only_messages_reach_the_provider_as_parts() {
     key(&mut app, 80, 4);
     assert_eq!(app.state.editor.attachments.len(), 1);
     assert_eq!(app.state.editor.display(), "[1# Image] ");
+}
+
+#[test]
+fn sent_attachments_do_not_return_to_the_composer_after_resume() {
+    for text in ["", "Next request"] {
+        let home = Directory::new();
+        let directory = Directory::new();
+        let fixture = HttpFixture::new(vec![(200, completion("Seen", vec![]))]);
+        let mut current = app(&home, &directory, &fixture.endpoint);
+        for _ in 0..2 {
+            current.clipboard_image = Some(Ok(png()));
+            key(&mut current, 86, 1);
+            settle(&mut current);
+        }
+        current
+            .input(Decoded::Text("Compare these".into()))
+            .unwrap();
+        assert!(!current.submit().unwrap());
+        settle(&mut current);
+        assert!(current.state.editor.prompt().is_empty());
+        current.input(Decoded::Text(text.into())).unwrap();
+        let id = current.persistence.as_ref().unwrap().id();
+        drop(current);
+        assert_eq!(fixture.finish().len(), 1);
+
+        let mut resumed = app(&home, &directory, OFFLINE);
+        resumed.resume_session(&id);
+        assert_eq!(resumed.state.editor.prompt(), Prompt::plain(text));
+        assert_eq!(resumed.state.history.snapshot()[0].attachments.len(), 2);
+        drop(resumed);
+
+        let mut reopened = app(&home, &directory, OFFLINE);
+        reopened.resume_session(&id);
+        assert_eq!(reopened.state.editor.prompt(), Prompt::plain(text));
+    }
 }
 
 #[test]
