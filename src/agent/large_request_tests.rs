@@ -1,20 +1,15 @@
 use super::*;
 use crate::attachments::{MARKER, Prompt};
 use crate::json::Value;
+use crate::test_support::server::{self, Server};
 use crate::test_support::{Directory, completion, tool_call};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[test]
 fn large_images_survive_native_write_and_avanti_without_replaying_the_write() {
     let project = Directory::new();
     let home = Directory::new();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
-    listener.set_nonblocking(true).unwrap();
-
     let mut png_a = crate::attachments::tests::png(4, 3);
     png_a.resize(4 * 1024 * 1024, 0xA5);
     let mut png_b = crate::attachments::tests::png(4, 3);
@@ -44,24 +39,10 @@ fn large_images_survive_native_write_and_avanti_without_replaying_the_write() {
         completion("Created.", vec![]),
         completion("Continued.", vec![]),
     ];
-    let server = thread::spawn(move || {
+    let server = Server::start(move |listener, stop| {
         let mut results = Vec::new();
         for response in responses {
-            let started = Instant::now();
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(
-                            started.elapsed() < Duration::from_secs(30),
-                            "missing request"
-                        );
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("accept: {error}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
+            let mut stream = server::accept(&listener, &stop)?;
             stream
                 .set_read_timeout(Some(Duration::from_secs(30)))
                 .unwrap();
@@ -69,7 +50,7 @@ fn large_images_survive_native_write_and_avanti_without_replaying_the_write() {
             let mut length = 0usize;
             loop {
                 let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
+                assert_ne!(reader.read_line(&mut line).unwrap(), 0, "missing headers");
                 if line == "\r\n" {
                     break;
                 }
@@ -107,10 +88,10 @@ fn large_images_survive_native_write_and_avanti_without_replaying_the_write() {
             let response = response.encode();
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
         }
-        results
+        Ok::<_, std::io::Error>(results)
     });
 
-    let mut client = OpenRouter::fixture(endpoint);
+    let mut client = OpenRouter::fixture(format!("{}/chat/completions", server.endpoint));
     client.fixture_inputs(&["text", "image"]);
     let mut agent = Agent::new(client, Tools::new(project.path()).unwrap());
     agent.enable_sessions(home.path()).unwrap();
@@ -149,7 +130,7 @@ fn large_images_survive_native_write_and_avanti_without_replaying_the_write() {
     assert_eq!(answers.last().map(String::as_str), Some("Continued."));
     assert_eq!(std::fs::read_to_string(&draft).unwrap(), "external change");
 
-    let requests = server.join().unwrap();
+    let requests = server.finish().unwrap();
     assert_eq!(requests.len(), 3);
     for (length, exact_images, _) in &requests {
         assert!(*length > 10 * 1024 * 1024);

@@ -1,4 +1,5 @@
 use super::Agent;
+use crate::test_support::server::{self, Server};
 use crate::{
     json::{self, Value},
     openrouter::OpenRouter,
@@ -6,35 +7,14 @@ use crate::{
     tools::Tools,
 };
 use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::thread;
 use std::time::Duration;
 
 #[test]
 fn web_tool_acquires_locally_and_returns_provenance_without_provider_web_plugins() {
     let home = Directory::new();
     let project = Directory::new();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!(
-        "http://{}/source?one=1&two=2",
-        listener.local_addr().unwrap()
-    );
-    listener.set_nonblocking(true).unwrap();
-    let site = thread::spawn(move || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(15);
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "web tool never contacted the local site"
-                    );
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => panic!("site accept: {error}"),
-            }
-        };
+    let site = Server::start(move |listener, stop| {
+        let mut stream = server::accept(&listener, &stop)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
@@ -48,8 +28,9 @@ fn web_tool_acquires_locally_and_returns_provenance_without_provider_web_plugins
         }
         let body = "<!doctype html><title>Local evidence</title><h1>Acquired locally</h1><a href='/next'>Next page</a>";
         write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-        String::from_utf8(request).unwrap()
+        Ok::<_, std::io::Error>(String::from_utf8(request).unwrap())
     });
+    let url = format!("{}/source?one=1&two=2", site.endpoint);
     let provider = HttpFixture::new(vec![
         (
             200,
@@ -80,7 +61,7 @@ fn web_tool_acquires_locally_and_returns_provenance_without_provider_web_plugins
     agent
         .run_turn("Read the local source", &mut |_| Ok(()))
         .unwrap();
-    let request = site.join().unwrap();
+    let request = site.finish().unwrap();
     assert!(request.starts_with("X-READ /source?one=1&two=2 HTTP/"));
     assert!(request.contains("X_Task_ID: fixture\r\n"));
     assert!(!request.to_ascii_lowercase().contains("authorization:"));

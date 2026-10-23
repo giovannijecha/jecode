@@ -1,29 +1,11 @@
 use super::*;
+use crate::test_support::server::{self, Server};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn round_trip(body: &str) -> (Vec<String>, Vec<u8>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    listener.set_nonblocking(true).unwrap();
-    let server = thread::spawn(move || {
-        let started = Instant::now();
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(
-                        started.elapsed() < Duration::from_secs(15),
-                        "no request received"
-                    );
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => panic!("accept: {error}"),
-            }
-        };
-        stream.set_nonblocking(false).unwrap();
+    let server = Server::start(move |listener, stop| {
+        let mut stream = server::accept(&listener, &stop)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
@@ -32,7 +14,7 @@ fn round_trip(body: &str) -> (Vec<String>, Vec<u8>) {
         let mut length = 0;
         loop {
             let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0, "missing headers");
             if line == "\r\n" {
                 break;
             }
@@ -48,17 +30,18 @@ fn round_trip(body: &str) -> (Vec<String>, Vec<u8>) {
         let response = b"{\"ok\":true}";
         write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).unwrap();
         stream.write_all(response).unwrap();
-        (headers, body)
+        Ok::<_, std::io::Error>((headers, body))
     });
 
-    let api = Api::fixture(&format!("{endpoint}/chat/completions"));
+    let api = Api::fixture(&format!("{}/chat/completions", server.endpoint));
     let mut observed = Vec::new();
     let response = api.raw("POST", "/chat/completions", Some(body), &mut |part| {
         observed.extend_from_slice(part);
         Ok(())
     });
+    let received = server.finish();
     assert_eq!(response.unwrap(), "{\"ok\":true}");
-    let (headers, received) = server.join().unwrap();
+    let (headers, received) = received.unwrap();
     assert_eq!(observed, b"{\"ok\":true}\n200");
     assert!(
         headers
