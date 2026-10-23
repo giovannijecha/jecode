@@ -276,6 +276,90 @@ fn selected_backend_is_separate_from_legacy_openrouter_account() {
 }
 
 #[test]
+fn legacy_openrouter_edits_override_mirrored_selection_and_credentials() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let mut selected = settings("fixture/first");
+    selected.effort = Effort::High;
+    selected.routing.insert(
+        "fixture/first".into(),
+        Routing::Endpoint("first-endpoint".into()),
+    );
+    store.save(&selected).unwrap();
+
+    let mut document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    let Value::Object(root) = &mut document else {
+        panic!()
+    };
+    let Value::Object(legacy) = root.get_mut("openrouter").unwrap() else {
+        panic!()
+    };
+    legacy.insert("api_key".into(), Value::string("legacy-edited-key"));
+    legacy.insert("model".into(), Value::string("fixture/edited"));
+    legacy.insert("effort".into(), Value::string("default"));
+    legacy.insert(
+        "routing".into(),
+        Value::object([(
+            "fixture/edited",
+            Routing::Endpoint("edited-endpoint".into()).value(),
+        )]),
+    );
+    fs::write(store.path(), document.encode()).unwrap();
+
+    let loaded = store.load().unwrap().unwrap();
+    assert_eq!(loaded.api_key, "legacy-edited-key");
+    assert_eq!(
+        loaded.credential_for("openrouter"),
+        Some("legacy-edited-key")
+    );
+    assert_eq!(loaded.model, "fixture/edited");
+    assert_eq!(loaded.effort, Effort::Default);
+    assert_eq!(
+        loaded.routing_for("fixture/edited"),
+        Routing::Endpoint("edited-endpoint".into())
+    );
+    store.save(&loaded).unwrap();
+    let reopened = store.load().unwrap().unwrap();
+    assert_eq!(reopened.api_key, "legacy-edited-key");
+    assert_eq!(reopened.model, "fixture/edited");
+    assert_eq!(reopened.effort, Effort::Default);
+    assert_eq!(
+        reopened.routing_for("fixture/edited"),
+        Routing::Endpoint("edited-endpoint".into())
+    );
+}
+
+#[test]
+fn legacy_openrouter_key_edit_does_not_change_another_backend_selection() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    fs::write(store.path(), r#"{"selection":{"backend":"fixture","model":"fixture/model"},"backends":{"fixture":{"api_key":"fixture-key"},"openrouter":{"api_key":"stale-openrouter-key"}},"openrouter":{"api_key":"legacy-edited-key","model":"openrouter/edited"}}"#).unwrap();
+    let loaded = store.load().unwrap().unwrap();
+    assert_eq!(loaded.backend_id, "fixture");
+    assert_eq!(loaded.api_key, "fixture-key");
+    assert_eq!(loaded.model, "fixture/model");
+    assert_eq!(
+        loaded.credential_for("openrouter"),
+        Some("legacy-edited-key")
+    );
+    store.save(&loaded).unwrap();
+    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    assert_eq!(
+        document
+            .get("backends")
+            .unwrap()
+            .get("openrouter")
+            .unwrap()
+            .get("api_key"),
+        Some(&Value::string("legacy-edited-key"))
+    );
+    assert_eq!(
+        document.get("openrouter").unwrap().get("model"),
+        Some(&Value::string("openrouter/edited"))
+    );
+}
+
+#[test]
 fn another_backend_configuration_does_not_require_an_openrouter_key() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());

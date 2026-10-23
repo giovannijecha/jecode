@@ -137,29 +137,38 @@ impl Settings {
                     .map(|key| (id.clone(), key.into()))
             })
             .collect();
-        let api_key = provider
+        // Older versions edit this object after newer versions have saved
+        // mirrored fields. It remains authoritative for OpenRouter.
+        let legacy_key = legacy
             .and_then(|value| value.get("api_key"))
-            .and_then(Value::as_str)
-            .or_else(|| {
-                (backend_id == "openrouter")
-                    .then_some(legacy)
-                    .flatten()
+            .and_then(Value::as_str);
+        let api_key = if backend_id == "openrouter" {
+            legacy_key.or_else(|| {
+                provider
                     .and_then(|value| value.get("api_key"))
                     .and_then(Value::as_str)
             })
-            .unwrap_or("");
+        } else {
+            provider
+                .and_then(|value| value.get("api_key"))
+                .and_then(Value::as_str)
+        }
+        .unwrap_or("");
         if backend_id == "openrouter" {
             validate_key(api_key)?;
         }
-        let model = selection
+        let legacy_model = legacy
             .and_then(|value| value.get("model"))
-            .and_then(Value::as_str)
-            .or_else(|| {
-                legacy
-                    .and_then(|value| value.get("model"))
-                    .and_then(Value::as_str)
-            })
-            .ok_or("Missing selected model")?;
+            .and_then(Value::as_str);
+        let selected_model = selection
+            .and_then(|value| value.get("model"))
+            .and_then(Value::as_str);
+        let model = if backend_id == "openrouter" {
+            legacy_model.or(selected_model)
+        } else {
+            selected_model
+        }
+        .ok_or("Missing selected model")?;
         validate_model(model)?;
         let mut settings = Self {
             backend_id: backend_id.into(),
@@ -175,29 +184,28 @@ impl Settings {
                 .credentials
                 .insert(backend_id.into(), api_key.into());
         }
-        if let Some(key) = legacy
-            .and_then(|value| value.get("api_key"))
-            .and_then(Value::as_str)
-        {
-            settings
-                .credentials
-                .entry("openrouter".into())
-                .or_insert_with(|| key.into());
+        if let Some(key) = legacy_key {
+            settings.credentials.insert("openrouter".into(), key.into());
         }
-        if let Some(value) = selection
-            .and_then(|value| value.get("effort"))
-            .or_else(|| legacy.and_then(|value| value.get("effort")))
-        {
+        let selected_effort = selection.and_then(|value| value.get("effort"));
+        let legacy_effort = legacy.and_then(|value| value.get("effort"));
+        let effort = if backend_id == "openrouter" {
+            legacy_effort.or(selected_effort)
+        } else {
+            selected_effort
+        };
+        if let Some(value) = effort {
             settings.effort = Effort::parse(value.as_str().ok_or("Invalid selected effort")?)?;
         }
         // Absent in older files. Entries this version cannot use are skipped
         // here and kept in the file on save.
-        let routing = provider.and_then(|value| value.get("routing")).or_else(|| {
-            (backend_id == "openrouter")
-                .then_some(legacy)
-                .flatten()
+        let routing = if backend_id == "openrouter" {
+            legacy
                 .and_then(|value| value.get("routing"))
-        });
+                .or_else(|| provider.and_then(|value| value.get("routing")))
+        } else {
+            provider.and_then(|value| value.get("routing"))
+        };
         if let Some(routing) = routing {
             let Value::Object(entries) = routing else {
                 return Err(if backend_id == "openrouter" {

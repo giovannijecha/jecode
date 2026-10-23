@@ -57,7 +57,10 @@ The relevant fields are:
 
 `selection` is the default for new conversations; switching a conversation does
 not change it. Backend credentials live under `backends.<id>`. The original
-`openrouter` block remains readable and is updated for compatibility. Routing
+`openrouter` block remains readable and is updated for compatibility. Its key,
+model, effort and routing take precedence for OpenRouter when both formats are
+present, so edits made by an older installed binary remain effective. Its
+values do not replace another backend's selection. Routing
 choices belong to a backend, so an OpenRouter pin cannot affect another backend
 using the same model ID. Other backend selections do not require
 an OpenRouter key. The model ID and key must be valid; `effort` defaults to `default` in older
