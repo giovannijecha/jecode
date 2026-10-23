@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
+    backend::openrouter::OpenRouter,
     events::Event,
     json::Value,
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
 };

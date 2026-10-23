@@ -1,8 +1,8 @@
 use super::composer_frame as frame;
 use super::*;
 use crate::{
+    backend::Model,
     effort::Effort,
-    openrouter::Model,
     sessions::Summary,
     tui::{
         selector::Selector,
@@ -43,7 +43,7 @@ fn every_menu_has_the_same_padded_surface_without_composer_borders_or_draft_text
             "fixture/model",
             Effort::High,
             80,
-            &crate::openrouter::Routing::Auto,
+            &crate::backend::openrouter::Routing::Auto,
         ),
         Selector::models(&models, false, "fixture/model-1"),
         Selector::efforts(model(1), false, Effort::High),
@@ -150,7 +150,7 @@ fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_res
             "fixture/model",
             Effort::High,
             80,
-            &crate::openrouter::Routing::Auto,
+            &crate::backend::openrouter::Routing::Auto,
         )),
     ] {
         let mut state = State {
@@ -197,7 +197,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
             "fixture/model",
             Effort::High,
             80,
-            &crate::openrouter::Routing::Auto,
+            &crate::backend::openrouter::Routing::Auto,
         )),
         notice: Some(crate::tui::Feedback::result(
             Kind::Error,

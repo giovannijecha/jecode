@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::openrouter::Limits;
+use crate::backend::openrouter::Limits;
 use crate::test_support::{Directory, HttpFixture, completion};
 
 fn candidate() -> String {

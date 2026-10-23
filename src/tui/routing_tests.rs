@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
+    backend::openrouter::{OpenRouter, Routing},
     config::{Settings, Store},
     json::Value,
-    openrouter::{OpenRouter, Routing},
     test_support::{Directory, HttpFixture, completion},
     tools::Tools,
 };
@@ -99,7 +99,7 @@ fn opening_routing_refreshes_an_expired_listing() {
         .offer_endpoints(crate::backend::Endpoints {
             model: "fixture/model".into(),
             list: vec![],
-            fetched: Instant::now() - crate::openrouter::routing::policy::FRESH,
+            fetched: Instant::now() - crate::backend::openrouter::routing::policy::FRESH,
         });
     app.dispatch("/routing".into()).unwrap();
     assert_eq!(

@@ -1,11 +1,11 @@
+#[cfg(test)]
+use crate::backend::openrouter::OpenRouter;
 use crate::backend::{Backend, ToolCall};
 use crate::cancel::Cancellation;
 use crate::effort::Effort;
 use crate::events::{Event, EventSink};
 use crate::export::{Archive, Messages};
 use crate::json::Value;
-#[cfg(test)]
-use crate::openrouter::OpenRouter;
 use crate::tools::Tools;
 use std::sync::{Arc, Mutex};
 

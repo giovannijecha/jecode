@@ -1,8 +1,8 @@
 use super::persistence::resume;
 use super::*;
 use crate::{
+    backend::openrouter::OpenRouter,
     config::{Settings, Store},
-    openrouter::OpenRouter,
     sessions::{Draft, Input},
     test_support::{Directory, HttpFixture, completion},
     tools::Tools,

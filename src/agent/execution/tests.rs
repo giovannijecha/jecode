@@ -133,7 +133,7 @@ fn read_batch_stops_at_a_write_and_next_read_sees_the_change() {
         (200, completion("Done.", vec![])),
     ]);
     let mut agent = Agent::new(
-        crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
+        crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();
@@ -195,7 +195,7 @@ fn cancelled_read_batch_records_results_and_does_not_start_later_write() {
     ];
     let fixture = HttpFixture::new(vec![(200, completion("", calls))]);
     let mut agent = Agent::new(
-        crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
+        crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
     let cancellation = agent.cancellation();
@@ -252,7 +252,7 @@ fn failed_start_event_cancels_unstarted_read_batch_and_later_write() {
     ];
     let fixture = HttpFixture::new(vec![(200, completion("", calls))]);
     let mut agent = Agent::new(
-        crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
+        crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
     let error = agent
@@ -306,7 +306,7 @@ fn failed_finish_event_keeps_all_read_results_and_cancels_later_write() {
     ];
     let fixture = HttpFixture::new(vec![(200, completion("", calls))]);
     let mut agent = Agent::new(
-        crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
+        crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();
@@ -376,7 +376,7 @@ fn failed_batch_result_checkpoint_recovers_uncertain_reads_without_replaying_wri
     ];
     let fixture = HttpFixture::new(vec![(200, completion("", calls))]);
     let mut agent = Agent::new(
-        crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
+        crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();

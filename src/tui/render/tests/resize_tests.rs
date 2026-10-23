@@ -241,7 +241,7 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
         "fixture/model",
         crate::effort::Effort::Default,
         80,
-        &crate::openrouter::Routing::Auto,
+        &crate::backend::openrouter::Routing::Auto,
     ));
     state.selector.as_mut().unwrap().selected = 5;
     let mut screen = Screen::new(state.width, state.height);
@@ -260,7 +260,7 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
         assert_eq!(state.editor, draft);
     }
     let models: Vec<_> = (0..12)
-        .map(|index| crate::openrouter::Model {
+        .map(|index| crate::backend::Model {
             id: format!("fixture/model-{index}"),
             name: format!("Model {index}"),
             prompt_price: None,

@@ -1,10 +1,10 @@
 use super::tests::wait_until;
 use super::*;
 use crate::{
+    backend::openrouter::OpenRouter,
     config::{Settings, Store},
     effort::Effort,
     json::Value,
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, Response, completion},
     tools::Tools,
 };

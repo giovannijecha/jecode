@@ -175,7 +175,7 @@ fn windows_path(word: String) -> Option<String> {
 
 /// `wslpath` treats UNC paths into the running distribution as network
 /// shares; those files are reachable at their Linux path directly.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg(any(not(windows), test))]
 fn distro_path(word: &str, distro: &str) -> Option<String> {
     let rest = word
         .strip_prefix(r"\\wsl.localhost\")

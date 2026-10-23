@@ -3,8 +3,8 @@ use super::*;
 use crate::{
     agent::Agent,
     attachments::{MARKER, Prompt},
+    backend::openrouter::OpenRouter,
     json::Value,
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, completion},
     tools::Tools,
 };

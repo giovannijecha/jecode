@@ -1,8 +1,8 @@
 use super::super::tests::{last_content, rows, wait_until};
 use super::super::*;
 use crate::{
+    backend::openrouter::OpenRouter,
     json::Value,
-    openrouter::OpenRouter,
     test_support::{Directory, HttpFixture, Response, completion},
     tools::Tools,
 };

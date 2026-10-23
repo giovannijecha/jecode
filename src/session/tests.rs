@@ -1,7 +1,7 @@
 use super::*;
+use crate::backend::openrouter::OpenRouter;
 use crate::config::{Settings, Store};
 use crate::json::Value;
-use crate::openrouter::OpenRouter;
 use crate::test_support::{Directory, HttpFixture};
 use crate::tools::Tools;
 use std::io::Cursor;
@@ -275,7 +275,7 @@ fn routing_command_offers_the_shared_choices_and_applies_from_the_next_request()
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    agent.set_routing(crate::openrouter::Routing::Auto);
+    agent.set_routing(crate::backend::openrouter::Routing::Auto);
     let mut config = SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
@@ -294,7 +294,7 @@ fn routing_command_offers_the_shared_choices_and_applies_from_the_next_request()
     .unwrap();
     assert_eq!(
         agent.routing(),
-        crate::openrouter::Routing::Endpoint("one/fp8".into())
+        crate::backend::openrouter::Routing::Endpoint("one/fp8".into())
     );
     assert!(config.store.load().unwrap().is_none());
     let output = String::from_utf8(output).unwrap();

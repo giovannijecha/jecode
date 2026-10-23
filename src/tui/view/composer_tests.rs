@@ -171,7 +171,7 @@ fn selectors_replace_all_composer_rows_but_keep_the_draft_and_mask_keys() {
         "provider/model",
         Effort::High,
         80,
-        &crate::openrouter::Routing::Auto,
+        &crate::backend::openrouter::Routing::Auto,
     ));
     let selection = frame(&state, "model", "directory");
     assert!(

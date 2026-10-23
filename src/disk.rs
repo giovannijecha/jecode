@@ -3,6 +3,8 @@ use std::fs::{self, Metadata, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub mod owned;
+
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
 /// A fresh hidden name beside `path` for staging its replacement. One
@@ -52,4 +54,38 @@ pub fn linked(metadata: &Metadata) -> bool {
     {
         metadata.file_type().is_symlink()
     }
+}
+
+/// Inspect an entry without following links, distinguishing absence from an
+/// inspection failure. Callers decide whether links are rejected or skipped.
+pub fn metadata_if_present(path: &Path) -> std::io::Result<Option<Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+pub fn ordinary_directory(metadata: &Metadata) -> bool {
+    metadata.is_dir() && !linked(metadata)
+}
+
+/// Create a private directory if absent, refusing links and checking the result.
+/// Returns whether it was created so durable stores can sync its parent.
+pub fn ensure_private_directory(path: &Path) -> std::io::Result<bool> {
+    let existing = metadata_if_present(path)?;
+    if let Some(metadata) = existing {
+        if ordinary_directory(&metadata) {
+            return Ok(false);
+        }
+    } else {
+        private_directory(path)?;
+        if ordinary_directory(&fs::symlink_metadata(path)?) {
+            return Ok(true);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "Path is a link, junction or non-directory entry",
+    ))
 }

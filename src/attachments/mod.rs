@@ -222,12 +222,14 @@ impl Prompt {
     }
 }
 
+#[cfg(test)]
 impl From<&str> for Prompt {
     fn from(text: &str) -> Self {
         Self::plain(text)
     }
 }
 
+#[cfg(test)]
 impl From<&String> for Prompt {
     fn from(text: &String) -> Self {
         Self::plain(text.as_str())

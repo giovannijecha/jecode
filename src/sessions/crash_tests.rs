@@ -1,7 +1,7 @@
 use crate::{
     agent::Agent,
+    backend::openrouter::OpenRouter,
     json::Value,
-    openrouter::OpenRouter,
     sessions::{Stage, Store},
     test_support::{Directory, tool_call},
     tools::Tools,
@@ -139,7 +139,7 @@ fn crash_child() {
             &agent.archive(),
             0,
             &crate::context::Context::default(),
-            &crate::openrouter::Routing::Default,
+            &crate::backend::openrouter::Routing::Default,
             Stage::Completion,
         )
         .unwrap();
@@ -157,7 +157,7 @@ fn crash_child() {
             &agent.archive(),
             0,
             &crate::context::Context::default(),
-            &crate::openrouter::Routing::Default,
+            &crate::backend::openrouter::Routing::Default,
             Stage::Tool("write".into()),
         )
         .unwrap();

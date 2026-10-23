@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    openrouter::Routing,
+    backend::openrouter::Routing,
     test_support::{Directory, HttpFixture, completion},
 };
 use std::collections::BTreeMap;

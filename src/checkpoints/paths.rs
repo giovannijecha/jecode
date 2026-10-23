@@ -1,6 +1,7 @@
 //! Workspace-relative names and bounded, explicit scope discovery.
 use super::{Issue, Snapshot, files};
 use crate::cancel::Cancellation;
+use crate::disk::ordinary_directory as ordinary_dir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -261,10 +262,6 @@ pub(super) fn eligible_beneath(path: &str, selected_root: &str, excluded: &[Stri
             GENERATED.iter().any(|name| name.eq_ignore_ascii_case(part))
                 || (part.starts_with(".jecode-") && part.ends_with(".tmp"))
         })
-}
-
-fn ordinary_dir(metadata: &fs::Metadata) -> bool {
-    metadata.is_dir() && !crate::disk::linked(metadata)
 }
 
 mod discovery;

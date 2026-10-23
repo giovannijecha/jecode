@@ -80,7 +80,7 @@ fn provider_regression_nested_error_keeps_diagnostics_and_redacts_credentials() 
             "tools[0].parameters",
         ),
     )]);
-    let error = crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone())
+    let error = crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone())
         .complete(&[])
         .err()
         .unwrap();
@@ -92,7 +92,7 @@ fn provider_regression_nested_error_keeps_diagnostics_and_redacts_credentials() 
 
 #[test]
 fn provider_regression_long_diagnostics_are_redacted_before_utf8_clipping() {
-    let api = crate::openrouter::Api::fixture("http://127.0.0.1:1");
+    let api = crate::backend::openrouter::Api::fixture("http://127.0.0.1:1");
     let diagnostic = format!(
         "{}isolated-fixture-key{}",
         "x".repeat(8000),

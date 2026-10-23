@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
+    backend::Model,
     effort::Effort,
-    openrouter::Model,
     tui::{
         selector::Selector,
         theme::{CURSOR, MUTED},

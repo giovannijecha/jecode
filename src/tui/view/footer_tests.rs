@@ -111,7 +111,7 @@ fn open_panels_keep_the_footer_on_the_terminal_surface_when_space_permits() {
             "provider/model",
             Effort::Default,
             80,
-            &crate::openrouter::Routing::Auto,
+            &crate::backend::openrouter::Routing::Auto,
         ),
         Selector::auto_compact(80),
     ] {

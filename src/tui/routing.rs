@@ -3,7 +3,7 @@ use super::{
     jobs::{Job, RoutingPurpose},
     selector::{Purpose, Selector},
 };
-use crate::backend::Endpoints;
+use crate::backend::{Endpoints, Services};
 
 /// How to read the endpoint rows.
 pub(super) const LEGEND: &str =
@@ -26,25 +26,9 @@ impl App {
         {
             return self.show_routing(purpose, Ok(Some(endpoints)));
         }
-        let services = if defaults {
-            let id = &self.config.settings.backend_id;
-            if id == agent.backend_id() {
-                agent.services()
-            } else {
-                let Some(key) = self.config.settings.credential_for(id) else {
-                    return self.finish_setting(
-                        Kind::Error,
-                        &format!("{id} has no saved credentials"),
-                        vec![],
-                    );
-                };
-                match crate::backend::Services::for_backend(id, key.into()) {
-                    Ok(services) => services,
-                    Err(error) => return self.finish_setting(Kind::Error, &error, vec![]),
-                }
-            }
-        } else {
-            agent.services()
+        let services = match self.routing_services(defaults) {
+            Ok(services) => services,
+            Err(error) => return self.finish_setting(Kind::Error, &error, vec![]),
         };
         let mut menu = Selector::loading();
         menu.title = "Loading endpoints…".into();
@@ -110,25 +94,9 @@ impl App {
             .map(|note| self.archive.redactor.text(note))
             .collect();
         self.state.clear_progress();
-        let services = if defaults {
-            let id = &self.config.settings.backend_id;
-            if id == agent.backend_id() {
-                agent.services()
-            } else {
-                let Some(key) = self.config.settings.credential_for(id) else {
-                    return self.finish_setting(
-                        Kind::Error,
-                        &format!("{id} has no saved credentials"),
-                        vec![],
-                    );
-                };
-                match crate::backend::Services::for_backend(id, key.into()) {
-                    Ok(services) => services,
-                    Err(error) => return self.finish_setting(Kind::Error, &error, vec![]),
-                }
-            }
-        } else {
-            agent.services()
+        let services = match self.routing_services(defaults) {
+            Ok(services) => services,
+            Err(error) => return self.finish_setting(Kind::Error, &error, vec![]),
         };
         let Some(entries) = services.routing_entries(endpoints.as_ref(), &current, reasoning)
         else {
@@ -141,6 +109,20 @@ impl App {
         self.state.selector = Some(Selector::routing(
             &model, defaults, entries, &current, notes,
         ));
+    }
+
+    fn routing_services(&self, defaults: bool) -> Result<Services, String> {
+        let agent = self.agent.as_ref().unwrap();
+        let id = &self.config.settings.backend_id;
+        if !defaults || id == agent.backend_id() {
+            return Ok(agent.services());
+        }
+        let key = self
+            .config
+            .settings
+            .credential_for(id)
+            .ok_or_else(|| format!("{id} has no saved credentials"))?;
+        Services::for_backend(id, key.into())
     }
 
     /// Applies a chosen entry: to the conversation from its next request, or

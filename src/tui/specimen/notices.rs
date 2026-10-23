@@ -71,7 +71,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         MODEL,
         crate::effort::Effort::High,
         80,
-        &crate::openrouter::Routing::Auto,
+        &crate::backend::openrouter::Routing::Auto,
     ));
 
     vec![

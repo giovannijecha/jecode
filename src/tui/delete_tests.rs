@@ -1,5 +1,5 @@
 use super::*;
-use crate::{json::Value, openrouter::OpenRouter, test_support::Directory, tools::Tools};
+use crate::{backend::openrouter::OpenRouter, json::Value, test_support::Directory, tools::Tools};
 use selector::Purpose;
 
 fn app(home: &Directory, directory: &Directory) -> App {

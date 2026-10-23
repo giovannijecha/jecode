@@ -47,11 +47,20 @@ pub enum Stage {
 
 impl Handle {
     pub fn new(store: Store, document: Document, redactor: Redactor) -> Self {
+        Self::with_lease(store, document, redactor, None)
+    }
+
+    fn with_lease(
+        store: Store,
+        document: Document,
+        redactor: Redactor,
+        lease: Option<Arc<Lease>>,
+    ) -> Self {
         Self(Arc::new(Shared {
             live: Mutex::new(Live {
                 store,
                 document,
-                lease: None,
+                lease,
                 redactor,
                 dirty: Some(Instant::now()),
                 validated: context::Validation::default(),
@@ -92,22 +101,7 @@ impl Handle {
         context::validate(&document)?;
         let interrupted = document.recover();
         context::validate(&document)?;
-        let handle = Self(Arc::new(Shared {
-            live: Mutex::new(Live {
-                store,
-                document,
-                lease: Some(Arc::new(lease)),
-                redactor,
-                dirty: Some(Instant::now()),
-                validated: context::Validation::default(),
-                deleted: false,
-                revision: 0,
-                last_ui_input: None,
-            }),
-            io: Mutex::new(()),
-            background_save: AtomicBool::new(false),
-            background_result: Mutex::new(None),
-        }));
+        let handle = Self::with_lease(store, document, redactor, Some(Arc::new(lease)));
         handle.flush()?;
         Ok((
             handle,

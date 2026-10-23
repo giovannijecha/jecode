@@ -1,9 +1,15 @@
-use crate::json::{self, Value};
+use crate::disk::owned::{self, Marker};
+use crate::json::Value;
 use std::fs::{self, Metadata};
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 const MARKER: &str = ".jecode-tmp.json";
+const OWNERSHIP: Marker = Marker {
+    name: MARKER,
+    format: "jecode.temporary",
+    label: "Temporary",
+    max_bytes: None,
+};
 
 /// Disposable working files belong to a folder and a resumable session.
 pub struct Area {
@@ -108,56 +114,17 @@ impl Area {
         }
         let root = fs::canonicalize(&self.path)
             .map_err(|error| format!("Could not resolve temporary area: {error}"))?;
-        let marker = root.join(MARKER);
-        if !marker.try_exists().map_err(|error| error.to_string())? {
-            if fs::read_dir(&root)
-                .map_err(|error| error.to_string())?
-                .next()
-                .is_some()
-            {
-                return Err(
-                    "Temporary area has no ownership record; existing files were left unchanged"
-                        .into(),
-                );
-            }
-            let mut file = crate::disk::private_options()
-                .write(true)
-                .create_new(true)
-                .open(&marker)
-                .map_err(|error| {
-                    format!("Could not establish temporary area ownership: {error}")
-                })?;
-            let result = file
-                .write_all(self.identity().encode().as_bytes())
-                .and_then(|()| file.sync_all());
-            drop(file);
-            if let Err(error) = result {
-                let _ = fs::remove_file(&marker);
-                return Err(format!("Could not save temporary area ownership: {error}"));
-            }
-        }
-        let metadata = inspect(&marker)?;
-        if !metadata.is_file() {
-            return Err("Temporary ownership record must be a regular file".into());
-        }
-        let owner = fs::read_to_string(&marker)
-            .map_err(|error| format!("Could not read temporary area ownership: {error}"))?;
-        if json::parse(&owner)? != self.identity() {
-            return Err(
-                "Temporary area belongs to another folder or session; files were left unchanged"
-                    .into(),
-            );
-        }
+        self.owned_directory(root.clone()).ensure()?;
         Ok(root)
     }
 
     fn identity(&self) -> Value {
-        Value::object([
-            ("format", Value::string("jecode.temporary")),
-            ("format_version", Value::number(1)),
-            ("directory", Value::string(self.project.to_string_lossy())),
-            ("session_id", Value::string(&self.session)),
-        ])
+        OWNERSHIP.identity(&self.project, &self.session)
+    }
+
+    fn owned_directory(&self, path: PathBuf) -> owned::Directory {
+        let boundary = path.ancestors().take(4).last().unwrap().to_path_buf();
+        owned::Directory::new(path, boundary, OWNERSHIP, self.identity())
     }
 
     pub fn file(&self, alias: &str, create_parents: bool) -> Result<(PathBuf, PathBuf), String> {
@@ -200,10 +167,10 @@ impl Area {
 
     pub fn info(&self) -> Result<Info, String> {
         let root = self.ensure()?;
-        self.inventory(&root, false)
+        self.inventory(&root)
     }
 
-    fn inventory(&self, root: &Path, strict: bool) -> Result<Info, String> {
+    fn inventory(&self, root: &Path) -> Result<Info, String> {
         let mut info = Info {
             path: environment_path(&self.path).to_string_lossy().into_owned(),
             files: 0,
@@ -215,7 +182,7 @@ impl Area {
         while let Some(directory) = pending.pop() {
             let entries = match fs::read_dir(&directory) {
                 Ok(entries) => entries,
-                Err(error) if !strict && error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.to_string()),
             };
             for entry in entries {
@@ -225,18 +192,12 @@ impl Area {
                 }
                 let metadata = match fs::symlink_metadata(&path) {
                     Ok(metadata) => metadata,
-                    Err(error) if !strict && error.kind() == std::io::ErrorKind::NotFound => {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                         continue;
                     }
                     Err(error) => return Err(error.to_string()),
                 };
                 if crate::disk::linked(&metadata) {
-                    if strict {
-                        return Err(
-                            "Temporary area contains a link or junction; it was left unchanged"
-                                .into(),
-                        );
-                    }
                     info.skipped += 1;
                     continue;
                 }
@@ -249,10 +210,6 @@ impl Area {
                         .bytes
                         .checked_add(metadata.len())
                         .ok_or("Temporary byte count overflow")?;
-                } else if strict {
-                    return Err(
-                        "Temporary area contains a special file; cleanup was not started".into(),
-                    );
                 } else {
                     info.skipped += 1;
                 }
@@ -263,51 +220,26 @@ impl Area {
 
     pub fn clean(&self) -> Result<Info, String> {
         let root = self.ensure()?;
-        // Inspect the entire tree before deleting anything. Links are never followed.
-        let info = self.inventory(&root, true)?;
-        let entries = fs::read_dir(&root).map_err(|error| error.to_string())?;
-        for entry in entries {
-            let path = entry.map_err(|error| error.to_string())?.path();
-            if path == root.join(MARKER) {
-                continue;
-            }
-            if self.ensure()? != root || !path.starts_with(&root) {
-                return Err(
-                    "Temporary area changed during cleanup; remaining files were left unchanged"
-                        .into(),
-                );
-            }
-            let metadata = inspect(&path)?;
-            let result = if metadata.is_dir() {
-                fs::remove_dir_all(&path)
-            } else if metadata.is_file() {
-                fs::remove_file(&path)
-            } else {
-                return Err("Temporary entry changed; remaining files were left unchanged".into());
-            };
-            result.map_err(|error| format!(
-                "Temporary cleanup did not finish: {error}. Some temporary files may already have been removed; inspect /tmp before continuing."
-            ))?;
-        }
-        Ok(info)
+        let removal = self
+            .owned_directory(root)
+            .prepare_removal()?
+            .ok_or("Temporary area disappeared before cleanup")?;
+        let (files, directories, bytes) = removal.contents()?;
+        removal.clean()?;
+        Ok(Info {
+            path: environment_path(&self.path).to_string_lossy().into_owned(),
+            files,
+            directories,
+            bytes,
+            skipped: 0,
+        })
     }
 }
 
 fn private_directory(path: &Path) -> Result<(), String> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => {
-            if !inspect(path)?.is_dir() {
-                return Err("Temporary area path must be a directory".into());
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            crate::disk::private_directory(path)
-                .map_err(|error| format!("Could not create temporary area: {error}"))?;
-            inspect(path)?;
-        }
-        Err(error) => return Err(format!("Could not inspect temporary area: {error}")),
-    }
-    Ok(())
+    crate::disk::ensure_private_directory(path)
+        .map(|_| ())
+        .map_err(|error| format!("Could not prepare temporary area: {error}"))
 }
 
 fn inspect(path: &Path) -> Result<Metadata, String> {

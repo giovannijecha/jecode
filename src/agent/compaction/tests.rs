@@ -7,7 +7,7 @@ fn resume_keeps_saved_model_calibration_but_discards_direct_request_measurements
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let new_agent = || {
-        let client = crate::openrouter::OpenRouter::fixture(fixture.endpoint.clone());
+        let client = crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone());
         Agent::new(client, crate::tools::Tools::new(directory.path()).unwrap())
     };
     let mut first = new_agent();

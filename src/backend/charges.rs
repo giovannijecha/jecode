@@ -22,11 +22,6 @@ impl Charges {
         self.upstream += other.upstream;
     }
 
-    /// Compatibility for callers that still use the former name.
-    pub fn extend(&mut self, other: &Self) {
-        self.include(other);
-    }
-
     pub fn describe(&self) -> Option<String> {
         let mut parts = Vec::new();
         if !self.providers.is_empty() {

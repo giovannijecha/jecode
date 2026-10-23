@@ -19,8 +19,11 @@ pub fn clipboard_image(cancellation: &Cancellation) -> Result<Vec<u8>, String> {
     let (mut command, encoding) = clipboard_command()?;
     let stdout = run(&mut command, None, Duration::from_secs(20), cancellation)?;
     match encoding {
+        #[cfg(not(target_os = "macos"))]
         Encoding::Base64 => super::base64::decode(std::str::from_utf8(&stdout).unwrap_or("!")),
+        #[cfg(all(unix, not(target_os = "macos")))]
         Encoding::Raw => Ok(stdout),
+        #[cfg(target_os = "macos")]
         Encoding::AppleScript => apple_data(&stdout),
     }
 }
@@ -35,11 +38,11 @@ pub fn convert(
 }
 
 enum Encoding {
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    #[cfg(not(target_os = "macos"))]
     Base64,
-    #[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
+    #[cfg(all(unix, not(target_os = "macos")))]
     Raw,
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg(target_os = "macos")]
     AppleScript,
 }
 
@@ -82,7 +85,7 @@ fn run(
     }
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg(not(target_os = "macos"))]
 const POWERSHELL_CLIPBOARD: &str = r#"$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $data = [System.Windows.Forms.Clipboard]::GetDataObject()
@@ -104,7 +107,7 @@ if ($null -eq $bytes -and [System.Windows.Forms.Clipboard]::ContainsImage()) {
 if ($null -eq $bytes) { exit 3 }
 [Console]::Out.Write([Convert]::ToBase64String($bytes))"#;
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg(not(target_os = "macos"))]
 const POWERSHELL_CONVERT: &str = r#"$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $buffer = New-Object System.IO.MemoryStream
@@ -129,7 +132,7 @@ if ($output.Length -gt 3750000) {
 }
 [Console]::Out.Write($extension + "`n" + [Convert]::ToBase64String($output.ToArray()))"#;
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg(not(target_os = "macos"))]
 fn powershell(script: &str) -> Command {
     let mut command = Command::new("powershell.exe");
     command.args([
@@ -152,7 +155,7 @@ fn powershell_available() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg(any(not(target_os = "macos"), test))]
 fn windows_converted(stdout: Vec<u8>) -> Result<(&'static str, Vec<u8>), String> {
     let text = String::from_utf8(stdout).map_err(|_| "Image conversion failed")?;
     let (extension, data) = text.split_once('\n').ok_or("Image conversion failed")?;
@@ -224,6 +227,7 @@ fn clipboard_command() -> Result<(Command, Encoding), String> {
 }
 
 /// Parses AppleScript's `«data PNGf…»` hex rendering.
+#[cfg(any(target_os = "macos", test))]
 fn apple_data(stdout: &[u8]) -> Result<Vec<u8>, String> {
     let text = String::from_utf8_lossy(stdout);
     let hex = text

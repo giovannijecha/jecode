@@ -2,9 +2,9 @@ mod driver;
 use super::*;
 use crate::{
     agent::Agent,
+    backend::openrouter::OpenRouter,
     config::{Settings, Store},
     json::Value,
-    openrouter::OpenRouter,
     session::SessionConfig,
     test_support::{HttpFixture, completion, tool_call},
     tools::Tools,

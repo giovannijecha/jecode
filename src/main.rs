@@ -24,8 +24,6 @@ mod file_change;
 mod inbox;
 mod input;
 mod json;
-#[cfg(test)]
-mod openrouter;
 mod output;
 mod process;
 mod redact;
