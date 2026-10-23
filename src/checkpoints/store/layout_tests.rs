@@ -186,6 +186,32 @@ fn unreadable_foreign_archive_does_not_stop_other_expiry() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn inherited_capture_descriptor_does_not_block_expiry_after_publication() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let inherited = Arc::new(Mutex::new(None::<File>));
+    let retained = Arc::clone(&inherited);
+    crate::checkpoints::capture::BEFORE_RELEASE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |file| {
+            *retained.lock().unwrap() = Some(file.try_clone().unwrap());
+        }));
+    });
+    let captured = store
+        .capture(
+            "write",
+            "test",
+            &["missing".into()],
+            &Cancellation::default(),
+        )
+        .unwrap();
+    assert!(inherited.lock().unwrap().is_some());
+    assert!(captured.reference.is_some());
+    assert_eq!(store.cleanup(captured.created + TTL_MILLIS).unwrap(), 1);
+    drop(inherited);
+}
+
 #[test]
 fn occupied_unmarked_archive_is_not_claimed() {
     let fixture = Fixture::new();
