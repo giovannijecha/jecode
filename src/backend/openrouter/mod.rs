@@ -286,7 +286,12 @@ impl OpenRouter {
                     .collect();
                 fields.insert("tools".into(), Value::Array(wrapped));
                 // OpenRouter supports automatic top-level breakpoints for Claude.
-                if self.model.starts_with("anthropic/claude-") {
+                if self
+                    .model
+                    .strip_prefix('~')
+                    .unwrap_or(&self.model)
+                    .starts_with("anthropic/claude-")
+                {
                     fields.insert(
                         "cache_control".into(),
                         Value::object([("type", Value::string("ephemeral"))]),

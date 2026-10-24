@@ -7,6 +7,39 @@ fn tool_catalog_and_encoded_size_are_reused() {
 }
 
 #[test]
+fn shell_and_process_budgets_advertise_the_same_bounded_preview_contract() {
+    for tool in definitions().as_array().unwrap().iter().filter(|tool| {
+        matches!(
+            tool.get("name").and_then(Value::as_str),
+            Some("bash" | "process")
+        )
+    }) {
+        let budget = tool
+            .get("parameters")
+            .unwrap()
+            .get("properties")
+            .unwrap()
+            .get("output_limit_bytes")
+            .unwrap();
+        assert_eq!(budget.get("minimum"), Some(&Value::number(1)));
+        assert_eq!(budget.get("maximum"), Some(&Value::number(256 * 1024)));
+        if tool.get("name").and_then(Value::as_str) == Some("process") {
+            let mode = tool
+                .get("parameters")
+                .unwrap()
+                .get("properties")
+                .unwrap()
+                .get("output_mode")
+                .unwrap();
+            assert_eq!(
+                mode.get("enum"),
+                Some(&Value::Array(["next", "tail"].map(Value::string).into()))
+            );
+        }
+    }
+}
+
+#[test]
 fn edit_schema_advertises_ordered_batch_and_legacy_fields() {
     let tools = definitions();
     let edit = &tools.as_array().unwrap()[2];
@@ -126,21 +159,4 @@ fn bash_contract_distinguishes_wait_from_execution_deadline() {
             .unwrap()
             .contains("does not end the process")
     );
-    for name in ["bash", "process"] {
-        let tool = tools
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
-            .unwrap();
-        let budget = tool
-            .get("parameters")
-            .unwrap()
-            .get("properties")
-            .unwrap()
-            .get("output_limit_bytes")
-            .unwrap();
-        assert_eq!(budget.get("minimum"), Some(&Value::number(1)));
-        assert!(budget.get("maximum").is_none());
-    }
 }

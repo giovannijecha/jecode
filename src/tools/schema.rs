@@ -101,7 +101,7 @@ fn build_definitions() -> Value {
         ),
         tool(
             "bash",
-            "Run Bash in the project directory. Shell syntax is Bash on every host, including Windows; invoke PowerShell explicitly if needed. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\" (project-relative paths are unchanged). Without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes changes the positive per-stream budget. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success. Bash has normal system access.",
+            "Run Bash in the project directory. Shell syntax is Bash on every host, including Windows; invoke PowerShell explicitly if needed. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\" (project-relative paths are unchanged). Without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; larger requests are clamped and logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success. Bash has normal system access.",
             Value::object([
                 ("command", string()),
                 (
@@ -143,13 +143,16 @@ fn build_definitions() -> Value {
                         ),
                     ]),
                 ),
-                ("output_limit_bytes", integer(1, None)),
+                (
+                    "output_limit_bytes",
+                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
+                ),
             ]),
             &["command"],
         ),
         tool(
             "process",
-            "Manage this conversation's persistent Bash processes. list recovers IDs, status, commands and saved-output refs. poll waits up to wait_ms (default 0) and returns status plus the next unread window. stop requests termination of the process and descendants, waits up to 10 seconds, and may return stopping; poll to confirm. Windows are 16 KiB per stream by default; output_limit_bytes sets a positive budget. <stream>_offset and <stream>_next_offset track consecutive saved bytes; _remaining_bytes counts unread saved data; _skipped_bytes is zero. Poll until drained, or read <stream>_file with byte_offset. Empty output says nothing about readiness; check status. exit_code appears after exit; finished processes remain listed. wait_cancelled interrupts the wait, not the process or a prior stop. Processes end on conversation change or Jecode exit; old IDs fail but saved output remains readable.",
+            "Manage this conversation's persistent Bash processes. list recovers IDs, status, commands and saved-output refs. poll waits up to wait_ms (default 0) and returns status plus the next unread window. output_mode defaults to next; tail jumps to the newest unread bytes for readiness/status checks and reports skipped bytes, still readable from the saved file. stop requests termination of the process and descendants, waits up to 10 seconds, and may return stopping; poll to confirm. Windows are 16 KiB per stream by default; output_limit_bytes sets a positive budget capped at 256 KiB; larger requests are clamped. <stream>_offset and <stream>_next_offset track consecutive saved bytes; _remaining_bytes counts unread saved data; _skipped_bytes is zero in next mode. Poll until drained, or read <stream>_file with byte_offset. Empty output says nothing about readiness; check status. exit_code appears after exit; finished processes remain listed. wait_cancelled interrupts the wait, not the process or a prior stop. Processes end on conversation change or Jecode exit; old IDs fail but saved output remains readable.",
             Value::object([
                 (
                     "action",
@@ -163,7 +166,20 @@ fn build_definitions() -> Value {
                 ),
                 ("process_id", string()),
                 ("wait_ms", integer(0, None)),
-                ("output_limit_bytes", integer(1, None)),
+                (
+                    "output_limit_bytes",
+                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
+                ),
+                (
+                    "output_mode",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(["next", "tail"].map(Value::string).into()),
+                        ),
+                    ]),
+                ),
             ]),
             &["action"],
         ),

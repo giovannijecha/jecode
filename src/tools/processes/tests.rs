@@ -449,12 +449,14 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
     };
     assert!(
         entry
-            .report(false, DEFAULT_OUTPUT_LIMIT)
+            .report(false, DEFAULT_OUTPUT_LIMIT, OutputMode::Next)
             .unwrap_err()
             .contains("saved stderr")
     );
     std::fs::write(stderr, "unread stderr").unwrap();
-    let recovered = entry.report(false, DEFAULT_OUTPUT_LIMIT).unwrap();
+    let recovered = entry
+        .report(false, DEFAULT_OUTPUT_LIMIT, OutputMode::Next)
+        .unwrap();
     assert_eq!(text(&recovered, "stdout"), "unread stdout");
     assert_eq!(text(&recovered, "stderr"), "unread stderr");
     assert_eq!(number(&recovered, "stdout_offset"), 0);

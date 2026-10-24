@@ -152,18 +152,24 @@ pub(super) fn edit(
         let (position, ambiguous) = locate(&mut source, old.as_bytes(), cancellation)?;
         unchanged(path, &original, &metadata)?;
         let reason = if position.is_none() {
-            Some("old text was not found; read the file and use exact current text")
+            Some((
+                "old text was not found",
+                "read the file and use exact current text",
+            ))
         } else if ambiguous {
-            Some("old text occurs more than once; include more exact surrounding text")
+            Some((
+                "old text occurs more than once",
+                "include more exact surrounding text",
+            ))
         } else {
             None
         };
-        if let Some(reason) = reason {
+        if let Some((reason, initial_advice)) = reason {
             return Ok((
                 mismatch(
                     &mut original,
                     metadata.len(),
-                    &format!("edit {}: {reason}", index + 1),
+                    &edit_mismatch_error(index, reason, initial_advice),
                 )?,
                 None,
             ));

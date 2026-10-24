@@ -102,6 +102,35 @@ fn automatic_cache_control_is_scoped_to_claude_agent_requests() {
 }
 
 #[test]
+fn automatic_cache_control_accepts_claude_alias_only_for_agent_requests() {
+    let response = crate::test_support::completion("ok", vec![]);
+    let fixture = HttpFixture::new(vec![
+        (200, response.clone()),
+        (200, response.clone()),
+        (200, response),
+    ]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    let alias = "~anthropic/claude-sonnet-latest";
+    client.set_model(alias.into()).unwrap();
+    client.complete(&[]).unwrap();
+    client.sample(&[], false, None, &mut |_| Ok(())).unwrap();
+    client.set_model("~openai/gpt-latest".into()).unwrap();
+    client.complete(&[]).unwrap();
+
+    let requests = fixture.finish();
+    assert_eq!(requests[0].body.get("model"), Some(&Value::string(alias)));
+    assert_eq!(
+        requests[0].body.get("cache_control"),
+        Some(&Value::object([("type", Value::string("ephemeral"))]))
+    );
+    assert!(requests[0].body.get("tools").is_some());
+    assert!(requests[1].body.get("cache_control").is_none());
+    assert!(requests[1].body.get("tools").is_none());
+    assert!(requests[2].body.get("cache_control").is_none());
+    assert!(requests[2].body.get("tools").is_some());
+}
+
+#[test]
 fn provider_errors_do_not_expose_credentials() {
     let fixture = HttpFixture::new(vec![(
         401,

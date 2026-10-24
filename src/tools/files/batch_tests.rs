@@ -77,6 +77,74 @@ fn rejected_later_batch_step_keeps_original_bytes() {
 }
 
 #[test]
+fn later_batch_mismatches_explain_staged_matching_and_original_context() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let path = root.join("source.txt");
+    let original = b"alpha beta\n";
+    for (steps, reason) in [
+        (vec![("alpha", "gamma"), ("alpha beta", "x")], "not found"),
+        (
+            vec![("alpha", "gamma gamma"), ("gamma", "x")],
+            "more than once",
+        ),
+    ] {
+        fs::write(&path, original).unwrap();
+        let rejected = edit(&root, &batch(&steps)).unwrap();
+        let error = rejected.get("error").and_then(Value::as_str).unwrap();
+        assert!(error.starts_with("edit 2: "), "{error}");
+        assert!(error.contains(reason), "{error}");
+        assert!(error.contains("staged by preceding edits"), "{error}");
+        assert!(error.contains("no edits were saved"), "{error}");
+        assert!(
+            error.contains("current_content comes from the unchanged original file"),
+            "{error}"
+        );
+        assert_eq!(
+            rejected.get("current_content").and_then(Value::as_str),
+            Some("alpha beta\n")
+        );
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
+}
+
+#[test]
+fn later_streaming_mismatches_explain_staged_matching_and_original_context() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let path = root.join("source.txt");
+    let original = format!("alpha beta\n{}", "x".repeat(MAX_DIFF_BYTES));
+    for (steps, reason) in [
+        (vec![("alpha", "gamma"), ("alpha beta", "x")], "not found"),
+        (
+            vec![("alpha", "gamma gamma"), ("gamma", "x")],
+            "more than once",
+        ),
+    ] {
+        fs::write(&path, &original).unwrap();
+        let rejected = edit(&root, &batch(&steps)).unwrap();
+        let error = rejected.get("error").and_then(Value::as_str).unwrap();
+        assert!(error.starts_with("edit 2: "), "{error}");
+        assert!(error.contains(reason), "{error}");
+        assert!(error.contains("staged by preceding edits"), "{error}");
+        assert!(error.contains("no edits were saved"), "{error}");
+        assert!(
+            error.contains("current_content comes from the unchanged original file"),
+            "{error}"
+        );
+        assert!(
+            rejected
+                .get("current_content")
+                .and_then(Value::as_str)
+                .unwrap()
+                .starts_with("alpha beta\n")
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+    }
+}
+
+#[test]
 fn batch_rejects_invalid_shapes_and_noop_does_not_replace_file() {
     let directory = Directory::new();
     let root = fs::canonicalize(directory.path()).unwrap();

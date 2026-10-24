@@ -82,9 +82,10 @@ pub(super) fn edit_with_change(
             return Ok((
                 mismatch::result(
                     &content,
-                    &format!(
-                        "edit {}: old text was not found; use exact current text from the supplied file context or read the file",
-                        index + 1
+                    &edit_mismatch_error(
+                        index,
+                        "old text was not found",
+                        "use exact current text from the supplied file context or read the file",
                     ),
                 ),
                 None,
@@ -96,9 +97,10 @@ pub(super) fn edit_with_change(
             return Ok((
                 mismatch::result(
                     &content,
-                    &format!(
-                        "edit {}: old text occurs more than once; include more exact surrounding text from the supplied file context or read the file",
-                        index + 1
+                    &edit_mismatch_error(
+                        index,
+                        "old text occurs more than once",
+                        "include more exact surrounding text from the supplied file context or read the file",
                     ),
                 ),
                 None,
@@ -115,6 +117,17 @@ pub(super) fn edit_with_change(
     }
     let change = crate::file_change::Change::between(Some(&content), &updated);
     Ok((written(updated.len() as u64, outcome.checkpoint), change))
+}
+
+fn edit_mismatch_error(index: usize, reason: &str, initial_advice: &str) -> String {
+    if index == 0 {
+        format!("edit 1: {reason}; {initial_advice}")
+    } else {
+        format!(
+            "edit {}: {reason}; matching uses content staged by preceding edits; no edits were saved, and current_content comes from the unchanged original file",
+            index + 1
+        )
+    }
 }
 
 fn edit_steps(arguments: &Value) -> Result<Vec<(&str, &str)>, String> {

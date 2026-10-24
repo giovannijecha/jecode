@@ -78,6 +78,82 @@ fn process_pages_follow_cursors_and_allow_a_budget_above_sixty_four_kib() {
 }
 
 #[test]
+fn oversized_poll_budget_is_bounded_without_skipping_the_saved_backlog() {
+    let directory = Directory::new();
+    let mut tools = Tools::new(directory.path()).unwrap();
+    tools.configure_output(directory.path().join("logs"), Redactor::empty());
+    let started = call(
+        &tools,
+        "bash",
+        Value::object([
+            ("command", Value::string("printf '%5000000s' x")),
+            ("wait_ms", Value::number(0)),
+            ("output_limit_bytes", Value::number(1)),
+        ]),
+    );
+    let from = number(&started, "stdout_next_offset");
+    let page = poll(&tools, text(&started, "process_id"), 100_000_000);
+    assert_eq!(number(&page, "output_limit_bytes"), 256 * 1024);
+    assert_eq!(text(&page, "stdout").len(), 256 * 1024);
+    assert_eq!(number(&page, "stdout_offset"), from);
+    assert_eq!(number(&page, "stdout_skipped_bytes"), 0);
+    assert_eq!(
+        number(&page, "stdout_remaining_bytes"),
+        5_000_000 - from - 256 * 1024
+    );
+    let saved = tools.outputs.resolve(text(&page, "stdout_file")).unwrap();
+    assert_eq!(std::fs::metadata(saved).unwrap().len(), 5_000_000);
+}
+
+#[test]
+fn explicit_tail_poll_reaches_readiness_and_reports_the_skipped_backlog() {
+    let directory = Directory::new();
+    let mut tools = Tools::new(directory.path()).unwrap();
+    tools.configure_output(directory.path().join("logs"), Redactor::empty());
+    let started = call(
+        &tools,
+        "bash",
+        Value::object([
+            (
+                "command",
+                Value::string("printf '%90000s' x; printf '\nready\n'"),
+            ),
+            ("wait_ms", Value::number(0)),
+            ("output_limit_bytes", Value::number(1)),
+        ]),
+    );
+    let from = number(&started, "stdout_next_offset");
+    let id = text(&started, "process_id");
+    let tail = call(
+        &tools,
+        "process",
+        Value::object([
+            ("action", Value::string("poll")),
+            ("process_id", Value::string(id)),
+            ("wait_ms", Value::number(10_000)),
+            ("output_limit_bytes", Value::number(256)),
+            ("output_mode", Value::string("tail")),
+        ]),
+    );
+    assert!(text(&tail, "stdout").ends_with("\nready\n"));
+    assert_eq!(text(&tail, "output_mode"), "tail");
+    assert!(number(&tail, "stdout_offset") > from);
+    assert_eq!(
+        number(&tail, "stdout_skipped_bytes"),
+        number(&tail, "stdout_offset") - from
+    );
+    assert_eq!(number(&tail, "stdout_remaining_bytes"), 0);
+    let next = poll(&tools, id, DEFAULT_OUTPUT_LIMIT);
+    assert_eq!(text(&next, "stdout"), "");
+    assert_eq!(
+        number(&next, "stdout_offset"),
+        number(&tail, "stdout_next_offset")
+    );
+    let saved = tools.outputs.resolve(text(&tail, "stdout_file")).unwrap();
+    assert_eq!(std::fs::metadata(saved).unwrap().len(), 90_007);
+}
+
+#[test]
 fn stop_uses_its_own_budget_without_advancing_past_unread_output() {
     let directory = Directory::new();
     let mut tools = Tools::new(directory.path()).unwrap();

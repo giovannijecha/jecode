@@ -13,20 +13,23 @@ use crate::cancel::Cancellation;
 use crate::json::Value;
 use crate::process::{RunError, Started};
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 mod observer;
+mod paging;
 #[cfg(test)]
 use observer::read_window;
 pub use observer::{Observer, Page, Process, Window};
+#[cfg(test)]
+use paging::read_after;
+use paging::{OutputMode, complete_prefix, read_output};
 
 const STOP_WAIT: Duration = Duration::from_secs(10);
 pub(super) const DEFAULT_OUTPUT_LIMIT: usize = 16 * 1024;
+pub(super) const MAX_OUTPUT_LIMIT: usize = 256 * 1024;
 
 #[derive(Default)]
 pub(super) struct Registry {
@@ -120,7 +123,7 @@ impl Registry {
         });
         *entry.monitor.lock().unwrap() = Some(monitor);
         let interrupted = entry.wait(wait, cancellation);
-        entry.report(interrupted, output_limit)
+        entry.report(interrupted, output_limit, OutputMode::Next)
     }
 
     pub(super) fn execute(
@@ -137,6 +140,7 @@ impl Registry {
         }
         let id = required_string(arguments, "process_id")?;
         let output_limit = output_limit(arguments)?;
+        let output_mode = OutputMode::parse(arguments)?;
         let entry = self
             .scope()
             .entries
@@ -157,7 +161,7 @@ impl Registry {
             let wait = wait_argument(arguments)?.unwrap_or(Duration::ZERO);
             entry.wait(wait, cancellation)
         };
-        entry.report(interrupted, output_limit)
+        entry.report(interrupted, output_limit, output_mode)
     }
 
     fn list(&self) -> Value {
@@ -255,7 +259,12 @@ impl Entry {
 
     /// Reports state, then output after each stream cursor. State is read
     /// first: a final state guarantees that the saved streams are complete.
-    fn report(&self, interrupted: bool, output_limit: usize) -> Result<Value, String> {
+    fn report(
+        &self,
+        interrupted: bool,
+        output_limit: usize,
+        output_mode: OutputMode,
+    ) -> Result<Value, String> {
         let mut state = self.state.lock().unwrap();
         let mut fields = self.status(&state);
         let finished = state.outcome.is_some();
@@ -263,7 +272,7 @@ impl Entry {
         for (index, name) in ["stdout", "stderr"].into_iter().enumerate() {
             let stream = &self.streams[index];
             let from = state.cursors[index];
-            let chunk = read_after(&stream.path, from, finished, output_limit)
+            let chunk = read_output(&stream.path, from, finished, output_limit, output_mode)
                 .map_err(|error| format!("Could not read saved {name} for {}: {error}", self.id))?;
             cursors[index] = chunk.next;
             fields.insert(name.into(), Value::string(chunk.text));
@@ -281,6 +290,7 @@ impl Entry {
         }
         state.cursors = cursors;
         fields.insert("output_limit_bytes".into(), Value::number(output_limit));
+        fields.insert("output_mode".into(), Value::string(output_mode.name()));
         if interrupted {
             fields.insert("wait_cancelled".into(), Value::Bool(true));
         }
@@ -341,63 +351,7 @@ pub(super) fn output_limit(arguments: &Value) -> Result<usize, String> {
                 .ok_or_else(|| "output_limit_bytes must be a positive integer".to_string())
         })
         .transpose()
-        .map(|value| value.unwrap_or(DEFAULT_OUTPUT_LIMIT))
-}
-
-struct Chunk {
-    text: String,
-    offset: u64,
-    next: u64,
-    length: u64,
-}
-
-/// Reads the next bounded window without advancing past unread bytes.
-/// A trailing incomplete UTF-8 sequence waits while the process runs.
-fn read_after(path: &Path, from: u64, finished: bool, limit: usize) -> std::io::Result<Chunk> {
-    let mut file = File::open(path)?;
-    let length = file.metadata()?.len().max(from);
-    file.seek(SeekFrom::Start(from))?;
-    let mut bytes = Vec::new();
-    file.take((length - from).min(limit.saturating_add(3) as u64))
-        .read_to_end(&mut bytes)?;
-    let target = bytes.len().min(limit);
-    let mut end = complete_prefix(&bytes[..target]);
-    if end == 0 && bytes.len() > target {
-        // A one-byte budget must still make progress on a complete UTF-8 character.
-        let width = match bytes[0] {
-            0xC0..=0xDF => 2,
-            0xE0..=0xEF => 3,
-            0xF0..=0xF7 => 4,
-            _ => 1,
-        };
-        if bytes.len() >= width {
-            end = width;
-        }
-    }
-    if finished && bytes.len() <= limit {
-        end = bytes.len();
-    }
-    Ok(Chunk {
-        text: String::from_utf8_lossy(&bytes[..end]).into_owned(),
-        offset: from,
-        next: from + end as u64,
-        length,
-    })
-}
-
-fn complete_prefix(bytes: &[u8]) -> usize {
-    for back in 1..=bytes.len().min(4) {
-        let index = bytes.len() - back;
-        let width = match bytes[index] {
-            0x80..=0xBF => continue,
-            0xC0..=0xDF => 2,
-            0xE0..=0xEF => 3,
-            0xF0..=0xF7 => 4,
-            _ => 1,
-        };
-        return if back < width { index } else { bytes.len() };
-    }
-    bytes.len()
+        .map(|value| value.unwrap_or(DEFAULT_OUTPUT_LIMIT).min(MAX_OUTPUT_LIMIT))
 }
 
 #[cfg(test)]

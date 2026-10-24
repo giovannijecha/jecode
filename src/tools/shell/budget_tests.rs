@@ -62,6 +62,31 @@ fn chosen_budget_can_exceed_the_old_sixty_four_kib_cap() {
 }
 
 #[test]
+fn oversized_foreground_budget_keeps_a_bounded_preview_and_the_complete_log() {
+    let directory = Directory::new();
+    let tools = tools(&directory, Redactor::empty());
+    let result = bash(
+        &tools,
+        "printf HEAD; printf '%4999992s' x; printf TAIL",
+        Some(100_000_000),
+    );
+    assert_eq!(result.get("stdout_bytes"), Some(&Value::number(5_000_000)));
+    assert_eq!(
+        result.get("output_limit_bytes"),
+        Some(&Value::number(256 * 1024))
+    );
+    let preview = result.get("stdout").and_then(Value::as_str).unwrap();
+    assert!(preview.len() < 256 * 1024 + 160);
+    assert!(preview.starts_with("HEAD") && preview.ends_with("TAIL"));
+    assert_eq!(result.get("truncated"), Some(&Value::Bool(true)));
+    let path = tools
+        .outputs
+        .resolve(result.get("stdout_file").unwrap().as_str().unwrap())
+        .unwrap();
+    assert_eq!(std::fs::metadata(path).unwrap().len(), 5_000_000);
+}
+
+#[test]
 fn preview_respects_utf8_boundaries_and_masks_credentials() {
     let directory = Directory::new();
     let tools = tools(&directory, Redactor::new("fixture-secret".into()));

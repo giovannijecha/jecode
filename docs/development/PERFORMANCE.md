@@ -8,8 +8,10 @@ current source. All probes use synthetic data and make no provider requests.
 ## Model loop and tool payloads
 
 Recorded **2026-10-24**, Windows, Rust 1.95.0 `x86_64-pc-windows-gnullvm`,
-release builds. The stream baseline uses the original `846a220` accumulation
-and line-draining algorithms; the candidate is the local optimized source.
+release builds. The stream baseline was measured at local commit `846a220`,
+whose source tree is identical to `674eba6` on `main` (the squash of PR #23).
+Use `674eba6` as the reproducible baseline. The recorded optimized candidate
+is `ab36897`; later review fixes do not change the stream parsing algorithm.
 
 | Workload | Before | After |
 | --- | ---: | ---: |
