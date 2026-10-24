@@ -101,7 +101,7 @@ impl App {
     }
 
     fn park_composer(&mut self) {
-        if !self.state.editor.text.is_empty() {
+        if !self.state.editor.text.trim().is_empty() || !self.state.editor.attachments.is_empty() {
             self.state
                 .queue
                 .paused

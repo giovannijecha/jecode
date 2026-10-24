@@ -105,18 +105,45 @@ fn failed_image_prompt_returns_to_composer_and_resumed_retry_sends_one_image() {
 }
 
 #[test]
-fn failure_keeps_new_composer_text_as_a_paused_draft() {
-    let home = Directory::new();
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![rejection()]);
-    let mut app = app(&home, &directory, &fixture);
-    app.state.editor.insert("Failed request");
-    app.submit().unwrap();
-    app.state.editor.insert("New unsent text");
-    tests::finish(&mut app);
-    assert_eq!(app.state.editor.text, "Failed request");
-    assert_eq!(app.state.queue.paused[0].text, "New unsent text");
-    fixture.finish();
+fn failure_keeps_meaningful_drafts_and_ignores_whitespace() {
+    for (text, attach, keep) in [
+        ("New unsent text", false, true),
+        (" \t", false, false),
+        ("\n", false, false),
+        ("", true, true),
+    ] {
+        let home = Directory::new();
+        let directory = Directory::new();
+        let fixture = HttpFixture::new(vec![rejection()]);
+        let mut app = app(&home, &directory, &fixture);
+        app.state.editor.insert("Failed request");
+        app.submit().unwrap();
+        app.state.editor.insert(text);
+        if attach {
+            let attachment = app
+                .persistence
+                .as_ref()
+                .unwrap()
+                .store()
+                .attachments()
+                .import_bytes("clipboard.png", &crate::attachments::tests::png(2, 2))
+                .unwrap();
+            app.state.editor.attach(attachment);
+        }
+        app.state.editor.cursor = 0;
+        let draft = app.state.editor.clone();
+        tests::finish(&mut app);
+        assert_eq!(app.state.editor.text, "Failed request");
+        assert_eq!(app.state.queue.paused.len(), usize::from(keep));
+        let input = app.persistence.as_ref().unwrap().snapshot().input;
+        assert_eq!(input.paused.len(), usize::from(keep));
+        if keep {
+            assert_eq!(app.state.queue.paused[0], draft);
+            assert_eq!(input.paused[0].prompt(), draft.prompt());
+            assert_eq!(input.paused[0].cursor, draft.cursor);
+        }
+        fixture.finish();
+    }
 }
 
 #[test]
