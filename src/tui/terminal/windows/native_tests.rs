@@ -16,6 +16,7 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
     for scenario in [
         "interactive",
         "delete-current",
+        "input-recovery",
         "owner-death",
         "guardian-loss",
     ] {
@@ -368,6 +369,12 @@ fn native_console_fixture() {
         restored(&path);
         assert_eq!(fixture.finish().len(), 1);
         println!("NATIVE_DELETE_RESTORED");
+        return;
+    }
+    if scenario == "input-recovery" {
+        super::recovery_tests::fixture(&path, &bash);
+        restored(&path);
+        println!("NATIVE_INPUT_RECOVERY_RESTORED");
         return;
     }
     full_width_console(&bash);

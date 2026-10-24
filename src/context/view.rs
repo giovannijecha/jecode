@@ -2,12 +2,18 @@ use crate::json::{self, Value};
 
 /// A fixed checkpoint of the first and recent user requests before `before`.
 /// Later messages never change this prefix; long requests retain history references.
-pub(super) fn requests(messages: &[Value], before: usize, budget: usize) -> Option<Value> {
+pub(super) fn requests(
+    messages: &[Value],
+    before: usize,
+    budget: usize,
+    returned: &std::collections::BTreeSet<usize>,
+) -> Option<Value> {
     let is_user = |message: &Value| message.get("role").and_then(Value::as_str) == Some("user");
     let requests = messages
         .iter()
         .enumerate()
         .take(before)
+        .filter(|(index, _)| !returned.contains(index))
         .filter(|(_, message)| is_user(message))
         .collect::<Vec<_>>();
     let latest_index = requests.last()?.0;

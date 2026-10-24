@@ -285,6 +285,9 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("Resume: jecode resume");
                 pty.Wait("NATIVE_RESTORED");
                 pty.Finish(true);
+            } else if (scenario == "input-recovery") {
+                pty.Wait("NATIVE_INPUT_RECOVERY_RESTORED");
+                pty.Finish(true);
             } else if (scenario == "delete-current") {
                 pty.Wait("Ask anything");
                 pty.Send("/resume"); Thread.Sleep(150); pty.Send("\r");

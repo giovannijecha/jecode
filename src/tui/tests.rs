@@ -30,7 +30,7 @@ fn submit(app: &mut App, text: &str) {
     app.edited();
     assert!(!app.submit().unwrap());
 }
-fn finish(app: &mut App) {
+pub(super) fn finish(app: &mut App) {
     let started = Instant::now();
     while app.worker.is_some() {
         app.poll().unwrap();

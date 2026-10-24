@@ -3,6 +3,7 @@ use crate::{
     backend::{Limits, Usage},
     json::Value,
 };
+use std::collections::BTreeSet;
 
 pub use crate::conversation::portable;
 
@@ -53,6 +54,8 @@ impl Status {
 /// A view of durable history. Compaction never deletes the source messages.
 #[derive(Clone, Debug)]
 pub struct Context {
+    /// Derived from turn_returned events; source history keeps its stable indices.
+    pub returned: BTreeSet<usize>,
     pub from: usize,
     pub summary: String,
     /// Operational references captured at compaction, independent of the model summary.
@@ -72,6 +75,7 @@ pub struct Context {
 impl Default for Context {
     fn default() -> Self {
         Self {
+            returned: BTreeSet::new(),
             from: 1,
             summary: String::new(),
             skill_references: String::new(),
@@ -136,6 +140,7 @@ impl Context {
             None => Err("Missing saved context measurement"),
         };
         Ok(Self {
+            returned: BTreeSet::new(),
             from: number("from")?,
             summary: value
                 .get("summary")
@@ -209,6 +214,20 @@ impl Context {
         }
         Ok(())
     }
+
+    pub fn restore_returned(&mut self, events: &[Value], count: usize) {
+        self.returned.clear();
+        for event in events {
+            if event.get("type").and_then(Value::as_str) == Some("turn_returned")
+                && let (Some(from), Some(end)) = (
+                    event.get("from_message").and_then(Value::as_usize),
+                    event.get("after_message").and_then(Value::as_usize),
+                )
+            {
+                self.returned.extend(from.min(count)..end.min(count));
+            }
+        }
+    }
     pub fn reset_usage(&mut self) {
         // Summary allowance belongs to the saved model/effort, not this live projection.
         self.input_tokens = None;
@@ -263,7 +282,9 @@ impl Context {
         if let Some(system) = messages.first() {
             result.push(system.clone());
         }
-        if let Some(requests) = view::requests(messages, self.from, self.request_budget()) {
+        if let Some(requests) =
+            view::requests(messages, self.from, self.request_budget(), &self.returned)
+        {
             result.push(requests);
         }
         if !self.summary.is_empty() {
@@ -284,6 +305,7 @@ impl Context {
                 .iter()
                 .enumerate()
                 .skip(self.from)
+                .filter(|(index, _)| !self.returned.contains(index))
                 .map(|(index, message)| self.project_message(message, index, compatible_from)),
         );
         result
@@ -320,14 +342,19 @@ impl Context {
     }
 
     pub(crate) fn user_requests(&self, messages: &[Value]) -> String {
-        view::requests(messages, messages.len(), self.request_budget())
-            .and_then(|value| {
-                value
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-            .unwrap_or_default()
+        view::requests(
+            messages,
+            messages.len(),
+            self.request_budget(),
+            &self.returned,
+        )
+        .and_then(|value| {
+            value
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
     }
     pub fn estimate(&self, messages: &[Value], compatible_from: usize, inputs: Inputs) -> usize {
         if let Some(tokens) = self.input_tokens
@@ -335,7 +362,15 @@ impl Context {
             && self.measured_end <= messages.len()
         {
             return tokens.saturating_add(
-                self.estimate_bytes(bytes_for(&messages[self.measured_end..], inputs)),
+                self.estimate_bytes(
+                    messages
+                        .iter()
+                        .enumerate()
+                        .skip(self.measured_end)
+                        .filter(|(index, _)| !self.returned.contains(index))
+                        .map(|(_, message)| bytes_for(std::slice::from_ref(message), inputs))
+                        .fold(0usize, usize::saturating_add),
+                ),
             );
         }
         self.estimate_bytes(
@@ -361,6 +396,9 @@ impl Context {
         )
     }
 }
+
+#[cfg(test)]
+mod returned_tests;
 pub fn bytes(messages: &[Value]) -> usize {
     bytes_for(messages, Inputs::default())
 }

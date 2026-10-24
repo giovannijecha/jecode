@@ -53,6 +53,15 @@ request. Most local commands wait for the turn to finish; `/copy`, `/drafts`,
 and `/terminal` open immediately. If the turn stops or fails,
 messages that have not joined it become `paused` and require review.
 
+If a turn fails or is stopped before any response text or tool card appears,
+its first prompt returns to the composer with its attachments. Other messages
+already accepted into that unanswered turn become paused drafts; a newer
+composer draft or edit is preserved there too. Returned input disappears from
+the transcript and is excluded from later model requests, including after
+resuming. Waiting and thinking indicators do not count as output. Once text
+or a tool card has appeared, interruption keeps the transcript and composer
+in place, so a new message such as `continue` can resume the work.
+
 Open `/drafts` or press `Alt+Up` to review pending messages, even during a
 turn. Queued drafts appear before paused ones. `Enter` edits the selected
 draft; in the editor, `Enter` saves the edit and `Esc` cancels it. `Ctrl+S`

@@ -141,6 +141,7 @@ impl App {
         self.state.clear_notice();
         self.state.information = None;
         if !command || init {
+            let input = self.agent.as_ref().unwrap().input_checkpoint();
             let execution = if init {
                 Prompt::plain(commands::INIT_PROMPT)
             } else {
@@ -156,6 +157,9 @@ impl App {
             self.refresh_context();
             self.state.begin_tool_turn();
             self.renderer.scroll(super::viewport::Scroll::End);
+            let mut submission = super::recovery::Submission::new(input);
+            submission.accepted(prompt.clone(), self.state.items.len());
+            self.submission = Some(submission);
             self.state
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());

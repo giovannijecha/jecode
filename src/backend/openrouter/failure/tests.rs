@@ -71,6 +71,33 @@ fn provider_regression_nested_context_error_uses_context_recovery() {
 }
 
 #[test]
+fn image_routing_error_keeps_provider_detail_and_suggests_a_compatible_model() {
+    let detail = "No endpoints found for this model. Filter by Image Support removed sail-research/fp4/us, sail-research/fp4.";
+    let value = Value::object([("error", Value::object([("message", Value::string(detail))]))]);
+    let failure = Failure::api(&value, 404);
+
+    assert_eq!(failure.kind, Kind::Terminal);
+    assert!(failure.message.contains(detail));
+    assert!(failure.message.contains("/model"));
+    assert!(failure.message.contains("/routing"));
+    assert!(failure.message.contains("remove the image"));
+    assert!(!failure.message.contains(".."));
+}
+
+#[test]
+fn oversized_request_keeps_provider_limit_and_suggests_reducing_input() {
+    let detail = "Request body exceeds 8 MiB limit.";
+    let value = Value::object([("error", Value::object([("message", Value::string(detail))]))]);
+    let failure = Failure::api(&value, 413);
+
+    assert_eq!(failure.kind, Kind::Terminal);
+    assert!(failure.message.contains(detail));
+    assert!(failure.message.contains("attachments"));
+    assert!(failure.message.contains("conversation"));
+    assert!(!failure.message.contains(".."));
+}
+
+#[test]
 fn provider_regression_nested_error_keeps_diagnostics_and_redacts_credentials() {
     let fixture = HttpFixture::new(vec![(
         400,

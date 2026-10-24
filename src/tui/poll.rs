@@ -20,7 +20,7 @@ impl App {
             while let Some(event) = self.next_event() {
                 self.worker_event(event);
             }
-            let (agent, result) = self.worker.take().unwrap().finish()?;
+            let (mut agent, result) = self.worker.take().unwrap().finish()?;
             self.reconcile_accepted();
             self.state.settle_tools(&agent.archive());
             self.state.finish_stream();
@@ -29,6 +29,7 @@ impl App {
             let cancelled = activity.as_ref().is_some_and(|activity| activity.stopping);
             match result {
                 Ok(()) if !cancelled => {
+                    self.submission = None;
                     self.state.status = "Ready".into();
                     self.state.clear_progress();
                     if let Some(activity) = activity {
@@ -51,6 +52,22 @@ impl App {
                 }
                 result => {
                     let error = result.err().unwrap_or_else(|| "Turn interrupted".into());
+                    self.state.queue.pause();
+                    let returned = self.return_unanswered(&mut agent);
+                    let mut message = if cancelled {
+                        "Interrupted".into()
+                    } else {
+                        agent.redact(&error)
+                    };
+                    if returned {
+                        message.push_str(" · prompt restored to composer");
+                        if let Some(error) = &self.save_error {
+                            message.push_str(&format!(" · {error}"));
+                        }
+                    }
+                    if !self.state.queue.is_empty() {
+                        message.push_str(" · pending drafts paused · Alt+↑ to review");
+                    }
                     self.state.status = "Turn interrupted".into();
                     self.state.notify(Feedback::result(
                         if cancelled {
@@ -58,16 +75,8 @@ impl App {
                         } else {
                             Kind::Error
                         },
-                        if cancelled {
-                            "Interrupted · pending drafts paused · Alt+↑ to review".into()
-                        } else {
-                            format!(
-                                "{} · pending drafts paused · Alt+↑ to review",
-                                agent.redact(&error)
-                            )
-                        },
+                        message,
                     ));
-                    self.state.queue.pause();
                     self.refresh_draft_menu();
                     self.edited();
                 }
@@ -102,6 +111,9 @@ impl App {
     }
 
     fn worker_event(&mut self, event: Event) {
+        if let Some(submission) = &mut self.submission {
+            submission.observe(&event);
+        }
         match event {
             Event::Accepted { prompts } => {
                 let count = prompts.len();
@@ -135,6 +147,9 @@ impl App {
         self.state.finish_stream();
         self.state.close_tools();
         for prompt in &prompts {
+            if let Some(submission) = &mut self.submission {
+                submission.accepted(prompt.clone(), self.state.items.len());
+            }
             self.state.history.record(prompt);
             self.state
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));

@@ -246,6 +246,7 @@ impl Agent {
         let transcript = original[self.context.from..end]
             .iter()
             .enumerate()
+            .filter(|(index, _)| !self.context.returned.contains(&(self.context.from + index)))
             .map(|(index, message)| {
                 (
                     self.context.from + index,
@@ -313,6 +314,9 @@ impl Agent {
         let mut boundary = messages.len();
         let mut bytes = 0usize;
         for index in (self.context.from..messages.len()).rev() {
+            if self.context.returned.contains(&index) {
+                continue;
+            }
             bytes = bytes.saturating_add(context::bytes_for(
                 std::slice::from_ref(&messages[index]),
                 self.client.inputs(),

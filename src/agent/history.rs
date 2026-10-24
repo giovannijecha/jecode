@@ -63,6 +63,7 @@ impl Agent {
             messages
                 .iter()
                 .enumerate()
+                .filter(|(index, _)| !self.context.returned.contains(index))
                 .filter(|(_, message)| message.get("role").and_then(Value::as_str) == Some("user"))
                 .map(|(index, message)| {
                     format!(

@@ -45,11 +45,23 @@ impl Document {
         let mut latest_tool = None;
         for (index, events) in events.into_iter().enumerate() {
             for event in events {
+                if event.get("type").and_then(Value::as_str) == Some("turn_start")
+                    && self.context.returned.contains(&index)
+                    || event.get("type").and_then(Value::as_str) == Some("turn_error")
+                        && index
+                            .checked_sub(1)
+                            .is_some_and(|last| self.context.returned.contains(&last))
+                {
+                    continue;
+                }
                 append_event(&mut records, event, latest_tool);
             }
             let Some(message) = self.messages.get(index) else {
                 break;
             };
+            if self.context.returned.contains(&index) {
+                continue;
+            }
             let role = string(message, "role").unwrap();
             if matches!(role, "user" | "assistant") {
                 let text = message.get("content").and_then(Value::as_str).unwrap_or("");
