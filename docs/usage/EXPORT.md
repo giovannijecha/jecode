@@ -18,10 +18,11 @@ recovery and turn errors, including incomplete streamed text. An export taken
 during an operation can contain a tool call whose result has not arrived yet.
 Unsent composer text and paused drafts are not included.
 
-Credentials from registered backend accounts are masked, but other conversation content is
-retained. Review the export before sharing it. Bash tool results contain the
-last 64 KiB of each output stream and references to the complete streams in
-the personal session store; those files are not embedded in the JSON. See
+Credentials from registered backend accounts are masked, but other conversation
+content is retained. Review the export before sharing it. Bash tool results
+contain bounded output previews (16 KiB per stream by default) and references
+to the complete streams in the personal session store; those files are not
+embedded in the JSON. See
 [TOOLS.md](TOOLS.md) for output references.
 
 The export writes only this JSON file. References to attachments remain in

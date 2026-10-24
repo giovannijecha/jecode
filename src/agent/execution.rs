@@ -7,7 +7,7 @@ use crate::{
     tools::{Begun, Execution},
 };
 
-const MAX_READ_BATCH: usize = 4;
+const MAX_PARALLEL_CALLS: usize = 4;
 
 impl Agent {
     pub(super) fn execute_calls(
@@ -23,12 +23,12 @@ impl Agent {
             }
             let end = calls[index..]
                 .iter()
-                .take(MAX_READ_BATCH)
-                .take_while(|call| parallel_read(call))
+                .take(MAX_PARALLEL_CALLS)
+                .take_while(|call| parallel_call(call))
                 .count()
                 + index;
             if end - index >= 2 {
-                self.execute_read_batch(&calls[index..end], &calls[end..], events)?;
+                self.execute_parallel_batch(&calls[index..end], &calls[end..], events)?;
                 index = end;
             } else {
                 self.execute_one(&calls[index], &calls[index + 1..], events)?;
@@ -105,7 +105,7 @@ impl Agent {
         Ok(())
     }
 
-    fn execute_read_batch(
+    fn execute_parallel_batch(
         &mut self,
         batch: &[ToolCall],
         remaining: &[ToolCall],
@@ -126,7 +126,7 @@ impl Agent {
         }
         // Scoped workers all finish before results or a later, potentially
         // modifying call is handled. Session messages remain in source order.
-        let results = run_parallel_reads(batch, &|call| {
+        let results = run_parallel_calls(batch, &|call| {
             self.tools.execute_begun(
                 Begun::default(),
                 &call.name,
@@ -142,13 +142,16 @@ impl Agent {
             return Err(error);
         }
         for (call, outcome) in batch.iter().zip(&results) {
-            if let Err(error) = events
-                .emit(self.finished_event(call, &outcome.result))
-                .and_then(|()| self.emit_context(events))
-            {
+            if let Err(error) = events.emit(self.finished_event(call, &outcome.result)) {
                 self.cancel_calls(remaining);
                 return Err(error);
             }
+        }
+        // Every result was recorded together; one context update describes the
+        // whole batch rather than recalculating the same projection per result.
+        if let Err(error) = self.emit_context(events) {
+            self.cancel_calls(remaining);
+            return Err(error);
         }
         if self.cancellation.requested() {
             self.cancel_calls(remaining);
@@ -177,23 +180,33 @@ impl Agent {
     }
 }
 
-fn parallel_read(call: &ToolCall) -> bool {
-    if call.name != "read" {
+fn parallel_call(call: &ToolCall) -> bool {
+    let Ok(arguments) = json::parse(&call.arguments) else {
         return false;
-    }
-    // History depends on preceding tool results; skills keep a per-turn snapshot.
-    json::parse(&call.arguments)
-        .ok()
-        .and_then(|arguments| {
-            arguments
-                .get("path")
+    };
+    let action = arguments.get("action").and_then(Value::as_str);
+    match call.name.as_str() {
+        // History depends on preceding results; skills keep a per-turn snapshot.
+        "read" => arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| !path.starts_with("history:") && !path.starts_with("skill:")),
+        "checkpoint" => matches!(action, Some("list" | "inspect")),
+        "process" => action == Some("list"),
+        "web" => {
+            let method = arguments
+                .get("method")
                 .and_then(Value::as_str)
-                .map(|path| !path.starts_with("history:") && !path.starts_with("skill:"))
-        })
-        .unwrap_or(false)
+                .unwrap_or("GET");
+            matches!(action, Some("fetch" | "download"))
+                && matches!(method, "GET" | "HEAD")
+                && arguments.get("body").is_none()
+        }
+        _ => false,
+    }
 }
 
-fn run_parallel_reads(
+fn run_parallel_calls(
     batch: &[ToolCall],
     execute: &(impl Fn(&ToolCall) -> Execution + Sync),
 ) -> Vec<Execution> {
@@ -208,7 +221,7 @@ fn run_parallel_reads(
                 handle.join().unwrap_or_else(|_| Execution {
                     result: Value::object([(
                         "error",
-                        Value::string("Read worker failed unexpectedly"),
+                        Value::string("Tool worker failed unexpectedly"),
                     )]),
                     change: None,
                 })
@@ -219,3 +232,5 @@ fn run_parallel_reads(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod web_tests;

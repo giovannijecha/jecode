@@ -1,6 +1,10 @@
 //! Exact large-text edits with bounded working memory and a staged replacement.
 use super::*;
-use std::io::{Seek, SeekFrom};
+use std::io::Seek;
+
+#[cfg(test)]
+mod measurements;
+mod pieces;
 
 const BLOCK: usize = 64 * 1024;
 
@@ -128,103 +132,103 @@ fn unchanged(path: &Path, file: &fs::File, expected: &fs::Metadata) -> Result<()
 
 pub(super) fn edit(
     path: &Path,
-    old: &str,
-    new: &str,
+    edits: &[(&str, &str)],
     mut guard: Option<FileGuard<'_>>,
     cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     check_cancelled(cancellation)?;
-    if new.contains('\0') {
-        return Err("File content must be UTF-8 text without NUL bytes".into());
-    }
-    let mut source = fs::File::open(path).map_err(|error| error.to_string())?;
-    let metadata = source.metadata().map_err(|error| error.to_string())?;
+    let mut original = fs::File::open(path).map_err(|error| error.to_string())?;
+    let metadata = original.metadata().map_err(|error| error.to_string())?;
     if !metadata.is_file() {
         return Err("The path must refer to a regular file".into());
-    }
-    let (position, ambiguous) = locate(&mut source, old.as_bytes(), cancellation)?;
-    unchanged(path, &source, &metadata)?;
-    let reason = if position.is_none() {
-        Some("old_text was not found; read the file and use exact current text")
-    } else if ambiguous {
-        Some("old_text occurs more than once; include more exact surrounding text")
-    } else {
-        None
-    };
-    if let Some(reason) = reason {
-        return Ok((mismatch(&mut source, metadata.len(), reason)?, None));
     }
     if metadata.permissions().readonly() {
         return Err("File is read-only; its content was not changed".into());
     }
-    let length = metadata
-        .len()
-        .checked_sub(old.len() as u64)
-        .and_then(|length| length.checked_add(new.len() as u64))
-        .ok_or("The replacement exceeds the filesystem length range")?;
+    let mut view = pieces::View::new(metadata.len());
+    let mut changed = false;
+    for (index, &(old, new)) in edits.iter().enumerate() {
+        check_cancelled(cancellation)?;
+        let (position, ambiguous) =
+            locate(view.reader(&mut original), old.as_bytes(), cancellation)?;
+        unchanged(path, &original, &metadata)?;
+        let reason = if position.is_none() {
+            Some((
+                "old text was not found",
+                "read the file and use exact current text",
+            ))
+        } else if ambiguous {
+            Some((
+                "old text occurs more than once",
+                "include more exact surrounding text",
+            ))
+        } else {
+            None
+        };
+        if let Some((reason, initial_advice)) = reason {
+            return Ok((
+                mismatch(
+                    &mut original,
+                    metadata.len(),
+                    &edit_mismatch_error(index, reason, initial_advice),
+                )?,
+                None,
+            ));
+        }
+        if old == new {
+            continue;
+        }
+        view.replace(position.unwrap(), old.len() as u64, new.as_bytes())?;
+        changed = true;
+    }
+    if !changed {
+        return Ok((written(0, None), None));
+    }
+    // All matching and sequential composition is complete before any staging
+    // write. Materialize the final view once, independent of the edit count.
+    let temporary = Temporary(crate::disk::temporary_beside(path));
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary.0)
+        .map_err(|error| format!("Could not stage file: {error}"))?;
+    let staged = (|| -> Result<(), String> {
+        copy_cancellable(view.reader(&mut original), &mut output, cancellation)?;
+        output
+            .set_permissions(metadata.permissions())
+            .map_err(|error| error.to_string())?;
+        check_cancelled(cancellation)?;
+        output.sync_all().map_err(|error| error.to_string())
+    })();
+    drop(output);
+    staged.map_err(|error| format!("Could not stage file: {error}"))?;
     if let Some(guard) = &mut guard {
         guard.capture();
     }
     let result = (|| -> Result<(), String> {
         check_guard(guard.as_ref(), cancellation)?;
-        unchanged(path, &source, &metadata)?;
-        let temporary = Temporary(crate::disk::temporary_beside(path));
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary.0)
-            .map_err(|error| error.to_string())?;
-        let staged = (|| -> Result<(), String> {
-            source.rewind().map_err(|error| error.to_string())?;
-            copy_cancellable(
-                &mut source,
-                &mut output,
-                Some(position.unwrap()),
-                cancellation,
-            )?;
-            for block in new.as_bytes().chunks(BLOCK) {
-                check_cancelled(cancellation)?;
-                output.write_all(block).map_err(|error| error.to_string())?;
-            }
-            source
-                .seek(SeekFrom::Start(position.unwrap() + old.len() as u64))
-                .map_err(|error| error.to_string())?;
-            copy_cancellable(&mut source, &mut output, None, cancellation)?;
-            output
-                .set_permissions(metadata.permissions())
-                .map_err(|error| error.to_string())?;
-            check_cancelled(cancellation)?;
-            output.sync_all().map_err(|error| error.to_string())
-        })();
-        drop(output);
-        staged.map_err(|error| format!("Could not stage file: {error}"))?;
-        unchanged(path, &source, &metadata)?;
-        drop(source);
+        unchanged(path, &original, &metadata)?;
+        drop(original);
         check_guard(guard.as_ref(), cancellation)?;
         fs::rename(&temporary.0, path).map_err(|error| format!("Could not replace file: {error}"))
     })();
     let checkpoint = guard.map(|guard| guard.finish());
     match result {
-        Ok(()) => Ok((written(length, checkpoint), None)),
+        Ok(()) => Ok((written(view.len(), checkpoint), None)),
         Err(error) => Ok((failed(error, checkpoint), None)),
     }
 }
 
 fn copy_cancellable(
-    source: &mut fs::File,
-    output: &mut fs::File,
-    mut remaining: Option<u64>,
+    mut source: impl Read,
+    output: &mut impl Write,
     cancellation: &Cancellation,
 ) -> Result<(), String> {
     let mut buffer = [0; BLOCK];
     loop {
         check_cancelled(cancellation)?;
-        let take = remaining.map_or(BLOCK, |left| left.min(BLOCK as u64) as usize);
-        if take == 0 {
-            return Ok(());
-        }
         let count = source
-            .read(&mut buffer[..take])
+            .read(&mut buffer)
             .map_err(|error| error.to_string())?;
         if count == 0 {
             return Ok(());
@@ -232,9 +236,6 @@ fn copy_cancellable(
         output
             .write_all(&buffer[..count])
             .map_err(|error| error.to_string())?;
-        if let Some(left) = &mut remaining {
-            *left -= count as u64;
-        }
     }
 }
 

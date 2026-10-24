@@ -250,14 +250,17 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
         .and_then(|message| message.get("content").and_then(Value::as_str))
         .map(|content| crate::json::parse(content).unwrap())
         .unwrap();
-    // Every byte skipped by the bounded preview counts from the start.
+    // The observer did not advance the model cursor. Its first bounded poll
+    // starts at the beginning and leaves the rest available to later polls.
     let offset = result.get("stdout_offset").and_then(Value::as_usize);
     let skipped = result.get("stdout_skipped_bytes").and_then(Value::as_usize);
-    assert!(
-        offset.is_some() && offset == skipped,
-        "{offset:?} {skipped:?}"
+    assert_eq!(offset, Some(0));
+    assert_eq!(skipped, Some(0));
+    assert!(text_of(&result, "stdout").starts_with("1\n2\n"));
+    assert_eq!(
+        result.get("stdout_next_offset").and_then(Value::as_usize),
+        Some(text_of(&result, "stdout").len())
     );
-    assert!(text_of(&result, "stdout").ends_with("30000\ntail-line\n"));
     assert_eq!(text_of(&result, "stderr"), errors);
     assert_eq!(poll.finish().len(), 2);
     create(&directory, "stop");

@@ -6,24 +6,30 @@
 //! cursors, so every byte is either returned or identified for `read`.
 //! An [`Observer`] reads the same streams without touching those cursors.
 
-use super::{OUTPUT_LIMIT, required_string};
+#[cfg(test)]
+use super::OUTPUT_LIMIT;
+use super::required_string;
 use crate::cancel::Cancellation;
 use crate::json::Value;
 use crate::process::{RunError, Started};
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 mod observer;
+mod paging;
 #[cfg(test)]
 use observer::read_window;
 pub use observer::{Observer, Page, Process, Window};
+#[cfg(test)]
+use paging::read_after;
+use paging::{OutputMode, complete_prefix, read_output};
 
 const STOP_WAIT: Duration = Duration::from_secs(10);
+pub(super) const DEFAULT_OUTPUT_LIMIT: usize = 16 * 1024;
+pub(super) const MAX_OUTPUT_LIMIT: usize = 256 * 1024;
 
 #[derive(Default)]
 pub(super) struct Registry {
@@ -67,6 +73,7 @@ struct Outcome {
 pub(super) struct Adoption<'a> {
     pub timeout: Option<Duration>,
     pub wait: Duration,
+    pub output_limit: usize,
     pub cancellation: &'a Cancellation,
 }
 
@@ -91,6 +98,7 @@ impl Registry {
         let Adoption {
             timeout,
             wait,
+            output_limit,
             cancellation,
         } = adoption;
         let entry = Arc::new(Entry {
@@ -115,7 +123,7 @@ impl Registry {
         });
         *entry.monitor.lock().unwrap() = Some(monitor);
         let interrupted = entry.wait(wait, cancellation);
-        entry.report(interrupted)
+        entry.report(interrupted, output_limit, OutputMode::Next)
     }
 
     pub(super) fn execute(
@@ -131,6 +139,8 @@ impl Registry {
             return Err("action must be list, poll or stop".into());
         }
         let id = required_string(arguments, "process_id")?;
+        let output_limit = output_limit(arguments)?;
+        let output_mode = OutputMode::parse(arguments)?;
         let entry = self
             .scope()
             .entries
@@ -151,7 +161,7 @@ impl Registry {
             let wait = wait_argument(arguments)?.unwrap_or(Duration::ZERO);
             entry.wait(wait, cancellation)
         };
-        entry.report(interrupted)
+        entry.report(interrupted, output_limit, output_mode)
     }
 
     fn list(&self) -> Value {
@@ -249,7 +259,12 @@ impl Entry {
 
     /// Reports state, then output after each stream cursor. State is read
     /// first: a final state guarantees that the saved streams are complete.
-    fn report(&self, interrupted: bool) -> Result<Value, String> {
+    fn report(
+        &self,
+        interrupted: bool,
+        output_limit: usize,
+        output_mode: OutputMode,
+    ) -> Result<Value, String> {
         let mut state = self.state.lock().unwrap();
         let mut fields = self.status(&state);
         let finished = state.outcome.is_some();
@@ -257,12 +272,16 @@ impl Entry {
         for (index, name) in ["stdout", "stderr"].into_iter().enumerate() {
             let stream = &self.streams[index];
             let from = state.cursors[index];
-            let chunk = read_after(&stream.path, from, finished)
+            let chunk = read_output(&stream.path, from, finished, output_limit, output_mode)
                 .map_err(|error| format!("Could not read saved {name} for {}: {error}", self.id))?;
             cursors[index] = chunk.next;
             fields.insert(name.into(), Value::string(chunk.text));
             fields.insert(format!("{name}_offset"), Value::number(chunk.offset));
             fields.insert(format!("{name}_next_offset"), Value::number(chunk.next));
+            fields.insert(
+                format!("{name}_remaining_bytes"),
+                Value::number(chunk.length - chunk.next),
+            );
             fields.insert(
                 format!("{name}_skipped_bytes"),
                 Value::number(chunk.offset - from),
@@ -270,6 +289,8 @@ impl Entry {
             fields.insert(format!("{name}_file"), Value::string(&stream.reference));
         }
         state.cursors = cursors;
+        fields.insert("output_limit_bytes".into(), Value::number(output_limit));
+        fields.insert("output_mode".into(), Value::string(output_mode.name()));
         if interrupted {
             fields.insert("wait_cancelled".into(), Value::Bool(true));
         }
@@ -320,55 +341,20 @@ pub(super) fn wait_argument(arguments: &Value) -> Result<Option<Duration>, Strin
         .transpose()
 }
 
-struct Chunk {
-    text: String,
-    offset: u64,
-    next: u64,
+pub(super) fn output_limit(arguments: &Value) -> Result<usize, String> {
+    arguments
+        .get("output_limit_bytes")
+        .map(|value| {
+            value
+                .as_usize()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| "output_limit_bytes must be a positive integer".to_string())
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(DEFAULT_OUTPUT_LIMIT).min(MAX_OUTPUT_LIMIT))
 }
 
-/// Reads at most the last `OUTPUT_LIMIT` bytes saved after `from`. While the
-/// process runs, a trailing incomplete UTF-8 sequence waits for the next read.
-fn read_after(path: &Path, from: u64, finished: bool) -> std::io::Result<Chunk> {
-    let mut file = File::open(path)?;
-    let length = file.metadata()?.len().max(from);
-    let mut offset = from.max(length.saturating_sub(OUTPUT_LIMIT as u64));
-    file.seek(SeekFrom::Start(offset))?;
-    let mut bytes = Vec::new();
-    file.take(length - offset).read_to_end(&mut bytes)?;
-    if offset > from {
-        // A bounded preview must not begin inside a UTF-8 sequence.
-        let skip = bytes
-            .iter()
-            .take(3)
-            .take_while(|byte| **byte & 0xC0 == 0x80)
-            .count();
-        bytes.drain(..skip);
-        offset += skip as u64;
-    }
-    if !finished {
-        bytes.truncate(complete_prefix(&bytes));
-    }
-    Ok(Chunk {
-        text: String::from_utf8_lossy(&bytes).into_owned(),
-        offset,
-        next: offset + bytes.len() as u64,
-    })
-}
-
-fn complete_prefix(bytes: &[u8]) -> usize {
-    for back in 1..=bytes.len().min(4) {
-        let index = bytes.len() - back;
-        let width = match bytes[index] {
-            0x80..=0xBF => continue,
-            0xC0..=0xDF => 2,
-            0xE0..=0xEF => 3,
-            0xF0..=0xF7 => 4,
-            _ => 1,
-        };
-        return if back < width { index } else { bytes.len() };
-    }
-    bytes.len()
-}
-
+#[cfg(test)]
+mod budget_tests;
 #[cfg(test)]
 mod tests;

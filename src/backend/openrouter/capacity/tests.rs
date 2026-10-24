@@ -2,6 +2,75 @@ use super::*;
 use crate::test_support::{HttpFixture, completion};
 
 #[test]
+fn turn_metadata_requests_overlap_and_pin_narrows_the_fresh_model_limit() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut peers = Vec::new();
+        while peers.len() < 2 && Instant::now() < deadline {
+            match listener.accept() {
+                Ok((peer, _)) => peers.push(peer),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("fixture accept: {error}"),
+            }
+        }
+        let overlapped = peers.len() == 2;
+        let mut paths = Vec::new();
+        for mut peer in peers {
+            peer.set_nonblocking(false).unwrap();
+            peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut reader = BufReader::new(peer.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let path = line.split_whitespace().nth(1).unwrap().to_owned();
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let body = if path.ends_with("/endpoints") {
+                r#"{"data":{"endpoints":[{"tag":"provider/p","context_length":16000,"supported_parameters":["tools"]}]}}"#
+            } else {
+                r#"{"data":[{"id":"fixture/model","context_length":32000}]}"#
+            };
+            write!(peer, "HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            paths.push(path);
+        }
+        (overlapped, paths)
+    });
+    let mut client = OpenRouter::fixture(endpoint);
+    client.limits = None;
+    client.set_routing(crate::backend::Routing::Endpoint("provider/p".into()));
+    let prepared = crate::backend::Backend::prepare_turn(&mut client);
+    let (overlapped, paths) = server.join().unwrap();
+    assert!(
+        overlapped,
+        "both metadata requests must arrive before either response"
+    );
+    assert_eq!(paths.len(), 2);
+    assert!(paths.iter().any(|path| path.ends_with("/endpoints")));
+    assert!(paths.iter().any(|path| path.starts_with("/models?")));
+    assert_eq!(prepared.unwrap().unwrap().context, 16000);
+    assert_eq!(
+        crate::backend::Backend::prepare_turn(&mut client)
+            .unwrap()
+            .unwrap()
+            .context,
+        16000
+    );
+}
+
+#[test]
 fn output_allowance_respects_both_model_output_and_remaining_context() {
     for (output, input, expected) in [
         (Some(9000), 1000, 9000),

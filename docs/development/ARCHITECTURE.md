@@ -37,15 +37,30 @@ Paths are relative to `src/`.
    translates that canonical transcript and neutral tool catalog into its wire
    request, then streams text and progress through agent events.
 4. The agent saves tool boundaries, executes calls and records their results.
-   Up to four adjacent eligible read calls run together after the complete
-   model response; history and skill reads, or any non-read call, break the
-   batch. Results and checkpoints keep model call order. Follow-up messages
+   Up to four adjacent eligible calls run together after the complete model
+   response: file reads, checkpoint list/inspect, process list, and web
+   fetch/download using GET or HEAD without a body. History and skill reads,
+   process cursors, crawls and modifying calls break the batch. Results and
+   checkpoints keep model call order. Follow-up messages
    from the shared inbox join before the next model request.
 5. Completion, cancellation or failure checkpoints the conversation. The interface
    renders the result and keeps unsent input available.
 
 The harness supplies tools, context and history. It adds no completion gates,
 repeated-command refusals or model-output validation.
+
+Backend updates carry text deltas. The agent masks split credentials incrementally
+and produces display/persistence snapshots at terminal cadence, flushing the final
+text on completion or failure. The TUI worker keeps one latest streaming snapshot;
+transient working indicators never wait for a full queue. Significant events use
+a bounded ordered queue and retain cancellation-aware backpressure.
+
+OpenRouter prepares uncached model capacities and stale endpoint metadata in
+parallel, then validates a pinned endpoint and narrows the effective limits.
+Live Claude tool requests enable automatic prefix caching; summary requests do
+not opt in. Reported cache reads and writes remain distinct from charged cost.
+Provider inference latency and cache-hit rates need live measurements; loopback
+and parsing tests establish local behavior only.
 The `web` tool uses system curl for HTTP(S) requests and keeps responses and
 crawl state in the session temporary area. `curl.rs` selects the executable for
 both web retrieval and model transport. Web redirects are followed one hop at a
@@ -133,9 +148,9 @@ saved immediately; later streaming updates and TUI input use a 250 ms save
 interval. Periodic saves serialize disk access in a worker; explicit saves and
 clean exit flush synchronously. The session journal calls these saves
 checkpoints; they are unrelated to the workspace checkpoints below.
-An in-progress read batch records its call IDs in `pending.reads` until all
-results are saved in call order. Earlier journals without this field load with
-an empty list.
+An in-progress parallel batch records its call IDs in the legacy `pending.reads`
+field until all results are saved in call order. Earlier journals without this
+field load with an empty list.
 
 | Condition | Recovery |
 | --- | --- |

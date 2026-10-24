@@ -8,6 +8,33 @@ fn area(home: &Directory, project: &Directory, id: &str) -> Area {
         .unwrap()
 }
 
+#[test]
+fn simultaneous_first_uses_publish_one_complete_ownership_record() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let temporary = area(&home, &project, "123-1-0");
+    let barrier = std::sync::Barrier::new(8);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..8)
+            .map(|index| {
+                let temporary = &temporary;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    let (_, file) = temporary
+                        .file(&format!("parallel/{index}.txt"), true)
+                        .unwrap();
+                    fs::write(file, "complete").unwrap();
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    assert_eq!(temporary.info().unwrap().files, 8);
+}
+
 fn call(tools: &Tools, name: &str, entries: &[(&str, &str)]) -> Value {
     let arguments = Value::Object(
         entries

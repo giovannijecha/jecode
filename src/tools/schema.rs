@@ -1,8 +1,19 @@
 use crate::json::Value;
+use std::sync::OnceLock;
 
 /// Executable tools in Jecode's neutral name, description and parameters shape.
 /// Each backend owns the wrapper required by its request protocol.
-pub fn definitions() -> Value {
+pub fn definitions() -> &'static Value {
+    static DEFINITIONS: OnceLock<Value> = OnceLock::new();
+    DEFINITIONS.get_or_init(build_definitions)
+}
+
+pub fn encoded_size() -> usize {
+    static SIZE: OnceLock<usize> = OnceLock::new();
+    *SIZE.get_or_init(|| definitions().encode().len())
+}
+
+fn build_definitions() -> Value {
     let string = || Value::object([("type", Value::string("string"))]);
     let integer = |min, max: Option<usize>| {
         let mut value = Value::object([
@@ -39,7 +50,7 @@ pub fn definitions() -> Value {
     Value::Array(vec![
         tool(
             "read",
-            "Read a project file or tmp:relative/path. Text is paged UTF-8; images and PDFs are recognized from their contents, copied into session storage and shown to you on the next request. The result includes an attachment:ID reference for rereading the copy after the original changes or disappears. Also accepts skill:<name> for a personal skill's SKILL.md or skill:<name>/<relative-path> for a text resource, saved output:SESSION:ID:stdout or :stderr, attachment:ID (text files page normally; images and PDFs are shown again; other files return their local path), or history:INDEX (a zero-based original message index in this session). history:requests returns the complete ordered user requests. history:memory returns the current conversation summary. checkpoint:rc-ID:path returns a file saved before one modifying call, until its fixed 24-hour expiry. History, skills, attachments and saved output remain available after compaction and resume. Older output:ID:stdout/:stderr references remain readable. Text paging uses one-based offset (default 1) and limit (default 200, maximum 2000). Pages contain up to 64 KiB; follow next_offset or next_byte_offset with byte_offset for a split long line. byte_offset is zero-based and returns unnumbered text; it takes precedence over offset. Paging arguments do not crop images or PDFs. A context_truncated tool result is an excerpt; read its history_reference for the full original, using small pages. total_lines is available at EOF in line mode.",
+            "Read a project file or tmp:relative/path. UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary); checkpoint:rc-ID:path (saved preimage, expires after 24 hours). History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
             Value::object([
                 ("path", string()),
                 ("offset", integer(1, None)),
@@ -50,23 +61,47 @@ pub fn definitions() -> Value {
         ),
         tool(
             "write",
-            "Create or replace a complete UTF-8 file through this tool call; describing a write in assistant text does not execute it. Project paths require an existing parent directory. Use tmp:relative/path for disposable scripts and one-off verification files; it writes in this session's temporary area and creates parent directories there. Keep project deliverables, including useful durable tests, in the project.",
+            "Create or replace a complete UTF-8 file; text in the assistant reply does not execute a write. Project paths need an existing parent. tmp:relative/path creates parents in session temporary storage for disposable scripts and one-off verification. Keep deliverables and durable tests in the project.",
             Value::object([("path", string()), ("content", string())]),
             &["path", "content"],
         ),
         tool(
             "edit",
-            "Replace one exact, nonempty old_text occurrence in a UTF-8 project file or tmp:relative/path in this session's temporary area with new_text. Missing or ambiguous matches fail without changing the file. Include original whitespace and line endings.",
+            "Edit a UTF-8 project or tmp: file. Use old_text/new_text once or ordered edits in one file. Each nonempty old_text must match exactly once after preceding edits; any missing or ambiguous match leaves the file unchanged. Preserve exact whitespace and line endings.",
             Value::object([
                 ("path", string()),
                 ("old_text", string()),
                 ("new_text", string()),
+                (
+                    "edits",
+                    Value::object([
+                        ("type", Value::string("array")),
+                        ("minItems", Value::number(1)),
+                        (
+                            "items",
+                            Value::object([
+                                ("type", Value::string("object")),
+                                (
+                                    "properties",
+                                    Value::object([("old_text", string()), ("new_text", string())]),
+                                ),
+                                (
+                                    "required",
+                                    Value::Array(
+                                        ["old_text", "new_text"].map(Value::string).into(),
+                                    ),
+                                ),
+                                ("additionalProperties", Value::Bool(false)),
+                            ]),
+                        ),
+                    ]),
+                ),
             ]),
-            &["path", "old_text", "new_text"],
+            &["path"],
         ),
         tool(
             "bash",
-            "Run a Bash command from the project directory. Shell syntax is Bash on every host, including Windows; invoke PowerShell explicitly if needed. For recoverable writes, pass protect as workspace-relative file paths or recursive directory scopes; use a trailing slash for a new directory or '.' for the whole workspace. Recursive scopes skip generated and Git-ignored directories; name one explicitly to save it. Jecode saves their preimages before launch and reports saved, partial or none. For writes through a symlink, protect its target too. Only declared paths are covered; the command still runs if capture fails. stdin is closed and shell state does not carry over. timeout_seconds sets an optional execution deadline from launch; without it execution has no deadline. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths. Set explicit output paths under \"$JECODE_TMP\" for one-off verification artifacts; these variables do not redirect project-relative output. Without wait_ms the command runs in the foreground and returns exit_code, cancellation/timeout flags, stream byte counts, the last 64 KiB of stdout/stderr and read-only output references. With wait_ms it becomes a persistent process; Jecode waits up to wait_ms, then returns process_id and status. wait_ms limits only the initial wait, not process lifetime; use process poll to check status and output and process stop to end it. A running process continues until exit, timeout or stop. The checkpoint receipt describes only prelaunch coverage and expires 24 hours after capture. Bash has normal system access.",
+            "Run Bash in the project directory. Shell syntax is Bash on every host, including Windows; invoke PowerShell explicitly if needed. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\" (project-relative paths are unchanged). Without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; larger requests are clamped and logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success. Bash has normal system access.",
             Value::object([
                 ("command", string()),
                 (
@@ -108,12 +143,16 @@ pub fn definitions() -> Value {
                         ),
                     ]),
                 ),
+                (
+                    "output_limit_bytes",
+                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
+                ),
             ]),
             &["command"],
         ),
         tool(
             "process",
-            "Manage persistent processes started by bash with wait_ms in this conversation. list returns every process_id with its command, status and output references; use it to recover IDs, for example after context compaction. poll returns the current status and the output saved since the previous bash or process result for that process, waiting up to wait_ms (default 0) for it to finish. stop requests termination of the process and its descendants and waits up to 10 seconds for the final status; if the wait expires or is interrupted it may return stopping, so poll to confirm completion. Each stream returns at most its last 64 KiB of new output: <stream>_offset is where the returned text starts in the saved stream, <stream>_next_offset is where the next result continues and <stream>_skipped_bytes counts earlier unread bytes left out; read <stream>_file with byte_offset to see them. exit_code appears only after the process exits. Empty output does not mean the process finished, is ready or is stalled; check status. Finished processes stay listed with their final status. Processes end when the conversation changes or Jecode exits and are never restarted; earlier IDs then return an error while saved output stays readable. wait_cancelled is true when the user interrupted the wait; it does not stop a running process or undo a previous stop request.",
+            "Manage this conversation's persistent Bash processes. list recovers IDs, status, commands and saved-output refs. poll waits up to wait_ms (default 0) and returns status plus the next unread window. output_mode defaults to next; tail jumps to the newest unread bytes for readiness/status checks and reports skipped bytes, still readable from the saved file. stop requests termination of the process and descendants, waits up to 10 seconds, and may return stopping; poll to confirm. Windows are 16 KiB per stream by default; output_limit_bytes sets a positive budget capped at 256 KiB; larger requests are clamped. <stream>_offset and <stream>_next_offset track consecutive saved bytes; _remaining_bytes counts unread saved data; _skipped_bytes is zero in next mode. Poll until drained, or read <stream>_file with byte_offset. Empty output says nothing about readiness; check status. exit_code appears after exit; finished processes remain listed. wait_cancelled interrupts the wait, not the process or a prior stop. Processes end on conversation change or Jecode exit; old IDs fail but saved output remains readable.",
             Value::object([
                 (
                     "action",
@@ -127,12 +166,26 @@ pub fn definitions() -> Value {
                 ),
                 ("process_id", string()),
                 ("wait_ms", integer(0, None)),
+                (
+                    "output_limit_bytes",
+                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
+                ),
+                (
+                    "output_mode",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(["next", "tail"].map(Value::string).into()),
+                        ),
+                    ]),
+                ),
             ]),
             &["action"],
         ),
         tool(
             "checkpoint",
-            "List, inspect and restore before-state snapshots from individual modifying calls. write and edit protect their file; Bash protects only declared paths. Each saved ref expires exactly 24 hours after capture. Inspect returns a token for the selected current paths. Restore requires that token or expected latest to acknowledge their current state, and saves an undo of paths it changes. A receipt reports what was saved before execution; it does not claim the tool succeeded.",
+            "List, inspect or restore before-state snapshots from modifying calls. write/edit save their file; Bash saves only declared protect paths. Refs expire 24 hours after capture. inspect returns an expected token for the selected current paths; omit paths for the saved call scope. restore needs that token for the same paths or expected set to latest to acknowledge live state. preview:true plans without writing; a real restore saves an undo. A receipt describes captured preimages, not command success.",
             Value::object([
                 (
                     "action",
@@ -180,7 +233,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "web",
-            "Fetch/download HTTP(S) or crawl links with local curl. fetch returns status, final_url, MIME, raw path, text_path and a short preview. Text/HTML extraction reads at most 4 MiB; extraction_truncated marks partial results. HTML returns up to 100 links; links_count and links_path cover all extracted links. download saves raw bytes without parsing. Fetch/download require url; support method, headers and body. Headers stay at the requested origin across redirects. crawl uses GET without a body; requires urls to start or crawl_id to resume. Seed-origin headers, timeout_seconds and max_bytes are saved; resume with unchanged options. Crawl defaults: same_origin true, max_depth 1, max_pages 20 per call. Returns up to 20 page summaries and manifest_path for full JSONL records; use read paging. max_bytes limits each response only when set. This is ordinary HTTP; use browser for rendered pages or search sites.",
+            "Use local curl for HTTP(S) fetch, raw download or link crawl. fetch returns status, final_url, MIME, raw/text paths and preview; extraction stops at 4 MiB (see extraction_truncated). HTML returns 100 links at most; links_count/links_path cover all. download saves raw bytes. fetch/download need url and accept method, headers, body; headers stay at the requested origin on redirects. crawl uses GET without body: start with urls or resume with crawl_id and unchanged saved seed headers, timeout_seconds and max_bytes. Defaults: same_origin true, max_depth 1, max_pages 20 per call. Returns page summaries plus manifest_path for full JSONL records; page with read. max_bytes limits each response only when set. Use browser for rendered pages or search sites.",
             Value::object([
                 (
                     "action",
@@ -214,7 +267,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "browser",
-            "Control an installed Chromium-based browser locally through the Chrome DevTools Protocol. open launches an isolated headless browser by default and optionally navigates to url; visible:true opens a window. profile names select dedicated persistent profiles, while the default profile is temporary. Actions: tabs, navigate, snapshot, click, fill, press, scroll, wait, screenshot, evaluate, cdp, logs, close, stop. An omitted browser_id selects the newest browser; an omitted tab_id selects an available page tab, so pass tab_id for a specific tab. snapshot returns element refs such as @1; selector accepts a ref or CSS. wait uses selector and/or text. screenshot saves a tmp:browser/ image, imports it as an attachment and delivers it on the next model request; its attachment reference survives temporary cleanup. cdp calls a raw DevTools method for advanced operations. Use a visible browser for login and two-factor prompts. Chromium must already be installed; JECODE_BROWSER may point to its executable.",
+            "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives element refs such as @1; selector accepts refs or CSS. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
             Value::object([
                 (
                     "action",

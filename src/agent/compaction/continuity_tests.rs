@@ -59,10 +59,16 @@ fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
     );
     agent.enable_sessions(home.path()).unwrap();
     let original = history(&mut agent, &"Earlier findings ".repeat(600));
+    // Reserve room for the retained exchange and summary independently of
+    // native prompt/catalog wording. This test checks continuity, not a 24K limit.
+    let fixed = agent.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + agent.request_environment().len();
+    let capacity = (fixed + 8192).div_ceil(4) * 5;
     agent
         .compact_if_needed(
             Some(Limits {
-                context: 24000,
+                context: capacity,
                 output: Some(4096),
             }),
             true,

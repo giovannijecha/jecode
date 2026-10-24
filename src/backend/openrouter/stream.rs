@@ -41,11 +41,17 @@ impl Stream {
         bytes: &[u8],
         emit: &mut impl FnMut(Update) -> Result<(), String>,
     ) -> Result<(), String> {
+        let previous_len = self.buffer.len();
         self.buffer.extend_from_slice(bytes);
-        while let Some(end) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let line = String::from_utf8(self.buffer.drain(..=end).collect())
-                .map_err(|_| "OpenRouter returned invalid UTF-8")?;
-            let line = line.trim_end_matches(['\r', '\n']);
+        let Some(end) = bytes.iter().rposition(|byte| *byte == b'\n') else {
+            return Ok(());
+        };
+        let tail = self.buffer.split_off(previous_len + end + 1);
+        let complete = std::mem::replace(&mut self.buffer, tail);
+        for line in complete.split_inclusive(|byte| *byte == b'\n') {
+            let line = std::str::from_utf8(line)
+                .map_err(|_| "OpenRouter returned invalid UTF-8")?
+                .trim_end_matches(['\r', '\n']);
             if line.is_empty() {
                 if !self.data.is_empty() {
                     let data = std::mem::take(&mut self.data);
@@ -199,7 +205,7 @@ impl Stream {
             match content {
                 Value::String(text) if !text.is_empty() => {
                     self.text.push_str(text);
-                    emit(Update::Text(self.text.clone()))?;
+                    emit(Update::TextDelta(text.clone()))?;
                 }
                 Value::Null | Value::String(_) => {}
                 _ => return Err("OpenRouter stream returned unsupported content".into()),
@@ -291,8 +297,10 @@ impl Stream {
                     let text = value
                         .as_str()
                         .ok_or("Stream tool call has an invalid function field")?;
-                    let previous = fields.get(key).and_then(Value::as_str).unwrap_or("");
-                    fields.insert(key.into(), Value::string(format!("{previous}{text}")));
+                    let Some(Value::String(previous)) = fields.get_mut(key) else {
+                        unreachable!()
+                    };
+                    previous.push_str(text);
                 }
             }
         }

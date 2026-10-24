@@ -5,6 +5,108 @@ workspace checkpoints, on Windows unless stated.
 Dates identify the measured implementation; run the probes below to measure the
 current source. All probes use synthetic data and make no provider requests.
 
+## Model loop and tool payloads
+
+Recorded **2026-10-24**, Windows, Rust 1.95.0 `x86_64-pc-windows-gnullvm`,
+release builds. The stream baseline was measured at local commit `846a220`,
+whose source tree is identical to `674eba6` on `main` (the squash of PR #23).
+Use `674eba6` as the reproducible baseline. The recorded optimized candidate
+is `ab36897`; later review fixes do not change the stream parsing algorithm.
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Parse a 256 KiB tool argument in 4,096 SSE fragments | 399–467 ms | 6 ms |
+
+Both versions used two warmups and five measured samples, with exact assembled
+length checked. The input wire was prepared outside the timer and fed as one
+buffer. This isolates parsing and assembly; it does not measure network chunk
+sizes, provider latency, cache-hit rates or whole-turn speed. The optimized
+probe also took 1 ms for 512 fragments and 3 ms for 2,048 fragments, each 64
+bytes. Millisecond values are rounded down by the probe.
+
+Backend text now travels as deltas. The agent incrementally masks credentials
+and creates display snapshots at terminal cadence, with a final flush. The TUI
+retains the newest pending snapshot rather than queuing every intermediate
+response. Tool schemas and their encoded size are built once per process;
+shorter descriptions reduce the encoded neutral catalog from 11,297 to 9,532
+bytes (15.6%), despite adding batch edits and caller-selected output budgets.
+These are structural changes, not
+measured model-token or billing savings.
+
+Bash keeps 16 KiB of stream data by default, with an omission marker and complete
+saved-log references. Callers can change the budget. Persistent-process results
+use consecutive windows and report unread bytes, independently of the terminal's
+64 KiB viewer window.
+
+Run the current stream probe:
+
+```text
+cargo test --locked --offline --release backend::openrouter::stream::tests::tool_argument_stream_bench -- --exact --ignored --nocapture --test-threads=1
+```
+
+### Large-file batch edits
+
+Recorded **2026-10-24**, Windows, Rust 1.95.0 `x86_64-pc-windows-gnullvm`,
+release builds. Baseline `97b4284` stages a complete file for each replacement;
+the candidate composes borrowed replacements and original file ranges, then
+materializes the final content once. Matching still scans the sequential view
+for each edit, including matches spanning original and inserted ranges.
+
+The synthetic input is 32 MiB with ten distributed unique markers and ten
+variable-length replacements. Both versions ran in baseline/candidate/candidate/
+baseline order, with two warmups and five measured samples per block. Binaries
+were built before timing. Fixture resets and streamed exact-output checks were
+outside the timer; checkpoints were disabled and filesystem caches were warm.
+
+| Version | First block median | Second block median | Pooled median |
+| --- | ---: | ---: | ---: |
+| Full-file stage per edit | 710.38 ms | 805.99 ms | 778.00 ms |
+| One final stage | 389.64 ms | 263.20 ms | 326.80 ms |
+
+Raw measured milliseconds, in execution order:
+
+```text
+baseline  [616.8742, 502.3746, 1017.6720, 767.3300, 710.3777]
+candidate [389.6402, 873.4982, 396.7329, 314.6476, 378.3990]
+candidate [338.9443, 297.6512, 255.5739, 226.5880, 263.2026]
+baseline  [724.0229, 788.6609, 805.9942, 856.8396, 1738.2140]
+```
+
+The pooled median fell by 58% for this workload. Samples vary substantially;
+this does not establish cold-disk, checkpoint-enabled or whole-turn latency.
+Derived logical staging payloads are 335,547,565 bytes before and 33,555,277
+bytes after: roughly ten times less content written to staging files. These
+are calculated from fixture lengths, not measured physical disk I/O. Matching
+reads remain proportional to the file size and edit count. Content buffers
+remain bounded; range metadata grows with the number of edits.
+
+Run the current probe:
+
+```text
+cargo test --locked --offline --release large_batch_edit_measurement -- --ignored --nocapture --test-threads=1
+```
+
+### Checkpoint cache experiment
+
+Deferring the session-listing cache until the end of an active turn did not
+improve the measured checkpoint workload, so that change was **not retained**.
+Journal durability and the existing listing-cache behavior remain intact.
+
+The fixture held 400 messages of 4 KiB and appended a short generated-text delta
+per save. Initial history creation and final reload/verification were outside
+the timer. Four blocks ran in A/B/B/A order, each with three warmups and 21
+samples. Per-block medians were 11.00/10.40 ms for the original saves and
+12.02/11.47 ms for deferred index writes. Individual ranges overlapped:
+7.75–12.48 ms and 9.15–16.30 ms respectively. These results establish no latency
+benefit and do not justify making active-session listing fall back to a full
+journal read.
+
+The retained probe measures the current checkpoint path:
+
+```text
+cargo test --locked --offline --release sessions::checkpoint_measurements::active_turn_checkpoints -- --exact --ignored --nocapture --test-threads=1
+```
+
 ## TUI responsiveness
 
 Recorded **2026-10-15**, Windows `x86_64-pc-windows-gnullvm`, Rust 1.95.0,

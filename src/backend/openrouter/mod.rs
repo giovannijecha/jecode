@@ -285,6 +285,18 @@ impl OpenRouter {
                     })
                     .collect();
                 fields.insert("tools".into(), Value::Array(wrapped));
+                // OpenRouter supports automatic top-level breakpoints for Claude.
+                if self
+                    .model
+                    .strip_prefix('~')
+                    .unwrap_or(&self.model)
+                    .starts_with("anthropic/claude-")
+                {
+                    fields.insert(
+                        "cache_control".into(),
+                        Value::object([("type", Value::string("ephemeral"))]),
+                    );
+                }
             }
             if let Some(tokens) = output_tokens {
                 fields.insert("max_completion_tokens".into(), Value::number(tokens));
@@ -314,11 +326,11 @@ impl OpenRouter {
             .map_err(|error| {
                 let mut failure = stream.failure.clone().unwrap_or_else(|| error.clone());
                 failure.retry_after = failure.retry_after.or(error.retry_after);
-                failure.charges = stream.reported(None).or(failure.charges);
+                failure.charges = stream.reported(None).map(Box::new).or(failure.charges);
                 self.pin_hint(self.api.sanitize_failure(failure))
             })?;
         let parsed = crate::json::parse(&response).ok();
-        let charges = stream.reported(parsed.as_ref());
+        let charges = stream.reported(parsed.as_ref()).map(Box::new);
         if let Some(value) = &parsed
             && api_error(value).is_some()
         {

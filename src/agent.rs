@@ -188,7 +188,7 @@ impl Agent {
         self.prepared = None;
         // Endpoint refresh may wait on the network. Run it here on the
         // execution worker, not while the TUI prepares the submitted prompt.
-        self.prepare_routing()?;
+        *self.charges.lock().unwrap() = crate::backend::Charges::default();
         let limits = self.model_limits(events)?;
         self.emit_context(events)?;
         loop {
@@ -309,7 +309,7 @@ impl Agent {
         } else {
             context.estimate_bytes(
                 self.context_bytes(&self.projected_context(context, messages))
-                    .saturating_add(crate::tools::definitions().encode().len()),
+                    .saturating_add(crate::tools::encoded_size()),
             )
         }
     }
@@ -383,6 +383,7 @@ mod project_instructions;
 mod recovery;
 mod routing;
 mod skills;
+mod streaming;
 mod summary;
 mod temporary;
 

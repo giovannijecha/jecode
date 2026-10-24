@@ -3,7 +3,173 @@ use crate::backend::openrouter::OpenRouter;
 use crate::test_support::Directory;
 use crate::tools::Tools;
 use std::net::TcpListener;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+#[test]
+fn thousands_of_stream_snapshots_leave_only_the_latest_for_a_slow_reader() {
+    let (sender, receiver) = event_channel();
+    let cancellation = Cancellation::default();
+    sender
+        .send(
+            Event::Waiting {
+                model: "test".into(),
+            },
+            &cancellation,
+        )
+        .unwrap();
+    for index in 0..2_000 {
+        sender
+            .send(
+                Event::Streaming {
+                    text: index.to_string(),
+                },
+                &cancellation,
+            )
+            .unwrap();
+    }
+    assert!(matches!(receiver.try_recv(), Ok(Event::Waiting { .. })));
+    assert_eq!(
+        receiver.try_recv(),
+        Ok(Event::Streaming {
+            text: "1999".into()
+        })
+    );
+    assert_eq!(receiver.try_recv(), Err(TryRecvError::Empty));
+}
+
+#[test]
+fn final_and_reset_events_invalidate_previews_without_reordering_reliable_events() {
+    let (sender, receiver) = event_channel();
+    let cancellation = Cancellation::default();
+    let send = |event| sender.send(event, &cancellation).unwrap();
+    send(Event::Streaming {
+        text: "before note".into(),
+    });
+    send(Event::Maintenance {
+        text: "note".into(),
+    });
+    send(Event::Streaming {
+        text: "before final".into(),
+    });
+    send(Event::Message {
+        text: "final".into(),
+    });
+    send(Event::Streaming {
+        text: "before wait".into(),
+    });
+    send(Event::Waiting {
+        model: "next".into(),
+    });
+    send(Event::Streaming {
+        text: "before discard".into(),
+    });
+    send(Event::RequestDiscarded);
+    send(Event::Streaming {
+        text: "before retry".into(),
+    });
+    send(Event::Recovering {
+        attempt: 1,
+        delay: Duration::ZERO,
+        error: "offline".into(),
+    });
+    assert_eq!(
+        receiver.try_recv(),
+        Ok(Event::Streaming {
+            text: "before note".into()
+        })
+    );
+    assert_eq!(
+        receiver.try_recv(),
+        Ok(Event::Maintenance {
+            text: "note".into()
+        })
+    );
+    assert_eq!(
+        receiver.try_recv(),
+        Ok(Event::Message {
+            text: "final".into()
+        })
+    );
+    assert_eq!(
+        receiver.try_recv(),
+        Ok(Event::Waiting {
+            model: "next".into()
+        })
+    );
+    assert_eq!(receiver.try_recv(), Ok(Event::RequestDiscarded));
+    assert!(matches!(receiver.try_recv(), Ok(Event::Recovering { .. })));
+    assert_eq!(receiver.try_recv(), Err(TryRecvError::Empty));
+}
+
+#[test]
+fn full_reliable_queue_drops_activity_but_unblocks_on_cancellation() {
+    let (sender, receiver) = event_channel();
+    let cancellation = Cancellation::default();
+    for index in 0..EVENT_CAPACITY {
+        sender
+            .send(
+                Event::Maintenance {
+                    text: index.to_string(),
+                },
+                &cancellation,
+            )
+            .unwrap();
+    }
+    sender.send(Event::Reasoning, &cancellation).unwrap();
+    sender.send(Event::Working, &cancellation).unwrap();
+    let blocked = cancellation.clone();
+    let task = thread::spawn(move || {
+        sender.send(
+            Event::Message {
+                text: "final".into(),
+            },
+            &blocked,
+        )
+    });
+    thread::sleep(Duration::from_millis(25));
+    assert!(!task.is_finished());
+    cancellation.cancel();
+    assert_eq!(task.join().unwrap(), Err("Operation cancelled".into()));
+    for index in 0..EVENT_CAPACITY {
+        assert_eq!(
+            receiver.try_recv(),
+            Ok(Event::Maintenance {
+                text: index.to_string()
+            })
+        );
+    }
+    assert_eq!(receiver.try_recv(), Err(TryRecvError::Disconnected));
+}
+
+#[test]
+fn slow_reader_receives_every_reliable_event_in_order() {
+    let (sender, receiver) = event_channel();
+    let cancellation = Cancellation::default();
+    let task = thread::spawn(move || {
+        for index in 0..64 {
+            sender
+                .send(
+                    Event::Maintenance {
+                        text: index.to_string(),
+                    },
+                    &cancellation,
+                )
+                .unwrap();
+        }
+    });
+    for index in 0..64 {
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(2)),
+            Ok(Event::Maintenance {
+                text: index.to_string()
+            })
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    task.join().unwrap();
+    assert_eq!(receiver.try_recv(), Err(TryRecvError::Disconnected));
+}
 
 #[test]
 fn cancels_a_waiting_native_curl_request_and_returns_the_agent() {
@@ -49,7 +215,7 @@ fn cancels_a_waiting_native_curl_request_and_returns_the_agent() {
 }
 
 #[test]
-fn cancelling_a_worker_with_a_full_stream_channel_cannot_block_shutdown() {
+fn cancelling_a_worker_during_a_stream_cannot_block_shutdown() {
     use crate::test_support::{HttpFixture, Response};
     let chunks = (0..500).map(|_| (Duration::ZERO, "data: {\"choices\":[{\"delta\":{\"content\":\"fragment \"},\"finish_reason\":null}]}\n\n".into())).collect();
     let fixture = HttpFixture::streaming(vec![Response::Stream(chunks)]);
@@ -68,7 +234,6 @@ fn cancelling_a_worker_with_a_full_stream_channel_cannot_block_shutdown() {
     assert!(matches!(next(), Event::Waiting { .. }));
     assert!(matches!(next(), Event::Streaming { .. }));
     thread::sleep(Duration::from_millis(100));
-    assert!(!worker.finished());
     let started = Instant::now();
     drop(worker);
     assert!(started.elapsed() < Duration::from_secs(3));

@@ -63,6 +63,8 @@ fn same_directory(a: &Path, b: &Path) -> bool {
 }
 
 #[cfg(test)]
+mod checkpoint_measurements;
+#[cfg(test)]
 mod crash_tests;
 #[cfg(test)]
 mod journal_tests;

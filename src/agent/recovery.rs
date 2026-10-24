@@ -19,7 +19,7 @@ impl Agent {
         messages: &[Value],
         tools: bool,
         output_tokens: Option<usize>,
-        emit: &mut impl FnMut(Update) -> Result<(), String>,
+        emit: &mut impl FnMut(Event) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
         let mut retries = Retries::default();
         loop {
@@ -39,34 +39,43 @@ impl Agent {
         tools: bool,
         output_tokens: Option<usize>,
         retries: &mut Retries,
-        emit: &mut impl FnMut(Update) -> Result<(), String>,
+        emit: &mut impl FnMut(Event) -> Result<(), String>,
     ) -> Result<Option<Completion>, Failure> {
         if self.cancellation.requested() {
             return Err("Operation cancelled".into());
         }
         let mut partial = String::new();
+        let mut text = super::streaming::Text::new(self.redactor.clone());
         let result = self.client.sample(
             messages,
             tools,
             output_tokens,
             self.tools.attachments(),
-            &mut |update| {
-                if let Update::Text(text) = &update {
-                    partial = text.clone();
+            &mut |update| match update {
+                Update::TextDelta(delta) => {
+                    partial.push_str(&delta);
+                    if let Some(text) = text.push(&delta) {
+                        emit(Event::Streaming { text })?;
+                    }
+                    Ok(())
                 }
-                emit(update)
+                Update::Reasoning => emit(Event::Reasoning),
+                Update::Working => emit(Event::Working),
             },
         );
-        if let Err(error) = &result
-            && let Some(charges) = &error.charges
-        {
-            self.charges.lock().unwrap().include(charges);
+        match &result {
+            Ok(completion) => self.record_charges(completion),
+            Err(error) => {
+                if let Some(charges) = &error.charges {
+                    self.charges.lock().unwrap().include(charges);
+                }
+            }
+        }
+        if let Some(text) = text.finish() {
+            emit(Event::Streaming { text })?;
         }
         match result {
-            Ok(completion) => {
-                self.record_charges(&completion);
-                Ok(Some(completion))
-            }
+            Ok(completion) => Ok(Some(completion)),
             Err(error) if matches!(error.kind, FailureKind::Temporary | FailureKind::Empty) => {
                 if error.kind == FailureKind::Empty {
                     retries.empty_responses += 1;
@@ -91,13 +100,13 @@ impl Agent {
                     &error.message,
                     &partial,
                 )?;
-                emit(Update::Retry {
+                emit(Event::Recovering {
                     attempt,
                     delay,
                     error: self.redact(&error.message),
                 })?;
                 self.cancellation.wait(delay)?;
-                emit(Update::RetryFinished)?;
+                emit(Event::RecoveryFinished)?;
                 Ok(None)
             }
             Err(mut error) => {
@@ -125,8 +134,13 @@ impl Agent {
             if self.cancellation.requested() {
                 return Err("Operation cancelled".into());
             }
-            match self.client.limits() {
-                Ok(limits) => return Ok(limits),
+            match self.client.prepare_turn() {
+                Ok(limits) => {
+                    if self.cancellation.requested() {
+                        return Err("Operation cancelled".into());
+                    }
+                    return Ok(limits);
+                }
                 Err(error) if error.kind == FailureKind::Temporary => {
                     attempt = attempt.saturating_add(1);
                     let delay = retry_delay(attempt, error.retry_after, cfg!(test));
@@ -141,26 +155,6 @@ impl Agent {
                 }
                 Err(error) => return Err(self.redact(&error.message)),
             }
-        }
-    }
-
-    pub(super) fn update_event(&self, update: Update) -> Event {
-        match update {
-            Update::Reasoning => Event::Reasoning,
-            Update::Working => Event::Working,
-            Update::Text(text) => Event::Streaming {
-                text: self.redact(&text),
-            },
-            Update::Retry {
-                attempt,
-                delay,
-                error,
-            } => Event::Recovering {
-                attempt,
-                delay,
-                error,
-            },
-            Update::RetryFinished => Event::RecoveryFinished,
         }
     }
 

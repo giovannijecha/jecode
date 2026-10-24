@@ -138,7 +138,7 @@ impl Backend for Client {
                 (
                     "functions",
                     if with_tools {
-                        crate::tools::definitions()
+                        crate::tools::definitions().clone()
                     } else {
                         Value::Null
                     },
@@ -165,7 +165,7 @@ impl Backend for Client {
                 (
                     "operations",
                     if with_tools {
-                        crate::tools::definitions()
+                        crate::tools::definitions().clone()
                     } else {
                         Value::Null
                     },
@@ -181,7 +181,7 @@ impl Backend for Client {
             .pop_front()
             .ok_or("Unexpected fixture request")?;
         if !reply.text.is_empty() {
-            emit(Update::Text(reply.text.into()))?;
+            emit(Update::TextDelta(reply.text.into()))?;
         }
         let mut message = Value::object([
             ("role", Value::string("assistant")),
@@ -204,6 +204,7 @@ impl Backend for Client {
                 input_tokens: Some(73),
                 output_tokens: Some(4),
                 cached_tokens: None,
+                cache_write_tokens: None,
             }),
             charges: Some(Charges {
                 requests: 1,

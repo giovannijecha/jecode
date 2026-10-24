@@ -195,6 +195,8 @@ impl Input {
 pub struct Pending {
     pub active: bool,
     pub tool: Option<String>,
+    /// Legacy journal name for every call in a parallel read-only batch,
+    /// including web acquisitions and checkpoint/process inspections.
     pub reads: Vec<String>,
     pub partial: String,
 }

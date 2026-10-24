@@ -190,7 +190,8 @@ fn windows_command_supervisor() {
             "supervisor stderr: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(!output.timed_out && !output.truncated && !output.cancelled);
+        assert!(!output.timed_out && !output.stdout_truncated && !output.cancelled);
+        assert_eq!(output.stderr_bytes, output.stderr.len());
         assert!(!output.stdout.is_empty());
         output
     };

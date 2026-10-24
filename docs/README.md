@@ -34,6 +34,7 @@ scripts run from the Jecode repository root.
 | Reference | Contents |
 | --- | --- |
 | [Architecture](development/ARCHITECTURE.md) | Module map, agent flow, persistence and native boundaries. |
+| [OpenAI backend direction](development/OPENAI.md) | Planned provider boundary and the independent Sign in with ChatGPT flow. |
 | [Development and testing](development/TESTING.md) | Offline checks, isolated fixtures and manual smoke tests. |
 | [Platform verification](development/PLATFORMS.md) | Native test commands, local coverage and host checks. |
 | [Performance](development/PERFORMANCE.md) | Recorded measurements, methodology and current benchmark commands. |

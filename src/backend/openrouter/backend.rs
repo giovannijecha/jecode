@@ -82,6 +82,39 @@ impl Backend for OpenRouter {
             std::time::Instant::now(),
         )
     }
+    fn prepare_turn(&mut self) -> Result<Option<backend::Limits>, backend::Failure> {
+        let parallel = self
+            .router
+            .needs_refresh(&self.model, std::time::Instant::now())
+            && self.limits.is_none();
+        let fetched = if parallel {
+            let api = self.api.clone();
+            let model = self.model.clone();
+            Some(std::thread::scope(|scope| {
+                let endpoints = scope.spawn(|| api.endpoints(&model));
+                let limits = self.model_limits();
+                match endpoints.join().expect("endpoint metadata worker panicked") {
+                    Ok(endpoints) => self.router.offer(endpoints),
+                    Err(_) => self.router.failed(&self.model, std::time::Instant::now()),
+                }
+                limits
+            }))
+        } else {
+            self.refresh_endpoints();
+            None
+        };
+        if self.api.cancellation.requested() {
+            return Err(backend::Failure::from("Operation cancelled"));
+        }
+        self.router
+            .validate_pin(&self.model, self.reasoning(), std::time::Instant::now())
+            .map_err(backend::Failure::from)?;
+        let limits = match fetched {
+            Some(limits) => limits?,
+            None => self.model_limits()?,
+        };
+        Ok(self.router.limits(&self.model, limits))
+    }
     fn routing(&self) -> backend::Routing {
         self.routing().clone()
     }
