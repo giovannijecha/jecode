@@ -340,7 +340,7 @@ impl Context {
         }
         self.estimate_bytes(
             bytes_for(&self.project(messages, compatible_from), inputs)
-                .saturating_add(crate::tools::definitions().encode().len()),
+                .saturating_add(crate::tools::encoded_size()),
         )
     }
     /// The effective window: declared capacity lowered by any ceiling learned

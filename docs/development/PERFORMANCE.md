@@ -5,6 +5,64 @@ workspace checkpoints, on Windows unless stated.
 Dates identify the measured implementation; run the probes below to measure the
 current source. All probes use synthetic data and make no provider requests.
 
+## Model loop and tool payloads
+
+Recorded **2026-10-24**, Windows, Rust 1.95.0 `x86_64-pc-windows-gnullvm`,
+release builds. The stream baseline uses the original `846a220` accumulation
+and line-draining algorithms; the candidate is the local optimized source.
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Parse a 256 KiB tool argument in 4,096 SSE fragments | 399–467 ms | 6 ms |
+
+Both versions used two warmups and five measured samples, with exact assembled
+length checked. The input wire was prepared outside the timer and fed as one
+buffer. This isolates parsing and assembly; it does not measure network chunk
+sizes, provider latency, cache-hit rates or whole-turn speed. The optimized
+probe also took 1 ms for 512 fragments and 3 ms for 2,048 fragments, each 64
+bytes. Millisecond values are rounded down by the probe.
+
+Backend text now travels as deltas. The agent incrementally masks credentials
+and creates display snapshots at terminal cadence, with a final flush. The TUI
+retains the newest pending snapshot rather than queuing every intermediate
+response. Tool schemas and their encoded size are built once per process;
+shorter descriptions reduce the encoded neutral catalog from 11,297 to 9,532
+bytes (15.6%), despite adding batch edits and caller-selected output budgets.
+These are structural changes, not
+measured model-token or billing savings.
+
+Bash keeps 16 KiB of stream data by default, with an omission marker and complete
+saved-log references. Callers can change the budget. Persistent-process results
+use consecutive windows and report unread bytes, independently of the terminal's
+64 KiB viewer window.
+
+Run the current stream probe:
+
+```text
+cargo test --locked --offline --release backend::openrouter::stream::tests::tool_argument_stream_bench -- --exact --ignored --nocapture --test-threads=1
+```
+
+### Checkpoint cache experiment
+
+Deferring the session-listing cache until the end of an active turn did not
+improve the measured checkpoint workload, so that change was **not retained**.
+Journal durability and the existing listing-cache behavior remain intact.
+
+The fixture held 400 messages of 4 KiB and appended a short generated-text delta
+per save. Initial history creation and final reload/verification were outside
+the timer. Four blocks ran in A/B/B/A order, each with three warmups and 21
+samples. Per-block medians were 11.00/10.40 ms for the original saves and
+12.02/11.47 ms for deferred index writes. Individual ranges overlapped:
+7.75–12.48 ms and 9.15–16.30 ms respectively. These results establish no latency
+benefit and do not justify making active-session listing fall back to a full
+journal read.
+
+The retained probe measures the current checkpoint path:
+
+```text
+cargo test --locked --offline --release sessions::checkpoint_measurements::active_turn_checkpoints -- --exact --ignored --nocapture --test-threads=1
+```
+
 ## TUI responsiveness
 
 Recorded **2026-10-15**, Windows `x86_64-pc-windows-gnullvm`, Rust 1.95.0,

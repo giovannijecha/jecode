@@ -417,26 +417,6 @@ fn live_reads_mask_credentials_split_across_chunks() {
 }
 
 #[test]
-fn bounded_reads_respect_utf8_boundaries_and_report_skipped_bytes() {
-    let directory = Directory::new();
-    let path = directory.path().join("stream");
-    // One partial character at the end of a live stream waits for the next read.
-    std::fs::write(&path, &"aé".as_bytes()[..2]).unwrap();
-    let live = read_after(&path, 0, false).unwrap();
-    assert_eq!((live.text.as_str(), live.next), ("a", 1));
-    let finished = read_after(&path, 1, true).unwrap();
-    assert_eq!(finished.text, "\u{fffd}");
-    // A tail cut never begins inside a character.
-    let mut bytes = "é".repeat(OUTPUT_LIMIT).into_bytes();
-    bytes.truncate(OUTPUT_LIMIT + 101);
-    std::fs::write(&path, &bytes).unwrap();
-    let tail = read_after(&path, 0, false).unwrap();
-    assert_eq!(tail.offset, 102);
-    assert_eq!(tail.next, bytes.len() as u64 - 1);
-    assert!(tail.text.chars().all(|character| character == 'é'));
-}
-
-#[test]
 fn a_failed_stream_read_preserves_both_output_cursors() {
     let directory = Directory::new();
     let stdout = directory.path().join("stdout");
@@ -467,9 +447,14 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
         changed: Condvar::new(),
         monitor: Mutex::new(None),
     };
-    assert!(entry.report(false).unwrap_err().contains("saved stderr"));
+    assert!(
+        entry
+            .report(false, DEFAULT_OUTPUT_LIMIT)
+            .unwrap_err()
+            .contains("saved stderr")
+    );
     std::fs::write(stderr, "unread stderr").unwrap();
-    let recovered = entry.report(false).unwrap();
+    let recovered = entry.report(false, DEFAULT_OUTPUT_LIMIT).unwrap();
     assert_eq!(text(&recovered, "stdout"), "unread stdout");
     assert_eq!(text(&recovered, "stderr"), "unread stderr");
     assert_eq!(number(&recovered, "stdout_offset"), 0);

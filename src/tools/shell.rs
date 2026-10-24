@@ -1,11 +1,15 @@
-use super::{OUTPUT_LIMIT, required_string};
+use super::required_string;
 use crate::cancel::Cancellation;
 use crate::json::Value;
 use crate::process;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+#[cfg(test)]
+mod budget_tests;
 #[cfg(all(test, windows))]
 mod windows_tests;
 
@@ -35,6 +39,7 @@ pub(super) fn execute(
         return Err("command must not be empty".into());
     }
     let wait = super::processes::wait_argument(arguments)?;
+    let output_limit = super::processes::output_limit(arguments)?;
     let timeout = arguments
         .get("timeout_seconds")
         .map(|value| {
@@ -69,6 +74,7 @@ pub(super) fn execute(
                 super::processes::Adoption {
                     timeout,
                     wait,
+                    output_limit,
                     cancellation,
                 },
             ),
@@ -82,7 +88,7 @@ pub(super) fn execute(
     let output = match process::run_logged(
         &mut command,
         timeout,
-        OUTPUT_LIMIT,
+        0,
         cancellation,
         [logs.stdout, logs.stderr],
     ) {
@@ -90,27 +96,32 @@ pub(super) fn execute(
         Err(error) if !error.started => return Err(error.message),
         Err(error) => return Ok(unknown_outcome(&error.message, [stdout_ref, stderr_ref])),
     };
+    let previews = (|| {
+        Ok::<_, String>((
+            preview(&outputs.resolve(&stdout_ref)?, output_limit)?,
+            preview(&outputs.resolve(&stderr_ref)?, output_limit)?,
+        ))
+    })();
+    let ((stdout, stdout_truncated), (stderr, stderr_truncated)) = match previews {
+        Ok(previews) => previews,
+        Err(error) => return Ok(unknown_outcome(&error, [stdout_ref, stderr_ref])),
+    };
+    let truncated = stdout_truncated || stderr_truncated;
     let mut result = Value::object([
-        (
-            "stdout",
-            Value::string(String::from_utf8_lossy(&output.stdout)),
-        ),
-        (
-            "stderr",
-            Value::string(String::from_utf8_lossy(&output.stderr)),
-        ),
+        ("stdout", Value::string(stdout)),
+        ("stderr", Value::string(stderr)),
         (
             "exit_code",
             output.exit_code.map_or(Value::Null, Value::number),
         ),
         ("timed_out", Value::Bool(output.timed_out)),
-        ("truncated", Value::Bool(output.truncated)),
+        ("truncated", Value::Bool(truncated)),
         ("cancelled", Value::Bool(output.cancelled)),
         ("stdout_bytes", Value::number(output.stdout_bytes)),
         ("stderr_bytes", Value::number(output.stderr_bytes)),
-        ("stdout_truncated", Value::Bool(output.stdout_truncated)),
-        ("stderr_truncated", Value::Bool(output.stderr_truncated)),
-        ("output_limit_bytes", Value::number(OUTPUT_LIMIT)),
+        ("stdout_truncated", Value::Bool(stdout_truncated)),
+        ("stderr_truncated", Value::Bool(stderr_truncated)),
+        ("output_limit_bytes", Value::number(output_limit)),
         ("stdout_file", Value::string(stdout_ref)),
         ("stderr_file", Value::string(stderr_ref)),
     ]);
@@ -126,6 +137,43 @@ pub(super) fn execute(
         );
     }
     Ok(result)
+}
+
+/// Reads only the model preview from the completed, redacted output file.
+fn preview(path: &Path, limit: usize) -> Result<(String, bool), String> {
+    let mut file = File::open(path).map_err(|error| error.to_string())?;
+    let length = file.metadata().map_err(|error| error.to_string())?.len();
+    if length <= limit as u64 {
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        return Ok((String::from_utf8_lossy(&bytes).into_owned(), false));
+    }
+    let head_length = limit.div_ceil(2);
+    let tail_length = limit / 2;
+    let mut head = vec![0; head_length];
+    let mut tail = vec![0; tail_length];
+    file.read_exact(&mut head)
+        .map_err(|error| error.to_string())?;
+    file.seek(SeekFrom::Start(length - tail_length as u64))
+        .map_err(|error| error.to_string())?;
+    file.read_exact(&mut tail)
+        .map_err(|error| error.to_string())?;
+    let head_end = match std::str::from_utf8(&head) {
+        Ok(_) => head.len(),
+        Err(error) if error.error_len().is_none() => error.valid_up_to(),
+        Err(_) => head.len(),
+    };
+    let tail_start = tail.iter().take_while(|byte| **byte & 0xC0 == 0x80).count();
+    let omitted = length - head_end as u64 - (tail.len() - tail_start) as u64;
+    Ok((
+        format!(
+            "{}\n[... {omitted} saved bytes omitted; read the output file for the complete stream ...]\n{}",
+            String::from_utf8_lossy(&head[..head_end]),
+            String::from_utf8_lossy(&tail[tail_start..])
+        ),
+        true,
+    ))
 }
 
 /// Declared workspace names whose preimages Bash may need. Command text is
@@ -288,21 +336,31 @@ mod tests {
             10,
         );
         assert_eq!(
-            result.get("stdout").unwrap().as_str().unwrap().len(),
-            OUTPUT_LIMIT
+            result.get("output_limit_bytes"),
+            Some(&Value::number(
+                crate::tools::processes::DEFAULT_OUTPUT_LIMIT
+            ))
         );
-        assert_eq!(
-            result.get("stderr").unwrap().as_str().unwrap().len(),
-            OUTPUT_LIMIT
+        assert!(
+            result
+                .get("stdout")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("saved bytes omitted")
+        );
+        assert!(
+            result
+                .get("stderr")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("saved bytes omitted")
         );
         assert_eq!(result.get("truncated"), Some(&Value::Bool(true)));
         assert_eq!(result.get("stdout_bytes"), Some(&Value::number(70000)));
         assert_eq!(result.get("stderr_bytes"), Some(&Value::number(70000)));
         assert_eq!(result.get("stdout_truncated"), Some(&Value::Bool(true)));
-        assert_eq!(
-            result.get("output_limit_bytes"),
-            Some(&Value::number(OUTPUT_LIMIT))
-        );
         assert_eq!(result.get("exit_code").unwrap().as_usize(), Some(0));
     }
 

@@ -23,20 +23,66 @@ fn read_call(id: &str, path: &str) -> ToolCall {
 
 #[test]
 fn history_and_skill_reads_stay_serial() {
-    assert!(parallel_read(&read_call("file", "src/main.rs")));
-    assert!(!parallel_read(&read_call("history", "history:requests")));
-    assert!(!parallel_read(&read_call("skill", "skill:example")));
-    assert!(!parallel_read(&ToolCall {
+    assert!(parallel_call(&read_call("file", "src/main.rs")));
+    assert!(!parallel_call(&read_call("history", "history:requests")));
+    assert!(!parallel_call(&read_call("skill", "skill:example")));
+    assert!(!parallel_call(&ToolCall {
         name: "bash".into(),
         ..read_call("shell", "src/main.rs")
     }));
 }
 
 #[test]
+fn parallel_operations_exclude_state_changes_and_shared_cursors() {
+    let call = |name: &str, arguments: Value| ToolCall {
+        id: "fixture".into(),
+        name: name.into(),
+        arguments: arguments.encode(),
+    };
+    for (name, action) in [
+        ("checkpoint", "list"),
+        ("checkpoint", "inspect"),
+        ("process", "list"),
+        ("web", "fetch"),
+        ("web", "download"),
+    ] {
+        assert!(parallel_call(&call(
+            name,
+            Value::object([("action", Value::string(action))])
+        )));
+    }
+    for (name, action) in [
+        ("checkpoint", "restore"),
+        ("process", "poll"),
+        ("process", "stop"),
+        ("process", "write"),
+        ("web", "crawl"),
+        ("browser", "snapshot"),
+    ] {
+        assert!(!parallel_call(&call(
+            name,
+            Value::object([("action", Value::string(action))])
+        )));
+    }
+    for arguments in [
+        Value::object([
+            ("action", Value::string("fetch")),
+            ("method", Value::string("POST")),
+        ]),
+        Value::object([
+            ("action", Value::string("fetch")),
+            ("body", Value::string("payload")),
+        ]),
+    ] {
+        assert!(!parallel_call(&call("web", arguments)));
+    }
+}
+
+#[test]
 fn independent_reads_overlap_and_results_keep_source_order() {
     let started = Arc::new((Mutex::new(0usize), Condvar::new()));
     let calls = [read_call("first", "a"), read_call("second", "b")];
-    let results = run_parallel_reads(&calls, &|call| {
+    let results = run_parallel_calls(&calls, &|call| {
         let (count, changed) = &*started;
         let mut count = count.lock().unwrap();
         *count += 1;
@@ -66,7 +112,7 @@ fn cancellation_waits_for_every_started_read() {
     let finished = AtomicUsize::new(0);
     let cancellation = Cancellation::default();
     let calls = [read_call("first", "a"), read_call("second", "b")];
-    let results = run_parallel_reads(&calls, &|call| {
+    let results = run_parallel_calls(&calls, &|call| {
         let (count, changed) = &*started;
         let mut count = count.lock().unwrap();
         *count += 1;

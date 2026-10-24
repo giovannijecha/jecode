@@ -63,9 +63,9 @@ fn fragmented_utf8_sse_preserves_reasoning_and_assembles_tool_arguments() {
         stream
             .feed(chunk, &mut |update| {
                 match update {
-                    Update::Text(value) => text = value,
+                    Update::TextDelta(value) => text.push_str(&value),
                     Update::Reasoning => thinking = true,
-                    Update::Working | Update::Retry { .. } | Update::RetryFinished => {}
+                    Update::Working => {}
                 };
                 Ok(())
             })
@@ -161,7 +161,7 @@ fn the_serving_provider_and_reported_usage_survive_streaming() {
     );
     wire.push_str(&delta(Value::object([]), Value::string("stop")));
     wire.push_str(
-        "data: {\"provider\":\"Baidu\",\"choices\":[],\"usage\":{\"cost\":0.0004,\"prompt_tokens_details\":{\"cached_tokens\":64}}}\n\ndata: [DONE]\n\n",
+        "data: {\"provider\":\"Baidu\",\"choices\":[],\"usage\":{\"cost\":0.0004,\"prompt_tokens_details\":{\"cached_tokens\":64,\"cache_write_tokens\":128}}}\n\ndata: [DONE]\n\n",
     );
     let mut stream = Stream::default();
     stream.feed(wire.as_bytes(), &mut |_| Ok(())).unwrap();
@@ -175,9 +175,11 @@ fn the_serving_provider_and_reported_usage_survive_streaming() {
         Some("Baidu")
     );
     let charges = completion.charges.as_ref().unwrap();
+    assert_eq!(completion.usage.unwrap().cache_write_tokens, Some(128));
+    assert_eq!(charges.cache_written, 128);
     assert_eq!(
         charges.describe().unwrap(),
-        "Served by Baidu · $0.0004 charged · 64 cached"
+        "Served by Baidu · $0.0004 charged · 64 cached · 128 cache write tokens"
     );
     let plain = parse_completion(
         crate::json::parse(
@@ -233,4 +235,46 @@ fn routing_metadata_reports_only_the_selected_provider_for_json_and_streams() {
         completion.charges.as_ref().map(|charges| charges.cost),
         Some(0.002)
     );
+}
+
+#[test]
+#[ignore = "local release benchmark; no provider request"]
+fn tool_argument_stream_bench() {
+    use std::time::Instant;
+
+    for fragments in [512, 2048, 4096] {
+        let mut wire = String::new();
+        for index in 0..fragments {
+            let call = Value::object([
+                ("index", Value::number(0)),
+                ("id", Value::string("call-1")),
+                (
+                    "function",
+                    Value::object([
+                        ("name", Value::string(if index == 0 { "read" } else { "" })),
+                        ("arguments", Value::string("x".repeat(64))),
+                    ]),
+                ),
+            ]);
+            wire.push_str(&delta(
+                Value::object([("tool_calls", Value::Array(vec![call]))]),
+                Value::Null,
+            ));
+        }
+        wire.push_str(&delta(Value::object([]), Value::string("tool_calls")));
+        wire.push_str("data: [DONE]\n\n");
+        let mut timings = Vec::new();
+        for sample in 0..7 {
+            let mut stream = Stream::default();
+            let started = Instant::now();
+            stream.feed(wire.as_bytes(), &mut |_| Ok(())).unwrap();
+            let completion = stream.finish(&wire).unwrap();
+            let elapsed = started.elapsed();
+            assert_eq!(completion.calls[0].arguments.len(), fragments * 64);
+            if sample >= 2 {
+                timings.push(elapsed.as_millis());
+            }
+        }
+        eprintln!("tool argument fragments={fragments}, 64 bytes each, warmup=2, ms={timings:?}");
+    }
 }

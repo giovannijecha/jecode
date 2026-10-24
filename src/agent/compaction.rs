@@ -1,6 +1,6 @@
 use super::Agent;
 use crate::{
-    backend::{Completion, FailureKind, Limits, Update},
+    backend::{Completion, FailureKind, Limits},
     context,
     events::{Event, EventSink},
     json::Value,
@@ -67,27 +67,26 @@ impl Agent {
                 return Err("No output space remains in the model context; the original session is preserved".into());
             }
             let persistence = self.persistence.clone();
-            let request = messages.clone();
-            let mut emit = |update: Update| {
-                match &update {
-                    Update::Text(text) => {
+            let mut emit = |event: Event| {
+                match &event {
+                    Event::Streaming { text } => {
                         if let Some(persistence) = &persistence {
                             persistence.partial(text)?;
                         }
                     }
-                    Update::Retry { .. } => {
+                    Event::Recovering { .. } => {
                         if let Some(persistence) = &persistence {
                             persistence.partial("")?;
                         }
                     }
                     _ => {}
                 }
-                events.emit(self.update_event(update))
+                events.emit(event)
             };
             // Rebuild after every retry wait so newly observed restores and
             // submitted messages reach the next provider request as well.
             let result =
-                self.complete_attempt(&request, true, output_tokens, &mut retries, &mut emit);
+                self.complete_attempt(&messages, true, output_tokens, &mut retries, &mut emit);
             match result {
                 Ok(None) => {}
                 Ok(Some(completion)) => {
@@ -95,7 +94,7 @@ impl Agent {
                     self.context.observe(completion.usage.as_ref(), input_end);
                     self.context.calibrate(
                         self.context_bytes(&messages)
-                            .saturating_add(crate::tools::definitions().encode().len()),
+                            .saturating_add(crate::tools::encoded_size()),
                     );
                     return Ok(completion);
                 }
@@ -234,7 +233,7 @@ impl Agent {
         next.summary = " ".into();
         let fixed = next.estimate_bytes(
             self.context_bytes(&self.projected_context(&next, &original))
-                .saturating_add(crate::tools::definitions().encode().len())
+                .saturating_add(crate::tools::encoded_size())
                 .saturating_add(self.request_environment().len())
                 .saturating_add(768),
         );

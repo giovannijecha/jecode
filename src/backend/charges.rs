@@ -18,6 +18,7 @@ impl Charges {
         self.priced += other.priced;
         self.cost += other.cost;
         self.cached += other.cached;
+        self.cache_written += other.cache_written;
         self.byok |= other.byok;
         self.upstream += other.upstream;
     }
@@ -50,6 +51,12 @@ impl Charges {
         }
         if self.cached > 0 {
             parts.push(format!("{} cached", quantity(self.cached)));
+        }
+        if self.cache_written > 0 {
+            parts.push(format!(
+                "{} cache write tokens",
+                quantity(self.cache_written)
+            ));
         }
         (!parts.is_empty()).then(|| parts.join(" · "))
     }

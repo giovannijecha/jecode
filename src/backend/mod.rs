@@ -43,19 +43,14 @@ pub struct Failure {
     pub kind: FailureKind,
     pub message: String,
     pub retry_after: Option<Duration>,
-    pub charges: Option<Charges>,
+    pub charges: Option<Box<Charges>>,
 }
 
 pub enum Update {
     Reasoning,
-    Text(String),
+    /// Newly generated text, appended to the current attempt's response.
+    TextDelta(String),
     Working,
-    Retry {
-        attempt: usize,
-        delay: Duration,
-        error: String,
-    },
-    RetryFinished,
 }
 
 pub struct Completion {
@@ -74,6 +69,7 @@ pub struct Usage {
     pub input_tokens: Option<usize>,
     pub output_tokens: Option<usize>,
     pub cached_tokens: Option<usize>,
+    pub cache_write_tokens: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -83,6 +79,7 @@ pub struct Charges {
     pub priced: usize,
     pub cost: f64,
     pub cached: usize,
+    pub cache_written: usize,
     pub byok: bool,
     pub upstream: f64,
 }
@@ -238,6 +235,11 @@ pub trait Backend: Send {
     fn services(&self) -> Services;
     fn prepare(&mut self) -> Result<(), String> {
         Ok(())
+    }
+    /// Prepares routing and returns the limits for the next inference turn.
+    fn prepare_turn(&mut self) -> Result<Option<Limits>, Failure> {
+        self.prepare().map_err(Failure::from)?;
+        self.limits()
     }
     fn routing(&self) -> Routing {
         Routing::Default

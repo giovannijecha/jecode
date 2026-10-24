@@ -29,11 +29,9 @@ pub struct Output {
     /// Input delivery failed after launch; the child's output and exit status remain available.
     pub input_error: Option<String>,
     pub timed_out: bool,
-    pub truncated: bool,
     pub stdout_bytes: usize,
     pub stderr_bytes: usize,
     pub stdout_truncated: bool,
-    pub stderr_truncated: bool,
     pub cancelled: bool,
 }
 
@@ -394,11 +392,9 @@ impl Started {
                 }
             },
             timed_out,
-            truncated: stdout.truncated || stderr.truncated,
             stdout_bytes: stdout.total_bytes,
             stderr_bytes: stderr.total_bytes,
             stdout_truncated: stdout.truncated,
-            stderr_truncated: stderr.truncated,
             cancelled,
         })
     }

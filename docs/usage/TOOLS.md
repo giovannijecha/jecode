@@ -4,12 +4,12 @@ Jecode offers eight tools to the model. An assistant message describing a comman
 or file change does not execute it; only a native tool call can do that. Check
 the tool result or resulting state before treating a change as complete. Calls
 run only after the complete model response arrives; streamed partial calls never
-execute. Up to four consecutive `read` calls can run together when their
-arguments identify paths other than `history:` and `skill:`. A different tool or
-one of those references ends the batch. Results enter the conversation and saved
-session in call order before
-the next tool runs. Tool errors return as results so the model can correct the
-call.
+execute. Up to four adjacent independent calls run together: `read` except
+`history:`/`skill:`, `checkpoint list`/`inspect`, `process list`, and
+`web fetch`/`download` with GET or HEAD and no body. Other calls end the batch,
+including process polling, crawls and workspace modifications. Results enter the
+conversation and saved session in call order before the next batch or tool runs.
+Tool errors return as results so the model can correct the call.
 
 ## Tool arguments
 
@@ -17,9 +17,9 @@ call.
 | --- | --- | --- | --- |
 | `read` | `path` | `offset`, `limit`, `byte_offset` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
-| `edit` | `path`, `old_text`, `new_text` | — | Replaces exactly one nonempty match; returns `bytes_written`. A missing or ambiguous match leaves the file unchanged. |
-| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
-| `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll` | Lists, polls or stops this conversation's persistent processes. |
+| `edit` | `path` and either `old_text`/`new_text` or `edits` | — | Applies exact unique replacements in order, installing the file only after all succeed. Returns `bytes_written`. |
+| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
+| `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes` | Lists, polls or stops this conversation's persistent processes. |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
 | `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
 | `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
@@ -35,6 +35,14 @@ symbolic links. Project paths passed to `read`, `write` and `edit` cannot cross
 that boundary. A new project file needs an existing parent directory. `write`
 and `edit` reject read-only files and replace accepted files through a sibling
 temporary file. Writes, edits and text reads use UTF-8 without NUL bytes.
+
+For several replacements in one file, use
+`edits: [{"old_text": "before", "new_text": "after"}, ...]` instead of the
+top-level pair. Each step matches the result of preceding steps, including exact
+whitespace and line endings. A missing or ambiguous match leaves the original
+file intact. A successful batch installs once and captures one workspace
+checkpoint. Large files stage intermediate replacements with bounded content
+memory; they can require multiple temporary-file passes.
 
 Images and PDFs in the project or the current `tmp:` area are recognized from
 their contents and shown to the model on the next request, using the same
@@ -168,8 +176,11 @@ Commands use Bash syntax on Windows too; use an explicit PowerShell invocation
 when a PowerShell command is needed.
 
 Without `wait_ms`, the call waits for completion. It returns `exit_code`,
-`cancelled`, `timed_out`, byte counts, and the last 64 KiB of each stdout/stderr
-stream. `stdout_file` and `stderr_file` point to the complete saved streams;
+`cancelled`, `timed_out`, byte counts, and a 16 KiB preview of each stdout/stderr
+stream. Truncated previews retain the beginning and end, with an omitted-byte
+marker. Set a positive `output_limit_bytes` to request a smaller or larger
+per-stream preview; it has no fixed 64 KiB ceiling. `stdout_file` and
+`stderr_file` point to the complete saved streams;
 read those references when a preview is truncated. Known configured keys are
 masked before storage. If saving output or confirming cleanup fails after a
 command starts, the result reports `outcome: "unknown"` with output references.
@@ -201,12 +212,17 @@ Statuses are `running`, `stopping`, `exited`, `timed_out`, `stopped` and
 the workspace before retrying. An empty output preview says nothing about
 readiness or completion: check `status`.
 
-Each result includes at most the last 64 KiB of *new* output per stream.
+Each result reads the next 16 KiB of saved output per stream by default;
+`output_limit_bytes` changes this budget for the initial Bash result or a
+`process poll`/`stop`. A budget smaller than one UTF-8 character still returns
+that complete character so the cursor can advance.
 `stdout_offset`/`stderr_offset` identify the start of returned text;
 `stdout_next_offset`/`stderr_next_offset` identify the next cursor; and
-`stdout_skipped_bytes`/`stderr_skipped_bytes` count earlier unread bytes omitted
-from the preview. Read the corresponding `*_file` with `byte_offset` to retrieve
-those bytes. Interrupting a `poll` wait reports `wait_cancelled: true` and
+`stdout_remaining_bytes`/`stderr_remaining_bytes` count unread saved data at
+the time of the result, including when the process has already exited.
+`stdout_skipped_bytes`/`stderr_skipped_bytes` remain zero: polling never skips
+unread output. Poll again for the next window or read the corresponding
+`*_file` with `byte_offset`. Interrupting a `poll` wait reports `wait_cancelled: true` and
 leaves the process running; interrupting a `stop` wait does not undo the stop.
 
 Processes survive tool calls and turns, but end on `process stop`, Jecode exit,

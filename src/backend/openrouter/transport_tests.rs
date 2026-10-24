@@ -105,11 +105,9 @@ fn incomplete_output(stdout: &[u8], stderr: &[u8], exit: i32) -> process::Output
         exit_code: Some(exit),
         input_error: Some("Could not send process input: pipe closed".into()),
         timed_out: false,
-        truncated: false,
         stdout_bytes: stdout.len(),
         stderr_bytes: stderr.len(),
         stdout_truncated: false,
-        stderr_truncated: false,
         cancelled: false,
     }
 }

@@ -68,17 +68,6 @@ impl Agent {
         }
     }
 
-    /// Prepares routing for a turn: clears the previous turn's charges and
-    /// refreshes stale endpoint metadata, at most once per freshness window.
-    pub(super) fn prepare_routing(&mut self) -> Result<(), String> {
-        *self.charges.lock().unwrap() = Charges::default();
-        self.client.prepare()?;
-        if self.cancellation.requested() {
-            return Err("Operation cancelled".into());
-        }
-        Ok(())
-    }
-
     /// Auto's `session_id` follows the saved conversation it belongs to.
     pub(super) fn sync_conversation(&mut self) {
         let id = self.persistence.as_ref().map(crate::sessions::Handle::id);

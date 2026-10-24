@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn tool_catalog_and_encoded_size_are_reused() {
+    assert!(std::ptr::eq(definitions(), definitions()));
+    assert_eq!(encoded_size(), definitions().encode().len());
+}
+
+#[test]
+fn edit_schema_advertises_ordered_batch_and_legacy_fields() {
+    let tools = definitions();
+    let edit = &tools.as_array().unwrap()[2];
+    let parameters = edit.get("parameters").unwrap();
+    assert_eq!(
+        parameters.get("required"),
+        Some(&Value::Array(vec![Value::string("path")]))
+    );
+    let properties = parameters.get("properties").unwrap();
+    assert!(properties.get("old_text").is_some());
+    assert!(properties.get("new_text").is_some());
+    let edits = properties.get("edits").unwrap();
+    assert_eq!(edits.get("minItems"), Some(&Value::number(1)));
+    let items = edits.get("items").unwrap();
+    assert_eq!(items.get("additionalProperties"), Some(&Value::Bool(false)));
+    assert_eq!(
+        items.get("required"),
+        Some(&Value::Array(vec![
+            Value::string("old_text"),
+            Value::string("new_text")
+        ]))
+    );
+}
+
+#[test]
 fn provider_regression_unbounded_offsets_have_no_platform_sized_schema_maximum() {
     let tools = definitions();
     let read = &tools.as_array().unwrap()[0];
@@ -95,4 +126,21 @@ fn bash_contract_distinguishes_wait_from_execution_deadline() {
             .unwrap()
             .contains("does not end the process")
     );
+    for name in ["bash", "process"] {
+        let tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+            .unwrap();
+        let budget = tool
+            .get("parameters")
+            .unwrap()
+            .get("properties")
+            .unwrap()
+            .get("output_limit_bytes")
+            .unwrap();
+        assert_eq!(budget.get("minimum"), Some(&Value::number(1)));
+        assert!(budget.get("maximum").is_none());
+    }
 }

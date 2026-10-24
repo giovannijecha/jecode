@@ -68,45 +68,80 @@ pub(super) fn edit_with_change(
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     check_cancelled(cancellation)?;
     let path = existing_path(root, required_string(arguments, "path")?)?;
-    let old = required_string(arguments, "old_text")?;
-    let new = required_string(arguments, "new_text")?;
-    if old.is_empty() {
-        return Err("old_text must not be empty; use write to replace the whole file".into());
-    }
+    let edits = edit_steps(arguments)?;
     // Hold the path from reading to replacing so concurrent sessions take turns.
     let guard = checkpoints.map(|session| session.file_cancellable("edit", &path, cancellation));
     if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > MAX_DIFF_BYTES as u64) {
-        return streaming::edit(&path, old, new, guard, cancellation);
+        return streaming::edit(&path, &edits, guard, cancellation);
     }
     let content = read_text(&path, cancellation)?;
-    let Some(position) = content.find(old) else {
-        return Ok((
-            mismatch::result(
-                &content,
-                "old_text was not found; use exact current text from the supplied file context or read the file",
-            ),
-            None,
-        ));
-    };
-    // Include overlapping matches, which are ambiguous too.
-    let next = position + content[position..].chars().next().unwrap().len_utf8();
-    if content[next..].contains(old) {
-        return Ok((
-            mismatch::result(
-                &content,
-                "old_text occurs more than once; include more exact surrounding text from the supplied file context or read the file",
-            ),
-            None,
-        ));
-    }
     let mut updated = content.clone();
-    updated.replace_range(position..position + old.len(), new);
+    for (index, (old, new)) in edits.iter().enumerate() {
+        check_cancelled(cancellation)?;
+        let Some(position) = updated.find(old) else {
+            return Ok((
+                mismatch::result(
+                    &content,
+                    &format!(
+                        "edit {}: old text was not found; use exact current text from the supplied file context or read the file",
+                        index + 1
+                    ),
+                ),
+                None,
+            ));
+        };
+        // Include overlapping matches, which are ambiguous too.
+        let next = position + updated[position..].chars().next().unwrap().len_utf8();
+        if updated[next..].contains(old) {
+            return Ok((
+                mismatch::result(
+                    &content,
+                    &format!(
+                        "edit {}: old text occurs more than once; include more exact surrounding text from the supplied file context or read the file",
+                        index + 1
+                    ),
+                ),
+                None,
+            ));
+        }
+        updated.replace_range(position..position + old.len(), new);
+    }
+    if updated == content {
+        return Ok((written(0, None), None));
+    }
     let outcome = replace_protected(guard, &path, &content, &updated, cancellation);
     if let Err(error) = outcome.result {
         return Ok((failed(error, outcome.checkpoint), None));
     }
     let change = crate::file_change::Change::between(Some(&content), &updated);
     Ok((written(updated.len() as u64, outcome.checkpoint), change))
+}
+
+fn edit_steps(arguments: &Value) -> Result<Vec<(&str, &str)>, String> {
+    let legacy = arguments.get("old_text").is_some() || arguments.get("new_text").is_some();
+    if let Some(items) = arguments.get("edits") {
+        if legacy {
+            return Err("Use either edits or old_text/new_text, not both".into());
+        }
+        let items = items.as_array().ok_or("edits must be an array")?;
+        if items.is_empty() {
+            return Err("edits must contain at least one replacement".into());
+        }
+        return items.iter().map(edit_step).collect();
+    }
+    Ok(vec![edit_step(arguments)?])
+}
+
+fn edit_step(arguments: &Value) -> Result<(&str, &str), String> {
+    let old = required_string(arguments, "old_text")?;
+    let new = required_string(arguments, "new_text")?;
+    if old.is_empty() {
+        return Err("old_text must not be empty; use write to replace the whole file".into());
+    }
+    if new.contains('\0') {
+        return Err("File content must be UTF-8 text without NUL bytes".into());
+    }
+    Ok((old, new))
 }
 
 struct ReplacementOutcome {
@@ -331,5 +366,7 @@ fn check_guard(guard: Option<&FileGuard<'_>>, cancellation: &Cancellation) -> Re
     Ok(())
 }
 
+#[cfg(test)]
+mod batch_tests;
 #[cfg(test)]
 mod tests;

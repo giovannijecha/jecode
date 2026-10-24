@@ -7,8 +7,14 @@ mod tests;
 
 impl OpenRouter {
     pub fn limits(&mut self) -> Result<Option<Limits>, Failure> {
+        let limits = self.model_limits()?;
+        Ok(self.router.limits(&self.model, limits))
+    }
+
+    /// Model catalog capacity before endpoint-specific narrowing.
+    pub(super) fn model_limits(&mut self) -> Result<Option<Limits>, Failure> {
         if let Some(limits) = self.limits {
-            return Ok(self.router.limits(&self.model, limits));
+            return Ok(limits);
         }
         let value = self.api.send(
             "GET",
@@ -49,7 +55,7 @@ impl OpenRouter {
             Some(Limits { context, output })
         });
         self.limits = Some(limits);
-        Ok(self.router.limits(&self.model, limits))
+        Ok(limits)
     }
 
     /// Limits already read for this model, narrowed to a pinned endpoint,

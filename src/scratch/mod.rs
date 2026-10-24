@@ -16,6 +16,7 @@ pub struct Area {
     path: PathBuf,
     project: PathBuf,
     session: String,
+    establishment: std::sync::Mutex<()>,
 }
 
 #[derive(Debug)]
@@ -39,6 +40,7 @@ impl Area {
             path,
             project,
             session: session.into(),
+            establishment: std::sync::Mutex::new(()),
         })
     }
 
@@ -107,6 +109,9 @@ impl Area {
     }
 
     pub fn ensure(&self) -> Result<PathBuf, String> {
+        // Parallel acquisitions share this area. Publish its ownership record
+        // completely before another caller validates it or creates artifacts.
+        let _establishment = self.establishment.lock().unwrap();
         // Only these three owned descendants may be created or cleaned here.
         let parents: Vec<_> = self.path.ancestors().take(3).collect();
         for path in parents.into_iter().rev() {

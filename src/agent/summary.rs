@@ -1,6 +1,6 @@
 use super::Agent;
 use crate::{
-    backend::{FailureKind, Limits, Update},
+    backend::{FailureKind, Limits},
     events::{Event, EventSink},
     json::Value,
 };
@@ -93,10 +93,10 @@ impl Agent {
                     &request(&transcript),
                     false,
                     Some(output_tokens),
-                    &mut |update| {
-                        events.emit(match update {
-                            Update::Text(_) => Event::Working,
-                            update => self.update_event(update),
+                    &mut |event| {
+                        events.emit(match event {
+                            Event::Streaming { .. } => Event::Working,
+                            event => event,
                         })
                     },
                 ) {

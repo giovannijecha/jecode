@@ -128,46 +128,53 @@ fn unchanged(path: &Path, file: &fs::File, expected: &fs::Metadata) -> Result<()
 
 pub(super) fn edit(
     path: &Path,
-    old: &str,
-    new: &str,
+    edits: &[(&str, &str)],
     mut guard: Option<FileGuard<'_>>,
     cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     check_cancelled(cancellation)?;
-    if new.contains('\0') {
-        return Err("File content must be UTF-8 text without NUL bytes".into());
-    }
-    let mut source = fs::File::open(path).map_err(|error| error.to_string())?;
-    let metadata = source.metadata().map_err(|error| error.to_string())?;
+    let mut original = fs::File::open(path).map_err(|error| error.to_string())?;
+    let metadata = original.metadata().map_err(|error| error.to_string())?;
     if !metadata.is_file() {
         return Err("The path must refer to a regular file".into());
-    }
-    let (position, ambiguous) = locate(&mut source, old.as_bytes(), cancellation)?;
-    unchanged(path, &source, &metadata)?;
-    let reason = if position.is_none() {
-        Some("old_text was not found; read the file and use exact current text")
-    } else if ambiguous {
-        Some("old_text occurs more than once; include more exact surrounding text")
-    } else {
-        None
-    };
-    if let Some(reason) = reason {
-        return Ok((mismatch(&mut source, metadata.len(), reason)?, None));
     }
     if metadata.permissions().readonly() {
         return Err("File is read-only; its content was not changed".into());
     }
-    let length = metadata
-        .len()
-        .checked_sub(old.len() as u64)
-        .and_then(|length| length.checked_add(new.len() as u64))
-        .ok_or("The replacement exceeds the filesystem length range")?;
-    if let Some(guard) = &mut guard {
-        guard.capture();
-    }
-    let result = (|| -> Result<(), String> {
-        check_guard(guard.as_ref(), cancellation)?;
-        unchanged(path, &source, &metadata)?;
+    let mut current: Option<Temporary> = None;
+    let mut length = metadata.len();
+    for (index, &(old, new)) in edits.iter().enumerate() {
+        check_cancelled(cancellation)?;
+        let input = current
+            .as_ref()
+            .map_or(path, |temporary| temporary.0.as_path());
+        let mut source = fs::File::open(input).map_err(|error| error.to_string())?;
+        let (position, ambiguous) = locate(&mut source, old.as_bytes(), cancellation)?;
+        unchanged(path, &original, &metadata)?;
+        let reason = if position.is_none() {
+            Some("old text was not found; read the file and use exact current text")
+        } else if ambiguous {
+            Some("old text occurs more than once; include more exact surrounding text")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Ok((
+                mismatch(
+                    &mut original,
+                    metadata.len(),
+                    &format!("edit {}: {reason}", index + 1),
+                )?,
+                None,
+            ));
+        }
+        if old == new {
+            continue;
+        }
+        length = length
+            .checked_sub(old.len() as u64)
+            .and_then(|length| length.checked_add(new.len() as u64))
+            .ok_or("The replacement exceeds the filesystem length range")?;
         let temporary = Temporary(crate::disk::temporary_beside(path));
         let mut output = OpenOptions::new()
             .write(true)
@@ -176,12 +183,7 @@ pub(super) fn edit(
             .map_err(|error| error.to_string())?;
         let staged = (|| -> Result<(), String> {
             source.rewind().map_err(|error| error.to_string())?;
-            copy_cancellable(
-                &mut source,
-                &mut output,
-                Some(position.unwrap()),
-                cancellation,
-            )?;
+            copy_cancellable(&mut source, &mut output, position, cancellation)?;
             for block in new.as_bytes().chunks(BLOCK) {
                 check_cancelled(cancellation)?;
                 output.write_all(block).map_err(|error| error.to_string())?;
@@ -194,12 +196,30 @@ pub(super) fn edit(
                 .set_permissions(metadata.permissions())
                 .map_err(|error| error.to_string())?;
             check_cancelled(cancellation)?;
-            output.sync_all().map_err(|error| error.to_string())
+            Ok(())
         })();
         drop(output);
         staged.map_err(|error| format!("Could not stage file: {error}"))?;
-        unchanged(path, &source, &metadata)?;
         drop(source);
+        current = Some(temporary);
+    }
+    let Some(temporary) = current else {
+        return Ok((written(0, None), None));
+    };
+    // Intermediate stages are disposable. Only the final replacement needs
+    // durability before it is installed into the workspace.
+    OpenOptions::new()
+        .write(true)
+        .open(&temporary.0)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| format!("Could not sync staged file: {error}"))?;
+    if let Some(guard) = &mut guard {
+        guard.capture();
+    }
+    let result = (|| -> Result<(), String> {
+        check_guard(guard.as_ref(), cancellation)?;
+        unchanged(path, &original, &metadata)?;
+        drop(original);
         check_guard(guard.as_ref(), cancellation)?;
         fs::rename(&temporary.0, path).map_err(|error| format!("Could not replace file: {error}"))
     })();

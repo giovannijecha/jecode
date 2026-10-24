@@ -12,13 +12,20 @@ pub(super) fn usage(value: Option<&Value>) -> Option<crate::backend::Usage> {
         .get("prompt_tokens_details")
         .and_then(|details| details.get("cached_tokens"))
         .and_then(Value::as_usize);
-    (input_tokens.is_some() || output_tokens.is_some() || cached_tokens.is_some()).then_some(
-        crate::backend::Usage {
-            input_tokens,
-            output_tokens,
-            cached_tokens,
-        },
-    )
+    let cache_write_tokens = value
+        .get("prompt_tokens_details")
+        .and_then(|details| details.get("cache_write_tokens"))
+        .and_then(Value::as_usize);
+    (input_tokens.is_some()
+        || output_tokens.is_some()
+        || cached_tokens.is_some()
+        || cache_write_tokens.is_some())
+    .then_some(crate::backend::Usage {
+        input_tokens,
+        output_tokens,
+        cached_tokens,
+        cache_write_tokens,
+    })
 }
 
 impl Charges {
@@ -51,6 +58,11 @@ impl Charges {
         self.cached += usage
             .get("prompt_tokens_details")
             .and_then(|details| details.get("cached_tokens"))
+            .and_then(Value::as_usize)
+            .unwrap_or(0);
+        self.cache_written += usage
+            .get("prompt_tokens_details")
+            .and_then(|details| details.get("cache_write_tokens"))
             .and_then(Value::as_usize)
             .unwrap_or(0);
         if usage.get("is_byok") == Some(&Value::Bool(true)) {
@@ -142,5 +154,26 @@ mod tests {
         let mut unknown = Charges::default();
         unknown.record(None, Some(&usage(r#"{"is_byok":true}"#)));
         assert_eq!(unknown.describe().unwrap(), "BYOK");
+    }
+
+    #[test]
+    fn cache_writes_are_parsed_and_summed_separately_from_reads() {
+        let written =
+            usage(r#"{"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":2048}}"#);
+        let read =
+            usage(r#"{"prompt_tokens_details":{"cached_tokens":1024,"cache_write_tokens":0}}"#);
+        assert_eq!(
+            super::usage(Some(&written)).unwrap().cache_write_tokens,
+            Some(2048)
+        );
+        assert_eq!(super::usage(Some(&read)).unwrap().cached_tokens, Some(1024));
+        let mut total = Charges::default();
+        total.include(&Charges::reported(None, Some(&written)).unwrap());
+        total.include(&Charges::reported(None, Some(&read)).unwrap());
+        assert_eq!((total.cached, total.cache_written), (1024, 2048));
+        assert_eq!(
+            total.describe().unwrap(),
+            "1K cached · 2K cache write tokens"
+        );
     }
 }

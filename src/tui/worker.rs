@@ -1,12 +1,168 @@
 use crate::agent::Agent;
 use crate::cancel::Cancellation;
 use crate::events::Event;
-use std::sync::mpsc::{self, Receiver};
+use std::collections::VecDeque;
+#[cfg(test)]
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::TryRecvError;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
+
+const EVENT_CAPACITY: usize = 16;
+
+struct EventQueue {
+    events: VecDeque<Event>,
+    streaming: Option<String>,
+    sender_alive: bool,
+    receiver_alive: bool,
+}
+
+struct EventChannel {
+    queue: Mutex<EventQueue>,
+    ready: Condvar,
+}
+
+struct EventSender(Arc<EventChannel>);
+
+pub struct EventReceiver(Arc<EventChannel>);
+
+fn event_channel() -> (EventSender, EventReceiver) {
+    let channel = Arc::new(EventChannel {
+        queue: Mutex::new(EventQueue {
+            events: VecDeque::new(),
+            streaming: None,
+            sender_alive: true,
+            receiver_alive: true,
+        }),
+        ready: Condvar::new(),
+    });
+    (EventSender(Arc::clone(&channel)), EventReceiver(channel))
+}
+
+impl EventSender {
+    fn send(&self, event: Event, cancellation: &Cancellation) -> Result<(), String> {
+        let mut queue = self.0.queue.lock().unwrap();
+        if !queue.receiver_alive {
+            return Err("Terminal output closed".into());
+        }
+        match event {
+            Event::Streaming { text } => {
+                // Updates contain the whole response. Keep only its latest state.
+                queue.streaming = Some(text);
+                self.0.ready.notify_one();
+                return Ok(());
+            }
+            Event::Reasoning | Event::Working if queue.streaming.is_some() => return Ok(()),
+            Event::Reasoning | Event::Working if queue.events.len() == EVENT_CAPACITY => {
+                return Ok(());
+            }
+            Event::Message { .. }
+            | Event::Waiting { .. }
+            | Event::RequestDiscarded
+            | Event::Recovering { .. } => {
+                // A completed or abandoned response makes its last preview stale.
+                queue.streaming = None;
+            }
+            _ => {
+                if let Some(text) = queue.streaming.take() {
+                    queue = self.wait_for_space(queue, cancellation)?;
+                    queue.events.push_back(Event::Streaming { text });
+                    self.0.ready.notify_one();
+                }
+            }
+        }
+        queue = self.wait_for_space(queue, cancellation)?;
+        queue.events.push_back(event);
+        self.0.ready.notify_one();
+        Ok(())
+    }
+
+    fn wait_for_space<'a>(
+        &self,
+        mut queue: std::sync::MutexGuard<'a, EventQueue>,
+        cancellation: &Cancellation,
+    ) -> Result<std::sync::MutexGuard<'a, EventQueue>, String> {
+        while queue.events.len() == EVENT_CAPACITY {
+            if !queue.receiver_alive {
+                return Err("Terminal output closed".into());
+            }
+            if cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
+            queue = self
+                .0
+                .ready
+                .wait_timeout(queue, Duration::from_millis(5))
+                .unwrap()
+                .0;
+        }
+        if !queue.receiver_alive {
+            return Err("Terminal output closed".into());
+        }
+        Ok(queue)
+    }
+}
+
+impl Drop for EventSender {
+    fn drop(&mut self) {
+        self.0.queue.lock().unwrap().sender_alive = false;
+        self.0.ready.notify_all();
+    }
+}
+
+impl EventReceiver {
+    pub fn try_recv(&self) -> Result<Event, TryRecvError> {
+        let mut queue = self.0.queue.lock().unwrap();
+        if let Some(event) = Self::take(&mut queue) {
+            self.0.ready.notify_all();
+            Ok(event)
+        } else if queue.sender_alive {
+            Err(TryRecvError::Empty)
+        } else {
+            Err(TryRecvError::Disconnected)
+        }
+    }
+
+    #[cfg(test)]
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<Event, RecvTimeoutError> {
+        let deadline = Instant::now() + timeout;
+        let mut queue = self.0.queue.lock().unwrap();
+        loop {
+            if let Some(event) = Self::take(&mut queue) {
+                self.0.ready.notify_all();
+                return Ok(event);
+            }
+            if !queue.sender_alive {
+                return Err(RecvTimeoutError::Disconnected);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(RecvTimeoutError::Timeout);
+            }
+            queue = self.0.ready.wait_timeout(queue, remaining).unwrap().0;
+        }
+    }
+
+    fn take(queue: &mut EventQueue) -> Option<Event> {
+        queue
+            .events
+            .pop_front()
+            .or_else(|| queue.streaming.take().map(|text| Event::Streaming { text }))
+    }
+}
+
+impl Drop for EventReceiver {
+    fn drop(&mut self) {
+        self.0.queue.lock().unwrap().receiver_alive = false;
+        self.0.ready.notify_all();
+    }
+}
 
 pub struct Worker {
-    pub events: Receiver<Event>,
+    pub events: EventReceiver,
     task: Option<JoinHandle<(Agent, Result<(), String>)>>,
     cancellation: Cancellation,
     inbox: crate::inbox::Inbox,
@@ -16,27 +172,10 @@ impl Worker {
         let cancellation = agent.cancellation();
         let inbox = agent.inbox();
         cancellation.reset();
-        let (sender, events) = mpsc::sync_channel(16);
+        let (sender, events) = event_channel();
         let token = cancellation.clone();
         let task = thread::spawn(move || {
-            let result = agent.run_turn(&prompt, &mut |event| {
-                let mut pending = event;
-                loop {
-                    match sender.try_send(pending) {
-                        Ok(()) => return Ok(()),
-                        Err(mpsc::TrySendError::Disconnected(_)) => {
-                            return Err("Terminal output closed".into());
-                        }
-                        Err(mpsc::TrySendError::Full(event)) => {
-                            if token.requested() {
-                                return Err("Operation cancelled".into());
-                            }
-                            pending = event;
-                            thread::sleep(Duration::from_millis(5));
-                        }
-                    }
-                }
-            });
+            let result = agent.run_turn(&prompt, &mut |event| sender.send(event, &token));
             (agent, result)
         });
         Self {

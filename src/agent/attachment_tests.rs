@@ -327,7 +327,7 @@ fn text_only_model_does_not_budget_for_unsent_image_parts() {
         .iter()
         .map(|message| message.encode().len())
         .sum::<usize>()
-        + crate::tools::definitions().encode().len()
+        + crate::tools::encoded_size()
         + agent.request_environment().len();
     assert_eq!(agent.context_estimate(&messages), bare);
     let request = crate::backend::openrouter::attachments::materialize(

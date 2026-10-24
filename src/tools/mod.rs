@@ -7,7 +7,7 @@ mod shell;
 
 pub(crate) use files::read_source;
 pub(crate) use files::read_text_page;
-pub use schema::definitions;
+pub use schema::{definitions, encoded_size};
 pub use shell::find_bash;
 
 use crate::cancel::Cancellation;
