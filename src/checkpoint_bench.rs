@@ -154,8 +154,13 @@ fn matched_tools() {
                 "edit",
                 vec![
                     ("path", Value::string(&names[0])),
-                    ("old_text", Value::string("alpha")),
-                    ("new_text", Value::string("omega")),
+                    (
+                        "edits",
+                        Value::Array(vec![Value::object([
+                            ("old_text", Value::string("alpha")),
+                            ("new_text", Value::string("omega")),
+                        ])]),
+                    ),
                 ],
             ),
             name if name.starts_with("bash") => call(
@@ -241,8 +246,13 @@ fn large(count: usize, enabled: bool) {
             "edit",
             vec![
                 ("path", Value::string("large.txt")),
-                ("old_text", Value::string("alpha")),
-                ("new_text", Value::string("omega")),
+                (
+                    "edits",
+                    Value::Array(vec![Value::object([
+                        ("old_text", Value::string("alpha")),
+                        ("new_text", Value::string("omega")),
+                    ])]),
+                ),
             ],
         );
         let elapsed = started.elapsed().as_nanos();

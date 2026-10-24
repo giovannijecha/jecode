@@ -1,4 +1,4 @@
-use super::{Body, diff, field, flag, preview, wrapped};
+use super::{Body, diff, edit_fallback, field, flag, preview, wrapped};
 use crate::{
     json::Value,
     tui::{
@@ -37,7 +37,8 @@ pub(super) fn render(
             Body::new(read(arguments, result, columns))
         }
         "write" => written(arguments, columns, expanded),
-        "edit" => selected(&payload(field(arguments, "new_text")), columns, expanded),
+        "edit" => edit_fallback::body(arguments, result, columns, expanded)
+            .unwrap_or_else(|| Body::new(Vec::new())),
         _ if result.get("processes").is_some() => processes(result, columns, expanded),
         "bash" | "process" => streams(result, columns, failed, expanded),
         "checkpoint" => {

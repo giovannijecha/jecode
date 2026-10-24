@@ -42,7 +42,7 @@ impl Agent {
                 // Input arriving during summaries or tool previews can change the budget.
                 continue;
             }
-            let timing = super::recovery::RequestTiming::start();
+            let timing = super::timing::RequestTiming::start();
             self.emit_context(events)?;
             // Summarization and event delivery can take time. Include restores
             // observed during that work before constructing the next request.
@@ -318,12 +318,14 @@ impl Agent {
     fn recent_boundary(&self, messages: &[Value], budget: usize) -> usize {
         let mut boundary = messages.len();
         let mut bytes = 0usize;
+        let active_start = crate::attachments::active_view_start(messages);
         for index in (self.context.from..messages.len()).rev() {
             if self.context.returned.contains(&index) {
                 continue;
             }
-            bytes = bytes.saturating_add(context::bytes_for(
-                std::slice::from_ref(&messages[index]),
+            bytes = bytes.saturating_add(context::bytes_for_message(
+                &messages[index],
+                index >= active_start,
                 self.client.inputs(),
             ));
             if self.context.estimate_bytes(bytes) > budget {

@@ -21,16 +21,21 @@ Unsent composer text and paused drafts are not included.
 The additive `build` object records the executable's OS, architecture, profile
 (`debug` or `release`, inferred from Rust debug assertions), and a fingerprint
 of its bytes. `jecode --version` prints the same identity, which helps identify
-an older installed executable with the same package version. The fingerprint
-is diagnostic, not an authenticity check; it is `null` if the executable cannot
-be read.
+an older installed executable with the same package version. Jecode opens the
+running executable at startup, so a later atomic replacement of its installed path
+does not change the identity reported by that process. The fingerprint is
+diagnostic, not an authenticity check; it is `null` if the executable cannot
+be opened or read.
 
 New `request_timing` events record each model attempt's backend, model,
 operation, attempt number, start time, request byte count and outcome. Durations
-are in milliseconds: `preparation_ms` ends at dispatch, `first_update_ms` runs
+are in milliseconds: `preparation_ms` covers local work up to dispatch,
+excluding `notification_ms`, which measures delivery of the dispatch event to
+the UI or other event consumer. `first_update_ms` runs
 from dispatch to the first nonempty model text, reasoning or tool activity,
 `response_ms` runs from dispatch to completion or failure, and `total_ms` covers
-the attempt. A boundary not reached is `null`. Waiting includes upload and
+the attempt. Outcomes are `complete`, `failed` or `cancelled`; a user stop is
+separate from an error. A boundary not reached is `null`. Waiting includes upload and
 remote queueing; these events do not separate those two costs. Ordinary request
 preparation includes context projection and serialization. Initial model
 metadata and compaction setup are outside that attempt; compaction model calls

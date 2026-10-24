@@ -195,6 +195,51 @@ fn tool_views_expire_from_context_budget_after_an_assistant_response() {
 }
 
 #[test]
+fn measured_growth_charges_only_active_tool_views_and_keeps_user_media() {
+    use crate::attachments::{MARKER, Prompt};
+
+    let mut image = crate::attachments::tests::attachment("att-1-1-1", "shot.png", "image/png");
+    image.width = Some(4);
+    image.height = Some(3);
+    let receipt = Value::object([
+        ("view", Value::string("image")),
+        ("attachment", image.value()),
+    ]);
+    let tool = message("tool", &receipt.encode());
+    let mut messages = vec![message("system", "Agent"), message("user", "Inspect")];
+    let mut context = Context::default();
+    context.observe(
+        Some(&Usage {
+            input_tokens: Some(500),
+            ..Usage::default()
+        }),
+        messages.len(),
+    );
+    messages.extend([
+        tool.clone(),
+        message("assistant", "Viewed"),
+        Prompt::new(MARKER.to_string(), vec![image]).message(),
+        tool,
+        message("user", "Compare both images"),
+    ]);
+    let text_bytes = messages[context.measured_end..]
+        .iter()
+        .map(|message| portable(message).encode().len())
+        .sum::<usize>();
+    let isolated_bytes = messages[context.measured_end..]
+        .iter()
+        .map(|message| bytes_for(std::slice::from_ref(message), Inputs::default()))
+        .sum::<usize>();
+    assert_eq!(isolated_bytes, text_bytes + 85 * 3);
+    // The earlier tool view expired at the assistant reply. The user attachment
+    // remains in the request, and the latest tool view is still active.
+    assert_eq!(
+        context.estimate(&messages, 0, Inputs::default()),
+        500 + text_bytes + 85 * 2
+    );
+}
+
+#[test]
 fn opaque_native_fields_do_not_consume_portable_context_budget() {
     let mut assistant = message("assistant", "Short answer");
     if let Value::Object(fields) = &mut assistant {

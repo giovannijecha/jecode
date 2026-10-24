@@ -356,20 +356,10 @@ impl Context {
         })
         .unwrap_or_default()
     }
+    #[cfg(test)]
     pub fn estimate(&self, messages: &[Value], compatible_from: usize, inputs: Inputs) -> usize {
-        if self.has_measured_input(messages) {
-            let tokens = self.input_tokens.unwrap();
-            return tokens.saturating_add(
-                self.estimate_bytes(
-                    messages
-                        .iter()
-                        .enumerate()
-                        .skip(self.measured_end)
-                        .filter(|(index, _)| !self.returned.contains(index))
-                        .map(|(_, message)| bytes_for(std::slice::from_ref(message), inputs))
-                        .fold(0usize, usize::saturating_add),
-                ),
-            );
+        if let Some(tokens) = self.measured_input(messages) {
+            return self.estimate_growth(messages, tokens, inputs);
         }
         self.estimate_bytes(
             bytes_for(&self.project(messages, compatible_from), inputs)
@@ -377,17 +367,33 @@ impl Context {
         )
     }
 
-    pub(crate) fn has_measured_input(&self, messages: &[Value]) -> bool {
-        self.input_tokens.is_some()
-            && self.measured_end >= self.from
+    pub(crate) fn estimate_growth(
+        &self,
+        messages: &[Value],
+        tokens: usize,
+        inputs: Inputs,
+    ) -> usize {
+        let active_start = crate::attachments::active_view_start(messages);
+        let bytes = messages
+            .iter()
+            .enumerate()
+            .skip(self.measured_end)
+            .filter(|(index, _)| !self.returned.contains(index))
+            .map(|(index, message)| bytes_for_message(message, index >= active_start, inputs))
+            .fold(0usize, usize::saturating_add);
+        tokens.saturating_add(self.estimate_bytes(bytes))
+    }
+
+    pub(crate) fn measured_input(&self, messages: &[Value]) -> Option<usize> {
+        let tokens = self.input_tokens?;
+        (self.measured_end >= self.from
             && self.measured_end <= messages.len()
-            && !self.measured_view_retired(messages)
+            && !self.measured_view_retired(messages))
+        .then_some(tokens)
     }
 
     fn measured_view_retired(&self, messages: &[Value]) -> bool {
-        if self.measured_end > messages.len()
-            || crate::attachments::active_view_start(messages) <= self.measured_end
-        {
+        if crate::attachments::active_view_start(messages) <= self.measured_end {
             return false;
         }
         let measured = &messages[..self.measured_end];
@@ -428,19 +434,18 @@ pub fn bytes_for(messages: &[Value], inputs: Inputs) -> usize {
     messages
         .iter()
         .enumerate()
-        .fold(0usize, |total, (index, message)| {
-            // Attachments are sent as content parts whose cost the stored text omits.
-            let media = if index >= active_start
-                || message.get("role").and_then(Value::as_str) != Some("tool")
-            {
-                crate::attachments::weight_for(message, inputs)
-            } else {
-                0
-            };
-            total
-                .saturating_add(portable(message).encode().len())
-                .saturating_add(media)
-        })
+        .map(|(index, message)| bytes_for_message(message, index >= active_start, inputs))
+        .fold(0usize, usize::saturating_add)
+}
+
+pub(crate) fn bytes_for_message(message: &Value, active_view: bool, inputs: Inputs) -> usize {
+    // User attachments persist; tool views expire after the next assistant reply.
+    let media = if active_view || message.get("role").and_then(Value::as_str) != Some("tool") {
+        crate::attachments::weight_for(message, inputs)
+    } else {
+        0
+    };
+    portable(message).encode().len().saturating_add(media)
 }
 
 #[cfg(test)]

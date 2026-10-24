@@ -380,7 +380,7 @@ fn retired_view_recalculates_with_current_system_and_request_environment() {
         ("content", Value::string("I saw it")),
     ]));
     let messages = agent.messages.lock().unwrap();
-    assert!(!agent.context.has_measured_input(&messages));
+    assert_eq!(agent.context.measured_input(&messages), None);
     assert!(!agent.request_environment().is_empty());
     let projected = agent.projected_context(&agent.context, &messages);
     assert!(

@@ -190,7 +190,6 @@ impl Agent {
         // Endpoint refresh may wait on the network. Run it here on the
         // execution worker, not while the TUI prepares the submitted prompt.
         *self.charges.lock().unwrap() = crate::backend::Charges::default();
-        events.emit(Event::Preparing)?;
         let limits = self.model_limits(events)?;
         self.emit_context(events)?;
         loop {
@@ -303,14 +302,17 @@ impl Agent {
     }
 
     fn projected_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        if context.has_measured_input(messages) {
-            context.estimate(messages, self.compatible_from, self.client.inputs())
-        } else {
-            context.estimate_bytes(
-                self.context_bytes(&self.projected_context(context, messages))
-                    .saturating_add(crate::tools::encoded_size()),
-            )
+        match context.measured_input(messages) {
+            Some(tokens) => context.estimate_growth(messages, tokens, self.client.inputs()),
+            None => self.unmeasured_estimate(context, messages),
         }
+    }
+
+    fn unmeasured_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
+        context.estimate_bytes(
+            self.context_bytes(&self.projected_context(context, messages))
+                .saturating_add(crate::tools::encoded_size()),
+        )
     }
 
     fn context_bytes(&self, messages: &[Value]) -> usize {
@@ -318,11 +320,13 @@ impl Agent {
     }
 
     fn context_estimate(&self, messages: &[Value]) -> usize {
-        let estimate = self.projected_estimate(&self.context, messages);
-        if self.context.has_measured_input(messages) {
-            estimate
-        } else {
-            estimate.saturating_add(self.request_environment().len())
+        match self.context.measured_input(messages) {
+            Some(tokens) => self
+                .context
+                .estimate_growth(messages, tokens, self.client.inputs()),
+            None => self
+                .unmeasured_estimate(&self.context, messages)
+                .saturating_add(self.request_environment().len()),
         }
     }
 
@@ -430,3 +434,4 @@ mod skills_tests;
 mod summary_tests;
 #[cfg(test)]
 mod tests;
+mod timing;

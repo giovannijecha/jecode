@@ -8,6 +8,7 @@ use crate::{file_change::Change, json::Value};
 
 mod content;
 mod diff;
+mod edit_fallback;
 mod presentation;
 pub use presentation::Presentation;
 
@@ -81,23 +82,10 @@ impl Body {
 pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
     let status = Status::of(&tool);
     let expanded = tool.presentation.expanded;
-    // An edit without a recorded change (beyond the diff limits) shows its
-    // replacement text; coordinates stay absent rather than read from disk.
+    // Diff limits leave only the supplied replacements; file coordinates
+    // cannot be recovered from those snippets.
     let legacy = (tool.change.is_none() && tool.name == "edit" && status == Status::Done)
-        .then(|| {
-            let mut change = Change::between(
-                Some(field(tool.arguments, "old_text")),
-                field(tool.arguments, "new_text"),
-            )?;
-            for entry in change.hunks.iter_mut().flatten() {
-                entry.old_line = None;
-                entry.new_line = None;
-                entry.no_newline = false;
-            }
-            change.ending_change = None;
-            change.final_newline = None;
-            Some(change)
-        })
+        .then(|| edit_fallback::single_change(tool.arguments))
         .flatten();
     let change = tool
         .change
@@ -120,20 +108,21 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
         true,
     ));
     if let Some(result) = tool.result {
-        let mut body = if result.get("error").is_some() {
-            Body::new(Vec::new())
-        } else if let Some(change) = change {
-            diff::render(change, field(tool.arguments, "path"), columns, expanded)
-        } else {
-            content::render(
-                tool.name,
-                tool.arguments,
-                result,
-                columns,
-                status == Status::Failed,
-                expanded,
-            )
-        };
+        let mut body =
+            if result.get("error").is_some() || tool.name == "edit" && status != Status::Done {
+                Body::new(Vec::new())
+            } else if let Some(change) = change {
+                diff::render(change, field(tool.arguments, "path"), columns, expanded)
+            } else {
+                content::render(
+                    tool.name,
+                    tool.arguments,
+                    result,
+                    columns,
+                    status == Status::Failed,
+                    expanded,
+                )
+            };
         if body.hidden > 0 {
             let origin = body
                 .rows
@@ -273,6 +262,11 @@ fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {
     if let Some(change) = change {
         return diff::summary(change);
     }
+    if tool.name == "edit"
+        && let Some(summary) = edit_fallback::summary(tool.arguments, result)
+    {
+        return summary;
+    }
     match tool.name {
         "bash" | "process" => {
             let code = result
@@ -397,6 +391,8 @@ fn field<'a>(value: &'a Value, key: &str) -> &'a str {
 
 #[cfg(test)]
 mod checkpoint_tests;
+#[cfg(test)]
+mod edit_fallback_tests;
 #[cfg(test)]
 mod skill_tests;
 #[cfg(test)]

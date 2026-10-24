@@ -1,10 +1,31 @@
 use super::{Agent, ToolCall, Value};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy)]
 pub(super) struct Clock {
-    started: Instant,
-    unix_ms: u128,
+    pub(super) started: Instant,
+    pub(super) unix_ms: u128,
+}
+
+/// One model attempt, including local request projection before backend work.
+pub(super) struct RequestTiming {
+    pub(super) clock: Clock,
+    pub(super) dispatched: Option<Instant>,
+    pub(super) first_update: Option<Instant>,
+    pub(super) request_bytes: Option<usize>,
+    pub(super) notification: Duration,
+}
+
+impl RequestTiming {
+    pub(super) fn start() -> Self {
+        Self {
+            clock: Clock::new(),
+            dispatched: None,
+            first_update: None,
+            request_bytes: None,
+            notification: Duration::ZERO,
+        }
+    }
 }
 
 impl Clock {
@@ -61,6 +82,53 @@ mod tests {
         test_support::{Directory, HttpFixture, completion, tool_call},
         tools::Tools,
     };
+
+    #[test]
+    fn parallel_timings_follow_results_even_when_call_ids_repeat() {
+        let project = Directory::new();
+        std::fs::write(project.path().join("a.txt"), "first").unwrap();
+        std::fs::write(project.path().join("b.txt"), "second").unwrap();
+        let mut agent = Agent::new(
+            OpenRouter::fixture("http://127.0.0.1:1".into()),
+            Tools::new(project.path()).unwrap(),
+        );
+        let calls: Vec<_> = ["a.txt", "b.txt"]
+            .into_iter()
+            .map(|path| ToolCall {
+                id: "repeated".into(),
+                name: "read".into(),
+                arguments: Value::object([("path", Value::string(path))]).encode(),
+            })
+            .collect();
+        agent.execute_calls(&calls, &mut |_| Ok(())).unwrap();
+        let document = agent.archive().document();
+        let timings: Vec<_> = document
+            .get("events")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .filter(|event| event.get("type").and_then(Value::as_str) == Some("tool_timing"))
+            .collect();
+        assert_eq!(timings.len(), 2);
+        assert_ne!(
+            timings[0].get("after_message"),
+            timings[1].get("after_message")
+        );
+        let messages = document.get("messages").and_then(Value::as_array).unwrap();
+        for (timing, content) in timings.iter().zip(["first", "second"]) {
+            let end = timing
+                .get("after_message")
+                .and_then(Value::as_usize)
+                .unwrap();
+            assert!(
+                messages[end - 1]
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap()
+                    .contains(content)
+            );
+        }
+    }
 
     #[test]
     fn serial_and_parallel_timings_survive_storage_without_entering_model_history() {

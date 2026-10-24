@@ -1,4 +1,5 @@
 use super::Agent;
+use super::timing::Clock;
 use crate::{
     backend::ToolCall,
     events::{Event, EventSink, tool_summary},
@@ -6,10 +7,7 @@ use crate::{
     sessions::Stage,
     tools::{Begun, Execution},
 };
-use std::{collections::BTreeMap, sync::Mutex, time::Instant};
-
-mod timing;
-use timing::Clock;
+use std::time::Instant;
 
 const MAX_PARALLEL_CALLS: usize = 4;
 
@@ -135,25 +133,17 @@ impl Agent {
         }
         // Scoped workers all finish before results or a later, potentially
         // modifying call is handled. Session messages remain in source order.
-        let timings = Mutex::new(BTreeMap::new());
-        let results = run_parallel_calls(batch, &|call| {
-            let executing = Instant::now();
-            let outcome = self.tools.execute_begun(
+        let mut results = run_parallel_calls(batch, clock, &|call| {
+            self.tools.execute_begun(
                 Begun::default(),
                 &call.name,
                 &call.arguments,
                 &self.cancellation,
-            );
-            timings
-                .lock()
-                .unwrap()
-                .insert(call.id.clone(), clock.finish(executing));
-            outcome
+            )
         });
-        let mut timings = timings.into_inner().unwrap();
-        for (call, outcome) in batch.iter().zip(&results) {
+        for (call, (outcome, timing)) in batch.iter().zip(&mut results) {
             self.tool_result(call, &outcome.result);
-            if let Some(timing) = timings.remove(&call.id) {
+            if let Some(timing) = timing.take() {
                 self.record_tool_timing(call, timing);
             }
         }
@@ -161,7 +151,7 @@ impl Agent {
             self.cancel_calls(remaining);
             return Err(error);
         }
-        for (call, outcome) in batch.iter().zip(&results) {
+        for (call, (outcome, _)) in batch.iter().zip(&results) {
             if let Err(error) = events.emit(self.finished_event(call, &outcome.result)) {
                 self.cancel_calls(remaining);
                 return Err(error);
@@ -228,22 +218,34 @@ fn parallel_call(call: &ToolCall) -> bool {
 
 fn run_parallel_calls(
     batch: &[ToolCall],
+    clock: Clock,
     execute: &(impl Fn(&ToolCall) -> Execution + Sync),
-) -> Vec<Execution> {
+) -> Vec<(Execution, Option<Value>)> {
     std::thread::scope(|scope| {
         let handles = batch
             .iter()
-            .map(|call| scope.spawn(|| execute(call)))
+            .map(|call| {
+                scope.spawn(move || {
+                    let executing = Instant::now();
+                    let outcome = execute(call);
+                    (outcome, Some(clock.finish(executing)))
+                })
+            })
             .collect::<Vec<_>>();
         handles
             .into_iter()
             .map(|handle| {
-                handle.join().unwrap_or_else(|_| Execution {
-                    result: Value::object([(
-                        "error",
-                        Value::string("Tool worker failed unexpectedly"),
-                    )]),
-                    change: None,
+                handle.join().unwrap_or_else(|_| {
+                    (
+                        Execution {
+                            result: Value::object([(
+                                "error",
+                                Value::string("Tool worker failed unexpectedly"),
+                            )]),
+                            change: None,
+                        },
+                        None,
+                    )
                 })
             })
             .collect()

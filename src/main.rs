@@ -45,6 +45,7 @@ use cli::Action;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    identity::capture();
     let action = match cli::parse(std::env::args_os().skip(1)) {
         Ok(action) => action,
         Err(error) => {

@@ -82,7 +82,7 @@ fn parallel_operations_exclude_state_changes_and_shared_cursors() {
 fn independent_reads_overlap_and_results_keep_source_order() {
     let started = Arc::new((Mutex::new(0usize), Condvar::new()));
     let calls = [read_call("first", "a"), read_call("second", "b")];
-    let results = run_parallel_calls(&calls, &|call| {
+    let results = run_parallel_calls(&calls, Clock::new(), &|call| {
         let (count, changed) = &*started;
         let mut count = count.lock().unwrap();
         *count += 1;
@@ -97,11 +97,11 @@ fn independent_reads_overlap_and_results_keep_source_order() {
         }
     });
     assert_eq!(
-        results[0].result.get("id").and_then(Value::as_str),
+        results[0].0.result.get("id").and_then(Value::as_str),
         Some("first")
     );
     assert_eq!(
-        results[1].result.get("id").and_then(Value::as_str),
+        results[1].0.result.get("id").and_then(Value::as_str),
         Some("second")
     );
 }
@@ -112,7 +112,7 @@ fn cancellation_waits_for_every_started_read() {
     let finished = AtomicUsize::new(0);
     let cancellation = Cancellation::default();
     let calls = [read_call("first", "a"), read_call("second", "b")];
-    let results = run_parallel_calls(&calls, &|call| {
+    let results = run_parallel_calls(&calls, Clock::new(), &|call| {
         let (count, changed) = &*started;
         let mut count = count.lock().unwrap();
         *count += 1;
@@ -139,7 +139,7 @@ fn cancellation_waits_for_every_started_read() {
     assert!(
         results
             .iter()
-            .all(|result| result.result.get("cancelled") == Some(&Value::Bool(true)))
+            .all(|(result, _)| result.result.get("cancelled") == Some(&Value::Bool(true)))
     );
 }
 

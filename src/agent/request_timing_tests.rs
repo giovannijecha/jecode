@@ -3,6 +3,78 @@ use crate::test_support::{Directory, HttpFixture, Response};
 use std::time::Duration;
 
 #[test]
+fn dispatch_notification_wait_is_separate_from_local_and_remote_work() {
+    let fixture = HttpFixture::new(vec![(
+        200,
+        crate::test_support::completion("Done.", vec![]),
+    )]);
+    let project = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent
+        .run_turn("Measure a slow event consumer", &mut |event| {
+            if matches!(event, Event::Waiting { .. }) {
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Ok(())
+        })
+        .unwrap();
+    fixture.finish();
+    let document = agent.archive().document();
+    let event = document
+        .get("events")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|event| event.get("type").and_then(Value::as_str) == Some("request_timing"))
+        .unwrap();
+    let ms = |name| event.get(name).and_then(Value::as_usize).unwrap();
+    assert!(ms("notification_ms") >= 40);
+    let parts = ms("preparation_ms") + ms("notification_ms") + ms("response_ms");
+    assert!(parts <= ms("total_ms"));
+    assert!(
+        ms("total_ms") - parts <= 2,
+        "only millisecond rounding may separate the measured phases"
+    );
+}
+
+#[test]
+fn cancelled_attempt_has_its_own_export_status() {
+    // Cancellation in the dispatch notification must prevent any HTTP request.
+    let fixture = HttpFixture::new(vec![]);
+    let project = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    let cancellation = agent.cancellation();
+    let error = agent
+        .run_turn("Stop before sending", &mut |event| {
+            if matches!(event, Event::Waiting { .. }) {
+                cancellation.cancel();
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(error.contains("cancelled"));
+    assert!(fixture.finish().is_empty());
+    let document = agent.archive().document();
+    let event = document
+        .get("events")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|event| event.get("type").and_then(Value::as_str) == Some("request_timing"))
+        .unwrap();
+    assert_eq!(
+        event.get("status").and_then(Value::as_str),
+        Some("cancelled")
+    );
+}
+
+#[test]
 fn request_timing_records_dispatch_and_first_model_update_without_payload() {
     let fixture = HttpFixture::streaming(vec![Response::Stream(vec![(
         Duration::from_millis(5),
@@ -25,12 +97,7 @@ fn request_timing_records_dispatch_and_first_model_update_without_payload() {
             Ok(())
         })
         .unwrap();
-    assert!(
-        phases[..phases.len() - 2]
-            .iter()
-            .all(|phase| *phase == "preparing")
-    );
-    assert_eq!(&phases[phases.len() - 2..], ["waiting", "streaming"]);
+    assert_eq!(phases, ["preparing", "waiting", "streaming"]);
     let request = fixture.finish().remove(0);
     let document = agent.archive().document();
     let timing = document

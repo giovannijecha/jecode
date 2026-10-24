@@ -1,7 +1,16 @@
 use super::{Terminal, probe};
 use crate::{
     events::Event,
-    tui::{activity::Activity, render::Renderer, state::State, text, view::Frame},
+    json::Value,
+    tui::{
+        activity::Activity,
+        cards::{self, Presentation, Tool},
+        line::Line,
+        render::Renderer,
+        state::State,
+        text,
+        view::Frame,
+    },
 };
 use std::{
     io::{self, Write},
@@ -53,6 +62,52 @@ pub(super) fn console(bash: &Path) {
         assert!(!row.plain().contains("70m"));
         rows.push(row);
     }
+    paint_rows(rows, width, height);
+
+    let arguments = Value::object([
+        ("path", Value::string("large.txt")),
+        (
+            "edits",
+            Value::Array(vec![
+                Value::object([
+                    ("old_text", Value::string("alpha")),
+                    ("new_text", Value::string("gamma")),
+                ]),
+                Value::object([
+                    ("old_text", Value::string("gamma beta")),
+                    ("new_text", Value::string("delta")),
+                ]),
+            ]),
+        ),
+    ]);
+    let result = Value::object([("bytes_written", Value::number(1_048_577))]);
+    let presentation = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rows = cards::render(
+        Tool {
+            name: "edit",
+            arguments: &arguments,
+            result: Some(&result),
+            change: None,
+            summary: "complete",
+            presentation: &presentation,
+        },
+        width,
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().contains("Applied 2 replacements"))
+    );
+    assert!(rows.iter().any(|row| row.plain().contains("Replacement 2")));
+    assert!(!rows.iter().any(|row| row.plain().contains("No changes")));
+    paint_rows(rows, width, height);
+    drop(terminal);
+}
+
+fn paint_rows(rows: Vec<Line>, width: usize, height: usize) {
+    assert!(rows.len() <= height);
     let expected: String = (0..height)
         .map(|index| {
             let row = rows.get(index).map_or_else(String::new, |row| row.plain());
@@ -73,5 +128,4 @@ pub(super) fn console(bash: &Path) {
     write!(io::stdout(), "{output}").unwrap();
     io::stdout().flush().unwrap();
     assert_eq!(probe().lines().nth(1).unwrap(), expected);
-    drop(terminal);
 }

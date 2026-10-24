@@ -37,8 +37,11 @@ and `edit` reject read-only files and replace accepted files through a sibling
 temporary file. Writes, edits and text reads use UTF-8 without NUL bytes.
 
 Use `edits: [{"old_text": "before", "new_text": "after"}, ...]` for one or more
-replacements in one file. Older saved calls with a top-level `old_text`/`new_text`
-pair still execute. Each step matches the result of preceding steps, including exact
+replacements in one file. The executor also accepts a top-level
+`old_text`/`new_text` pair for models that imitate older conversation history;
+interrupted saved calls are not replayed. Empty or null unused legacy fields do
+not conflict with a valid batch, but populated competing formats are rejected.
+Each step matches the result of preceding steps, including exact
 whitespace and line endings. A missing or ambiguous match leaves the original
 file intact. A successful batch installs once and captures one workspace
 checkpoint. Large-file batches keep original ranges and replacement text in a

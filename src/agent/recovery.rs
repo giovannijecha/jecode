@@ -1,40 +1,16 @@
-use super::Agent;
+use super::{Agent, timing::RequestTiming};
 use crate::{
     backend::{Completion, Failure, FailureKind, Limits, Update},
     events::Event,
     json::Value,
 };
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 /// Retry state shared by the attempts of one request.
 #[derive(Default)]
 pub(super) struct Retries {
     attempt: usize,
     empty_responses: usize,
-}
-
-/// One model attempt, including local request projection before backend work.
-pub(super) struct RequestTiming {
-    started: Instant,
-    started_at_unix_ms: u128,
-    dispatched: Option<Instant>,
-    first_update: Option<Instant>,
-    request_bytes: Option<usize>,
-}
-
-impl RequestTiming {
-    pub(super) fn start() -> Self {
-        Self {
-            started: Instant::now(),
-            started_at_unix_ms: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis(),
-            dispatched: None,
-            first_update: None,
-            request_bytes: None,
-        }
-    }
 }
 
 impl Agent {
@@ -91,12 +67,16 @@ impl Agent {
                     Update::Waiting {
                         request_bytes: bytes,
                     } => {
-                        emit(Event::Waiting {
-                            model: self.redact(self.model()),
-                        })?;
-                        timing.dispatched.get_or_insert_with(Instant::now);
                         timing.request_bytes = Some(bytes);
-                        Ok(())
+                        let notifying = Instant::now();
+                        let notified = emit(Event::Waiting {
+                            model: self.redact(self.model()),
+                        });
+                        timing.notification += notifying.elapsed();
+                        if notified.is_ok() {
+                            timing.dispatched.get_or_insert_with(Instant::now);
+                        }
+                        notified
                     }
                     Update::TextDelta(delta) => {
                         partial.push_str(&delta);
@@ -118,7 +98,11 @@ impl Agent {
             },
             retries.attempt.saturating_add(1),
             timing,
-            result.is_ok(),
+            match (&result, self.cancellation.requested()) {
+                (Ok(_), _) => "complete",
+                (Err(_), true) => "cancelled",
+                (Err(_), false) => "failed",
+            },
         );
         match &result {
             Ok(completion) => self.record_charges(completion),
@@ -241,7 +225,7 @@ impl Agent {
         operation: &str,
         attempt: usize,
         timing: RequestTiming,
-        success: bool,
+        status: &str,
     ) {
         let finished = Instant::now();
         let milliseconds = |duration: Duration| Value::number(duration.as_millis());
@@ -255,24 +239,23 @@ impl Agent {
             ("backend", Value::string(self.backend_id())),
             ("model", Value::string(self.redact(self.model()))),
             ("attempt", Value::number(attempt)),
-            (
-                "started_at_unix_ms",
-                Value::number(timing.started_at_unix_ms),
-            ),
+            ("started_at_unix_ms", Value::number(timing.clock.unix_ms)),
             (
                 "request_bytes",
                 timing.request_bytes.map_or(Value::Null, Value::number),
             ),
-            (
-                "status",
-                Value::string(if success { "complete" } else { "failed" }),
-            ),
+            ("status", Value::string(status)),
             (
                 "preparation_ms",
-                timing
-                    .dispatched
-                    .map_or(Value::Null, |dispatched| since(dispatched, timing.started)),
+                timing.dispatched.map_or(Value::Null, |dispatched| {
+                    milliseconds(
+                        dispatched
+                            .saturating_duration_since(timing.clock.started)
+                            .saturating_sub(timing.notification),
+                    )
+                }),
             ),
+            ("notification_ms", milliseconds(timing.notification)),
             (
                 "first_update_ms",
                 timing
@@ -286,7 +269,7 @@ impl Agent {
                     .dispatched
                     .map_or(Value::Null, |dispatched| since(finished, dispatched)),
             ),
-            ("total_ms", since(finished, timing.started)),
+            ("total_ms", since(finished, timing.clock.started)),
             ("after_message", Value::number(after_message)),
         ]));
     }
