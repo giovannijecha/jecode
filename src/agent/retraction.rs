@@ -28,6 +28,7 @@ impl Agent {
         {
             return false;
         }
+        drop(messages);
         self.context = input.context;
         self.context.returned.extend(input.from..end);
         self.context.reset_usage();

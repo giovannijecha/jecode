@@ -62,7 +62,12 @@ impl Failure {
                         | "provider_error"
                 )
             });
-        let mut message = format!("OpenRouter HTTP {status}: {}", detail.trim_end());
+        let detail = if detail.trim().is_empty() {
+            "Request failed"
+        } else {
+            detail.trim_end()
+        };
+        let mut message = format!("OpenRouter HTTP {status}: {detail}");
         if !matches!(message.chars().last(), Some('.' | '!' | '?')) {
             message.push('.');
         }

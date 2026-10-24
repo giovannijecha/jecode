@@ -2,6 +2,7 @@ use super::super::*;
 use crate::{
     attachments::{MARKER, Prompt},
     backend::openrouter::OpenRouter,
+    events::Event,
     json::Value,
     test_support::{Directory, HttpFixture, Response, completion, tool_call},
     tools::Tools,
@@ -282,4 +283,101 @@ fn error_after_partial_text_keeps_the_prompt_and_response_in_the_transcript() {
             .is_empty()
     );
     fixture.finish();
+}
+
+#[test]
+fn failed_queued_preparation_while_recalling_history_keeps_the_failed_prompt_after_escape() {
+    for edited in [false, true] {
+        let home = Directory::new();
+        let root = Directory::new();
+        let fixture = HttpFixture::new(vec![]);
+        let mut app = app(&home, &root, &fixture);
+        app.state.history.record("Older prompt");
+        app.state.editor.insert("My unsent draft");
+        app.state.editor.cursor = 3;
+        let draft = app.state.editor.clone();
+        app.state.history.navigate(&mut app.state.editor, true);
+        if edited {
+            app.input(Decoded::Text(" revised".into())).unwrap();
+        }
+        std::fs::write(root.path().join("AGENTS.md"), "x".repeat(64 * 1024 + 1)).unwrap();
+        app.state.queue.push("Queued task").unwrap();
+        app.capture_input();
+        app.poll().unwrap();
+        assert!(app.worker.is_none());
+        assert_eq!(app.state.editor.text, "Queued task");
+        app.input(Decoded::Key(terminal::Key {
+            code: 27,
+            modifiers: 0,
+            character: 0,
+        }))
+        .unwrap();
+        assert_eq!(
+            app.state.editor.text, "Queued task",
+            "Escape discarded the recovered prompt"
+        );
+        assert!(app.state.queue.paused.contains(&draft));
+        let recalled = app
+            .state
+            .queue
+            .paused
+            .iter()
+            .filter(|editor| editor.text.starts_with("Older prompt"))
+            .count();
+        assert_eq!(recalled, usize::from(edited));
+        let input = app.persistence.as_ref().unwrap().snapshot().input;
+        assert_eq!(input.draft.text, "Queued task");
+        assert_eq!(input.paused.len(), 1 + usize::from(edited));
+        fixture.finish();
+    }
+}
+
+#[test]
+fn retry_that_discards_its_partial_response_restores_unanswered_input() {
+    let home = Directory::new();
+    let root = Directory::new();
+    let (release, gate) = std::sync::mpsc::channel();
+    let fixture = HttpFixture::streaming(vec![
+        Response::GatedStream {
+            head: "data: {\"choices\":[{\"delta\":{\"content\":\"Discarded partial\"},\"finish_reason\":null}]}\n\n".into(),
+            tail: "data: {\"error\":{\"code\":503,\"message\":\"Temporary fixture failure\"}}\n\n".into(),
+            release: gate,
+        },
+        Response::Json(404, Value::object([("error", Value::object([("message", Value::string("No endpoint"))]))])),
+    ]);
+    let mut app = app(&home, &root, &fixture);
+    app.state.editor.insert("Unanswered request");
+    app.submit().unwrap();
+    tests::wait_until(&mut app, |app| {
+        app.state
+            .items
+            .iter()
+            .any(|item| matches!(item, state::Item::Streaming { .. }))
+    });
+    release.send(()).unwrap();
+    tests::finish(&mut app);
+    assert_eq!(app.state.editor.text, "Unanswered request");
+    assert!(tests::rows(&app).is_empty());
+    assert_eq!(fixture.finish().len(), 2);
+}
+
+#[test]
+fn a_discarded_preview_does_not_count_as_visible_output() {
+    let root = Directory::new();
+    let agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(root.path()).unwrap(),
+    );
+    let mut submission = super::Submission::new(agent.input_checkpoint());
+    submission.observe(&Event::Streaming {
+        text: "Preview".into(),
+    });
+    assert!(submission.has_output());
+    submission.observe(&Event::RequestDiscarded);
+    assert!(!submission.has_output());
+    submission.observe(&Event::Message {
+        text: "Confirmed response".into(),
+    });
+    submission.observe(&Event::RequestDiscarded);
+    assert!(submission.has_output());
 }

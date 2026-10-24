@@ -9,7 +9,8 @@ pub(super) struct Submission {
     input: TurnInput,
     prompts: Vec<Prompt>,
     items: Vec<usize>,
-    output: bool,
+    committed: bool,
+    streaming: bool,
 }
 
 impl Submission {
@@ -18,7 +19,8 @@ impl Submission {
             input,
             prompts: vec![],
             items: vec![],
-            output: false,
+            committed: false,
+            streaming: false,
         }
     }
 
@@ -28,11 +30,20 @@ impl Submission {
     }
 
     pub fn observe(&mut self, event: &Event) {
-        self.output |= match event {
-            Event::Streaming { text } | Event::Message { text } => !text.trim().is_empty(),
-            Event::ToolStarted { .. } => true,
-            _ => false,
-        };
+        match event {
+            Event::Streaming { text } if !text.trim().is_empty() => self.streaming = true,
+            Event::Message { text } => {
+                self.committed |= !text.trim().is_empty();
+                self.streaming = false;
+            }
+            Event::ToolStarted { .. } => self.committed = true,
+            Event::Recovering { .. } | Event::RequestDiscarded => self.streaming = false,
+            _ => {}
+        }
+    }
+
+    fn has_output(&self) -> bool {
+        self.committed || self.streaming
     }
 }
 
@@ -43,17 +54,10 @@ impl App {
         let Some(submission) = self.submission.take() else {
             return false;
         };
-        if submission.output || !agent.return_input(submission.input) {
+        if submission.has_output() || !agent.return_input(submission.input) {
             return false;
         }
-        if self.state.queue.is_editing() {
-            self.state.queue.save_edit(&mut self.state.editor);
-        }
-        if self.state.history.has_edited_recall() {
-            self.park_composer();
-        }
-        self.state.history.cancel(&mut self.state.editor);
-        self.park_composer();
+        self.park_composer_for_restore();
         self.state.history.withdraw(&submission.prompts);
         let mut prompts = submission.prompts.into_iter();
         self.state.editor.set(prompts.next().unwrap());
@@ -97,7 +101,7 @@ impl App {
     }
 
     fn park_composer(&mut self) {
-        if !self.state.editor.prompt().is_empty() {
+        if !self.state.editor.text.is_empty() {
             self.state
                 .queue
                 .paused
@@ -105,9 +109,20 @@ impl App {
         }
     }
 
+    fn park_composer_for_restore(&mut self) {
+        if self.state.queue.is_editing() {
+            self.state.queue.save_edit(&mut self.state.editor);
+        }
+        if self.state.history.has_edited_recall() {
+            self.park_composer();
+        }
+        self.state.history.cancel(&mut self.state.editor);
+        self.park_composer();
+    }
+
     pub(super) fn restore_failed_start(&mut self, prompt: Prompt) {
         self.state.queue.pause();
-        self.park_composer();
+        self.park_composer_for_restore();
         self.state.editor.set(prompt);
         self.edited();
         self.capture_input();

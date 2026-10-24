@@ -149,7 +149,7 @@ The `path` argument also accepts these read-only references:
 | Reference | What it retrieves |
 | --- | --- |
 | `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | Complete saved Bash stream, including text omitted from a result preview. Older `output:OUTPUT_ID:stdout` and `:stderr` references also work. |
-| `history:N` | Original message at zero-based index `N`. A `context_truncated` result includes its `history_reference`. |
+| `history:N` | Original message at zero-based index `N`, excluding input withdrawn to the composer. A `context_truncated` result includes its `history_reference`. |
 | `history:requests` / `history:memory` | Ordered original user requests / current compaction summary. |
 | `skill:NAME` / `skill:NAME/relative/path` | A personal skill's `SKILL.md` / a resource inside that skill. See [Skills](SKILLS.md). |
 | `attachment:ID` | An attached text file, or a re-shown image/PDF; other binaries return their local path. See [Attachments](ATTACHMENTS.md#what-the-model-receives). |

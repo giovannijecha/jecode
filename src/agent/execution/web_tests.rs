@@ -17,6 +17,7 @@ fn independent_web_requests_overlap_and_keep_call_order() {
         for _ in 0..2 {
             let mut stream = loop {
                 if let Ok((stream, _)) = listener.accept() {
+                    stream.set_nonblocking(false).unwrap();
                     break stream;
                 }
                 assert!(

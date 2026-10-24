@@ -40,6 +40,11 @@ The context indicator in the TUI estimates the next request as a share of the
 effective model window; `Context unknown` means the window has not been
 established. It is an estimate, so a provider context rejection can still occur.
 
+Input returned to the composer is withdrawn from the model's history view:
+neither `history:N` nor `history:requests` exposes that attempt. Submitting it
+again creates a new history entry. The original attempt remains in the saved
+session and export for diagnosis; withdrawal does not erase archived data.
+
 The [Auto-compact at setting](CONFIGURATION.md#automatic-compaction-threshold)
 defaults to 80% of the effective window. Before each model request, reaching
 that input budget first turns large older tool results into previews containing

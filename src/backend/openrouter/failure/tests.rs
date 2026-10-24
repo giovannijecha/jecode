@@ -98,6 +98,17 @@ fn oversized_request_keeps_provider_limit_and_suggests_reducing_input() {
 }
 
 #[test]
+fn empty_provider_detail_uses_a_readable_fallback() {
+    for detail in ["", "   "] {
+        let failure = Failure::api(
+            &Value::object([("error", Value::object([("message", Value::string(detail))]))]),
+            404,
+        );
+        assert_eq!(failure.message, "OpenRouter HTTP 404: Request failed.");
+    }
+}
+
+#[test]
 fn provider_regression_nested_error_keeps_diagnostics_and_redacts_credentials() {
     let fixture = HttpFixture::new(vec![(
         400,
