@@ -107,9 +107,4 @@ fn restoring_ranges_clamps_to_history_without_serializing_a_duplicate_cache() {
             .returned
             .is_empty()
     );
-    let projected = context.project(&messages, 0);
-    assert_eq!(
-        context.estimate(&messages, 0, Inputs::default()),
-        bytes_for(&projected, Inputs::default()) + crate::tools::encoded_size()
-    );
 }

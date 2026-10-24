@@ -293,12 +293,7 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
         &[Value::string(constraint)]
     );
     assert!(agent.context.summary.len() > 8192);
-    assert!(
-        agent
-            .context
-            .estimate(&agent.messages.lock().unwrap(), 0, Default::default())
-            < WINDOW
-    );
+    assert!(agent.context_status().tokens < WINDOW);
     assert_eq!(agent.messages.lock().unwrap().len(), 6);
     assert_eq!(
         agent

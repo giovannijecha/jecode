@@ -26,6 +26,99 @@ fn plain(rows: &[Line]) -> String {
 }
 
 #[test]
+fn fallback_uses_executor_edit_shapes_for_valid_and_invalid_calls() {
+    let fixture = crate::test_support::Directory::new();
+    let path = fixture.path().join("source.txt");
+    let tools = crate::tools::Tools::new(fixture.path()).unwrap();
+    let replacement = || {
+        Value::object([
+            ("old_text", Value::string("before")),
+            ("new_text", Value::string("after")),
+        ])
+    };
+    let calls = [
+        (
+            Value::object([("edits", Value::Array(vec![replacement()]))]),
+            None,
+        ),
+        (
+            Value::object([
+                ("edits", Value::Array(vec![replacement()])),
+                ("old_text", Value::Null),
+                ("new_text", Value::string("")),
+            ]),
+            None,
+        ),
+        (
+            Value::object([
+                ("edits", Value::Array(vec![])),
+                ("old_text", Value::string("before")),
+                ("new_text", Value::string("after")),
+            ]),
+            None,
+        ),
+        (
+            Value::object([
+                ("edits", Value::Null),
+                ("old_text", Value::string("before")),
+                ("new_text", Value::string("after")),
+            ]),
+            None,
+        ),
+        (
+            Value::object([
+                ("edits", Value::Array(vec![replacement()])),
+                ("old_text", Value::string("before")),
+                ("new_text", Value::string("after")),
+            ]),
+            Some("Use either edits or old_text/new_text, not both"),
+        ),
+        (
+            Value::object([("edits", Value::Array(vec![]))]),
+            Some("edits must contain at least one replacement"),
+        ),
+        (
+            Value::object([("edits", Value::string("invalid"))]),
+            Some("edits must be an array"),
+        ),
+        (
+            Value::object([
+                ("old_text", Value::string("")),
+                ("new_text", Value::string("after")),
+            ]),
+            Some("old_text must not be empty; use write to replace the whole file"),
+        ),
+        (
+            Value::object([
+                ("old_text", Value::string("before")),
+                ("new_text", Value::string("after\0")),
+            ]),
+            Some("File content must be UTF-8 text without NUL bytes"),
+        ),
+    ];
+    for (mut arguments, error) in calls {
+        std::fs::write(&path, "before").unwrap();
+        let Value::Object(fields) = &mut arguments else {
+            unreachable!()
+        };
+        fields.insert("path".into(), Value::string("source.txt"));
+        let result = tools.execute("edit", &arguments.encode());
+        assert_eq!(result.get("error").and_then(Value::as_str), error);
+        if error.is_some() {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "before");
+            assert!(edit_fallback::single_change(&arguments).is_none());
+            assert!(edit_fallback::summary(&arguments, &result).is_none());
+            assert!(edit_fallback::body(&arguments, &result, 80, true).is_none());
+        } else {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "after");
+            assert!(edit_fallback::single_change(&arguments).is_some());
+            assert!(edit_fallback::summary(&arguments, &result).is_some());
+            assert!(edit_fallback::body(&arguments, &result, 80, true).is_some());
+        }
+    }
+}
+
+#[test]
 fn canonical_batch_without_full_file_diff_shows_staged_replacements() {
     let arguments = Value::object([
         ("path", Value::string("large.rs")),
@@ -69,6 +162,11 @@ fn canonical_batch_without_full_file_diff_shows_staged_replacements() {
         "{text}"
     );
     assert!(!text.contains("No changes"), "{text}");
+    assert_eq!(
+        text.matches("Original file coordinates unavailable.")
+            .count(),
+        1
+    );
     assert!(!text.contains("1 +") && !text.contains("1 −"), "{text}");
 }
 

@@ -60,6 +60,20 @@ pub(super) fn code_rows(
 }
 
 pub(super) fn render(change: &Change, path: &str, columns: usize, expanded: bool) -> Body {
+    render_inner(change, path, columns, expanded, true)
+}
+
+pub(super) fn render_snippet(change: &Change, path: &str, columns: usize, expanded: bool) -> Body {
+    render_inner(change, path, columns, expanded, false)
+}
+
+fn render_inner(
+    change: &Change,
+    path: &str,
+    columns: usize,
+    expanded: bool,
+    coordinate_notice: bool,
+) -> Body {
     let total: usize = change.hunks.iter().map(Vec::len).sum();
     let compact = !expanded && total > 14;
     let digits = change
@@ -182,7 +196,7 @@ pub(super) fn render(change: &Change, path: &str, columns: usize, expanded: bool
         ));
         origin += 1;
     }
-    if digits == 0 && !change.hunks.is_empty() {
+    if coordinate_notice && digits == 0 && !change.hunks.is_empty() {
         rows.extend(wrapped(
             "Original file coordinates unavailable.",
             MUTED,

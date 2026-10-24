@@ -72,6 +72,13 @@ fn cancelled_attempt_has_its_own_export_status() {
         event.get("status").and_then(Value::as_str),
         Some("cancelled")
     );
+    for field in ["preparation_ms", "first_update_ms", "response_ms"] {
+        assert_eq!(
+            event.get(field),
+            Some(&Value::Null),
+            "{field}: no HTTP attempt was dispatched"
+        );
+    }
 }
 
 #[test]

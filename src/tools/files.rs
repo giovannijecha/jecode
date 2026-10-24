@@ -1,4 +1,4 @@
-use super::required_string;
+use super::{edit::steps as edit_steps, required_string};
 use crate::cancel::Cancellation;
 use crate::checkpoints::session::{FileGuard, Session};
 use crate::{file_change::MAX_DIFF_BYTES, json::Value};
@@ -128,42 +128,6 @@ fn edit_mismatch_error(index: usize, reason: &str, initial_advice: &str) -> Stri
             index + 1
         )
     }
-}
-
-fn edit_steps(arguments: &Value) -> Result<Vec<(&str, &str)>, String> {
-    let legacy = ["old_text", "new_text"]
-        .iter()
-        .any(|name| match arguments.get(name) {
-            None | Some(Value::Null) => false,
-            Some(Value::String(text)) if text.is_empty() => false,
-            Some(_) => true,
-        });
-    if let Some(items) = arguments.get("edits") {
-        match items {
-            Value::Array(items) if !items.is_empty() => {
-                if legacy {
-                    return Err("Use either edits or old_text/new_text, not both".into());
-                }
-                return items.iter().map(edit_step).collect();
-            }
-            Value::Array(_) | Value::Null if legacy => return Ok(vec![edit_step(arguments)?]),
-            Value::Array(_) => return Err("edits must contain at least one replacement".into()),
-            _ => return Err("edits must be an array".into()),
-        }
-    }
-    Ok(vec![edit_step(arguments)?])
-}
-
-fn edit_step(arguments: &Value) -> Result<(&str, &str), String> {
-    let old = required_string(arguments, "old_text")?;
-    let new = required_string(arguments, "new_text")?;
-    if old.is_empty() {
-        return Err("old_text must not be empty; use write to replace the whole file".into());
-    }
-    if new.contains('\0') {
-        return Err("File content must be UTF-8 text without NUL bytes".into());
-    }
-    Ok((old, new))
 }
 
 struct ReplacementOutcome {

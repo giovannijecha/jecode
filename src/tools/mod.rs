@@ -1,4 +1,5 @@
 mod attachment;
+pub(crate) mod edit;
 mod files;
 mod network;
 pub mod processes;

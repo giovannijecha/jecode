@@ -387,6 +387,7 @@ mod skills;
 mod streaming;
 mod summary;
 mod temporary;
+mod timing;
 
 #[cfg(test)]
 mod attachment_tests;
@@ -398,6 +399,8 @@ mod browser_tests;
 mod checkpoint_tests;
 #[cfg(test)]
 mod compaction_tests;
+#[cfg(test)]
+mod context_estimate_tests;
 #[cfg(test)]
 mod context_status_tests;
 #[cfg(test)]
@@ -434,4 +437,3 @@ mod skills_tests;
 mod summary_tests;
 #[cfg(test)]
 mod tests;
-mod timing;

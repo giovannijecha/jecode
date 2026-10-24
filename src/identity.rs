@@ -3,7 +3,6 @@
 
 use crate::json::Value;
 use std::fs::File;
-use std::hash::Hasher;
 use std::io::{self, Read};
 use std::sync::OnceLock;
 
@@ -37,16 +36,19 @@ pub fn fingerprint() -> Option<&'static str> {
 }
 
 fn hash_file(mut file: &File) -> io::Result<String> {
-    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
     let mut buffer = [0; 64 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
         }
-        hash.write(&buffer[..count]);
+        for byte in &buffer[..count] {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
     }
-    Ok(format!("{:016x}", hash.finish()))
+    Ok(format!("{hash:016x}"))
 }
 
 fn profile() -> &'static str {
@@ -59,7 +61,7 @@ fn profile() -> &'static str {
 
 pub fn version_line() -> String {
     format!(
-        "jecode {} ({}-{}-{}, exe {})",
+        "jecode {} ({}-{}-{}, exe fnv1a64:{})",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -73,6 +75,7 @@ pub fn value() -> Value {
         ("os", Value::string(std::env::consts::OS)),
         ("arch", Value::string(std::env::consts::ARCH)),
         ("profile", Value::string(profile())),
+        ("fingerprint_algorithm", Value::string("fnv1a64")),
         (
             "executable_fingerprint",
             fingerprint().map_or(Value::Null, Value::string),
@@ -83,6 +86,20 @@ pub fn value() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn executable_hash_matches_fnv1a64_vectors() {
+        let directory = crate::test_support::Directory::new();
+        let path = directory.path().join("bytes");
+        for (bytes, expected) in [
+            (b"".as_slice(), "cbf29ce484222325"),
+            (b"a".as_slice(), "af63dc4c8601ec8c"),
+            (b"foobar".as_slice(), "85944171f73967e8"),
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            assert_eq!(hash_file(&File::open(&path).unwrap()).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn version_and_export_share_the_current_executable_identity() {

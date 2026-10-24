@@ -73,7 +73,7 @@ impl Agent {
                             model: self.redact(self.model()),
                         });
                         timing.notification += notifying.elapsed();
-                        if notified.is_ok() {
+                        if notified.is_ok() && !self.cancellation.requested() {
                             timing.dispatched.get_or_insert_with(Instant::now);
                         }
                         notified

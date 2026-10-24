@@ -109,7 +109,7 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
     ));
     if let Some(result) = tool.result {
         let mut body =
-            if result.get("error").is_some() || tool.name == "edit" && status != Status::Done {
+            if result.get("error").is_some() || (tool.name == "edit" && status != Status::Done) {
                 Body::new(Vec::new())
             } else if let Some(change) = change {
                 diff::render(change, field(tool.arguments, "path"), columns, expanded)

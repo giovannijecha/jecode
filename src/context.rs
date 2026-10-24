@@ -356,17 +356,6 @@ impl Context {
         })
         .unwrap_or_default()
     }
-    #[cfg(test)]
-    pub fn estimate(&self, messages: &[Value], compatible_from: usize, inputs: Inputs) -> usize {
-        if let Some(tokens) = self.measured_input(messages) {
-            return self.estimate_growth(messages, tokens, inputs);
-        }
-        self.estimate_bytes(
-            bytes_for(&self.project(messages, compatible_from), inputs)
-                .saturating_add(crate::tools::encoded_size()),
-        )
-    }
-
     pub(crate) fn estimate_growth(
         &self,
         messages: &[Value],

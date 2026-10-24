@@ -1,26 +1,6 @@
 use super::{Body, diff, field, wrapped};
 use crate::{file_change::Change, json::Value, tui::theme::MUTED};
 
-fn replacements(arguments: &Value) -> Option<Vec<(&str, &str)>> {
-    if let Some(items) = arguments.get("edits").and_then(Value::as_array)
-        && !items.is_empty()
-    {
-        return items
-            .iter()
-            .map(|item| {
-                Some((
-                    item.get("old_text")?.as_str()?,
-                    item.get("new_text")?.as_str()?,
-                ))
-            })
-            .collect();
-    }
-    Some(vec![(
-        arguments.get("old_text")?.as_str()?,
-        arguments.get("new_text")?.as_str()?,
-    )])
-}
-
 fn snippet_change(old: &str, new: &str) -> Option<Change> {
     let mut change = Change::between(Some(old), new)?;
     for entry in change.hunks.iter_mut().flatten() {
@@ -34,14 +14,14 @@ fn snippet_change(old: &str, new: &str) -> Option<Change> {
 }
 
 pub(super) fn single_change(arguments: &Value) -> Option<Change> {
-    let edits = replacements(arguments)?;
+    let edits = crate::tools::edit::steps(arguments).ok()?;
     (edits.len() == 1)
         .then(|| snippet_change(edits[0].0, edits[0].1))
         .flatten()
 }
 
 pub(super) fn summary(arguments: &Value, result: &Value) -> Option<String> {
-    let edits = replacements(arguments)?;
+    let edits = crate::tools::edit::steps(arguments).ok()?;
     if result.get("bytes_written").and_then(Value::as_usize) == Some(0) {
         return Some("No changes".into());
     }
@@ -62,7 +42,7 @@ pub(super) fn body(
     columns: usize,
     expanded: bool,
 ) -> Option<Body> {
-    let edits = replacements(arguments)?;
+    let edits = crate::tools::edit::steps(arguments).ok()?;
     if result.get("bytes_written").and_then(Value::as_usize) == Some(0) {
         return None;
     }
@@ -85,7 +65,8 @@ pub(super) fn body(
         ));
         origin += 1;
         if let Some(change) = snippet_change(old, new) {
-            let mut snippet = diff::render(&change, field(arguments, "path"), columns, expanded);
+            let mut snippet =
+                diff::render_snippet(&change, field(arguments, "path"), columns, expanded);
             for row in &mut snippet.rows {
                 if let Some(source) = &mut row.origin {
                     source.line += origin - 2;
@@ -131,7 +112,17 @@ pub(super) fn body(
             "    ",
             true,
         ));
+        origin += 1;
     }
+    body.rows.extend(wrapped(
+        "Original file coordinates unavailable.",
+        MUTED,
+        columns,
+        origin,
+        "    ",
+        "    ",
+        true,
+    ));
     body.unit = "diff rows";
     Some(body)
 }
