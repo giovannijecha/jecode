@@ -42,7 +42,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
             ]),
             Value::object([("status", Value::number(200)), ("bytes", Value::number(42))]),
             "Web(fetch https://example.org/)",
-            "HTTP 200 · 42 bytes",
+            "HTTP 200 · 42 B",
         ),
         (
             "browser",
@@ -52,7 +52,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
             ]),
             Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]),
             "Browser(screenshot tab-1)",
-            "screenshot saved to tmp:browser/shot.png",
+            "Screenshot · tmp:browser/shot.png",
         ),
     ];
     for (name, arguments, result, title, outcome) in cases {
@@ -85,14 +85,14 @@ fn title_and_result_are_left_aligned_without_a_tree_or_status_column() {
     );
     assert_eq!(
         rows.iter().map(Line::plain).collect::<Vec<_>>(),
-        ["● Bash(cargo test)", "  ⎿ Exit 0"]
+        ["● Bash(cargo test)", "  ⎿ Done"]
     );
     assert_eq!(rows[0].spans[0].style, GOOD);
     assert!(
         rows[0]
             .spans
             .iter()
-            .any(|span| span.text == "Bash(" && span.style == EMPHASIS.bold())
+            .any(|span| span.text == "Bash(" && span.style == TOOL_ACCENT.bold())
     );
     assert!(rows[0].background.is_none());
 }
@@ -112,12 +112,18 @@ fn wrapped_titles_retain_long_unicode_commands_and_fit_narrow_views() {
                 ..Presentation::default()
             },
         );
+        // Words wrap under the open paren; every character survives.
         let title: String = rows
             .iter()
             .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
-            .map(|row| row.plain().chars().skip(2).collect::<String>())
+            .flat_map(|row| row.plain().chars().skip(2).collect::<Vec<_>>())
+            .filter(|character| !character.is_whitespace())
             .collect();
-        assert_eq!(title, format!("Bash({command})"));
+        let expected: String = format!("Bash({command})")
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        assert_eq!(title, expected);
         assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
     }
     for columns in 2..20 {
@@ -181,7 +187,7 @@ fn running_states_stay_explicit_without_a_selection_mode() {
     );
     assert!(rows[0].background.is_none());
     assert_eq!(rows[0].spans[0].style, TOOL_ACCENT);
-    assert!(plain(&rows).contains("⎿ Running…"));
+    assert!(plain(&rows).contains("⎿ ▰▰▱▱▱▱"));
     assert!(rows[1..].iter().all(|row| row.background.is_none()));
 }
 
@@ -205,7 +211,7 @@ fn read_expansion_preserves_numbered_source_and_syntax() {
         &Presentation::default(),
     );
     assert_eq!(compact.len(), 2);
-    assert!(plain(&compact).contains("Read 2 lines · lines 41–42"));
+    assert!(plain(&compact).contains("Read 2 lines · from line 41"));
     let rows = draw(
         "read",
         &arguments,
@@ -250,7 +256,7 @@ fn byte_reads_do_not_invent_line_numbers() {
             ..Presentation::default()
         },
     );
-    assert!(plain(&rows).contains("Read 5 bytes · bytes 16–20"));
+    assert!(plain(&rows).contains("Read 5 bytes · from byte 16"));
     assert_eq!(rows.last().unwrap().plain(), "    hello");
 }
 
@@ -275,9 +281,10 @@ fn failed_commands_prioritize_errors_and_expand_both_streams() {
     );
     let text = plain(&compact);
     assert!(
-        text.contains("Failed · Exit 101")
-            && text.contains("error 1")
-            && text.contains("4 more output lines")
+        text.contains("⎿ Exit 101 · error 1")
+            && text.contains("    error 3")
+            && !text.contains("error 4")
+            && text.contains("7 more lines")
     );
     assert!(!text.contains("compiled one"));
     let rows = draw(
@@ -330,7 +337,8 @@ fn capture_notices_survive_collapse_and_expansion() {
         let text = plain(&rows);
         assert!(text.contains("last") && text.contains("full output saved"));
         assert_eq!(text.contains("    old"), expanded);
-        assert_eq!(text.contains("1 more output line"), !expanded);
+        assert!(text.contains(if expanded { "⎿ Done" } else { "⎿ last" }));
+        assert_eq!(text.contains("2 more lines"), !expanded);
     }
 }
 
@@ -350,7 +358,7 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
         80,
         &Presentation::default(),
     );
-    assert!(plain(&initial).contains("● Update(src/auth.rs)\n  ⎿ Added 2 lines, removed 1 line"));
+    assert!(plain(&initial).contains("● Update(src/auth.rs)\n  ⎿ +2 −1 lines"));
     assert!(
         initial
             .iter()
@@ -380,8 +388,8 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
         80,
         &Presentation::default(),
     );
-    assert!(!plain(&rows).contains("new();") && !plain(&rows).contains("Added 2"));
-    assert!(plain(&rows).contains("Failed · File is read-only"));
+    assert!(!plain(&rows).contains("new();") && !plain(&rows).contains("+2"));
+    assert!(plain(&rows).contains("⎿ File is read-only"));
 }
 
 #[test]
@@ -401,13 +409,12 @@ fn old_sessions_keep_snippet_diffs_without_fake_file_coordinates_or_eof() {
     );
     let text = plain(&rows);
     assert!(
-        text.contains("Added 1 line, removed 1 line")
-            && text.contains("Original file coordinates unavailable.")
+        text.contains("+1 −1 lines") && text.contains("Original file coordinates unavailable.")
     );
     assert!(
         !text.contains("No newline at end of file")
-            && !text.contains("1 −")
-            && !text.contains("1 +")
+            && !text.contains("    1 −")
+            && !text.contains("    1 +")
     );
     assert_eq!(text.matches("same").count(), 1);
 }
@@ -419,10 +426,10 @@ fn process_states_and_lists_name_their_actual_outcomes() {
         ("process_id", Value::string("p1")),
     ]);
     for (status, expected) in [
-        ("running", "Running at last check · p1"),
-        ("stopping", "Stopping · p1"),
-        ("stopped", "Stopped · p1"),
-        ("unknown", "Status unknown · p1"),
+        ("running", "⎿ p1 running"),
+        ("stopping", "⎿ p1 stopping"),
+        ("stopped", "⎿ p1 stopped"),
+        ("unknown", "⎿ p1 status unknown"),
     ] {
         let result = Value::object([
             ("process_id", Value::string("p1")),
@@ -515,7 +522,7 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
         80,
         &Presentation::default(),
     );
-    assert!(plain(&rows).contains("Wrote 1 line · previous content unavailable"));
+    assert!(plain(&rows).contains("⎿ Wrote 1 line"));
     assert!(rows.iter().all(|row| row.background.is_none()));
     let change = Change::between(None, "").unwrap();
     let rows = draw(

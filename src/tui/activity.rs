@@ -1,90 +1,58 @@
 use super::{
     line::Line,
-    text,
-    theme::{EMPHASIS, TOOL_DIM, WAVE_SHADES},
+    theme::{SCANNER_LIT, SCANNER_REST, TOOL_DIM},
 };
 use std::time::{Duration, Instant};
 
 pub struct Activity {
     pub started: Instant,
-    pub phase_started: Instant,
-    pub label: &'static str,
     pub tools: usize,
     pub stopping: bool,
 }
 impl Activity {
     pub fn new() -> Self {
-        let started = Instant::now();
         Self {
-            started,
-            phase_started: started,
-            label: "Preparing",
+            started: Instant::now(),
             tools: 0,
             stopping: false,
         }
     }
-    pub fn set_label(&mut self, label: &'static str) {
-        if self.label != label {
-            self.label = label;
-            self.phase_started = Instant::now();
-        }
+    /// The scanner and the whole turn's elapsed time, as the composer rule shows them.
+    pub fn line(&self, time: bool) -> Line {
+        Self::at(self.started.elapsed(), time)
     }
-    pub fn line(&self, columns: usize, hint: &str) -> Line {
-        self.at(self.phase_started.elapsed(), columns, hint)
-    }
-    /// One sentence: the current phase and its duration, then a key hint when it
-    /// fits whole. Progress such as a reconnect is a notice above this row.
-    fn at(&self, elapsed: Duration, columns: usize, hint: &str) -> Line {
+    fn at(elapsed: Duration, time: bool) -> Line {
         let mut line = indicator((elapsed.as_millis() / 120) as usize);
-        line.push("  ", TOOL_DIM);
-        line.push(
-            if self.label == "Waiting" {
-                "Waiting for the model"
-            } else {
-                self.label
-            },
-            EMPHASIS.bold(),
-        );
-        line.push(&format!("  ·  {}", duration(elapsed)), TOOL_DIM);
-        if !hint.is_empty() && text::cells(&line.plain()) + 3 + text::cells(hint) <= columns {
-            line.push(
-                &" ".repeat(columns - text::cells(&line.plain()) - text::cells(hint)),
-                TOOL_DIM,
-            );
-            line.push(hint, TOOL_DIM);
+        if time {
+            line.push(&format!(" {}", duration(elapsed)), TOOL_DIM);
         }
-        line.shortened(columns)
+        line
     }
 }
 
+/// Two lit blocks sweeping across six cells and back.
 pub(super) fn indicator(frame: usize) -> Line {
-    // A constant glyph and weight keep all four dots on the same baseline.
-    const WAVE: [[usize; 4]; 12] = [
-        [3, 1, 0, 0],
-        [2, 2, 0, 0],
-        [1, 3, 1, 0],
-        [0, 2, 2, 0],
-        [0, 1, 3, 1],
-        [0, 0, 2, 2],
-        [0, 0, 1, 3],
-        [0, 0, 2, 2],
-        [0, 1, 3, 1],
-        [0, 2, 2, 0],
-        [1, 3, 1, 0],
-        [2, 2, 0, 0],
-    ];
+    const CELLS: usize = 6;
+    let lit = 4 - (frame % 8).abs_diff(4);
     let mut line = Line::default();
-    for shade in WAVE[frame % WAVE.len()] {
-        line.push("•", WAVE_SHADES[shade]);
+    for cell in 0..CELLS {
+        if cell == lit || cell == lit + 1 {
+            line.push("▰", SCANNER_LIT);
+        } else {
+            line.push("▱", SCANNER_REST);
+        }
     }
     line
 }
 
 pub fn duration(elapsed: Duration) -> String {
-    if elapsed.as_secs() < 60 {
+    let seconds = elapsed.as_secs();
+    if seconds < 60 {
         format!("{:.1}s", elapsed.as_secs_f64())
+    } else if seconds < 3600 {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
     } else {
-        format!("{}m {:02}s", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
+        format!("{}h {:02}m", seconds / 3600, seconds / 60 % 60)
     }
 }
 
@@ -92,35 +60,24 @@ pub fn duration(elapsed: Duration) -> String {
 mod tests {
     use super::*;
     #[test]
-    fn animation_has_fixed_positions_and_duration_spans_the_current_phase() {
-        let activity = Activity::new();
-        let at = |elapsed, columns| activity.at(elapsed, columns, "esc to stop").plain();
-        let wide = at(Duration::from_millis(3200), 80);
-        assert!(wide.starts_with("••••  Preparing  ·  3.2s"));
-        assert!(wide.ends_with("esc to stop"));
-        assert_eq!(text::cells(&wide), 80);
-        assert!(at(Duration::from_millis(3700), 80).contains("  ·  3.7s"));
-        assert!(at(Duration::from_secs(64), 80).contains("1m 04s"));
-        // The hint leaves whole before the sentence shortens.
-        assert_eq!(at(Duration::ZERO, 32), "••••  Preparing  ·  0.0s");
-        assert!(at(Duration::ZERO, 15).ends_with('…'));
+    fn scanner_sweeps_two_blocks_across_six_cells() {
+        let frames: Vec<_> = (0..8).map(|frame| indicator(frame).plain()).collect();
+        assert_eq!(frames[0], "▰▰▱▱▱▱");
+        assert_eq!(frames[4], "▱▱▱▱▰▰");
+        assert_eq!(frames[7], "▱▰▰▱▱▱");
+        assert_eq!(indicator(8).plain(), frames[0]);
     }
 
     #[test]
-    fn phase_changes_reset_only_the_displayed_timer() {
-        let mut activity = Activity::new();
-        activity.started -= Duration::from_secs(10);
-        activity.phase_started = activity.started;
-        activity.set_label("Waiting");
-        assert!(activity.phase_started > activity.started);
-        let waiting_since = activity.phase_started;
-        activity.set_label("Waiting");
-        assert_eq!(activity.phase_started, waiting_since);
-        assert!(
-            activity
-                .line(80, "")
-                .plain()
-                .contains("Waiting for the model")
+    fn duration_moves_from_tenths_to_minutes_to_hours() {
+        assert_eq!(duration(Duration::from_millis(3200)), "3.2s");
+        assert_eq!(duration(Duration::from_secs(64)), "1m 04s");
+        assert_eq!(duration(Duration::from_secs(70 * 60 + 52)), "1h 10m");
+        assert_eq!(duration(Duration::from_secs(3600 + 5 * 60)), "1h 05m");
+        assert_eq!(
+            Activity::at(Duration::from_millis(3200), true).plain(),
+            "▱▱▰▰▱▱ 3.2s"
         );
+        assert_eq!(Activity::at(Duration::ZERO, false).plain(), "▰▰▱▱▱▱");
     }
 }

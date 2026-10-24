@@ -9,13 +9,13 @@ original text. Terminal styling does not change what the model said.
 
 | Source | Terminal display |
 | --- | --- |
-| `#` through `######`, or a one-line Setext heading | Emphasized heading text. Optional closing hashes are removed. |
+| `#` through `######`, or a one-line Setext heading | Bold heading text: level 1 (and `===`) in the accent, level 2 (and `---`) emphasized, deeper levels in the body colour. Optional closing hashes are removed, and one neutral row follows a heading that touches the next line. |
 | `**strong**`, `__strong__`, `*italic*`, `_italic_`, `~~strike~~` | Styled text; styles can combine. |
-| Matching backtick runs | Inline code with literal spaces and punctuation. |
-| `[label](destination)` | Styled label followed by the visible destination in parentheses. Jecode does not open it. |
+| Matching backtick runs | Inline code on the code surface, with literal spaces and punctuation. |
+| `[label](destination)` | Underlined accent label followed by the muted destination in parentheses. Jecode does not open it. |
 | `-`, `*`, `+`, or numbered list items | A hanging indent when the item wraps. `[ ]` and `[x]`/`[X]` render as task boxes. |
 | `>` quote lines | A muted quote with a vertical guide. |
-| Three or more matching backticks or tildes | A full-width code panel with a language label. |
+| Three or more matching backticks or tildes | A full-width code panel with a language label and one cell of padding on each side when space allows. |
 | Three or more matching `-`, `*`, or `_` markers | A horizontal rule. |
 
 Fenced Rust, shell, JSON, JavaScript/TypeScript and XML/HTML code gets light
@@ -24,10 +24,15 @@ inside tool output. Other languages remain readable plain code. Highlighting is
 for display, not syntax validation. An unfinished fence stays open while a
 response streams.
 
-Each source line remains a separate display line, wrapping to fit the
-terminal. Explicit blank lines remain visible. Consecutive prose lines are
-not merged into paragraphs. Backslash escapes protect ASCII punctuation;
-unmatched formatting markers stay visible as text.
+Consecutive prose lines form one paragraph, as in CommonMark: a plain line
+continues the paragraph, list item or quote above it, joined by a space, so
+emphasis can span the break and the text reflows to the terminal width.
+Consecutive `>` lines continue one quote. A blank line or the start of a
+heading, list item, quote, rule, table or code fence ends the paragraph. Two
+trailing spaces or a trailing backslash keep a hard line break, and a
+paragraph longer than 8 KiB continues at the next source line. Explicit blank
+lines remain visible. Backslash escapes protect ASCII punctuation; unmatched
+formatting markers stay visible as text.
 
 ## Tables
 
@@ -54,7 +59,7 @@ response is streaming and settle when the message completes.
 ## Display limits
 
 This is a display subset of Markdown, not a complete CommonMark or GFM
-parser. Lazy quote continuation, deeply nested block containers, reference
+parser. Deeply nested block containers, reference
 links, images, HTML, entities, and math have no special rendering. Their
 source remains visible. Links show their destination but are not clickable
 through Jecode. Terminal control characters are sanitized for display.

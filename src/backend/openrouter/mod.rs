@@ -17,6 +17,7 @@ pub use crate::backend::{
     Charges, Completion, Failure, FailureKind, Limits, ToolCall, Update, validate_model,
 };
 pub use endpoints::Endpoints;
+pub(crate) use failure::KEY_HINT;
 pub use routing::{Router, Routing};
 
 use crate::cancel::Cancellation;

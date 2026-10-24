@@ -243,7 +243,7 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
         80,
         &crate::backend::openrouter::Routing::Auto,
     ));
-    state.selector.as_mut().unwrap().selected = 5;
+    state.selector.as_mut().unwrap().selected = 4;
     let mut screen = Screen::new(state.width, state.height);
     let mut display = Display::new((state.width, state.height));
     step(&mut display, &mut screen, &state, now);
@@ -255,8 +255,8 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
             &state,
             now + Duration::from_millis(75),
         );
-        assert!(screen.visible().contains("6. Close"));
-        assert_eq!(state.selector.as_ref().unwrap().selected, 5);
+        assert!(screen.visible().contains("API key"));
+        assert_eq!(state.selector.as_ref().unwrap().selected, 4);
         assert_eq!(state.editor, draft);
     }
     let models: Vec<_> = (0..12)
@@ -284,7 +284,8 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
         now + Duration::from_millis(75),
     );
     assert!(screen.visible().contains(&selected));
-    assert!(screen.visible().contains("› model"));
+    // The search field keeps its query.
+    assert!(screen.visible().contains(" model "));
     assert_eq!(state.selector.as_ref().unwrap().editor.text, "model");
     assert_eq!(state.editor, draft);
 }

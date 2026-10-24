@@ -259,10 +259,12 @@ public sealed class JecodeTestPty : IDisposable {
                 // Routing at normal, narrow and short sizes; focus starts on the current row.
                 pty.Send("/routing"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Routing · fixture/model");
-                pty.Wait("current · no routing preferences");
-                pty.Wait("$/M input/output after discounts");
-                pty.Resize(40, 12); pty.Send("\x1b[A"); pty.Wait("Pinned to two/fp8");
-                pty.Resize(44, 6); pty.Send("\x1b[A"); pty.Wait("› 2. one/fp8");
+                pty.Wait("no routing preferences are sent");
+                pty.Wait("$/M after discounts");
+                // The detail strip leaves first as the height shrinks; selection stays.
+                int pinned = pty.Mark(); pty.Send("\x1b[A"); pty.Wait("Pinned to two/fp8", pinned);
+                int narrow = pty.Mark(); pty.Resize(40, 12); pty.Send("\x1b[A"); pty.Wait("› one/fp8", narrow);
+                int shortened = pty.Mark(); pty.Resize(44, 6); pty.Send("\x1b[A"); pty.Wait("› Auto", shortened);
                 // Esc closes quietly; the draft below only reaches an open composer.
                 pty.Send("\x1b"); Thread.Sleep(150);
                 pty.Resize(80, 24);
@@ -299,7 +301,7 @@ public sealed class JecodeTestPty : IDisposable {
                 int openSaved = pty.Mark(); pty.Send("/resume"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("native delete request", openSaved);
                 int confirmDelete = pty.Mark(); pty.Send("\x04");
-                pty.Wait("Delete?", confirmDelete);
+                pty.Wait("Delete this conversation?", confirmDelete);
                 int deleted = pty.Mark(); pty.Send("\r");
                 pty.Wait("No saved conversations", deleted);
                 int afterDelete = pty.Mark(); pty.Send("\x1b");

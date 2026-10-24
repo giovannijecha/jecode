@@ -1,12 +1,15 @@
-use super::{Body, diff, edit_fallback, field, flag, preview, wrapped};
+use super::{
+    Body, Status, Tool, diff, edit_fallback, field, flag, line_rows, preview,
+    streams::{self, Preview},
+    summary::size,
+};
 use crate::{
     json::Value,
     tui::{
         line::Line,
-        notice::{self, Level},
         syntax::Highlighter,
         text,
-        theme::{BAD, BODY, MUTED},
+        theme::{BODY, MUTED, Style, WARNING},
     },
 };
 
@@ -24,14 +27,14 @@ pub(super) fn payload(value: &str) -> Vec<String> {
 }
 
 pub(super) fn render(
-    name: &str,
-    arguments: &Value,
+    tool: &Tool<'_>,
     result: &Value,
+    status: Status,
     columns: usize,
-    failed: bool,
     expanded: bool,
 ) -> Body {
-    match name {
+    let arguments = tool.arguments;
+    match tool.name {
         "read" if !expanded => Body::new(Vec::new()),
         "read" if result.get("content").and_then(Value::as_str).is_some() => {
             Body::new(read(arguments, result, columns))
@@ -40,15 +43,34 @@ pub(super) fn render(
         "edit" => edit_fallback::body(arguments, result, columns, expanded)
             .unwrap_or_else(|| Body::new(Vec::new())),
         _ if result.get("processes").is_some() => processes(result, columns, expanded),
-        "bash" | "process" => streams(result, columns, failed, expanded),
+        "bash" | "process" => {
+            let (skip, rows) = match status {
+                Status::Failed => (
+                    streams::headline(&streams::entries(result, true), true),
+                    Preview::First(2),
+                ),
+                Status::Stopped => (None, Preview::Last(3)),
+                _ => (
+                    streams::headline(&streams::entries(result, false), false),
+                    Preview::Quiet,
+                ),
+            };
+            let failed = status == Status::Failed;
+            streams::render(result, failed, skip, rows, columns, expanded)
+        }
         "checkpoint" => {
             let lines = payload(&crate::checkpoints::render::text(result, "/checkpoints"));
-            selected(&lines, columns, expanded)
+            selected(&lines, columns, expanded, 3)
         }
-        _ => {
-            let lines = payload(&result.pretty());
-            selected(&lines, columns, expanded)
+        // A page's text, or the raw result, waits for Ctrl+O.
+        "web" if result.get("preview").and_then(Value::as_str).is_some() => {
+            let lines: Vec<_> = payload(field(result, "preview"))
+                .into_iter()
+                .filter(|line| !line.trim().is_empty())
+                .collect();
+            selected(&lines, columns, expanded, 0)
         }
+        _ => selected(&payload(&result.pretty()), columns, expanded, 0),
     }
 }
 
@@ -122,63 +144,7 @@ fn written(arguments: &Value, columns: usize, expanded: bool) -> Body {
     Body {
         rows,
         hidden: lines.len() - count,
-        unit: "output lines",
-    }
-}
-
-fn streams(result: &Value, columns: usize, failed: bool, expanded: bool) -> Body {
-    let stdout = payload(field(result, "stdout"));
-    let stderr = payload(field(result, "stderr"));
-    let stderr = stderr
-        .iter()
-        .map(|line| (line, if failed { BAD } else { MUTED }, "stderr"));
-    let stdout = stdout.iter().map(|line| (line, BODY, "stdout"));
-    let entries: Vec<_> = if failed {
-        stderr.chain(stdout).collect()
-    } else {
-        stdout.chain(stderr).collect()
-    };
-    let limit = if failed { 6 } else { 3 };
-    let start = if !expanded && !failed {
-        entries.len().saturating_sub(limit)
-    } else {
-        0
-    };
-    let count = if expanded {
-        entries.len()
-    } else {
-        entries.len().min(limit)
-    };
-    let both = !field(result, "stdout").is_empty() && !field(result, "stderr").is_empty();
-    let mut previous = "";
-    let mut rows = Vec::new();
-    for (index, (line, style, stream)) in entries.iter().enumerate().skip(start).take(count) {
-        if expanded && both && previous != *stream {
-            rows.extend(wrapped(
-                stream,
-                MUTED,
-                columns,
-                index * 2 + 2,
-                "    ",
-                "    ",
-                true,
-            ));
-        }
-        previous = stream;
-        rows.extend(wrapped(
-            &preview(Line::new(line, *style), columns.saturating_sub(4), expanded).plain(),
-            *style,
-            columns,
-            index * 2 + 3,
-            "    ",
-            "    ",
-            false,
-        ));
-    }
-    Body {
-        rows,
-        hidden: entries.len() - count,
-        unit: "output lines",
+        unit: "lines",
     }
 }
 
@@ -201,97 +167,83 @@ fn processes(result: &Value, columns: usize, expanded: bool) -> Body {
             )
         })
         .collect();
-    selected(&lines, columns, expanded)
+    selected(&lines, columns, expanded, 3)
 }
 
-fn selected(lines: &[String], columns: usize, expanded: bool) -> Body {
-    // A collapsed card previews three lines.
+/// The first `preview_rows` lines, or every line when expanded.
+fn selected(lines: &[String], columns: usize, expanded: bool, preview_rows: usize) -> Body {
     let count = if expanded {
         lines.len()
     } else {
-        lines.len().min(3)
+        lines.len().min(preview_rows)
     };
     let rows = lines
         .iter()
         .take(count)
         .enumerate()
         .flat_map(|(index, line)| {
-            wrapped(
-                &preview(Line::new(line, BODY), columns.saturating_sub(4), expanded).plain(),
-                BODY,
+            line_rows(
+                &preview(Line::new(line, BODY), columns.saturating_sub(4), expanded),
                 columns,
                 index + 2,
                 "    ",
                 "    ",
-                false,
+                MUTED,
             )
         })
         .collect();
     Body {
         rows,
         hidden: lines.len() - count,
-        unit: "output lines",
+        unit: "lines",
     }
 }
 
+/// Upright notes under the card: what was trimmed, what follows, what failed.
 pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool) -> Vec<Line> {
-    let mut notices = Vec::new();
+    let mut notices: Vec<(Style, String)> = Vec::new();
+    let number = |key: &str| result.get(key).and_then(Value::as_usize).unwrap_or(0);
     if name == "read" && result.get("offset") == Some(&Value::Null) {
         if let Some(next) = result.get("next_byte_offset").and_then(Value::as_usize) {
-            notices.push((
-                Level::Info,
-                format!("More file bytes available from byte {next}."),
-            ));
+            notices.push((MUTED, format!("More bytes available from byte {next}")));
         }
     } else if name == "read"
         && let Some(next) = result.get("next_offset").and_then(Value::as_usize)
     {
         notices.push((
-            Level::Info,
+            MUTED,
             if flag(result, "partial_line") {
-                format!(
-                    "Line continues at byte {}.",
-                    result
-                        .get("next_byte_offset")
-                        .and_then(Value::as_usize)
-                        .unwrap_or(0)
-                )
+                format!("Line continues at byte {}", number("next_byte_offset"))
             } else {
-                format!("More file lines available from line {next}.")
+                format!("More lines available from line {next}")
             },
         ));
     }
     if matches!(name, "bash" | "process") {
         for stream in ["stdout", "stderr"] {
-            let skipped = result
-                .get(&format!("{stream}_skipped_bytes"))
-                .and_then(Value::as_usize)
-                .unwrap_or(0);
+            let skipped = number(&format!("{stream}_skipped_bytes"));
             if skipped > 0 {
                 notices.push((
-                    Level::Warning,
-                    format!("{stream}: {skipped} earlier bytes not shown · full output saved."),
+                    MUTED,
+                    format!(
+                        "{stream} skipped the first {} · full output saved",
+                        size(skipped)
+                    ),
                 ));
             }
             if flag(result, &format!("{stream}_truncated")) {
-                let bytes = result
-                    .get(&format!("{stream}_bytes"))
-                    .and_then(Value::as_usize)
-                    .unwrap_or(0);
-                let limit = result
-                    .get("output_limit_bytes")
-                    .and_then(Value::as_usize)
-                    .unwrap_or(0);
-                notices.push((
-                    Level::Warning,
-                    if field(result, &format!("{stream}_file")).is_empty() {
-                        format!("{stream} capture truncated: {limit} of {bytes} bytes retained.")
-                    } else {
+                let bytes = size(number(&format!("{stream}_bytes")));
+                let limit = size(number("output_limit_bytes"));
+                notices.push(if field(result, &format!("{stream}_file")).is_empty() {
+                    (WARNING, format!("{stream} capture kept {limit} of {bytes}"))
+                } else {
+                    (
+                        MUTED,
                         format!(
-                            "{stream}: last {limit} of {bytes} bytes shown · full output saved."
-                        )
-                    },
-                ));
+                            "{stream} trimmed to the last {limit} of {bytes} · full output saved"
+                        ),
+                    )
+                });
             }
         }
     }
@@ -299,7 +251,7 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
         let text = |key| checkpoint.get(key).and_then(Value::as_str);
         if let Some(status @ ("partial" | "none")) = text("status") {
             notices.push((
-                Level::Warning,
+                WARNING,
                 text("reason").map_or_else(
                     || format!("Checkpoint {status}"),
                     |reason| format!("Checkpoint {status} · {reason}"),
@@ -307,20 +259,21 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
             ));
         }
         if expanded && let Some(reference) = text("ref") {
-            notices.push((Level::Info, format!("Checkpoint {reference}")));
+            notices.push((MUTED, format!("Checkpoint {reference}")));
         }
     }
     notices
         .into_iter()
         .enumerate()
-        .flat_map(|(index, (level, message))| {
-            notice::lines(level, &message, columns.saturating_sub(4).max(1))
-                .into_iter()
-                .map(move |row| {
-                    row.at_source(usize::MAX - 100 + index)
-                        .gutter("    ", MUTED)
-                        .shortened(columns)
-                })
+        .flat_map(|(index, (style, message))| {
+            line_rows(
+                &Line::new(&text::clean(&message), style),
+                columns,
+                usize::MAX - 100 + index,
+                "    ",
+                "    ",
+                MUTED,
+            )
         })
         .collect()
 }

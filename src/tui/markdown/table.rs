@@ -312,9 +312,7 @@ fn visual_width(value: &str) -> usize {
 }
 
 fn append(line: &mut Line, value: &Line) {
-    for span in &value.spans {
-        line.push(&span.text, span.style);
-    }
+    line.spans.extend(value.spans.iter().cloned());
 }
 
 fn alignment(value: &str) -> Option<Alignment> {

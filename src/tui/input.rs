@@ -30,7 +30,7 @@ impl App {
             }
             Decoded::Error => {
                 self.state.feedback_input(true);
-                self.warn("Input exceeds 1 MiB. Insertion rejected; your draft was kept.");
+                self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
                 return Ok(false);
             }
             Decoded::Text(text) | Decoded::Paste(text) => {
@@ -45,7 +45,7 @@ impl App {
                     }
                     if selector.accepts_text() {
                         if !selector.editor.insert(&text) {
-                            self.warn("Input exceeds 1 MiB. Insertion rejected.");
+                            self.warn("Input exceeds 1 MiB · insertion rejected");
                         } else {
                             self.state.selector.as_mut().unwrap().refresh();
                         }
@@ -63,7 +63,7 @@ impl App {
                     }
                 } else {
                     if !self.state.editor.insert(&text) {
-                        self.warn("Input exceeds 1 MiB. Insertion rejected; your draft was kept.");
+                        self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
                     } else {
                         self.edited();
                         self.state.history.edited();
@@ -107,7 +107,7 @@ impl App {
                 self.state.information = None;
                 return Ok(false);
             }
-            if !key.ctrl() && !key.alt() && matches!(key.code, 33..=36 | 38 | 40) {
+            if !key.ctrl() && !key.alt() && matches!(key.code, 33..=40) {
                 super::view::scroll_information(&mut self.state, key.code);
                 return Ok(false);
             }
@@ -207,7 +207,7 @@ impl App {
             80 | 78 if key.ctrl() => {
                 if self.state.queue.is_editing() {
                     self.warn(
-                        "Save this draft with enter or cancel with esc before browsing history.",
+                        "Save this draft with Enter or cancel with Esc before browsing history",
                     );
                     return Ok(false);
                 }
@@ -227,7 +227,7 @@ impl App {
             _ => {
                 let before = self.state.editor.text.clone();
                 if !self.state.editor.key(key) {
-                    self.warn("Input exceeds 1 MiB. Insertion rejected; your draft was kept.");
+                    self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
                 }
                 if self.state.editor.text != before {
                     self.state.feedback_input(true);
@@ -310,7 +310,6 @@ impl App {
             worker.cancel();
             if let Some(activity) = &mut self.state.activity {
                 activity.stopping = true;
-                activity.set_label("Stopping");
             }
             self.state.clear_notice();
             self.state.status = "Stopping...".into();

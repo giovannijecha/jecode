@@ -1,12 +1,19 @@
-use super::panel;
+//! The `/terminal` panel in the menu standard: the process list is a menu,
+//! stopping asks in place of the key row, and output sits in an inset with
+//! Output and Errors as section tabs.
+
+use super::panel::{self, Key, Panel as Rows, Part, key};
 use crate::tools::processes::Process;
 use crate::tui::{
-    hint,
     line::Line,
     processes::{Logs, Panel, STREAMS},
     text,
-    theme::{ACCENT, BAD, BODY, GOOD, MUTED, SELECTED_SURFACE, Style, WARNING},
+    theme::{
+        ACCENT, BAD, BODY, CODE_SURFACE, GOOD, MUTED, SELECTED_SURFACE, STRONG, Style, WARNING,
+    },
 };
+
+const LIMIT: usize = 6;
 
 pub(super) fn render(
     panel: &Panel,
@@ -14,159 +21,143 @@ pub(super) fn render(
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let width = panel::width(columns);
-    let (lines, mut priorities) = if let Some(process) = &panel.confirm_stop {
-        confirmation(process, width)
-    } else if let Some(logs) = &panel.logs {
+    let out = if let Some(logs) = &panel.logs {
         output(panel, logs, width, height)
     } else {
         list(panel, width, height)
     };
-    // Below the catalog's row budgets, keep the confirmation recognizable.
-    if height == 1 && panel.confirm_stop.is_some() {
-        priorities.insert(0, 0);
-    }
-    panel::finish(lines, None, &priorities, columns, height)
+    out.finish(columns, height)
 }
 
-fn capacity(height: usize, fixed: usize) -> usize {
-    height.saturating_sub(fixed + 3).max(1)
-}
-
+/// Process rows visible at once.
 pub(in crate::tui) fn list_capacity(height: usize) -> usize {
-    capacity(height, 1)
+    panel::budget(height, 2, LIMIT)
 }
 
-fn confirmation(process: &Process, width: usize) -> (Vec<Line>, Vec<usize>) {
-    let live = process.active();
-    let controls = if live {
-        &["Enter stop · Esc cancel", "↵ stop · Esc", "↵ · Esc", "↵"][..]
-    } else {
-        &[
-            "Already finished · Enter back · Esc cancel",
-            "Finished · Enter back",
-            "↵ back · Esc",
-            "↵",
-        ][..]
-    };
-    let lines = vec![
-        panel::heading(
-            if live {
-                "Stop process?"
-            } else {
-                "Process finished"
-            },
-            "",
+/// Log text width inside the inset, leaving room for the scrollbar.
+pub(in crate::tui) fn text_width(width: usize) -> usize {
+    width.saturating_sub(4).max(1)
+}
+
+/// The stop confirmation, or the key row it replaces.
+fn ending(panel: &Panel, keys: &[Key], width: usize, overflow: bool) -> Vec<Line> {
+    match &panel.confirm_stop {
+        Some(process) if process.active() => panel::confirm(
+            "Stop this process?",
+            &[key("Enter", "stop"), key("Esc", "cancel")],
             width,
         ),
-        Line::new(&single_line(&process.command), crate::tui::theme::STRONG).shortened(width),
-        Line::new(&display_status(process), status_style(process)).shortened(width),
-        Line::new(&process.id, MUTED).shortened(width),
-        Line::new(&hint::choose(controls, width), MUTED),
-    ];
-    (lines, vec![1, 4, 0, 3, 2])
+        Some(_) => {
+            let mut rows = vec![Line::new("Already finished", MUTED)];
+            rows.extend(panel::keys(
+                &[key("Enter", "back"), key("Esc", "cancel")],
+                width,
+                false,
+            ));
+            rows
+        }
+        None => panel::keys(keys, width, overflow),
+    }
 }
 
-fn list(panel: &Panel, width: usize, height: usize) -> (Vec<Line>, Vec<usize>) {
+fn list(panel: &Panel, width: usize, height: usize) -> Rows {
     let total = panel.processes.len();
-    let limit = capacity(height, 1);
-    let start = panel.selected.saturating_sub(limit - 1);
-    let end = (start + limit).min(total);
-    let mut lines = vec![panel::heading(
-        "Background processes",
-        &panel::position(start, end, total),
-        width,
-    )];
+    let mut out = Rows::default();
+    let aside = if total == 0 {
+        String::new()
+    } else {
+        format!("{total} running")
+    };
+    out.add(
+        panel::header(
+            None,
+            "Background processes",
+            "this conversation",
+            Line::new(&aside, MUTED),
+            width,
+        ),
+        Part::Title,
+    );
+    out.add(panel::divider(width), Part::Header);
+    out.space();
+    let keys: Vec<Key> = if total == 0 {
+        vec![key("Esc", "close")]
+    } else {
+        vec![
+            key("↑↓", "move").optional(),
+            key("Enter", "output"),
+            key("Ctrl+D", "stop"),
+            key("Esc", "close"),
+        ]
+    };
+    let limit = list_capacity(height);
+    let overflow = total > limit;
+    let ending = ending(panel, &keys, width, overflow);
+    if total == 0 {
+        out.add(
+            Line::new("No active background processes in this conversation", MUTED),
+            Part::Keep,
+        );
+    }
+    let start = panel
+        .selected
+        .saturating_sub(limit / 2)
+        .min(total.saturating_sub(limit));
+    let rows = width.saturating_sub(2 * usize::from(overflow)).max(1);
     let labels = panel
         .processes
         .iter()
         .map(|process| text::cells(&display_status(process)))
         .max()
         .unwrap_or(0);
-    let mut selected = None;
-    for (index, process) in panel.processes.iter().enumerate().take(end).skip(start) {
-        let chosen = index == panel.selected;
-        if chosen {
-            selected = Some(lines.len());
-        }
+    let stopping = panel
+        .confirm_stop
+        .as_ref()
+        .map(|process| process.id.as_str());
+    for (index, process) in panel.processes.iter().enumerate().skip(start).take(limit) {
+        let on = index == panel.selected;
+        let mut line = Line::new(if on { "› " } else { "  " }, ACCENT);
         let label = display_status(process);
-        let mut line = Line::new(
-            if chosen { "› " } else { "  " },
-            if chosen { ACCENT } else { MUTED },
-        );
         line.push(&label, status_style(process));
-        line.push(
-            &" ".repeat(labels.saturating_sub(text::cells(&label)) + 2),
-            MUTED,
-        );
-        line.push(
-            &text::ellipsize(
-                &single_line(&process.command),
-                width.saturating_sub(text::cells(&line.plain())),
-            ),
-            crate::tui::theme::STRONG,
-        );
-        if chosen {
-            line.background = Some(SELECTED_SURFACE);
-        }
-        lines.push(line);
+        line.push(&" ".repeat(labels - text::cells(&label) + 2), MUTED);
+        let style = if on && stopping == Some(process.id.as_str()) {
+            BAD
+        } else {
+            STRONG
+        };
+        line.push(&single_line(&process.command), style);
+        let line = panel::spread(line, Line::new(&process.id, MUTED), rows, None);
+        let line = if on {
+            panel::surfaced(
+                panel::fit(line, rows, Some(SELECTED_SURFACE)),
+                SELECTED_SURFACE,
+            )
+        } else {
+            line
+        };
+        let bar = overflow.then_some((index - start, start, total, limit));
+        let part = if on {
+            Part::Keep
+        } else {
+            Part::Row(index.abs_diff(panel.selected))
+        };
+        out.add(panel::barred(line, bar), part);
     }
-    if total == 0 {
-        selected = Some(lines.len());
-        lines.push(Line::new(
-            "No active background processes in this conversation",
-            MUTED,
-        ));
-    }
-    let variants: &[&str] = if total == 0 {
-        &["Esc close", "Esc"]
-    } else {
-        &[
-            "↑↓ move · Enter output · Ctrl+D stop · Esc close",
-            "↑↓ move · Enter output · ^D stop · Esc close",
-            "↑↓ · Enter · ^D stop · Esc",
-            "↵ · ^D · Esc",
-            "^D",
-        ]
-    };
-    lines.push(Line::new(&hint::choose(variants, width), MUTED));
-    let mut priorities: Vec<usize> = selected.into_iter().collect();
-    priorities.push(lines.len() - 1);
-    priorities.push(0);
-    (lines, priorities)
+    out.space();
+    out.extend(ending, confirming(panel));
+    out
 }
 
-fn header(process: Option<&Process>, logs: &Logs, width: usize) -> Vec<Line> {
-    let mut status = match process {
-        Some(process) => Line::new(&display_status(process), status_style(process)),
-        None => Line::new("unavailable", BAD),
-    };
-    status.push(&format!(" · {}", logs.id), MUTED);
-    let mut lines = vec![status.shortened(width)];
-    if let Some(error) = process.and_then(|process| process.error.as_deref()) {
-        lines.push(Line::new(&single_line(error), BAD).shortened(width));
-    }
-    let mut tabs = Line::default();
-    for (index, name) in STREAMS.into_iter().enumerate() {
-        if index > 0 {
-            tabs.push("  ", MUTED);
-        }
-        tabs.push(name, if index == logs.stream { ACCENT } else { MUTED });
-    }
-    let mode = if logs.views[logs.stream].follow {
-        "following"
+/// A stop confirmation outlasts every other row.
+fn confirming(panel: &Panel) -> Part {
+    if panel.confirm_stop.is_some() {
+        Part::Focus
     } else {
-        "paused"
-    };
-    let used = text::cells(&tabs.plain());
-    if used + text::cells(mode) + 2 <= width {
-        tabs.push(&" ".repeat(width - used - text::cells(mode)), MUTED);
-        tabs.push(mode, MUTED);
+        Part::Keep
     }
-    lines.push(tabs);
-    lines
 }
 
-/// The log rows of `text` wrapped by character to `width` cells.
+/// The log rows of `text` wrapped at spaces to `width` cells.
 pub(in crate::tui) fn rows(text: &str, width: usize) -> Vec<Line> {
     let text = text::clean(text);
     if text.is_empty() {
@@ -201,7 +192,7 @@ pub(in crate::tui) fn rows(text: &str, width: usize) -> Vec<Line> {
         }
         rows
     } else {
-        Line::new(text, BODY).at_source(0).wrap(width, false)
+        Line::new(text, BODY).at_source(0).wrap(width, true)
     }
 }
 
@@ -218,29 +209,59 @@ pub(in crate::tui) fn row_at(starts: &[usize], anchor: usize) -> usize {
         .saturating_sub(1)
 }
 
+fn keys(process: Option<&Process>, logs: &Logs) -> Vec<Key<'static>> {
+    let other = STREAMS[1 - logs.stream];
+    let mut keys = vec![key("↑↓", "scroll").scrolling(), key("Tab", other)];
+    keys.push(if logs.views[logs.stream].follow {
+        key("Home", "start").scrolling().optional()
+    } else {
+        key("End", "follow").scrolling()
+    });
+    keys.push(key("PgUp/PgDn", "page").scrolling().optional());
+    if process.is_some_and(Process::active) {
+        keys.push(key("Ctrl+D", "stop"));
+    }
+    keys.push(key("Esc", "back"));
+    keys
+}
+
+/// Rows of the stream that fit beside the header, tabs, notes and keys.
+fn capacity(panel: &Panel, logs: &Logs, width: usize, height: usize) -> usize {
+    let process = panel.selected_process();
+    let notes = usize::from(process.and_then(|process| process.error.as_ref()).is_some())
+        + usize::from(logs.views[logs.stream].error.is_some());
+    let keys = ending(panel, &keys(process, logs), width, true).len();
+    let chrome = 3 + 4 + notes + keys;
+    if height >= chrome + 3 {
+        height - chrome
+    } else {
+        height.saturating_sub(1 + notes + keys)
+    }
+    .max(1)
+}
+
 /// Total rows of the open stream and the rows visible at once.
 pub(in crate::tui) fn metrics(panel: &Panel, width: usize, height: usize) -> (usize, usize) {
     let Some(logs) = &panel.logs else {
         return (0, list_capacity(height));
     };
-    let fixed = header(panel.selected_process(), logs, width).len() + 1;
     (
-        rows(&logs.views[logs.stream].text(), width).len(),
-        capacity(height, fixed),
+        rows(&logs.views[logs.stream].text(), text_width(width)).len(),
+        capacity(panel, logs, width, height),
     )
 }
 
-fn output(panel: &Panel, logs: &Logs, width: usize, height: usize) -> (Vec<Line>, Vec<usize>) {
+fn output(panel: &Panel, logs: &Logs, width: usize, height: usize) -> Rows {
     let process = panel.selected_process();
-    let header = header(process, logs, width);
-    let limit = capacity(height, header.len() + 1);
     let view = &logs.views[logs.stream];
-    let rows = rows(&view.text(), width);
-    let bottom = rows.len().saturating_sub(limit);
+    let limit = capacity(panel, logs, width, height);
+    let all = rows(&view.text(), text_width(width));
+    let total = all.len();
+    let bottom = total.saturating_sub(limit);
     let offset = if view.follow {
         bottom
     } else {
-        rows.iter()
+        all.iter()
             .rposition(|line| {
                 line.origin
                     .is_some_and(|origin| origin.character <= view.anchor)
@@ -248,74 +269,73 @@ fn output(panel: &Panel, logs: &Logs, width: usize, height: usize) -> (Vec<Line>
             .unwrap_or(0)
             .min(bottom)
     };
-    let end = (offset + limit).min(rows.len());
+    let overflow = total > limit;
     let title = process.map_or_else(|| "Process".into(), |process| single_line(&process.command));
-    let mut lines = vec![panel::heading(
-        &title,
-        &panel::position(offset, end, rows.len()),
-        width,
-    )];
-    lines.extend(header);
-    let body = lines.len();
-    if let Some(error) = &view.error {
-        lines.push(Line::new(&single_line(error), BAD).shortened(width));
-    }
-    if rows.is_empty() && view.error.is_none() {
-        let finished = process.is_none_or(|process| !process.active());
-        lines.push(Line::new(
-            if finished {
-                "No output"
-            } else {
-                "No output yet"
-            },
-            MUTED,
-        ));
-    }
-    let remaining = limit.saturating_sub(lines.len() - body);
-    lines.extend(
-        rows.into_iter()
-            .skip(offset)
-            .take(end - offset)
-            .take(remaining),
-    );
-    let live = process.is_some_and(Process::active);
-    let other = STREAMS[1 - logs.stream];
-    let variants = if view.follow {
-        if live {
-            vec![
-                format!("↑↓ PgUp/PgDn scroll · Home start · Tab {other} · Ctrl+D stop · Esc back"),
-                format!("↑↓ scroll · Tab {other} · ^D stop · Esc back"),
-                "↑↓ · Tab · ^D · Esc".into(),
-                "^D · Esc".into(),
-            ]
-        } else {
-            vec![
-                format!("↑↓ PgUp/PgDn scroll · Home start · Tab {other} · Esc back"),
-                format!("↑↓ scroll · Tab {other} · Esc back"),
-                "↑↓ · Tab · Esc".into(),
-                "Esc".into(),
-            ]
+    let mut aside = match process {
+        Some(process) if process.active() => {
+            let mut line = Line::new("● ", GOOD);
+            line.push("running", MUTED);
+            line
         }
-    } else if live {
-        vec![
-            format!("↑↓ PgUp/PgDn scroll · End follow · Tab {other} · Ctrl+D stop · Esc back"),
-            format!("↑↓ scroll · End follow · Tab {other} · ^D stop · Esc back"),
-            "↑↓ · End · ^D · Esc".into(),
-            "^D · Esc".into(),
-        ]
-    } else {
-        vec![
-            format!("↑↓ PgUp/PgDn scroll · End follow · Tab {other} · Esc back"),
-            format!("↑↓ scroll · End follow · Tab {other} · Esc back"),
-            "↑↓ · End · Tab · Esc".into(),
-            "Esc".into(),
-        ]
+        Some(process) => Line::new(&display_status(process), status_style(process)),
+        None => Line::new("unavailable", BAD),
     };
-    let refs: Vec<&str> = variants.iter().map(String::as_str).collect();
-    lines.push(Line::new(&hint::choose(&refs, width), MUTED));
-    let hint = lines.len() - 1;
-    let priorities = vec![body, 0, body - 1, hint, 1];
-    (lines, priorities)
+    aside.push(&format!(" · {}", logs.id), MUTED);
+    let mut out = Rows::default();
+    out.add(
+        panel::header(Some("Processes"), &title, "", aside, width),
+        Part::Title,
+    );
+    let mode = if view.follow {
+        Line::new("following", MUTED)
+    } else {
+        Line::new("paused", WARNING)
+    };
+    out.extend(
+        panel::tabs(&STREAMS, logs.stream, mode, width),
+        Part::Header,
+    );
+    out.space();
+    let errors = [
+        process.and_then(|process| process.error.as_deref()),
+        view.error.as_deref(),
+    ];
+    for error in errors.into_iter().flatten() {
+        out.add(
+            Line::new(&single_line(error), BAD).shortened(width),
+            Part::Keep,
+        );
+    }
+    if all.is_empty() && view.error.is_none() {
+        let finished = process.is_none_or(|process| !process.active());
+        let empty = if finished {
+            "No output"
+        } else {
+            "No output yet"
+        };
+        out.add(Line::new(empty, MUTED), Part::Keep);
+    }
+    let inset = width.saturating_sub(2 * usize::from(overflow)).max(1);
+    for (index, line) in all.into_iter().enumerate().skip(offset).take(limit) {
+        let mut row = Line::default();
+        panel::push(&mut row, " ", MUTED, Some(CODE_SURFACE));
+        let row = panel::surfaced(row.append(line), CODE_SURFACE);
+        let row = panel::fit(row, inset, Some(CODE_SURFACE));
+        let bar = overflow.then_some((index - offset, offset, total, limit));
+        // The newest rows stay longest while following.
+        let distance = if view.follow {
+            offset + limit - 1 - index
+        } else {
+            index - offset
+        };
+        out.add(panel::barred(row, bar), Part::Row(distance));
+    }
+    out.space();
+    out.extend(
+        ending(panel, &keys(process, logs), width, overflow),
+        confirming(panel),
+    );
+    out
 }
 
 fn status_style(process: &Process) -> Style {

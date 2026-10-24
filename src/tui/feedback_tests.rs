@@ -188,7 +188,11 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
     app.state.editor.cursor = 2;
     for _ in 0..3 {
         app.local_start("/model");
-        app.state.selector = Some(selector::Selector::loading());
+        app.state.selector = Some(selector::Selector::loading(
+            "Model",
+            "Loading model catalog…",
+            false,
+        ));
         key(&mut app, 27, 0);
         assert!(app.state.selector.is_none());
         assert!(app.state.notice.is_none());
@@ -202,7 +206,7 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
         selector::Purpose::Settings
     ));
     assert!(app.state.notice.is_none());
-    app.input(Decoded::Text("6".into())).unwrap();
+    key(&mut app, 27, 0);
     assert!(app.state.selector.is_none());
     assert!(app.state.notice.is_none());
     assert_eq!(app.state.editor.text, "kept\ndraft");

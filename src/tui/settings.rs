@@ -40,10 +40,7 @@ impl App {
             }
             (Choice::Routing(index), Purpose::Routing { .. }) => self.choose_routing(menu, index),
             (Choice::Setting(setting), Purpose::Settings) => {
-                self.settings_parent = match setting {
-                    Setting::Close => None,
-                    _ => Some(setting),
-                };
+                self.settings_parent = Some(setting);
                 match setting {
                     Setting::Model => self.load_catalog(CatalogPurpose::Models {
                         defaults: true,
@@ -60,9 +57,6 @@ impl App {
                             Some(Selector::auto_compact(self.config.settings.auto_compact))
                     }
                     Setting::Key => self.state.selector = Some(Selector::key()),
-                    Setting::Close => {
-                        self.local_finish_quiet(Kind::Notice, "Settings closed", vec![])
-                    }
                 }
             }
             _ => {
@@ -94,14 +88,7 @@ impl App {
                 settings.auto_compact,
                 &settings.routing_for(&settings.model),
             );
-            menu.selected = match parent {
-                Setting::Model => 0,
-                Setting::Effort => 1,
-                Setting::Routing => 2,
-                Setting::AutoCompact => 3,
-                Setting::Key => 4,
-                Setting::Close => 5,
-            };
+            menu.selected = Selector::setting_index(parent);
             self.state.selector = Some(menu);
         }
     }
@@ -124,7 +111,7 @@ impl App {
             match self.config.store.save(&settings) {
                 Ok(()) => {
                     let previous = format!(
-                        "{} · {}",
+                        "{} ({})",
                         self.config.settings.model,
                         self.config.settings.effort.name()
                     );
@@ -132,7 +119,7 @@ impl App {
                     self.finish_setting(
                         Kind::Notice,
                         &format!(
-                            "Defaults saved: {model} · {} · was {previous}",
+                            "Default model: {previous} → {model} ({}) · new conversations",
                             effort.name()
                         ),
                         vec![],
@@ -142,7 +129,7 @@ impl App {
             }
         } else {
             let agent = self.agent.as_mut().unwrap();
-            let previous = format!("{} · {}", agent.model(), agent.effort().name());
+            let previous = format!("{} ({})", agent.model(), agent.effort().name());
             match agent.set_model(model.clone()) {
                 Ok(()) => {
                     agent.set_effort(effort);
@@ -151,7 +138,10 @@ impl App {
                     self.refresh_context();
                     self.finish_setting(
                         Kind::Notice,
-                        &format!("Model set to {model} · {} · was {previous}", effort.name()),
+                        &format!(
+                            "Model: {previous} → {model} ({}) · this conversation",
+                            effort.name()
+                        ),
                         vec![],
                     );
                 }
@@ -317,9 +307,7 @@ impl App {
             Err(error) => self.warn(&error),
             Ok(services) => {
                 self.state.clear_notice();
-                let mut menu = Selector::loading();
-                menu.title = "Checking API key…".into();
-                self.state.selector = Some(menu);
+                self.state.selector = Some(Selector::loading("API key", "Checking API key…", true));
                 self.job = Some(Job::key(services, key));
             }
         }
@@ -355,9 +343,7 @@ impl App {
                 self.refresh_context();
                 self.finish_setting(
                     Kind::Notice,
-                    &format!(
-                        "Auto-compact at {percent}% · was {previous}% · applies to this and new conversations"
-                    ),
+                    &format!("Auto-compact: {previous}% → {percent}% · this and new conversations"),
                     vec![],
                 );
             }

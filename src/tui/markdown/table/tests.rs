@@ -38,6 +38,26 @@ fn clean_columns_use_visual_widths_and_preserve_inline_styles() {
 }
 
 #[test]
+fn inline_code_keeps_its_surface_in_columns_and_stacked_fields() {
+    use crate::tui::theme::{INLINE_CODE, INLINE_CODE_SURFACE};
+
+    let source = "| `Head` | Other |\n|---|---|\n| `body` | plain |";
+    for columns in [80, 6] {
+        let rows = markdown::render(source, columns);
+        for value in ["Head", "body"] {
+            assert!(
+                rows.iter().flat_map(|row| &row.spans).any(|span| {
+                    span.text == value
+                        && span.style == INLINE_CODE
+                        && span.background == Some(INLINE_CODE_SURFACE)
+                }),
+                "{value} at width {columns}"
+            );
+        }
+    }
+}
+
+#[test]
 fn alignment_escape_empty_cells_and_surplus_cells_are_visible() {
     let source = "| L | C | R |\n| :--- | :---: | ---: |\n| a | b | 7 |\n| \\| | `x\\|y` | 12 |\n| missing |\n| extra | b | c | preserved |";
     let rows = rendered(source, 80);
@@ -74,10 +94,11 @@ fn tables_stop_at_blocks_and_fences_keep_literal_table_syntax() {
         assert!(rows.len() > 3);
     }
     let rows = rendered(&format!("```\n{table}\n```"), 60);
-    assert_eq!(rows[1], "| A | B |");
-    assert_eq!(rows[2], "|---|---|");
+    assert_eq!(rows[1], " | A | B |");
+    assert_eq!(rows[2], " |---|---|");
     assert_eq!(rendered("a | b\n---\ntext", 60)[0], "a | b");
-    assert_eq!(rendered("|a|b|\n|---|bad|", 60)[1], "|---|bad|");
+    // An invalid delimiter leaves one paragraph.
+    assert_eq!(rendered("|a|b|\n|---|bad|", 60), ["|a|b| |---|bad|"]);
 }
 
 #[test]

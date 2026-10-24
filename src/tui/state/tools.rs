@@ -73,6 +73,28 @@ impl State {
         Some((expanded, first))
     }
 
+    /// Finished reads can join the reads before them; their shared card is
+    /// drawn again from the first read of the run.
+    pub(super) fn join_reads(&mut self, finished: &[usize]) {
+        let start = finished
+            .iter()
+            .filter(|&&index| {
+                index > 0 && self.items[index].groupable() && self.items[index - 1].groupable()
+            })
+            .map(|&index| {
+                (0..index)
+                    .rev()
+                    .take_while(|&before| self.items[before].groupable())
+                    .last()
+                    .unwrap_or(index)
+            })
+            .min();
+        if let Some(start) = start {
+            self.tool_details.changed_from = start;
+            self.tool_revision = self.tool_revision.wrapping_add(1);
+        }
+    }
+
     pub fn reset_tool_details(&mut self) {
         let mut first = None;
         for (index, item) in self.items.iter_mut().enumerate() {

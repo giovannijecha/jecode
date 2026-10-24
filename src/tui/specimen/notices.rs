@@ -26,22 +26,31 @@ fn state(columns: usize) -> State {
 }
 
 fn noticed(columns: usize, kind: Kind, text: &str) -> State {
+    with(columns, Feedback::result(kind, text))
+}
+
+fn with(columns: usize, notice: Feedback) -> State {
     let mut state = state(columns);
-    state.notice = Some(Feedback::result(kind, text));
+    state.notice = Some(notice);
     state
 }
 
-fn working(state: &mut State, label: &'static str, seconds: f64) {
+fn working(state: &mut State, seconds: f64) {
     let mut activity = Activity::new();
-    activity.label = label;
     activity.started = Instant::now() - Duration::from_secs_f64(seconds);
-    activity.phase_started = activity.started;
     state.activity = Some(activity);
 }
 
 fn states(columns: usize) -> Vec<(&'static str, State)> {
     let mut progress = state(columns);
-    progress.notice = Some(Feedback::progress(Kind::Notice, "Attaching 2 files…"));
+    progress.progress = Some(Feedback::progress(Kind::Notice, "Attaching 2 files"));
+
+    let mut compacting = state(columns);
+    working(&mut compacting, 92.0);
+    compacting.progress = Some(Feedback::progress(
+        Kind::Notice,
+        "Compacting context · anthropic/claude-sonnet-5.5 · original conversation kept",
+    ));
 
     let mut both = noticed(columns, Kind::Notice, "Complete · 48s · 6 tools");
     both.copy_notice = Some(Feedback::result(
@@ -54,14 +63,17 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         Kind::Notice,
         "Context compacted · 24 messages summarized",
     );
-    working(&mut turn, "Writing the response", 92.0);
+    working(&mut turn, 92.0);
 
     let mut reconnecting = state(columns);
-    working(&mut reconnecting, "Waiting", 64.0);
-    reconnecting.notice = Some(Feedback::progress(
-        Kind::Warning,
-        "Reconnecting · attempt 2 in 4.0s · connection reset by peer",
-    ));
+    working(&mut reconnecting, 64.0);
+    reconnecting.progress = Some(
+        Feedback::progress(
+            Kind::Warning,
+            "Rate limited · attempt 2 · OpenRouter HTTP 429: rate limit exceeded",
+        )
+        .until(Instant::now() + Duration::from_millis(3500)),
+    );
 
     let mut panel = noticed(
         columns,
@@ -81,28 +93,52 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             noticed(columns, Kind::Notice, "Complete · 48s · 6 tools"),
         ),
         (
-            "Startup",
+            "Setting changed",
             noticed(
                 columns,
                 Kind::Notice,
-                "Previous session: Rate limiting for /login · /resume",
+                "Auto-compact: 80% → 55% · this and new conversations",
+            ),
+        ),
+        (
+            "Model changed",
+            noticed(
+                columns,
+                Kind::Notice,
+                "Model: anthropic/claude-sonnet-5.5 (high) → openai/gpt-5.5 (medium) · this conversation",
+            ),
+        ),
+        (
+            "Startup",
+            with(
+                columns,
+                Feedback::result(Kind::Notice, "Previous session: Rate limiting for /login")
+                    .info()
+                    .action("/resume", "open"),
             ),
         ),
         ("Progress", progress),
+        ("Compacting", compacting),
         (
-            "Warning",
-            noticed(
+            "Interrupted",
+            with(
                 columns,
-                Kind::Warning,
-                "Interrupted · pending drafts paused · alt+↑ to review",
+                Feedback::result(
+                    Kind::Warning,
+                    "Interrupted · prompt restored · 2 drafts paused",
+                )
+                .action("Alt+↑", "review"),
             ),
         ),
         (
             "Error",
-            noticed(
+            with(
                 columns,
-                Kind::Error,
-                "Account disconnected · /settings to update the OpenRouter key",
+                Feedback::result(
+                    Kind::Error,
+                    "OpenRouter HTTP 401: User not found. · prompt restored",
+                )
+                .action("/settings", "update key"),
             ),
         ),
         (
@@ -115,7 +151,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         ("Result and copy", both),
         ("During a turn", turn),
-        ("Reconnecting", reconnecting),
+        ("Rate limited", reconnecting),
         ("Error over a panel", panel),
     ]
 }

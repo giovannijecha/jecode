@@ -101,8 +101,8 @@ fn temporary_cleanup_queues_until_tools_finish_and_keeps_the_draft_and_quiet_con
         .map(|row| row.plain())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rows.contains("Session temporary files"));
-    assert!(rows.contains("retention"));
+    assert!(rows.contains("Temporary files · this session"));
+    assert!(rows.contains("Retention"));
     assert!(!rows.lines().any(|line| line == "/tmp"));
     assert_eq!(app.state.editor.text, "retained\ndraft");
     let saved = app.persistence.as_ref().unwrap().snapshot();

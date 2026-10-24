@@ -73,6 +73,7 @@ fn checkpoint_list_and_show_run_off_the_input_thread() {
         .expect("show opens information panel");
     assert!(
         information
+            .current()
             .details
             .iter()
             .any(|(_, value)| value.contains("saved before"))

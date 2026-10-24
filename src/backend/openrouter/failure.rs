@@ -1,6 +1,9 @@
 use crate::backend::{Failure, FailureKind as Kind};
 use crate::json::Value;
 
+/// The CLI's fix for a rejected key; the TUI offers /settings instead.
+pub(crate) const KEY_HINT: &str = " Check your key with jecode setup.";
+
 impl Failure {
     pub fn response(message: impl Into<String>) -> Self {
         let message = message.into();
@@ -72,7 +75,7 @@ impl Failure {
             message.push('.');
         }
         if status == 401 {
-            message.push_str(" Check your key with jecode setup.");
+            message.push_str(KEY_HINT);
         } else if status == 404
             && text.contains("no endpoints found")
             && text.contains("filter by image support")

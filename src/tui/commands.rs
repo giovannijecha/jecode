@@ -5,77 +5,18 @@ use super::{
     selector::Selector,
     state::Item,
 };
-use crate::{
-    attachments::Prompt,
-    backend,
-    effort::Effort,
-    session::commands::{self, COMMANDS},
-};
-
-/// The `/help` rows: every command, then the keyboard controls.
-pub(super) fn help_details() -> Vec<(String, String)> {
-    let mut details: Vec<(String, String)> = COMMANDS
-        .iter()
-        .map(|command| (command.name.into(), command.description(true).into()))
-        .collect();
-    details.extend([
-        (
-            "Enter".into(),
-            "Send · while working, joins the turn before its next model request".into(),
-        ),
-        (
-            "Ctrl+J".into(),
-            "New line · Shift/Alt+Enter when supported".into(),
-        ),
-        (
-            "Alt+Up · /drafts".into(),
-            "Open pending drafts · edit or discard one message".into(),
-        ),
-        (
-            "Ctrl+P/N".into(),
-            "Sent prompt history · commands are excluded".into(),
-        ),
-        (
-            "PgUp/PgDn · mouse wheel".into(),
-            "Scroll conversation · new output keeps your reading position".into(),
-        ),
-        (
-            "Alt+Home/End".into(),
-            "Conversation start / follow latest output · Esc returns to bottom".into(),
-        ),
-        (
-            "Esc · Ctrl+C".into(),
-            "Stop work · close panel / clear draft".into(),
-        ),
-        ("Ctrl+Q".into(), "Cancel work and quit".into()),
-        (
-            "Ctrl+O".into(),
-            "Expand/collapse the last finished turn's tools".into(),
-        ),
-        (
-            "/terminal [ID]".into(),
-            "Enter output · Tab Output/Errors · End follows · Ctrl+D stop · Esc returns".into(),
-        ),
-        (
-            "Ctrl+D in /terminal".into(),
-            "Mark a process to stop · Enter confirms · Esc or Ctrl+C cancels".into(),
-        ),
-        (
-            "Ctrl+D in /resume or /drafts".into(),
-            "Mark deletion · Enter confirms · Esc cancels".into(),
-        ),
-        (
-            "Ctrl+S in /drafts".into(),
-            "Send a paused draft · joins the active turn while working".into(),
-        ),
-    ]);
-    details
-}
+use crate::{attachments::Prompt, backend, effort::Effort, session::commands};
 
 impl App {
     pub(super) fn help(&mut self) {
         self.local_start("/help");
-        self.local_finish(Kind::Notice, "Commands and controls", help_details());
+        self.clear_unless_error();
+        self.state.information = Some(super::information::Information::help());
+        self.local_finish_quiet(
+            Kind::Notice,
+            "Commands and controls",
+            super::information::help_details(),
+        );
     }
 
     pub(super) fn submit(&mut self) -> Result<bool, String> {
@@ -85,7 +26,7 @@ impl App {
         }
         if self.state.queue.is_editing() {
             if self.state.editor.prompt().is_empty() {
-                self.warn("The draft is empty. esc cancels; discard it in /drafts.");
+                self.warn("The draft is empty · Esc cancels, /drafts discards it");
             } else {
                 self.finish_draft_edit(true);
             }
@@ -296,6 +237,10 @@ impl App {
                     } else if let Err(error) = crate::config::validate_model(model) {
                         self.local_finish(Kind::Error, &error, vec![]);
                     } else if let Some(key) = self.config.settings.credential_for(id) {
+                        let previous = {
+                            let agent = self.agent.as_ref().unwrap();
+                            format!("{} / {}", agent.backend_id(), agent.model())
+                        };
                         let result = if self.agent.as_ref().unwrap().backend_id() == id {
                             let agent = self.agent.as_mut().unwrap();
                             agent
@@ -314,7 +259,9 @@ impl App {
                                 self.refresh_context();
                                 self.local_finish(
                                     Kind::Notice,
-                                    &format!("Backend set to {id} / {model}"),
+                                    &format!(
+                                        "Backend: {previous} → {id} / {model} · this conversation"
+                                    ),
                                     vec![],
                                 );
                             }
@@ -389,36 +336,53 @@ impl App {
                 )
             })
             .collect();
-        let information = self
+        let command = self
             .pending_command
             .and_then(|index| self.state.items.get(index))
-            .is_some_and(|item| {
-                matches!(item, Item::Local { command, .. }
-                if command.eq_ignore_ascii_case("/help")
-                    || command.eq_ignore_ascii_case("/tmp")
-                    || command.eq_ignore_ascii_case("/skills")
-                    || command
-                        .split_whitespace()
-                        .next()
-                        .is_some_and(|name| name.eq_ignore_ascii_case("/checkpoints")))
-            });
-        if information && matches!(kind, Kind::Notice) && !details.is_empty() {
-            if self
-                .state
-                .notice
-                .as_ref()
-                .is_none_or(|notice| !matches!(notice.kind, Kind::Error))
-            {
-                self.state.notice = None;
-            }
-            self.state.information = Some(super::information::Information::new(
+            .and_then(|item| match item {
+                Item::Local { command, .. } => command.split_whitespace().next(),
+                _ => None,
+            })
+            .map(str::to_ascii_lowercase);
+        let information = match command.as_deref() {
+            Some("/tmp") => Some(
+                super::information::Information::new("Temporary files".into(), details.clone())
+                    .context("this session"),
+            ),
+            Some("/skills") => Some(
+                super::information::Information::new("Skills".into(), details.clone())
+                    .aside(&result),
+            ),
+            Some("/backend") => Some(
+                super::information::Information::new("Backends".into(), details.clone())
+                    .aside("/backend ID MODEL"),
+            ),
+            Some("/checkpoints") => Some(super::information::Information::new(
                 result.clone(),
                 details.clone(),
-            ));
-        } else {
-            self.state.notify(Feedback::result(kind, result.clone()));
+            )),
+            _ => None,
+        };
+        match information {
+            Some(information) if matches!(kind, Kind::Notice) && !details.is_empty() => {
+                self.clear_unless_error();
+                self.state.information = Some(information);
+            }
+            _ => self.state.notify(Feedback::result(kind, result.clone())),
         }
         self.local_finish_quiet(kind, &result, details);
+    }
+
+    /// An information panel replaces the notice unless it reports an error.
+    fn clear_unless_error(&mut self) {
+        if self
+            .state
+            .notice
+            .as_ref()
+            .is_none_or(|notice| !matches!(notice.kind, Kind::Error))
+        {
+            self.state.notice = None;
+        }
     }
 
     pub(super) fn local_finish_quiet(
@@ -460,13 +424,31 @@ impl App {
             let error = agent.redact(&format!(
                 "Autosave failed: {error}. Session kept in memory."
             ));
-            self.state.notice = Some(Feedback::result(Kind::Error, error.clone()));
+            self.state
+                .notify(Feedback::result(Kind::Error, error.clone()));
             self.save_error = Some(error);
         }
     }
 
     pub(super) fn load_catalog(&mut self, purpose: CatalogPurpose) {
-        self.state.selector = Some(Selector::loading());
+        let (title, context, defaults) = match &purpose {
+            CatalogPurpose::Models { defaults: true, .. } => ("Default model", "", true),
+            CatalogPurpose::Models { .. } => ("Model", "this conversation", false),
+            CatalogPurpose::Effort {
+                defaults, model, ..
+            } => (
+                if *defaults {
+                    "Default effort"
+                } else {
+                    "Effort"
+                },
+                model.as_str(),
+                *defaults,
+            ),
+        };
+        let mut menu = Selector::loading(title, "Loading model catalog…", defaults);
+        context.clone_into(&mut menu.context);
+        self.state.selector = Some(menu);
         self.state.clear_notice();
         self.job = Some(Job::catalog(
             self.agent.as_ref().unwrap().services(),

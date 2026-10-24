@@ -27,10 +27,11 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
     assert!(header.contains("● Bash(fixture command)"));
     let summary = visible
         .lines()
-        .find(|line| line.contains("⎿ Running…"))
+        .find(|line| line.contains("⎿ ") && line.contains('▰'))
         .unwrap();
     let seconds: f64 = summary
-        .rsplit('·')
+        .trim_end()
+        .rsplit(' ')
         .next()
         .unwrap()
         .trim()
@@ -38,12 +39,12 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .parse()
         .unwrap();
     assert!(seconds >= 12.0);
-    assert!(!header.contains('•'));
-    assert_eq!(visible.matches("••••").count(), 1);
+    assert!(!header.contains('▰'));
+    assert_eq!(visible.matches("▰▰").count(), 2); // The card and the rule.
     assert!(
         visible
             .lines()
-            .any(|line| line.starts_with("••••  Running tools  ·  "))
+            .any(|line| line.starts_with("─ ") && line.contains("▰▰"))
     );
     assert_eq!(state.revision, revision);
 

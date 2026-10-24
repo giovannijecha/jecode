@@ -5,7 +5,6 @@ use std::collections::VecDeque;
 
 use crate::tools::processes::{Page, Process};
 use crate::tui::{
-    commands::help_details,
     information::Information,
     line::Line,
     processes::{Logs, Panel},
@@ -29,9 +28,9 @@ fn state(columns: usize) -> State {
     }
 }
 
-fn informed(columns: usize, title: &str, details: Vec<(String, String)>) -> State {
+fn informed(columns: usize, information: Information) -> State {
     let mut state = state(columns);
-    state.information = Some(Information::new(title.into(), details));
+    state.information = Some(information);
     state
 }
 
@@ -99,29 +98,47 @@ fn viewing(columns: usize, logs: Logs) -> State {
 }
 
 fn states(columns: usize) -> Vec<(&'static str, State)> {
-    let help = |offset| {
-        let mut state = informed(columns, "Commands and controls", help_details());
-        let information = state.information.as_mut().unwrap();
+    let help = |section, offset| {
+        let mut information = Information::help();
+        information.section = section;
         information.offset = offset;
-        state
+        informed(columns, information)
     };
-    let temporary = informed(
-        columns,
-        "Session temporary files",
+    let temporary = Information::new(
+        "Temporary files".into(),
         vec![
             (
-                "path".into(),
+                "Path".into(),
                 r"C:\Users\example\.jecode\sessions\example-session\tmp".into(),
             ),
-            ("files".into(), "3".into()),
-            ("directories".into(), "1".into()),
-            ("size".into(), "18432 bytes".into()),
+            ("Files".into(), "3".into()),
+            ("Directories".into(), "1".into()),
+            ("Size".into(), "18432 bytes".into()),
             (
-                "retention".into(),
+                "Retention".into(),
                 "Kept until /tmp clean, including after resume".into(),
             ),
         ],
-    );
+    )
+    .context("this session");
+    let skills = Information::new(
+        "Skills".into(),
+        vec![
+            (
+                "release-notes".into(),
+                "Draft release notes from the changes merged since the last tag".into(),
+            ),
+            (
+                "review".into(),
+                "Review the working tree for correctness bugs before a commit".into(),
+            ),
+            (
+                "Skipped".into(),
+                "skills/broken/SKILL.md has no description".into(),
+            ),
+        ],
+    )
+    .aside("2 available skills · 1 skipped");
 
     let mut list = Panel::new(running());
     list.selected = 1;
@@ -143,9 +160,11 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     );
 
     vec![
-        ("Help", help(0)),
-        ("Help · scrolled", help(10)),
-        ("Temporary files", temporary),
+        ("Help", help(0, 0)),
+        ("Help · scrolled", help(0, 10)),
+        ("Help · keys", help(1, 0)),
+        ("Skills", informed(columns, skills)),
+        ("Temporary files", informed(columns, temporary)),
         ("Processes · none", listed(columns, Panel::new(vec![]))),
         ("Processes", listed(columns, list)),
         ("Processes · stop", listed(columns, stop)),

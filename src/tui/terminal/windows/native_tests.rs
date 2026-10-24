@@ -293,7 +293,7 @@ fn tool_cards_console(bash: &std::path::Path) {
     );
     assert!(rows.iter().any(|row| {
         row.plain()
-            .contains("screenshot saved to tmp:browser/screenshot.png")
+            .contains("Screenshot · tmp:browser/screenshot.png")
     }));
     let expected: String = (0..height)
         .map(|index| {

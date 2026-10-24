@@ -313,7 +313,11 @@ fn scrolling_loads_bounded_older_and_newer_pages() {
 
     key(&mut app, 36, 0);
     assert_eq!((stream(&app).start(), stream(&app).offset), (0, 0));
-    assert!(frame(&app).iter().any(|line| line.trim() == "1"));
+    assert!(
+        frame(&app)
+            .iter()
+            .any(|line| line.split_whitespace().next() == Some("1"))
+    );
     key(&mut app, 35, 0);
     assert!(stream(&app).follow);
     assert!(stream(&app).text().ends_with("30000\n"));

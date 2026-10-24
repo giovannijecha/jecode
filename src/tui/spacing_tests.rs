@@ -150,12 +150,16 @@ fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
     let rows = state.rows();
     assert!(rows[1].is_empty());
     assert!(rows[0][0].plain().starts_with("● Bash(first)"));
-    assert!(rows[0][1].plain().contains("⎿ Exit 0"));
-    assert!(rows[0].iter().any(|row| row.plain() == "    five"));
+    assert!(rows[0][1].plain().contains("⎿ five"));
+    assert!(
+        rows[0]
+            .iter()
+            .any(|row| row.plain().starts_with("    … 3 more lines"))
+    );
     assert!(!rows[0].iter().any(|row| row.plain() == "    one"));
     assert_eq!(rows[2][0], Line::default());
     assert!(rows[2][1].plain().starts_with("● Bash(second)"));
-    assert!(rows[2].iter().any(|row| row.plain() == "    second output"));
+    assert!(rows[2].iter().any(|row| row.plain() == "  ⎿ second output"));
     // Earlier results remain available when the completed turn expands.
     state.toggle_tools();
     let expanded = state
@@ -185,12 +189,18 @@ fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
 }
 
 #[test]
-fn compact_tool_output_keeps_actual_trailing_empty_rows_without_adding_a_terminator_row() {
+fn tool_output_keeps_actual_trailing_empty_rows_only_when_expanded() {
     for (output, count) in [("line\n", 1), ("line\n\n\n", 3)] {
         let mut state = State::default();
+        state.begin_tool_turn();
         start(&mut state, "fixture");
         finish(&mut state, "fixture", output);
         state.close_tools();
+        state.finish_tool_turn();
+        let rows = state.rows();
+        assert_eq!(rows[0][1].plain(), "  ⎿ line");
+        assert_eq!(rows[0].len(), 2);
+        state.toggle_tools();
         let rows = state.rows();
         assert_eq!(rows[0].len(), count + 2);
         assert_eq!(rows[0][2].plain(), "    line");
@@ -216,6 +226,7 @@ fn assistant_markdown_keeps_internal_and_leading_blanks_without_automatic_margin
         [
             "",
             "Title",
+            "",
             "Paragraph",
             "",
             "",
@@ -297,12 +308,11 @@ fn the_lower_area_stays_at_the_bottom_with_space_before_notices_activity_and_que
     state.queue.push("next prompt").unwrap();
     state.notice = Some(super::Feedback::result(Kind::Warning, "notice"));
     let frame = view::frame(&state, "model", "directory");
-    assert_eq!(frame.composer, state.height - 7);
+    assert_eq!(frame.composer, state.height - 6);
     assert_eq!(frame.live[frame.composer - 1], Line::default());
     assert!(frame.live[frame.composer].plain().contains("next prompt"));
     assert!(frame.live[frame.composer + 1].plain().contains("notice"));
-    assert!(frame.live[frame.composer + 2].plain().contains("Preparing"));
-    assert!(frame.live[frame.composer + 3].plain().starts_with('─'));
+    assert!(frame.live[frame.composer + 2].plain().starts_with("─ ▰▰"));
     state.items.clear();
     let empty = view::frame(&state, "model", "directory");
     assert_eq!(empty.composer, frame.composer);

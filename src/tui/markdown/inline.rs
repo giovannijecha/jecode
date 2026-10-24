@@ -1,6 +1,6 @@
 use crate::tui::{
     line::Line,
-    theme::{BODY, EMPHASIS, INLINE_CODE, LINK, LINK_DESTINATION, Style},
+    theme::{BODY, EMPHASIS, INLINE_CODE, INLINE_CODE_SURFACE, LINK, LINK_DESTINATION, Style},
 };
 
 const BOLD: u8 = 1;
@@ -10,41 +10,58 @@ const LINKED: u8 = 8;
 const MAX_DEPTH: usize = 8;
 
 pub fn render(value: &str, base: Style) -> Line {
-    let mut parser = Parser {
-        line: Line::default(),
-        // Failed opening markers must not repeatedly scan an arbitrarily long suffix.
-        search_left: value.len().saturating_mul(16),
-    };
+    let mut parser = Parser::new(value, EMPHASIS);
     parser.segment(value, base, u8::from(base == EMPHASIS.bold()) * BOLD, 0);
+    parser.line
+}
+
+/// A heading: bold throughout, in its level's colour.
+pub fn heading(value: &str, colour: Style) -> Line {
+    let mut parser = Parser::new(value, colour);
+    parser.segment(value, colour.bold(), BOLD, 0);
     parser.line
 }
 
 struct Parser {
     line: Line,
     search_left: usize,
+    // The colour of bold text.
+    strong: Style,
 }
 
 impl Parser {
+    fn new(value: &str, strong: Style) -> Self {
+        Self {
+            line: Line::default(),
+            // Failed opening markers must not repeatedly scan an arbitrarily long suffix.
+            search_left: value.len().saturating_mul(16),
+            strong,
+        }
+    }
+
     fn segment(&mut self, value: &str, base: Style, flags: u8, depth: usize) {
         let mut position = 0;
         while position < value.len() {
             let Some(offset) = value[position..].find(['\\', '\u{0060}', '*', '_', '~', '['])
             else {
-                self.line.push(&value[position..], style(base, flags));
+                self.line
+                    .push(&value[position..], style(base, flags, self.strong));
                 return;
             };
             let start = position + offset;
-            self.line.push(&value[position..start], style(base, flags));
+            self.line
+                .push(&value[position..start], style(base, flags, self.strong));
             let tail = &value[start..];
 
             if let Some(rest) = tail.strip_prefix('\\') {
                 if let Some(next) = rest.chars().next()
                     && next.is_ascii_punctuation()
                 {
-                    self.line.push(&rest[..next.len_utf8()], style(base, flags));
+                    self.line
+                        .push(&rest[..next.len_utf8()], style(base, flags, self.strong));
                     position = start + 1 + next.len_utf8();
                 } else {
-                    self.line.push("\\", style(base, flags));
+                    self.line.push("\\", style(base, flags, self.strong));
                     position = start + 1;
                 }
                 continue;
@@ -53,10 +70,12 @@ impl Parser {
             if tail.starts_with('\u{0060}') {
                 let count = run(tail, b'\x60');
                 if let Some(end) = self.code_end(&tail[count..], count) {
-                    self.line.push(&tail[count..count + end], INLINE_CODE);
+                    self.line
+                        .push_on(&tail[count..count + end], INLINE_CODE, INLINE_CODE_SURFACE);
                     position = start + count + end + count;
                 } else {
-                    self.line.push(&tail[..count], style(base, flags));
+                    self.line
+                        .push(&tail[..count], style(base, flags, self.strong));
                     position = start + count;
                 }
                 continue;
@@ -70,9 +89,9 @@ impl Parser {
                 let label = &tail[1..label_end];
                 let destination = &tail[label_end + 2..destination_end];
                 self.segment(label, base, flags | LINKED, depth + 1);
-                self.line.push(" (", style(base, flags));
+                self.line.push(" (", LINK_DESTINATION);
                 self.line.push(destination, LINK_DESTINATION);
-                self.line.push(")", style(base, flags));
+                self.line.push(")", LINK_DESTINATION);
                 position = start + destination_end + 1;
                 continue;
             }
@@ -101,12 +120,13 @@ impl Parser {
                     position = start + width + end + width;
                     continue;
                 }
-                self.line.push(&tail[..count], style(base, flags));
+                self.line
+                    .push(&tail[..count], style(base, flags, self.strong));
                 position = start + count;
                 continue;
             }
 
-            self.line.push("[", style(base, flags));
+            self.line.push("[", style(base, flags, self.strong));
             position = start + 1;
         }
     }
@@ -265,7 +285,7 @@ fn inside_word(before: Option<char>, after: Option<char>) -> bool {
     before.is_some_and(char::is_alphanumeric) && after.is_some_and(char::is_alphanumeric)
 }
 
-fn style(base: Style, flags: u8) -> Style {
+fn style(base: Style, flags: u8, strong: Style) -> Style {
     if flags == 0 {
         return base;
     }
@@ -273,7 +293,7 @@ fn style(base: Style, flags: u8) -> Style {
     let mut style = if flags & LINKED != 0 {
         LINK
     } else if flags & BOLD != 0 {
-        EMPHASIS
+        strong
     } else {
         BODY
     };

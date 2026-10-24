@@ -43,11 +43,11 @@ fn every_turn_keeps_short_previews_and_its_original_results() {
     start(&mut state, "future");
     let running = visible(&state);
     assert!(running.contains("● Bash(fixture-command)"));
-    assert!(running.contains("⎿ Running…"));
+    assert!(running.contains("⎿ ") && running.contains('▰'));
     finish(&mut state, "future", "one\ntwo\nthree\nfour\nfuture detail");
     let text = visible(&state);
-    assert_eq!(text.matches("⎿ Exit 0").count(), 3);
-    assert_eq!(text.matches("2 more output lines").count(), 3);
+    assert_eq!(text.matches("⎿ retained detail").count(), 2);
+    assert_eq!(text.matches("4 more lines").count(), 3);
     assert!(!text.contains("omitted"));
     assert!(text.contains("retained detail"));
     assert!(text.contains("future detail"));
@@ -163,7 +163,7 @@ fn consecutive_tools_keep_independent_blocks_across_model_requests() {
     assert!(
         current[..3]
             .iter()
-            .all(|block| block.iter().any(|row| row.plain().contains("⎿ Exit 0")))
+            .all(|block| block.iter().any(|row| row.plain().starts_with("  ⎿ ")))
     );
     start(&mut state, "later");
     finish(&mut state, "later", "later result");
@@ -199,7 +199,7 @@ fn captured_file_diff_stays_visible_when_the_next_tool_starts() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(text.contains("● Update(fixture.rs)"));
-    assert!(text.contains("⎿ Added 1 line, removed 1 line"));
+    assert!(text.contains("⎿ +1 −1 lines"));
     assert!(text.contains("old();") && text.contains("new();"));
     start(&mut state, "next");
     assert_eq!(state.rows()[0], original);

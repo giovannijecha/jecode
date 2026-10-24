@@ -159,12 +159,7 @@ fn escape_before_output_restores_prompt_accepted_followups_and_saved_composer() 
     app.capture_input();
     app.state.editor.insert("Original request");
     app.submit().unwrap();
-    tests::wait_until(&mut app, |app| {
-        app.state
-            .activity
-            .as_ref()
-            .is_some_and(|activity| activity.label == "Thinking")
-    });
+    tests::wait_until(&mut app, |app| app.state.status == "Thinking…");
     app.state.editor.insert("Unsent draft");
     key(&mut app, 27);
     // Let the socket finish after cancellation, as the worker is being stopped.

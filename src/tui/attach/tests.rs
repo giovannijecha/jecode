@@ -175,7 +175,7 @@ fn alt_v_reads_the_clipboard_only_on_request_and_failures_keep_the_draft() {
     settle(&mut app);
     assert_eq!(
         notice(&app),
-        "The clipboard has no image Your draft was kept."
+        "The clipboard has no image · your draft was kept"
     );
     assert_eq!(app.state.editor.display(), "look[1# Image] ");
 }

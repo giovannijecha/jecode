@@ -13,19 +13,19 @@ pub fn run(agent: &mut Agent, arguments: &str) -> Result<Report, String> {
         let mut report = Report {
             message: "Session temporary files".into(),
             details: vec![
-                ("path".into(), info.path),
-                ("files".into(), info.files.to_string()),
-                ("directories".into(), info.directories.to_string()),
-                ("size".into(), format!("{} bytes", info.bytes)),
+                ("Path".into(), info.path),
+                ("Files".into(), info.files.to_string()),
+                ("Directories".into(), info.directories.to_string()),
+                ("Size".into(), format!("{} bytes", info.bytes)),
                 (
-                    "retention".into(),
+                    "Retention".into(),
                     "Kept until /tmp clean, including after resume".into(),
                 ),
             ],
         };
         if skipped > 0 {
             report.details.push((
-                "skipped".into(),
+                "Skipped".into(),
                 format!("{skipped} links or special files (not followed)"),
             ));
         }

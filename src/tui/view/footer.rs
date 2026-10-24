@@ -1,64 +1,104 @@
-use super::fitted;
 use crate::{
     context::Status,
-    tui::{line::Line, state::State, text},
+    tui::{
+        line::Line,
+        state::State,
+        text,
+        theme::{METER_FILL, METER_TRACK, MUTED, Style, WARNING},
+    },
 };
 
 /// Panels keep the footer below them from this many rows.
 const PANEL_MIN: usize = 10;
-/// Directory cells kept before the indicator abbreviates.
-const DIRECTORY_MIN: usize = 12;
-/// Below this many cells a shortened directory is omitted, not left as a lone ellipsis.
-const DIRECTORY_FLOOR: usize = 6;
+/// Cells in the context meter.
+const METER_CELLS: usize = 8;
+/// The meter and share turn gold this many points before auto-compaction.
+const NEAR: usize = 3;
 
-/// The footer: directory on the left; context, model and effort on the right.
+/// The footer: the home-relative directory on the left; the context meter and
+/// share, model and effort on the right. Narrow rows fall back to the project
+/// name and the model without its provider, then drop them.
 pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) -> Line {
-    let directory = directory.strip_prefix(r"\\?\").unwrap_or(directory);
-    let model = format!("{model} · {}", state.effort);
-    let right = match &state.context {
-        Some(status) => {
-            let room = text::cells(&text::clean(directory)).min(DIRECTORY_MIN) + 2;
-            let variants = indicators(status);
-            // The indicator leads, so narrow rows shorten the model before it.
-            variants
-                .iter()
-                .map(|indicator| format!("{indicator} · {model}"))
-                .find(|right| text::cells(right) + room <= columns)
-                .unwrap_or_else(|| format!("{} · {model}", variants[variants.len() - 1]))
+    let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok();
+    let directory = text::clean(directory.strip_prefix(r"\\?\").unwrap_or(directory));
+    let path = home_relative(&directory, home.as_deref());
+    let project = directory
+        .rsplit(['\\', '/'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(&directory);
+    let model = text::clean(model);
+    let short = model.rsplit('/').next().unwrap_or(&model);
+    let effort = &state.effort;
+    let gauge = state.context.as_ref().map(gauge);
+    let right = |detail: &str| {
+        let mut line = gauge.clone().unwrap_or_default();
+        let separator = if gauge.is_some() { " · " } else { "" };
+        line.push(&format!("{separator}{detail}"), MUTED);
+        line
+    };
+    let variants = [
+        (path.as_str(), right(&format!("{model} · {effort}"))),
+        (project, right(&format!("{short} · {effort}"))),
+        ("", right(short)),
+        ("", gauge.clone().unwrap_or_else(|| Line::new(short, MUTED))),
+    ];
+    let last = variants.len() - 1;
+    for (index, (left, right)) in variants.into_iter().enumerate() {
+        let (left_cells, right_cells) = (text::cells(left), text::cells(&right.plain()));
+        let gap = if left.is_empty() { 0 } else { 2 };
+        if left_cells + gap + right_cells > columns && index < last {
+            continue;
         }
-        None => model,
-    };
-    let budget = columns.saturating_sub(text::cells(&right) + 2);
-    let directory = if budget < text::cells(&text::clean(directory)).min(DIRECTORY_FLOOR) {
-        ""
-    } else {
-        directory
-    };
-    fitted(directory, &right, columns)
+        let mut line = Line::new(left, MUTED);
+        line.push(
+            &" ".repeat(columns.saturating_sub(left_cells + right_cells)),
+            MUTED,
+        );
+        for span in right.spans {
+            line.push(&span.text, span.style);
+        }
+        return line.shortened(columns);
+    }
+    unreachable!("the last variant always renders")
 }
 
-/// Indicator labels from fullest to shortest. Unknown capacity never shows a percentage.
-pub(super) fn indicators(status: &Status) -> [String; 3] {
-    let auto = format!("Auto {}%", status.auto_compact);
-    match status.percent() {
-        Some(percent) => {
-            let value = if percent == 0 && status.tokens > 0 {
-                "<1%".into()
-            } else {
-                format!("≈{percent}%")
-            };
-            [
-                format!("Context {value} · {auto}"),
-                format!("Context {value}"),
-                value,
-            ]
-        }
-        None => [
-            format!("Context unknown · {auto}"),
-            "Context unknown".into(),
-            "Context ?".into(),
-        ],
-    }
+/// `━━━━━━── 25%`: eight cells filling toward the auto-compact threshold, gold
+/// when close to it. Unknown capacity leaves the track empty with `?`.
+fn gauge(status: &Status) -> Line {
+    let threshold = usize::from(status.auto_compact).max(1);
+    let percent = status.percent();
+    let near = percent.is_some_and(|percent| percent + NEAR >= threshold);
+    let fill: Style = if near { WARNING } else { METER_FILL };
+    let filled = percent.map_or(0, |percent| {
+        (percent.min(threshold) * METER_CELLS * 2 + threshold) / (threshold * 2)
+    });
+    let mut line = Line::default();
+    line.push(&"━".repeat(filled), fill);
+    line.push(&"─".repeat(METER_CELLS - filled), METER_TRACK);
+    let share = match percent {
+        None => "?".into(),
+        Some(0) if status.tokens > 0 => "<1%".into(),
+        Some(percent) => format!("{percent}%"),
+    };
+    line.push(&format!(" {share}"), if near { WARNING } else { MUTED });
+    line
+}
+
+/// `C:\Users\me\Projects\app` → `~\Projects\app` when it lies inside `home`.
+pub(super) fn home_relative(directory: &str, home: Option<&str>) -> String {
+    let home = home
+        .map(|home| home.trim_end_matches(['\\', '/']))
+        .filter(|home| !home.is_empty());
+    let split = home.and_then(|home| {
+        let (prefix, rest) = (directory.get(..home.len())?, directory.get(home.len()..)?);
+        let same = if cfg!(windows) {
+            prefix.eq_ignore_ascii_case(home)
+        } else {
+            prefix == home
+        };
+        (same && (rest.is_empty() || rest.starts_with(['\\', '/']))).then_some(rest)
+    });
+    split.map_or_else(|| directory.into(), |rest| format!("~{rest}"))
 }
 
 /// Rows a panel of `height` gives to the footer: one when the engine status

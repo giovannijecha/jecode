@@ -218,22 +218,20 @@ fn one_tool_per_model_request_keeps_each_read_and_the_next_turn_preserves_it() {
         .map(line::Line::plain)
         .filter(|row| row.starts_with("● Read("))
         .collect::<Vec<_>>();
-    assert_eq!(headers.len(), 3);
-    for (index, header) in headers.iter().enumerate() {
-        assert_eq!(*header, "● Read(fixture.txt)");
+    // Pages of one file share a card, drawn at the first read.
+    assert_eq!(headers, ["● Read(fixture.txt)"]);
+    assert!(
+        settled[1]
+            .iter()
+            .any(|row| row.plain().contains("⎿ 3 reads · 3 lines"))
+    );
+    assert!(settled[2].is_empty() && settled[3].is_empty());
+    for (index, word) in ["first", "second", "third"].into_iter().enumerate() {
+        let file_line = format!("{}: {word}", index + 1);
         assert!(
-            settled[index + 1]
+            !settled
                 .iter()
-                .any(|row| row.plain().contains(&format!(
-                    "⎿ Read 1 line · lines {}–{}",
-                    index + 1,
-                    index + 1
-                )))
-        );
-        let file_line = format!("{}: {}", index + 1, ["first", "second", "third"][index]);
-        assert!(
-            !settled[index + 1]
-                .iter()
+                .flatten()
                 .any(|row| row.plain().contains(&file_line))
         );
     }

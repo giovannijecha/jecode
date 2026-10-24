@@ -143,12 +143,12 @@ fn preview_only_reduction_reports_the_reduced_projection() {
     assert!(before.percent().unwrap() >= usize::from(AUTO_COMPACT_DEFAULT));
     let reduced = trace
         .iter()
-        .skip_while(|(label, _)| *label != "maintenance")
+        .skip_while(|(label, _)| *label != "compacted")
         .find(|(label, _)| *label == "context")
         .unwrap()
         .1;
     assert!(reduced.tokens > 0 && reduced.tokens < budget);
-    assert!(trace.iter().all(|(label, _)| *label != "compacted"));
+    assert!(trace.iter().all(|(label, _)| *label != "maintenance"));
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
     assert_eq!(fixture.finish().len(), 1);
 }

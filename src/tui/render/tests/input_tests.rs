@@ -102,7 +102,7 @@ fn streaming_and_panels_keep_the_reading_position_and_new_resets_it() {
     assert_eq!(screen.rows[0], top);
     app.help();
     paint(&mut app, &mut screen);
-    assert!(screen.visible().contains("Commands and controls"));
+    assert!(screen.visible().contains("Help") && screen.visible().contains("Keys"));
     key(&mut app, 27, 0);
     paint(&mut app, &mut screen);
     assert_eq!(screen.rows[0], top);
@@ -143,7 +143,7 @@ fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priorit
     app.state.editor.cursor = 2;
     let draft = app.state.editor.clone();
     let deadline = Instant::now() + Duration::from_secs(6);
-    while app.state.activity.as_ref().unwrap().label != "Thinking" {
+    while app.state.status != "Thinking…" {
         app.poll().unwrap();
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
@@ -153,7 +153,8 @@ fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priorit
     key(&mut app, 33, 0);
     paint(&mut app, &mut screen);
     assert!(screen.visible().contains("Back to bottom · esc"));
-    assert!(screen.visible().contains("Esc returns"));
+    // Esc returns to the bottom here, so the composer rule does not offer it.
+    assert!(!screen.visible().contains(" esc ─"));
     key(&mut app, 27, 0);
     paint(&mut app, &mut screen);
     assert!(!screen.visible().contains("Back to bottom"));

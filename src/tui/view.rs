@@ -1,9 +1,12 @@
+mod commands;
 mod composer;
 mod footer;
 mod information;
 mod menus;
+mod notices;
 mod panel;
 pub(super) mod processes;
+mod routing;
 use super::{line::Line, state::State, text, theme::MUTED};
 
 pub struct Frame {
@@ -159,8 +162,9 @@ pub(super) fn input_width(width: usize, command_panel: bool) -> usize {
     columns.saturating_sub(3).max(1)
 }
 
+/// Log text width of the open process stream.
 pub(super) fn process_width(state: &State) -> usize {
-    panel::width(state.width.max(1))
+    processes::text_width(panel::width(state.width.max(1)))
 }
 
 /// Process list entries visible at once.
@@ -173,7 +177,7 @@ pub(super) fn process_log_rows(state: &State) -> (usize, usize) {
     state.processes.as_ref().map_or((0, 0), |panel| {
         processes::metrics(
             panel,
-            process_width(state),
+            panel::width(state.width.max(1)),
             composer::information_height(state),
         )
     })
@@ -184,6 +188,14 @@ pub(super) fn scroll_information(state: &mut State, code: u16) {
     if let Some(info) = &mut state.information {
         information::scroll(info, code, state.width.max(1), height);
     }
+}
+
+/// Whether `line` is a panel's focused row.
+#[cfg(test)]
+pub(super) fn focused(line: &Line) -> bool {
+    line.spans
+        .iter()
+        .any(|span| span.background == Some(super::theme::SELECTED_SURFACE))
 }
 
 #[cfg(test)]

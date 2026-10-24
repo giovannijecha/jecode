@@ -5,8 +5,9 @@ use super::{
     line::Line,
     syntax::Highlighter,
     text,
-    theme::{BODY, CODE_SURFACE, EMPHASIS, MUTED, Style},
+    theme::{ACCENT, BODY, CODE_SURFACE, CODE_TEXT, EMPHASIS, MUTED, Style},
 };
+use std::borrow::Cow;
 
 #[derive(Clone)]
 struct Fence {
@@ -178,17 +179,20 @@ impl Iterator for Rows {
                         .highlighter
                         .line(source)
                         .at_source(origin)
-                        .wrap(columns, false),
+                        .wrap(padded(columns), false)
+                        .into_iter()
+                        .map(|row| pad(row, columns)),
                 );
             }
             return Some(output);
         }
         if let Some((marker, count, label)) = opening_fence(source) {
-            output.push(
-                Line::new(&text::ellipsize(label, columns), MUTED)
+            output.push(pad(
+                Line::new(&text::ellipsize(label, padded(columns)), MUTED)
                     .on(CODE_SURFACE)
                     .at_source(origin),
-            );
+                columns,
+            ));
             self.fenced = Some(Fence {
                 marker,
                 count,
@@ -204,18 +208,23 @@ impl Iterator for Rows {
         }
         let trimmed = source.trim_start();
         let indentation = &source[..source.len() - trimmed.len()];
-        let heading = trimmed.bytes().take_while(|&byte| byte == b'#').count();
+        let level = trimmed.bytes().take_while(|&byte| byte == b'#').count();
         if horizontal_rule(trimmed) {
             output.push(Line::new(&"─".repeat(columns), MUTED).at_source(origin));
-        } else if (1..=6).contains(&heading) && trimmed.as_bytes().get(heading) == Some(&b' ') {
-            output.extend(
-                inline::render(heading_body(&trimmed[heading + 1..]), EMPHASIS.bold())
-                    .at_source(origin)
-                    .wrap(columns, true),
-            );
+        } else if (1..=6).contains(&level) && trimmed.as_bytes().get(level) == Some(&b' ') {
+            let body = heading_body(&trimmed[level + 1..]);
+            output.extend(heading(
+                body,
+                level,
+                origin,
+                columns,
+                &self.value,
+                self.position,
+            ));
         } else if let Some(quote) = quoted(trimmed) {
+            let quote = joined(&self.value, quote, &mut self.position, columns, true);
             output.extend(prefixed(
-                quote,
+                &quote,
                 (&format!("{indentation}│ "), MUTED),
                 columns,
                 true,
@@ -224,8 +233,9 @@ impl Iterator for Rows {
             ));
         } else if let Some((marker, body)) = list_item(trimmed) {
             let (marker, body) = task_item(marker, body);
+            let body = joined(&self.value, body, &mut self.position, columns, false);
             output.extend(prefixed(
-                body,
+                &body,
                 (&format!("{indentation}{marker}"), MUTED),
                 columns,
                 false,
@@ -238,20 +248,109 @@ impl Iterator for Rows {
                 && setext(underline)
             {
                 self.position = next;
-                output.extend(
-                    inline::render(trimmed, EMPHASIS.bold())
-                        .at_source(origin)
-                        .wrap(columns, true),
-                );
+                let level = if underline.trim_start().starts_with('=') {
+                    1
+                } else {
+                    2
+                };
+                output.extend(heading(trimmed, level, origin, columns, &self.value, next));
             } else {
+                let source = if trimmed.is_empty() {
+                    Cow::Borrowed(source)
+                } else {
+                    joined(&self.value, source, &mut self.position, columns, false)
+                };
                 output.extend(
-                    inline::render(source, BODY)
+                    inline::render(&source, BODY)
                         .at_source(origin)
                         .wrap(columns, true),
                 );
             }
         }
         Some(output)
+    }
+}
+
+// A heading is bold in its level's colour and keeps one neutral row before
+// the text it introduces.
+fn heading(
+    body: &str,
+    level: usize,
+    origin: usize,
+    columns: usize,
+    value: &str,
+    next: usize,
+) -> Vec<Line> {
+    let colour = match level {
+        1 => ACCENT,
+        2 => EMPHASIS,
+        _ => BODY,
+    };
+    let mut rows = inline::heading(body, colour)
+        .at_source(origin)
+        .wrap(columns, true);
+    if table::source_line(value, next).is_some_and(|(line, _)| !line.trim().is_empty()) {
+        rows.push(Line::default());
+    }
+    rows
+}
+
+// CommonMark soft breaks: plain lines continuing a paragraph, list item or
+// quote join it with one space, so emphasis can span them and the text reflows
+// at any width. A quote also continues through `>` lines. A streamed block is
+// laid out again on each append, so a very long one breaks at a source line.
+fn joined<'a>(
+    value: &'a str,
+    first: &'a str,
+    position: &mut usize,
+    columns: usize,
+    quote: bool,
+) -> Cow<'a, str> {
+    const LIMIT: usize = 8 * 1024;
+    let mut text = Cow::Borrowed(first);
+    // Two trailing spaces or a backslash end the line with a hard break.
+    while text.len() < LIMIT && !text.ends_with("  ") && !text.ends_with('\\') {
+        let inner = quote
+            .then(|| quote_continuation(value, *position))
+            .flatten();
+        let Some((line, next)) = inner.or_else(|| continuation(value, *position, columns)) else {
+            return text;
+        };
+        let joined = text.to_mut();
+        joined.truncate(joined.trim_end().len());
+        joined.push(' ');
+        joined.push_str(line);
+        *position = next;
+    }
+    text
+}
+
+fn continuation(value: &str, position: usize, columns: usize) -> Option<(&str, usize)> {
+    let (line, next) = table::source_line(value, position)?;
+    // A setext underline or table delimiter below makes this line its own block.
+    let own = table::source_line(value, next).is_some_and(|(below, after)| {
+        setext(below) || table::Table::new(line, below, after, columns, 0).is_some()
+    });
+    (!line.trim().is_empty() && !table::block_start(line) && !own)
+        .then(|| (line.trim_start(), next))
+}
+
+fn quote_continuation(value: &str, position: usize) -> Option<(&str, usize)> {
+    let (line, next) = table::source_line(value, position)?;
+    let inner = quoted(line.trim_start())?.trim_start();
+    (!inner.is_empty() && !table::block_start(inner)).then_some((inner, next))
+}
+
+// Keep padding only when the inner width can hold a two-cell glyph.
+fn padded(columns: usize) -> usize {
+    if columns < 4 { columns } else { columns - 2 }
+}
+
+fn pad(row: Line, columns: usize) -> Line {
+    if row.spans.is_empty() || columns < 4 {
+        row
+    } else {
+        row.indent(" ", CODE_TEXT)
     }
 }
 

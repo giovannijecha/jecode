@@ -188,15 +188,7 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
     let mut resumed = app(&home, &directory, "http://127.0.0.1:1/chat/completions");
     assert!(resumed.state.items.is_empty());
     assert_eq!(resumed.archive.messages.lock().unwrap().len(), 1);
-    assert!(
-        resumed
-            .state
-            .notice
-            .as_ref()
-            .unwrap()
-            .text
-            .contains("/resume")
-    );
+    assert!(resumed.state.notice.as_ref().unwrap().action == Some(("/resume", "open")));
     submit(&mut resumed, "/resume");
     assert!(matches!(
         resumed.state.selector.as_ref().unwrap().purpose,
@@ -240,7 +232,7 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
         .join("\n");
     assert!(rows.contains("Answer preserved"));
     assert!(rows.contains("● Write(file.txt)"));
-    assert!(rows.contains("⎿ Added 1 line, removed 0 lines"));
+    assert!(rows.contains("⎿ +1 line"));
     assert!(rows.contains("original"));
     assert!(resumed.state.items.iter().any(|item| matches!(item, state::Item::Tool { name, change: Some(change), .. } if name == "write" && change.created && change.added == 1)));
     assert!(

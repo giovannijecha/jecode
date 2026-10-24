@@ -1,6 +1,6 @@
 //! The routing choices offered for one model, shared by every interface.
 
-use super::{Routing, compatible, describe, explain, guard};
+use super::{Routing, compatible, describe, explain, facts, guard, metrics};
 use crate::backend::Endpoints;
 use crate::backend::Entry;
 
@@ -18,6 +18,8 @@ pub fn entries(endpoints: Option<&Endpoints>, current: &Routing, reasoning: bool
         routing: Routing::Auto,
         name: Routing::Auto.label(),
         description: mark(&Routing::Auto, "native routing with fallbacks".into()),
+        metrics: None,
+        facts: String::new(),
         help: explain(
             &Routing::Auto,
             endpoints.and_then(|endpoints| guard(endpoints, reasoning)),
@@ -34,6 +36,8 @@ pub fn entries(endpoints: Option<&Endpoints>, current: &Routing, reasoning: bool
         entries.push(Entry {
             name: endpoint.tag.clone(),
             description: mark(&routing, describe(endpoint, reasoning)),
+            metrics: Some(metrics(endpoint)),
+            facts: facts(endpoint, reasoning),
             help: explain(&routing, None),
             problem: if endpoint.supports("tools") == Some(false) {
                 Some(format!(
@@ -53,17 +57,17 @@ pub fn entries(endpoints: Option<&Endpoints>, current: &Routing, reasoning: bool
     }
     match current {
         Routing::Endpoint(tag) if !entries.iter().any(|entry| entry.routing == *current) => {
+            let fact = if endpoints.is_some() {
+                "not in the latest listing"
+            } else {
+                "listing unavailable"
+            };
             entries.push(Entry {
                 routing: current.clone(),
                 name: tag.clone(),
-                description: mark(
-                    current,
-                    if endpoints.is_some() {
-                        "not in the latest listing".into()
-                    } else {
-                        "listing unavailable".into()
-                    },
-                ),
+                description: mark(current, fact.into()),
+                metrics: None,
+                facts: fact.into(),
                 help: explain(current, None),
                 problem: None,
             });
@@ -72,6 +76,8 @@ pub fn entries(endpoints: Option<&Endpoints>, current: &Routing, reasoning: bool
             routing: Routing::Default,
             name: Routing::Default.label(),
             description: mark(current, "no routing preferences".into()),
+            metrics: None,
+            facts: "no routing preferences".into(),
             help: explain(current, None),
             problem: None,
         }),

@@ -1,7 +1,10 @@
 use super::{
     line::Line,
     markdown,
-    state::{Item, Kind, State, rows::Rows},
+    state::{
+        Item, Kind, State,
+        rows::{self, Rows},
+    },
     theme::{ACCENT, EMPHASIS},
 };
 
@@ -18,14 +21,43 @@ fn source(state: &State, index: usize) -> Source<'_> {
     }
 }
 
-fn render(source: Source<'_>, context: &mut Rows, columns: usize) -> Vec<Line> {
-    match source {
-        Source::Header => {
-            *context = Rows::default();
-            header(columns)
-        }
-        Source::Item(item) => context.render(item, columns),
+fn render(
+    state: &State,
+    block: usize,
+    context: &mut Rows,
+    columns: usize,
+    keycap: Option<usize>,
+) -> Vec<Line> {
+    let Some(index) = block.checked_sub(1) else {
+        *context = Rows::default();
+        return header(columns);
+    };
+    context.render_at(&state.items, index, columns, keycap == Some(index))
+}
+
+// The card that names Ctrl+O: the last one with hidden lines in the latest
+// finished turn, while that turn is collapsed.
+type KeycapKey = (u64, u64, Option<(usize, usize)>, bool, bool, usize);
+
+fn keycap_key(state: &State, columns: usize) -> KeycapKey {
+    let details = &state.tool_details;
+    (
+        state.generation,
+        state.tool_revision,
+        details.turn.as_ref().map(|turn| (turn.start, turn.end)),
+        details.active,
+        details.expanded,
+        columns,
+    )
+}
+
+fn keycap(state: &State, columns: usize) -> Option<usize> {
+    if state.tool_details.expanded || !state.tool_details_available() {
+        return None;
     }
+    state.tool_details.turn.clone()?.rev().find(|&index| {
+        rows::tool_card(&state.items, index, columns, false).is_some_and(|card| card.hidden)
+    })
 }
 
 pub(super) fn header(columns: usize) -> Vec<Line> {
@@ -51,6 +83,8 @@ pub(super) struct Layout {
     pending_start: usize,
     pending_revision: Option<u64>,
     pending_stream: Option<PendingStream>,
+    keycap: Option<usize>,
+    keycap_key: Option<KeycapKey>,
 }
 
 struct Partial {
@@ -96,6 +130,7 @@ impl Layout {
             self.pending_stream = None;
             self.tools = state.tool_revision;
         }
+        self.refresh_keycap(state);
         let end = state.settled_len() + 1;
         let mut rows_left = 256usize;
         let mut blocks_left = max_blocks;
@@ -134,7 +169,13 @@ impl Layout {
                 }
                 lines
             } else {
-                let lines = render(item, &mut self.context, columns);
+                let lines = render(
+                    state,
+                    self.blocks.len(),
+                    &mut self.context,
+                    columns,
+                    self.keycap,
+                );
                 rows_left = rows_left.saturating_sub(lines.len().max(1));
                 lines
             };
@@ -145,10 +186,41 @@ impl Layout {
     }
 
     pub fn ready(&self, state: &State) -> bool {
-        self.blocks.len() == state.settled_len() + 1 && self.tools == state.tool_revision
+        self.blocks.len() == state.settled_len() + 1
+            && self.tools == state.tool_revision
+            && self.keycap_key == Some(keycap_key(state, self.columns))
+    }
+
+    // Both the card that loses the keycap and the one that gains it are drawn again.
+    fn refresh_keycap(&mut self, state: &State) {
+        let key = keycap_key(state, self.columns);
+        if self.keycap_key == Some(key) {
+            return;
+        }
+        self.keycap_key = Some(key);
+        let keycap = keycap(state, self.columns);
+        if keycap == self.keycap {
+            return;
+        }
+        let block = self
+            .keycap
+            .into_iter()
+            .chain(keycap)
+            .min()
+            .map_or(0, |index| index + 1);
+        self.keycap = keycap;
+        if block < self.blocks.len() {
+            self.context = self.contexts[block];
+            self.blocks.truncate(block);
+            self.contexts.truncate(block);
+            self.partial = None;
+        }
+        self.pending_revision = None;
+        self.pending_stream = None;
     }
 
     pub fn prepare_pending(&mut self, state: &State, max_rows: usize) {
+        self.refresh_keycap(state);
         let start = state.settled_len();
         let changed = self.pending_revision != Some(state.revision) || self.pending_start != start;
         let running = state.items[start..]
@@ -202,7 +274,12 @@ impl Layout {
                     {
                         self.pending_stream = None;
                     }
-                    let lines = context.render(item, self.columns);
+                    let lines = context.render_at(
+                        &state.items,
+                        start + index,
+                        self.columns,
+                        self.keycap == Some(start + index),
+                    );
                     if index < self.pending.len() {
                         self.pending[index] = lines;
                     } else {

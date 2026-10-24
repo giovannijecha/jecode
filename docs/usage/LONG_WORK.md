@@ -45,9 +45,9 @@ export. After compaction, the next model request uses a smaller view built from
 system instructions, a fixed excerpt of archived user requests, a summary and
 recent original exchanges. The excerpt keeps the first request and the latest
 requests that fit its budget; `history:requests` retains the complete sequence.
-The context indicator in the TUI estimates the next request as a share of the
-effective model window; `Context unknown` means the window has not been
-established. It is an estimate, so a provider context rejection can still occur.
+The context meter in the TUI footer estimates the next request as a share of
+the effective model window and fills toward the auto-compact threshold; `?`
+means the window has not been established. It is an estimate, so a provider context rejection can still occur.
 
 Input returned to the composer is withdrawn from the model's history view:
 neither `history:N` nor `history:requests` exposes that attempt. Submitting it

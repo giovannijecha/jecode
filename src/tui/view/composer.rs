@@ -1,11 +1,12 @@
-use super::{fitted, footer, information, menus, panel, processes};
+use super::{fitted, footer, information, menus, notices, panel, processes};
 use crate::tui::{
+    activity,
+    feedback::Feedback,
     hint,
     line::Line,
-    notice,
     state::State,
     text,
-    theme::{ACCENT, BODY, CURSOR, MUTED, SELECTED_SURFACE, STRONG, Style},
+    theme::{ACCENT, BODY, CURSOR, MUTED, Style},
 };
 
 pub(super) fn render(
@@ -17,15 +18,11 @@ pub(super) fn render(
     back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let is_panel = super::panel_open(state);
-    let notice_rows = state
-        .notice
-        .as_ref()
-        .map_or_else(Vec::new, |notice| feedback(notice, columns));
-    let copy_rows = state
-        .copy_notice
-        .as_ref()
-        .map_or_else(Vec::new, |notice| feedback(notice, columns));
-    let bottom_count = notice_rows.len() + copy_rows.len() + usize::from(state.activity.is_some());
+    let notice_rows = feedback(state.notice.as_ref(), columns);
+    let copy_rows = feedback(state.copy_notice.as_ref(), columns);
+    // Activity and progress ride the composer rule; an open panel gives them a row.
+    let activity_row = is_panel.then(|| status(state)).flatten();
+    let bottom_count = notice_rows.len() + copy_rows.len() + usize::from(activity_row.is_some());
     let reserve = if is_panel {
         bottom_count.min(height.saturating_sub(3))
     } else {
@@ -45,9 +42,9 @@ pub(super) fn render(
     } else if let Some(selector) = &state.selector {
         menus::selector(selector, columns, panel_height)
     } else if state.suggestions.panel {
-        commands(state, columns, panel_height)
+        super::commands::render(state, columns, panel_height)
     } else {
-        draft(state, model, directory, columns, height)
+        draft(state, model, directory, columns, height, back_to_bottom)
     };
     if footer_rows > 0 {
         // The footer stays on the terminal surface below an open panel.
@@ -126,17 +123,9 @@ pub(super) fn render(
         extra.push(extra_row(row));
     }
     extra.extend(notice_rows);
-    if let Some(activity) = &state.activity {
-        let escape = if is_panel {
-            "Esc closes menu"
-        } else if state.queue.is_editing() {
-            "Esc cancels edit"
-        } else if state.history.is_browsing() || back_to_bottom {
-            "Esc returns"
-        } else {
-            "Esc stops"
-        };
-        extra.push(extra_row(activity.line(extra_columns, escape)));
+    if let Some(status) = activity_row {
+        // Panels name their own Esc action.
+        extra.push(extra_row(status.shortened(extra_columns)));
     }
     extra.extend(copy_rows);
     if extra.len() > remaining {
@@ -145,6 +134,70 @@ pub(super) fn render(
     let offset = extra.len();
     extra.append(&mut composer);
     (extra, cursor.map(|(row, col)| (row + offset, col)))
+}
+
+/// `─ ▰▰▱▱▱▱ 1h 10m · Drafts 1 · Alt+↑ ──── 3/7 · esc ─`. As columns shrink,
+/// the draft range leaves first, then the context takes a shorter form,
+/// shortens and leaves, then `esc`, then the time; the scanner stays.
+/// `contexts` lists the context's forms, longest first; `scanner` draws the
+/// scanner with or without the time.
+fn working_rule(
+    scanner: &dyn Fn(bool) -> Line,
+    contexts: &[Line],
+    position: &str,
+    escape: bool,
+    style: Style,
+    columns: usize,
+) -> Line {
+    let (mut range, mut escape, mut time) = (position, escape, true);
+    loop {
+        let mut line = Line::new("─ ", style);
+        for span in scanner(time).spans {
+            line.push(&span.text, span.style);
+        }
+        let right = [range, if escape { "esc" } else { "" }]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let right = if right.is_empty() {
+            right
+        } else {
+            format!(" {right} ─")
+        };
+        // A space after the scanner group and at least three rule cells.
+        let fixed = text::cells(&line.plain()) + 4 + text::cells(&right);
+        let room = columns.saturating_sub(fixed);
+        let full = contexts
+            .first()
+            .map_or(0, |context| 3 + panel::cells(context));
+        if !range.is_empty() && (fixed > columns || full > room) {
+            range = "";
+            continue;
+        }
+        if fixed > columns && escape {
+            escape = false;
+            continue;
+        }
+        if fixed > columns && time {
+            time = false;
+            continue;
+        }
+        let whole = contexts
+            .iter()
+            .find(|context| 3 + panel::cells(context) <= room);
+        if let Some(context) = whole.or(contexts.last()).filter(|_| room >= 9) {
+            line.push(" · ", MUTED);
+            line = line.append(context.shortened(room - 3));
+        }
+        line.push(" ", style);
+        line.push(
+            &"─".repeat(columns.saturating_sub(text::cells(&line.plain()) + text::cells(&right))),
+            style,
+        );
+        line.push(&right, MUTED);
+        return line.shortened(columns);
+    }
 }
 
 /// Key hints for the current draft context, shown in place of the directory.
@@ -171,18 +224,46 @@ fn hints(state: &State) -> Option<&'static [&'static str]> {
     }
 }
 
-fn feedback(notice: &crate::tui::feedback::Feedback, columns: usize) -> Vec<Line> {
-    notice::lines(notice.kind.into(), &notice.text, columns)
+/// Result and banner rows; progress belongs to the rule.
+fn feedback(notice: Option<&Feedback>, columns: usize) -> Vec<Line> {
+    notice
+        .filter(|notice| !notice.in_progress())
+        .map_or_else(Vec::new, |notice| notices::lines(notice, columns))
+}
+
+/// The scanner beside progress that has no turn, for its frame.
+fn scanner(progress: &Feedback) -> Line {
+    let started = progress.started().unwrap_or_else(std::time::Instant::now);
+    activity::indicator((started.elapsed().as_millis() / 120) as usize)
+}
+
+/// The scanner, the turn's time and any progress, as one row.
+fn status(state: &State) -> Option<Line> {
+    let progress = state.current_progress();
+    let mut line = match (&state.activity, progress) {
+        (Some(activity), _) => activity.line(true),
+        (None, Some(progress)) => scanner(progress),
+        (None, None) => return None,
+    };
+    if let Some(progress) = progress {
+        line.push(
+            if state.activity.is_some() {
+                " · "
+            } else {
+                " "
+            },
+            MUTED,
+        );
+        line = line.append(notices::progress(progress));
+    }
+    Some(line)
 }
 
 pub(super) fn information_height(state: &State) -> usize {
     let columns = state.width.max(1);
-    let feedback_rows = [state.notice.as_ref(), state.copy_notice.as_ref()]
-        .into_iter()
-        .flatten()
-        .map(|notice| feedback(notice, columns).len())
-        .sum::<usize>();
-    let activity = usize::from(state.activity.is_some());
+    let feedback_rows = feedback(state.notice.as_ref(), columns).len()
+        + feedback(state.copy_notice.as_ref(), columns).len();
+    let activity = usize::from(state.activity.is_some() || state.current_progress().is_some());
     let height = super::chrome_height(state);
     let height = height.saturating_sub((feedback_rows + activity).min(height.saturating_sub(3)));
     height - footer::panel_rows(state, height)
@@ -194,6 +275,7 @@ fn draft(
     directory: &str,
     columns: usize,
     height: usize,
+    back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let style = if state.activity.is_some() {
         MUTED
@@ -215,7 +297,17 @@ fn draft(
     } else {
         String::new()
     };
-    let top = if !context.is_empty() && columns >= 7 {
+    let progress = state.current_progress();
+    let contexts = contexts(progress, &context, state.queue.len(), contextual);
+    let top = if let Some(activity) = state.activity.as_ref().filter(|_| columns >= 7) {
+        // Esc names itself only while it stops the turn.
+        let escape = !activity.stopping && !contextual && !back_to_bottom;
+        let scanner = |time| activity.line(time);
+        working_rule(&scanner, &contexts, &input.position, escape, style, columns)
+    } else if let Some(progress) = progress.filter(|_| columns >= 7) {
+        let scanner = |_| scanner(progress);
+        working_rule(&scanner, &contexts, &input.position, false, style, columns)
+    } else if !context.is_empty() && columns >= 7 {
         let range = if badge > 0 && badge + text::cells(&context) + 7 <= columns {
             format!(" {} ─", input.position)
         } else {
@@ -254,13 +346,49 @@ fn draft(
     (lines, Some((input.cursor.0 + 1, input.cursor.1)))
 }
 
-struct Input {
-    lines: Vec<Line>,
-    cursor: (usize, usize),
-    position: String,
+/// The rule's context forms, longest first: progress, then the draft context.
+fn contexts(
+    progress: Option<&Feedback>,
+    context: &str,
+    drafts: usize,
+    contextual: bool,
+) -> Vec<Line> {
+    let context = (!context.is_empty()).then(|| Line::new(context, MUTED));
+    let short = context
+        .as_ref()
+        .filter(|_| !contextual)
+        .map(|_| Line::new(&format!("Drafts {drafts}"), MUTED));
+    let Some(notice) = progress else {
+        return context.into_iter().chain(short).collect();
+    };
+    let progress = notices::progress(notice);
+    let joined = |tail: &Line| {
+        let mut line = progress.clone();
+        line.push(" · ", MUTED);
+        line.append(tail.clone())
+    };
+    context
+        .iter()
+        .chain(short.iter())
+        .map(joined)
+        .chain([progress.clone()])
+        .chain(notices::progress_forms(notice))
+        .collect()
 }
 
-fn input(state: &State, columns: usize, style: Style, foreground: Style, limit: usize) -> Input {
+pub(super) struct Input {
+    pub lines: Vec<Line>,
+    pub cursor: (usize, usize),
+    pub position: String,
+}
+
+pub(super) fn input(
+    state: &State,
+    columns: usize,
+    style: Style,
+    foreground: Style,
+    limit: usize,
+) -> Input {
     if columns < 7 {
         // At extreme widths the editor gets the entire row, including its caret.
         // The logical draft/caret are unchanged and regain multiline layout later.
@@ -313,59 +441,4 @@ fn input(state: &State, columns: usize, style: Style, foreground: Style, limit: 
         cursor,
         position: panel::position(start, end, total),
     }
-}
-
-fn commands(state: &State, columns: usize, height: usize) -> (Vec<Line>, Option<(usize, usize)>) {
-    let width = panel::width(columns);
-    let reserve = 2 + usize::from(height >= 5) + usize::from(state.suggestions.visible);
-    let input = input(state, width, ACCENT, STRONG, height.saturating_sub(reserve));
-    let mut lines = vec![panel::heading("Commands", &input.position, width)];
-    lines.extend(input.lines);
-    let cursor = Some((input.cursor.0 + 1, input.cursor.1));
-    if state.suggestions.visible {
-        let (options, position) = menus::suggestions(
-            &state.suggestions,
-            width,
-            height.saturating_sub(lines.len() + 3),
-        );
-        if input.position.is_empty() {
-            lines[0] = panel::heading("Commands", &position, width);
-        }
-        lines.extend(options);
-    }
-    let selected = lines
-        .iter()
-        .position(|line| line.background == Some(SELECTED_SURFACE));
-    let working = state.activity.is_some();
-    let immediate = if state.suggestions.visible {
-        state.suggestions.chosen()
-    } else {
-        state.editor.text.split_whitespace().next()
-    }
-    .is_some_and(crate::tui::commands::immediate);
-    let action = if working && !immediate {
-        "queue"
-    } else {
-        "run"
-    };
-    let controls = if state.suggestions.visible && !state.suggestions.matches.is_empty() {
-        vec![
-            format!("↑↓ move · Tab complete · Enter {action} · Esc close"),
-            format!("↑↓ · Tab · Enter {action} · Esc close"),
-            "Enter · Esc".into(),
-            "↵ · Esc".into(),
-        ]
-    } else {
-        vec![
-            format!("Enter {action} · Esc close"),
-            "Enter · Esc".into(),
-            "↵ · Esc".into(),
-        ]
-    };
-    let variants: Vec<&str> = controls.iter().map(String::as_str).collect();
-    lines.push(Line::new(&hint::choose(&variants, width), MUTED));
-    let mut priorities = vec![cursor.map_or(1, |(row, _)| row)];
-    priorities.extend(selected);
-    priorities.extend([lines.len() - 1, 0]);
-    panel::finish(lines, cursor, &priorities, columns, height)
 }

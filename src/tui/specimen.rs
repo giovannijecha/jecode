@@ -58,7 +58,8 @@ const GLYPHS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("●", "conversation bullet"),
             ("⏺", "macOS bullet"),
-            ("•", "activity dot"),
+            ("▰", "scanner lit"),
+            ("▱", "scanner resting"),
             ("❯", "prompt and focus"),
             ("›", "current prompt"),
             ("▸", "collapsed"),
@@ -74,6 +75,7 @@ const GLYPHS: &[(&str, &[(&str, &str)])] = &[
             ("├", "branch"),
             ("│", "guide"),
             ("─", "rule"),
+            ("━", "context meter"),
             ("╭", "round corner"),
             ("▎", "quote bar"),
             ("┃", "heavy bar"),
@@ -203,10 +205,10 @@ fn attributes(rows: &mut Vec<Line>) {
     rows.push(line);
 }
 
-fn wave(rows: &mut Vec<Line>) {
-    heading(rows, "Activity wave  ·  12 frames at 120 ms");
+fn scanner(rows: &mut Vec<Line>) {
+    heading(rows, "Activity scanner  ·  8 frames at 120 ms");
     let mut line = Line::new("    ", BODY);
-    for frame in 0..12 {
+    for frame in 0..8 {
         for span in activity::indicator(frame).spans {
             line.push(&span.text, span.style);
         }
@@ -247,7 +249,7 @@ fn specimen() {
     let mut rows = vec![Line::new("Jecode design specimen", STRONG.bold())];
     palette(&mut rows);
     attributes(&mut rows);
-    wave(&mut rows);
+    scanner(&mut rows);
     glyphs(&mut rows);
     // One write keeps the output whole when the tool specimen runs alongside.
     let painted: String = rows

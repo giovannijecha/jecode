@@ -52,10 +52,7 @@ fn a_running_command_shows_its_checkpoint_in_the_running_line() {
     ));
     assert_eq!(
         rows,
-        [
-            "● Bash(cargo fmt)",
-            "  ⎿ Running… · checkpoint rc-12 · saved"
-        ]
+        ["● Bash(cargo fmt)", "  ⎿ ▰▰▱▱▱▱ · checkpoint rc-12 · saved"]
     );
 }
 

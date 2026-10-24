@@ -1,0 +1,225 @@
+use super::*;
+use crate::tui::theme::{ACCENT, EMPHASIS, KEYWORD};
+use std::time::Duration;
+
+fn presentation(milliseconds: u64, expanded: bool) -> Presentation {
+    Presentation {
+        elapsed: Some(Duration::from_millis(milliseconds)),
+        expanded,
+        ..Presentation::default()
+    }
+}
+
+fn tool<'a>(
+    name: &'a str,
+    arguments: &'a Value,
+    result: &'a Value,
+    presentation: &'a Presentation,
+) -> Tool<'a> {
+    Tool {
+        name,
+        arguments,
+        summary: "complete",
+        result: Some(result),
+        change: None,
+        presentation,
+    }
+}
+
+fn plain(rows: &[Line]) -> Vec<String> {
+    rows.iter().map(Line::plain).collect()
+}
+
+fn object<const N: usize>(fields: [(&str, &str); N]) -> Value {
+    Value::object(fields.map(|(key, value)| (key, Value::string(value))))
+}
+
+fn read(path: &str, lines: usize) -> (Value, Value) {
+    (
+        object([("path", path)]),
+        Value::object([
+            ("content", Value::string("1: x\n")),
+            ("lines_returned", Value::number(lines)),
+            ("offset", Value::number(1)),
+        ]),
+    )
+}
+
+#[test]
+fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
+    let shown = presentation(0, false);
+    for (name, arguments, family) in [
+        ("read", object([("path", "a.rs")]), ACCENT),
+        ("write", object([("path", "a.rs")]), KEYWORD),
+        ("bash", object([("command", "ls")]), TOOL_ACCENT),
+    ] {
+        let result = Value::object([("exit_code", Value::number(0))]);
+        let rows = card(tool(name, &arguments, &result, &shown), 80, false).rows;
+        let spans = &rows[0].spans;
+        assert_eq!(spans[0].style, GOOD);
+        assert_eq!(spans[1].style, family.bold());
+        assert_eq!(spans[2].style, EMPHASIS);
+        assert_eq!(spans.last().unwrap().style, family.bold());
+    }
+}
+
+#[test]
+fn titles_wrap_on_words_under_the_open_paren_and_compact_titles_close_with_an_ellipsis() {
+    let arguments = object([(
+        "command",
+        "cargo build --locked --release --target x86_64-pc-windows-gnullvm\ncargo test --locked",
+    )]);
+    let result = Value::object([("exit_code", Value::number(0))]);
+    let shown = presentation(0, false);
+    let rows = plain(&card(tool("bash", &arguments, &result, &shown), 60, false).rows);
+    assert_eq!(rows[0], "● Bash(cargo build --locked --release --target");
+    assert_eq!(rows[1], "       x86_64-pc-windows-gnullvm");
+    assert_eq!(rows[2], "       cargo test --locked)");
+    let long = object([("command", &"word ".repeat(60))]);
+    let compact = plain(&card(tool("bash", &long, &result, &shown), 60, false).rows);
+    assert!(compact[2].ends_with("…)") && !compact[3].starts_with("    "));
+    let expanded = presentation(0, true);
+    let full = card(tool("bash", &long, &result, &expanded), 60, false).rows;
+    assert!(
+        full.iter()
+            .filter(|row| row.origin.unwrap().line == 0)
+            .count()
+            > 3
+    );
+}
+
+#[test]
+fn commands_name_their_result_line_and_count_the_rest_with_a_keycap() {
+    let arguments = object([("command", "cargo test")]);
+    let result = Value::object([
+        ("exit_code", Value::number(0)),
+        (
+            "stdout",
+            Value::string("running 3 tests\n\ntest a ... ok\ntest result: ok. 3 passed\n"),
+        ),
+    ]);
+    let shown = presentation(6800, false);
+    let card = card(tool("bash", &arguments, &result, &shown), 60, true);
+    let rows = plain(&card.rows);
+    assert!(card.hidden);
+    assert_eq!(rows[1], "  ⎿ test result: ok. 3 passed · 6.8s");
+    assert!(rows[2].starts_with("    … 2 more lines") && rows[2].ends_with("Ctrl+O  expand"));
+    assert_eq!(rows[2].chars().count(), 60);
+    let quick = presentation(400, false);
+    let empty = Value::object([("exit_code", Value::number(0))]);
+    let rows = plain(&super::card(tool("bash", &arguments, &empty, &quick), 60, true).rows);
+    assert_eq!(rows, ["● Bash(cargo test)", "  ⎿ Done"]);
+}
+
+#[test]
+fn failures_lead_with_the_exit_and_first_error_in_the_failure_colour() {
+    let arguments = object([("command", "cargo test")]);
+    let result = Value::object([
+        ("exit_code", Value::number(101)),
+        (
+            "stderr",
+            Value::string("error[E0425]: missing\n  --> a.rs\n\nnote\nmore\n"),
+        ),
+    ]);
+    let shown = presentation(4200, false);
+    let rows = card(tool("bash", &arguments, &result, &shown), 80, false).rows;
+    assert_eq!(
+        plain(&rows)[1..],
+        [
+            "  ⎿ Exit 101 · error[E0425]: missing",
+            "      --> a.rs",
+            "    note",
+            "    … 1 more line"
+        ]
+    );
+    assert_eq!(rows[1].spans[0].style, BAD);
+    let missing = Value::object([(
+        "error",
+        Value::string("Could not resolve path \"a.rs\": No such file (os error 2)"),
+    )]);
+    let path = object([("path", "a.rs")]);
+    let rows = card(tool("read", &path, &missing, &shown), 80, false).rows;
+    assert_eq!(plain(&rows)[1], "  ⎿ Not found");
+}
+
+#[test]
+fn pages_and_captures_summarise_what_came_back() {
+    let shown = presentation(600, false);
+    let fetch = object([("action", "fetch"), ("url", "https://docs.rs/governor/")]);
+    let page = Value::object([
+        ("final_url", Value::string("https://docs.rs/governor/")),
+        ("status", Value::number(200)),
+        ("bytes", Value::number(18402)),
+        ("title", Value::string("governor - Rust")),
+        (
+            "preview",
+            Value::string("# Crate governor\n\nRate limiting.\n"),
+        ),
+    ]);
+    let rows = plain(&card(tool("web", &fetch, &page, &shown), 80, false).rows);
+    assert_eq!(
+        rows[1..],
+        [
+            "  ⎿ governor - Rust · 18 KiB · docs.rs",
+            "    … 2 more lines"
+        ]
+    );
+    let capture = object([("action", "screenshot"), ("tab_id", "tab-1")]);
+    let image = Value::object([
+        ("screenshot_path", Value::string("tmp:browser/shot.png")),
+        (
+            "attachment",
+            Value::object([
+                ("width", Value::number(1280)),
+                ("height", Value::number(720)),
+            ]),
+        ),
+    ]);
+    let rows = plain(&card(tool("browser", &capture, &image, &shown), 80, false).rows);
+    assert_eq!(rows[1], "  ⎿ Screenshot 1280×720 · tmp:browser/shot.png");
+}
+
+#[test]
+fn reads_group_by_file_name_and_expand_to_one_row_per_read() {
+    let shown = presentation(0, false);
+    let calls = [
+        read("src/routes/auth.rs", 212),
+        read("tests/auth.rs", 120),
+        read("src/limiter.rs", 88),
+    ];
+    let tools: Vec<_> = calls
+        .iter()
+        .map(|(arguments, result)| tool("read", arguments, result, &shown))
+        .collect();
+    assert!(tools.iter().all(groupable));
+    let card = group(&tools, 80, true);
+    let rows = plain(&card.rows);
+    assert!(card.hidden);
+    assert_eq!(rows[0], "● Read(3 files)");
+    assert!(rows[1].starts_with("  ⎿ routes/auth.rs, tests/auth.rs, limiter.rs · 420 lines"));
+    assert!(rows[1].ends_with("Ctrl+O  list"));
+    let expanded = presentation(0, true);
+    let tools: Vec<_> = calls
+        .iter()
+        .map(|(arguments, result)| tool("read", arguments, result, &expanded))
+        .collect();
+    assert_eq!(
+        plain(&group(&tools, 80, false).rows)[1..],
+        [
+            "  ⎿ src/routes/auth.rs · 212 lines",
+            "    tests/auth.rs · 120 lines",
+            "    src/limiter.rs · 88 lines",
+        ]
+    );
+    let pages = [read("big.rs", 40), read("big.rs", 40)];
+    let tools: Vec<_> = pages
+        .iter()
+        .map(|(arguments, result)| tool("read", arguments, result, &shown))
+        .collect();
+    assert_eq!(
+        plain(&group(&tools, 80, false).rows),
+        ["● Read(big.rs)", "  ⎿ 2 reads · 80 lines"]
+    );
+    let failed = Value::object([("error", Value::string("denied"))]);
+    assert!(!groupable(&tool("read", &calls[0].0, &failed, &shown)));
+}

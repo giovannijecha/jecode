@@ -79,6 +79,7 @@ pub struct State {
     pub activity: Option<Activity>,
     pub notice: Option<Feedback>,
     pub copy_notice: Option<Feedback>,
+    pub progress: Option<Feedback>,
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
@@ -104,6 +105,7 @@ impl Default for State {
             activity: None,
             notice: None,
             copy_notice: None,
+            progress: None,
             information: None,
             selector: None,
             processes: None,
@@ -150,19 +152,29 @@ impl State {
                     self.changed();
                 }
                 self.status = "Waiting for connection…".into();
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Reconnecting");
-                }
-                self.notify(Feedback::progress(
-                    Kind::Warning,
-                    format!(
-                        "Reconnecting · attempt {attempt} in {:.1}s · {error}",
-                        delay.as_secs_f64()
-                    ),
-                ));
+                // The rule counts down to the next attempt.
+                let subject = if error.contains("HTTP 429") {
+                    "Rate limited"
+                } else {
+                    "Reconnecting"
+                };
+                self.notify(
+                    Feedback::progress(
+                        Kind::Warning,
+                        format!("{subject} · attempt {attempt} · {error}"),
+                    )
+                    .until(std::time::Instant::now() + delay),
+                );
             }
             Event::RecoveryFinished => {
-                self.clear_progress();
+                // Only the retry ends here; compaction keeps its progress.
+                if self
+                    .progress
+                    .as_ref()
+                    .is_some_and(|progress| matches!(progress.kind, Kind::Warning))
+                {
+                    self.clear_progress();
+                }
             }
             Event::RequestDiscarded => {
                 if matches!(self.items.last(), Some(Item::Streaming { .. })) {
@@ -172,52 +184,27 @@ impl State {
             }
             Event::Maintenance { text } => {
                 self.notify(Feedback::progress(Kind::Notice, text));
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Working");
-                }
             }
             Event::ContextCompacted { text } => {
                 self.clear_progress();
                 self.message(Kind::Notice, &text);
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Working");
-                }
             }
             Event::Preparing => {
                 self.status = "Preparing request…".into();
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Preparing");
-                }
             }
             Event::Waiting { .. } => {
                 self.status = "Waiting for model…".into();
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Waiting");
-                }
             }
-            Event::Reasoning => {
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Thinking");
-                }
-            }
-            Event::Working => {
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Working");
-                }
-            }
+            Event::Reasoning => self.status = "Thinking…".into(),
+            Event::Working => self.status = "Working…".into(),
             Event::InputHeld => {
                 self.status = "Waiting for the draft being edited…".into();
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Waiting for your edit");
-                }
             }
             // The application shows accepted input with its prompt history.
             Event::Accepted { .. } => {}
             Event::Context(status) => self.context = Some(status),
             Event::Streaming { text } => {
-                if let Some(activity) = &mut self.activity {
-                    activity.set_label("Writing the response");
-                }
+                self.status = "Writing the response…".into();
                 // Updates contain the entire response so far. Its leading whitespace
                 // remains available when visible content arrives in a later update.
                 if text.trim().is_empty() {
@@ -250,7 +237,6 @@ impl State {
                 }
                 self.status = format!("Running {name}…");
                 if let Some(activity) = &mut self.activity {
-                    activity.set_label("Running tools");
                     activity.tools += 1;
                 }
                 self.items.push(Item::Tool {
@@ -282,18 +268,20 @@ impl State {
                 summary,
                 result,
             } => {
-                if let Some(Item::Tool {
+                if let Some(index) = self.items.iter().rposition(|item| {
+                    matches!(item, Item::Tool { id: candidate, name: tool, result: None, .. }
+                        if candidate == &id && tool == &name)
+                }) && let Item::Tool {
                     summary: current,
                     result: captured,
                     presentation,
                     ..
-                }) = self.items.iter_mut().rev().find(|item| {
-                    matches!(item, Item::Tool { id: candidate, name: tool, result: None, .. }
-                        if candidate == &id && tool == &name)
-                }) {
+                } = &mut self.items[index]
+                {
                     *current = summary;
                     *captured = Some(result);
                     presentation.finish();
+                    self.join_reads(&[index]);
                 }
             }
         }
@@ -320,6 +308,7 @@ impl State {
         self.status = "Ready".into();
         self.clear_notice();
         self.clear_copy_notice();
+        self.clear_progress();
         self.information = None;
         self.processes = None;
     }
@@ -350,7 +339,8 @@ impl State {
     pub fn settle_tools(&mut self, archive: &crate::export::Archive) {
         self.changed();
         let messages = archive.messages.lock().unwrap();
-        for item in &mut self.items {
+        let mut settled = Vec::new();
+        for (index, item) in self.items.iter_mut().enumerate() {
             if let Item::Tool {
                 id,
                 name,
@@ -384,8 +374,11 @@ impl State {
                     .text(&crate::events::tool_summary(name, &captured));
                 *result = Some(archive.redactor.value(&captured));
                 presentation.finish();
+                settled.push(index);
             }
         }
+        drop(messages);
+        self.join_reads(&settled);
     }
     pub fn changed(&mut self) {
         self.revision = self.revision.wrapping_add(1);

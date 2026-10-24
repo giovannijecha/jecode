@@ -343,7 +343,7 @@ fn a_save_failure_pauses_the_message_and_reports_the_error() {
         app.state
             .notice
             .as_ref()
-            .is_some_and(|notice| notice.text.contains("pending drafts paused"))
+            .is_some_and(|notice| notice.text.contains("1 draft paused"))
     );
     assert_eq!(app.state.history.snapshot(), ["active"]);
     assert_eq!(fixture.finish().len(), 1);

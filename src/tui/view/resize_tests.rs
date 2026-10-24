@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::{
     state::Kind,
-    theme::{CURSOR, SELECTED_SURFACE, USER_SURFACE},
+    theme::{CURSOR, USER_SURFACE},
 };
 
 #[test]
@@ -45,10 +45,35 @@ fn short_command_suggestions_keep_the_selected_item_and_caret_in_view() {
                 .paint(state.width)
                 .contains(&CURSOR.to_string())
         );
-        assert!(frame.live.iter().any(
-            |line| line.background == Some(SELECTED_SURFACE) && line.plain().contains(selected)
-        ));
+        assert!(
+            frame
+                .live
+                .iter()
+                .any(|line| focused(line) && line.plain().contains(selected))
+        );
         assert_eq!(state.editor.text, "/");
+    }
+}
+
+#[test]
+fn narrow_command_field_keeps_its_first_span_and_caret_at_start() {
+    let mut state = State::default();
+    state.editor.insert("/");
+    state.editor.cursor = 0;
+    state.suggestions.refresh(&state.editor.text);
+    for width in 1..=8 {
+        state.width = width;
+        state.height = 24;
+        let frame = frame(&state, "fixture/model", "fixture directory");
+        let (row, column) = frame.cursor.unwrap();
+        assert!(column < width, "caret must fit width {width}");
+        assert!(
+            frame.live[row].plain().contains('/'),
+            "input lost at width {width}"
+        );
+        assert!(frame.live[row].paint(width).contains(&CURSOR.to_string()));
+        assert_eq!(state.editor.text, "/");
+        assert_eq!(state.editor.cursor, 0);
     }
 }
 

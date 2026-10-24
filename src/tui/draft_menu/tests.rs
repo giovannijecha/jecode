@@ -84,7 +84,8 @@ fn editing_and_discarding_one_of_five_equal_drafts_keeps_the_composer_separate()
     let original = app.state.editor.clone();
     key(&mut app, 38, 1);
     assert!(app.draft_menu_open());
-    assert_eq!(frame_text(&app).matches("same draft").count(), 5);
+    // Five rows, and the focused draft again in the detail strip.
+    assert_eq!(frame_text(&app).matches("same draft").count(), 6);
     key(&mut app, 13, 0);
     assert!(app.state.queue.is_editing());
     assert!(frame_text(&app).contains("Editing draft 1/5"));
@@ -95,7 +96,8 @@ fn editing_and_discarding_one_of_five_equal_drafts_keeps_the_composer_separate()
     assert_eq!(app.state.queue.messages()[0], "same draft revised");
     assert_eq!(app.state.editor, original);
     key(&mut app, 68, 4);
-    assert!(frame_text(&app).contains("Enter discard · Esc cancel"));
+    assert!(frame_text(&app).contains("Discard this draft?"));
+    assert!(frame_text(&app).contains(" Enter  discard"));
     key(&mut app, 13, 0);
     assert_eq!(app.state.queue.messages().len(), 4);
     assert!(
@@ -223,7 +225,7 @@ fn a_paused_draft_can_be_edited_and_sent_explicitly_without_sending_the_main_dra
     app.state.editor.cursor = 2;
     let main = app.state.editor.clone();
     app.open_drafts();
-    assert!(frame_text(&app).contains("Ctrl+S send"));
+    assert!(frame_text(&app).contains(" Ctrl+S  send"));
     key(&mut app, 13, 0);
     text(&mut app, " revised");
     key(&mut app, 83, 4);

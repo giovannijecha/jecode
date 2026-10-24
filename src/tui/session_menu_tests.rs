@@ -187,5 +187,5 @@ fn current_and_last_saved_deletions_keep_resume_open_without_an_empty_replacemen
         .collect::<Vec<_>>()
         .join("\n");
     assert!(visible.contains("No saved conversations"));
-    assert!(visible.contains("Esc close"));
+    assert!(visible.contains(" Esc  close"));
 }
