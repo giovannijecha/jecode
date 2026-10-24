@@ -63,6 +63,7 @@ impl Agent {
             messages
                 .iter()
                 .enumerate()
+                .filter(|(index, _)| !self.context.returned.contains(index))
                 .filter(|(_, message)| message.get("role").and_then(Value::as_str) == Some("user"))
                 .map(|(index, message)| {
                     format!(
@@ -80,6 +81,9 @@ impl Agent {
                 );
             }
             let index: usize = id.parse().map_err(|_| "Invalid history message index")?;
+            if self.context.returned.contains(&index) {
+                return Err("History message was withdrawn to the composer".into());
+            }
             let message = messages
                 .get(index)
                 .ok_or("History message does not exist in this session")?;

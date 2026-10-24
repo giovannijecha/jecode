@@ -136,9 +136,7 @@ impl App {
     }
 
     pub(super) fn keep_failed_prompt(&mut self, text: crate::attachments::Prompt) {
-        self.state.queue.keep_failed(text);
-        self.edited();
-        self.capture_input();
+        self.restore_failed_start(text);
     }
 }
 

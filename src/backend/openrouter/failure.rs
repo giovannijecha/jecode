@@ -62,6 +62,25 @@ impl Failure {
                         | "provider_error"
                 )
             });
+        let detail = if detail.trim().is_empty() {
+            "Request failed"
+        } else {
+            detail.trim_end()
+        };
+        let mut message = format!("OpenRouter HTTP {status}: {detail}");
+        if !matches!(message.chars().last(), Some('.' | '!' | '?')) {
+            message.push('.');
+        }
+        if status == 401 {
+            message.push_str(" Check your key with jecode setup.");
+        } else if status == 404
+            && text.contains("no endpoints found")
+            && text.contains("filter by image support")
+        {
+            message.push_str(" Use /model to choose an image-capable model, /routing to choose a compatible endpoint, or remove the image attachment.");
+        } else if status == 413 && text.contains("request body exceeds") {
+            message.push_str(" Reduce attachments or conversation size and retry.");
+        }
         Self {
             kind: if context {
                 Kind::Context
@@ -72,14 +91,7 @@ impl Failure {
             } else {
                 Kind::Terminal
             },
-            message: format!(
-                "OpenRouter HTTP {status}: {detail}.{}",
-                if status == 401 {
-                    " Check your key with jecode setup."
-                } else {
-                    ""
-                }
-            ),
+            message,
             retry_after: None,
             charges: None,
         }

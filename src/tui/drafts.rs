@@ -15,6 +15,13 @@ impl History {
         self.prompts.iter().cloned().collect()
     }
 
+    pub fn withdraw(&mut self, prompts: &[Prompt]) {
+        let count = prompts.iter().filter(|prompt| is_prompt(prompt)).count();
+        self.prompts
+            .truncate(self.prompts.len().saturating_sub(count));
+        self.position = None;
+    }
+
     pub fn restore(&mut self, prompts: Vec<Prompt>) {
         self.prompts = prompts
             .into_iter()
@@ -315,21 +322,6 @@ impl Queue {
                 Slot::Queued(_) => Slot::Paused(held.unwrap_or(0)),
                 Slot::Paused(index) => Slot::Paused(index + count),
             };
-        }
-    }
-
-    /// Keeps a prompt that could not start a turn as the first paused draft.
-    pub fn keep_failed(&mut self, prompt: Prompt) {
-        self.pause();
-        let mut editor = Editor::default();
-        editor.set(prompt);
-        self.paused.insert(0, editor);
-        if let Some(Editing {
-            slot: Slot::Paused(index),
-            ..
-        }) = &mut self.editing
-        {
-            *index += 1;
         }
     }
 

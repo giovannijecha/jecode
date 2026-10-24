@@ -336,7 +336,7 @@ fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
 }
 
 #[test]
-fn stopping_pauses_fifo_drafts_and_preserves_the_separate_composer() {
+fn stopping_before_output_restores_input_and_preserves_fifo_drafts() {
     let directory = Directory::new();
     let fixture = HttpFixture::streaming(vec![Response::Stream(vec![
         (Duration::ZERO, "data: {\"choices\":[{\"delta\":{\"reasoning\":\"fixture\"},\"finish_reason\":null}]}\n\n".into()),
@@ -361,7 +361,7 @@ fn stopping_pauses_fifo_drafts_and_preserves_the_separate_composer() {
     key(&mut app, 27, 0);
     key(&mut app, 27, 0);
     wait(&mut app);
-    assert_eq!(app.state.editor.text, "prior draft");
+    assert_eq!(app.state.editor.text, "active");
     assert_eq!(
         app.state
             .queue
@@ -369,7 +369,7 @@ fn stopping_pauses_fifo_drafts_and_preserves_the_separate_composer() {
             .iter()
             .map(|draft| draft.text.as_str())
             .collect::<Vec<_>>(),
-        ["queued one", "queued two revised"]
+        ["queued one", "queued two revised", "prior draft"]
     );
     assert!(app.state.queue.messages().is_empty());
     assert!(app.state.activity.is_none());

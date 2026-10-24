@@ -24,6 +24,7 @@ mod notice;
 mod persistence;
 mod poll;
 mod processes;
+mod recovery;
 mod render;
 mod resize;
 mod routing;
@@ -56,6 +57,7 @@ use worker::Worker;
 struct App {
     agent: Option<Agent>,
     worker: Option<Worker>,
+    submission: Option<recovery::Submission>,
     archive: Archive,
     config: SessionConfig,
     terminal: Option<Terminal>,
@@ -97,6 +99,7 @@ impl App {
             process_observer: agent.processes(),
             agent: Some(agent),
             worker: None,
+            submission: None,
             config,
             renderer: display::Display::new((state.width, state.height)),
             terminal,

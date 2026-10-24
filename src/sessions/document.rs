@@ -375,6 +375,8 @@ impl Document {
             Value::Bool(active) => *active,
             _ => return Err("Invalid pending turn state".into()),
         };
+        let mut context = crate::context::Context::parse(value.get("context"))?;
+        context.restore_returned(&events, messages.len());
         let document = Self {
             id,
             directory,
@@ -411,7 +413,7 @@ impl Document {
                 partial: string(pending, "partial_text")?.into(),
             },
             input: Input::parse(required(value, "input")?)?,
-            context: crate::context::Context::parse(value.get("context"))?,
+            context,
             // Sessions saved before routing existed, or with a mode this
             // version does not know, keep sending no routing preferences.
             routing: value

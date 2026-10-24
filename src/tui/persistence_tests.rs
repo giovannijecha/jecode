@@ -75,12 +75,11 @@ fn failed_submit_keeps_the_turn_ready_and_retry_sends_the_request_once() {
     assert!(!result.unwrap());
     assert!(current.worker.is_none());
     assert!(!current.persistence.as_ref().unwrap().active());
-    assert!(current.state.editor.text.is_empty());
-    assert_eq!(current.state.queue.paused[0].text, "Retry this request");
+    assert_eq!(current.state.editor.text, "Retry this request");
+    assert!(current.state.queue.paused.is_empty());
     assert_eq!(current.archive.messages.lock().unwrap().len(), 3);
     current.agent.as_mut().unwrap().clean_temporary().unwrap();
-    current.open_drafts();
-    current.send_paused_draft().unwrap();
+    current.submit().unwrap();
     finish(&mut current);
     let requests = fixture.finish();
     assert_eq!(requests.len(), 1);
@@ -122,7 +121,7 @@ fn failed_queued_preparation_returns_all_unsent_work_in_order() {
     assert!(current.worker.is_none());
     assert!(current.state.queue.messages().is_empty());
     assert_eq!(current.archive.messages.lock().unwrap().len(), 3);
-    assert_eq!(current.state.editor.text, "current draft");
+    assert_eq!(current.state.editor.text, "first queued");
     assert_eq!(
         current
             .state
@@ -131,7 +130,7 @@ fn failed_queued_preparation_returns_all_unsent_work_in_order() {
             .iter()
             .map(|draft| draft.text.as_str())
             .collect::<Vec<_>>(),
-        ["first queued", "second queued"]
+        ["second queued", "current draft"]
     );
     current.persist_input(true);
     let saved = current.persistence.as_ref().unwrap().snapshot();

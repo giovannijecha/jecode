@@ -14,6 +14,52 @@ fn read(agent: &Agent, path: &str, byte_offset: usize) -> Value {
 }
 
 #[test]
+fn returned_input_is_not_readable_through_numeric_or_request_history() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        404,
+        Value::object([(
+            "error",
+            Value::object([("message", Value::string("No endpoint"))]),
+        )]),
+    )]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let input = agent.input_checkpoint();
+    assert!(
+        agent
+            .run_turn("withdrawn-fixture-input", &mut |_| Ok(()))
+            .is_err()
+    );
+    assert!(agent.return_input(input));
+    let page = read(&agent, "history:1", 0);
+    assert!(
+        page.get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|error| error.contains("withdrawn")),
+        "{}",
+        page.encode()
+    );
+    assert!(!page.encode().contains("withdrawn-fixture-input"));
+    assert!(
+        !read(&agent, "history:requests", 0)
+            .encode()
+            .contains("withdrawn-fixture-input")
+    );
+    // Withdrawal changes the model's view, not the diagnostic source archive.
+    assert!(
+        agent
+            .archive()
+            .document()
+            .encode()
+            .contains("withdrawn-fixture-input")
+    );
+    fixture.finish();
+}
+
+#[test]
 fn large_original_requests_are_fully_readable_after_compaction_and_resume() {
     let directory = Directory::new();
     let home = Directory::new();

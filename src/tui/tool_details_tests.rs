@@ -147,7 +147,8 @@ fn native_ctrl_o_waits_for_the_whole_turn_preserves_drafts_and_resets_on_accepte
     assert!(app.worker.is_none());
     assert_eq!(flags(&app.state), [true; 3]);
     std::fs::remove_file(directory.path().join("AGENTS.md")).unwrap();
-    assert_eq!(app.state.queue.paused.len(), 1);
+    assert_eq!(app.state.editor.text, "Next request.");
+    assert!(app.state.queue.paused.is_empty());
     app.state.editor.replace("Retry next request.".into());
     key(&mut app, 13, 0);
     assert!(app.worker.is_some());

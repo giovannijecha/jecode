@@ -21,6 +21,49 @@ fn local(after: usize, text: &str) -> Value {
 }
 
 #[test]
+fn returned_turn_hides_reverted_compaction_but_keeps_unrelated_local_commands() {
+    let directory = Directory::new();
+    let mut doc = Document::new(
+        directory.path().to_path_buf(),
+        "fixture/model".into(),
+        Effort::Default,
+    )
+    .unwrap();
+    doc.messages = vec![
+        message("system", "Fixture"),
+        message("user", "Unanswered request"),
+    ];
+    let compaction = Value::object([
+        ("type", Value::string("local_command")),
+        ("command", Value::string("Context compaction")),
+        ("result", Value::string("Reverted compaction")),
+        ("after_message", Value::number(2)),
+    ]);
+    doc.events = vec![
+        compaction,
+        local(2, "Keep this command"),
+        Value::object([
+            ("type", Value::string("turn_returned")),
+            ("from_message", Value::number(1)),
+            ("after_message", Value::number(2)),
+        ]),
+    ];
+    doc.context
+        .restore_returned(&doc.events, doc.messages.len());
+    super::super::context::validate(&doc).unwrap();
+    let results: Vec<_> = doc
+        .records()
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Local { result, .. } => Some(result),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results, ["Keep this command"]);
+    assert!(doc.events.iter().any(|event| event.get("result").and_then(Value::as_str) == Some("Reverted compaction")));
+}
+
+#[test]
 fn records_keep_event_order_at_each_boundary_and_match_reused_tool_ids() {
     let directory = Directory::new();
     let mut doc = Document::new(

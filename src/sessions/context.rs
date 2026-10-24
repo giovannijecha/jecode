@@ -133,6 +133,19 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
                 string(event, "error")?;
                 string(event, "partial_text")?;
             }
+            "turn_returned" => {
+                let from = integer(event, "from_message")? as usize;
+                let end = integer(event, "after_message")? as usize;
+                if from == 0
+                    || from >= end
+                    || end > messages.len()
+                    || messages[from..end]
+                        .iter()
+                        .any(|message| message.get("role").and_then(Value::as_str) != Some("user"))
+                {
+                    return Err("Returned turn contains more than unanswered input".into());
+                }
+            }
             "temporary_cleanup" => {
                 string(event, "result")?;
             }

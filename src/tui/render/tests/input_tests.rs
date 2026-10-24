@@ -181,6 +181,7 @@ fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priorit
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(app.state.editor, draft);
+    assert_eq!(app.state.editor.text, "active request");
+    assert_eq!(app.state.queue.paused[0], draft);
     assert_eq!(fixture.finish().len(), 1);
 }

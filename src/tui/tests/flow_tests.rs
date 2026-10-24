@@ -177,7 +177,8 @@ fn init_stays_retryable_when_project_instructions_cannot_be_read() {
     let mut app = app(&directory, &fixture);
     submit(&mut app, "/init");
     assert!(app.worker.is_none());
-    assert_eq!(app.state.queue.paused[0].text, "/init");
+    assert_eq!(app.state.editor.text, "/init");
+    assert!(app.state.queue.paused.is_empty());
     assert!(app.state.notice.as_ref().unwrap().text.contains("UTF-8"));
     assert!(fixture.finish().is_empty());
 }

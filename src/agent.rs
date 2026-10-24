@@ -7,6 +7,7 @@ use crate::events::{Event, EventSink};
 use crate::export::{Archive, Messages};
 use crate::json::Value;
 use crate::tools::Tools;
+pub use retraction::TurnInput;
 use std::sync::{Arc, Mutex};
 
 pub struct Agent {
@@ -381,6 +382,7 @@ mod lifecycle;
 mod persistence;
 mod project_instructions;
 mod recovery;
+mod retraction;
 mod routing;
 mod skills;
 mod streaming;
