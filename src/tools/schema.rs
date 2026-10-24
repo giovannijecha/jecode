@@ -67,11 +67,9 @@ fn build_definitions() -> Value {
         ),
         tool(
             "edit",
-            "Edit a UTF-8 project or tmp: file. Use old_text/new_text once or ordered edits in one file. Each nonempty old_text must match exactly once after preceding edits; any missing or ambiguous match leaves the file unchanged. Preserve exact whitespace and line endings.",
+            "Edit a UTF-8 project or tmp: file with one or more ordered replacements. Each nonempty old_text must match exactly once after preceding edits; any missing or ambiguous match leaves the file unchanged. Preserve exact whitespace and line endings.",
             Value::object([
                 ("path", string()),
-                ("old_text", string()),
-                ("new_text", string()),
                 (
                     "edits",
                     Value::object([
@@ -97,7 +95,7 @@ fn build_definitions() -> Value {
                     ]),
                 ),
             ]),
-            &["path"],
+            &["path", "edits"],
         ),
         tool(
             "bash",

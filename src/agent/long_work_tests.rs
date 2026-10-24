@@ -96,6 +96,27 @@ fn temporary_failures_have_no_attempt_cap_and_completed_tools_are_not_replayed()
             .count(),
         56
     );
+    let timings: Vec<_> = doc
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("request_timing"))
+        .collect();
+    assert_eq!(timings.len(), 58);
+    assert_eq!(
+        timings
+            .iter()
+            .filter(|event| event.get("status").and_then(Value::as_str) == Some("failed"))
+            .count(),
+        56
+    );
+    assert_eq!(
+        timings
+            .last()
+            .unwrap()
+            .get("attempt")
+            .and_then(Value::as_usize),
+        Some(57)
+    );
     assert!(!doc.value().encode().contains("isolated-fixture-key"));
 }
 

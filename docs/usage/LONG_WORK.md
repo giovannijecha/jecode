@@ -6,6 +6,14 @@ interruption or an error needing intervention ends it. Jecode does not infer
 completion from quiet output or repeated commands; inspect a running process
 with [`process`](TOOLS.md#persistent-processes) when its state matters.
 
+The activity row distinguishes preparing a request, waiting for the model,
+thinking, writing a response, running tools and reconnecting. Its duration
+belongs to the current phase; the finished-turn summary retains total elapsed
+time. Preparation includes local context and attachment work. Waiting begins
+at request dispatch, so it includes upload and remote service time. An export
+records request sizes and timing boundaries for investigation; see
+[EXPORT.md](EXPORT.md).
+
 ## Connection recovery
 
 Temporary network failures, incomplete streaming connections, rate limits and

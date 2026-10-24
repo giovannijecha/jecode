@@ -190,6 +190,7 @@ impl Agent {
         // Endpoint refresh may wait on the network. Run it here on the
         // execution worker, not while the TUI prepares the submitted prompt.
         *self.charges.lock().unwrap() = crate::backend::Charges::default();
+        events.emit(Event::Preparing)?;
         let limits = self.model_limits(events)?;
         self.emit_context(events)?;
         loop {
@@ -302,10 +303,7 @@ impl Agent {
     }
 
     fn projected_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        if context.input_tokens.is_some()
-            && context.measured_end >= context.from
-            && context.measured_end <= messages.len()
-        {
+        if context.has_measured_input(messages) {
             context.estimate(messages, self.compatible_from, self.client.inputs())
         } else {
             context.estimate_bytes(
@@ -321,10 +319,7 @@ impl Agent {
 
     fn context_estimate(&self, messages: &[Value]) -> usize {
         let estimate = self.projected_estimate(&self.context, messages);
-        if self.context.input_tokens.is_some()
-            && self.context.measured_end >= self.context.from
-            && self.context.measured_end <= messages.len()
-        {
+        if self.context.has_measured_input(messages) {
             estimate
         } else {
             estimate.saturating_add(self.request_environment().len())
@@ -425,6 +420,8 @@ mod persistence_tests;
 mod process_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod request_timing_tests;
 #[cfg(test)]
 mod routing_tests;
 #[cfg(test)]

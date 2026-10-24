@@ -34,6 +34,7 @@ impl Agent {
     ) -> Result<Completion, String> {
         let mut retries = super::recovery::Retries::default();
         loop {
+            events.emit(Event::Preparing)?;
             self.reload_restored_instructions();
             self.accept_input(events)?;
             self.compact_if_needed(limits, false, events)?;
@@ -41,10 +42,8 @@ impl Agent {
                 // Input arriving during summaries or tool previews can change the budget.
                 continue;
             }
+            let timing = super::recovery::RequestTiming::start();
             self.emit_context(events)?;
-            events.emit(Event::Waiting {
-                model: self.redact(self.model()),
-            })?;
             // Summarization and event delivery can take time. Include restores
             // observed during that work before constructing the next request.
             self.reload_restored_instructions();
@@ -85,8 +84,14 @@ impl Agent {
             };
             // Rebuild after every retry wait so newly observed restores and
             // submitted messages reach the next provider request as well.
-            let result =
-                self.complete_attempt(&messages, true, output_tokens, &mut retries, &mut emit);
+            let result = self.complete_attempt(
+                &messages,
+                true,
+                output_tokens,
+                &mut retries,
+                timing,
+                &mut emit,
+            );
             match result {
                 Ok(None) => {}
                 Ok(Some(completion)) => {

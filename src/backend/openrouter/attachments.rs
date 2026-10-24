@@ -4,9 +4,10 @@
 //! Right before a request, `materialize` reads the session-owned assets and
 //! builds multipart content: images as `image_url` parts, PDFs as `file`
 //! parts, and a manifest that tells the model what each element is and how to
-//! reach it again. Nothing here changes the stored history.
+//! reach it again. Tool-requested views remain until the next assistant
+//! response; their references remain in history for later reads.
 
-use crate::attachments::{Attachment, Inputs, Kind, Pool, base64, requested};
+use crate::attachments::{Attachment, Inputs, Kind, Pool, active_view_start, base64, requested};
 #[cfg(test)]
 pub use crate::attachments::{user_text, weight, weight_for};
 use crate::json::Value;
@@ -48,8 +49,8 @@ pub fn has_files(messages: &[Value]) -> bool {
     })
 }
 
-/// Builds request messages: user attachments become content parts and each
-/// image or PDF a read tool asked to show follows its tool results as a user part.
+/// Builds request messages: user attachments become content parts, while views
+/// requested after the last assistant message follow their tool batch.
 pub fn materialize(
     messages: Vec<Value>,
     pool: Option<&Pool>,
@@ -57,13 +58,16 @@ pub fn materialize(
 ) -> Result<Vec<Value>, String> {
     let mut result = Vec::with_capacity(messages.len());
     let mut views = Vec::new();
-    for message in messages {
+    let active_start = active_view_start(&messages);
+    for (index, message) in messages.into_iter().enumerate() {
         let role = message.get("role").and_then(Value::as_str).unwrap_or("");
         if role != "tool" && !views.is_empty() {
             result.push(shown(std::mem::take(&mut views), pool, inputs));
         }
         if role == "tool" {
-            if let Some(attachment) = requested(&message) {
+            if index >= active_start
+                && let Some(attachment) = requested(&message)
+            {
                 views.push(attachment);
             }
             result.push(message);

@@ -16,7 +16,7 @@ mod view;
 pub use pool::{Pool, references};
 #[cfg(test)]
 pub use view::weight;
-pub use view::{Inputs, requested, user_text, weight_for};
+pub use view::{Inputs, active_view_start, requested, user_text, weight_for};
 
 use crate::json::Value;
 

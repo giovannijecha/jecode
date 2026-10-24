@@ -6,6 +6,10 @@ use crate::{
     sessions::Stage,
     tools::{Begun, Execution},
 };
+use std::{collections::BTreeMap, sync::Mutex, time::Instant};
+
+mod timing;
+use timing::Clock;
 
 const MAX_PARALLEL_CALLS: usize = 4;
 
@@ -44,6 +48,7 @@ impl Agent {
         remaining: &[ToolCall],
         events: &mut impl EventSink,
     ) -> Result<(), String> {
+        let clock = Clock::new();
         if let Err(error) = self.checkpoint(Stage::Tool(call.id.clone())) {
             self.cancel_calls(std::slice::from_ref(call));
             self.cancel_calls(remaining);
@@ -67,9 +72,12 @@ impl Agent {
             self.cancel_calls(remaining);
             return Err(error);
         }
+        let executing = Instant::now();
         let outcome = self.execute_tool_with_change(call, begun);
+        let timing = clock.finish(executing);
         let result = &outcome.result;
         self.tool_result(call, result);
+        self.record_tool_timing(call, timing);
         let change = outcome.change.map(|change| change.redacted(&self.redactor));
         if let Some(change) = &change {
             self.events.lock().unwrap().push(Value::object([
@@ -111,6 +119,7 @@ impl Agent {
         remaining: &[ToolCall],
         events: &mut impl EventSink,
     ) -> Result<(), String> {
+        let clock = Clock::new();
         let ids = batch.iter().map(|call| call.id.clone()).collect();
         if let Err(error) = self.checkpoint(Stage::ReadBatch(ids)) {
             self.cancel_calls(batch);
@@ -126,16 +135,27 @@ impl Agent {
         }
         // Scoped workers all finish before results or a later, potentially
         // modifying call is handled. Session messages remain in source order.
+        let timings = Mutex::new(BTreeMap::new());
         let results = run_parallel_calls(batch, &|call| {
-            self.tools.execute_begun(
+            let executing = Instant::now();
+            let outcome = self.tools.execute_begun(
                 Begun::default(),
                 &call.name,
                 &call.arguments,
                 &self.cancellation,
-            )
+            );
+            timings
+                .lock()
+                .unwrap()
+                .insert(call.id.clone(), clock.finish(executing));
+            outcome
         });
+        let mut timings = timings.into_inner().unwrap();
         for (call, outcome) in batch.iter().zip(&results) {
             self.tool_result(call, &outcome.result);
+            if let Some(timing) = timings.remove(&call.id) {
+                self.record_tool_timing(call, timing);
+            }
         }
         if let Err(error) = self.checkpoint(Stage::ReadBatchFinished) {
             self.cancel_calls(remaining);

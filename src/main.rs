@@ -21,6 +21,7 @@ mod effort;
 mod events;
 mod export;
 mod file_change;
+mod identity;
 mod inbox;
 mod input;
 mod json;
@@ -57,7 +58,7 @@ fn main() -> ExitCode {
             Ok(())
         }
         Action::Version => {
-            println!("jecode {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", identity::version_line());
             Ok(())
         }
         Action::Setup => bootstrap::configure(),

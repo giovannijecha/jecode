@@ -251,6 +251,7 @@ fn a_reconnect_is_a_notice_above_an_activity_row_that_keeps_its_timer() {
         activity: Some(Activity::new()),
         ..State::default()
     };
+    state.activity.as_mut().unwrap().set_label("Reconnecting");
     state.notice = Some(crate::tui::Feedback::progress(
         Kind::Warning,
         "Reconnecting · attempt 2 in 4.0s",
@@ -259,6 +260,6 @@ fn a_reconnect_is_a_notice_above_an_activity_row_that_keeps_its_timer() {
     assert_eq!(frame.live.len(), 6);
     assert_eq!(frame.live[0].plain(), "Reconnecting · attempt 2 in 4.0s");
     let activity = frame.live[1].plain();
-    assert!(activity.starts_with("••••  Waiting for the model  ·  "));
+    assert!(activity.starts_with("••••  Reconnecting  ·  "));
     assert!(activity.ends_with("Esc stops"));
 }

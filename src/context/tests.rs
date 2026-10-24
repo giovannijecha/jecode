@@ -140,6 +140,61 @@ fn measured_history_uses_calibrated_growth_and_falls_back_without_density() {
 }
 
 #[test]
+fn tool_views_expire_from_context_budget_after_an_assistant_response() {
+    use crate::attachments::{MARKER, Prompt};
+
+    let mut image = crate::attachments::tests::attachment("att-1-1-1", "shot.png", "image/png");
+    image.width = Some(4);
+    image.height = Some(3);
+    let user = Prompt::new(MARKER.to_string(), vec![image.clone()]).message();
+    let receipt = Value::object([
+        ("view", Value::string("image")),
+        ("attachment", image.value()),
+    ]);
+    let tool = message("tool", &receipt.encode());
+    let mut messages = vec![message("system", "Agent"), user, tool];
+    let text_bytes = messages
+        .iter()
+        .map(|message| portable(message).encode().len())
+        .sum::<usize>();
+    assert_eq!(bytes_for(&messages, Inputs::default()), text_bytes + 170);
+
+    let mut context = Context::default();
+    context.observe(
+        Some(&Usage {
+            input_tokens: Some(500),
+            ..Usage::default()
+        }),
+        messages.len(),
+    );
+    context.calibrate(1000);
+    messages.push(message("user", "Compare the image"));
+    assert_eq!(
+        bytes_for(&messages, Inputs::default()),
+        messages
+            .iter()
+            .map(|message| portable(message).encode().len())
+            .sum::<usize>()
+            + 170
+    );
+    assert!(context.estimate(&messages, 0, Inputs::default()) >= 500);
+
+    messages.push(message("assistant", "I saw it"));
+    let text_bytes = messages
+        .iter()
+        .map(|message| portable(message).encode().len())
+        .sum::<usize>();
+    assert_eq!(bytes_for(&messages, Inputs::default()), text_bytes + 85);
+    let projected = context.project(&messages, 0);
+    assert_eq!(
+        context.estimate(&messages, 0, Inputs::default()),
+        context.estimate_bytes(
+            bytes_for(&projected, Inputs::default()) + crate::tools::encoded_size()
+        )
+    );
+}
+
+#[test]
 fn opaque_native_fields_do_not_consume_portable_context_budget() {
     let mut assistant = message("assistant", "Short answer");
     if let Value::Object(fields) = &mut assistant {

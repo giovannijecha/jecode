@@ -357,10 +357,8 @@ impl Context {
         .unwrap_or_default()
     }
     pub fn estimate(&self, messages: &[Value], compatible_from: usize, inputs: Inputs) -> usize {
-        if let Some(tokens) = self.input_tokens
-            && self.measured_end >= self.from
-            && self.measured_end <= messages.len()
-        {
+        if self.has_measured_input(messages) {
+            let tokens = self.input_tokens.unwrap();
             return tokens.saturating_add(
                 self.estimate_bytes(
                     messages
@@ -377,6 +375,28 @@ impl Context {
             bytes_for(&self.project(messages, compatible_from), inputs)
                 .saturating_add(crate::tools::encoded_size()),
         )
+    }
+
+    pub(crate) fn has_measured_input(&self, messages: &[Value]) -> bool {
+        self.input_tokens.is_some()
+            && self.measured_end >= self.from
+            && self.measured_end <= messages.len()
+            && !self.measured_view_retired(messages)
+    }
+
+    fn measured_view_retired(&self, messages: &[Value]) -> bool {
+        if self.measured_end > messages.len()
+            || crate::attachments::active_view_start(messages) <= self.measured_end
+        {
+            return false;
+        }
+        let measured = &messages[..self.measured_end];
+        measured[crate::attachments::active_view_start(measured)..]
+            .iter()
+            .any(|message| {
+                message.get("role").and_then(Value::as_str) == Some("tool")
+                    && crate::attachments::requested(message).is_some()
+            })
     }
     /// The effective window: declared capacity lowered by any ceiling learned
     /// from backend rejections, or that ceiling alone without catalog metadata.
@@ -404,12 +424,23 @@ pub fn bytes(messages: &[Value]) -> usize {
 }
 
 pub fn bytes_for(messages: &[Value], inputs: Inputs) -> usize {
-    messages.iter().fold(0usize, |total, message| {
-        // Attachments are sent as content parts whose cost the stored text omits.
-        total
-            .saturating_add(portable(message).encode().len())
-            .saturating_add(crate::attachments::weight_for(message, inputs))
-    })
+    let active_start = crate::attachments::active_view_start(messages);
+    messages
+        .iter()
+        .enumerate()
+        .fold(0usize, |total, (index, message)| {
+            // Attachments are sent as content parts whose cost the stored text omits.
+            let media = if index >= active_start
+                || message.get("role").and_then(Value::as_str) != Some("tool")
+            {
+                crate::attachments::weight_for(message, inputs)
+            } else {
+                0
+            };
+            total
+                .saturating_add(portable(message).encode().len())
+                .saturating_add(media)
+        })
 }
 
 #[cfg(test)]

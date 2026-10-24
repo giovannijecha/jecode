@@ -131,16 +131,25 @@ fn edit_mismatch_error(index: usize, reason: &str, initial_advice: &str) -> Stri
 }
 
 fn edit_steps(arguments: &Value) -> Result<Vec<(&str, &str)>, String> {
-    let legacy = arguments.get("old_text").is_some() || arguments.get("new_text").is_some();
+    let legacy = ["old_text", "new_text"]
+        .iter()
+        .any(|name| match arguments.get(name) {
+            None | Some(Value::Null) => false,
+            Some(Value::String(text)) if text.is_empty() => false,
+            Some(_) => true,
+        });
     if let Some(items) = arguments.get("edits") {
-        if legacy {
-            return Err("Use either edits or old_text/new_text, not both".into());
+        match items {
+            Value::Array(items) if !items.is_empty() => {
+                if legacy {
+                    return Err("Use either edits or old_text/new_text, not both".into());
+                }
+                return items.iter().map(edit_step).collect();
+            }
+            Value::Array(_) | Value::Null if legacy => return Ok(vec![edit_step(arguments)?]),
+            Value::Array(_) => return Err("edits must contain at least one replacement".into()),
+            _ => return Err("edits must be an array".into()),
         }
-        let items = items.as_array().ok_or("edits must be an array")?;
-        if items.is_empty() {
-            return Err("edits must contain at least one replacement".into());
-        }
-        return items.iter().map(edit_step).collect();
     }
     Ok(vec![edit_step(arguments)?])
 }

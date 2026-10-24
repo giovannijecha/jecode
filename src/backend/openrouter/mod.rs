@@ -257,6 +257,7 @@ impl OpenRouter {
             .map_err(|failure| failure.message)
     }
 
+    #[cfg(test)]
     pub fn sample(
         &self,
         messages: &[Value],
@@ -264,9 +265,20 @@ impl OpenRouter {
         output_tokens: Option<usize>,
         emit: &mut impl FnMut(Update) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
+        self.sample_owned(messages.to_vec(), with_tools, output_tokens, emit)
+    }
+
+    fn sample_owned(
+        &self,
+        messages: Vec<Value>,
+        with_tools: bool,
+        output_tokens: Option<usize>,
+        emit: &mut impl FnMut(Update) -> Result<(), String>,
+    ) -> Result<Completion, Failure> {
+        let has_files = attachments::has_files(&messages);
         let mut body = Value::object([
             ("model", Value::string(&self.model)),
-            ("messages", Value::Array(messages.to_vec())),
+            ("messages", Value::Array(messages)),
             ("stream", Value::Bool(true)),
         ]);
         if let Value::Object(fields) = &mut body {
@@ -311,13 +323,15 @@ impl OpenRouter {
         {
             fields.insert("reasoning".into(), reasoning);
         }
-        if attachments::has_files(messages)
-            && let Value::Object(fields) = &mut body
-        {
+        if has_files && let Value::Object(fields) = &mut body {
             fields.insert("plugins".into(), attachments::plugins(self.accepts("file")));
         }
         let body = body.encode();
         let mut stream = stream::Stream::default();
+        emit(Update::Waiting {
+            request_bytes: body.len(),
+        })
+        .map_err(Failure::from)?;
         let response = self
             .api
             .raw("POST", "/chat/completions", Some(&body), &mut |bytes| {

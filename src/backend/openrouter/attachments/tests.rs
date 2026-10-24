@@ -129,10 +129,6 @@ fn read_views_follow_their_tool_results() {
     let messages = vec![
         tool("a", result.encode()),
         tool("b", "{\"content\":\"plain\"}".into()),
-        Value::object([
-            ("role", Value::string("assistant")),
-            ("content", Value::string("seen")),
-        ]),
     ];
     let text_only = materialize(messages.clone(), Some(&pool), known(false, false)).unwrap();
     assert_eq!(types(&text_only[2]), ["text"]);
@@ -143,11 +139,90 @@ fn read_views_follow_their_tool_results() {
         .iter()
         .map(|message| message.get("role").and_then(Value::as_str).unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(roles, ["tool", "tool", "user", "assistant"]);
+    assert_eq!(roles, ["tool", "tool", "user"]);
     assert_eq!(types(&request[2]), ["text", "image_url"]);
     assert!(texts(&request[2]).contains(&format!("{} follows.", image.reference())));
     assert_eq!(weight(&tool("a", result.encode())), 85);
     assert_eq!(weight(&tool("b", "{}".into())), 0);
+}
+
+#[test]
+fn read_views_are_sent_once_and_can_be_requested_again() {
+    let root = Directory::new();
+    let pool = Pool::new(root.path().to_path_buf());
+    let first = pool.import_bytes("first.png", &png(4, 3)).unwrap();
+    let second = pool.import_bytes("second.png", &png(5, 2)).unwrap();
+    let tool = |id: &str, attachment: &Attachment| {
+        Value::object([
+            ("role", Value::string("tool")),
+            ("tool_call_id", Value::string(id)),
+            (
+                "content",
+                Value::string(
+                    Value::object([
+                        ("view", Value::string("image")),
+                        ("attachment", attachment.value()),
+                    ])
+                    .encode(),
+                ),
+            ),
+        ])
+    };
+    let first_result = tool("a", &first);
+    let second_result = tool("b", &second);
+    let after_tools = vec![first_result.clone(), second_result.clone()];
+    let current = materialize(after_tools.clone(), Some(&pool), known(true, false)).unwrap();
+    assert_eq!(
+        materialize(after_tools.clone(), Some(&pool), known(true, false)).unwrap(),
+        current,
+        "a retry before the assistant response must keep the requested views"
+    );
+    assert_eq!(types(&current[2]), ["text", "image_url", "image_url"]);
+    let first_url = current[2].get("content").and_then(Value::as_array).unwrap()[1]
+        .get("image_url")
+        .and_then(|part| part.get("url"))
+        .and_then(Value::as_str)
+        .unwrap();
+
+    let user = Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Please compare both images")),
+    ]);
+    let with_user = materialize(
+        vec![first_result.clone(), second_result.clone(), user.clone()],
+        Some(&pool),
+        known(true, false),
+    )
+    .unwrap();
+    assert_eq!(types(&with_user[2]), ["text", "image_url", "image_url"]);
+    assert_eq!(with_user[3], user);
+
+    let answer = Value::object([
+        ("role", Value::string("assistant")),
+        ("content", Value::string("seen")),
+        ("reasoning_details", Value::string("opaque provider data")),
+    ]);
+    let history = vec![first_result.clone(), second_result, answer.clone()];
+    let later = materialize(history.clone(), Some(&pool), known(true, false)).unwrap();
+    assert_eq!(later, history);
+
+    let reread = materialize(
+        vec![first_result, answer, tool("c", &first)],
+        Some(&pool),
+        known(true, false),
+    )
+    .unwrap();
+    assert_eq!(
+        reread[1].get("reasoning_details"),
+        Some(&Value::string("opaque provider data"))
+    );
+    assert_eq!(types(&reread[3]), ["text", "image_url"]);
+    let reread_url = reread[3].get("content").and_then(Value::as_array).unwrap()[1]
+        .get("image_url")
+        .and_then(|part| part.get("url"))
+        .and_then(Value::as_str)
+        .unwrap();
+    assert_eq!(reread_url, first_url);
 }
 
 #[test]

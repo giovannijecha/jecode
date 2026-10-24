@@ -64,6 +64,13 @@ result includes `attached_from`. References remain available after
 compaction; see [LONG_WORK.md](LONG_WORK.md). File tools keep their normal
 scope, with these references adding access to the stored copies.
 
+User-provided attachments stay in the active conversation view. Media returned
+by tools is sent for the next assistant response, including retries and user
+messages arriving before that response. Later requests retain the original tool
+results and attachment references without resending those media bytes. Read an
+older `attachment:ID` again to show it; read several references together for a
+visual comparison. This also applies to browser screenshots and tool-read PDFs.
+
 ## Storage and retention
 
 The model can also use `read` on an image or PDF in the project or the current

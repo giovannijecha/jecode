@@ -35,6 +35,7 @@ fn working(state: &mut State, label: &'static str, seconds: f64) {
     let mut activity = Activity::new();
     activity.label = label;
     activity.started = Instant::now() - Duration::from_secs_f64(seconds);
+    activity.phase_started = activity.started;
     state.activity = Some(activity);
 }
 

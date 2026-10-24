@@ -4,13 +4,37 @@ use crate::{
     events::Event,
     json::Value,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Retry state shared by the attempts of one request.
 #[derive(Default)]
 pub(super) struct Retries {
     attempt: usize,
     empty_responses: usize,
+}
+
+/// One model attempt, including local request projection before backend work.
+pub(super) struct RequestTiming {
+    started: Instant,
+    started_at_unix_ms: u128,
+    dispatched: Option<Instant>,
+    first_update: Option<Instant>,
+    request_bytes: Option<usize>,
+}
+
+impl RequestTiming {
+    pub(super) fn start() -> Self {
+        Self {
+            started: Instant::now(),
+            started_at_unix_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+            dispatched: None,
+            first_update: None,
+            request_bytes: None,
+        }
+    }
 }
 
 impl Agent {
@@ -23,9 +47,14 @@ impl Agent {
     ) -> Result<Completion, Failure> {
         let mut retries = Retries::default();
         loop {
-            if let Some(completion) =
-                self.complete_attempt(messages, tools, output_tokens, &mut retries, emit)?
-            {
+            if let Some(completion) = self.complete_attempt(
+                messages,
+                tools,
+                output_tokens,
+                &mut retries,
+                RequestTiming::start(),
+                emit,
+            )? {
                 return Ok(completion);
             }
         }
@@ -39,6 +68,7 @@ impl Agent {
         tools: bool,
         output_tokens: Option<usize>,
         retries: &mut Retries,
+        mut timing: RequestTiming,
         emit: &mut impl FnMut(Event) -> Result<(), String>,
     ) -> Result<Option<Completion>, Failure> {
         if self.cancellation.requested() {
@@ -51,17 +81,44 @@ impl Agent {
             tools,
             output_tokens,
             self.tools.attachments(),
-            &mut |update| match update {
-                Update::TextDelta(delta) => {
-                    partial.push_str(&delta);
-                    if let Some(text) = text.push(&delta) {
-                        emit(Event::Streaming { text })?;
-                    }
-                    Ok(())
+            &mut |update| {
+                if !matches!(&update, Update::Waiting { .. })
+                    && !matches!(&update, Update::TextDelta(delta) if delta.trim().is_empty())
+                {
+                    timing.first_update.get_or_insert_with(Instant::now);
                 }
-                Update::Reasoning => emit(Event::Reasoning),
-                Update::Working => emit(Event::Working),
+                match update {
+                    Update::Waiting {
+                        request_bytes: bytes,
+                    } => {
+                        emit(Event::Waiting {
+                            model: self.redact(self.model()),
+                        })?;
+                        timing.dispatched.get_or_insert_with(Instant::now);
+                        timing.request_bytes = Some(bytes);
+                        Ok(())
+                    }
+                    Update::TextDelta(delta) => {
+                        partial.push_str(&delta);
+                        if let Some(text) = text.push(&delta) {
+                            emit(Event::Streaming { text })?;
+                        }
+                        Ok(())
+                    }
+                    Update::Reasoning => emit(Event::Reasoning),
+                    Update::Working => emit(Event::Working),
+                }
             },
+        );
+        self.record_request_timing(
+            if tools {
+                "completion"
+            } else {
+                "context_compaction"
+            },
+            retries.attempt.saturating_add(1),
+            timing,
+            result.is_ok(),
         );
         match &result {
             Ok(completion) => self.record_charges(completion),
@@ -166,6 +223,7 @@ impl Agent {
         error: &str,
         partial: &str,
     ) -> Result<(), String> {
+        let after_message = self.messages.lock().unwrap().len();
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("request_recovery")),
             ("operation", Value::string(operation)),
@@ -173,12 +231,64 @@ impl Agent {
             ("delay_ms", Value::number(delay.as_millis())),
             ("error", Value::string(self.redact(error))),
             ("partial_text", Value::string(self.redact(partial))),
-            (
-                "after_message",
-                Value::number(self.messages.lock().unwrap().len()),
-            ),
+            ("after_message", Value::number(after_message)),
         ]));
         self.checkpoint(crate::sessions::Stage::Preserve)
+    }
+
+    fn record_request_timing(
+        &self,
+        operation: &str,
+        attempt: usize,
+        timing: RequestTiming,
+        success: bool,
+    ) {
+        let finished = Instant::now();
+        let milliseconds = |duration: Duration| Value::number(duration.as_millis());
+        let since = |later: Instant, earlier: Instant| {
+            milliseconds(later.saturating_duration_since(earlier))
+        };
+        let after_message = self.messages.lock().unwrap().len();
+        self.events.lock().unwrap().push(Value::object([
+            ("type", Value::string("request_timing")),
+            ("operation", Value::string(operation)),
+            ("backend", Value::string(self.backend_id())),
+            ("model", Value::string(self.redact(self.model()))),
+            ("attempt", Value::number(attempt)),
+            (
+                "started_at_unix_ms",
+                Value::number(timing.started_at_unix_ms),
+            ),
+            (
+                "request_bytes",
+                timing.request_bytes.map_or(Value::Null, Value::number),
+            ),
+            (
+                "status",
+                Value::string(if success { "complete" } else { "failed" }),
+            ),
+            (
+                "preparation_ms",
+                timing
+                    .dispatched
+                    .map_or(Value::Null, |dispatched| since(dispatched, timing.started)),
+            ),
+            (
+                "first_update_ms",
+                timing
+                    .dispatched
+                    .zip(timing.first_update)
+                    .map_or(Value::Null, |(dispatched, first)| since(first, dispatched)),
+            ),
+            (
+                "response_ms",
+                timing
+                    .dispatched
+                    .map_or(Value::Null, |dispatched| since(finished, dispatched)),
+            ),
+            ("total_ms", since(finished, timing.started)),
+            ("after_message", Value::number(after_message)),
+        ]));
     }
 }
 

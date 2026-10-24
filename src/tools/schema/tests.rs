@@ -40,17 +40,24 @@ fn shell_and_process_budgets_advertise_the_same_bounded_preview_contract() {
 }
 
 #[test]
-fn edit_schema_advertises_ordered_batch_and_legacy_fields() {
+fn edit_schema_advertises_only_ordered_replacements() {
     let tools = definitions();
     let edit = &tools.as_array().unwrap()[2];
     let parameters = edit.get("parameters").unwrap();
     assert_eq!(
         parameters.get("required"),
-        Some(&Value::Array(vec![Value::string("path")]))
+        Some(&Value::Array(vec![
+            Value::string("path"),
+            Value::string("edits")
+        ]))
+    );
+    assert_eq!(
+        parameters.get("additionalProperties"),
+        Some(&Value::Bool(false))
     );
     let properties = parameters.get("properties").unwrap();
-    assert!(properties.get("old_text").is_some());
-    assert!(properties.get("new_text").is_some());
+    assert!(properties.get("old_text").is_none());
+    assert!(properties.get("new_text").is_none());
     let edits = properties.get("edits").unwrap();
     assert_eq!(edits.get("minItems"), Some(&Value::number(1)));
     let items = edits.get("items").unwrap();
