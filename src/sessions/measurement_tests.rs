@@ -140,10 +140,9 @@ fn session_history_and_listing() {
                 // This storage probe estimates the saved view; a live Agent also
                 // substitutes current instructions and adds its runtime environment.
                 let projected = loaded.context.project(&loaded.messages, 0);
-                loaded.context.estimate_bytes(
-                    crate::context::bytes_for(&projected, Default::default())
-                        .saturating_add(crate::tools::encoded_size()),
-                )
+                loaded
+                    .context
+                    .estimate_projected(&projected, Default::default())
             });
             assert!(estimated > 0);
             row(&path, "context_estimate", size, repeat, elapsed, bytes);

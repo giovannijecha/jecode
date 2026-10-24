@@ -309,9 +309,9 @@ impl Agent {
     }
 
     fn unmeasured_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        context.estimate_bytes(
-            self.context_bytes(&self.projected_context(context, messages))
-                .saturating_add(crate::tools::encoded_size()),
+        context.estimate_projected(
+            &self.projected_context(context, messages),
+            self.client.inputs(),
         )
     }
 
