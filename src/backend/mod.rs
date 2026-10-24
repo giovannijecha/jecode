@@ -47,6 +47,10 @@ pub struct Failure {
 }
 
 pub enum Update {
+    /// Request construction is complete and the backend is about to send it.
+    Waiting {
+        request_bytes: usize,
+    },
     Reasoning,
     /// Newly generated text, appended to the current attempt's response.
     TextDelta(String),

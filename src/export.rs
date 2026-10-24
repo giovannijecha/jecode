@@ -35,6 +35,7 @@ impl Archive {
             ("format", Value::string("jecode.conversation")),
             ("format_version", Value::number(1)),
             ("jecode_version", Value::string(env!("CARGO_PKG_VERSION"))),
+            ("build", crate::identity::value()),
             ("exported_at_unix_ms", Value::number(timestamp)),
             ("model", Value::string(&self.model)),
             ("backend", Value::string(&self.backend)),

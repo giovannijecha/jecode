@@ -1,4 +1,4 @@
-use super::required_string;
+use super::{edit::steps as edit_steps, required_string};
 use crate::cancel::Cancellation;
 use crate::checkpoints::session::{FileGuard, Session};
 use crate::{file_change::MAX_DIFF_BYTES, json::Value};
@@ -128,33 +128,6 @@ fn edit_mismatch_error(index: usize, reason: &str, initial_advice: &str) -> Stri
             index + 1
         )
     }
-}
-
-fn edit_steps(arguments: &Value) -> Result<Vec<(&str, &str)>, String> {
-    let legacy = arguments.get("old_text").is_some() || arguments.get("new_text").is_some();
-    if let Some(items) = arguments.get("edits") {
-        if legacy {
-            return Err("Use either edits or old_text/new_text, not both".into());
-        }
-        let items = items.as_array().ok_or("edits must be an array")?;
-        if items.is_empty() {
-            return Err("edits must contain at least one replacement".into());
-        }
-        return items.iter().map(edit_step).collect();
-    }
-    Ok(vec![edit_step(arguments)?])
-}
-
-fn edit_step(arguments: &Value) -> Result<(&str, &str), String> {
-    let old = required_string(arguments, "old_text")?;
-    let new = required_string(arguments, "new_text")?;
-    if old.is_empty() {
-        return Err("old_text must not be empty; use write to replace the whole file".into());
-    }
-    if new.contains('\0') {
-        return Err("File content must be UTF-8 text without NUL bytes".into());
-    }
-    Ok((old, new))
 }
 
 struct ReplacementOutcome {

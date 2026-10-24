@@ -338,3 +338,61 @@ fn accepted_input_updates_context_before_a_summary_starts() {
         assert_eq!(fixture.finish().len(), 3);
     }
 }
+
+#[test]
+fn retired_view_recalculates_with_current_system_and_request_environment() {
+    use crate::attachments::{MARKER, Prompt};
+
+    let project = Directory::new();
+    let home = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.project_instructions = "A changed project instruction".into();
+    let mut image = crate::attachments::tests::attachment("att-1-1-1", "shot.png", "image/png");
+    image.width = Some(4);
+    image.height = Some(3);
+    let receipt = Value::object([
+        ("view", Value::string("image")),
+        ("attachment", image.value()),
+    ]);
+    let measured_end = {
+        let mut messages = agent.messages.lock().unwrap();
+        messages.push(Prompt::new(MARKER.to_string(), vec![image]).message());
+        messages.push(Value::object([
+            ("role", Value::string("tool")),
+            ("content", Value::string(receipt.encode())),
+        ]));
+        messages.len()
+    };
+    agent.context.observe(
+        Some(&crate::backend::Usage {
+            input_tokens: Some(50_000),
+            ..Default::default()
+        }),
+        measured_end,
+    );
+    agent.context.calibrate(1000);
+    agent.messages.lock().unwrap().push(Value::object([
+        ("role", Value::string("assistant")),
+        ("content", Value::string("I saw it")),
+    ]));
+    let messages = agent.messages.lock().unwrap();
+    assert_eq!(agent.context.measured_input(&messages), None);
+    assert!(!agent.request_environment().is_empty());
+    let projected = agent.projected_context(&agent.context, &messages);
+    assert!(
+        projected[0]
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("A changed project instruction")
+    );
+    let expected = agent
+        .context
+        .estimate_bytes(agent.context_bytes(&projected) + crate::tools::encoded_size())
+        + agent.request_environment().len();
+    assert_eq!(agent.context_estimate(&messages), expected);
+}

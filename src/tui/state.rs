@@ -151,7 +151,7 @@ impl State {
                 }
                 self.status = "Waiting for connection…".into();
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Waiting";
+                    activity.set_label("Reconnecting");
                 }
                 self.notify(Feedback::progress(
                     Kind::Warning,
@@ -173,36 +173,42 @@ impl State {
             Event::Maintenance { text } => {
                 self.notify(Feedback::progress(Kind::Notice, text));
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Working";
+                    activity.set_label("Working");
                 }
             }
             Event::ContextCompacted { text } => {
                 self.clear_progress();
                 self.message(Kind::Notice, &text);
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Working";
+                    activity.set_label("Working");
+                }
+            }
+            Event::Preparing => {
+                self.status = "Preparing request…".into();
+                if let Some(activity) = &mut self.activity {
+                    activity.set_label("Preparing");
                 }
             }
             Event::Waiting { .. } => {
                 self.status = "Waiting for model…".into();
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Waiting";
+                    activity.set_label("Waiting");
                 }
             }
             Event::Reasoning => {
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Thinking";
+                    activity.set_label("Thinking");
                 }
             }
             Event::Working => {
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Working";
+                    activity.set_label("Working");
                 }
             }
             Event::InputHeld => {
                 self.status = "Waiting for the draft being edited…".into();
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Waiting for your edit";
+                    activity.set_label("Waiting for your edit");
                 }
             }
             // The application shows accepted input with its prompt history.
@@ -210,7 +216,7 @@ impl State {
             Event::Context(status) => self.context = Some(status),
             Event::Streaming { text } => {
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Writing the response";
+                    activity.set_label("Writing the response");
                 }
                 // Updates contain the entire response so far. Its leading whitespace
                 // remains available when visible content arrives in a later update.
@@ -244,7 +250,7 @@ impl State {
                 }
                 self.status = format!("Running {name}…");
                 if let Some(activity) = &mut self.activity {
-                    activity.label = "Running tools";
+                    activity.set_label("Running tools");
                     activity.tools += 1;
                 }
                 self.items.push(Item::Tool {

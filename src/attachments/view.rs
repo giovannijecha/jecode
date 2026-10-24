@@ -55,6 +55,15 @@ pub fn requested(message: &Value) -> Option<Attachment> {
     Attachment::parse(value.get("attachment")?).ok()
 }
 
+/// Tool views after the last assistant message still belong to the next request.
+/// A later user message does not consume them before the model has seen them.
+pub fn active_view_start(messages: &[Value]) -> usize {
+    messages
+        .iter()
+        .rposition(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
+        .map_or(0, |index| index + 1)
+}
+
 /// Estimated token cost of attachment views added to the next request.
 #[cfg(test)]
 pub fn weight(message: &Value) -> usize {

@@ -60,6 +60,7 @@ impl EventSender {
                 return Ok(());
             }
             Event::Message { .. }
+            | Event::Preparing
             | Event::Waiting { .. }
             | Event::RequestDiscarded
             | Event::Recovering { .. } => {

@@ -154,7 +154,13 @@ fn batch_rejects_invalid_shapes_and_noop_does_not_replace_file() {
         ("path", Value::string("source.txt")),
         ("old_text", Value::string("original")),
         ("new_text", Value::string("changed")),
-        ("edits", Value::Array(vec![])),
+        (
+            "edits",
+            Value::Array(vec![Value::object([
+                ("old_text", Value::string("original")),
+                ("new_text", Value::string("changed")),
+            ])]),
+        ),
     ]);
     assert!(edit(&root, &mixed).unwrap_err().contains("either"));
     assert!(
@@ -176,6 +182,57 @@ fn batch_rejects_invalid_shapes_and_noop_does_not_replace_file() {
     assert!(change.is_none());
     assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
     assert_eq!(fs::read(&path).unwrap(), b"original");
+}
+
+#[test]
+fn batch_ignores_empty_legacy_placeholders_from_native_call() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let path = root.join("source.txt");
+    let tools = crate::tools::Tools::new(&root).unwrap();
+    for placeholder in [Value::string(""), Value::Null] {
+        fs::write(&path, "before").unwrap();
+        let mut arguments = batch(&[("before", "after")]);
+        let Value::Object(fields) = &mut arguments else {
+            unreachable!()
+        };
+        fields.insert("old_text".into(), placeholder.clone());
+        fields.insert("new_text".into(), placeholder);
+        let result = tools.execute("edit", &arguments.encode());
+        assert_eq!(result.get("bytes_written"), Some(&Value::number(5)));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "after");
+    }
+}
+
+#[test]
+fn populated_legacy_fields_still_conflict_with_batch_and_legacy_calls_still_work() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let path = root.join("source.txt");
+    fs::write(&path, "before").unwrap();
+    for (old, new) in [("before", ""), ("", "after")] {
+        let mut arguments = batch(&[("before", "after")]);
+        let Value::Object(fields) = &mut arguments else {
+            unreachable!()
+        };
+        fields.insert("old_text".into(), Value::string(old));
+        fields.insert("new_text".into(), Value::string(new));
+        assert!(edit(&root, &arguments).unwrap_err().contains("either"));
+    }
+    assert_eq!(fs::read_to_string(&path).unwrap(), "before");
+
+    for unused_edits in [Value::Null, Value::Array(vec![])] {
+        fs::write(&path, "before").unwrap();
+        let legacy = Value::object([
+            ("path", Value::string("source.txt")),
+            ("old_text", Value::string("before")),
+            ("new_text", Value::string("after")),
+            ("edits", unused_edits),
+        ]);
+        let result = edit(&root, &legacy).unwrap();
+        assert_eq!(result.get("bytes_written"), Some(&Value::number(5)));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "after");
+    }
 }
 
 #[test]

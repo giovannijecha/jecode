@@ -310,7 +310,7 @@ impl App {
             worker.cancel();
             if let Some(activity) = &mut self.state.activity {
                 activity.stopping = true;
-                activity.label = "Stopping";
+                activity.set_label("Stopping");
             }
             self.state.clear_notice();
             self.state.status = "Stopping...".into();

@@ -51,6 +51,16 @@ fn exports_exact_protocol_messages_and_masks_the_key_in_nested_arguments() {
     assert!(!text.contains("fixture-secret"));
     let document = json::parse(&text).unwrap();
     assert_eq!(document.get("format_version"), Some(&Value::number(1)));
+    let build = document.get("build").unwrap();
+    assert_eq!(build.get("os"), Some(&Value::string(std::env::consts::OS)));
+    assert_eq!(
+        build.get("arch"),
+        Some(&Value::string(std::env::consts::ARCH))
+    );
+    assert_eq!(
+        build.get("executable_fingerprint"),
+        crate::identity::value().get("executable_fingerprint")
+    );
     assert_eq!(
         document.get("messages"),
         Some(&Value::Array(

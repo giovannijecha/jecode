@@ -112,6 +112,54 @@ fn a_tool_pair_larger_than_the_tail_budget_is_archived_together() {
 }
 
 #[test]
+fn expired_tool_view_does_not_shrink_the_recent_tail() {
+    let directory = Directory::new();
+    let agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let mut image = crate::attachments::tests::attachment("att-1-1-1", "shot.png", "image/png");
+    image.width = Some(4);
+    image.height = Some(3);
+    let receipt = Value::object([
+        ("view", Value::string("image")),
+        ("attachment", image.value()),
+    ]);
+    let messages = vec![
+        message("system", "Agent"),
+        message("user", "Inspect the image"),
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "tool_calls",
+                Value::Array(vec![tool_call(
+                    "earlier",
+                    "read",
+                    Value::object([("path", Value::string("image"))]),
+                )]),
+            ),
+        ]),
+        message("tool", &receipt.encode()),
+        message("assistant", "The first image is clear"),
+        message("user", "Compare it with the next image"),
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "tool_calls",
+                Value::Array(vec![tool_call(
+                    "recent",
+                    "read",
+                    Value::object([("path", Value::string("next image"))]),
+                )]),
+            ),
+        ]),
+        message("tool", &receipt.encode()),
+    ];
+    let budget = crate::context::bytes_for(&messages[2..], agent.client.inputs());
+    assert_eq!(agent.recent_boundary(&messages, budget), 2);
+}
+
+#[test]
 fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![

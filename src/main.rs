@@ -21,6 +21,7 @@ mod effort;
 mod events;
 mod export;
 mod file_change;
+mod identity;
 mod inbox;
 mod input;
 mod json;
@@ -44,6 +45,7 @@ use cli::Action;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    identity::capture();
     let action = match cli::parse(std::env::args_os().skip(1)) {
         Ok(action) => action,
         Err(error) => {
@@ -57,7 +59,7 @@ fn main() -> ExitCode {
             Ok(())
         }
         Action::Version => {
-            println!("jecode {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", identity::version_line());
             Ok(())
         }
         Action::Setup => bootstrap::configure(),

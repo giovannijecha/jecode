@@ -301,7 +301,7 @@ fn the_lower_area_stays_at_the_bottom_with_space_before_notices_activity_and_que
     assert_eq!(frame.live[frame.composer - 1], Line::default());
     assert!(frame.live[frame.composer].plain().contains("next prompt"));
     assert!(frame.live[frame.composer + 1].plain().contains("notice"));
-    assert!(frame.live[frame.composer + 2].plain().contains("Waiting"));
+    assert!(frame.live[frame.composer + 2].plain().contains("Preparing"));
     assert!(frame.live[frame.composer + 3].plain().starts_with('─'));
     state.items.clear();
     let empty = view::frame(&state, "model", "directory");

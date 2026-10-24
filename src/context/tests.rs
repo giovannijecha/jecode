@@ -114,32 +114,6 @@ fn summary_byte_budgets_keep_a_separate_margin_and_safe_fallbacks() {
 }
 
 #[test]
-fn measured_history_uses_calibrated_growth_and_falls_back_without_density() {
-    let mut messages = vec![message("system", "Agent"), message("user", "Inspect")];
-    let mut context = Context::default();
-    context.observe(
-        Some(&Usage {
-            input_tokens: Some(1000),
-            ..Usage::default()
-        }),
-        2,
-    );
-    context.calibrate(6000);
-    let appended = message("tool", &"new output ".repeat(1000));
-    let size = appended.encode().len();
-    messages.push(appended);
-    assert_eq!(
-        context.estimate(&messages, 0, Default::default()),
-        1000 + size.div_ceil(2)
-    );
-    context.calibration = None;
-    assert_eq!(
-        context.estimate(&messages, 0, Default::default()),
-        1000 + size
-    );
-}
-
-#[test]
 fn opaque_native_fields_do_not_consume_portable_context_budget() {
     let mut assistant = message("assistant", "Short answer");
     if let Value::Object(fields) = &mut assistant {

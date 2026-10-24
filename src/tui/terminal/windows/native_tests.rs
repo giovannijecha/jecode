@@ -10,6 +10,9 @@ use crate::{
     tools::Tools,
 };
 
+#[path = "activity_tests.rs"]
+mod activity_tests;
+
 #[test]
 #[ignore = "requires Windows ConPTY for an isolated native console check"]
 fn native_windows_fullscreen_controls_and_terminal_lifetime() {
@@ -380,6 +383,8 @@ fn native_console_fixture() {
     full_width_console(&bash);
     restored(&path);
     tool_cards_console(&bash);
+    restored(&path);
+    activity_tests::console(&bash);
     restored(&path);
     std::fs::write(path.join("drop me.txt"), "dropped through ConPTY").unwrap();
     let response = (0..100)

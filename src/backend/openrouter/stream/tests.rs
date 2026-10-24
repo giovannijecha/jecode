@@ -66,6 +66,7 @@ fn fragmented_utf8_sse_preserves_reasoning_and_assembles_tool_arguments() {
                     Update::TextDelta(value) => text.push_str(&value),
                     Update::Reasoning => thinking = true,
                     Update::Working => {}
+                    Update::Waiting { .. } => unreachable!("parser cannot dispatch a request"),
                 };
                 Ok(())
             })

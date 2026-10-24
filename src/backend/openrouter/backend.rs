@@ -50,7 +50,7 @@ impl Backend for OpenRouter {
         let request = super::attachments::materialize(projected, pool, self.inputs())
             .map_err(backend::Failure::from)?;
         let mut forward = |update| emit(update);
-        let mut completion = self.sample(&request, with_tools, output_tokens, &mut forward)?;
+        let mut completion = self.sample_owned(request, with_tools, output_tokens, &mut forward)?;
         super::calls::response(&mut completion.message, &completion.calls);
         if let Err(error) = super::annotations::store(&mut completion.message, pool) {
             if let Value::Object(fields) = &mut completion.message {

@@ -302,17 +302,17 @@ impl Agent {
     }
 
     fn projected_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        if context.input_tokens.is_some()
-            && context.measured_end >= context.from
-            && context.measured_end <= messages.len()
-        {
-            context.estimate(messages, self.compatible_from, self.client.inputs())
-        } else {
-            context.estimate_bytes(
-                self.context_bytes(&self.projected_context(context, messages))
-                    .saturating_add(crate::tools::encoded_size()),
-            )
+        match context.measured_input(messages) {
+            Some(tokens) => context.estimate_growth(messages, tokens, self.client.inputs()),
+            None => self.unmeasured_estimate(context, messages),
         }
+    }
+
+    fn unmeasured_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
+        context.estimate_projected(
+            &self.projected_context(context, messages),
+            self.client.inputs(),
+        )
     }
 
     fn context_bytes(&self, messages: &[Value]) -> usize {
@@ -320,14 +320,13 @@ impl Agent {
     }
 
     fn context_estimate(&self, messages: &[Value]) -> usize {
-        let estimate = self.projected_estimate(&self.context, messages);
-        if self.context.input_tokens.is_some()
-            && self.context.measured_end >= self.context.from
-            && self.context.measured_end <= messages.len()
-        {
-            estimate
-        } else {
-            estimate.saturating_add(self.request_environment().len())
+        match self.context.measured_input(messages) {
+            Some(tokens) => self
+                .context
+                .estimate_growth(messages, tokens, self.client.inputs()),
+            None => self
+                .unmeasured_estimate(&self.context, messages)
+                .saturating_add(self.request_environment().len()),
         }
     }
 
@@ -388,6 +387,7 @@ mod skills;
 mod streaming;
 mod summary;
 mod temporary;
+mod timing;
 
 #[cfg(test)]
 mod attachment_tests;
@@ -399,6 +399,8 @@ mod browser_tests;
 mod checkpoint_tests;
 #[cfg(test)]
 mod compaction_tests;
+#[cfg(test)]
+mod context_estimate_tests;
 #[cfg(test)]
 mod context_status_tests;
 #[cfg(test)]
@@ -425,6 +427,8 @@ mod persistence_tests;
 mod process_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod request_timing_tests;
 #[cfg(test)]
 mod routing_tests;
 #[cfg(test)]

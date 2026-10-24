@@ -17,7 +17,7 @@ Tool errors return as results so the model can correct the call.
 | --- | --- | --- | --- |
 | `read` | `path` | `offset`, `limit`, `byte_offset` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
-| `edit` | `path` and either `old_text`/`new_text` or `edits` | — | Applies exact unique replacements in order, installing the file only after all succeed. Returns `bytes_written`. |
+| `edit` | `path`, `edits` | — | Applies one or more exact unique replacements in order, installing the file only after all succeed. Returns `bytes_written`. |
 | `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
 | `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes`, `output_mode` | Lists, polls or stops this conversation's persistent processes. |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
@@ -36,9 +36,12 @@ that boundary. A new project file needs an existing parent directory. `write`
 and `edit` reject read-only files and replace accepted files through a sibling
 temporary file. Writes, edits and text reads use UTF-8 without NUL bytes.
 
-For several replacements in one file, use
-`edits: [{"old_text": "before", "new_text": "after"}, ...]` instead of the
-top-level pair. Each step matches the result of preceding steps, including exact
+Use `edits: [{"old_text": "before", "new_text": "after"}, ...]` for one or more
+replacements in one file. The executor also accepts a top-level
+`old_text`/`new_text` pair for models that imitate older conversation history;
+interrupted saved calls are not replayed. Empty or null unused legacy fields do
+not conflict with a valid batch, but populated competing formats are rejected.
+Each step matches the result of preceding steps, including exact
 whitespace and line endings. A missing or ambiguous match leaves the original
 file intact. A successful batch installs once and captures one workspace
 checkpoint. Large-file batches keep original ranges and replacement text in a

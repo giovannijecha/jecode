@@ -18,6 +18,42 @@ recovery and turn errors, including incomplete streamed text. An export taken
 during an operation can contain a tool call whose result has not arrived yet.
 Unsent composer text and paused drafts are not included.
 
+The additive `build` object records the executable's OS, architecture, profile
+(`debug` or `release`, inferred from Rust debug assertions), and a fingerprint
+of its bytes. `jecode --version` prints the same identity, which helps identify
+an older installed executable with the same package version. Jecode opens the
+running executable at startup, so a later atomic replacement of its installed path
+does not change the identity reported by that process. `fingerprint_algorithm`
+is `fnv1a64`: FNV-1a over the executable bytes, rendered as 16 lowercase hex
+digits. `--version` identifies the same algorithm. The fingerprint is
+diagnostic, not an authenticity check; it is `null` if the executable cannot
+be opened or read.
+
+New `request_timing` events record each model attempt's backend, model,
+operation, attempt number, start time, request byte count and outcome. Durations
+are in milliseconds: `preparation_ms` covers local work up to dispatch,
+excluding `notification_ms`, which measures delivery of the dispatch event to
+the UI or other event consumer. `first_update_ms` runs
+from dispatch to the first nonempty model text, reasoning or tool activity,
+`response_ms` runs from dispatch to completion or failure, and `total_ms` covers
+the attempt. Outcomes are `complete`, `failed` or `cancelled`; a user stop is
+separate from an error. A stop during the dispatch notification leaves
+`response_ms` and the other unreached boundaries `null`; the request was not
+dispatched. Waiting includes upload and
+remote queueing; these events do not separate those two costs. Ordinary request
+preparation includes context projection and serialization. Initial model
+metadata and compaction setup are outside that attempt; compaction model calls
+have their own `context_compaction` timing events.
+
+`tool_timing` events identify the call and record its start time,
+`preparation_ms`, `execution_ms` and `total_ms`. Preparation includes checkpoint
+setup; measurement ends when execution returns, before result persistence and
+rendering. Parallel calls overlap, so their totals must not be added as elapsed
+turn time. Both timing event types use Unix milliseconds for
+`started_at_unix_ms`, monotonic clocks for durations, and `after_message` to
+locate the attempt in the transcript. Timing events stay outside model history
+and do not copy request payloads or credentials.
+
 Credentials from registered backend accounts are masked, but other conversation
 content is retained. Review the export before sharing it. Bash tool results
 contain bounded output previews (16 KiB per stream by default) and references

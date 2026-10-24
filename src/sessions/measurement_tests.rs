@@ -137,9 +137,12 @@ fn session_history_and_listing() {
             assert_eq!(projected, loaded.messages);
             row(&path, "context_project", size, repeat, elapsed, bytes);
             let (estimated, elapsed) = timed(|| {
+                // This storage probe estimates the saved view; a live Agent also
+                // substitutes current instructions and adds its runtime environment.
+                let projected = loaded.context.project(&loaded.messages, 0);
                 loaded
                     .context
-                    .estimate(&loaded.messages, 0, Default::default())
+                    .estimate_projected(&projected, Default::default())
             });
             assert!(estimated > 0);
             row(&path, "context_estimate", size, repeat, elapsed, bytes);

@@ -464,6 +464,7 @@ fn interrupted_result_display_keeps_completed_work_and_cancels_remaining_calls()
     assert_eq!(
         observed,
         vec![
+            Event::Preparing,
             Event::Waiting {
                 model: "fixture/model".into()
             },

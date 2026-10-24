@@ -172,7 +172,9 @@ impl Backend for Client {
                 ),
             ])
         };
+        let request_bytes = request.encode().len();
         self.account.requests.lock().unwrap().push(request);
+        emit(Update::Waiting { request_bytes })?;
         let reply = self
             .account
             .replies

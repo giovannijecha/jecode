@@ -227,7 +227,7 @@ fn cancelling_a_worker_during_a_stream_cannot_block_shutdown() {
     let worker = Worker::start(agent, "stream".into());
     let next = || loop {
         match worker.events.recv_timeout(Duration::from_secs(3)).unwrap() {
-            Event::Context(_) => {}
+            Event::Context(_) | Event::Preparing => {}
             event => break event,
         }
     };

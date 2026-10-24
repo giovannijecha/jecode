@@ -55,7 +55,8 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
             Event::Maintenance { text } | Event::ContextCompacted { text } => {
                 format!("[context] {text}")
             }
-            Event::Reasoning
+            Event::Preparing
+            | Event::Reasoning
             | Event::Working
             | Event::Streaming { .. }
             | Event::ToolChanged { .. }
