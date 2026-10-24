@@ -41,8 +41,12 @@ For several replacements in one file, use
 top-level pair. Each step matches the result of preceding steps, including exact
 whitespace and line endings. A missing or ambiguous match leaves the original
 file intact. A successful batch installs once and captures one workspace
-checkpoint. Large files stage intermediate replacements with bounded content
-memory; they can require multiple temporary-file passes.
+checkpoint. Large-file batches keep original ranges and replacement text in a
+virtual view, so later edits can match earlier replacements without writing
+intermediate files. Each edit scans that view to verify a unique match; after
+all matches succeed, the final content is written once to a temporary file,
+synced and installed atomically. Buffering stays independent of file size;
+range metadata grows with the number of edits.
 
 Images and PDFs in the project or the current `tmp:` area are recognized from
 their contents and shown to the model on the next request, using the same

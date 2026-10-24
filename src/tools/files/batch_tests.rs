@@ -179,7 +179,7 @@ fn batch_rejects_invalid_shapes_and_noop_does_not_replace_file() {
 }
 
 #[test]
-fn streaming_batch_stages_each_step_and_installs_only_after_validation() {
+fn streaming_batch_composes_each_step_and_installs_only_after_validation() {
     let directory = Directory::new();
     let root = fs::canonicalize(directory.path()).unwrap();
     let path = root.join("source.txt");
@@ -229,6 +229,54 @@ fn streaming_batch_stages_each_step_and_installs_only_after_validation() {
     .unwrap();
     assert_eq!(noop.get("bytes_written"), Some(&Value::number(0)));
     assert!(change.is_none());
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}
+
+#[test]
+fn streaming_batch_matches_across_inserted_and_original_utf8_ranges() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let path = root.join("source.txt");
+    let filler = "x".repeat(MAX_DIFF_BYTES);
+    let original = format!("αhead|middle|tail🦀{filler}end");
+    fs::write(&path, original).unwrap();
+    let steps = [
+        ("head", "first-long"),
+        ("αfirst", "Ω"),
+        ("Ω-long|middle", "body"),
+        ("tail🦀", ""),
+        ("body|", "🦀\r\n"),
+        ("end", "Z"),
+    ];
+    let result = edit(&root, &batch(&steps)).unwrap();
+    let expected = format!("🦀\r\n{filler}Z");
+    assert_eq!(
+        result.get("bytes_written"),
+        Some(&Value::number(expected.len()))
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}
+
+#[test]
+fn streaming_batch_ambiguity_created_across_pieces_keeps_original_and_permissions() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let path = root.join("source.txt");
+    let original = format!("ab|aca{}", "x".repeat(MAX_DIFF_BYTES));
+    fs::write(&path, &original).unwrap();
+    let permissions = fs::metadata(&path).unwrap().permissions();
+    // An additional "aca" spans the inserted "c" and original bytes on both sides.
+    let result = edit(&root, &batch(&[("b|", "c"), ("aca", "done")])).unwrap();
+    assert!(
+        result
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("more than once")
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    assert_eq!(fs::metadata(&path).unwrap().permissions(), permissions);
     assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
 }
 

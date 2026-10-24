@@ -25,6 +25,7 @@ fn turn_metadata_requests_overlap_and_pin_narrows_the_fresh_model_limit() {
         let overlapped = peers.len() == 2;
         let mut paths = Vec::new();
         for mut peer in peers {
+            peer.set_nonblocking(false).unwrap();
             peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
             let mut reader = BufReader::new(peer.try_clone().unwrap());
             let mut line = String::new();

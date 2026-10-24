@@ -44,6 +44,48 @@ Run the current stream probe:
 cargo test --locked --offline --release backend::openrouter::stream::tests::tool_argument_stream_bench -- --exact --ignored --nocapture --test-threads=1
 ```
 
+### Large-file batch edits
+
+Recorded **2026-10-24**, Windows, Rust 1.95.0 `x86_64-pc-windows-gnullvm`,
+release builds. Baseline `97b4284` stages a complete file for each replacement;
+the candidate composes borrowed replacements and original file ranges, then
+materializes the final content once. Matching still scans the sequential view
+for each edit, including matches spanning original and inserted ranges.
+
+The synthetic input is 32 MiB with ten distributed unique markers and ten
+variable-length replacements. Both versions ran in baseline/candidate/candidate/
+baseline order, with two warmups and five measured samples per block. Binaries
+were built before timing. Fixture resets and streamed exact-output checks were
+outside the timer; checkpoints were disabled and filesystem caches were warm.
+
+| Version | First block median | Second block median | Pooled median |
+| --- | ---: | ---: | ---: |
+| Full-file stage per edit | 710.38 ms | 805.99 ms | 778.00 ms |
+| One final stage | 389.64 ms | 263.20 ms | 326.80 ms |
+
+Raw measured milliseconds, in execution order:
+
+```text
+baseline  [616.8742, 502.3746, 1017.6720, 767.3300, 710.3777]
+candidate [389.6402, 873.4982, 396.7329, 314.6476, 378.3990]
+candidate [338.9443, 297.6512, 255.5739, 226.5880, 263.2026]
+baseline  [724.0229, 788.6609, 805.9942, 856.8396, 1738.2140]
+```
+
+The pooled median fell by 58% for this workload. Samples vary substantially;
+this does not establish cold-disk, checkpoint-enabled or whole-turn latency.
+Derived logical staging payloads are 335,547,565 bytes before and 33,555,277
+bytes after: roughly ten times less content written to staging files. These
+are calculated from fixture lengths, not measured physical disk I/O. Matching
+reads remain proportional to the file size and edit count. Content buffers
+remain bounded; range metadata grows with the number of edits.
+
+Run the current probe:
+
+```text
+cargo test --locked --offline --release large_batch_edit_measurement -- --ignored --nocapture --test-threads=1
+```
+
 ### Checkpoint cache experiment
 
 Deferring the session-listing cache until the end of an active turn did not
