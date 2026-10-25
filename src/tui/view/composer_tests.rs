@@ -28,6 +28,23 @@ fn turn_phases_and_waiting_for_an_edit_are_visible_in_the_rule() {
         (Event::Reasoning, "Thinking"),
         (Event::Working, "Working"),
         (
+            Event::ToolStarted {
+                id: "phase".into(),
+                name: "read".into(),
+                arguments: crate::json::Value::object([]),
+            },
+            "Working",
+        ),
+        (
+            Event::ToolFinished {
+                id: "phase".into(),
+                name: "read".into(),
+                summary: "read".into(),
+                result: crate::json::Value::object([]),
+            },
+            "Working",
+        ),
+        (
             Event::Streaming {
                 text: "response".into(),
             },

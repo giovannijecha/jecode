@@ -60,6 +60,7 @@ pub(super) struct Stream {
     rows: Rows,
     trailing: String,
     checkpoint: Checkpoint,
+    previous_plain: Option<(usize, usize)>,
     ready: bool,
 }
 
@@ -83,6 +84,7 @@ impl Stream {
                 rendered: 0,
                 fenced: None,
             },
+            previous_plain: None,
             ready: false,
         }
     }
@@ -106,6 +108,7 @@ impl Stream {
         self.rows.fenced = self.checkpoint.fenced.clone();
         self.rows.table = None;
         self.rows.empty_pending = self.rows.value.is_empty();
+        self.previous_plain = None;
         self.ready = false;
         Some(self.checkpoint.rendered)
     }
@@ -126,7 +129,28 @@ impl Stream {
                 break;
             };
             if let Some(before) = before {
-                self.checkpoint = before;
+                let previous = self.previous_plain;
+                self.previous_plain = before
+                    .fenced
+                    .is_none()
+                    .then_some((before.position, before.rendered));
+                // The final line may still become a new block. Revisit the
+                // preceding hard-break candidate too, without losing older rows.
+                let follows_break = before.fenced.is_none()
+                    && self.rows.value[..before.position]
+                        .strip_suffix('\n')
+                        .is_some_and(backslash_break);
+                self.checkpoint = if follows_break && let Some((position, rendered)) = previous {
+                    Checkpoint {
+                        position,
+                        rendered,
+                        fenced: None,
+                    }
+                } else {
+                    before
+                };
+            } else {
+                self.previous_plain = None;
             }
             budget = budget.saturating_sub(next.len().max(1));
             lines.extend(next);
@@ -308,6 +332,9 @@ fn joined<'a>(
 ) -> Cow<'a, str> {
     const LIMIT: usize = 8 * 1024;
     let mut text = Cow::Borrowed(first);
+    if quote && first.trim().is_empty() {
+        return text;
+    }
     // Two trailing spaces or an unescaped backslash end the line with a hard break.
     while text.len() < LIMIT && !text.ends_with("  ") && !backslash_break(&text) {
         let inner = quote
@@ -322,7 +349,12 @@ fn joined<'a>(
         joined.push_str(line);
         *position = next;
     }
-    if *position <= value.len() && backslash_break(&text) {
+    // A trailing backslash is a hard break only inside the same paragraph.
+    // At a block boundary (including a blank line), it remains literal.
+    if backslash_break(&text)
+        && (quote && quote_continuation(value, *position).is_some()
+            || continuation(value, *position, columns).is_some())
+    {
         text.to_mut().pop();
     }
     text

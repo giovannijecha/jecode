@@ -29,8 +29,11 @@ continues the paragraph, list item or quote above it, joined by a space, so
 emphasis can span the break and the text reflows to the terminal width.
 Consecutive `>` lines continue one quote. A blank line or the start of a
 heading, list item, quote, rule, table or code fence ends the paragraph. Two
-trailing spaces or a trailing backslash keep a hard line break, and a
-paragraph longer than 8 KiB continues at the next source line. Explicit blank
+trailing spaces or an unescaped trailing backslash keep a hard line break
+inside a paragraph. The backslash is consumed only when another line continues
+that paragraph; it stays literal at paragraph and block boundaries, including
+the end of the document. A paragraph longer than 8 KiB continues at the next
+source line. Explicit blank
 lines remain visible. Backslash escapes protect ASCII punctuation; unmatched
 formatting markers stay visible as text.
 

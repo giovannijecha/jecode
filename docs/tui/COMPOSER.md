@@ -152,8 +152,9 @@ replaces them. Progress such as compaction, attachments or a retry sits in
 the composer rule beside the scanner, with a countdown to the next attempt.
 Copy feedback has its own slot. Notices do not become conversation messages.
 The rule also names the turn's phase, including `Waiting for your edit` when
-a draft edit holds the turn and `Stopping` after cancellation. Maintenance
-and retry feedback takes priority over normal phases. A retry temporarily
+a draft edit holds the turn and `Stopping` after cancellation. Tool activity
+uses `Working`, which also covers the interval after a tool finishes.
+Maintenance and retry feedback take priority over normal phases. A retry temporarily
 overlays compaction; its original progress and clock return when the retry ends.
 
 The footer shows the working directory relative to your home folder, a

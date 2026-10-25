@@ -275,6 +275,73 @@ fn quotes_repeat_a_muted_bar_and_join_continuation_lines() {
 }
 
 #[test]
+fn trailing_backslashes_are_literal_at_paragraph_and_block_boundaries() {
+    for (source, expected) in [
+        ("foo\\\n\nbar", vec!["foo\\", "", "bar"]),
+        ("C:\\\n\nnext", vec!["C:\\", "", "next"]),
+        ("- item\\\n- next", vec!["• item\\", "• next"]),
+        ("foo\\\n# Head", vec!["foo\\", "Head"]),
+        ("> foo\\\n>\n> next", vec!["│ foo\\", "│ ", "│ next"]),
+        ("foo\\", vec!["foo\\"]),
+        ("foo\\\nbar", vec!["foo", "bar"]),
+        ("> foo\\\n> bar", vec!["│ foo", "│ bar"]),
+    ] {
+        let rows: Vec<_> = render(source, 80).iter().map(Line::plain).collect();
+        assert_eq!(rows, expected, "source: {source:?}");
+    }
+    for next in [
+        "```rust\nlet x = 1;\n```",
+        "| A | B |\n|---|---|\n| x | y |",
+        "> quote",
+    ] {
+        let source = format!("C:\\\n{next}");
+        assert_eq!(render(&source, 80)[0].plain(), "C:\\", "source: {source:?}");
+    }
+}
+
+#[test]
+fn streamed_backslash_boundaries_match_full_render() {
+    for source in [
+        "C:\\\n\nnext",
+        "foo\\\n# Head",
+        "- item\\\n- next",
+        "> foo\\\n>\n> next",
+        "foo\\\nbar",
+    ] {
+        let mut stream = Stream::new("", 28);
+        let mut lines = Vec::new();
+        let mut prefix = String::new();
+        for character in source.chars() {
+            prefix.push(character);
+            if let Some(keep) = stream.update(&prefix, 28) {
+                lines.truncate(keep);
+            }
+            while !stream.ready() {
+                stream.advance(&mut lines, 4);
+            }
+            assert_eq!(lines, render(&prefix, 28), "after: {prefix:?}");
+        }
+    }
+    let source = format!("{}#", "older line\\\n".repeat(200));
+    let mut stream = Stream::new(&source, 80);
+    let mut lines = Vec::new();
+    while !stream.ready() {
+        stream.advance(&mut lines, 4);
+    }
+    let completed = format!("{source} Head");
+    let keep = stream.update(&completed, 80).unwrap();
+    assert!(
+        keep >= 199,
+        "a changed final block invalidated the older hard breaks"
+    );
+    lines.truncate(keep);
+    while !stream.ready() {
+        stream.advance(&mut lines, 4);
+    }
+    assert_eq!(lines, render(&completed, 80));
+}
+
+#[test]
 fn code_panels_pad_one_cell_on_the_code_surface() {
     let rows = render("```text\nabcdefghij\n```", 10);
     let plain: Vec<_> = rows.iter().map(Line::plain).collect();

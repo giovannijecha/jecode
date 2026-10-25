@@ -231,7 +231,7 @@ impl State {
                 if let Some(last) = self.open_branch() {
                     *last = Some(false);
                 }
-                self.status = format!("Running {name}…");
+                self.status = "Working…".into();
                 if let Some(activity) = &mut self.activity {
                     activity.tools += 1;
                 }
