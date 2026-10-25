@@ -33,6 +33,7 @@ impl Reply {
 #[derive(Clone)]
 pub struct Account {
     pub id: &'static str,
+    pub scope: Option<String>,
     replies: Arc<Mutex<VecDeque<Reply>>>,
     pub requests: Arc<Mutex<Vec<Value>>>,
 }
@@ -41,6 +42,7 @@ impl Account {
     pub fn new(id: &'static str, replies: Vec<Reply>) -> Self {
         Self {
             id,
+            scope: None,
             replies: Arc::new(Mutex::new(replies.into())),
             requests: Arc::default(),
         }
@@ -61,6 +63,9 @@ impl Account {
 impl Service for Account {
     fn id(&self) -> &'static str {
         self.id
+    }
+    fn account(&self) -> Option<String> {
+        self.scope.clone()
     }
     fn with_credential(&self, _: String) -> Result<Arc<dyn Service>, String> {
         Ok(Arc::new(self.clone()))
@@ -100,6 +105,9 @@ impl Backend for Client {
     fn id(&self) -> &'static str {
         self.account.id
     }
+    fn account(&self) -> Option<String> {
+        self.account.scope.clone()
+    }
     fn model(&self) -> &str {
         &self.model
     }
@@ -126,7 +134,7 @@ impl Backend for Client {
         _: Option<&Pool>,
         emit: &mut dyn FnMut(Update) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
-        let origin = Origin::new(self.id(), self.model());
+        let origin = Origin::with_account(self.id(), self.model(), self.account());
         // Two deliberately different request protocols, both built from the
         // canonical conversation and catalog rather than another adapter.
         let projected = messages

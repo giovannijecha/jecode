@@ -79,6 +79,42 @@ fn every_menu_has_the_same_padded_surface_without_composer_borders_or_draft_text
 }
 
 #[test]
+fn sign_in_link_wraps_without_losing_the_url_or_escape_control() {
+    let url = "https://auth.openai.com/oauth/authorize?client_id=fixture&state=long-fixture-state";
+    let mut menu = Selector::loading(
+        "Continue with ChatGPT",
+        &format!("Waiting… Open in browser: {url}"),
+        false,
+    );
+    menu.parent = Some("OpenAI");
+    for width in [44, 80] {
+        let state = State {
+            width,
+            height: 30,
+            selector: Some(Selector::loading(
+                "Continue with ChatGPT",
+                &menu.message,
+                false,
+            )),
+            ..State::default()
+        };
+        let rows = frame(&state, "fixture/model", "directory").live;
+        let text: String = rows
+            .iter()
+            .map(|line| line.plain())
+            .collect::<Vec<_>>()
+            .join("");
+        let compact: String = text
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        assert!(text.contains("auth.openai.com"));
+        assert!(compact.contains("long-fixture-state"));
+        assert!(text.contains("Esc"));
+    }
+}
+
+#[test]
 fn slash_arguments_keep_the_panel_and_escape_restores_the_draft_and_caret() {
     let mut state = State::default();
     state.editor.insert("/tmp clean");
@@ -224,7 +260,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
         super::frame(&state, "fixture/model", "directory")
             .live
             .iter()
-            .any(|line| line.plain().contains("API key"))
+            .any(|line| line.plain().contains("Providers"))
     );
 }
 

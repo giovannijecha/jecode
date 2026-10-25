@@ -35,6 +35,21 @@ Tests use original Rust fixtures, synthetic credentials, isolated directories
 under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash without
 contacting OpenRouter or reading personal configuration.
 
+OpenAI fixtures also use isolated account records and loopback HTTP. They do
+not read Codex credentials or launch a real ChatGPT sign-in. Native signature
+checks exercise Windows .NET or the Unix `openssl` executable. A successful
+fixture run does not establish account eligibility or real plan inference.
+
+Opt-in live OpenAI checks use the selected saved ChatGPT registration and
+synthetic inputs. They consume ChatGPT plan usage, never print tokens, and stay
+outside ordinary offline verification:
+
+```text
+cargo test --locked --offline backend::openai::live::inspect_live_model_and_stream -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline backend::openai::live::live_tool_roundtrip_uses_context_and_selected_effort -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline backend::openai::live::live_image_and_tool_roundtrip -- --exact --ignored --nocapture --test-threads=1
+```
+
 ## Run a focused check
 
 Pass a test-name filter after the Cargo options:
@@ -43,6 +58,8 @@ Pass a test-name filter after the Cargo options:
 cargo test --locked --offline agent::routing_tests::
 cargo test --locked --offline agent::backend_tests::
 cargo test --locked --offline backend::openrouter::calls::tests::
+cargo test --locked --offline auth::openai::
+cargo test --locked --offline backend::openai::
 cargo test --locked --offline tools::processes::tests::
 cargo test --locked --offline sessions::journal_tests::
 cargo test --locked --offline checkpoint

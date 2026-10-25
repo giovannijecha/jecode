@@ -189,95 +189,10 @@ impl App {
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
             "/settings" if arguments.is_empty() => {
-                let settings = &self.config.settings;
-                self.state.selector = Some(Selector::settings(
-                    &settings.model,
-                    settings.effort,
-                    settings.auto_compact,
-                    &settings.routing_for(&settings.model),
-                    self.config.store.path(),
-                ));
+                self.open_settings();
             }
             "/routing" if arguments.is_empty() => self.open_routing(false),
-            "/backend" => {
-                if arguments.is_empty() {
-                    let details = backend::available()
-                        .iter()
-                        .map(|info| {
-                            (
-                                info.id.into(),
-                                format!(
-                                    "{}{}",
-                                    info.name,
-                                    if info.id == self.agent.as_ref().unwrap().backend_id() {
-                                        " · current"
-                                    } else {
-                                        ""
-                                    }
-                                ),
-                            )
-                        })
-                        .collect();
-                    self.local_finish(
-                        Kind::Notice,
-                        "Available backends · use /backend ID MODEL to switch",
-                        details,
-                    );
-                } else {
-                    let mut parts = arguments.split_whitespace();
-                    let (Some(id), Some(model), None) = (parts.next(), parts.next(), parts.next())
-                    else {
-                        self.local_finish(Kind::Error, "Usage: /backend ID MODEL", vec![]);
-                        return Ok(false);
-                    };
-                    if !backend::available().iter().any(|info| info.id == id) {
-                        self.local_finish(
-                            Kind::Error,
-                            &format!("Backend is not available: {id}"),
-                            vec![],
-                        );
-                    } else if let Err(error) = crate::config::validate_model(model) {
-                        self.local_finish(Kind::Error, &error, vec![]);
-                    } else if let Some(key) = self.config.settings.credential_for(id) {
-                        let previous = {
-                            let agent = self.agent.as_ref().unwrap();
-                            format!("{} / {}", agent.backend_id(), agent.model())
-                        };
-                        let result = if self.agent.as_ref().unwrap().backend_id() == id {
-                            let agent = self.agent.as_mut().unwrap();
-                            agent
-                                .set_model(model.into())
-                                .map(|()| agent.set_effort(Effort::Default))
-                        } else {
-                            backend::create(id, key.into(), model.into()).and_then(|mut client| {
-                                client.set_effort(Effort::Default);
-                                self.agent.as_mut().unwrap().replace_backend(client)
-                            })
-                        };
-                        match result {
-                            Ok(()) => {
-                                self.archive = self.agent.as_ref().unwrap().archive();
-                                self.state.effort = Effort::Default.name().into();
-                                self.refresh_context();
-                                self.local_finish_change(
-                                    Kind::Notice,
-                                    &format!(
-                                        "Backend: {previous} → {id} / {model} · this conversation"
-                                    ),
-                                    vec![],
-                                );
-                            }
-                            Err(error) => self.local_finish(Kind::Error, &error, vec![]),
-                        }
-                    } else {
-                        self.local_finish(
-                            Kind::Error,
-                            &format!("{id} has no saved credentials; run jecode setup"),
-                            vec![],
-                        );
-                    }
-                }
-            }
+            "/backend" => self.backend_command(arguments),
             "/model" => {
                 if !arguments.is_empty()
                     && let Err(error) = crate::config::validate_model(arguments)
@@ -285,10 +200,14 @@ impl App {
                     self.local_finish(Kind::Error, &error, vec![]);
                     return Ok(false);
                 }
-                self.load_catalog(CatalogPurpose::Models {
-                    defaults: false,
-                    id: (!arguments.is_empty()).then(|| arguments.into()),
-                });
+                if arguments.is_empty() {
+                    self.open_model_providers(false);
+                } else {
+                    self.load_catalog(CatalogPurpose::Models {
+                        defaults: false,
+                        id: Some(arguments.into()),
+                    });
+                }
             }
             "/effort" => match if arguments.is_empty() {
                 Ok(None)
@@ -297,6 +216,9 @@ impl App {
             } {
                 Ok(Some(Effort::Default)) => {
                     self.apply_selection(self.archive.model.clone(), Effort::Default, false)
+                }
+                Ok(Some(effort)) if !self.agent.as_ref().unwrap().services().validates_effort() => {
+                    self.apply_selection(self.archive.model.clone(), effort, false)
                 }
                 Ok(effort) => self.load_catalog(CatalogPurpose::Effort {
                     defaults: false,
@@ -458,6 +380,35 @@ impl App {
     }
 
     pub(super) fn load_catalog(&mut self, purpose: CatalogPurpose) {
+        let home = self
+            .config
+            .store
+            .path()
+            .parent()
+            .expect("configuration directory");
+        let id = match &purpose {
+            CatalogPurpose::Models { defaults: true, .. }
+            | CatalogPurpose::Effort { defaults: true, .. } => {
+                self.config.settings.backend_id.as_str()
+            }
+            _ => self.agent.as_ref().unwrap().backend_id(),
+        };
+        let services = if id == self.agent.as_ref().unwrap().backend_id() {
+            Ok(self.agent.as_ref().unwrap().services())
+        } else {
+            self.config.settings.services(home, id)
+        };
+        match services {
+            Ok(services) => self.load_catalog_for(purpose, services),
+            Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
+        }
+    }
+
+    pub(super) fn load_catalog_for(
+        &mut self,
+        purpose: CatalogPurpose,
+        services: backend::Services,
+    ) {
         let (title, context, defaults) = match &purpose {
             CatalogPurpose::Models { defaults: true, .. } => ("Default model", "", true),
             CatalogPurpose::Models { .. } => ("Model", "this conversation", false),
@@ -474,13 +425,14 @@ impl App {
             ),
         };
         let mut menu = Selector::loading(title, "Loading model catalog…", defaults);
+        if self.provider_parent.is_some() {
+            menu.parent = Some("Provider");
+        }
         context.clone_into(&mut menu.context);
         self.state.selector = Some(menu);
         self.state.clear_notice();
-        self.job = Some(Job::catalog(
-            self.agent.as_ref().unwrap().services(),
-            purpose,
-        ));
+        self.catalog_services = Some(services.clone());
+        self.job = Some(Job::catalog(services, purpose));
     }
 
     /// Runs `/copy`, `/drafts` or `/terminal`; returns false for other text.

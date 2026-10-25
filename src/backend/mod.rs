@@ -2,6 +2,7 @@
 
 mod charges;
 mod failure;
+pub(crate) mod openai;
 pub(crate) mod openrouter;
 pub(crate) use charges::{price, quantity};
 
@@ -243,6 +244,9 @@ pub struct Metrics {
 /// Every backend accepts the same canonical transcript and tool catalog.
 pub trait Backend: Send {
     fn id(&self) -> &'static str;
+    fn account(&self) -> Option<String> {
+        None
+    }
     fn model(&self) -> &str;
     fn effort(&self) -> Effort;
     fn set_effort(&mut self, effort: Effort);
@@ -291,18 +295,22 @@ pub struct BackendInfo {
     pub key_url: Option<&'static str>,
     pub credential_env: &'static [&'static str],
 }
-static AVAILABLE: [BackendInfo; 1] = [BackendInfo {
-    id: "openrouter",
-    name: "OpenRouter",
-    key_url: Some("https://openrouter.ai/settings/keys"),
-    credential_env: openrouter::CREDENTIAL_ENV,
-}];
+static AVAILABLE: [BackendInfo; 2] = [
+    BackendInfo {
+        id: "openrouter",
+        name: "OpenRouter",
+        key_url: Some("https://openrouter.ai/settings/keys"),
+        credential_env: openrouter::CREDENTIAL_ENV,
+    },
+    BackendInfo {
+        id: "openai",
+        name: "OpenAI",
+        key_url: None,
+        credential_env: openai::CREDENTIAL_ENV,
+    },
+];
 pub fn available() -> &'static [BackendInfo] {
     &AVAILABLE
-}
-
-pub fn create(id: &str, key: String, model: String) -> Result<Box<dyn Backend>, String> {
-    Services::for_backend(id, key)?.create(model)
 }
 
 /// Checks credential syntax without contacting the backend.
@@ -312,6 +320,13 @@ pub fn validate_credential(id: &str, key: &str) -> Result<(), String> {
 
 pub trait Service: Send + Sync {
     fn id(&self) -> &'static str;
+    fn account(&self) -> Option<String> {
+        None
+    }
+    /// Whether catalog effort options describe known model capabilities.
+    fn validates_effort(&self) -> bool {
+        true
+    }
     fn with_credential(&self, key: String) -> Result<Arc<dyn Service>, String>;
     fn with_cancellation(&self, cancellation: Cancellation) -> Arc<dyn Service>;
     fn catalog(&self) -> Result<Vec<Model>, String>;
@@ -342,11 +357,21 @@ impl Services {
         Self::for_credential(&crate::auth::Credential::api_key(id, key))
     }
     pub fn for_credential(credential: &crate::auth::Credential) -> Result<Self, String> {
-        let key = credential
-            .api_key_material()
-            .ok_or("This backend needs an API key")?;
         match credential.identity.backend.as_str() {
-            "openrouter" => Ok(Self::from_service(openrouter::Api::new(key.to_owned())?)),
+            "openrouter" => Ok(Self::from_service(openrouter::Api::new(
+                credential
+                    .api_key_material()
+                    .ok_or("OpenRouter needs an API key")?
+                    .to_owned(),
+            )?)),
+            "openai" => Ok(Self::from_service(openai::Api::new(
+                credential
+                    .account_session()
+                    .ok_or(
+                        "OpenAI needs a ChatGPT account; open Settings > Providers > Credentials",
+                    )?
+                    .clone(),
+            )?)),
             id => Err(format!("Unknown backend: {id}")),
         }
     }
@@ -357,6 +382,12 @@ impl Services {
     }
     pub fn id(&self) -> &'static str {
         self.inner.id()
+    }
+    pub fn account(&self) -> Option<String> {
+        self.inner.account()
+    }
+    pub fn validates_effort(&self) -> bool {
+        self.inner.validates_effort()
     }
     pub fn with_credential(&self, key: String) -> Result<Self, String> {
         Ok(Self {

@@ -11,7 +11,7 @@ Paths are relative to `src/`.
 | Area | Modules |
 | --- | --- |
 | Entry and setup | `main.rs`, `cli.rs`, `bootstrap.rs`, `setup/` |
-| Settings, credentials and model effort | `config/`, `auth/`, `effort.rs` |
+| Settings, credentials and model effort | `config/`, `auth/`, `auth/openai/`, `effort.rs` |
 | Agent, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
@@ -21,7 +21,7 @@ Paths are relative to `src/`.
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments | `attachments/`, `tools/attachment.rs` |
-| Model backends | `backend/`, `backend/openrouter/` |
+| Model backends | `backend/`, `backend/openrouter/`, `backend/openai/` |
 | Interfaces | `session.rs`, `session/`, `console.rs`, `tui/` |
 | Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs` |
 
@@ -243,13 +243,23 @@ Native fixture commands and host-specific checks are in [platform verification](
 typed input/output/cached-token usage, context limits, progress updates and
 failures. The agent can retain its transcript, execute tools, compact context
 and save a session without importing an OpenRouter type. `conversation/` keeps
-portable message fields and tags native extras with their backend and model.
+portable message fields and tags native extras with their backend, model and
+verified account registration when the provider uses account sessions.
 Only the matching adapter receives those extras on a later request. Legacy
 untagged OpenRouter messages are assigned their archived origin on a transient
 request copy; the saved originals remain intact. `auth/` represents user-scoped
 credential material and account identity, while `backend::Services` exposes
 catalog, credential checks and optional routing choices to setup and the TUI.
-The existing user-scoped configuration stays readable.
+The existing user-scoped configuration stays readable. OpenAI OAuth records are
+separate from API-key settings. Shared redaction sources mask newly rotated
+tokens in already-created tools, output readers and persistence handles.
+
+`backend/openai/` translates the same transcript and local tools into stateless
+Responses requests using the selected ChatGPT registration. It preserves ordered
+native output items and assistant phases, and requires `response.completed`
+before returning executable calls. `auth/openai/` owns browser authorization,
+PKCE, ID-token validation, protected records, serialized refresh and logout.
+See [OpenAI](OPENAI.md) for the route contract and native crypto boundary.
 
 `backend/openrouter/` uses the fixed HTTPS OpenRouter API through curl 8.3+,
 with curl's default configuration disabled and TLS certificate validation enabled.

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
 
-A terminal coding agent written in Rust. Jecode currently connects to OpenRouter and works
+A terminal coding agent written in Rust. Jecode connects to OpenRouter or your ChatGPT account and works
 in your project through eight tools: `read`, `write`, `edit`, `bash`, `process`,
 `checkpoint`, `web` and `browser`.
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
@@ -21,6 +21,10 @@ Build from this repository with Rust 1.95.0 and a native linker.
 | --- | --- |
 | Windows 10+ | Git Bash, HTTPS-enabled curl 8.3+, Windows PowerShell with `Add-Type`. |
 | Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
+
+ChatGPT sign-in additionally uses .NET cryptography through Windows PowerShell,
+or the installed `openssl` executable on Linux and macOS. Browser sign-in uses
+the system browser; the callback listens only on `127.0.0.1`.
 
 Both installers verify the selected curl version and HTTPS support before
 installation. Set `JECODE_CURL` to an installed curl executable to override the
@@ -70,13 +74,19 @@ Open the project directory you want Jecode to work in, then run:
 jecode
 ```
 
-1. Paste your [OpenRouter API key](https://openrouter.ai/settings/keys); input is hidden.
-2. Choose a tool-capable model from the searchable list, or enter `=provider/model-id`.
+1. Choose OpenAI and **Continue with ChatGPT**, or enter an [OpenRouter API key](https://openrouter.ai/settings/keys) with hidden input.
+2. Choose a model from the searchable list, or enter `=model-id`.
 3. Type a task and press Enter.
 
-Setup validates the key without sending a paid chat completion. `/cancel` leaves
-setup without replacing existing settings. The key and defaults are stored in
-plaintext at `~/.jecode/config.json`.
+Setup checks access without sending an inference request. `/cancel` leaves saved
+defaults unchanged. OpenRouter keys and defaults live in plaintext at
+`~/.jecode/config.json`; protected ChatGPT account records live separately under
+`~/.jecode/accounts/openai/`. OpenAI API keys are not supported.
+
+Use `/settings` → **Providers** → **Credentials** for ChatGPT accounts, or
+**API keys** for OpenRouter. With multiple configured providers, `/model` asks
+for the provider before the model. ChatGPT plan usage is managed in
+[ChatGPT Settings → Usage](https://chatgpt.com/settings/usage).
 
 ## Work in a project
 
@@ -91,7 +101,7 @@ saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard sh
 | `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
 | `/backend [ID [MODEL]]` | List available backends or switch this conversation to a configured backend and model. |
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
-| `/settings` | Edit saved defaults and the OpenRouter key. |
+| `/settings` | Edit saved defaults and manage provider accounts or API keys. |
 | `/init` | Inspect this project and create or update its `AGENTS.md`. |
 | `/skills` | List personal skills available to the model. |
 | `/checkpoints` | Inspect or recover files from a tool call. |
@@ -121,7 +131,8 @@ for unsent input, interruption and deletion.
 
 Jecode runs tools with your system permissions. Its working directory is not a
 sandbox. Provider requests send conversation content and supported attachments to
-OpenRouter and the selected provider; see [security](SECURITY.md).
+the selected backend: OpenAI directly or OpenRouter and its selected provider;
+see [security](SECURITY.md).
 
 ## CLI and pipes
 

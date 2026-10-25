@@ -256,7 +256,7 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
             &state,
             now + Duration::from_millis(75),
         );
-        assert!(screen.visible().contains("API key"));
+        assert!(screen.visible().contains("Providers"));
         assert_eq!(state.selector.as_ref().unwrap().selected, 4);
         assert_eq!(state.editor, draft);
     }

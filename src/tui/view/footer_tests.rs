@@ -53,6 +53,42 @@ fn the_footer_meters_the_projection_toward_auto_compaction() {
 }
 
 #[test]
+fn chatgpt_account_uses_only_spare_footer_width() {
+    let mut state = with_status(10_000, Some(100_000));
+    state.chatgpt_account = Some(crate::tui::state::ChatGptAccount::Active(
+        "fixture@example.test".into(),
+    ));
+    state.width = 140;
+    let wide = frame(&state, "gpt-fixture", r"C:\project")
+        .live
+        .last()
+        .unwrap()
+        .plain();
+    assert!(wide.contains("Using ChatGPT plan · fixture@example.test"));
+    state.chatgpt_account = Some(crate::tui::state::ChatGptAccount::SignedOut);
+    let signed_out = frame(&state, "gpt-fixture", r"C:\project")
+        .live
+        .last()
+        .unwrap()
+        .plain();
+    assert!(signed_out.contains("ChatGPT · signed out"));
+    assert!(!signed_out.contains("Using ChatGPT plan"));
+    state.chatgpt_account = Some(crate::tui::state::ChatGptAccount::Active(
+        "fixture@example.test".into(),
+    ));
+    for width in [80, 44] {
+        state.width = width;
+        let narrow = frame(&state, "gpt-fixture", r"C:\project")
+            .live
+            .last()
+            .unwrap()
+            .plain();
+        assert!(!narrow.contains("fixture@example.test"));
+        assert!(narrow.contains("gpt-fixture"));
+    }
+}
+
+#[test]
 fn the_meter_turns_gold_near_the_threshold_and_stays_empty_when_unknown() {
     let state = with_status(78_000, Some(100_000));
     let near = frame(&state, "provider/model", r"C:\project");

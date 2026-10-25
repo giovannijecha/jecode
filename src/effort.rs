@@ -9,10 +9,12 @@ pub enum Effort {
     High,
     Xhigh,
     Max,
+    Ultra,
 }
 
 impl Effort {
-    pub const LEVELS: [Self; 7] = [
+    pub const LEVELS: [Self; 8] = [
+        Self::Ultra,
         Self::Max,
         Self::Xhigh,
         Self::High,
@@ -32,6 +34,7 @@ impl Effort {
             Self::High => "high",
             Self::Xhigh => "xhigh",
             Self::Max => "max",
+            Self::Ultra => "ultra",
         }
     }
 
@@ -40,7 +43,7 @@ impl Effort {
             .chain(Self::LEVELS)
             .find(|effort| effort.name().eq_ignore_ascii_case(value.trim()))
             .ok_or_else(|| {
-                "Unknown effort. Use default, none, minimal, low, medium, high, xhigh or max."
+                "Unknown effort. Use default, none, minimal, low, medium, high, xhigh, max or ultra."
                     .into()
             })
     }

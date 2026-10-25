@@ -1,9 +1,11 @@
 //! User-scoped credential material and its backend identity.
 //!
-//! This boundary describes a saved API key today. A future account session
-//! can use another secret variant without changing the inference contract.
+//! Saved API keys and renewable account sessions share this boundary without
+//! changing the provider-independent inference contract.
 
 use std::process::Command;
+
+pub mod openai;
 
 /// Prevent backend credentials from reaching child tools and native helpers.
 pub fn isolate_environment(command: &mut Command) -> &mut Command {
@@ -24,6 +26,7 @@ pub struct Identity {
 #[derive(Clone)]
 pub enum Secret {
     ApiKey(String),
+    AccountSession(openai::Session),
 }
 
 #[derive(Clone)]
@@ -33,6 +36,23 @@ pub struct Credential {
 }
 
 impl Credential {
+    pub fn openai(session: openai::Session) -> Self {
+        Self {
+            identity: Identity {
+                backend: "openai".into(),
+                account: Some(session.identity()),
+            },
+            secret: Secret::AccountSession(session),
+        }
+    }
+
+    pub fn account_session(&self) -> Option<&openai::Session> {
+        match &self.secret {
+            Secret::AccountSession(session) => Some(session),
+            Secret::ApiKey(_) => None,
+        }
+    }
+
     pub fn api_key(backend: impl Into<String>, key: String) -> Self {
         Self {
             identity: Identity {
@@ -46,6 +66,7 @@ impl Credential {
     pub fn api_key_material(&self) -> Option<&str> {
         match &self.secret {
             Secret::ApiKey(key) => Some(key),
+            Secret::AccountSession(_) => None,
         }
     }
 }

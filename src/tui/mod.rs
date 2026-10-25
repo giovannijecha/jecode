@@ -1,5 +1,6 @@
 mod activity;
 mod attach;
+mod backend_command;
 mod cards;
 #[cfg(test)]
 mod checkpoint_tests;
@@ -17,12 +18,14 @@ mod information;
 mod input;
 mod inspection;
 mod jobs;
+mod key_settings;
 mod keys;
 mod line;
 mod markdown;
 mod persistence;
 mod poll;
 mod processes;
+mod providers;
 mod recovery;
 mod render;
 mod resize;
@@ -64,6 +67,14 @@ struct App {
     renderer: display::Display,
     job: Option<Job>,
     catalog: Vec<Model>,
+    catalog_services: Option<crate::backend::Services>,
+    provider_parent: Option<bool>,
+    auth_accounts: Vec<crate::auth::openai::Account>,
+    auth_account_index: Option<usize>,
+    auth_updates: Option<std::sync::mpsc::Receiver<crate::auth::openai::SignInUpdate>>,
+    auth_browser_url: Option<String>,
+    auth_model_switch: bool,
+    auth_signing_out: bool,
     pending_command: Option<usize>,
     exit_requested: bool,
     persistence: Option<crate::sessions::Handle>,
@@ -105,6 +116,14 @@ impl App {
             state,
             job: None,
             catalog: vec![],
+            catalog_services: None,
+            provider_parent: None,
+            auth_accounts: vec![],
+            auth_account_index: None,
+            auth_updates: None,
+            auth_browser_url: None,
+            auth_model_switch: false,
+            auth_signing_out: false,
             pending_command: None,
             exit_requested: false,
             persistence,
@@ -131,6 +150,34 @@ impl App {
     fn refresh_context(&mut self) {
         if let Some(agent) = &self.agent {
             self.state.context = Some(agent.context_status());
+            self.state.chatgpt_account = if agent.backend_id() == "openai" {
+                let identity = agent.services().account();
+                let account = crate::auth::openai::Store::new(
+                    self.config
+                        .store
+                        .path()
+                        .parent()
+                        .expect("configuration directory")
+                        .to_path_buf(),
+                )
+                .accounts()
+                .ok()
+                .and_then(|accounts| {
+                    accounts.into_iter().find(|account| {
+                        identity.as_deref()
+                            == Some(format!("{}:{}", account.client_id, account.subject).as_str())
+                    })
+                });
+                Some(match account {
+                    Some(account) if account.enabled => {
+                        state::ChatGptAccount::Active(account.email)
+                    }
+                    Some(_) => state::ChatGptAccount::SignedOut,
+                    None => state::ChatGptAccount::Unavailable,
+                })
+            } else {
+                None
+            };
         }
     }
 

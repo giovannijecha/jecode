@@ -1,9 +1,11 @@
+use crate::auth::openai::{SignInUpdate, Store};
 use crate::{
     backend::{Endpoints, Model, Services},
     cancel::Cancellation,
     effort::Effort,
 };
 use std::thread::{self, JoinHandle};
+use std::{path::PathBuf, sync::mpsc::Sender};
 
 pub enum CatalogPurpose {
     Models {
@@ -25,10 +27,13 @@ pub enum ResultValue {
     Catalog(CatalogPurpose, Result<Vec<Model>, String>),
     Key(String, Result<(), String>),
     Endpoints(RoutingPurpose, Result<Option<Endpoints>, String>),
+    SignIn(Result<crate::auth::openai::Account, String>),
+    SignOut(Result<Option<String>, String>),
 }
 pub struct Job {
     task: Option<JoinHandle<ResultValue>>,
     cancellation: Cancellation,
+    detach_on_cancel: bool,
 }
 
 impl Job {
@@ -53,12 +58,37 @@ impl Job {
             )
         })
     }
+    pub fn sign_in(home: PathBuf, existing: Option<String>, updates: Sender<SignInUpdate>) -> Self {
+        let mut job = Self::start(move |cancellation| {
+            let store = Store::new(home);
+            let result = store
+                .sign_in(existing.as_deref(), cancellation, &mut |update| {
+                    updates
+                        .send(update)
+                        .map_err(|_| "Sign-in cancelled".to_string())
+                })
+                .and_then(|session| session.account());
+            ResultValue::SignIn(result)
+        });
+        job.detach_on_cancel = true;
+        job
+    }
+    pub fn sign_out(home: PathBuf, subject: String) -> Self {
+        Self::start(move |cancellation| {
+            let store = Store::new(home);
+            let result = store
+                .session(&subject)
+                .and_then(|session| session.sign_out(&cancellation));
+            ResultValue::SignOut(result)
+        })
+    }
     fn start(work: impl FnOnce(Cancellation) -> ResultValue + Send + 'static) -> Self {
         let cancellation = Cancellation::default();
         let token = cancellation.clone();
         Self {
             task: Some(thread::spawn(move || work(token))),
             cancellation,
+            detach_on_cancel: false,
         }
     }
     pub fn finished(&self) -> bool {
@@ -76,7 +106,9 @@ impl Drop for Job {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
             self.cancellation.cancel();
-            let _ = task.join();
+            if !self.detach_on_cancel {
+                let _ = task.join();
+            }
         }
     }
 }

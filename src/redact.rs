@@ -1,16 +1,31 @@
 use crate::json::Value;
+use std::sync::{Arc, Mutex};
+
+type Secrets = Arc<Mutex<Vec<(String, String)>>>;
 
 // No Debug implementation: this value owns a credential.
 #[derive(Clone)]
 pub struct Redactor {
-    secrets: Vec<(String, String)>,
+    sources: Vec<Secrets>,
 }
 
 impl Redactor {
-    fn patterns(&self) -> Vec<&[u8]> {
-        self.secrets
+    fn secrets(&self) -> Vec<(String, String)> {
+        let mut secrets: Vec<_> = self
+            .sources
             .iter()
-            .flat_map(|(raw, escaped)| [raw.as_bytes(), escaped.as_bytes()])
+            .flat_map(|source| source.lock().unwrap().clone())
+            .filter(|(raw, _)| !raw.is_empty())
+            .collect();
+        secrets.sort_by_key(|entry| std::cmp::Reverse(entry.0.len()));
+        secrets.dedup();
+        secrets
+    }
+
+    fn patterns(&self) -> Vec<Vec<u8>> {
+        self.secrets()
+            .into_iter()
+            .flat_map(|(raw, escaped)| [raw.into_bytes(), escaped.into_bytes()])
             .filter(|pattern| !pattern.is_empty())
             .collect()
     }
@@ -49,7 +64,9 @@ impl Redactor {
     }
 
     pub fn empty() -> Self {
-        Self { secrets: vec![] }
+        Self {
+            sources: vec![Arc::new(Mutex::new(vec![]))],
+        }
     }
 
     pub fn byte_prefix(&self, bytes: &[u8], finish: bool) -> (usize, Vec<u8>) {
@@ -89,15 +106,27 @@ impl Redactor {
     }
 
     pub fn new(secret: String) -> Self {
+        let redactor = Self::empty();
+        redactor.add_secret(secret);
+        redactor
+    }
+
+    /// Existing clones and consumers also mask tokens added after renewal.
+    pub fn add_secret(&self, secret: String) {
+        if secret.is_empty() {
+            return;
+        }
         let encoded = Value::string(&secret).encode();
-        Self {
-            secrets: vec![(secret, encoded[1..encoded.len() - 1].into())],
+        let entry = (secret, encoded[1..encoded.len() - 1].into());
+        let mut secrets = self.sources[0].lock().unwrap();
+        if !secrets.contains(&entry) {
+            secrets.push(entry);
         }
     }
 
     pub fn text(&self, text: &str) -> String {
         let mut text = text.to_string();
-        for (secret, escaped) in &self.secrets {
+        for (secret, escaped) in &self.secrets() {
             text = text.replace(secret, "[redacted]");
             if escaped != secret {
                 text = text.replace(escaped, "[redacted]");
@@ -107,19 +136,17 @@ impl Redactor {
     }
 
     pub fn include(&mut self, other: Self) {
-        for entry in other.secrets {
-            if !self.secrets.contains(&entry) {
-                self.secrets.push(entry);
+        for source in other.sources {
+            if !self.sources.iter().any(|saved| Arc::ptr_eq(saved, &source)) {
+                self.sources.push(source);
             }
         }
-        self.secrets
-            .sort_by_key(|entry| std::cmp::Reverse(entry.0.len()));
     }
 
     pub fn text_cursor(&self, text: &str, cursor: usize) -> (String, usize) {
         let mut text = text.to_string();
         let mut cursor = cursor;
-        for (secret, escaped) in &self.secrets {
+        for (secret, escaped) in &self.secrets() {
             for pattern in [secret, escaped] {
                 let matches: Vec<_> = text
                     .match_indices(pattern)
@@ -160,6 +187,28 @@ impl Redactor {
 mod tests {
     use super::*;
     use crate::json;
+
+    #[test]
+    fn renewal_is_visible_to_registered_consumers_and_keeps_old_tokens_masked() {
+        let account = Redactor::new("fixture-access-old".into());
+        let mut agent = Redactor::empty();
+        agent.include(account.clone());
+        let persisted = agent.clone();
+        account.add_secret("fixture-access-new".into());
+        account.add_secret("fixture-refresh-token".into());
+        assert_eq!(
+            persisted.text("fixture-access-old fixture-access-new fixture-refresh-token"),
+            "[redacted] [redacted] [redacted]"
+        );
+        assert_eq!(
+            persisted.byte_prefix(b"fixture-access-ne", false),
+            (0, vec![])
+        );
+        assert_eq!(
+            Redactor::empty().text("fixture-access-new"),
+            "fixture-access-new"
+        );
+    }
 
     #[test]
     fn masks_nested_and_json_encoded_credentials_without_changing_other_data() {

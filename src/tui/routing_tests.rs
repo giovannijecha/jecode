@@ -311,12 +311,8 @@ fn default_routing_is_saved_per_model_without_changing_the_conversation_or_a_fai
     let mut app = app(&home, &directory, &fixture, Routing::Auto);
     app.dispatch("/settings".into()).unwrap();
     let settings = app.state.selector.as_ref().unwrap();
-    let key = settings.setting_index(selector::Setting::Key);
-    assert!(
-        settings.options[key]
-            .prose
-            .contains(&app.config.store.path().display().to_string())
-    );
+    let providers = settings.setting_index(selector::Setting::Providers);
+    assert_eq!(settings.options[providers].name, "Providers");
     app.input(Decoded::Text("3".into())).unwrap();
     wait(&mut app);
     let menu = app.state.selector.as_ref().unwrap();

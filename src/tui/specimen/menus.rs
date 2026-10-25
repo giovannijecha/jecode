@@ -209,6 +209,26 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             "Model",
             selecting(columns, Selector::models(&models(), false, MODEL)),
         ),
+        (
+            "Provider",
+            selecting(
+                columns,
+                Selector::providers(
+                    &[
+                        crate::backend::Services::fixture("http://127.0.0.1:1"),
+                        crate::backend::Services::from_service(
+                            crate::backend::openai::Api::fixture(
+                                crate::auth::openai::Session::fixture("fixture-token"),
+                                "http://127.0.0.1:1",
+                            ),
+                        ),
+                    ],
+                    false,
+                    "openrouter",
+                    "openai",
+                ),
+            ),
+        ),
         ("Model · search", selecting(columns, search)),
         (
             "Effort",
@@ -229,6 +249,52 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
                     std::path::Path::new("fixture/config.json"),
                 ),
             ),
+        ),
+        (
+            "Providers",
+            selecting(columns, Selector::providers_settings()),
+        ),
+        (
+            "Credentials",
+            selecting(columns, Selector::credentials(true)),
+        ),
+        ("API keys", selecting(columns, Selector::api_keys(true))),
+        (
+            "OpenAI accounts",
+            selecting(
+                columns,
+                Selector::accounts(
+                    &[
+                        crate::auth::openai::Account {
+                            client_id: "fixture-one".into(),
+                            subject: "one".into(),
+                            email: "first.account@example.test".into(),
+                            label: "First account".into(),
+                            enabled: true,
+                        },
+                        crate::auth::openai::Account {
+                            client_id: "fixture-two".into(),
+                            subject: "two".into(),
+                            email: "second.account@example.test".into(),
+                            label: "Second account".into(),
+                            enabled: false,
+                        },
+                    ],
+                    Some("fixture-one"),
+                ),
+            ),
+        ),
+        (
+            "OpenAI sign-in",
+            selecting(columns, {
+                let mut menu = Selector::loading(
+                    "Continue with ChatGPT",
+                    "Waiting for ChatGPT sign-in… · Open in browser: https://auth.openai.com/api/accounts/authorize?client_id=fixture&state=fixture",
+                    false,
+                );
+                menu.parent = Some("OpenAI");
+                menu
+            }),
         ),
         (
             "Routing",

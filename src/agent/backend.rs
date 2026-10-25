@@ -12,7 +12,7 @@ impl Agent {
     }
 
     pub fn identity(&self) -> Origin {
-        Origin::new(self.backend_id(), self.model())
+        Origin::with_account(self.backend_id(), self.model(), self.client.account())
     }
 
     pub fn services(&self) -> Services {
@@ -20,9 +20,13 @@ impl Agent {
     }
 
     pub fn register_backend(&mut self, services: Services) {
-        self.redactor.include(services.redactor());
-        self.tools.include_credentials(self.redactor.clone());
+        self.include_credentials(services.redactor());
         self.accounts.insert(services.id().into(), services);
+    }
+
+    pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
+        self.redactor.include(redactor);
+        self.tools.include_credentials(self.redactor.clone());
     }
 
     /// Commits a prepared model connection while retaining this conversation's
@@ -37,7 +41,7 @@ impl Agent {
         prepare: bool,
     ) -> Result<(), String> {
         let previous_identity = self.identity();
-        let identity = Origin::new(next.id(), next.model());
+        let identity = Origin::with_account(next.id(), next.model(), next.account());
         let changed = previous_identity != identity;
         let changed_effort = self.effort() != next.effort();
         // Remember replacement credentials before preparation or persistence

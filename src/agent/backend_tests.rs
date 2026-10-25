@@ -9,6 +9,35 @@ mod fixture;
 use fixture::{Account, Reply};
 
 #[test]
+fn account_only_switch_resets_context_and_excludes_foreign_native_items() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let mut first = Account::new("alpha", vec![Reply::text("First account answer")]);
+    first.scope = Some("client-a:subject".into());
+    let mut second = Account::new("alpha", vec![Reply::text("Second account answer")]);
+    second.scope = Some("client-b:subject".into());
+    let mut agent = Agent::new(first.client(), Tools::new(directory.path()).unwrap());
+    agent.enable_sessions(home.path()).unwrap();
+    agent.run_turn("Original task", &mut |_| Ok(())).unwrap();
+    assert_eq!(agent.context.input_tokens, Some(73));
+    let original = agent.messages.lock().unwrap().clone();
+    agent.replace_backend(Box::new(second.client())).unwrap();
+    assert_eq!(agent.context.input_tokens, None);
+    assert_eq!(agent.compatible_from, original.len());
+    assert_eq!(*agent.messages.lock().unwrap(), original);
+    agent
+        .run_turn("Continue the same task", &mut |_| Ok(()))
+        .unwrap();
+    let request = second.requests.lock().unwrap()[0].encode();
+    assert!(request.contains("Original task"));
+    assert!(!request.contains("alpha-private-state"));
+    assert_eq!(
+        agent.identity().account.as_deref(),
+        Some("client-b:subject")
+    );
+}
+
+#[test]
 fn different_protocols_share_a_session_without_replaying_tools_or_foreign_native_fields() {
     let directory = Directory::new();
     let home = Directory::new();

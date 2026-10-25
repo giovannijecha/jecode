@@ -39,12 +39,28 @@ pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) 
         line.push(&format!("{separator}{detail}"), MUTED);
         line
     };
-    let variants = [
+    let mut variants = Vec::new();
+    if let Some(account) = &state.chatgpt_account {
+        let status = match account {
+            crate::tui::state::ChatGptAccount::Active(email) => {
+                format!("Using ChatGPT plan · {email}")
+            }
+            crate::tui::state::ChatGptAccount::SignedOut => "ChatGPT · signed out".into(),
+            crate::tui::state::ChatGptAccount::Unavailable => {
+                "ChatGPT · account unavailable".into()
+            }
+        };
+        variants.push((
+            path.as_str(),
+            right(&format!("{model} · {effort} · {status}")),
+        ));
+    }
+    variants.extend([
         (path.as_str(), right(&format!("{model} · {effort}"))),
         (project, right(&format!("{short} · {effort}"))),
         ("", right(short)),
         ("", gauge.clone().unwrap_or_else(|| Line::new(short, MUTED))),
-    ];
+    ]);
     let last = variants.len() - 1;
     for (index, (left, right)) in variants.into_iter().enumerate() {
         let (left_cells, right_cells) = (text::cells(left), text::cells(&right.plain()));

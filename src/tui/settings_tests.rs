@@ -2,11 +2,36 @@ use super::*;
 use crate::{
     backend::openrouter::OpenRouter,
     config::{Settings, Store},
+    effort::Effort,
     json::Value,
     test_support::{Directory, HttpFixture, completion},
     tools::Tools,
 };
 use std::{thread, time::Instant};
+
+#[test]
+fn a_newly_configured_default_provider_is_available_to_new_conversations() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let home = app.config.store.path().parent().unwrap().to_path_buf();
+    crate::auth::openai::Store::fixture_account(home.clone(), "isolated-new-account-access")
+        .unwrap();
+    let session = crate::auth::openai::Store::new(home)
+        .active()
+        .unwrap()
+        .unwrap();
+    app.catalog_services = Some(
+        crate::backend::Services::for_credential(&crate::auth::Credential::openai(session))
+            .unwrap(),
+    );
+    app.apply_selection("fixture-chatgpt-default".into(), Effort::Default, true);
+    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openrouter");
+    app.dispatch("/new".into()).unwrap();
+    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openai");
+    assert_eq!(app.archive.model, "fixture-chatgpt-default");
+    assert!(fixture.finish().is_empty());
+}
 
 fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
@@ -33,6 +58,11 @@ fn enter(app: &mut App) {
     }))
     .unwrap();
 }
+fn open_key(app: &mut App) {
+    app.input(Decoded::Text("5".into())).unwrap();
+    app.input(Decoded::Text("2".into())).unwrap();
+    app.input(Decoded::Text("1".into())).unwrap();
+}
 fn wait(app: &mut App) {
     let started = Instant::now();
     while app.job.is_some() || app.worker.is_some() {
@@ -58,6 +88,188 @@ fn backend_command_switches_model_without_changing_saved_defaults() {
 }
 
 #[test]
+fn backend_command_uses_the_selected_chatgpt_account_without_changing_defaults() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let home = app.config.store.path().parent().unwrap().to_path_buf();
+    crate::auth::openai::Store::fixture_account(home, "fixture-token").unwrap();
+    app.dispatch("/backend openai fixture-chatgpt-model".into())
+        .unwrap();
+    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openai");
+    assert_eq!(app.archive.model, "fixture-chatgpt-model");
+    assert_eq!(app.config.settings.backend_id, "openrouter");
+    assert!(matches!(app.state.chatgpt_account,
+        Some(state::ChatGptAccount::Active(ref email)) if email == "fixture@example.test"));
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn two_configured_providers_choose_provider_then_model_and_effort_for_this_conversation() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        200,
+        Value::object([(
+            "models",
+            Value::Array(vec![Value::object([
+                ("slug", Value::string("fixture-chatgpt-model")),
+                ("display_name", Value::string("Fixture ChatGPT model")),
+                ("visibility", Value::string("list")),
+                ("context_window", Value::number(500_000)),
+                (
+                    "supported_reasoning_levels",
+                    Value::Array(
+                        ["low", "medium", "high", "xhigh", "max", "ultra"]
+                            .into_iter()
+                            .map(|effort| Value::object([("effort", Value::string(effort))]))
+                            .collect(),
+                    ),
+                ),
+            ])]),
+        )]),
+    )]);
+    let store = Store::new(directory.path().join("config"));
+    let settings =
+        Settings::new("isolated-fixture-key".into(), "fixture/router-model".into()).unwrap();
+    store.save(&settings).unwrap();
+    let home = store.path().parent().unwrap().to_path_buf();
+    crate::auth::openai::Store::fixture_account(home.clone(), "fixture-chatgpt-token").unwrap();
+    let session = crate::auth::openai::Store::new(home)
+        .active()
+        .unwrap()
+        .unwrap();
+    let services = crate::backend::Services::from_service(crate::backend::openai::Api::fixture(
+        session,
+        fixture.endpoint.strip_suffix("/chat/completions").unwrap(),
+    ));
+    let agent = Agent::with_backend(
+        services.create("fixture/original".into()).unwrap(),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let mut app = App::new(
+        agent,
+        SessionConfig {
+            store,
+            settings,
+            bash: crate::tools::find_bash().unwrap(),
+        },
+        None,
+    );
+    app.dispatch("/model".into()).unwrap();
+    let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(
+        menu.purpose,
+        selector::Purpose::Providers { defaults: false }
+    ));
+    let index = menu
+        .options
+        .iter()
+        .position(|row| matches!(row.choice, selector::Choice::Provider("openai")))
+        .unwrap();
+    assert!(menu.options[index].prose.contains("fixture@example.test"));
+    app.choose(selector::Choice::Provider("openai")).unwrap();
+    assert!(index < 2);
+    assert!(app.job.is_some());
+    wait(&mut app);
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::Models { defaults: false }
+    ));
+    assert!(
+        app.state.selector.as_ref().unwrap().options[0]
+            .prose
+            .contains("fixture@example.test")
+    );
+    app.state.width = 44;
+    assert!(
+        view::frame(&app.state, "fixture/original", "directory")
+            .live
+            .iter()
+            .any(|row| row.plain().contains("fixture@example.test"))
+    );
+    enter(&mut app);
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::Efforts {
+            defaults: false,
+            ..
+        }
+    ));
+    assert!(
+        app.state
+            .selector
+            .as_ref()
+            .unwrap()
+            .options
+            .iter()
+            .any(|row| matches!(row.choice, selector::Choice::Effort(Effort::Ultra)))
+    );
+    app.input(Decoded::Text("4".into())).unwrap();
+    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openai");
+    assert_eq!(app.agent.as_ref().unwrap().effort(), Effort::High);
+    assert_eq!(
+        app.agent.as_ref().unwrap().context_status().capacity,
+        Some(500_000)
+    );
+    assert_eq!(app.archive.model, "fixture-chatgpt-model");
+    assert_eq!(app.config.settings.backend_id, "openrouter");
+    assert!(
+        fixture
+            .finish()
+            .iter()
+            .any(|request| request.headers[0].starts_with("GET /models "))
+    );
+}
+
+#[test]
+fn model_command_reports_when_no_provider_is_configured() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.config.settings.credentials.clear();
+    app.config.settings.api_key.clear();
+    app.dispatch("/model".into()).unwrap();
+    assert!(app.job.is_none());
+    assert!(app.state.selector.is_none());
+    assert!(
+        app.state
+            .notice
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("No configured provider")
+    );
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn account_menu_keeps_sign_out_confirmation_and_escape_returns_to_account() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let home = app.config.store.path().parent().unwrap().to_path_buf();
+    crate::auth::openai::Store::fixture_account(home, "fixture-token").unwrap();
+    app.dispatch("/settings".into()).unwrap();
+    for number in ["5", "1", "1", "1", "3"] {
+        app.input(Decoded::Text(number.into())).unwrap();
+    }
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::Account {
+            confirm_sign_out: true
+        }
+    ));
+    app.close_selector();
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::Account {
+            confirm_sign_out: false
+        }
+    ));
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn validated_key_save_changes_authentication_preserves_context_and_never_displays_the_key() {
     let directory = Directory::new();
     let key = "replacement-fixture-key";
@@ -74,7 +286,7 @@ fn validated_key_save_changes_authentication_preserves_context_and_never_display
     let mut app = app(&directory, &fixture);
     app.state.editor.insert("untouched draft");
     app.dispatch("/settings".into()).unwrap();
-    app.input(Decoded::Text("5".into())).unwrap();
+    open_key(&mut app);
     app.input(Decoded::Text(key.into())).unwrap();
     let frame = view::frame(&app.state, "fixture/model", "directory");
     assert!(frame.live.iter().all(|line| !line.plain().contains(key)));
@@ -123,7 +335,7 @@ fn a_rejected_key_does_not_replace_saved_settings_or_the_current_client() {
     )]);
     let mut app = app(&directory, &fixture);
     app.dispatch("/settings".into()).unwrap();
-    app.input(Decoded::Text("5".into())).unwrap();
+    open_key(&mut app);
     app.input(Decoded::Text("replacement-fixture-key".into()))
         .unwrap();
     enter(&mut app);
@@ -268,9 +480,11 @@ fn cancelling_settings_children_returns_to_settings_before_closing_the_manager()
         selector::Purpose::Settings
     ));
     assert_eq!(app.state.selector.as_ref().unwrap().selected, 0);
-    app.input(Decoded::Text("5".into())).unwrap();
+    open_key(&mut app);
     app.input(Decoded::Text("unsaved-fixture-key".into()))
         .unwrap();
+    app.close_selector();
+    app.close_selector();
     app.close_selector();
     assert!(matches!(
         app.state.selector.as_ref().unwrap().purpose,

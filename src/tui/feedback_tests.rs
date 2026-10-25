@@ -243,12 +243,24 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
     }
     app.dispatch("/settings".into()).unwrap();
     app.input(Decoded::Text("5".into())).unwrap();
+    app.input(Decoded::Text("2".into())).unwrap();
+    app.input(Decoded::Text("1".into())).unwrap();
+    key(&mut app, 27, 0);
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::ApiKeys
+    ));
+    assert!(app.state.notice.is_none());
+    key(&mut app, 27, 0);
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::ProviderSettings
+    ));
     key(&mut app, 27, 0);
     assert!(matches!(
         app.state.selector.as_ref().unwrap().purpose,
         selector::Purpose::Settings
     ));
-    assert!(app.state.notice.is_none());
     key(&mut app, 27, 0);
     assert!(app.state.selector.is_none());
     assert!(app.state.notice.is_none());
@@ -355,6 +367,8 @@ fn catalog_and_key_validation_use_one_correct_loading_title() {
         .replace_client(OpenRouter::fixture(fixture.endpoint.clone()));
     app.dispatch("/settings".into()).unwrap();
     app.input(Decoded::Text("5".into())).unwrap();
+    app.input(Decoded::Text("2".into())).unwrap();
+    app.input(Decoded::Text("1".into())).unwrap();
     app.input(Decoded::Text("isolated-key".into())).unwrap();
     key(&mut app, 13, 0);
     assert_eq!(live(&app).matches("Checking API key…").count(), 1);

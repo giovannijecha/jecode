@@ -37,7 +37,7 @@ pub(super) fn selector(
         Purpose::Loading => {
             let mut line = activity::indicator((menu.opened.elapsed().as_millis() / 120) as usize);
             line.push(&format!("  {}", menu.message), MUTED);
-            out.add(line, Part::Keep);
+            out.extend(line.wrap(width, true), Part::Keep);
         }
         _ => list(menu, &mut out, width, height, ending.len()),
     }
@@ -62,6 +62,14 @@ fn aside(menu: &Selector) -> Line {
     };
     let text = match &menu.purpose {
         Purpose::Models { .. } => count("models"),
+        Purpose::Providers { .. } => count("providers"),
+        Purpose::Accounts => format!(
+            "{} accounts",
+            menu.options
+                .iter()
+                .filter(|row| matches!(row.choice, Choice::Account(_)))
+                .count()
+        ),
         Purpose::Sessions { .. } if !menu.options.is_empty() => count("conversations"),
         Purpose::Efforts { defaults: true, .. } | Purpose::Settings => "new conversations".into(),
         Purpose::Routing { entries, .. } if entries.iter().any(|entry| entry.metrics.is_some()) => {
@@ -113,6 +121,15 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
                 width,
             );
         }
+        Purpose::Account {
+            confirm_sign_out: true,
+        } => {
+            return panel::confirm(
+                "Sign out of this account?",
+                &[key("Enter", "sign out"), key("Esc", "cancel")],
+                width,
+            );
+        }
         Purpose::Sessions { .. } | Purpose::Drafts { .. } if menu.options.is_empty() => {
             close.to_vec()
         }
@@ -136,6 +153,7 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
         }
         Purpose::Key => vec![key("Enter", "validate and save"), close[0]],
         Purpose::AutoCompact => vec![key("0–9", "type"), key("Enter", "save"), close[0]],
+        Purpose::Loading if menu.title == "Sign out" => vec![],
         Purpose::Loading => close.to_vec(),
         Purpose::Settings => vec![
             key("↑↓", "move").optional(),
@@ -370,6 +388,7 @@ pub(super) fn badge(badge: Option<&Badge>) -> Line {
             line.push("● ", GOOD);
             line.push("current", MUTED);
         }
+        Some(Badge::Default) => line.push("default", MUTED),
         Some(Badge::Note(note)) => line.push(note, MUTED),
         Some(Badge::Queued) => line.push("queued", ACCENT),
         Some(Badge::Paused) => line.push("paused", WARNING),
