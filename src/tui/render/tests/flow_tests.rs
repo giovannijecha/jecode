@@ -81,7 +81,8 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     let mut screen = Screen::new(state.width, state.height);
     let mut display = Display::new((state.width, state.height));
     drain(&mut display, &mut screen, &state, now);
-    display.scroll(Scroll::Reveal(1));
+    display.scroll(Scroll::Start);
+    display.scroll(Scroll::Rows(2));
     step(&mut display, &mut screen, &state, now);
     assert!(screen.visible().starts_with("● Bash(first)"));
     assert!(!screen.visible().contains("    one"));
@@ -142,7 +143,8 @@ fn resizing_inside_expanded_tool_output_keeps_the_logical_source_line() {
     let mut screen = Screen::new(state.width, state.height);
     let mut display = Display::new((state.width, state.height));
     drain(&mut display, &mut screen, &state, now);
-    display.scroll(Scroll::Reveal(1));
+    display.scroll(Scroll::Start);
+    display.scroll(Scroll::Rows(2));
     display.scroll(Scroll::Rows(6));
     step(&mut display, &mut screen, &state, now);
     let anchor = first_source_line(&screen);

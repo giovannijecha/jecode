@@ -35,9 +35,9 @@ images.
 Prompt history preserves the unsent draft and caret. `Esc` leaves history and
 returns to that draft. `Ctrl+O` is ignored during generation and becomes
 available when the worker ends, including after a stop or error. It opens all
-tools from that turn and moves the view to its first tool; pressing it again
-restores the normal previews and returns to the final answer. A finished turn
-without tools has no toggle, and earlier turns are never substituted. Typing
+tools from that turn; pressing it again restores the normal previews. Both
+actions preserve the reading position, including following the tail. A finished
+turn without tools has no toggle, and earlier turns are never substituted. Typing
 an unsent draft keeps details open. Accepting a new user prompt collapses the
 old details until the new turn finishes.
 Expansion is temporary. Resumed sessions start compact and retain execution-turn

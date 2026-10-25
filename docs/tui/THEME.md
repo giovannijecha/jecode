@@ -116,8 +116,8 @@ preview. Size and alignment limits also use this fallback without affecting
 the file operation. See [Tools](../usage/TOOLS.md) for the execution boundary.
 
 `Ctrl+O` expands or collapses every call in the latest finished execution turn.
-Opening scrolls to its first tool; closing returns to the final answer. It is
-ignored while a turn runs, and a new accepted prompt resets the old expansion.
+Opening and closing preserve the reading position; following the tail stays at
+the tail. It is ignored while a turn runs, and a new accepted prompt resets the old expansion.
 No tool title opens details individually. See [Composer and controls](COMPOSER.md)
 for the complete interaction map and [Tools](../usage/TOOLS.md) for tool behavior.
 
