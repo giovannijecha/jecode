@@ -183,11 +183,14 @@ fn running_states_stay_explicit_without_a_selection_mode() {
         None,
         None,
         80,
-        &Presentation::default(),
+        &Presentation {
+            elapsed: Some(std::time::Duration::from_millis(2400)),
+            ..Presentation::default()
+        },
     );
     assert!(rows[0].background.is_none());
-    assert_eq!(rows[0].spans[0].style, TOOL_ACCENT);
-    assert!(plain(&rows).contains("⎿ ▰▰▱▱▱▱"));
+    assert_eq!(rows[0].spans[0].style, crate::tui::theme::TOOL_PULSE[2]);
+    assert!(plain(&rows).contains("⎿ 2.4s"));
     assert!(rows[1..].iter().all(|row| row.background.is_none()));
 }
 

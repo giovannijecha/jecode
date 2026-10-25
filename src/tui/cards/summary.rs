@@ -6,7 +6,7 @@ use crate::{
         activity,
         line::Line,
         text,
-        theme::{BAD, BODY, GOOD, MUTED, STRONG, TOOL_ACCENT, WARNING},
+        theme::{BAD, BODY, GOOD, MUTED, STRONG, TOOL_ACCENT, TOOL_DIM, WARNING},
     },
 };
 use std::time::Duration;
@@ -109,16 +109,15 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
 }
 
 fn running(tool: &Tool<'_>) -> Line {
-    let elapsed = tool.presentation.duration();
-    let frame = elapsed.map_or(0, |elapsed| {
-        usize::try_from(elapsed.as_millis() / 120).unwrap_or(0)
-    });
-    let mut line = activity::indicator(frame);
-    if let Some(elapsed) = elapsed {
-        line.push(&format!(" {}", activity::duration(elapsed)), MUTED);
+    let mut line = Line::default();
+    if let Some(elapsed) = tool.presentation.duration() {
+        line.push(&activity::duration(elapsed), TOOL_DIM);
     }
     if let Some(note) = &tool.presentation.note {
-        line.push(&format!(" · {}", text::clean(note)), MUTED);
+        if !line.spans.is_empty() {
+            line.push(" · ", MUTED);
+        }
+        line.push(&text::clean(note), MUTED);
     }
     line
 }

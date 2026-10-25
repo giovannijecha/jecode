@@ -64,6 +64,72 @@ fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
 }
 
 #[test]
+fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
+    use crate::tui::theme::TOOL_PULSE;
+    let arguments = object([("path", "fixture.rs"), ("command", "cargo build")]);
+    for name in [
+        "read",
+        "write",
+        "edit",
+        "bash",
+        "process",
+        "checkpoint",
+        "web",
+        "browser",
+        "future_tool",
+    ] {
+        for (frame, shade) in TOOL_PULSE.iter().enumerate() {
+            let shown = Presentation {
+                elapsed: Some(Duration::from_millis(240 * frame as u64)),
+                note: Some("checkpoint rc-fixture".into()),
+                ..Presentation::default()
+            };
+            let rows = card(
+                Tool {
+                    name,
+                    arguments: &arguments,
+                    summary: "",
+                    result: None,
+                    change: None,
+                    presentation: &shown,
+                },
+                80,
+                false,
+            )
+            .rows;
+            assert_eq!(rows[0].spans[0].text, "● ");
+            assert_eq!(rows[0].spans[0].style, *shade, "{name}, frame {frame}");
+            let expected = crate::tui::activity::duration(shown.elapsed.unwrap());
+            assert_eq!(
+                rows[1].plain(),
+                format!("  ⎿ {expected} · checkpoint rc-fixture")
+            );
+            assert!(!plain(&rows).join("").contains(['▰', '▱']));
+        }
+    }
+}
+
+#[test]
+fn returned_tools_keep_their_static_outcome_marker() {
+    let arguments = object([("command", "cargo build")]);
+    for (result, expected) in [
+        (Value::object([("exit_code", Value::number(0))]), GOOD),
+        (object([("error", "failed")]), BAD),
+        (Value::object([("cancelled", Value::Bool(true))]), WARNING),
+        (
+            object([("process_id", "p1"), ("status", "running")]),
+            TOOL_ACCENT,
+        ),
+    ] {
+        for elapsed in [0, 480] {
+            let shown = presentation(elapsed, false);
+            let rows = card(tool("bash", &arguments, &result, &shown), 80, false).rows;
+            assert_eq!(rows[0].spans[0].style, expected);
+        }
+    }
+}
+
+#[test]
 fn titles_wrap_on_words_under_the_open_paren_and_compact_titles_close_with_an_ellipsis() {
     let arguments = object([(
         "command",

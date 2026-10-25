@@ -25,7 +25,7 @@ fn plain(rows: &[Line]) -> String {
 fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     let running = draw("skill:review", None, false);
     assert!(plain(&running).contains("Skill(review)"));
-    assert_eq!(running[0].spans[0].style, TOOL_ACCENT);
+    assert_eq!(running[0].spans[0].style, TOOL_DIM);
 
     let result = Value::object([
         ("content", Value::string("1: # Review\n2: Check changes.\n")),

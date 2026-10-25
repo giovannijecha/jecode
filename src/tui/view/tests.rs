@@ -84,7 +84,7 @@ fn pending_tools_and_following_notices_remain_live_until_the_result_arrives() {
         pending
             .live
             .iter()
-            .any(|line| line.plain().contains("⎿ ") && line.plain().contains('▰'))
+            .any(|line| line.plain().contains("⎿ ") && !line.plain().contains(['▰', '▱']))
     );
     assert!(
         pending

@@ -1,7 +1,10 @@
 use super::{
     line::{Line, Span},
     text,
-    theme::{BAD, GOOD, MUTED, SELECTED_SURFACE, STRONG, Style, TOOL_ACCENT, TOOL_DIM, WARNING},
+    theme::{
+        BAD, GOOD, MUTED, SELECTED_SURFACE, STRONG, Style, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE,
+        WARNING,
+    },
 };
 use crate::{file_change::Change, json::Value};
 
@@ -109,7 +112,13 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         .or(legacy.as_ref())
         .filter(|_| status == Status::Done);
     let (name, target) = heading(&tool);
-    let mut rows = title::rows(name, &target, status, columns, expanded);
+    let marker = if status == Status::Running {
+        let elapsed = tool.presentation.duration().unwrap_or_default();
+        TOOL_PULSE[((elapsed.as_millis() / 240) % TOOL_PULSE.len() as u128) as usize]
+    } else {
+        status.style()
+    };
+    let mut rows = title::rows(name, &target, marker, columns, expanded);
     let lead = if status == Status::Failed {
         BAD
     } else {

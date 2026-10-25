@@ -43,7 +43,8 @@ fn every_turn_keeps_short_previews_and_its_original_results() {
     start(&mut state, "future");
     let running = visible(&state);
     assert!(running.contains("● Bash(fixture-command)"));
-    assert!(running.contains("⎿ ") && running.contains('▰'));
+    assert!(running.contains("⎿ ") && running.contains('●'));
+    assert!(!running.contains(['▰', '▱']));
     finish(&mut state, "future", "one\ntwo\nthree\nfour\nfuture detail");
     let text = visible(&state);
     assert_eq!(text.matches("⎿ retained detail").count(), 2);

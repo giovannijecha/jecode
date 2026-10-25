@@ -67,7 +67,7 @@ The result names what came back as `Subject · detail`:
 
 | Call | Result |
 | --- | --- |
-| Running | The activity scanner, elapsed time and any note, such as the [checkpoint](../usage/CHECKPOINTS.md) `checkpoint rc-ID` recorded before a Bash call. |
+| Running | A fixed `●` title marker pulses through `TOOL_PULSE` every 240 ms; the result row keeps the elapsed time and any note, such as the [checkpoint](../usage/CHECKPOINTS.md) `checkpoint rc-ID` recorded before a Bash call. |
 | Read | `Read N lines`, with `from line N` past the start; byte reads, image and PDF views and attachments say so. |
 | Update, Write | `+N −M lines` in green and red, or explicit text for empty creations, no-op edits, final newlines and line endings. |
 | Bash, Process | Collapsed, the last stdout line and the duration from one second. Expanded, `Done in …`. |

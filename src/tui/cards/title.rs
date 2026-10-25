@@ -1,4 +1,3 @@
-use super::Status;
 use crate::tui::{
     line::{Line, Origin},
     text,
@@ -21,7 +20,7 @@ pub(super) fn family(name: &str) -> Style {
 pub(super) fn rows(
     name: &str,
     target: &str,
-    status: Status,
+    marker: Style,
     columns: usize,
     expanded: bool,
 ) -> Vec<Line> {
@@ -85,7 +84,7 @@ pub(super) fn rows(
             } else {
                 " ".repeat(indent)
             };
-            line.gutter(&gutter, if index == 0 { status.style() } else { MUTED })
+            line.gutter(&gutter, if index == 0 { marker } else { MUTED })
                 .shortened(columns)
         })
         .collect()

@@ -25,10 +25,7 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .find(|line| line.contains("fixture command"))
         .unwrap();
     assert!(header.contains("● Bash(fixture command)"));
-    let summary = visible
-        .lines()
-        .find(|line| line.contains("⎿ ") && line.contains('▰'))
-        .unwrap();
+    let summary = visible.lines().find(|line| line.contains("⎿ ")).unwrap();
     let seconds: f64 = summary
         .trim_end()
         .rsplit(' ')
@@ -40,7 +37,8 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .unwrap();
     assert!(seconds >= 12.0);
     assert!(!header.contains('▰'));
-    assert_eq!(visible.matches("▰▰").count(), 2); // The card and the rule.
+    assert!(!summary.contains(['▰', '▱']));
+    assert_eq!(visible.matches("▰▰").count(), 1); // Only the composer rule.
     assert!(
         visible
             .lines()

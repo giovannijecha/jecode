@@ -447,6 +447,23 @@ fn tools() {
         &format!("Tool cards  ·  one turn at {WIDE} columns"),
     );
     turn(&mut rows, WIDE);
+    heading(&mut rows, "Tool activity  ·  quiet pulse colour frames");
+    for frame in 0..4 {
+        let call = Call {
+            name: "bash",
+            arguments: command("cargo build --locked"),
+            result: None,
+            change: None,
+            presentation: Presentation {
+                elapsed: Some(Duration::from_millis(frame * 240)),
+                ..Presentation::default()
+            },
+        };
+        for line in card(&call, WIDE) {
+            rows.push((line, WIDE));
+        }
+        rows.push((Line::default(), WIDE));
+    }
     heading(&mut rows, "Tool cards  ·  states");
     for (title, call) in states() {
         rows.push((Line::new(title, MUTED), WIDE));

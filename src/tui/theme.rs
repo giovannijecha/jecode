@@ -43,6 +43,8 @@ pub const CODE_STRING: Style = GOOD;
 pub const CODE_NUMBER: Style = WARNING;
 pub const METER_FILL: Style = SCANNER_LIT;
 pub const METER_TRACK: Style = SCANNER_REST;
+// Quiet pulse: one fixed tool marker, four discrete 240 ms colour frames.
+pub const TOOL_PULSE: [Style; 4] = [TOOL_DIM, TOOL_ACCENT, SCANNER_LIT, TOOL_ACCENT];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rgb(u8, u8, u8);

@@ -36,7 +36,7 @@ pub fn render(reads: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
         [path] => path.clone(),
         paths => format!("{} files", paths.len()),
     };
-    let mut rows = title::rows("Read", &target, Status::Done, columns, expanded);
+    let mut rows = title::rows("Read", &target, Status::Done.style(), columns, expanded);
     let lines = |tool: &Tool<'_>| tool.result.map_or(0, summary::lines);
     if expanded {
         for (index, tool) in reads.iter().enumerate() {
