@@ -73,6 +73,8 @@ Short diffs stay open when another tool starts. After the execution turn ends,
 `Ctrl+O` expands every call from that turn, including long diffs and retained
 output; another `Ctrl+O` restores the normal previews. The shortcut is ignored
 during generation and does nothing when the latest finished turn has no tools.
+It keeps your reading position and briefly confirms the change with the
+number of completed tools.
 See [TUI theme](../tui/THEME.md) for presentation and controls.
 
 ## Local web and browser tools

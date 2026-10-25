@@ -261,12 +261,14 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("Native row 099");
                 pty.Wait("Complete ·");
                 int expanded = pty.Mark(); pty.Send("\x0f");
+                pty.Wait("Tool details expanded", expanded);
                 pty.Send("after expansion");
                 pty.Wait("after expansion", expanded);
                 pty.EnsureNoText("native detail", expanded);
                 int clearExpanded = pty.Mark(); pty.Send("\x15");
                 pty.Wait("Ask anything", clearExpanded);
                 int collapsed = pty.Mark(); pty.Send("\x0f");
+                pty.Wait("Tool details collapsed", collapsed);
                 pty.Send("after collapse");
                 pty.Wait("after collapse", collapsed);
                 int clearCollapsed = pty.Mark(); pty.Send("\x15");

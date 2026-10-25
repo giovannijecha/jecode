@@ -61,9 +61,11 @@ fn control_o_keeps_the_tail_and_a_reading_page_in_place() {
     };
     draw(&mut app);
     key(&mut app, 79, 4);
+    let expanded = draw(&mut app);
+    assert!(expanded.contains("Tool details expanded"));
     assert!(
-        draw(&mut app).is_empty(),
-        "expanding moved the following tail"
+        !expanded.contains("Latest output"),
+        "expanding revealed the tool above the tail"
     );
     assert!(!app.renderer.back_to_bottom(), "tail stopped following");
     let tools: Vec<_> = app
@@ -77,10 +79,7 @@ fn control_o_keeps_the_tail_and_a_reading_page_in_place() {
         .collect();
     assert_eq!(tools, [false, true], "only the latest turn expands");
     key(&mut app, 79, 4);
-    assert!(
-        draw(&mut app).is_empty(),
-        "collapsing moved the following tail"
-    );
+    assert!(draw(&mut app).contains("Tool details collapsed"));
     assert!(!app.renderer.back_to_bottom(), "tail stopped following");
 
     app.renderer
@@ -95,14 +94,18 @@ fn control_o_keeps_the_tail_and_a_reading_page_in_place() {
         "reading mode was not entered"
     );
     key(&mut app, 79, 4);
+    let expanded = draw(&mut app);
+    assert!(expanded.contains("Tool details expanded"));
     assert!(
-        draw(&mut app).is_empty(),
-        "expanding moved the reading page"
+        !expanded.contains("Later paragraph"),
+        "expanding repainted the reading page"
     );
     key(&mut app, 79, 4);
+    let collapsed = draw(&mut app);
+    assert!(collapsed.contains("Tool details collapsed"));
     assert!(
-        draw(&mut app).is_empty(),
-        "collapsing moved the reading page"
+        !collapsed.contains("Later paragraph"),
+        "collapsing repainted the reading page"
     );
     assert!(fixture.finish().is_empty());
 }
