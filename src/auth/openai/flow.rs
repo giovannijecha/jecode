@@ -180,7 +180,7 @@ pub(super) fn refresh(record: &Record, cancel: &Cancellation) -> Result<Record, 
     )?;
     let mut updated = record.clone();
     updated.access_token = required(&response, "access_token")?.to_string();
-    updated.refresh_token = required(&response, "refresh_token")?.to_string();
+    updated.refresh_token = refresh_token(&response, &record.refresh_token)?;
     if let Some(id) = response.get("id_token").and_then(Value::as_str) {
         // A refresh ID token has no per-attempt nonce; retain the previously
         // verified ID token for reauthorization instead of trusting this one.
@@ -255,6 +255,13 @@ fn required<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OpenAI token response has no valid {key}"))
+}
+
+fn refresh_token(response: &Value, previous: &str) -> Result<String, String> {
+    match response.get("refresh_token") {
+        Some(_) => Ok(required(response, "refresh_token")?.to_string()),
+        None => Ok(previous.to_string()),
+    }
 }
 
 fn seconds(value: &Value, key: &str) -> Result<u64, String> {
@@ -343,7 +350,10 @@ fn handle_callback(
             }
         }
     }
-    let request = std::str::from_utf8(&input).map_err(|_| "OpenAI callback is not UTF-8")?;
+    let Ok(request) = std::str::from_utf8(&input) else {
+        respond(stream, "400 Bad Request", "Invalid callback encoding");
+        return Ok(None);
+    };
     let Some((head, _)) = request.split_once("\r\n") else {
         respond(stream, "400 Bad Request", "Invalid callback");
         return Ok(None);
@@ -367,12 +377,19 @@ fn handle_callback(
         respond(stream, "400 Bad Request", "Invalid callback host");
         return Ok(None);
     }
-    let values = wire::query(query)?;
+    let Ok(values) = wire::query(query) else {
+        respond(stream, "400 Bad Request", "Invalid callback query");
+        return Ok(None);
+    };
     if values.get("state").map(String::as_str) != Some(state) {
         respond(stream, "400 Bad Request", "Sign-in state mismatch");
-        return Err("OpenAI callback state mismatch".into());
+        return Ok(None);
     }
     if let Some(error) = values.get("error") {
+        if error.is_empty() {
+            respond(stream, "400 Bad Request", "Invalid callback error");
+            return Ok(None);
+        }
         respond(
             stream,
             "200 OK",
@@ -390,9 +407,9 @@ fn handle_callback(
             }
         ));
     }
-    if !values.contains_key("code") {
+    if values.get("code").is_none_or(String::is_empty) {
         respond(stream, "400 Bad Request", "Missing authorization code");
-        return Err("OpenAI callback returned no code".into());
+        return Ok(None);
     }
     respond(
         stream,
@@ -402,7 +419,15 @@ fn handle_callback(
     Ok(Some(values))
 }
 
-fn open_browser(url: &str) -> Result<(), String> {
+pub(crate) fn open_browser(url: &str) -> Result<(), String> {
+    let authority = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split(['/', '?', '#']).next());
+    if authority.is_none_or(|authority| authority.is_empty() || authority.contains('@'))
+        || !url.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err("Invalid HTTPS link".into());
+    }
     #[cfg(windows)]
     let mut command = {
         let mut c = Command::new("rundll32.exe");
@@ -428,55 +453,9 @@ fn open_browser(url: &str) -> Result<(), String> {
         .stderr(Stdio::null());
     command
         .spawn()
-        .map_err(|_| "Could not open the system browser; use the displayed sign-in URL")?;
+        .map_err(|_| "Could not open the system browser; use the displayed link")?;
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    #[test]
-    fn callback_accepts_fragmented_headers_and_rejects_wrong_state() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let receiver = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            handle_callback(&mut stream, port, "expected", &Cancellation::default())
-        });
-        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        client
-            .write_all(b"GET /auth/callback?code=secret&state=expected HTTP/1.1\r\nHo")
-            .unwrap();
-        std::thread::sleep(Duration::from_millis(20));
-        client
-            .write_all(format!("st: 127.0.0.1:{port}\r\n\r\n").as_bytes())
-            .unwrap();
-        assert_eq!(receiver.join().unwrap().unwrap().unwrap()["code"], "secret");
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let receiver = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            handle_callback(&mut stream, port, "expected", &Cancellation::default())
-        });
-        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        client.write_all(format!("GET /auth/callback?code=secret&state=wrong HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes()).unwrap();
-        assert!(
-            receiver
-                .join()
-                .unwrap()
-                .unwrap_err()
-                .contains("state mismatch")
-        );
-    }
-
-    #[test]
-    fn unsupported_earliest_refresh_format_fails_closed() {
-        let response = Value::object([("earliest_refresh_at", Value::string("tomorrow"))]);
-        assert!(earliest_refresh(&response, 1).is_err());
-        let response = Value::object([("earliest_refresh_at", Value::number(42))]);
-        assert_eq!(earliest_refresh(&response, 1).unwrap(), 42);
-    }
-}
+mod tests;

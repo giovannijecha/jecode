@@ -10,7 +10,9 @@ pub(super) struct Stream {
     data: String,
     items: BTreeMap<usize, Value>,
     terminal: Option<Result<Value, Failure>>,
-    observed_text: String,
+    has_text: bool,
+    text_item: Option<usize>,
+    message_boundary: bool,
 }
 
 impl Stream {
@@ -56,8 +58,18 @@ impl Stream {
             .ok_or("OpenAI stream event has no type")?
         {
             "response.output_text.delta" | "response.refusal.delta" => {
-                if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                    self.observed_text.push_str(delta);
+                if let Some(delta) = event.get("delta").and_then(Value::as_str)
+                    && !delta.is_empty()
+                {
+                    let index = event.get("output_index").and_then(Value::as_usize);
+                    if self.has_text
+                        && (self.message_boundary || (index.is_some() && index != self.text_item))
+                    {
+                        emit(Update::TextDelta("\n\n".into()))?;
+                    }
+                    self.has_text = true;
+                    self.text_item = index.or(self.text_item);
+                    self.message_boundary = false;
                     emit(Update::TextDelta(delta.into()))?;
                 }
             }
@@ -74,6 +86,7 @@ impl Stream {
                 {
                     Some("reasoning") => emit(Update::Reasoning)?,
                     Some("function_call" | "custom_tool_call") => emit(Update::Working)?,
+                    Some("message") => self.message_boundary = self.has_text,
                     _ => {}
                 }
             }
@@ -151,23 +164,30 @@ impl Stream {
                     if item.get("role").and_then(Value::as_str) != Some("assistant") {
                         continue;
                     }
+                    let mut message_text = String::new();
                     if let Some(parts) = item.get("content").and_then(Value::as_array) {
                         for part in parts {
                             match part.get("type").and_then(Value::as_str) {
                                 Some("output_text") => {
                                     if let Some(value) = part.get("text").and_then(Value::as_str) {
-                                        text.push_str(value);
+                                        message_text.push_str(value);
                                     }
                                 }
                                 Some("refusal") => {
                                     if let Some(value) = part.get("refusal").and_then(Value::as_str)
                                     {
-                                        text.push_str(value);
+                                        message_text.push_str(value);
                                     }
                                 }
                                 _ => {}
                             }
                         }
+                    }
+                    if !message_text.is_empty() {
+                        if !text.is_empty() {
+                            text.push_str("\n\n");
+                        }
+                        text.push_str(&message_text);
                     }
                 }
                 Some("function_call") => {
@@ -250,160 +270,4 @@ impl Stream {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cached_input_is_reported_with_the_completion() {
-        let bytes = concat!(
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}}
-
-",
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":9000,\"input_tokens_details\":{\"cached_tokens\":8192},\"output_tokens\":5}}}
-
-"
-        );
-        let mut stream = Stream::default();
-        stream.feed(bytes.as_bytes(), &mut |_| Ok(())).unwrap();
-        let charges = stream.finish().unwrap().charges.unwrap();
-        assert_eq!((charges.requests, charges.cached), (1, 8192));
-        assert_eq!(charges.describe().as_deref(), Some("8.2K cached"));
-    }
-
-    #[test]
-    fn opened_reasoning_and_call_items_report_progress_without_summaries() {
-        let bytes = concat!(
-            "data: {\"type\":\"response.created\",\"response\":{}}
-
-",
-            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\"}}
-
-",
-            "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"message\"}}
-
-",
-            "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\"}}
-
-",
-        );
-        let mut seen = Vec::new();
-        Stream::default()
-            .feed(bytes.as_bytes(), &mut |update| {
-                seen.push(match update {
-                    Update::Reasoning => "reasoning",
-                    Update::Working => "working",
-                    _ => "other",
-                });
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(seen, ["reasoning", "working"]);
-    }
-
-    #[test]
-    fn completed_empty_output_keeps_items_already_delivered_by_the_chatgpt_route() {
-        let bytes = concat!(
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}}\n\n",
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\",\"content\":[{\"type\":\"output_text\",\"text\":\"Checking the file\"}]}}\n\n",
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"call_id\":\"read-1\",\"namespace\":\"jecode\",\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"probe.txt\\\"}\"}}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":5}}}\n\n"
-        );
-        let mut stream = Stream::default();
-        for chunk in bytes.as_bytes().chunks(11) {
-            stream.feed(chunk, &mut |_| Ok(())).unwrap();
-        }
-        let completion = stream.finish().unwrap();
-        assert_eq!(completion.text, "Checking the file");
-        assert_eq!(completion.calls[0].name, "read");
-        assert_eq!(
-            completion
-                .message
-                .get("openai_items")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .len(),
-            3
-        );
-        assert_eq!(completion.usage.unwrap().input_tokens, Some(12));
-        assert!(completion.charges.is_none());
-    }
-
-    #[test]
-    fn fragmented_stream_waits_for_completion_and_preserves_native_order() {
-        let mut stream = Stream::default();
-        let bytes = concat!(
-            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n",
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"secret\"}}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\"},{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hi\"}]}],\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n"
-        );
-        let mut seen = Vec::new();
-        for chunk in bytes.as_bytes().chunks(7) {
-            stream
-                .feed(chunk, &mut |update| {
-                    if let Update::TextDelta(text) = update {
-                        seen.push(text);
-                    }
-                    Ok(())
-                })
-                .unwrap();
-        }
-        let result = stream.finish().unwrap();
-        assert_eq!(seen, ["Hi"]);
-        assert_eq!(result.text, "Hi");
-        let items = result
-            .message
-            .get("openai_items")
-            .unwrap()
-            .as_array()
-            .unwrap();
-        assert_eq!(
-            items[0].get("encrypted_content").and_then(Value::as_str),
-            Some("secret")
-        );
-        assert_eq!(result.usage.unwrap().input_tokens, Some(3));
-    }
-
-    #[test]
-    fn interrupted_or_failed_stream_never_returns_calls() {
-        let call = "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"write\",\"arguments\":\"{}\"}}\n\n";
-        let mut stream = Stream::default();
-        stream.feed(call.as_bytes(), &mut |_| Ok(())).unwrap();
-        assert_eq!(stream.finish().err().unwrap().kind, FailureKind::Temporary);
-        let mut stream = Stream::default();
-        stream.feed(call.as_bytes(), &mut |_| Ok(())).unwrap();
-        stream.feed(b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\",\"message\":\"limit\"}}}\n\n", &mut |_| Ok(())).unwrap();
-        let failure = stream.finish().err().unwrap();
-        assert_eq!(failure.kind, FailureKind::Terminal);
-        assert!(failure.diagnostic.as_deref().unwrap().contains("\"error\""));
-        assert!(
-            failure
-                .diagnostic
-                .as_deref()
-                .unwrap()
-                .contains("response.failed")
-        );
-    }
-
-    #[test]
-    fn completed_refusal_is_displayed_as_assistant_text() {
-        let mut stream = Stream::default();
-        let bytes = concat!(
-            "data: {\"type\":\"response.refusal.delta\",\"delta\":\"I cannot help\"}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"refusal\",\"refusal\":\"I cannot help\"}]}]}}\n\n",
-        );
-        let mut deltas = Vec::new();
-        stream
-            .feed(bytes.as_bytes(), &mut |update| {
-                if let Update::TextDelta(text) = update {
-                    deltas.push(text);
-                }
-                Ok(())
-            })
-            .unwrap();
-        let completion = stream.finish().unwrap();
-        assert_eq!(deltas, ["I cannot help"]);
-        assert_eq!(completion.text, "I cannot help");
-        assert!(completion.calls.is_empty());
-    }
-}
+mod tests;

@@ -5,15 +5,16 @@ use std::time::Duration;
 
 type Fixture = Server<Result<(Vec<String>, String), std::io::Error>>;
 
-fn serve(response_status: u16, response_body: &'static str) -> (Fixture, String) {
+fn serve(response_status: u16, response_body: impl Into<String>) -> (Fixture, String) {
     serve_with_headers(response_status, response_body, "")
 }
 
 fn serve_with_headers(
     response_status: u16,
-    response_body: &'static str,
+    response_body: impl Into<String>,
     extra_headers: &'static str,
 ) -> (Fixture, String) {
+    let response_body = response_body.into();
     let server = Server::start(move |listener, stop| {
         let mut stream = server::accept(&listener, &stop)?;
         stream
@@ -49,6 +50,61 @@ fn serve_with_headers(
     });
     let endpoint = server.endpoint.clone();
     (server, endpoint)
+}
+
+#[test]
+fn large_stream_reaches_completion_beyond_the_process_capture_limit() {
+    let text = "x".repeat(96 * 1024);
+    let delta = Value::object([
+        ("type", Value::string("response.output_text.delta")),
+        ("output_index", Value::number(0)),
+        ("delta", Value::string(&text)),
+    ]);
+    let terminal = Value::object([
+        ("type", Value::string("response.completed")),
+        (
+            "response",
+            Value::object([
+                ("status", Value::string("completed")),
+                (
+                    "output",
+                    Value::Array(vec![Value::object([
+                        ("type", Value::string("message")),
+                        ("role", Value::string("assistant")),
+                        (
+                            "content",
+                            Value::Array(vec![Value::object([
+                                ("type", Value::string("output_text")),
+                                ("text", Value::string(&text)),
+                            ])]),
+                        ),
+                    ])]),
+                ),
+            ]),
+        ),
+    ]);
+    let (server, endpoint) = serve(
+        200,
+        format!(
+            "data: {}\n\ndata: {}\n\n",
+            delta.encode(),
+            terminal.encode()
+        ),
+    );
+    let api = Api::fixture(Session::fixture("fixture-access-token"), &endpoint);
+    let backend = OpenAi::with_api(api, "model-a".into()).unwrap();
+    let mut observed = String::new();
+    let completion = Backend::sample(&backend, &[], false, None, None, &mut |update| {
+        if let backend::Update::TextDelta(delta) = update {
+            observed.push_str(&delta);
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(observed.len(), text.len());
+    assert!(observed == text);
+    assert!(completion.text == text);
+    server.finish().unwrap();
 }
 
 #[test]

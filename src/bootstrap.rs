@@ -5,6 +5,7 @@ use crate::console::Console;
 use crate::session::{self, SessionConfig};
 use crate::{setup, tools::Tools};
 use std::io::{self, IsTerminal, Read, Write};
+use std::path::Path;
 
 pub fn configure() -> Result<(), String> {
     require_terminal()?;
@@ -114,9 +115,7 @@ fn launch(
         client.set_effort(settings.effort);
     }
     let mut agent = Agent::with_backend(client, tools);
-    agent.include_credentials(
-        crate::auth::openai::Store::new(config_home.to_path_buf()).redactor()?,
-    );
+    agent.include_credentials(account_redactor(config_home, &mut status)?);
     for services in settings.configured_services(config_home) {
         agent.register_backend(services);
     }
@@ -199,6 +198,22 @@ fn launch(
     }
 }
 
+fn account_redactor(
+    home: &Path,
+    status: &mut impl Write,
+) -> Result<crate::redact::Redactor, String> {
+    let (redactor, invalid) =
+        crate::auth::openai::Store::new(home.to_path_buf()).redactor_report()?;
+    if invalid > 0 {
+        writeln!(
+            status,
+            "Skipped {invalid} invalid OpenAI account record(s); inspect the saved accounts."
+        )
+        .map_err(|error| format!("Could not report invalid OpenAI accounts: {error}"))?;
+    }
+    Ok(redactor)
+}
+
 fn require_terminal() -> Result<(), String> {
     if !io::stdin().is_terminal() {
         return Err(
@@ -252,5 +267,25 @@ mod tests {
             .is_err()
         );
         assert_eq!(fs::read_to_string(store.path()).unwrap(), "{broken");
+    }
+
+    #[test]
+    fn openrouter_startup_reports_corrupt_inactive_account_and_keeps_valid_redaction() {
+        let directory = Directory::new();
+        let home = directory.path();
+        let settings =
+            Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+        assert!(settings.services(home, "openrouter").is_ok());
+        crate::auth::openai::Store::fixture_account(home.to_path_buf(), "valid-access-token")
+            .unwrap();
+        fs::write(home.join("accounts/openai/account-bad.json"), "{broken").unwrap();
+        let mut status = Vec::new();
+        let redactor = account_redactor(home, &mut status).unwrap();
+        assert_eq!(redactor.text("valid-access-token"), "[redacted]");
+        assert!(
+            String::from_utf8(status)
+                .unwrap()
+                .contains("Skipped 1 invalid OpenAI account")
+        );
     }
 }

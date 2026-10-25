@@ -73,11 +73,11 @@ impl Job {
         job.detach_on_cancel = true;
         job
     }
-    pub fn sign_out(home: PathBuf, subject: String) -> Self {
+    pub fn sign_out(home: PathBuf, client_id: String) -> Self {
         Self::start(move |cancellation| {
             let store = Store::new(home);
             let result = store
-                .session(&subject)
+                .session(&client_id)
                 .and_then(|session| session.sign_out(&cancellation));
             ResultValue::SignOut(result)
         })

@@ -23,11 +23,7 @@ use crate::redact::Redactor;
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 
-pub const CREDENTIAL_ENV: &[&str] = &[
-    "JECODE_OPENAI_ACCESS_TOKEN",
-    "OPENAI_API_KEY",
-    "ACCESS_TOKEN",
-];
+pub const CREDENTIAL_ENV: &[&str] = &["JECODE_OPENAI_ACCESS_TOKEN"];
 
 #[derive(Clone)]
 pub struct Api {

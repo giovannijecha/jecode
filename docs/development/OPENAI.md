@@ -41,13 +41,26 @@ bytes, SHA-256 and RSA signature verification. Unix requires the installed
 token request bodies travel through stdin and inference bearer tokens through
 the curl child's environment. Cancellation and timeouts bound these operations.
 No external Rust crate or copied cryptographic implementation is used.
+Only `JECODE_OPENAI_ACCESS_TOKEN` is reserved for Jecode's OpenAI transport;
+unrelated `OPENAI_API_KEY` and `ACCESS_TOKEN` variables remain available to tools.
 
-Protected records live under `~/.jecode/accounts/openai/`, separately from
-`config.json`. Unix uses `0700` directories and `0600` files; Windows applies an
+Account records are plaintext JSON under `~/.jecode/accounts/openai/`, separately
+from `config.json`. Unix uses `0700` directories and `0600` files; Windows applies an
 ACL restricted to the current user. A stable host identity and each verified
 registration survive logout. Refresh rereads the record under an OS file lock
 and replaces the rotating token set atomically. Shared redaction sources keep
 new access, refresh and ID tokens masked in existing consumers.
+
+Account discovery skips malformed record content and reports a count at startup,
+before fullscreen rendering. Valid accounts remain available; filesystem access
+errors and a corrupt selected account still return explicit errors. Sign-out
+removes local credentials under the account lock even when already cancelled,
+then releases the lock before attempting remote revocation.
+
+Invalid or unrelated loopback callbacks receive HTTP 400 without ending the
+sign-in attempt. A matching provider error still ends it. During refresh, an
+omitted `refresh_token` retains the previous token; a newly issued token replaces
+it, following [RFC 6749 section 6](https://www.rfc-editor.org/rfc/rfc6749#section-6).
 
 The account picker separates registrations even when they share an email.
 Conversation origins include the verified registration, so another account
@@ -111,11 +124,17 @@ a cache hit; OpenAI routes requests automatically, and newer models may not
 need the key. Reported `cached_tokens` appear with the completion. The stream
 reports progress when a reasoning or tool-call item opens, before its first
 delta, so the TUI leaves "Waiting for model" as soon as work starts.
+Separate assistant message items have a blank line between them in both the
+streamed display and the saved portable text; native items retain their phases.
 
 The access token is kept in memory until it nears expiry or the account record
-file changes; requests then skip the locked disk read and decryption.
+file changes. Cache hits still check the record file's metadata, but skip the
+locked record read, JSON parsing and native permission/hash helpers.
 
 Temporary HTTP and stream failures retain the server's `Retry-After` delay
 (seconds or HTTP date). The recovery loop waits at least that long and remains
 cancellable. `slow_down` and `server_is_overloaded` stream errors are temporary;
 a plan usage-limit error still stops inference.
+The top-level `error` event's code, message and parameter are retained alongside
+nested response errors. Successful SSE bodies go directly to the stream parser;
+the process capture and HTTP error body each retain at most 64 KiB of diagnostics.

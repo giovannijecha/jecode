@@ -70,14 +70,102 @@ fn cancelling_remote_revocation_still_removes_local_tokens_and_retains_registrat
     received
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
+    // A slow revocation must not retain the account lock or local credentials.
+    let files = session.store.files();
+    let _account_lock = files.lock(&Cancellation::default()).unwrap();
+    assert!(session.store.active().unwrap().is_none());
+    assert!(!session.account().unwrap().enabled);
+    // A new login can persist while the old token's remote revocation waits.
+    let mut new_login = files
+        .record(
+            session.client_id(),
+            "fixture-subject",
+            &Cancellation::default(),
+        )
+        .unwrap();
+    new_login.access_token = "new-login-access-token".into();
+    new_login.refresh_token = "new-login-refresh-token".into();
+    new_login.expires_at = u64::MAX;
+    files
+        .save_record(&new_login, &Cancellation::default())
+        .unwrap();
+    files
+        .set_active(Some((&new_login.client_id, &new_login.subject)))
+        .unwrap();
     cancel.cancel();
     release.send(()).unwrap();
+    drop(_account_lock);
     assert!(worker.join().unwrap().unwrap().is_some());
     server.finish();
-    assert!(session.store.active().unwrap().is_none());
+    assert!(session.store.active().unwrap().is_some());
     assert_eq!(session.store.accounts().unwrap().len(), 1);
+    assert!(session.account().unwrap().enabled);
+    assert_eq!(
+        session.access_token(&Cancellation::default()).unwrap(),
+        "new-login-access-token"
+    );
+}
+
+#[test]
+fn already_cancelled_sign_out_removes_local_credentials() {
+    let session = Session::fixture("cancelled-access-token");
+    session.store.activate(session.client_id()).unwrap();
+    let cancel = Cancellation::default();
+    cancel.cancel();
+    assert!(session.sign_out(&cancel).unwrap().is_some());
+    assert!(session.store.active().unwrap().is_none());
     assert!(!session.account().unwrap().enabled);
-    assert!(session.access_token(&Cancellation::default()).is_err());
+}
+
+#[test]
+fn corrupt_inactive_record_does_not_hide_valid_accounts_or_their_secrets() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    Store::fixture_account(directory.path().to_path_buf(), "valid-access-token").unwrap();
+    std::fs::write(
+        store.files().directory.join("account-corrupt.json"),
+        "{broken",
+    )
+    .unwrap();
+    std::fs::write(
+        store.files().directory.join("account-incomplete.json"),
+        r#"{"access_token":"orphan-access-token"}"#,
+    )
+    .unwrap();
+    assert_eq!(store.accounts().unwrap().len(), 1);
+    assert_eq!(
+        store
+            .redactor()
+            .unwrap()
+            .text("valid-access-token orphan-access-token"),
+        "[redacted] [redacted]"
+    );
+    assert_eq!(store.redactor_report().unwrap().1, 2);
+    store.activate("fixture-client").unwrap();
+    assert_eq!(
+        store.active().unwrap().unwrap().client_id(),
+        "fixture-client"
+    );
+    let active_path = store
+        .files()
+        .record_path(
+            "fixture-client",
+            "fixture-subject",
+            &Cancellation::default(),
+        )
+        .unwrap();
+    std::fs::write(active_path, "{broken").unwrap();
+    assert!(store.active().is_err());
+}
+
+#[test]
+fn account_path_errors_are_not_treated_as_corrupt_content() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    Store::fixture_account(directory.path().to_path_buf(), "valid-access-token").unwrap();
+    std::fs::create_dir(store.files().directory.join("account-not-a-file.json")).unwrap();
+    assert!(store.accounts().is_err());
+    assert!(store.redactor().is_err());
 }
 
 #[test]

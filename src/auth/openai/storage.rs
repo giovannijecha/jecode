@@ -111,6 +111,12 @@ pub(super) struct Files {
     pub directory: PathBuf,
 }
 
+pub(super) struct RecordScan {
+    pub records: Vec<Record>,
+    pub invalid: usize,
+    pub secrets: Vec<String>,
+}
+
 impl Files {
     pub fn new(home: PathBuf) -> Self {
         Self {
@@ -235,21 +241,48 @@ impl Files {
     }
 
     pub fn records(&self) -> Result<Vec<Record>, String> {
+        Ok(self.records_report()?.records)
+    }
+
+    pub fn records_report(&self) -> Result<RecordScan, String> {
         if !self.directory.exists() {
-            return Ok(vec![]);
+            return Ok(RecordScan {
+                records: vec![],
+                invalid: 0,
+                secrets: vec![],
+            });
         }
         self.ensure()?;
         let mut records = vec![];
+        let mut invalid = 0usize;
+        let mut secrets = vec![];
         for entry in fs::read_dir(&self.directory).map_err(|_| "Could not list OpenAI accounts")? {
             let entry = entry.map_err(|_| "Could not list OpenAI accounts")?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if !name.starts_with("account-") || !name.ends_with(".json") {
                 continue;
             }
-            let value = read_json(&entry.path())?.ok_or("Missing OpenAI account record")?;
-            records.push(Record::parse(&value)?);
+            match read_json(&entry.path()) {
+                Ok(Some(value)) => {
+                    for key in ["access_token", "refresh_token", "id_token"] {
+                        if let Some(secret) = value.get(key).and_then(Value::as_str) {
+                            secrets.push(secret.to_owned());
+                        }
+                    }
+                    match Record::parse(&value) {
+                        Ok(record) => records.push(record),
+                        Err(_) => invalid += 1,
+                    }
+                }
+                Ok(None) | Err(ReadError::Invalid(_)) => invalid += 1,
+                Err(ReadError::Io(error)) => return Err(error),
+            }
         }
-        Ok(records)
+        Ok(RecordScan {
+            records,
+            invalid,
+            secrets,
+        })
     }
 
     pub fn active(&self) -> Result<Option<(String, String)>, String> {
@@ -337,30 +370,56 @@ pub(super) fn now() -> Result<u64, String> {
         .as_secs())
 }
 
-fn read_json(path: &Path) -> Result<Option<Value>, String> {
+enum ReadError {
+    Invalid(&'static str),
+    Io(String),
+}
+
+impl From<ReadError> for String {
+    fn from(error: ReadError) -> Self {
+        match error {
+            ReadError::Invalid(message) => message.into(),
+            ReadError::Io(message) => message,
+        }
+    }
+}
+
+fn read_json(path: &Path) -> Result<Option<Value>, ReadError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("Could not inspect OpenAI account record".into()),
+        Err(_) => {
+            return Err(ReadError::Io(
+                "Could not inspect OpenAI account record".into(),
+            ));
+        }
     };
-    if !metadata.is_file() || metadata.len() > LIMIT as u64 {
-        return Err("Invalid OpenAI account record".into());
+    if !metadata.is_file() {
+        return Err(ReadError::Io(
+            "OpenAI account path has an unexpected type".into(),
+        ));
     }
-    check_path(path, false)?;
-    protect_file(path)?;
+    if metadata.len() > LIMIT as u64 {
+        return Err(ReadError::Invalid("Invalid OpenAI account record"));
+    }
+    check_path(path, false).map_err(ReadError::Io)?;
+    protect_file(path).map_err(ReadError::Io)?;
     let mut bytes = Vec::new();
     File::open(path)
-        .map_err(|_| "Could not read OpenAI account record")?
+        .map_err(|_| ReadError::Io("Could not read OpenAI account record".into()))?
         .take(LIMIT as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| "Could not read OpenAI account record")?;
+        .map_err(|_| ReadError::Io("Could not read OpenAI account record".into()))?;
     if bytes.len() > LIMIT {
-        return Err("OpenAI account record exceeds size limit".into());
+        return Err(ReadError::Invalid(
+            "OpenAI account record exceeds size limit",
+        ));
     }
-    let text = String::from_utf8(bytes).map_err(|_| "Invalid OpenAI account record encoding")?;
-    Ok(Some(
-        json::parse(&text).map_err(|_| "Invalid OpenAI account record JSON")?,
-    ))
+    let text = String::from_utf8(bytes)
+        .map_err(|_| ReadError::Invalid("Invalid OpenAI account record encoding"))?;
+    Ok(Some(json::parse(&text).map_err(|_| {
+        ReadError::Invalid("Invalid OpenAI account record JSON")
+    })?))
 }
 
 fn check_path(path: &Path, directory: bool) -> Result<(), String> {

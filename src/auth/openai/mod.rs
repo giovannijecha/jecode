@@ -8,6 +8,8 @@ mod native;
 mod storage;
 mod wire;
 
+pub(crate) use flow::open_browser;
+
 use crate::cancel::Cancellation;
 use crate::redact::Redactor;
 use std::path::PathBuf;
@@ -53,11 +55,16 @@ impl Store {
     }
 
     pub fn redactor(&self) -> Result<Redactor, String> {
+        Ok(self.redactor_report()?.0)
+    }
+
+    pub(crate) fn redactor_report(&self) -> Result<(Redactor, usize), String> {
         let redactor = Redactor::empty();
-        for record in self.files().records()? {
-            add_secrets(&redactor, &record);
+        let scan = self.files().records_report()?;
+        for secret in scan.secrets {
+            redactor.add_secret(secret);
         }
-        Ok(redactor)
+        Ok((redactor, scan.invalid))
     }
 
     #[cfg(test)]
@@ -406,25 +413,32 @@ impl Session {
     pub fn sign_out(&self, cancel: &Cancellation) -> Result<Option<String>, String> {
         let files = self.store.files();
         // Local removal remains mandatory even if remote revocation is cancelled.
-        let _lock = files.lock(cancel)?;
-        let mut record = files.record(&self.client_id, &self.subject, &Cancellation::default())?;
-        add_secrets(&self.redactor, &record);
-        let warning = flow::revoke(&record, cancel).err().map(|_| {
+        let previous = {
+            let _lock = files.lock(&Cancellation::default())?;
+            let mut record =
+                files.record(&self.client_id, &self.subject, &Cancellation::default())?;
+            add_secrets(&self.redactor, &record);
+            let previous = record.clone();
+            record.access_token.clear();
+            record.refresh_token.clear();
+            record.id_token.clear();
+            record.expires_at = 0;
+            record.earliest_refresh_at = 0;
+            files.save_record(&record, &Cancellation::default())?;
+            if files.active()?.is_some_and(|(client, subject)| {
+                client == self.client_id && subject == self.subject
+            }) {
+                files.set_active(None)?;
+            }
+            if let Ok(mut cache) = self.tokens.lock() {
+                cache.token = None;
+            }
+            previous
+        };
+        let warning = flow::revoke(&previous, cancel).err().map(|_| {
             "OpenAI revocation could not be confirmed; credentials were removed locally."
                 .to_string()
         });
-        record.access_token.clear();
-        record.refresh_token.clear();
-        record.id_token.clear();
-        record.expires_at = 0;
-        record.earliest_refresh_at = 0;
-        files.save_record(&record, &Cancellation::default())?;
-        if files
-            .active()?
-            .is_some_and(|(client, subject)| client == self.client_id && subject == self.subject)
-        {
-            files.set_active(None)?;
-        }
         Ok(warning)
     }
 }

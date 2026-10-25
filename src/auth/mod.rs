@@ -79,6 +79,8 @@ mod tests {
     fn child_environment_excludes_every_registered_backend_credential() {
         let mut command = Command::new("fixture-only");
         command.env("JECODE_TEST_UNRELATED", "kept");
+        command.env("OPENAI_API_KEY", "another-app-key");
+        command.env("ACCESS_TOKEN", "another-app-token");
         isolate_environment(&mut command);
         let env: Vec<_> = command.get_envs().collect();
         for name in crate::backend::available()
@@ -94,5 +96,13 @@ mod tests {
             key.to_string_lossy() == "JECODE_TEST_UNRELATED"
                 && value == &Some(std::ffi::OsStr::new("kept"))
         }));
+        for (name, value) in [
+            ("OPENAI_API_KEY", "another-app-key"),
+            ("ACCESS_TOKEN", "another-app-token"),
+        ] {
+            assert!(env.iter().any(|(key, set)| {
+                key.to_string_lossy() == name && set == &Some(std::ffi::OsStr::new(value))
+            }));
+        }
     }
 }

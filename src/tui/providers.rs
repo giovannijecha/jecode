@@ -5,7 +5,7 @@ use super::{
 };
 use crate::auth::openai::{SignInUpdate, Store};
 use crate::backend::Services;
-use std::{path::PathBuf, process::Command, sync::mpsc};
+use std::{path::PathBuf, sync::mpsc};
 
 const USAGE_URL: &str = "https://chatgpt.com/settings/usage";
 
@@ -264,14 +264,14 @@ impl App {
         let Some(account) = self.auth_accounts.get(index) else {
             return;
         };
-        let subject = account.client_id.clone();
+        let client_id = account.client_id.clone();
         self.state.selector = Some(Selector::loading(
             "Sign out",
             "Removing saved credentials…",
             false,
         ));
         self.auth_signing_out = true;
-        self.job = Some(Job::sign_out(self.home(), subject));
+        self.job = Some(Job::sign_out(self.home(), client_id));
     }
 
     pub(super) fn finish_sign_out(&mut self, result: Result<Option<String>, String>) {
@@ -372,12 +372,12 @@ impl App {
     }
 
     pub(super) fn manage_usage(&mut self) {
-        match open_external(USAGE_URL) {
+        match crate::auth::openai::open_browser(USAGE_URL) {
             Ok(()) => self.state.notify(Feedback::result(
                 Kind::Notice,
                 format!("Manage usage · {USAGE_URL}"),
             )),
-            Err(error) => self.warn(&error),
+            Err(error) => self.warn(&format!("{error}: {USAGE_URL}")),
         }
     }
 
@@ -441,21 +441,4 @@ impl App {
         }
         true
     }
-}
-
-fn open_external(url: &str) -> Result<(), String> {
-    if !url.starts_with("https://") || url.chars().any(char::is_whitespace) {
-        return Err("Unsafe sign-in link".into());
-    }
-    #[cfg(target_os = "windows")]
-    let program = "explorer.exe";
-    #[cfg(target_os = "macos")]
-    let program = "open";
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let program = "xdg-open";
-    Command::new(program)
-        .arg(url)
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("Open this link in a browser: {url} · {error}"))
 }

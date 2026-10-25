@@ -43,6 +43,7 @@ impl From<String> for RunError {
     }
 }
 
+/// Observe complete stdout while bounding the bytes retained in `Output`.
 pub fn run_observed(
     command: &mut Command,
     input: Option<Vec<u8>>,

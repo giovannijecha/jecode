@@ -7,6 +7,8 @@ use crate::redact::Redactor;
 use std::process::Command;
 use std::time::Duration;
 
+const DIAGNOSTIC_LIMIT: usize = 64 * 1024;
+
 pub(super) struct Response {
     pub body: String,
     pub status: u16,
@@ -88,13 +90,16 @@ impl Api {
         } else {
             command.args(["--noproxy", "*"]);
         }
-        let mut decoder = Headers::default();
+        let mut decoder = Headers {
+            collect_body: body.is_none(),
+            ..Headers::default()
+        };
         let mut observer_failed = false;
         let output = crate::curl::run(
             &mut command,
             body.map(|body| body.as_bytes().to_vec()),
             None,
-            usize::MAX,
+            DIAGNOSTIC_LIMIT,
             &self.cancellation,
             Some(Duration::from_secs(120)),
             &mut |bytes| {
@@ -128,9 +133,10 @@ impl Api {
             return Err(Failure::temporary("OpenAI connection became inactive"));
         }
         if output.exit_code != Some(0) {
-            let stderr = self
+            let (_, stderr) = self
                 .redactor()
-                .text(&String::from_utf8_lossy(&output.stderr));
+                .byte_prefix(&output.stderr, output.stderr_bytes == output.stderr.len());
+            let stderr = String::from_utf8_lossy(&stderr);
             let message = format!(
                 "Could not reach OpenAI via curl (exit {}): {}",
                 output
@@ -157,8 +163,13 @@ impl Api {
         let status = decoder
             .status
             .ok_or_else(|| Failure::temporary("OpenAI returned no HTTP status"))?;
-        let body = String::from_utf8(decoder.body)
-            .map_err(|_| Failure::from("OpenAI returned invalid UTF-8"))?;
+        let body = if (200..300).contains(&status) {
+            String::from_utf8(decoder.body)
+                .map_err(|_| Failure::from("OpenAI returned invalid UTF-8"))?
+        } else {
+            // A bounded diagnostic can end inside a UTF-8 sequence.
+            String::from_utf8_lossy(&decoder.body).into_owned()
+        };
         if !(200..300).contains(&status) {
             let parsed = json::parse(&body).ok();
             let mut error = failure(parsed.as_ref(), Some(status));
@@ -189,6 +200,7 @@ struct Headers {
     request_id: Option<String>,
     retry_after: Option<Duration>,
     ready: bool,
+    collect_body: bool,
 }
 
 impl Headers {
@@ -198,14 +210,7 @@ impl Headers {
         observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
         if self.ready {
-            self.body.extend_from_slice(bytes);
-            if self
-                .status
-                .is_some_and(|status| (200..300).contains(&status))
-            {
-                observer(bytes)?;
-            }
-            return Ok(());
+            return self.body(bytes, observer);
         }
         self.pending.extend_from_slice(bytes);
         loop {
@@ -246,18 +251,37 @@ impl Headers {
             }
             self.ready = true;
             let rest = std::mem::take(&mut self.pending);
-            self.body.extend_from_slice(&rest);
-            if (200..300).contains(&status) {
-                observer(&rest)?;
-            }
-            return Ok(());
+            return self.body(&rest, observer);
         }
+    }
+
+    fn body(
+        &mut self,
+        bytes: &[u8],
+        observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if self
+            .status
+            .is_some_and(|status| (200..300).contains(&status))
+        {
+            if self.collect_body {
+                self.body.extend_from_slice(bytes);
+            }
+            observer(bytes)?;
+        } else {
+            let keep = bytes
+                .len()
+                .min(DIAGNOSTIC_LIMIT.saturating_sub(self.body.len()));
+            self.body.extend_from_slice(&bytes[..keep]);
+        }
+        Ok(())
     }
 }
 
 pub(super) fn failure(value: Option<&Value>, status: Option<u16>) -> Failure {
     let error = value
         .and_then(|value| value.get("error"))
+        .or(value)
         .unwrap_or(&Value::Null);
     let code = error.get("code").and_then(Value::as_str).unwrap_or("");
     let param = error.get("param").and_then(Value::as_str).unwrap_or("");
@@ -343,6 +367,40 @@ pub(super) fn sanitize(failure: &mut Failure, redactor: &Redactor) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streamed_body_is_observed_without_retaining_a_second_copy() {
+        let mut headers = Headers::default();
+        let mut observed = Vec::new();
+        let body = vec![b'x'; 128 * 1024];
+        headers
+            .feed(b"HTTP/1.1 200 OK\r\n\r\n", &mut |_| Ok(()))
+            .unwrap();
+        headers
+            .feed(&body, &mut |bytes| {
+                observed.extend_from_slice(bytes);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(observed, body);
+        assert!(headers.body.is_empty());
+    }
+
+    #[test]
+    fn error_bodies_are_bounded_and_never_delivered_to_the_stream() {
+        let mut headers = Headers::default();
+        headers
+            .feed(b"HTTP/1.1 503 Unavailable\r\n\r\n", &mut |_| {
+                panic!("HTTP error reached stream")
+            })
+            .unwrap();
+        headers
+            .feed(&vec![b'x'; 128 * 1024], &mut |_| {
+                panic!("HTTP error reached stream")
+            })
+            .unwrap();
+        assert_eq!(headers.body.len(), 64 * 1024);
+    }
 
     #[test]
     fn http_decoder_handles_split_headers_and_delivers_only_body() {

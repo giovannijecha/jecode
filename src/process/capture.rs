@@ -50,10 +50,11 @@ pub(super) fn capture(
                         output.bytes.extend_from_slice(&buffer[..keep]);
                     }
                     output.truncated |= keep < length;
-                    if keep > 0
-                        && let Some(chunks) = &chunks
-                    {
-                        let _ = chunks.send(buffer[..keep].to_vec());
+                    drop(output);
+                    // The retained preview limit must not truncate a streamed
+                    // protocol consumed by the observer.
+                    if let Some(chunks) = &chunks {
+                        let _ = chunks.send(buffer[..length].to_vec());
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -64,4 +65,33 @@ pub(super) fn capture(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observer_receives_complete_output_beyond_the_retained_limit() {
+        let bytes = vec![b'x'; 128 * 1024];
+        let output = Arc::new(Mutex::new(Capture::default()));
+        let (sender, receiver) = mpsc::channel();
+        capture(
+            std::io::Cursor::new(bytes.clone()),
+            Arc::clone(&output),
+            4096,
+            Some(sender),
+            false,
+            None,
+        )
+        .join()
+        .unwrap();
+        let observed: Vec<_> = receiver.into_iter().flatten().collect();
+        assert_eq!(observed.len(), bytes.len());
+        assert!(observed == bytes);
+        let output = output.lock().unwrap();
+        assert_eq!(output.bytes.len(), 4096);
+        assert_eq!(output.total_bytes, bytes.len());
+        assert!(output.truncated);
+    }
 }
