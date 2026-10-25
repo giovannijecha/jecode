@@ -8,32 +8,40 @@ pub struct ToolDetails {
     pub turn: Option<Range<usize>>,
     pub active: bool,
     pub expanded: bool,
-    changes: VecDeque<usize>,
+    /// Equal consecutive starts share a record, even across a large read batch.
+    changes: VecDeque<(usize, u64)>,
 }
 
 impl ToolDetails {
     /// Returns the earliest item affected by every unseen revision. When a
     /// layout is older than the bounded history, its caller rebuilds all rows.
     pub(in crate::tui) fn changed_since(&self, revisions: u64) -> Option<usize> {
-        if revisions > self.changes.len() as u64 {
-            return None;
+        let mut remaining = revisions;
+        let mut first = None;
+        for &(index, count) in self.changes.iter().rev() {
+            first = Some(first.map_or(index, |earlier: usize| earlier.min(index)));
+            remaining = remaining.saturating_sub(count);
+            if remaining == 0 {
+                return first;
+            }
         }
-        self.changes
-            .iter()
-            .rev()
-            .take(revisions as usize)
-            .min()
-            .copied()
+        None
     }
 }
 
 impl State {
     fn tool_changed_from(&mut self, first: usize) {
         self.tool_revision = self.tool_revision.wrapping_add(1);
+        if let Some((index, count)) = self.tool_details.changes.back_mut()
+            && *index == first
+        {
+            *count = count.saturating_add(1);
+            return;
+        }
         if self.tool_details.changes.len() == RECENT_TOOL_CHANGES {
             self.tool_details.changes.pop_front();
         }
-        self.tool_details.changes.push_back(first);
+        self.tool_details.changes.push_back((first, 1));
     }
 
     pub fn begin_tool_turn(&mut self) {
