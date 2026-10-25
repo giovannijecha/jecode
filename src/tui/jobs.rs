@@ -25,7 +25,7 @@ pub struct RoutingPurpose {
 }
 pub enum ResultValue {
     Catalog(CatalogPurpose, Result<Vec<Model>, String>),
-    Key(String, Result<(), String>),
+    Key(String, Result<Services, String>),
     Endpoints(RoutingPurpose, Result<Option<Endpoints>, String>),
     SignIn(Result<crate::auth::openai::Account, String>),
     SignOut(Result<Option<String>, String>),
@@ -52,10 +52,11 @@ impl Job {
     }
     pub fn key(services: Services, key: String) -> Self {
         Self::start(move |cancellation| {
-            ResultValue::Key(
-                key,
-                services.with_cancellation(cancellation).check_credential(),
-            )
+            let result = services
+                .clone()
+                .with_cancellation(cancellation)
+                .check_credential();
+            ResultValue::Key(key, result.map(|()| services))
         })
     }
     pub fn sign_in(home: PathBuf, existing: Option<String>, updates: Sender<SignInUpdate>) -> Self {

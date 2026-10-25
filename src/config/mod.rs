@@ -25,6 +25,22 @@ pub struct Settings {
 }
 
 impl Settings {
+    pub fn unconfigured() -> Self {
+        Self {
+            backend_id: "openrouter".into(),
+            credentials: BTreeMap::new(),
+            api_key: String::new(),
+            model: String::new(),
+            effort: Effort::Default,
+            auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
+            routing: BTreeMap::new(),
+        }
+    }
+
+    pub fn has_model(&self) -> bool {
+        !self.model.is_empty()
+    }
+
     pub fn services(&self, home: &Path, id: &str) -> Result<crate::backend::Services, String> {
         if id == "openai" {
             let session = crate::auth::openai::Store::new(home.to_path_buf())
@@ -171,7 +187,8 @@ impl Settings {
         // mirrored fields. It remains authoritative for OpenRouter.
         let legacy_key = legacy
             .and_then(|value| value.get("api_key"))
-            .and_then(Value::as_str);
+            .and_then(Value::as_str)
+            .filter(|key| !key.is_empty());
         let api_key = if backend_id == "openrouter" {
             legacy_key.or_else(|| {
                 provider
@@ -302,3 +319,6 @@ pub fn environment_settings(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod recovery_tests;

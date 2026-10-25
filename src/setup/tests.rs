@@ -31,7 +31,8 @@ impl Prompter for Prompts {
     fn input(&mut self, _: &str) -> Result<Option<String>, String> {
         Ok(self.inputs.pop_front())
     }
-    fn secret(&mut self, _: &str) -> Result<Option<String>, String> {
+    fn secret(&mut self, prompt: &str) -> Result<Option<String>, String> {
+        self.messages.push_str(prompt);
         Ok(self.secrets.pop_front())
     }
 
@@ -45,6 +46,20 @@ impl Prompter for Prompts {
             operation(self, crate::cancel::Cancellation::default()).map(SignIn::Completed)
         }
     }
+}
+
+#[test]
+fn a_missing_saved_key_is_not_offered_as_reusable() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let settings = Settings::selected("openrouter", String::new(), "fixture/model".into()).unwrap();
+    let mut ui = Prompts::new(&[], &["/cancel"]);
+    configure_with(&store, Some(&settings), &mut ui, "openrouter", |id, key| {
+        Services::for_backend(id, key.into())
+    })
+    .unwrap();
+    assert!(ui.messages.contains("OpenRouter API key (hidden):"));
+    assert!(!ui.messages.contains("keeps the saved key"));
 }
 
 #[test]

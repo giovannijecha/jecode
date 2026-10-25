@@ -7,6 +7,10 @@ use crate::{
 };
 
 impl Agent {
+    pub fn has_model(&self) -> bool {
+        self.client.has_model()
+    }
+
     pub fn needs_configuration(&self) -> bool {
         self.client.needs_configuration()
     }
@@ -20,6 +24,11 @@ impl Agent {
     }
 
     pub fn services(&self) -> Services {
+        if self.client.needs_configuration()
+            && let Some(services) = self.accounts.get(self.backend_id())
+        {
+            return services.clone();
+        }
         self.client.services()
     }
 

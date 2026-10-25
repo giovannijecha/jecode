@@ -12,7 +12,7 @@ fn removed_default_account_does_not_prevent_local_tui_work() {
     let (mut backend, notice) = client(&store, &settings, None, true).unwrap();
     assert_eq!(backend.id(), "openai");
     assert_eq!(backend.model(), "saved-model");
-    assert!(notice.unwrap().0.contains("No configured provider"));
+    assert!(notice.unwrap().text.contains("No configured provider"));
     assert!(backend.limits().unwrap().is_none());
     assert!(
         backend
@@ -41,7 +41,7 @@ fn saved_fallback_uses_its_own_model_without_changing_defaults() {
     assert_eq!(backend.model(), "fixture/fallback");
     assert_eq!(backend.effort(), Effort::Default);
     assert_eq!(backend.routing(), Routing::Auto);
-    assert!(notice.unwrap().0.contains("Using openrouter"));
+    assert!(notice.unwrap().text.contains("Using OpenRouter"));
     assert_eq!(fs::read(store.path()).unwrap(), original);
     assert_eq!(store.load().unwrap().unwrap().backend_id, "openai");
 }
@@ -66,7 +66,7 @@ fn fallback_to_chatgpt_restores_its_own_saved_model() {
     assert_eq!(backend.id(), "openai");
     assert_eq!(backend.model(), "chatgpt-model");
     assert!(backend.account().is_some());
-    assert!(notice.unwrap().0.contains("Using openai"));
+    assert!(notice.unwrap().text.contains("Using OpenAI"));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn fallback_without_a_saved_model_can_select_one_without_crossing_model_ids() {
     let (backend, notice) = client(&store, &settings, None, true).unwrap();
     assert_eq!(backend.id(), "openrouter");
     assert_eq!(backend.model(), "unconfigured");
-    assert_eq!(notice.unwrap().1, "/model");
+    assert_eq!(notice.unwrap().action.0, "/model");
     let selected = backend.services().create("fixture/chosen".into()).unwrap();
     assert_eq!(selected.model(), "fixture/chosen");
 }
@@ -90,9 +90,9 @@ fn fallback_without_a_saved_model_can_select_one_without_crossing_model_ids() {
 fn first_launch_needs_no_credentials_or_saved_configuration() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    let settings = Settings::selected("openrouter", String::new(), "unconfigured".into()).unwrap();
+    let settings = Settings::unconfigured();
     let (backend, notice) = client(&store, &settings, None, true).unwrap();
-    assert_eq!(notice.unwrap().1, "/settings");
+    assert_eq!(notice.unwrap().action.0, "/settings");
     assert!(!store.path().exists());
     assert!(backend.services().catalog().is_err());
     assert!(
@@ -105,13 +105,16 @@ fn first_launch_needs_no_credentials_or_saved_configuration() {
 }
 
 #[test]
-fn an_added_credential_still_requests_a_model_after_restart() {
+fn an_added_credential_without_a_selection_requests_a_model() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    let settings = Settings::new("isolated-fixture-key".into(), "unconfigured".into()).unwrap();
-    store.save(&settings).unwrap();
+    let mut settings = Settings::unconfigured();
+    settings.api_key = "isolated-fixture-key".into();
+    settings
+        .credentials
+        .insert("openrouter".into(), settings.api_key.clone());
     let (mut backend, notice) = client(&store, &settings, None, true).unwrap();
-    assert_eq!(notice.unwrap().1, "/model");
+    assert_eq!(notice.unwrap().action.0, "/model");
     assert!(backend.prepare().unwrap_err().contains("Choose a model"));
     assert!(backend.services().create("fixture/model".into()).is_ok());
 }
@@ -136,4 +139,45 @@ fn legacy_fallback_model_remains_available() {
     let (backend, _) = client(&store, &settings, None, true).unwrap();
     assert_eq!(backend.id(), "openrouter");
     assert_eq!(backend.model(), "fixture/legacy");
+}
+
+#[test]
+fn a_real_model_named_unconfigured_is_not_a_placeholder() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let settings = Settings::new("isolated-fixture-key".into(), "unconfigured".into()).unwrap();
+    store.save(&settings).unwrap();
+    let (backend, notice) = client(&store, &settings, None, true).unwrap();
+    assert!(!backend.needs_configuration());
+    assert!(backend.has_model());
+    assert!(notice.is_none());
+    assert_eq!(
+        store.previous_model("openrouter").unwrap().as_deref(),
+        Some("unconfigured")
+    );
+}
+
+#[test]
+fn fallback_reports_the_cause_and_an_unused_model_override() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let mut settings =
+        Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    store.save(&settings).unwrap();
+    settings.select_backend("openai", String::new()).unwrap();
+    settings.model = "chatgpt-model".into();
+    store.save(&settings).unwrap();
+    assert!(needs_setup(&store, &settings));
+    let (backend, notice) =
+        client(&store, &settings, Some("requested-model".into()), true).unwrap();
+    assert_eq!(backend.model(), "fixture/model");
+    let text = notice.unwrap().text;
+    assert!(text.contains("has no active ChatGPT account"));
+    assert!(text.contains("--model override skipped"));
+    assert!(
+        client(&store, &settings, None, false)
+            .err()
+            .unwrap()
+            .contains("jecode setup")
+    );
 }

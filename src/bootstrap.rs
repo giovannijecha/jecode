@@ -84,11 +84,7 @@ fn launch(
         Err(error) => return Err(error),
     };
     let settings = if tui && settings.is_none() {
-        Some(Settings::selected(
-            "openrouter",
-            String::new(),
-            "unconfigured".into(),
-        )?)
+        Some(Settings::unconfigured())
     } else {
         settings
     };
@@ -104,19 +100,21 @@ fn launch(
     let mut output = io::stdout().lock();
     let mut status = io::stderr().lock();
     let mut input = io::stdin().lock();
-    let settings = match settings {
-        Some(settings) => settings,
-        None => {
-            let Some(settings) = setup::configure(
-                &store,
-                None,
-                &mut setup::Terminal::new(&mut input, &mut output, &bash),
-            )?
-            else {
-                return Ok(());
-            };
-            settings
-        }
+    let needs_setup = settings
+        .as_ref()
+        .is_none_or(|settings| !tui && interactive && startup::needs_setup(&store, settings));
+    let settings = if needs_setup {
+        let Some(settings) = setup::configure(
+            &store,
+            settings.as_ref(),
+            &mut setup::Terminal::new(&mut input, &mut output, &bash),
+        )?
+        else {
+            return Ok(());
+        };
+        settings
+    } else {
+        settings.unwrap()
     };
     let config_home = store.path().parent().expect("configuration directory");
     let (mut client, notice) = startup::client(&store, &settings, model_override, tui)?;
@@ -180,7 +178,7 @@ fn launch(
         drop(input);
         drop(output);
         drop(status);
-        return crate::tui::run_inner(
+        return crate::tui::launch(
             agent,
             session_config,
             resume,

@@ -83,6 +83,11 @@ defaults unchanged. OpenRouter keys and defaults live in plaintext at
 `~/.jecode/config.json`; protected ChatGPT account records live separately under
 `~/.jecode/accounts/openai/`. OpenAI API keys are not supported.
 
+First-time configuration is saved after choosing a default model. Until then,
+an OpenRouter key and settings changes stay in memory for the current session;
+cancelling model selection leaves the configuration file absent. Connecting a
+provider and choosing its first model also activates it for the current conversation.
+
 Use `/settings` → **Providers** → **Credentials** for ChatGPT accounts, or
 **API keys** for OpenRouter. With multiple configured providers, `/model` asks
 for the provider before the model. ChatGPT plan usage is managed in
@@ -92,6 +97,8 @@ If the default provider's credentials are removed, the TUI uses another configur
 provider for the conversation and shows a warning. It restores that provider's
 saved model when available; otherwise, use `/model` to choose one. With no
 configured provider, the warning points to `/settings`. Saved defaults stay unchanged.
+The warning includes the failure reason and reports when a `--model` override is
+skipped because the fallback provider uses its own model identifiers.
 
 ## Work in a project
 

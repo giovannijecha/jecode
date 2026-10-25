@@ -45,6 +45,7 @@ impl App {
                     .expect("configuration directory");
                 let configured = self.config.settings.services(home, id);
                 let services = if !defaults
+                    && !self.agent.as_ref().unwrap().needs_configuration()
                     && self.agent.as_ref().unwrap().backend_id() == id
                     && configured
                         .as_ref()
@@ -179,11 +180,16 @@ impl App {
     }
 
     pub(super) fn apply_selection(&mut self, model: String, effort: Effort, defaults: bool) {
+        // Completing first-time setup saves a real selection and activates it.
+        if !self.config.settings.has_model() && !defaults {
+            return self.apply_selection(model, effort, true);
+        }
         self.state.selector = None;
         self.auth_model_switch = false;
         let selected = self.catalog_services.take();
         self.provider_parent = None;
         if defaults {
+            let first_setup = !self.config.settings.has_model();
             let mut settings = self.config.settings.clone();
             if let Some(services) = &selected
                 && services.id() != settings.backend_id
@@ -202,6 +208,18 @@ impl App {
             match self.config.store.save(&settings) {
                 Ok(()) => {
                     if let Some(services) = selected {
+                        if first_setup {
+                            let result = services.create(model.clone()).and_then(|mut client| {
+                                client.set_effort(effort);
+                                self.agent.as_mut().unwrap().replace_backend(client)
+                            });
+                            if let Err(error) = result {
+                                self.config.settings = settings;
+                                self.finish_setting(Kind::Error, &error, vec![]);
+                                return;
+                            }
+                            self.state.effort = effort.name().into();
+                        }
                         self.agent.as_mut().unwrap().register_backend(services);
                         self.archive = self.agent.as_ref().unwrap().archive();
                     }
@@ -219,6 +237,18 @@ impl App {
                         self.config.settings.effort.name()
                     );
                     self.config.settings = settings;
+                    if first_setup {
+                        self.refresh_context();
+                        self.finish_setting(
+                            Kind::Notice,
+                            &format!(
+                                "Configuration saved · {model} ({}) · ready for this conversation",
+                                effort.name()
+                            ),
+                            vec![],
+                        );
+                        return;
+                    }
                     let next = if changed_provider {
                         format!("{} / {model}", self.config.settings.backend_id)
                     } else {
@@ -434,7 +464,13 @@ impl App {
         self.state.selector = None;
         let mut settings = self.config.settings.clone();
         settings.auto_compact = percent;
-        match self.config.store.save(&settings) {
+        let first_setup = !settings.has_model();
+        let saved = if first_setup {
+            Ok(())
+        } else {
+            self.config.store.save(&settings)
+        };
+        match saved {
             Ok(()) => {
                 let previous = self.config.settings.auto_compact;
                 self.config.settings = settings;
@@ -445,7 +481,14 @@ impl App {
                 self.refresh_context();
                 self.finish_setting_change(
                     Kind::Notice,
-                    &format!("Auto-compact: {previous}% → {percent}% · this and new conversations"),
+                    &format!(
+                        "Auto-compact: {previous}% → {percent}% · {}",
+                        if first_setup {
+                            "this session · choose a default model to save"
+                        } else {
+                            "this and new conversations"
+                        }
+                    ),
                     vec![],
                 );
             }

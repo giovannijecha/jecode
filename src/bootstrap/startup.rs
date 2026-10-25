@@ -1,54 +1,93 @@
 use super::*;
-use crate::backend::{Backend, unconfigured};
+use crate::{
+    backend::{Backend, unconfigured},
+    tui::StartupNotice,
+};
 
-pub(crate) type Notice = (String, &'static str, &'static str);
+pub(super) fn needs_setup(store: &Store, settings: &Settings) -> bool {
+    !settings.has_model()
+        || settings
+            .services(
+                store.path().parent().expect("configuration directory"),
+                &settings.backend_id,
+            )
+            .is_err()
+}
 
 pub(super) fn client(
     store: &Store,
     settings: &Settings,
     model_override: Option<String>,
     tui: bool,
-) -> Result<(Box<dyn Backend>, Option<Notice>), String> {
+) -> Result<(Box<dyn Backend>, Option<StartupNotice>), String> {
     let home = store.path().parent().expect("configuration directory");
-    let model = model_override.unwrap_or_else(|| settings.model.clone());
-    match settings.services(home, &settings.backend_id) {
-        Ok(services) => {
-            if model == "unconfigured" {
-                let message = "No model selected · Choose a model with /model".to_string();
-                return Ok((
-                    unconfigured::client(services.id(), model, Some(services), message.clone()),
-                    Some((message, "/model", "choose model")),
-                ));
-            }
-            return services.create(model).map(|client| (client, None));
-        }
-        Err(error) if !tui => return Err(error),
-        Err(_) => {}
+    if !tui && needs_setup(store, settings) {
+        return Err("Jecode needs provider credentials and a default model. Run jecode setup in a terminal, then retry your task.".into());
     }
+    let model = model_override
+        .clone()
+        .or_else(|| settings.has_model().then(|| settings.model.clone()));
+    let unavailable = match settings.services(home, &settings.backend_id) {
+        Ok(services) => {
+            if let Some(model) = model {
+                return services.create(model).map(|client| (client, None));
+            }
+            let text = "No model selected · Choose a model to finish configuration".to_string();
+            return Ok((
+                unconfigured::client(services.id(), None, Some(services), text.clone()),
+                Some(StartupNotice {
+                    text,
+                    action: ("/model", "choose model"),
+                }),
+            ));
+        }
+        Err(error) => error,
+    };
+    // The banner already carries an action; retain the diagnostic without a
+    // second settings instruction embedded in the provider error.
+    let cause = unavailable
+        .split("; open Settings")
+        .next()
+        .unwrap_or(&unavailable);
     if let Some(services) = settings.configured_services(home).into_iter().next() {
         let id = services.id();
+        let name = crate::backend::available()
+            .iter()
+            .find(|info| info.id == id)
+            .map_or(id, |info| info.name);
+        let mut text =
+            format!("Default provider unavailable · {cause} · Using {name} for this conversation");
+        if model_override.is_some() {
+            text.push_str(" · --model override skipped for the fallback provider");
+        }
         if let Some(model) = store.previous_model(id)? {
             let mut client = services.create(model)?;
             client.set_routing(crate::backend::Routing::Auto);
             return Ok((
                 client,
-                Some((
-                    format!("Default provider unavailable · Using {id} for this conversation"),
-                    "/settings",
-                    "providers",
-                )),
+                Some(StartupNotice {
+                    text,
+                    action: ("/settings", "providers"),
+                }),
             ));
         }
-        let message =
-            format!("Default provider unavailable · Using {id} · Choose a model with /model");
-        let client =
-            unconfigured::client(id, "unconfigured".into(), Some(services), message.clone());
-        return Ok((client, Some((message, "/model", "choose model"))));
+        text.push_str(" · Choose a model");
+        let client = unconfigured::client(id, None, Some(services), text.clone());
+        return Ok((
+            client,
+            Some(StartupNotice {
+                text,
+                action: ("/model", "choose model"),
+            }),
+        ));
     }
-    let message = "No configured provider · Connect an account or add an API key".to_string();
+    let text = format!("No configured provider · {cause}");
     Ok((
-        unconfigured::client(&settings.backend_id, model, None, message.clone()),
-        Some((message, "/settings", "configure provider")),
+        unconfigured::client(&settings.backend_id, model, None, text.clone()),
+        Some(StartupNotice {
+            text,
+            action: ("/settings", "configure provider"),
+        }),
     ))
 }
 

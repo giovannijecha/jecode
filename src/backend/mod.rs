@@ -249,6 +249,9 @@ pub trait Backend: Send {
     fn needs_configuration(&self) -> bool {
         false
     }
+    fn has_model(&self) -> bool {
+        true
+    }
     fn account(&self) -> Option<String> {
         None
     }

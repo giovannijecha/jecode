@@ -34,12 +34,15 @@ impl App {
     pub(super) fn finish_key(
         &mut self,
         key: String,
-        result: Result<(), String>,
+        result: Result<backend::Services, String>,
     ) -> Result<(), String> {
-        if let Err(error) = result {
-            self.finish_setting(Kind::Error, &error, vec![]);
-            return Ok(());
-        }
+        let services = match result {
+            Ok(services) => services,
+            Err(error) => {
+                self.finish_setting(Kind::Error, &error, vec![]);
+                return Ok(());
+            }
+        };
         let mut settings = self.config.settings.clone();
         settings
             .credentials
@@ -47,29 +50,36 @@ impl App {
         if settings.backend_id == "openrouter" {
             settings.api_key = key.clone();
         }
-        if let Err(error) = self.config.store.save(&settings) {
+        let first_setup = !settings.has_model();
+        if !first_setup && let Err(error) = self.config.store.save(&settings) {
             self.finish_setting(Kind::Error, &error, vec![]);
             return Ok(());
         }
         let agent = self.agent.as_mut().unwrap();
-        let choose_model = agent.model() == "unconfigured";
-        if agent.backend_id() == "openrouter" && !choose_model {
-            let mut client = agent
-                .services()
-                .with_credential(key.clone())?
-                .create(agent.model().into())?;
+        let unconfigured = agent.needs_configuration();
+        let reuse_model = agent.backend_id() == services.id() && agent.has_model();
+        if reuse_model {
+            let mut client = services.create(agent.model().into())?;
             client.set_effort(agent.effort());
             agent.replace_backend(client)?;
         } else {
-            agent.register_backend(backend::Services::for_backend("openrouter", key)?);
+            agent.register_backend(services.clone());
         }
         self.config.settings = settings;
         self.archive = agent.archive();
         self.catalog.clear();
         self.refresh_context();
-        self.finish_setting(Kind::Notice, "API key validated and saved", vec![]);
-        if choose_model {
-            self.open_model_providers(false);
+        self.finish_setting(
+            Kind::Notice,
+            if first_setup {
+                "API key validated · Choose a default model to save configuration"
+            } else {
+                "API key validated and saved"
+            },
+            vec![],
+        );
+        if unconfigured && !reuse_model {
+            self.offer_connected_models(services);
         }
         Ok(())
     }

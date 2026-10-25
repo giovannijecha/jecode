@@ -13,12 +13,23 @@ During browser-based ChatGPT sign-in from `jecode setup`, press Enter to cancel
 the pending login and return to provider selection. Once sign-in completes,
 Enter belongs to the next setup prompt.
 
+The first TUI configuration stays in memory until a real default model is
+selected. Adding an OpenRouter key opens that selection; cancelling it does not
+save the key. Preferences changed before setup is complete apply to the current
+session and are saved along with the eventual default model. No placeholder
+provider/model selection is written to `config.json`. Choosing the first model
+also activates it for the current conversation; later default changes retain
+their usual scope of new conversations.
+
 If the saved default provider has no credentials, the TUI falls back to another
 configured provider for the current conversation. It uses that provider's saved
 model, or offers `/model` when none is saved. With no configured providers, local
 commands and settings remain available; model requests report that credentials
 are needed. Startup does not rewrite saved defaults or contact a provider to
-validate credentials. Plain chat and single-prompt commands still require configuration.
+validate credentials. A fallback warning includes the failure reason and states
+when a `--model` override is skipped across providers. Plain interactive chat
+offers setup if its saved provider credentials are missing; noninteractive tasks
+instead report how to run `jecode setup`.
 
 ## Models and effort
 

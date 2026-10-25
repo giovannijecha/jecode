@@ -70,10 +70,12 @@ fn sessions_windows_smoke() {
     );
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     client.set_effort(Effort::High);
-    run(
+    launch(
         Agent::new(client, Tools::new(directory.path()).unwrap()),
         tests::config(&directory),
+        None,
         Default::default(),
+        None,
     )
     .unwrap();
     let home = directory.path().join(".jecode");
@@ -108,7 +110,14 @@ fn sessions_windows_smoke() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    resume(agent, tests::config(&directory), None).unwrap();
+    launch(
+        agent,
+        tests::config(&directory),
+        Some(None),
+        Default::default(),
+        None,
+    )
+    .unwrap();
     assert_eq!(fixture.finish().len(), 3);
     assert_eq!(
         std::fs::read_to_string(directory.path().join("executions.txt")).unwrap(),

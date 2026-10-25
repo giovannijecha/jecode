@@ -356,19 +356,8 @@ impl App {
                     Kind::Notice,
                     "Connected OpenAI · Using your ChatGPT plan · Manage usage in account details",
                 ));
-                if let Ok(services) = self.config.settings.services(&self.home(), "openai")
-                    && (self.agent.as_ref().unwrap().model() == "unconfigured"
-                        || (self.agent.as_ref().unwrap().backend_id() == "openai"
-                            && services.account() != self.agent.as_ref().unwrap().services().account()))
-                {
-                    self.auth_model_switch = true;
-                    self.load_catalog_for(
-                        super::jobs::CatalogPurpose::Models {
-                            defaults: false,
-                            id: None,
-                        },
-                        services,
-                    );
+                if let Ok(services) = self.config.settings.services(&self.home(), "openai") {
+                    self.offer_connected_models(services);
                 }
             }
             Ok(false) => self.state.notify(Feedback::result(
@@ -376,6 +365,23 @@ impl App {
                 "Signed in, but ChatGPT plan access was not granted · check your plan or sign in again",
             )),
             Err(error) => self.warn(&error),
+        }
+    }
+
+    pub(super) fn offer_connected_models(&mut self, services: Services) {
+        let agent = self.agent.as_ref().unwrap();
+        if agent.needs_configuration()
+            || (agent.backend_id() == services.id()
+                && services.account() != agent.services().account())
+        {
+            self.auth_model_switch = services.id() == "openai";
+            self.load_catalog_for(
+                super::jobs::CatalogPurpose::Models {
+                    defaults: !self.config.settings.has_model(),
+                    id: None,
+                },
+                services,
+            );
         }
     }
 

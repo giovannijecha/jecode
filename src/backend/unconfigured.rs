@@ -4,7 +4,7 @@ use super::*;
 #[derive(Clone)]
 struct Unconfigured {
     id: &'static str,
-    model: String,
+    model: Option<String>,
     effort: Effort,
     services: Option<Services>,
     message: String,
@@ -12,7 +12,7 @@ struct Unconfigured {
 
 pub fn client(
     id: &str,
-    model: String,
+    model: Option<String>,
     services: Option<Services>,
     message: String,
 ) -> Box<dyn Backend> {
@@ -29,6 +29,9 @@ pub fn client(
 }
 
 impl Backend for Unconfigured {
+    fn has_model(&self) -> bool {
+        self.model.is_some()
+    }
     fn needs_configuration(&self) -> bool {
         true
     }
@@ -36,7 +39,7 @@ impl Backend for Unconfigured {
         self.id
     }
     fn model(&self) -> &str {
-        &self.model
+        self.model.as_deref().unwrap_or("unconfigured")
     }
     fn effort(&self) -> Effort {
         self.effort

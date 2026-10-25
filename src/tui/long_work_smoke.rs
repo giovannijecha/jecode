@@ -59,10 +59,12 @@ fn long_work_windows_smoke() {
     let fixture = HttpFixture::streaming_with_wait(responses, Duration::from_secs(180));
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     client.fixture_limits(24000, Some(4096));
-    run(
+    launch(
         Agent::new(client, Tools::new(directory.path()).unwrap()),
         tests::config(&directory),
+        None,
         Default::default(),
+        None,
     )
     .unwrap();
     let requests = fixture.finish();

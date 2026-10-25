@@ -136,9 +136,9 @@ public sealed class JecodeTestPty : IDisposable {
         input.Write(bytes, 0, bytes.Length); input.Flush();
     }
     public int Mark() { lock (gate) { return received.Length; } }
-    void EnsureVt(string text) {
+    void EnsureVt(string text, string label) {
         lock (gate) {
-            if (!received.ToString().Contains(text)) throw new IOException("ConPTY missing warning style");
+            if (!received.ToString().Contains(text)) throw new IOException("ConPTY missing " + label + ": " + text);
         }
     }
     public void Wait(string text, int after = 0) {
@@ -263,11 +263,19 @@ public sealed class JecodeTestPty : IDisposable {
     public static void Run(string executable, string directory, string scenario) {
         using (var pty = new JecodeTestPty()) {
             pty.Start(executable, directory, scenario);
-            if (scenario.StartsWith("startup-")) {
+            if (scenario == "startup-plain") {
+                pty.Wait("Providers:"); pty.Send("/cancel\r");
+                pty.Wait("NATIVE_STARTUP_RESTORED"); pty.Finish(true);
+            } else if (scenario == "startup-setup-empty") {
+                pty.Wait("Providers:"); pty.Send("1\r");
+                pty.Wait("OpenRouter API key (hidden):");
+                pty.EnsureNoText("Enter keeps the saved key", 0); pty.Send("/cancel\r");
+                pty.Wait("NATIVE_STARTUP_RESTORED"); pty.Finish(true);
+            } else if (scenario.StartsWith("startup-")) {
                 pty.Wait("Ask anything");
                 pty.Wait(scenario == "startup-fallback" ? "Default provider unavailable" : "No configured provider");
-                pty.EnsureVt("\x1b[38;2;224;175;104m");
-                pty.EnsureVt("\x1b[48;2;40;46;57m");
+                pty.EnsureVt("JECODE_WARNING_FOREGROUND", "warning foreground");
+                pty.EnsureVt("JECODE_WARNING_SURFACE", "warning surface");
                 int settings = pty.Mark(); pty.Send("/settings");
                 pty.Wait("Commands", settings); pty.Send("\r");
                 pty.Wait("Providers", settings);

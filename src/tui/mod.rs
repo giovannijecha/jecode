@@ -56,6 +56,11 @@ use std::time::Instant;
 use terminal::{Input, Terminal};
 use worker::Worker;
 
+pub(crate) struct StartupNotice {
+    pub text: String,
+    pub action: (&'static str, &'static str),
+}
+
 struct App {
     agent: Option<Agent>,
     worker: Option<Worker>,
@@ -193,26 +198,12 @@ impl App {
 }
 
 /// Opens the TUI; a non-empty `draft` starts the composer, as `--attach` does.
-#[cfg(test)]
-pub fn run(
-    agent: Agent,
-    config: SessionConfig,
-    draft: crate::attachments::Prompt,
-) -> Result<(), String> {
-    run_inner(agent, config, None, draft, None)
-}
-
-#[cfg(test)]
-pub fn resume(agent: Agent, config: SessionConfig, id: Option<String>) -> Result<(), String> {
-    run_inner(agent, config, Some(id), Default::default(), None)
-}
-
-pub(crate) fn run_inner(
+pub(crate) fn launch(
     mut agent: Agent,
     config: SessionConfig,
     resume: Option<Option<String>>,
     draft: crate::attachments::Prompt,
-    notice: Option<(String, &'static str, &'static str)>,
+    notice: Option<StartupNotice>,
 ) -> Result<(), String> {
     agent.enable_sessions(
         config
@@ -232,9 +223,9 @@ pub(crate) fn run_inner(
         None => {}
     }
     app.restore_staged();
-    if let Some((text, key, label)) = notice {
-        let mut feedback = Feedback::result(Kind::Warning, app.archive.redactor.text(&text));
-        feedback.action = Some((key, label));
+    if let Some(notice) = notice {
+        let mut feedback = Feedback::result(Kind::Warning, app.archive.redactor.text(&notice.text));
+        feedback.action = Some(notice.action);
         app.state.notify(feedback);
     }
     let mut decoder = Decoder::default();
