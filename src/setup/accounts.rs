@@ -1,16 +1,20 @@
-use super::{Prompter, answer, cancelled, choose_model};
+use super::{Prompter, SignIn, answer, cancelled, choose_model};
 use crate::{
     auth::{Credential, openai},
     backend::Services,
-    cancel::Cancellation,
     config::{Settings, Store},
 };
+
+pub(super) enum Outcome {
+    Finished(Option<Settings>),
+    Back,
+}
 
 pub(super) fn configure(
     config: &Store,
     current: Option<&Settings>,
     ui: &mut impl Prompter,
-) -> Result<Option<Settings>, String> {
+) -> Result<Outcome, String> {
     let home = config.path().parent().expect("configuration directory");
     let accounts = openai::Store::new(home.to_path_buf());
     let saved = accounts.accounts()?;
@@ -18,11 +22,11 @@ pub(super) fn configure(
         let Some(value) = answer(ui.input(
             "Continue with ChatGPT (Enter opens your browser; /cancel leaves unchanged): ",
         )?) else {
-            return cancelled(ui);
+            return cancelled(ui).map(Outcome::Finished);
         };
         if !value.is_empty() {
             ui.message("Press Enter to continue with ChatGPT.")?;
-            return Ok(None);
+            return Ok(Outcome::Finished(None));
         }
         None
     } else {
@@ -38,7 +42,7 @@ pub(super) fn configure(
             let Some(value) =
                 answer(ui.input("Choose an account number (/cancel leaves unchanged): ")?)
             else {
-                return cancelled(ui);
+                return cancelled(ui).map(Outcome::Finished);
             };
             if let Some(index) = value.parse::<usize>().ok().and_then(|n| n.checked_sub(1)) {
                 if index == saved.len() {
@@ -53,16 +57,24 @@ pub(super) fn configure(
     };
     let session = match existing.filter(|account| account.enabled) {
         Some(account) => accounts.session(&account.client_id)?,
-        None => accounts.sign_in(
-            existing.map(|account| account.client_id.as_str()),
-            Cancellation::default(),
-            &mut |update| match update {
-                openai::SignInUpdate::Browser(url) => {
-                    ui.message(&format!("Continue with ChatGPT in your browser:\n{url}"))
-                }
-                openai::SignInUpdate::Waiting => ui.message("Waiting for ChatGPT sign-in…"),
-            },
-        )?,
+        None => match ui.with_sign_in_cancel(|ui, cancellation| {
+            accounts.sign_in(
+                existing.map(|account| account.client_id.as_str()),
+                cancellation,
+                &mut |update| match update {
+                    openai::SignInUpdate::Browser(url) => {
+                        ui.message(&format!("Continue with ChatGPT in your browser:\n{url}"))
+                    }
+                    openai::SignInUpdate::Waiting => ui.message("Waiting for ChatGPT sign-in…"),
+                },
+            )
+        })? {
+            SignIn::Completed(session) => session,
+            SignIn::Back => {
+                ui.message("ChatGPT sign-in cancelled. Choose a provider to continue.")?;
+                return Ok(Outcome::Back);
+            }
+        },
     };
     let services = Services::for_credential(&Credential::openai(session.clone()))?;
     services.check_credential()?;
@@ -70,7 +82,7 @@ pub(super) fn configure(
         .filter(|settings| settings.backend_id == "openai")
         .map(|settings| settings.model.as_str());
     let Some(model) = choose_model(&services, current_model, ui)? else {
-        return cancelled(ui);
+        return cancelled(ui).map(Outcome::Finished);
     };
     let mut settings = match current {
         Some(settings) => settings.clone(),
@@ -86,5 +98,5 @@ pub(super) fn configure(
     accounts.activate(session.client_id())?;
     ui.message("Using ChatGPT plan. Manage usage: https://chatgpt.com/settings/usage")?;
     ui.message(&format!("Saved. Model: {}", settings.model))?;
-    Ok(Some(settings))
+    Ok(Outcome::Finished(Some(settings)))
 }

@@ -8,6 +8,10 @@ OpenRouter keys and defaults are
 stored in plain text in `~/.jecode/config.json` (on Windows,
 `%USERPROFILE%\.jecode\config.json`). Keep this personal file private.
 
+During browser-based ChatGPT sign-in from `jecode setup`, press Enter to cancel
+the pending login and return to provider selection. Once sign-in completes,
+Enter belongs to the next setup prompt.
+
 ## Models and effort
 
 | Action | Scope |

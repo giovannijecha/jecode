@@ -61,6 +61,13 @@ Invalid or unrelated loopback callbacks receive HTTP 400 without ending the
 sign-in attempt. A matching provider error still ends it. During refresh, an
 omitted `refresh_token` retains the previous token; a newly issued token replaces
 it, following [RFC 6749 section 6](https://www.rfc-editor.org/rfc/rfc6749#section-6).
+A null token is treated as omitted for compatibility.
+
+CLI setup uses a scoped console reader for Enter-to-cancel during sign-in:
+system `cmd.exe` on Windows and Bash on Unix. The reader process is stopped and
+reaped, and its watcher joined, before setup reads another prompt, including
+after completion or failure. This uses installed system tools without a Rust
+runtime dependency.
 
 The account picker separates registrations even when they share an email.
 Conversation origins include the verified registration, so another account
@@ -135,6 +142,8 @@ Temporary HTTP and stream failures retain the server's `Retry-After` delay
 (seconds or HTTP date). The recovery loop waits at least that long and remains
 cancellable. `slow_down` and `server_is_overloaded` stream errors are temporary;
 a plan usage-limit error still stops inference.
+An unrepresentable retry deadline omits only the TUI countdown; the server's
+minimum delay is retained and user cancellation still interrupts the wait.
 The top-level `error` event's code, message and parameter are retained alongside
 nested response errors. Successful SSE bodies go directly to the stream parser;
 the process capture and HTTP error body each retain at most 64 KiB of diagnostics.

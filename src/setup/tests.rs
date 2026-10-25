@@ -8,6 +8,7 @@ struct Prompts {
     inputs: VecDeque<String>,
     secrets: VecDeque<String>,
     messages: String,
+    cancel_sign_in: bool,
 }
 
 impl Prompts {
@@ -16,6 +17,7 @@ impl Prompts {
             inputs: inputs.iter().map(|text| text.to_string()).collect(),
             secrets: secrets.iter().map(|text| text.to_string()).collect(),
             messages: String::new(),
+            cancel_sign_in: false,
         }
     }
 }
@@ -32,6 +34,38 @@ impl Prompter for Prompts {
     fn secret(&mut self, _: &str) -> Result<Option<String>, String> {
         Ok(self.secrets.pop_front())
     }
+
+    fn with_sign_in_cancel<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self, crate::cancel::Cancellation) -> Result<T, String>,
+    ) -> Result<SignIn<T>, String> {
+        if self.cancel_sign_in {
+            Ok(SignIn::Back)
+        } else {
+            operation(self, crate::cancel::Cancellation::default()).map(SignIn::Completed)
+        }
+    }
+}
+
+#[test]
+fn cancelled_chatgpt_sign_in_returns_to_provider_selection_and_preserves_settings() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().join("config.json"));
+    let settings = Settings::new("isolated-fixture-key".into(), "fixture/original".into()).unwrap();
+    store.save(&settings).unwrap();
+    let original = fs::read(store.path()).unwrap();
+    let mut ui = Prompts::new(&["2", "", "/cancel"], &[]);
+    ui.cancel_sign_in = true;
+
+    assert!(
+        configure(&store, Some(&settings), &mut ui)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(ui.messages.matches("Providers:").count(), 2);
+    assert!(ui.messages.contains("ChatGPT sign-in cancelled"));
+    assert!(ui.messages.contains("Setup cancelled"));
+    assert_eq!(fs::read(store.path()).unwrap(), original);
 }
 
 #[test]

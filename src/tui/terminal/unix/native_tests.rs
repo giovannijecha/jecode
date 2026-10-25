@@ -151,11 +151,30 @@ fn controls_and_terminal_lifetime() {
 
     let mut terminal = driver::Pty::new("guardian-loss");
     terminal.finish("PTY_GUARDIAN_RECOVERED");
+
+    for case in ["setup-cancel", "setup-success", "setup-error"] {
+        let mut terminal = driver::Pty::new(case);
+        terminal.wait("SETUP_SIGN_IN_WAITING");
+        if case == "setup-cancel" {
+            terminal.send(b"\r");
+        }
+        terminal.wait("SETUP_NEXT_PROMPT: ");
+        terminal.send(b"next\r");
+        terminal.finish("SETUP_NATIVE_DONE");
+    }
 }
 
 #[test]
 #[ignore = "private child fixture of the native Unix PTY check"]
 fn native_pty_fixture() {
+    let case = std::env::var("JECODE_TUI_CASE").unwrap();
+    if case.starts_with("setup-") {
+        let tty = File::open("/dev/tty").unwrap();
+        let original = mode::stty(&tty, &["-g"]).unwrap();
+        crate::setup::native_sign_in_fixture(&case);
+        assert_mode_restored(&tty, &original);
+        return;
+    }
     let path = std::path::PathBuf::from(std::env::var_os("JECODE_TUI_FIXTURE").unwrap());
     let output = std::process::Command::new("tty")
         .stdin(std::process::Stdio::inherit())

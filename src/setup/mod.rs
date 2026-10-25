@@ -4,6 +4,8 @@ mod terminal;
 
 pub use models::choose_model;
 pub use terminal::Terminal;
+#[cfg(test)]
+pub(crate) use terminal::native_sign_in_fixture;
 
 use crate::backend::{self, Services};
 use crate::config::{Settings, Store};
@@ -13,6 +15,21 @@ pub trait Prompter {
     fn message(&mut self, text: &str) -> Result<(), String>;
     fn input(&mut self, prompt: &str) -> Result<Option<String>, String>;
     fn secret(&mut self, prompt: &str) -> Result<Option<String>, String>;
+
+    fn with_sign_in_cancel<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self, crate::cancel::Cancellation) -> Result<T, String>,
+    ) -> Result<SignIn<T>, String>
+    where
+        Self: Sized,
+    {
+        operation(self, crate::cancel::Cancellation::default()).map(SignIn::Completed)
+    }
+}
+
+pub enum SignIn<T> {
+    Completed(T),
+    Back,
 }
 
 pub fn configure(
@@ -20,16 +37,21 @@ pub fn configure(
     current: Option<&Settings>,
     ui: &mut impl Prompter,
 ) -> Result<Option<Settings>, String> {
-    let backend_id = choose_provider(ui)?;
-    let Some(backend_id) = backend_id else {
-        return cancelled(ui);
-    };
-    if backend_id == "openai" {
-        return accounts::configure(store, current, ui);
+    loop {
+        let backend_id = choose_provider(ui)?;
+        let Some(backend_id) = backend_id else {
+            return cancelled(ui);
+        };
+        if backend_id == "openai" {
+            match accounts::configure(store, current, ui)? {
+                accounts::Outcome::Finished(settings) => return Ok(settings),
+                accounts::Outcome::Back => continue,
+            }
+        }
+        return configure_with(store, current, ui, backend_id, |id, key| {
+            Services::for_backend(id, key.into())
+        });
     }
-    configure_with(store, current, ui, backend_id, |id, key| {
-        Services::for_backend(id, key.into())
-    })
 }
 
 fn choose_provider(ui: &mut impl Prompter) -> Result<Option<&'static str>, String> {

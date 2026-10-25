@@ -2,6 +2,23 @@ use super::*;
 use crate::events::Event;
 
 #[test]
+fn extreme_retry_after_keeps_progress_without_an_overflowing_countdown() {
+    let mut state = State::default();
+    state.event(Event::Recovering {
+        attempt: 1,
+        delay: Duration::from_secs(u64::MAX),
+        error: "provider requested a long retry delay".into(),
+        reason: Some(crate::backend::FailureReason::RateLimited),
+    });
+    let feedback = state.current_progress().unwrap();
+    assert!(feedback.in_progress());
+    assert!(feedback.text.starts_with("Rate limited"));
+    assert!(feedback.until.is_none());
+    state.event(Event::RecoveryFinished);
+    assert!(state.current_progress().is_none());
+}
+
+#[test]
 fn a_new_preparation_discards_stale_backend_failure_metadata() {
     let mut state = State::default();
     state.event(Event::BackendFailure {

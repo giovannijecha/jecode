@@ -253,7 +253,14 @@ public sealed class JecodeTestPty : IDisposable {
     public static void Run(string executable, string directory, string scenario) {
         using (var pty = new JecodeTestPty()) {
             pty.Start(executable, directory, scenario);
-            if (scenario == "latency-idle" || scenario == "latency-active") {
+            if (scenario.StartsWith("setup-")) {
+                pty.Wait("SETUP_SIGN_IN_WAITING");
+                if (scenario == "setup-cancel") pty.Send("\r");
+                pty.Wait("SETUP_NEXT_PROMPT: ");
+                pty.Send("next\r");
+                pty.Wait("SETUP_NATIVE_DONE");
+                pty.Finish(true);
+            } else if (scenario == "latency-idle" || scenario == "latency-active") {
                 pty.Latency(directory, scenario == "latency-active");
             } else if (scenario == "interactive") {
                 pty.Wait("Ask anything");

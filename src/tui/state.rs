@@ -172,13 +172,16 @@ impl State {
                 } else {
                     "Reconnecting"
                 };
-                self.recovery = Some(
-                    Feedback::progress(
-                        Kind::Warning,
-                        format!("{subject} · attempt {attempt} · {error}"),
-                    )
-                    .until(std::time::Instant::now() + delay),
+                let recovery = Feedback::progress(
+                    Kind::Warning,
+                    format!("{subject} · attempt {attempt} · {error}"),
                 );
+                // Server delays can exceed the platform's Instant range. The
+                // cancellable retry still honors them without a countdown.
+                self.recovery = Some(match std::time::Instant::now().checked_add(delay) {
+                    Some(until) => recovery.until(until),
+                    None => recovery,
+                });
             }
             Event::RecoveryFinished => {
                 self.recovery = None;

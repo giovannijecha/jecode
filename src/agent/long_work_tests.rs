@@ -122,30 +122,32 @@ fn temporary_failures_have_no_attempt_cap_and_completed_tools_are_not_replayed()
 
 #[test]
 fn retry_after_is_respected_and_user_interruption_breaks_the_wait_immediately() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::streaming(vec![Response::Http(
-        429,
-        vec![("Retry-After".into(), "90".into())],
-        failure(429, "Wait"),
-    )]);
-    let mut agent = Agent::new(
-        OpenRouter::fixture(fixture.endpoint.clone()),
-        Tools::new(directory.path()).unwrap(),
-    );
-    let signal = agent.cancellation.clone();
-    let started = Instant::now();
-    let error = agent
-        .run_turn("Work", &mut |event| {
-            if let Event::Recovering { delay, .. } = event {
-                assert_eq!(delay, Duration::from_secs(90));
-                signal.cancel();
-            }
-            Ok(())
-        })
-        .unwrap_err();
-    assert!(error.contains("cancelled"));
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(fixture.finish().len(), 1);
+    for seconds in [90, u64::MAX] {
+        let directory = Directory::new();
+        let fixture = HttpFixture::streaming(vec![Response::Http(
+            429,
+            vec![("Retry-After".into(), seconds.to_string())],
+            failure(429, "Wait"),
+        )]);
+        let mut agent = Agent::new(
+            OpenRouter::fixture(fixture.endpoint.clone()),
+            Tools::new(directory.path()).unwrap(),
+        );
+        let signal = agent.cancellation.clone();
+        let started = Instant::now();
+        let error = agent
+            .run_turn("Work", &mut |event| {
+                if let Event::Recovering { delay, .. } = event {
+                    assert_eq!(delay, Duration::from_secs(seconds));
+                    signal.cancel();
+                }
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.contains("cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(fixture.finish().len(), 1);
+    }
 }
 
 #[test]

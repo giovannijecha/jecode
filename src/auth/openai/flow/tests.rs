@@ -72,12 +72,14 @@ fn matching_provider_error_ends_sign_in() {
 }
 
 #[test]
-fn refresh_token_is_retained_when_omitted_and_replaced_when_issued() {
+fn refresh_token_is_retained_when_omitted_or_null_and_replaced_when_issued() {
     let omitted = Value::object([("access_token", Value::string("new-access"))]);
     assert_eq!(
         refresh_token(&omitted, "old-refresh").unwrap(),
         "old-refresh"
     );
+    let null = Value::object([("refresh_token", Value::Null)]);
+    assert_eq!(refresh_token(&null, "old-refresh").unwrap(), "old-refresh");
     let rotated = Value::object([("refresh_token", Value::string("new-refresh"))]);
     assert_eq!(
         refresh_token(&rotated, "old-refresh").unwrap(),
@@ -87,7 +89,7 @@ fn refresh_token_is_retained_when_omitted_and_replaced_when_issued() {
 
 #[test]
 fn malformed_issued_refresh_token_is_rejected() {
-    for invalid in [Value::Null, Value::number(1), Value::string("")] {
+    for invalid in [Value::number(1), Value::string("")] {
         let response = Value::object([("refresh_token", invalid)]);
         assert!(refresh_token(&response, "old-refresh").is_err());
     }

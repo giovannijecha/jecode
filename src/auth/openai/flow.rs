@@ -259,8 +259,8 @@ fn required<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
 
 fn refresh_token(response: &Value, previous: &str) -> Result<String, String> {
     match response.get("refresh_token") {
+        Some(Value::Null) | None => Ok(previous.to_string()),
         Some(_) => Ok(required(response, "refresh_token")?.to_string()),
-        None => Ok(previous.to_string()),
     }
 }
 

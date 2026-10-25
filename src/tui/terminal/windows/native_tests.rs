@@ -22,6 +22,9 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "input-recovery",
         "owner-death",
         "guardian-loss",
+        "setup-cancel",
+        "setup-success",
+        "setup-error",
     ] {
         let directory = Directory::new();
         let script = format!(
@@ -322,8 +325,12 @@ fn tool_cards_console(bash: &std::path::Path) {
 #[test]
 #[ignore = "private child fixture of the native Windows ConPTY check"]
 fn native_console_fixture() {
-    let path = std::path::PathBuf::from(std::env::var_os("JECODE_NATIVE_DIR").unwrap());
     let scenario = std::env::var("JECODE_NATIVE_CASE").unwrap();
+    if scenario.starts_with("setup-") {
+        crate::setup::native_sign_in_fixture(&scenario);
+        return;
+    }
+    let path = std::path::PathBuf::from(std::env::var_os("JECODE_NATIVE_DIR").unwrap());
     if scenario == "verify-owner-death" {
         restored(&path);
         println!("NATIVE_OWNER_RESTORED");
