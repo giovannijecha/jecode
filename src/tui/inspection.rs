@@ -1,4 +1,4 @@
-use super::{App, terminal::Key, viewport::Scroll};
+use super::{App, Feedback, Kind, terminal::Key};
 
 impl App {
     pub(super) fn inspect_key(&mut self, key: Key) -> bool {
@@ -8,13 +8,16 @@ impl App {
         if self.idle()
             && !super::view::panel_open(&self.state)
             && !self.state.queue.is_editing()
-            && let Some((expanded, first)) = self.state.toggle_tools()
+            && let Some((expanded, count)) = self.state.toggle_tools()
         {
-            self.renderer.scroll(if expanded {
-                Scroll::Reveal(first + 1)
-            } else {
-                Scroll::End
-            });
+            self.state.notify(Feedback::result(
+                Kind::Notice,
+                format!(
+                    "Tool details {} · {count} {}",
+                    if expanded { "expanded" } else { "collapsed" },
+                    if count == 1 { "tool" } else { "tools" }
+                ),
+            ));
         }
         true
     }

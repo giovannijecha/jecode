@@ -67,7 +67,7 @@ fn input_during_a_tool_preview_joins_the_immediately_following_request() {
     let mut sent = false;
     agent
         .next_completion(Some(limits), &mut |event| {
-            if matches!(&event, Event::Maintenance { text } if text.starts_with("Large tool results"))
+            if matches!(&event, Event::ContextCompacted { text } if text.starts_with("Large tool results"))
             {
                 send(&inbox, "Keep the original inspection scope.");
                 sent = true;

@@ -6,7 +6,6 @@ pub(super) enum Scroll {
     Page(bool),
     Start,
     End,
-    Reveal(usize),
 }
 
 #[derive(Clone, Copy)]
@@ -107,14 +106,6 @@ impl Viewport {
                 Scroll::End => {
                     top = end;
                     following = true;
-                }
-                Scroll::Reveal(block) => {
-                    if let Some(start) = starts.get(block).copied() {
-                        if start < top || start >= top + height {
-                            top = start.min(end);
-                        }
-                        following = false;
-                    }
                 }
             }
         }

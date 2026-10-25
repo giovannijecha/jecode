@@ -5,7 +5,18 @@ pub struct Command {
     pub plain_usage: Option<&'static str>,
 }
 
+/// Command groups in the order menus list them.
+pub const GROUPS: [&str; 4] = ["Conversation", "Model", "Workspace", "Jecode"];
+
 impl Command {
+    pub fn group(&self) -> &'static str {
+        match self.name {
+            "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/exit" => GROUPS[0],
+            "/backend" | "/model" | "/effort" | "/routing" => GROUPS[1],
+            "/settings" | "/help" => GROUPS[3],
+            _ => GROUPS[2],
+        }
+    }
     pub fn description(&self, tui: bool) -> &'static str {
         match (tui, self.name) {
             (false, "/terminal") => "List active processes, or show saved output by ID",
@@ -241,7 +252,16 @@ pub fn suggestions(query: &str) -> Vec<Match> {
             })
         })
         .collect();
-    matches.sort_by_key(|matched| (matched.score, matched.index));
+    // The bare slash lists every command under its group.
+    let grouped = |matched: &Match| {
+        let group = COMMANDS[matched.index].group();
+        if query == "/" {
+            GROUPS.iter().position(|name| *name == group).unwrap_or(0)
+        } else {
+            0
+        }
+    };
+    matches.sort_by_key(|matched| (matched.score, grouped(matched), matched.index));
     matches
 }
 

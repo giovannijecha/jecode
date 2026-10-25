@@ -39,21 +39,29 @@ impl App {
         };
         match handle.store().list() {
             Ok(listing) => {
-                if let Some(session) = listing
+                // Unreadable sessions outrank the hint, so the warning shows.
+                if !listing.warnings.is_empty() {
+                    let count = listing.warnings.len();
+                    self.state.notify(
+                        Feedback::result(
+                            Kind::Warning,
+                            format!(
+                                "{count} saved {} could not be read",
+                                if count == 1 { "session" } else { "sessions" }
+                            ),
+                        )
+                        .action("/resume", "details"),
+                    );
+                } else if let Some(session) = listing
                     .sessions
                     .iter()
                     .find(|session| session.id != handle.id())
                 {
-                    self.state.notice = Some(Feedback::result(
-                        Kind::Notice,
-                        format!("Previous session: {} · /resume", session.title),
-                    ));
-                }
-                if !listing.warnings.is_empty() {
-                    self.warn(&format!(
-                        "{} saved session(s) could not be read · /resume for details",
-                        listing.warnings.len()
-                    ));
+                    let title = self.archive.redactor.text(&session.title);
+                    self.state.notify(
+                        Feedback::result(Kind::Notice, format!("Previous session: {title}"))
+                            .action("/resume", "open"),
+                    );
                 }
             }
             Err(error) => self.warn(&error),
@@ -107,7 +115,8 @@ impl App {
                     "Autosave failed: {error}. Session kept in memory."
                 ));
                 if self.save_error.as_ref() != Some(&error) {
-                    self.state.notice = Some(Feedback::result(Kind::Error, error.clone()));
+                    self.state
+                        .notify(Feedback::result(Kind::Error, error.clone()));
                     self.save_error = Some(error);
                     return true;
                 }
@@ -128,8 +137,8 @@ impl App {
             Ok((sessions, warnings)) => {
                 let current = self.persistence.as_ref().unwrap().id();
                 self.saved_sessions = sessions;
-                for warning in warnings {
-                    self.state.message(Kind::Warning, &warning);
+                if !warnings.is_empty() {
+                    self.state.message(Kind::Warning, &warnings.join(" · "));
                 }
                 self.state.selector = Some(Selector::sessions(&self.saved_sessions, &current));
             }

@@ -1,12 +1,16 @@
 mod inline;
+mod stream;
 mod table;
+
+pub(super) use stream::Stream;
 
 use super::{
     line::Line,
     syntax::Highlighter,
     text,
-    theme::{BODY, CODE_SURFACE, EMPHASIS, MUTED, Style},
+    theme::{ACCENT, BODY, CODE_SURFACE, CODE_TEXT, EMPHASIS, MUTED, Style},
 };
+use std::borrow::Cow;
 
 #[derive(Clone)]
 struct Fence {
@@ -51,92 +55,6 @@ impl Rows {
     }
 }
 
-// An append may change the last source line, turn the preceding line into a
-// setext heading or table, or extend an open table. Keep only the prefix before
-// that unstable region. A fence checkpoint carries its lexer state with it.
-pub(super) struct Stream {
-    raw: String,
-    rows: Rows,
-    trailing: String,
-    checkpoint: Checkpoint,
-    ready: bool,
-}
-
-struct Checkpoint {
-    position: usize,
-    rendered: usize,
-    fenced: Option<Fence>,
-}
-
-impl Stream {
-    pub fn new(value: &str, columns: usize) -> Self {
-        let mut cleaned = text::clean(value);
-        let trailing = cleaned.split_off(cleaned.trim_end().len());
-        let rows = Rows::from_clean(cleaned, columns);
-        Self {
-            raw: value.into(),
-            rows,
-            trailing,
-            checkpoint: Checkpoint {
-                position: 0,
-                rendered: 0,
-                fenced: None,
-            },
-            ready: false,
-        }
-    }
-
-    // Returns the number of previously rendered rows that remain valid.
-    pub fn update(&mut self, value: &str, columns: usize) -> Option<usize> {
-        if columns == self.rows.columns && value == self.raw {
-            return None;
-        }
-        if columns != self.rows.columns || !value.starts_with(&self.raw) {
-            *self = Self::new(value, columns);
-            return Some(0);
-        }
-        let suffix = text::clean(&value[self.raw.len()..]);
-        self.raw.clear();
-        self.raw.push_str(value);
-        self.rows.value.push_str(&self.trailing);
-        self.rows.value.push_str(&suffix);
-        self.trailing = self.rows.value.split_off(self.rows.value.trim_end().len());
-        self.rows.position = self.checkpoint.position;
-        self.rows.fenced = self.checkpoint.fenced.clone();
-        self.rows.table = None;
-        self.rows.empty_pending = self.rows.value.is_empty();
-        self.ready = false;
-        Some(self.checkpoint.rendered)
-    }
-
-    pub fn advance(&mut self, lines: &mut Vec<Line>, max_rows: usize) {
-        if self.ready {
-            return;
-        }
-        let mut budget = max_rows.max(1);
-        while budget > 0 {
-            let before = self.rows.table.is_none().then(|| Checkpoint {
-                position: self.rows.position,
-                rendered: lines.len(),
-                fenced: self.rows.fenced.clone(),
-            });
-            let Some(next) = self.rows.next() else {
-                self.ready = true;
-                break;
-            };
-            if let Some(before) = before {
-                self.checkpoint = before;
-            }
-            budget = budget.saturating_sub(next.len().max(1));
-            lines.extend(next);
-        }
-    }
-
-    pub fn ready(&self) -> bool {
-        self.ready
-    }
-}
-
 impl Iterator for Rows {
     type Item = Vec<Line>;
 
@@ -178,17 +96,20 @@ impl Iterator for Rows {
                         .highlighter
                         .line(source)
                         .at_source(origin)
-                        .wrap(columns, false),
+                        .wrap(padded(columns), false)
+                        .into_iter()
+                        .map(|row| pad(row, columns)),
                 );
             }
             return Some(output);
         }
         if let Some((marker, count, label)) = opening_fence(source) {
-            output.push(
-                Line::new(&text::ellipsize(label, columns), MUTED)
+            output.push(pad(
+                Line::new(&text::ellipsize(label, padded(columns)), MUTED)
                     .on(CODE_SURFACE)
                     .at_source(origin),
-            );
+                columns,
+            ));
             self.fenced = Some(Fence {
                 marker,
                 count,
@@ -204,18 +125,23 @@ impl Iterator for Rows {
         }
         let trimmed = source.trim_start();
         let indentation = &source[..source.len() - trimmed.len()];
-        let heading = trimmed.bytes().take_while(|&byte| byte == b'#').count();
+        let level = trimmed.bytes().take_while(|&byte| byte == b'#').count();
         if horizontal_rule(trimmed) {
             output.push(Line::new(&"─".repeat(columns), MUTED).at_source(origin));
-        } else if (1..=6).contains(&heading) && trimmed.as_bytes().get(heading) == Some(&b' ') {
-            output.extend(
-                inline::render(heading_body(&trimmed[heading + 1..]), EMPHASIS.bold())
-                    .at_source(origin)
-                    .wrap(columns, true),
-            );
+        } else if (1..=6).contains(&level) && trimmed.as_bytes().get(level) == Some(&b' ') {
+            let body = heading_body(&trimmed[level + 1..]);
+            output.extend(heading(
+                body,
+                level,
+                origin,
+                columns,
+                &self.value,
+                self.position,
+            ));
         } else if let Some(quote) = quoted(trimmed) {
+            let quote = joined(&self.value, quote, &mut self.position, columns, true, false);
             output.extend(prefixed(
-                quote,
+                &quote,
                 (&format!("{indentation}│ "), MUTED),
                 columns,
                 true,
@@ -224,8 +150,9 @@ impl Iterator for Rows {
             ));
         } else if let Some((marker, body)) = list_item(trimmed) {
             let (marker, body) = task_item(marker, body);
+            let body = joined(&self.value, body, &mut self.position, columns, false, false);
             output.extend(prefixed(
-                body,
+                &body,
                 (&format!("{indentation}{marker}"), MUTED),
                 columns,
                 false,
@@ -233,25 +160,159 @@ impl Iterator for Rows {
                 origin,
             ));
         } else {
+            let source = if trimmed.is_empty() {
+                Cow::Borrowed(source)
+            } else {
+                joined(
+                    &self.value,
+                    source,
+                    &mut self.position,
+                    columns,
+                    false,
+                    true,
+                )
+            };
             if !trimmed.is_empty()
                 && let Some((underline, next)) = table::source_line(&self.value, self.position)
                 && setext(underline)
             {
                 self.position = next;
-                output.extend(
-                    inline::render(trimmed, EMPHASIS.bold())
-                        .at_source(origin)
-                        .wrap(columns, true),
-                );
+                let level = if underline.trim_start().starts_with('=') {
+                    1
+                } else {
+                    2
+                };
+                output.extend(heading(
+                    source.trim_start(),
+                    level,
+                    origin,
+                    columns,
+                    &self.value,
+                    next,
+                ));
             } else {
                 output.extend(
-                    inline::render(source, BODY)
+                    inline::render(&source, BODY)
                         .at_source(origin)
                         .wrap(columns, true),
                 );
             }
         }
         Some(output)
+    }
+}
+
+// A heading is bold in its level's colour and keeps one neutral row before
+// the text it introduces.
+fn heading(
+    body: &str,
+    level: usize,
+    origin: usize,
+    columns: usize,
+    value: &str,
+    next: usize,
+) -> Vec<Line> {
+    let colour = match level {
+        1 => ACCENT,
+        2 => EMPHASIS,
+        _ => BODY,
+    };
+    let mut rows = inline::heading(body, colour)
+        .at_source(origin)
+        .wrap(columns, true);
+    if table::source_line(value, next).is_some_and(|(line, _)| !line.trim().is_empty()) {
+        rows.push(Line::default());
+    }
+    rows
+}
+
+// CommonMark soft breaks: plain lines continuing a paragraph, list item or
+// quote join it with one space, so emphasis can span them and the text reflows
+// at any width. A quote also continues through `>` lines. A streamed block is
+// laid out again on each append, so a very long one breaks at a source line.
+fn joined<'a>(
+    value: &'a str,
+    first: &'a str,
+    position: &mut usize,
+    columns: usize,
+    quote: bool,
+    setext_body: bool,
+) -> Cow<'a, str> {
+    const LIMIT: usize = 8 * 1024;
+    let mut text = Cow::Borrowed(first);
+    if quote && first.trim().is_empty() {
+        return text;
+    }
+    // Two trailing spaces or an unescaped backslash end the line with a hard break.
+    while text.len() < LIMIT && !text.ends_with("  ") && !backslash_break(&text) {
+        let inner = quote
+            .then(|| quote_continuation(value, *position))
+            .flatten();
+        let Some((line, next)) =
+            inner.or_else(|| continuation(value, *position, columns, setext_body))
+        else {
+            return text;
+        };
+        let joined = text.to_mut();
+        joined.truncate(joined.trim_end().len());
+        joined.push(' ');
+        joined.push_str(line);
+        *position = next;
+    }
+    // A trailing backslash is a hard break only inside the same paragraph.
+    // At a block boundary (including a blank line), it remains literal.
+    if backslash_break(&text)
+        && (quote && quote_continuation(value, *position).is_some()
+            || continuation(value, *position, columns, setext_body).is_some())
+    {
+        text.to_mut().pop();
+    }
+    text
+}
+
+fn backslash_break(value: &str) -> bool {
+    value
+        .bytes()
+        .rev()
+        .take_while(|&byte| byte == b'\\')
+        .count()
+        % 2
+        == 1
+}
+
+fn continuation(
+    value: &str,
+    position: usize,
+    columns: usize,
+    setext_body: bool,
+) -> Option<(&str, usize)> {
+    let (line, next) = table::source_line(value, position)?;
+    // A table header stays separate. Prose may include a line before a setext
+    // underline; the heading is rendered from the whole joined paragraph.
+    let own = table::source_line(value, next).is_some_and(|(below, after)| {
+        (!setext_body && setext(below))
+            || table::Table::new(line, below, after, columns, 0).is_some()
+    });
+    (!line.trim().is_empty() && !setext(line) && !table::block_start(line) && !own)
+        .then(|| (line.trim_start(), next))
+}
+
+fn quote_continuation(value: &str, position: usize) -> Option<(&str, usize)> {
+    let (line, next) = table::source_line(value, position)?;
+    let inner = quoted(line.trim_start())?.trim_start();
+    (!inner.is_empty() && !table::block_start(inner)).then_some((inner, next))
+}
+
+// Keep padding only when the inner width can hold a two-cell glyph.
+fn padded(columns: usize) -> usize {
+    if columns < 4 { columns } else { columns - 2 }
+}
+
+fn pad(row: Line, columns: usize) -> Line {
+    if row.spans.is_empty() || columns < 4 {
+        row
+    } else {
+        row.indent(" ", CODE_TEXT)
     }
 }
 

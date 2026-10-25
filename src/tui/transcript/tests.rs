@@ -163,15 +163,16 @@ fn a_single_long_markdown_block_yields_between_passes_and_keeps_fence_state() {
     let body = &layout.blocks[1];
     assert_eq!(
         body.iter()
-            .filter(|line| line.plain() == "comment line")
+            .filter(|line| line.plain() == " comment line")
             .count(),
         600
     );
-    assert_eq!(body[0].plain(), "rust");
-    assert!(body[500].spans.iter().all(|span| span.style == MUTED));
+    assert_eq!(body[0].plain(), " rust");
+    // After the panel's one-cell padding, the comment keeps its colour.
+    assert!(body[500].spans[1..].iter().all(|span| span.style == MUTED));
     let code = body
         .iter()
-        .find(|line| line.plain() == "let value = 1;")
+        .find(|line| line.plain() == " let value = 1;")
         .unwrap();
     assert!(
         code.paint(39)
@@ -223,4 +224,157 @@ fn toggling_tool_details_keeps_the_settled_transcript_ready() {
     assert!(!state.tool_details.expanded);
     assert_eq!(layout.blocks[..tool + 1], prior);
     assert_eq!(layout.blocks[tool + 1], compact_tool);
+}
+
+fn read(state: &mut State, id: &str, path: &str) {
+    state.event(Event::ToolStarted {
+        id: id.into(),
+        name: "read".into(),
+        arguments: Value::object([("path", Value::string(path))]),
+    });
+}
+
+fn finish_read(state: &mut State, id: &str) {
+    state.event(Event::ToolFinished {
+        id: id.into(),
+        name: "read".into(),
+        summary: "complete".into(),
+        result: Value::object([
+            ("content", Value::string("1: x\n")),
+            ("lines_returned", Value::number(1)),
+            ("offset", Value::number(1)),
+        ]),
+    });
+}
+
+#[test]
+fn simultaneous_read_completions_keep_the_earlier_layout_cached() {
+    for calls in [3, 100] {
+        let mut state = State::default();
+        for index in 0..150 {
+            state.message(Kind::Assistant, &format!("Message {index}"));
+        }
+        state.begin_tool_turn();
+        for index in 0..calls {
+            read(&mut state, &index.to_string(), &format!("src/{index}.rs"));
+        }
+        let mut layout = Layout::default();
+        assert!(shown(&mut layout, &state).contains("Message 149"));
+        let prior = layout.blocks.clone();
+        for index in 0..calls {
+            finish_read(&mut state, &index.to_string());
+        }
+        assert!(state.tool_revision >= 2);
+        layout.prepare(&state, 80, 1);
+        assert!(
+            layout.blocks.len() >= prior.len(),
+            "settled prefix was rebuilt: {} cached blocks became {}",
+            prior.len(),
+            layout.blocks.len()
+        );
+        assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
+        state.close_tools();
+        let output = shown(&mut layout, &state);
+        assert!(output.contains(&format!("Read({calls} files)")));
+        assert_eq!(output.matches("● Read(").count(), 1);
+    }
+}
+
+#[test]
+fn missed_read_group_and_tool_toggles_redraw_from_the_earliest_change() {
+    let mut state = State::default();
+    for index in 0..150 {
+        state.message(Kind::Assistant, &format!("Message {index}"));
+    }
+    state.begin_tool_turn();
+    for (id, path) in [("a", "src/a.rs"), ("b", "src/b.rs"), ("c", "src/c.rs")] {
+        read(&mut state, id, path);
+    }
+    let mut layout = Layout::default();
+    shown(&mut layout, &state);
+    let prior = layout.blocks.clone();
+    for id in ["a", "b", "c"] {
+        finish_read(&mut state, id);
+    }
+    state.close_tools();
+    state.finish_tool_turn();
+    state.toggle_tools().expect("completed read group");
+    state.begin_tool_turn();
+    assert!(!state.tool_details.expanded);
+    layout.prepare(&state, 80, 64);
+    assert!(
+        layout.blocks.len() >= prior.len(),
+        "settled prefix was rebuilt"
+    );
+    assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
+    let output = shown(&mut layout, &state);
+    assert!(output.contains("Read(3 files)"));
+    assert_eq!(output.matches("● Read(").count(), 1);
+}
+
+#[test]
+fn a_layout_older_than_the_bounded_tool_history_still_matches_a_fresh_layout() {
+    let mut state = State::default();
+    for index in 0..150 {
+        state.message(Kind::Assistant, &format!("Message {index}"));
+    }
+    state.begin_tool_turn();
+    read(&mut state, "a", "src/a.rs");
+    finish_read(&mut state, "a");
+    state.close_tools();
+    state.finish_tool_turn();
+    let mut layout = Layout::default();
+    shown(&mut layout, &state);
+    for index in 0..66 {
+        state.message(Kind::User, "Next read group");
+        state.begin_tool_turn();
+        for suffix in ["a", "b"] {
+            let id = format!("{index}-{suffix}");
+            read(&mut state, &id, &format!("src/{id}.rs"));
+            finish_read(&mut state, &id);
+        }
+        state.close_tools();
+        state.finish_tool_turn();
+    }
+    assert_eq!(
+        shown(&mut layout, &state),
+        shown(&mut Layout::default(), &state)
+    );
+}
+
+fn shown(layout: &mut Layout, state: &State) -> String {
+    for _ in 0..100 {
+        layout.prepare(state, 80, 64);
+        if layout.ready(state) {
+            break;
+        }
+    }
+    assert!(layout.ready(state));
+    let mut rows: Vec<_> = layout.blocks.iter().flatten().map(Line::plain).collect();
+    rows.extend(layout.pending(state).iter().map(Line::plain));
+    rows.join("\n")
+}
+
+#[test]
+fn reads_join_one_card_as_they_finish_and_the_keycap_follows_the_latest_turn() {
+    let mut state = State::default();
+    let mut layout = Layout::default();
+    state.begin_tool_turn();
+    read(&mut state, "a", "src/a.rs");
+    finish_read(&mut state, "a");
+    read(&mut state, "b", "src/b.rs");
+    let text = shown(&mut layout, &state);
+    assert!(text.contains("● Read(src/a.rs)") && text.contains("● Read(src/b.rs)"));
+    finish_read(&mut state, "b");
+    let text = shown(&mut layout, &state);
+    assert!(text.contains("● Read(2 files)\n  ⎿ a.rs, b.rs · 2 lines"));
+    assert!(!text.contains("● Read(src/a.rs)") && !text.contains("Ctrl+O"));
+    state.close_tools();
+    state.finish_tool_turn();
+    let text = shown(&mut layout, &state);
+    assert_eq!(text.matches("Ctrl+O  list").count(), 1);
+    assert_eq!(text.matches("● Read(").count(), 1);
+    state.message(Kind::User, "Next request.");
+    state.begin_tool_turn();
+    assert!(!shown(&mut layout, &state).contains("Ctrl+O"));
 }

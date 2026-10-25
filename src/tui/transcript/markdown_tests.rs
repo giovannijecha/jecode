@@ -129,7 +129,7 @@ fn a_single_tall_table_cell_yields_while_emitting_wrapped_rows() {
 fn live_stream_renders_a_bounded_prefix_and_discards_replaced_or_removed_text() {
     let mut state = State::default();
     let first = (0..600)
-        .map(|index| format!("Line {index}\n"))
+        .map(|index| format!("Line {index}\n\n"))
         .collect::<String>();
     state.event(Event::Streaming { text: first });
     let mut layout = Layout::default();
@@ -138,7 +138,7 @@ fn live_stream_renders_a_bounded_prefix_and_discards_replaced_or_removed_text() 
     assert!(!layout.pending_ready(&state));
     // A pass emits a bounded number of complete source lines.
     let prefix: Vec<_> = layout.pending_blocks()[0].iter().map(Line::plain).collect();
-    assert_eq!(&prefix[..2], ["Line 0", "Line 1"]);
+    assert_eq!(&prefix[..3], ["Line 0", "", "Line 1"]);
     assert!(prefix.len() <= 32);
     assert!(!prefix.iter().any(|line| line == "Line 599"));
 

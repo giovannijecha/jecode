@@ -90,12 +90,7 @@ pub fn guard(endpoints: &Endpoints, reasoning: bool) -> Option<Guard> {
 /// Listed rates and 30-minute statistics in one line, for example
 /// `$0.177/$0.355 · 52 tok/s · 0.9 s · 89% off · fp8 · cache $0.0147 · 1M ctx`.
 pub fn describe(endpoint: &Endpoint, reasoning: bool) -> String {
-    let mut parts = Vec::new();
-    if endpoint.supports("tools") == Some(false) {
-        parts.push("no tools".to_owned());
-    } else if reasoning && endpoint.supports("reasoning") == Some(false) {
-        parts.push("no reasoning".to_owned());
-    }
+    let mut parts: Vec<String> = problem(endpoint, reasoning).into_iter().collect();
     parts.push(match (endpoint.prompt, endpoint.completion) {
         (None, None) => "price ?".into(),
         (input, output) => format!("{}/{}", price(input), price(output)),
@@ -109,6 +104,41 @@ pub fn describe(endpoint: &Endpoint, reasoning: bool) -> String {
     if let Some(latency) = endpoint.latency {
         parts.push(format!("{:.1} s", latency / 1000.0));
     }
+    parts.extend(extras(endpoint));
+    parts.join(" · ")
+}
+
+/// What a table of price, speed and latency columns leaves for prose.
+pub fn facts(endpoint: &Endpoint, reasoning: bool) -> String {
+    let mut parts: Vec<String> = problem(endpoint, reasoning).into_iter().collect();
+    if endpoint.throughput.is_none() && endpoint.latency.is_none() {
+        parts.push("no stats".into());
+    }
+    parts.extend(extras(endpoint));
+    parts.join(" · ")
+}
+
+pub fn metrics(endpoint: &Endpoint) -> crate::backend::Metrics {
+    crate::backend::Metrics {
+        input: endpoint.prompt,
+        output: endpoint.completion,
+        throughput: endpoint.throughput,
+        latency: endpoint.latency.map(|latency| latency / 1000.0),
+    }
+}
+
+fn problem(endpoint: &Endpoint, reasoning: bool) -> Option<String> {
+    if endpoint.supports("tools") == Some(false) {
+        Some("no tools".into())
+    } else if reasoning && endpoint.supports("reasoning") == Some(false) {
+        Some("no reasoning".into())
+    } else {
+        None
+    }
+}
+
+fn extras(endpoint: &Endpoint) -> Vec<String> {
+    let mut parts = Vec::new();
     if let Some(discount) = endpoint.discount.filter(|discount| *discount > 0.0) {
         parts.push(format!("{}% off", (discount * 100.0).round()));
     }
@@ -126,7 +156,7 @@ pub fn describe(endpoint: &Endpoint, reasoning: bool) -> String {
     if let Some(context) = endpoint.context {
         parts.push(format!("{} ctx", quantity(context)));
     }
-    parts.join(" · ")
+    parts
 }
 
 fn median(values: impl Iterator<Item = f64>) -> f64 {

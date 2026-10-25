@@ -145,6 +145,7 @@ impl Agent {
                     attempt,
                     delay,
                     error: self.redact(&error.message),
+                    reason: error.reason,
                 })?;
                 self.cancellation.wait(delay)?;
                 emit(Event::RecoveryFinished)?;
@@ -152,6 +153,15 @@ impl Agent {
             }
             Err(mut error) => {
                 error.message = self.redact(&error.message);
+                if error.kind == FailureKind::Terminal
+                    && let Some(reason) = error.reason
+                {
+                    emit(Event::BackendFailure {
+                        reason,
+                        diagnostic: self
+                            .redact(error.diagnostic.as_deref().unwrap_or(&error.message)),
+                    })?;
+                }
                 if error.kind == FailureKind::Context {
                     self.record_recovery(
                         "context_rejected",
@@ -190,11 +200,24 @@ impl Agent {
                         attempt,
                         delay,
                         error: self.redact(&error.message),
+                        reason: error.reason,
                     })?;
                     self.cancellation.wait(delay)?;
                     events.emit(Event::RecoveryFinished)?;
                 }
-                Err(error) => return Err(self.redact(&error.message)),
+                Err(error) => {
+                    let message = self.redact(&error.message);
+                    if error.kind == FailureKind::Terminal
+                        && let Some(reason) = error.reason
+                    {
+                        events.emit(Event::BackendFailure {
+                            reason,
+                            diagnostic: self
+                                .redact(error.diagnostic.as_deref().unwrap_or(&message)),
+                        })?;
+                    }
+                    return Err(message);
+                }
             }
         }
     }

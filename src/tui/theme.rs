@@ -29,23 +29,22 @@ pub const DIFF_REMOVED_SURFACE: Surface = Surface::rgb(49, 32, 38); // #312026
 
 // The software caret carries its own fill, even inside a shaded panel.
 pub const CURSOR: Style = Style::rgb(26, 27, 38).filled(192, 202, 245); // #1A1B26 / #C0CAF5
-// Activity wave shades, from resting to brightest.
-pub const WAVE_SHADES: [Style; 4] = [
-    Style::rgb(78, 97, 113),
-    Style::rgb(105, 133, 159),
-    Style::rgb(137, 169, 196),
-    Style::rgb(181, 213, 241),
-];
+// Activity scanner blocks, resting and lit.
+pub const SCANNER_REST: Style = Style::rgb(78, 97, 113); // #4E6171
+pub const SCANNER_LIT: Style = Style::rgb(181, 213, 241); // #B5D5F1
 
 // Component aliases, derived from the roles above.
-pub const INLINE_CODE: Style = ACCENT;
+// Inline code is a chip on the code surface, apart from the link accent.
+pub const INLINE_CODE: Style = CODE_TEXT;
+pub const INLINE_CODE_SURFACE: Surface = CODE_SURFACE;
 pub const LINK: Style = ACCENT.underline();
-pub const LINK_DESTINATION: Style = ACCENT;
+pub const LINK_DESTINATION: Style = MUTED;
 pub const CODE_STRING: Style = GOOD;
 pub const CODE_NUMBER: Style = WARNING;
-pub const NOTICE_INFO: Style = MUTED.italic();
-pub const NOTICE_WARNING: Style = WARNING.italic();
-pub const NOTICE_ERROR: Style = BAD.italic();
+pub const METER_FILL: Style = SCANNER_LIT;
+pub const METER_TRACK: Style = SCANNER_REST;
+// Quiet pulse: one fixed tool marker, four discrete 240 ms colour frames.
+pub const TOOL_PULSE: [Style; 4] = [TOOL_DIM, TOOL_ACCENT, SCANNER_LIT, TOOL_ACCENT];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rgb(u8, u8, u8);

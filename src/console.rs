@@ -48,6 +48,7 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                 attempt,
                 delay,
                 error,
+                ..
             } => format!(
                 "[reconnecting: attempt {attempt}, waiting {:.1}s] {error}",
                 delay.as_secs_f64()
@@ -61,6 +62,7 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
             | Event::Streaming { .. }
             | Event::ToolChanged { .. }
             | Event::RecoveryFinished
+            | Event::BackendFailure { .. }
             | Event::RequestDiscarded
             | Event::Accepted { .. }
             | Event::InputHeld

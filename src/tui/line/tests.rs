@@ -71,7 +71,8 @@ fn wraps_words_with_their_styles_and_preserves_code_indentation() {
 
 #[test]
 fn prose_word_wrap_preserves_inline_code_spaces() {
-    let code = Line::new("a   b", INLINE_CODE);
+    let mut code = Line::default();
+    code.push_on("a   b", INLINE_CODE, INLINE_CODE_SURFACE);
     let rows = code.wrap(2, true);
     assert_eq!(
         rows.iter().map(Line::plain).collect::<String>(),
@@ -81,7 +82,7 @@ fn prose_word_wrap_preserves_inline_code_spaces() {
     assert!(rows.iter().all(|row| row.spans[0].style == INLINE_CODE));
 
     let mut mixed = Line::new("prose ", BODY);
-    mixed.push("a b", INLINE_CODE);
+    mixed.push_on("a b", INLINE_CODE, INLINE_CODE_SURFACE);
     assert_eq!(
         mixed
             .clone()

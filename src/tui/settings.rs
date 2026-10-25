@@ -40,10 +40,7 @@ impl App {
             }
             (Choice::Routing(index), Purpose::Routing { .. }) => self.choose_routing(menu, index),
             (Choice::Setting(setting), Purpose::Settings) => {
-                self.settings_parent = match setting {
-                    Setting::Close => None,
-                    _ => Some(setting),
-                };
+                self.settings_parent = Some(setting);
                 match setting {
                     Setting::Model => self.load_catalog(CatalogPurpose::Models {
                         defaults: true,
@@ -60,9 +57,6 @@ impl App {
                             Some(Selector::auto_compact(self.config.settings.auto_compact))
                     }
                     Setting::Key => self.state.selector = Some(Selector::key()),
-                    Setting::Close => {
-                        self.local_finish_quiet(Kind::Notice, "Settings closed", vec![])
-                    }
                 }
             }
             _ => {
@@ -78,10 +72,33 @@ impl App {
         result: &str,
         details: Vec<(String, String)>,
     ) {
+        self.finish_setting_with_change(kind, result, details, false);
+    }
+
+    pub(super) fn finish_setting_change(
+        &mut self,
+        kind: Kind,
+        result: &str,
+        details: Vec<(String, String)>,
+    ) {
+        self.finish_setting_with_change(kind, result, details, true);
+    }
+
+    fn finish_setting_with_change(
+        &mut self,
+        kind: Kind,
+        result: &str,
+        details: Vec<(String, String)>,
+        change: bool,
+    ) {
         if self.settings_parent.is_some() && self.pending_command.is_none() {
             self.local_start("/settings");
         }
-        self.local_finish(kind, result, details);
+        if change {
+            self.local_finish_change(kind, result, details);
+        } else {
+            self.local_finish(kind, result, details);
+        }
         self.return_to_settings();
     }
 
@@ -93,15 +110,9 @@ impl App {
                 settings.effort,
                 settings.auto_compact,
                 &settings.routing_for(&settings.model),
+                self.config.store.path(),
             );
-            menu.selected = match parent {
-                Setting::Model => 0,
-                Setting::Effort => 1,
-                Setting::Routing => 2,
-                Setting::AutoCompact => 3,
-                Setting::Key => 4,
-                Setting::Close => 5,
-            };
+            menu.selected = menu.setting_index(parent);
             self.state.selector = Some(menu);
         }
     }
@@ -124,15 +135,15 @@ impl App {
             match self.config.store.save(&settings) {
                 Ok(()) => {
                     let previous = format!(
-                        "{} · {}",
+                        "{} ({})",
                         self.config.settings.model,
                         self.config.settings.effort.name()
                     );
                     self.config.settings = settings;
-                    self.finish_setting(
+                    self.finish_setting_change(
                         Kind::Notice,
                         &format!(
-                            "Defaults saved: {model} · {} · was {previous}",
+                            "Default model: {previous} → {model} ({}) · new conversations",
                             effort.name()
                         ),
                         vec![],
@@ -142,16 +153,19 @@ impl App {
             }
         } else {
             let agent = self.agent.as_mut().unwrap();
-            let previous = format!("{} · {}", agent.model(), agent.effort().name());
+            let previous = format!("{} ({})", agent.model(), agent.effort().name());
             match agent.set_model(model.clone()) {
                 Ok(()) => {
                     agent.set_effort(effort);
                     self.archive = agent.archive();
                     self.state.effort = effort.name().into();
                     self.refresh_context();
-                    self.finish_setting(
+                    self.finish_setting_change(
                         Kind::Notice,
-                        &format!("Model set to {model} · {} · was {previous}", effort.name()),
+                        &format!(
+                            "Model: {previous} → {model} ({}) · this conversation",
+                            effort.name()
+                        ),
                         vec![],
                     );
                 }
@@ -317,9 +331,7 @@ impl App {
             Err(error) => self.warn(&error),
             Ok(services) => {
                 self.state.clear_notice();
-                let mut menu = Selector::loading();
-                menu.title = "Checking API key…".into();
-                self.state.selector = Some(menu);
+                self.state.selector = Some(Selector::loading("API key", "Checking API key…", true));
                 self.job = Some(Job::key(services, key));
             }
         }
@@ -353,11 +365,9 @@ impl App {
                     agent.set_auto_compact(percent);
                 }
                 self.refresh_context();
-                self.finish_setting(
+                self.finish_setting_change(
                     Kind::Notice,
-                    &format!(
-                        "Auto-compact at {percent}% · was {previous}% · applies to this and new conversations"
-                    ),
+                    &format!("Auto-compact: {previous}% → {percent}% · this and new conversations"),
                     vec![],
                 );
             }

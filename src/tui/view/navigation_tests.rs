@@ -2,10 +2,7 @@ use super::*;
 use crate::{
     backend::Model,
     effort::Effort,
-    tui::{
-        selector::Selector,
-        theme::{CURSOR, MUTED},
-    },
+    tui::{selector::Selector, theme::CURSOR},
 };
 
 fn draft() -> State {
@@ -61,7 +58,7 @@ fn short_composers_keep_a_continuous_window_and_an_accurate_range() {
 }
 
 #[test]
-fn selector_positions_follow_navigation_filtering_and_empty_results_in_one_heading() {
+fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results() {
     let models: Vec<_> = (0..12)
         .map(|index| Model {
             id: format!("fixture/model-{index}"),
@@ -75,36 +72,31 @@ fn selector_positions_follow_navigation_filtering_and_empty_results_in_one_headi
         selector: Some(Selector::models(&models, false, "")),
         ..State::default()
     };
-    for (selected, range) in [(0, "1–8 / 12"), (9, "3–10 / 12"), (11, "5–12 / 12")] {
+    for selected in [0, 9, 11] {
         state.selector.as_mut().unwrap().selected = selected;
         let frame = composer_frame(&state, "model", "directory");
-        assert!(frame.live[1].plain().contains(range));
-        assert_eq!(
+        assert!(frame.live[1].plain().contains("12 models"));
+        let focus = format!("› fixture/model-{selected} ");
+        assert!(
             frame
                 .live
                 .iter()
-                .filter(|row| row.plain().contains("fixture/model-"))
-                .count(),
-            8
+                .any(|row| super::focused(row) && row.plain().contains(&focus))
         );
-        assert!(
-            frame.live[1]
-                .spans
-                .iter()
-                .any(|span| span.style == MUTED && span.text.contains(range))
-        );
+        // A scrollbar replaces the position range.
+        assert!(frame.live.iter().any(|row| row.plain().ends_with('┃')));
         assert!(
             !frame
                 .live
                 .iter()
-                .any(|row| row.plain().contains("earlier") || row.plain().contains("more"))
+                .any(|row| row.plain().contains("earlier") || row.plain().contains(" / 12"))
         );
     }
     let menu = state.selector.as_mut().unwrap();
     menu.editor.insert("model-10");
     menu.refresh();
     let filtered = composer_frame(&state, "model", "directory");
-    assert!(filtered.live[1].plain().contains("1 match"));
+    assert!(filtered.live[1].plain().contains("1 of 12 models"));
     assert!(
         filtered
             .live
@@ -121,7 +113,7 @@ fn selector_positions_follow_navigation_filtering_and_empty_results_in_one_headi
             .iter()
             .any(|row| row.plain().contains("No matching option"))
     );
-    assert!(!empty.live[1].plain().contains('/'));
+    assert!(empty.live[1].plain().contains("0 of 12 models"));
 }
 
 #[test]
@@ -159,24 +151,46 @@ fn queue_overflow_uses_its_first_preview_without_displacing_the_next_message() {
 }
 
 #[test]
-fn command_panels_show_suggestion_or_multiline_position_in_the_title() {
+fn command_panels_group_a_bare_slash_and_keep_a_multiline_caret() {
     let mut state = State::default();
     state.editor.insert("/");
     state.suggestions.refresh(&state.editor.text);
     let commands = composer_frame(&state, "model", "directory");
-    let title = format!("1–6 / {}", crate::session::commands::COMMANDS.len());
-    assert!(commands.live[1].plain().contains(&title));
-    state
-        .editor
-        .replace("/tmp clean\none\ntwo\nthree\nfour\nfive\nsix".into());
-    state.suggestions.refresh(&state.editor.text);
-    let multiline = composer_frame(&state, "model", "directory");
-    assert!(multiline.live[1].plain().contains("3–7 / 7"));
-    assert_eq!(multiline.live[2].plain(), "  › two");
+    let count = format!("{} commands", crate::session::commands::COMMANDS.len());
+    assert!(commands.live[1].plain().contains(&count));
+    // A bare slash lists commands under their groups.
     assert!(
-        !multiline
+        commands
             .live
             .iter()
-            .any(|row| row.plain().contains("more lines"))
+            .any(|row| row.plain().trim_start().starts_with("Conversation "))
+    );
+    assert!(commands.live.iter().any(|row| row.plain().ends_with('┃')));
+    state.editor.replace(
+        "/tmp clean
+one
+two
+three
+four
+five
+six"
+        .into(),
+    );
+    state.suggestions.refresh(&state.editor.text);
+    let multiline = composer_frame(&state, "model", "directory");
+    let (row, _) = multiline.cursor.unwrap();
+    assert!(multiline.live[row].plain().contains("six"));
+    assert!(
+        multiline.live[row]
+            .spans
+            .iter()
+            .any(|span| span.background == Some(crate::tui::theme::CODE_SURFACE))
+    );
+    // The typed command keeps its description below the field.
+    assert!(
+        multiline
+            .live
+            .iter()
+            .any(|row| row.plain().contains("temporary"))
     );
 }

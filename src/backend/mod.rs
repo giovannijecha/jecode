@@ -38,10 +38,19 @@ pub enum FailureKind {
     Terminal,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureReason {
+    RateLimited,
+    RejectedKey,
+}
+
 #[derive(Clone, Debug)]
 pub struct Failure {
     pub kind: FailureKind,
+    pub reason: Option<FailureReason>,
     pub message: String,
+    /// Diagnostic without a consumer-specific next-step hint, when one exists.
+    pub diagnostic: Option<String>,
     pub retry_after: Option<Duration>,
     pub charges: Option<Box<Charges>>,
 }
@@ -211,9 +220,24 @@ impl Endpoints {
 pub struct Entry {
     pub routing: Routing,
     pub name: String,
+    /// Every fact on one line, for plain output.
     pub description: String,
+    /// The measured endpoint's comparable figures, for a table.
+    pub metrics: Option<Metrics>,
+    /// The facts a table leaves out of its columns.
+    pub facts: String,
     pub help: String,
     pub problem: Option<String>,
+}
+
+/// Prices per million tokens after discounts, median throughput in tokens
+/// per second and median seconds to the first token.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Metrics {
+    pub input: Option<f64>,
+    pub output: Option<f64>,
+    pub throughput: Option<f64>,
+    pub latency: Option<f64>,
 }
 
 /// Every backend accepts the same canonical transcript and tool catalog.

@@ -1,15 +1,22 @@
 use super::{
-    activity,
-    line::Line,
+    line::{Line, Span},
     text,
-    theme::{BAD, EMPHASIS, GOOD, MUTED, Style, TOOL_ACCENT, TOOL_DIM, WARNING},
+    theme::{
+        BAD, GOOD, MUTED, SELECTED_SURFACE, STRONG, Style, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE,
+        WARNING,
+    },
 };
 use crate::{file_change::Change, json::Value};
 
 mod content;
 mod diff;
 mod edit_fallback;
+mod group;
 mod presentation;
+mod streams;
+mod summary;
+mod title;
+pub use group::{groupable, render as group};
 pub use presentation::Presentation;
 
 pub struct Tool<'a> {
@@ -19,6 +26,12 @@ pub struct Tool<'a> {
     pub result: Option<&'a Value>,
     pub change: Option<&'a Change>,
     pub presentation: &'a Presentation,
+}
+
+/// A card's rows, and whether Ctrl+O would show more of it.
+pub struct Card {
+    pub rows: Vec<Line>,
+    pub hidden: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -38,11 +51,12 @@ impl Status {
         let process = crate::events::process_status(result);
         if matches!(process, Some("running" | "stopping")) {
             Self::Background
-        } else if flag(result, "cancelled") || process == Some("stopped") {
+        } else if flag(result, "cancelled")
+            || flag(result, "timed_out")
+            || matches!(process, Some("stopped" | "timed_out"))
+        {
             Self::Stopped
         } else if result.get("error").is_some()
-            || flag(result, "timed_out")
-            || process == Some("timed_out")
             || matches!(tool.name, "bash" | "process")
                 && result
                     .get("exit_code")
@@ -74,12 +88,18 @@ impl Body {
         Self {
             rows,
             hidden: 0,
-            unit: "output lines",
+            unit: "lines",
         }
     }
 }
 
+#[cfg(test)]
 pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
+    card(tool, columns, false).rows
+}
+
+/// One card. `keycap` names Ctrl+O on the row that counts hidden lines.
+pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
     let expanded = tool.presentation.expanded;
     // Diff limits leave only the supplied replacements; file coordinates
@@ -91,22 +111,32 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
         .change
         .or(legacy.as_ref())
         .filter(|_| status == Status::Done);
-    let mut rows = header(&tool, status, columns);
-    let summary = preview(
-        Line::new(&outcome(&tool, change), status_summary(status)),
-        columns.saturating_sub(4),
-        expanded,
-    )
-    .plain();
-    rows.extend(wrapped(
-        &summary,
-        status_summary(status),
+    let (name, target) = heading(&tool);
+    let marker = if status == Status::Running {
+        let elapsed = tool.presentation.duration().unwrap_or_default();
+        TOOL_PULSE[((elapsed.as_millis() / 240) % TOOL_PULSE.len() as u128) as usize]
+    } else {
+        status.style()
+    };
+    let mut rows = title::rows(name, &target, marker, columns, expanded);
+    let lead = if status == Status::Failed {
+        BAD
+    } else {
+        TOOL_DIM
+    };
+    rows.extend(line_rows(
+        &preview(
+            summary::line(&tool, status, change),
+            columns.saturating_sub(4),
+            expanded,
+        ),
         columns,
         1,
         "  ⎿ ",
         "    ",
-        true,
+        lead,
     ));
+    let mut hidden = false;
     if let Some(result) = tool.result {
         let mut body =
             if result.get("error").is_some() || (tool.name == "edit" && status != Status::Done) {
@@ -114,16 +144,10 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
             } else if let Some(change) = change {
                 diff::render(change, field(tool.arguments, "path"), columns, expanded)
             } else {
-                content::render(
-                    tool.name,
-                    tool.arguments,
-                    result,
-                    columns,
-                    status == Status::Failed,
-                    expanded,
-                )
+                content::render(&tool, result, status, columns, expanded)
             };
         if body.hidden > 0 {
+            hidden = true;
             let origin = body
                 .rows
                 .iter()
@@ -137,41 +161,26 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
             } else {
                 body.unit
             };
-            body.rows.extend(wrapped(
-                &format!("… {} more {unit}", body.hidden),
-                MUTED,
+            let mut more = line_rows(
+                &Line::new(&format!("… {} more {unit}", body.hidden), MUTED),
                 columns,
                 origin,
                 "    ",
                 "    ",
-                true,
-            ));
+                MUTED,
+            );
+            if keycap && let Some(last) = more.pop() {
+                more.extend(hint(last, "expand", columns));
+            }
+            body.rows.extend(more);
         }
         rows.extend(body.rows);
         rows.extend(content::notices(tool.name, result, columns, expanded));
     }
-    if expanded && let Some(elapsed) = tool.presentation.duration() {
-        rows.extend(wrapped(
-            &format!("Elapsed {}", activity::duration(elapsed)),
-            TOOL_DIM,
-            columns,
-            usize::MAX - 1,
-            "    ",
-            "    ",
-            true,
-        ));
-    }
-    rows
+    Card { rows, hidden }
 }
 
-fn status_summary(status: Status) -> Style {
-    match status {
-        Status::Failed | Status::Stopped => status.style(),
-        _ => MUTED,
-    }
-}
-
-fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
+fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     let skill = (tool.name == "read")
         .then(|| skill_name(field(tool.arguments, "path")))
         .flatten();
@@ -194,106 +203,29 @@ fn header(tool: &Tool<'_>, status: Status, columns: usize) -> Vec<Line> {
         }
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
-    let mut title = Line::new(&format!("{name}("), EMPHASIS.bold()).at_source(0);
-    title.push(&text::clean(&target).replace('\n', " ↵ "), EMPHASIS);
-    title.push(")", EMPHASIS.bold());
-    preview(title, columns.saturating_sub(2), tool.presentation.expanded)
-        .wrap(columns.saturating_sub(2).max(1), false)
-        .into_iter()
-        .enumerate()
-        .map(|(index, row)| {
-            row.gutter(if index == 0 { "● " } else { "  " }, status.style())
-                .shortened(columns)
-        })
-        .collect()
+    (name, target)
 }
 
-fn outcome(tool: &Tool<'_>, change: Option<&Change>) -> String {
-    let Some(result) = tool.result else {
-        let mut text = String::from("Running…");
-        if let Some(note) = &tool.presentation.note {
-            text.push_str(&format!(" · {note}"));
-        }
-        if let Some(elapsed) = tool.presentation.duration() {
-            text.push_str(&format!(" · {}", activity::duration(elapsed)));
-        }
-        return text;
-    };
-    if let Some(error) = result.get("error").and_then(Value::as_str) {
-        return format!("Failed · {}", text::clean(error));
-    }
-    if flag(result, "cancelled") {
-        return "Cancelled".into();
-    }
-    if flag(result, "timed_out") || crate::events::process_status(result) == Some("timed_out") {
-        return tool.presentation.duration().map_or_else(
-            || "Timed out".into(),
-            |elapsed| format!("Timed out after {}", activity::duration(elapsed)),
-        );
-    }
-    if let Some(processes) = result.get("processes").and_then(Value::as_array) {
-        let running = processes
-            .iter()
-            .filter(|item| crate::events::process_status(item) == Some("running"))
-            .count();
-        return format!(
-            "{} {} · {running} running",
-            processes.len(),
-            if processes.len() == 1 {
-                "process"
-            } else {
-                "processes"
-            }
-        );
-    }
-    if let Some(status) = crate::events::process_status(result) {
-        let id = field(result, "process_id");
-        match status {
-            "running" if tool.name == "bash" => {
-                return format!("Started in background · {id}");
-            }
-            "running" => return format!("Running at last check · {id}"),
-            "stopping" => return format!("Stopping · {id}"),
-            "stopped" => return format!("Stopped · {id}"),
-            "unknown" => return format!("Status unknown · {id}"),
-            _ => {}
-        }
-    }
-    if let Some(change) = change {
-        return diff::summary(change);
-    }
-    if tool.name == "edit"
-        && let Some(summary) = edit_fallback::summary(tool.arguments, result)
-    {
-        return summary;
-    }
-    match tool.name {
-        "bash" | "process" => {
-            let code = result
-                .get("exit_code")
-                .filter(|value| **value != Value::Null)
-                .map_or_else(|| "unknown".into(), Value::encode);
-            format!(
-                "{}Exit {code}",
-                if Status::of(tool) == Status::Failed {
-                    "Failed · "
-                } else {
-                    ""
-                }
-            )
-        }
-        "read" if skill_name(field(tool.arguments, "path")).is_some() => {
-            format!("Loaded skill · {}", read_summary(tool.arguments, result))
-        }
-        "read" => read_summary(tool.arguments, result),
-        "write" => {
-            let count = content::payload(field(tool.arguments, "content")).len();
-            format!(
-                "Wrote {count} {} · previous content unavailable",
-                plural(count)
-            )
-        }
-        _ => tool.summary.into(),
+/// `row` with a right-aligned Ctrl+O keycap, or the keycap on its own row.
+fn hint(row: Line, label: &str, columns: usize) -> Vec<Line> {
+    let mut cap = Line::default();
+    cap.spans.push(Span {
+        text: " Ctrl+O ".into(),
+        style: STRONG,
+        background: Some(SELECTED_SURFACE),
+    });
+    cap.push(&format!(" {label}"), MUTED);
+    let used = text::cells(&row.plain());
+    let room = text::cells(&cap.plain());
+    if used + 2 + room <= columns {
+        let mut row = row;
+        row.push(&" ".repeat(columns - used - room), MUTED);
+        vec![row.append(cap)]
+    } else {
+        let origin = row.origin;
+        let mut cap = cap.indent("    ", MUTED);
+        cap.origin = origin;
+        vec![row, cap]
     }
 }
 
@@ -301,51 +233,6 @@ fn skill_name(path: &str) -> Option<&str> {
     let name = path.strip_prefix("skill:")?;
     let name = name.strip_suffix("/SKILL.md").unwrap_or(name);
     (!name.is_empty() && !name.contains('/')).then_some(name)
-}
-
-fn read_summary(arguments: &Value, result: &Value) -> String {
-    if let Some(view) = result.get("view").and_then(Value::as_str) {
-        return format!("Opened {}", if view == "pdf" { "PDF" } else { view });
-    }
-    if result.get("attachment").is_some() && result.get("content").is_none() {
-        return "Attachment available".into();
-    }
-    if arguments.get("byte_offset").is_some() || result.get("offset") == Some(&Value::Null) {
-        let count = result
-            .get("bytes_returned")
-            .and_then(Value::as_usize)
-            .unwrap_or(0);
-        let start = result
-            .get("byte_offset")
-            .and_then(Value::as_usize)
-            .unwrap_or(0);
-        return if count == 0 {
-            "Read 0 bytes".into()
-        } else {
-            format!(
-                "Read {count} bytes · bytes {start}–{}",
-                start.saturating_add(count - 1)
-            )
-        };
-    }
-    let count = result
-        .get("lines_returned")
-        .and_then(Value::as_usize)
-        .unwrap_or_else(|| content::payload(field(result, "content")).len());
-    let start = result
-        .get("offset")
-        .or_else(|| arguments.get("offset"))
-        .and_then(Value::as_usize)
-        .unwrap_or(1);
-    if count == 0 {
-        "Read 0 lines".into()
-    } else {
-        format!(
-            "Read {count} {} · lines {start}–{}",
-            plural(count),
-            start.saturating_add(count - 1)
-        )
-    }
 }
 
 fn plural(count: usize) -> &'static str {
@@ -359,6 +246,27 @@ fn preview(line: Line, width: usize, expanded: bool) -> Line {
         // A wide glyph can leave one unused cell at each wrap boundary.
         line.shortened(width.saturating_sub(1).max(1).saturating_mul(3))
     }
+}
+
+/// `line` word-wrapped under `first`, then `rest`, in the `gutter` style.
+fn line_rows(
+    line: &Line,
+    columns: usize,
+    source: usize,
+    first: &str,
+    rest: &str,
+    gutter: Style,
+) -> Vec<Line> {
+    line.clone()
+        .at_source(source)
+        .wrap(columns.saturating_sub(text::cells(first)).max(1), true)
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| {
+            row.gutter(if index == 0 { first } else { rest }, gutter)
+                .shortened(columns)
+        })
+        .collect()
 }
 
 fn wrapped(
@@ -397,3 +305,5 @@ mod edit_fallback_tests;
 mod skill_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod typed_tests;

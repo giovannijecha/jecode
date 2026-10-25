@@ -1,7 +1,16 @@
 use super::*;
+use crate::tui::theme::{DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, Surface};
+
+fn highlighted(rows: &[Line], surface: Surface) -> String {
+    rows.iter()
+        .flat_map(|row| &row.spans)
+        .filter(|span| span.background == Some(surface))
+        .map(|span| span.text.as_str())
+        .collect()
+}
 
 #[test]
-fn context_changes_keep_coordinates_syntax_and_full_row_surfaces() {
+fn context_changes_keep_coordinates_and_syntax_with_fragment_surfaces() {
     let change = Change::between(
         Some("fn main() {\n    let limit = 3;\n}\n"),
         "fn main() {\n    let limit = 12;\n}\n",
@@ -17,8 +26,16 @@ fn context_changes_keep_coordinates_syntax_and_full_row_surfaces() {
             "    3    }"
         ]
     );
-    assert_eq!(body.rows[1].background, Some(DIFF_REMOVED_SURFACE));
-    assert_eq!(body.rows[2].background, Some(DIFF_ADDED_SURFACE));
+    assert!(body.rows.iter().all(|row| row.background.is_none()));
+    assert_eq!(highlighted(&body.rows, DIFF_REMOVED_SURFACE), "3");
+    assert_eq!(highlighted(&body.rows, DIFF_ADDED_SURFACE), "12");
+    assert!(
+        body.rows[0]
+            .spans
+            .iter()
+            .skip(1)
+            .all(|span| span.style == TOOL_DIM)
+    );
     assert!(
         body.rows[2]
             .spans
@@ -46,18 +63,16 @@ fn long_previews_keep_both_sides_and_expand_every_hunk() {
     let change = Change::between(Some(&old), &new).unwrap();
     let preview = render(&change, "notes.txt", 80, false);
     assert!(preview.hidden > 0);
-    assert!(
-        preview
-            .rows
+    assert!(preview.rows.iter().any(|row| {
+        row.spans
             .iter()
-            .any(|row| row.background == Some(DIFF_REMOVED_SURFACE))
-    );
-    assert!(
-        preview
-            .rows
+            .any(|span| span.background == Some(DIFF_REMOVED_SURFACE))
+    }));
+    assert!(preview.rows.iter().any(|row| {
+        row.spans
             .iter()
-            .any(|row| row.background == Some(DIFF_ADDED_SURFACE))
-    );
+            .any(|span| span.background == Some(DIFF_ADDED_SURFACE))
+    }));
     let full = render(&change, "notes.txt", 80, true);
     assert_eq!(full.hidden, 0);
     let text = full
@@ -90,7 +105,10 @@ fn context_between_deletion_and_addition_cannot_hide_the_added_side() {
         assert!(
             body.rows
                 .iter()
-                .filter(|row| row.background == Some(surface))
+                .filter(|row| row
+                    .spans
+                    .iter()
+                    .any(|span| span.background == Some(surface)))
                 .count()
                 >= 3
         );
@@ -108,7 +126,11 @@ fn wrapped_code_stays_complete_with_empty_continuation_gutters() {
         let rows: Vec<_> = body
             .rows
             .iter()
-            .filter(|row| row.background == Some(DIFF_ADDED_SURFACE))
+            .filter(|row| {
+                row.spans
+                    .iter()
+                    .any(|span| span.background == Some(DIFF_ADDED_SURFACE))
+            })
             .collect();
         let retained: String = rows
             .iter()
@@ -159,4 +181,84 @@ fn format_only_changes_do_not_invent_changed_code() {
         );
         assert!(text.contains(expected));
     }
+}
+
+#[test]
+fn changed_fragments_keep_whole_unicode_glyphs_and_insertion_boundaries() {
+    for (before, after, removed, added) in [
+        ("cafe\u{301}", "cafe\u{308}", "e\u{301}", "e\u{308}"),
+        ("👩‍💻", "👩‍🔬", "👩‍💻", "👩‍🔬"),
+        ("🇮🇹", "🇮🇪", "🇮🇹", "🇮🇪"),
+        ("東京", "東海", "京", "海"),
+        ("10", "120", "", "2"),
+        ("120", "10", "2", ""),
+        ("a b", "a  b", "", " "),
+    ] {
+        let old = format!("let value = \"{before}\";\n");
+        let new = format!("let value = \"{after}\";\n");
+        let change = Change::between(Some(&old), &new).unwrap();
+        for width in [20, 40, 80] {
+            let body = render(&change, "source.rs", width, true);
+            assert_eq!(highlighted(&body.rows, DIFF_REMOVED_SURFACE), removed);
+            assert_eq!(highlighted(&body.rows, DIFF_ADDED_SURFACE), added);
+            assert!(body.rows.iter().all(|row| row.background.is_none()));
+            assert!(
+                body.rows
+                    .iter()
+                    .all(|row| text::cells(&row.plain()) <= width)
+            );
+        }
+    }
+}
+
+#[test]
+fn unmatched_lines_highlight_their_whole_text_and_keep_the_outside_gutter_clear() {
+    let old = "let first = 10;\nlet second = 20;\nlet gone = 30;\n";
+    let new = "let first = 11;\nlet second = 21;\n";
+    let change = Change::between(Some(old), new).unwrap();
+    let body = render(&change, "source.rs", 80, true);
+    let gone: Vec<_> = body
+        .rows
+        .iter()
+        .filter(|row| row.plain().contains("gone"))
+        .cloned()
+        .collect();
+    assert_eq!(highlighted(&gone, DIFF_REMOVED_SURFACE), "let gone = 30;");
+    assert_eq!(gone[0].spans[0].background, Some(Surface::TERMINAL));
+    assert!(gone[0].spans[1].background.is_none());
+    let created = render(
+        &Change::between(None, "let ready = true;\n").unwrap(),
+        "source.rs",
+        80,
+        true,
+    );
+    assert_eq!(
+        highlighted(&created.rows, DIFF_ADDED_SURFACE),
+        "let ready = true;"
+    );
+    assert!(created.rows.iter().all(|row| row.background.is_none()));
+}
+
+#[test]
+fn long_paired_lines_keep_their_shared_tail_and_exact_changed_fragment() {
+    let prefix = "界x".repeat(4_000);
+    let before = format!("{prefix}OLD unchanged tail\n");
+    let after = format!("{prefix}NEW unchanged tail\n");
+    let change = Change::between(Some(&before), &after).unwrap();
+    let compact = render(&change, "source.txt", 40, false);
+    assert!(compact.rows.len() <= 6);
+    let full = render(&change, "source.txt", 40, true);
+    assert_eq!(highlighted(&full.rows, DIFF_REMOVED_SURFACE), "OLD");
+    assert_eq!(highlighted(&full.rows, DIFF_ADDED_SURFACE), "NEW");
+    for (source, expected) in [(2, before.trim_end()), (3, after.trim_end())] {
+        let retained: String = full
+            .rows
+            .iter()
+            .filter(|row| row.origin.is_some_and(|origin| origin.line == source))
+            .flat_map(|row| row.spans.iter().skip(2))
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(retained, expected);
+    }
+    assert!(full.rows.iter().all(|row| text::cells(&row.plain()) <= 40));
 }

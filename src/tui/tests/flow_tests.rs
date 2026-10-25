@@ -30,6 +30,87 @@ fn tool(app: &mut App, id: &str, output: &str) {
 }
 
 #[test]
+fn control_o_keeps_the_tail_and_a_reading_page_in_place() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.state.width = 80;
+    app.state.height = 20;
+    app.state.begin_tool_turn();
+    tool(&mut app, "earlier", "Earlier output\n");
+    app.state.close_tools();
+    app.state.finish_tool_turn();
+    app.state.message(Kind::Assistant, "First answer.");
+    app.state.begin_tool_turn();
+    tool(&mut app, "latest", "Latest output\nMore latest output\n");
+    app.state.close_tools();
+    app.state.finish_tool_turn();
+    app.state.message(
+        Kind::Assistant,
+        &(0..80)
+            .map(|index| format!("Later paragraph {index:02}.  \n"))
+            .collect::<String>(),
+    );
+    let draw = |app: &mut App| {
+        app.renderer.update(
+            &app.state,
+            "fixture/model",
+            "fixture directory",
+            std::time::Instant::now(),
+        )
+    };
+    draw(&mut app);
+    key(&mut app, 79, 4);
+    let expanded = draw(&mut app);
+    assert!(expanded.contains("Tool details expanded"));
+    assert!(
+        !expanded.contains("Latest output"),
+        "expanding revealed the tool above the tail"
+    );
+    assert!(!app.renderer.back_to_bottom(), "tail stopped following");
+    let tools: Vec<_> = app
+        .state
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Tool { presentation, .. } => Some(presentation.expanded),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tools, [false, true], "only the latest turn expands");
+    key(&mut app, 79, 4);
+    assert!(draw(&mut app).contains("Tool details collapsed"));
+    assert!(!app.renderer.back_to_bottom(), "tail stopped following");
+
+    app.renderer
+        .scroll(super::super::viewport::Scroll::Rows(-8));
+    let scrolled = draw(&mut app);
+    assert!(
+        scrolled.contains("Later paragraph"),
+        "scroll did not enter the answer"
+    );
+    assert!(
+        scrolled.contains("Back to bottom"),
+        "reading mode was not entered"
+    );
+    key(&mut app, 79, 4);
+    let expanded = draw(&mut app);
+    assert!(expanded.contains("Tool details expanded"));
+    assert!(
+        !expanded.contains("Later paragraph"),
+        "expanding repainted the reading page"
+    );
+    key(&mut app, 79, 4);
+    let collapsed = draw(&mut app);
+    assert!(collapsed.contains("Tool details collapsed"));
+    assert!(
+        !collapsed.contains("Later paragraph"),
+        "collapsing repainted the reading page"
+    );
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn tool_toggle_preserves_the_draft_and_source_and_returns_to_editing() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);

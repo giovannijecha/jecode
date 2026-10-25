@@ -1,15 +1,49 @@
 use super::{Item, State};
-use std::ops::Range;
+use std::{collections::VecDeque, ops::Range};
+
+const RECENT_TOOL_CHANGES: usize = 64;
 
 #[derive(Default)]
 pub struct ToolDetails {
     pub turn: Option<Range<usize>>,
     pub active: bool,
     pub expanded: bool,
-    pub changed_from: usize,
+    /// Equal consecutive starts share a record, even across a large read batch.
+    changes: VecDeque<(usize, u64)>,
+}
+
+impl ToolDetails {
+    /// Returns the earliest item affected by every unseen revision. When a
+    /// layout is older than the bounded history, its caller rebuilds all rows.
+    pub(in crate::tui) fn changed_since(&self, revisions: u64) -> Option<usize> {
+        let mut remaining = revisions;
+        let mut first = None;
+        for &(index, count) in self.changes.iter().rev() {
+            first = Some(first.map_or(index, |earlier: usize| earlier.min(index)));
+            remaining = remaining.saturating_sub(count);
+            if remaining == 0 {
+                return first;
+            }
+        }
+        None
+    }
 }
 
 impl State {
+    fn tool_changed_from(&mut self, first: usize) {
+        self.tool_revision = self.tool_revision.wrapping_add(1);
+        if let Some((index, count)) = self.tool_details.changes.back_mut()
+            && *index == first
+        {
+            *count = count.saturating_add(1);
+            return;
+        }
+        if self.tool_details.changes.len() == RECENT_TOOL_CHANGES {
+            self.tool_details.changes.pop_front();
+        }
+        self.tool_details.changes.push_back((first, 1));
+    }
+
     pub fn begin_tool_turn(&mut self) {
         self.reset_tool_details();
         self.tool_details.turn = Some(self.items.len()..self.items.len());
@@ -56,6 +90,7 @@ impl State {
             )
         })?;
         let expanded = !self.tool_details.expanded;
+        let mut count = 0;
         for item in &mut self.items[turn] {
             if let Item::Tool {
                 presentation,
@@ -64,13 +99,34 @@ impl State {
             } = item
             {
                 presentation.expanded = expanded;
+                count += 1;
             }
         }
         self.tool_details.expanded = expanded;
-        self.tool_details.changed_from = first;
-        self.tool_revision = self.tool_revision.wrapping_add(1);
+        self.tool_changed_from(first);
         self.changed();
-        Some((expanded, first))
+        Some((expanded, count))
+    }
+
+    /// Finished reads can join the reads before them; their shared card is
+    /// drawn again from the first read of the run.
+    pub(super) fn join_reads(&mut self, finished: &[usize]) {
+        let start = finished
+            .iter()
+            .filter(|&&index| {
+                index > 0 && self.items[index].groupable() && self.items[index - 1].groupable()
+            })
+            .map(|&index| {
+                (0..index)
+                    .rev()
+                    .take_while(|&before| self.items[before].groupable())
+                    .last()
+                    .unwrap_or(index)
+            })
+            .min();
+        if let Some(start) = start {
+            self.tool_changed_from(start);
+        }
     }
 
     pub fn reset_tool_details(&mut self) {
@@ -87,8 +143,7 @@ impl State {
         self.tool_details.active = false;
         self.tool_details.expanded = false;
         if let Some(first) = first {
-            self.tool_details.changed_from = first;
-            self.tool_revision = self.tool_revision.wrapping_add(1);
+            self.tool_changed_from(first);
             self.changed();
         }
     }

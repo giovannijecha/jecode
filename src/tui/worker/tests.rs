@@ -72,6 +72,7 @@ fn final_and_reset_events_invalidate_previews_without_reordering_reliable_events
         attempt: 1,
         delay: Duration::ZERO,
         error: "offline".into(),
+        reason: None,
     });
     assert_eq!(
         receiver.try_recv(),

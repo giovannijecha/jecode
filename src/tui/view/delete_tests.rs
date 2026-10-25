@@ -4,7 +4,7 @@ use crate::{
     tui::{
         selector::{Purpose, Selector},
         state::Kind,
-        theme::{BAD, SELECTED_SURFACE},
+        theme::BAD,
     },
 };
 
@@ -41,18 +41,21 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
     let marked = full
         .live
         .iter()
-        .find(|line| line.plain().contains("› Delete? Saved request 3"))
+        .find(|line| line.plain().contains("› Saved request 3"))
         .unwrap();
     let name = marked.spans.iter().find(|span| span.text.contains("Saved"));
     assert_eq!(name.unwrap().style, BAD);
-    assert!(rendered.contains("owned outputs and temporary files"));
-    assert!(rendered.contains("New conversation · unsent input kept"));
-    assert!(rendered.contains("Enter delete · Esc cancel"));
+    assert!(
+        rendered.contains("owned outputs and temporary files"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("unsent input is kept"));
+    assert!(rendered.contains("Delete this conversation?"));
+    assert!(rendered.contains(" Enter  delete"));
     assert!(
         full.live
             .iter()
-            .any(|line| line.background == Some(SELECTED_SURFACE)
-                && line.spans.iter().any(|span| span.style == BAD))
+            .any(|line| focused(line) && line.spans.iter().any(|span| span.style == BAD))
     );
     for width in [8, 18, 40, 80] {
         for height in [1, 2, 4, 6, 10, 20] {
@@ -66,22 +69,16 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
                     .iter()
                     .all(|line| text::cells(&line.plain()) <= width)
             );
-            assert!(
-                fitted
-                    .live
-                    .iter()
-                    .any(|line| line.background == Some(SELECTED_SURFACE))
-            );
+            // The search field and the confirmation come first, then the row.
+            if height >= 4 {
+                assert!(fitted.live.iter().any(focused), "{width}x{height}");
+            }
             if width >= 18 && height >= 2 {
                 assert!(
                     fitted
                         .live
                         .iter()
-                        .any(|line| line.plain().contains(if width >= 25 {
-                            "Enter delete"
-                        } else {
-                            "Enter"
-                        }))
+                        .any(|line| line.plain().contains("Delete"))
                 );
             }
             assert_eq!(state.editor.text, "kept draft");
@@ -102,7 +99,7 @@ fn resume_exposes_delete_control_and_shows_loading_error_and_success_in_the_same
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("Ctrl+D delete"));
+    assert!(rendered.contains(" Ctrl+D  delete"));
     state.height = 8;
     state.selector.as_mut().unwrap().toggle_delete();
     if let Purpose::Sessions { working, .. } = &mut state.selector.as_mut().unwrap().purpose {
@@ -115,7 +112,8 @@ fn resume_exposes_delete_control_and_shows_loading_error_and_success_in_the_same
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(busy.matches("Deleting conversation…").count(), 1);
-    assert!(!busy.contains("Enter delete"));
+    assert!(!busy.contains(" Enter  delete"));
+    assert!(busy.contains(" Ctrl+Q  quit after cleanup"));
     state.selector = Some(Selector::sessions(&entries, &entries[3].id));
     for (kind, message) in [
         (Kind::Error, "Session is already open"),

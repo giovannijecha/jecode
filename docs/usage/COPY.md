@@ -3,7 +3,7 @@
 Type `/copy` to choose text from the latest completed assistant message in the
 current conversation, including while the agent works. Choose the whole
 response, a fenced code block or an explicit blockquote. Use Up/Down and Enter;
-small menus accept their displayed numbers and larger menus support search.
+small menus also accept number keys and larger menus support search.
 Esc or Ctrl+C closes the menu without stopping active work.
 
 The menu captures its source when opened, so a newer response does not change

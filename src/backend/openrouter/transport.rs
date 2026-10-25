@@ -176,7 +176,11 @@ impl Api {
 
 fn with_input_error(mut failure: Failure, error: Option<&str>) -> Failure {
     if let Some(error) = error {
-        failure.message.push_str(&format!("; {error}"));
+        let detail = format!("; {error}");
+        failure.message.push_str(&detail);
+        if let Some(diagnostic) = &mut failure.diagnostic {
+            diagnostic.push_str(&detail);
+        }
     }
     failure
 }

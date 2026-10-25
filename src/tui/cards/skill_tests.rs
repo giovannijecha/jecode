@@ -25,7 +25,7 @@ fn plain(rows: &[Line]) -> String {
 fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     let running = draw("skill:review", None, false);
     assert!(plain(&running).contains("Skill(review)"));
-    assert_eq!(running[0].spans[0].style, TOOL_ACCENT);
+    assert_eq!(running[0].spans[0].style, TOOL_DIM);
 
     let result = Value::object([
         ("content", Value::string("1: # Review\n2: Check changes.\n")),
@@ -34,7 +34,7 @@ fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     ]);
     let done = draw("skill:review", Some(&result), false);
     assert_eq!(done[0].spans[0].style, GOOD);
-    assert!(plain(&done).contains("Loaded skill · Read 2 lines"));
+    assert!(plain(&done).contains("Loaded skill · 2 lines"));
     assert_eq!(done.len(), 2);
     let expanded = draw("skill:review", Some(&result), true);
     assert!(plain(&expanded).contains("2   Check changes."));
@@ -42,7 +42,7 @@ fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     let failed_result = Value::object([("error", Value::string("Skill unavailable"))]);
     let failed = draw("skill:review", Some(&failed_result), false);
     assert_eq!(failed[0].spans[0].style, BAD);
-    assert!(plain(&failed).contains("Failed · Skill unavailable"));
+    assert!(plain(&failed).contains("⎿ Skill unavailable"));
     assert!(!plain(&failed).contains("Loaded skill"));
 
     let resource = draw("skill:review/references/CHECKLIST.md", Some(&result), false);

@@ -291,7 +291,7 @@ fn canonical_single_edit_uses_snippet_diff_and_noop_batch_stays_empty() {
         &Presentation::default(),
     ));
     assert!(
-        text.contains("Added 1 line, removed 1 line") && text.contains("new()"),
+        text.contains("+1 −1 lines") && text.contains("new()"),
         "{text}"
     );
     assert!(

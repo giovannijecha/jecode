@@ -1,6 +1,6 @@
 use super::{
     text,
-    theme::{BODY, INLINE_CODE, Style, Surface},
+    theme::{BODY, INLINE_CODE, INLINE_CODE_SURFACE, Style, Surface},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,6 +70,10 @@ impl Line {
     pub fn push(&mut self, value: &str, style: Style) {
         self.push_span(value, style, None);
     }
+    /// A span on its own surface, such as an inline code chip.
+    pub fn push_on(&mut self, value: &str, style: Style, background: Surface) {
+        self.push_span(value, style, Some(background));
+    }
     fn push_span(&mut self, value: &str, style: Style, background: Option<Surface>) {
         if value.is_empty() {
             return;
@@ -86,6 +90,11 @@ impl Line {
                 background,
             });
         }
+    }
+    /// `other`'s spans after this line's, keeping their surfaces.
+    pub fn append(mut self, other: Line) -> Self {
+        self.spans.extend(other.spans);
+        self
     }
     pub fn plain(&self) -> String {
         self.spans.iter().map(|span| span.text.as_str()).collect()
@@ -139,7 +148,8 @@ impl Line {
                     newline: glyph.text == "\n",
                     whitespace: glyph.text.chars().next().is_some_and(char::is_whitespace),
                     breakable: glyph.text.chars().next().is_some_and(char::is_whitespace)
-                        && characters[start].1 != INLINE_CODE,
+                        && (characters[start].1, characters[start].2)
+                            != (INLINE_CODE, Some(INLINE_CODE_SURFACE)),
                 };
                 start = end;
                 part
@@ -258,6 +268,11 @@ impl Line {
 }
 
 impl Wrapped {
+    /// Change the width of the remaining rows without parsing the text again.
+    pub(in crate::tui) fn set_columns(&mut self, columns: usize) {
+        self.columns = columns.max(2);
+    }
+
     fn new(line: &Line, columns: usize, words: bool) -> Self {
         let styled = line.glyphs();
         let empty_pending =

@@ -26,9 +26,10 @@ fn skills_catalog_is_local_keeps_drafts_and_restores_its_saved_details() {
         messages_before
     );
     let info = first.state.information.as_ref().unwrap();
-    assert_eq!(info.title, "1 available skill");
+    assert_eq!(info.title, "Skills");
+    assert_eq!(info.current().aside, "1 available skill");
     assert_eq!(
-        info.details,
+        info.current().details,
         [("review".into(), "Inspect a change.".into())]
     );
     let id = first.persistence.as_ref().unwrap().id();
@@ -63,8 +64,13 @@ fn skills_catalog_shows_empty_and_malformed_states_without_provider_work() {
     std::fs::write(malformed.join("SKILL.md"), "invalid").unwrap();
     current.dispatch("/skills".into()).unwrap();
     let info = current.state.information.as_ref().unwrap();
-    assert!(info.title.contains("No valid skills found"));
-    assert!(info.details.iter().any(|(name, _)| name == "Skipped"));
+    assert!(info.current().aside.contains("No valid skills found"));
+    assert!(
+        info.current()
+            .details
+            .iter()
+            .any(|(name, _)| name == "Skipped")
+    );
     assert!(current.worker.is_none());
 }
 

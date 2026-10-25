@@ -187,7 +187,6 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     key.editor.insert("example-key-input");
 
     let listing = endpoints();
-    let legend = crate::tui::routing::LEGEND.to_owned();
     let charges = Charges {
         providers: vec!["DeepInfra".into()],
         requests: 1,
@@ -227,6 +226,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
                     Effort::High,
                     80,
                     &crate::backend::openrouter::Routing::Auto,
+                    std::path::Path::new("fixture/config.json"),
                 ),
             ),
         ),
@@ -237,7 +237,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
                 Routing::Auto,
                 false,
                 Some(&listing),
-                vec![legend.clone(), format!("Last turn · {served}")],
+                vec![format!("Last turn · {served}")],
             ),
         ),
         (
@@ -247,7 +247,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
                 Routing::Endpoint("baidu/fp8".into()),
                 false,
                 Some(&listing),
-                vec![legend.clone()],
+                vec![],
             ),
         ),
         (
@@ -262,14 +262,20 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         (
             "Default routing",
-            routing(columns, Routing::Auto, true, Some(&listing), vec![legend]),
+            routing(columns, Routing::Auto, true, Some(&listing), vec![]),
         ),
         (
             "Auto-compact at",
             selecting(columns, Selector::auto_compact(80)),
         ),
         ("OpenRouter key", selecting(columns, key)),
-        ("Loading", selecting(columns, Selector::loading())),
+        (
+            "Loading",
+            selecting(
+                columns,
+                Selector::loading("Model", "Loading model catalog…", false),
+            ),
+        ),
         (
             "Resume",
             selecting(columns, Selector::sessions(&sessions(), "current")),

@@ -35,9 +35,9 @@ images.
 Prompt history preserves the unsent draft and caret. `Esc` leaves history and
 returns to that draft. `Ctrl+O` is ignored during generation and becomes
 available when the worker ends, including after a stop or error. It opens all
-tools from that turn and moves the view to its first tool; pressing it again
-restores the normal previews and returns to the final answer. A finished turn
-without tools has no toggle, and earlier turns are never substituted. Typing
+tools from that turn; pressing it again restores the normal previews. Both
+actions preserve the reading position, including following the tail. A finished
+turn without tools has no toggle, and earlier turns are never substituted. Typing
 an unsent draft keeps details open. Accepting a new user prompt collapses the
 old details until the new turn finishes.
 Expansion is temporary. Resumed sessions start compact and retain execution-turn
@@ -46,9 +46,10 @@ listed in `/help`; it adds no persistent composer hint.
 
 ## Activity and queue
 
-The activity line names the current phase and elapsed time. While a turn is
-running, the composer stays editable. Pending messages appear above it as
-`queued`; Jecode accepts ordinary messages before the active turn's next model
+While a turn runs, the composer's upper rule carries a sweeping scanner and the
+turn's elapsed time, which reads in hours past 60 minutes, then any draft
+context, and `esc` at the right while Esc stops the turn. The composer stays
+editable. Pending messages appear above it as `queued`; Jecode accepts ordinary messages before the active turn's next model
 request. Most local commands wait for the turn to finish; `/copy`, `/drafts`,
 and `/terminal` open immediately. If the turn stops or fails,
 messages that have not joined it become `paused` and require review.
@@ -77,16 +78,23 @@ See [Sessions](../usage/SESSIONS.md) for persistence and resume behavior, and
 
 ## Commands and selectors
 
-Type `/` to see command suggestions. `Up`/`Down` selects a suggestion,
-`Tab` completes its name, and `Enter` runs it when idle. Adding a space keeps
-the command text but closes suggestions. `Esc` closes the suggestion panel
-without clearing the draft. `/help` lists the available commands and keys;
-`F1` opens the same help while idle.
+Type `/` to open the commands panel; the draft is its search field. A bare
+`/` lists every command under its group (Conversation, Model, Workspace,
+Jecode); further typing filters a flat list. `Up`/`Down` selects a
+suggestion, `Tab` completes its name, and `Enter` runs it when idle. After a
+space the panel shows the typed command's description. `Esc` closes the panel
+without clearing the draft. `/help` opens Commands and Keys sections, switched
+with `Left`/`Right`; `F1` opens the same help while idle.
 
-Selectors use `Up`/`Down` and `Enter`. Lists with at most eight options also
-accept number keys; larger lists provide a search field. `Esc` closes a
-selector, or first cancels a pending delete/discard confirmation. Current
-values remain marked independently of the highlighted row.
+Menus share one layout: a header with the title, context and a right-aligned
+scope or count; a divider; an optional search field; the list; a two-row
+detail strip for the selected item's description; and a row of key hints.
+Menus use `Up`/`Down` and `Enter`. Lists with at most eight options also
+accept number keys; larger lists provide a search field. `Esc` closes a menu,
+goes back from a settings value, or first cancels a pending delete/discard
+confirmation. Current values remain marked independently of the highlighted
+row. On short terminals the detail strip leaves first, then spacing, then
+column headers; the selected row, search field and key hints stay.
 
 - `/model [ID]` chooses a model and effort for this conversation;
   `/effort [NAME]` changes effort directly.
@@ -116,8 +124,9 @@ available. `/help` also shows the commands omitted from this quick reference.
 ## Processes
 
 In `/terminal`, select a process with `Up`/`Down` and open it with `Enter`.
-The output view has Output and Errors streams: `Tab` switches streams,
-the arrows, page keys, and wheel browse, and `End` follows the tail. `Ctrl+D`
+The output view has Output and Errors tabs: `Tab` switches streams,
+the arrows, page keys, and wheel browse, `Home` jumps to the start and `End`
+follows the tail. Output wraps at word boundaries. `Ctrl+D`
 opens a stop confirmation for the selected process; `Enter` confirms and
 `Esc` or `Ctrl+C` cancels. `/terminal stop ID` requests the same stop directly.
 The composer and pending drafts remain available after the panel closes.
@@ -133,16 +142,29 @@ bottom, `Esc` stops active work. `Ctrl+C` also stops
 work, closes a panel, or clears an idle draft; it never exits. See
 [Scrolling and resize](RESIZE.md) for reflow and terminal restoration.
 
-Notices appear near the composer: muted results, gold warnings, and red
-errors. Short notices clear after a few seconds or on input; errors remain
-until the next action. Copy feedback has its own slot. These notices do not
-become conversation messages.
+Notices appear above the composer, by lifetime. Results and setting changes
+are muted text without an icon, clearing after five seconds or when you start
+typing. A changed setting's new value stays strong.
+Warnings and errors are banners that stay until your next key, naming the
+next step when there is one, such as `Alt+↑ review` for paused drafts or
+`/settings update key` for a rejected key; a lower-severity notice never
+replaces them. Progress such as compaction, attachments or a retry sits in
+the composer rule beside the scanner, with a countdown to the next attempt.
+Copy feedback has its own slot. Notices do not become conversation messages.
+The rule also names the turn's phase, including `Waiting for your edit` when
+a draft edit holds the turn and `Stopping` after cancellation. Tool activity
+uses `Working`, which also covers the interval after a tool finishes.
+Maintenance and retry feedback take priority over normal phases. A retry temporarily
+overlays compaction; its original progress and clock return when the retry ends.
 
-The footer shows the working directory, model, effort, and a projected context
-share when capacity is known. `Context unknown` means there is no reliable
-capacity yet. `Auto 80%` denotes the configured automatic compaction
-threshold, not the current usage. Unsent draft text is excluded from the
-projection. See [Configuration](../usage/CONFIGURATION.md) for model and
+The footer shows the working directory relative to your home folder, a
+context meter with the projected share, the model and effort. The meter fills
+toward the configured automatic compaction threshold, so a full meter means
+compaction is due; it turns gold within three points of it, starting at 1%
+for thresholds of 3% or less. An empty meter
+with `?` means there is no reliable capacity yet. Narrow terminals show the
+project name and the model without its provider, then drop them before the
+meter. Unsent draft text is excluded from the projection. See [Configuration](../usage/CONFIGURATION.md) for model and
 compaction settings.
 
 Terminal shortcuts can be intercepted by the host. On Unix, a terminal with

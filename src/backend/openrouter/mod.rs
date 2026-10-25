@@ -369,6 +369,12 @@ impl OpenRouter {
                 "{} Pinned endpoint {tag} has no fallbacks; use /routing to choose Auto or another endpoint.",
                 failure.message.trim_end()
             );
+            if let Some(diagnostic) = &mut failure.diagnostic {
+                *diagnostic = format!(
+                    "{} Pinned endpoint {tag} has no fallbacks; use /routing to choose Auto or another endpoint.",
+                    diagnostic.trim_end()
+                );
+            }
         }
         failure
     }

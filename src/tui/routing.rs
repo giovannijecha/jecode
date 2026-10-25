@@ -5,10 +5,6 @@ use super::{
 };
 use crate::backend::{Endpoints, Services};
 
-/// How to read the endpoint rows.
-pub(super) const LEGEND: &str =
-    "$/M input/output after discounts · 30-minute medians for speed and latency";
-
 impl App {
     /// Opens routing for the conversation or, with `defaults`, the default
     /// model's saved routing. A fresh listing opens at once; otherwise it is
@@ -30,8 +26,13 @@ impl App {
             Ok(services) => services,
             Err(error) => return self.finish_setting(Kind::Error, &error, vec![]),
         };
-        let mut menu = Selector::loading();
-        menu.title = "Loading endpoints…".into();
+        let title = if defaults {
+            "Default routing"
+        } else {
+            "Routing"
+        };
+        let mut menu = Selector::loading(title, "Loading endpoints…", defaults);
+        menu.context.clone_from(&purpose.model);
         self.state.selector = Some(menu);
         self.state.clear_notice();
         self.job = Some(Job::endpoints(services, purpose));
@@ -71,7 +72,6 @@ impl App {
                 if !defaults || agent.backend_id() == self.config.settings.backend_id {
                     agent.offer_endpoints(endpoints.clone());
                 }
-                notes.push(LEGEND.to_owned());
                 Some(endpoints)
             }
             Ok(None) => {
@@ -158,12 +158,12 @@ impl App {
                             &self.config.settings.backend_id,
                             self.config.settings.routing.clone(),
                         );
-                    self.finish_setting(
+                    self.finish_setting_change(
                         Kind::Notice,
                         &format!(
-                            "Default routing for {model}: {} · was {} · applies to new conversations and model switches",
-                            entry.routing.label(),
-                            previous.label()
+                            "Default routing for {model}: {} → {} · new conversations and model switches",
+                            previous.label(),
+                            entry.routing.label()
                         ),
                         vec![],
                     );
@@ -182,10 +182,10 @@ impl App {
         }
         let previous = agent.routing().label();
         agent.set_routing(entry.routing.clone());
-        self.finish_setting(
+        self.finish_setting_change(
             Kind::Notice,
             &format!(
-                "Routing set to {} · was {previous} · applies from the next request",
+                "Routing: {previous} → {} · from the next request",
                 entry.routing.label()
             ),
             vec![],

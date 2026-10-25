@@ -1,5 +1,5 @@
 use super::{App, Feedback, Kind, activity};
-use crate::{attachments::Prompt, events::Event};
+use crate::{attachments::Prompt, backend::FailureReason, events::Event};
 use std::time::Instant;
 
 impl App {
@@ -29,6 +29,7 @@ impl App {
             let cancelled = activity.as_ref().is_some_and(|activity| activity.stopping);
             match result {
                 Ok(()) if !cancelled => {
+                    self.state.backend_failure = None;
                     self.submission = None;
                     self.state.status = "Ready".into();
                     self.state.clear_progress();
@@ -53,30 +54,51 @@ impl App {
                 result => {
                     let error = result.err().unwrap_or_else(|| "Turn interrupted".into());
                     self.state.queue.pause();
+                    self.state.clear_progress();
                     let returned = self.return_unanswered(&mut agent);
+                    let backend_failure = self.state.backend_failure.take();
+                    let key = !cancelled
+                        && matches!(
+                            backend_failure.as_ref(),
+                            Some((FailureReason::RejectedKey, _))
+                        );
                     let mut message = if cancelled {
                         "Interrupted".into()
                     } else {
-                        agent.redact(&error)
+                        agent.redact(
+                            backend_failure
+                                .as_ref()
+                                .map_or(error.as_str(), |(_, diagnostic)| diagnostic.as_str()),
+                        )
                     };
                     if returned {
-                        message.push_str(" · prompt restored to composer");
+                        message.push_str(" · prompt restored");
                         if let Some(error) = &self.save_error {
                             message.push_str(&format!(" · {error}"));
                         }
                     }
-                    if !self.state.queue.is_empty() {
-                        message.push_str(" · pending drafts paused · Alt+↑ to review");
+                    let paused = self.state.queue.len();
+                    if paused > 0 {
+                        message.push_str(&format!(
+                            " · {paused} {} paused",
+                            if paused == 1 { "draft" } else { "drafts" }
+                        ));
                     }
                     self.state.status = "Turn interrupted".into();
-                    self.state.notify(Feedback::result(
+                    let mut notice = Feedback::result(
                         if cancelled {
                             Kind::Warning
                         } else {
                             Kind::Error
                         },
                         message,
-                    ));
+                    );
+                    if key {
+                        notice = notice.action("/settings", "update key");
+                    } else if paused > 0 {
+                        notice = notice.action("Alt+↑", "review");
+                    }
+                    self.state.notify(notice);
                     self.refresh_draft_menu();
                     self.edited();
                 }

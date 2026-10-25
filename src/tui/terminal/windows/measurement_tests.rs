@@ -26,6 +26,7 @@ pub(super) fn fixture(path: &Path, bash: &Path, active: bool) {
         let first = vec![b'a'; 1 << 20];
         let second = vec![b'b'; 1 << 20];
         std::fs::write(&file, &first).unwrap();
+        let file = std::fs::canonicalize(file).unwrap();
         (file, first, second)
     });
     let provider = HttpFixture::new(vec![]);

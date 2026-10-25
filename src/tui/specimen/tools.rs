@@ -222,7 +222,12 @@ fn states() -> Vec<(&'static str, Call)> {
             finished(
                 "read",
                 path("src/missing.rs"),
-                Value::object([("error", text("path not found: src/missing.rs"))]),
+                Value::object([(
+                    "error",
+                    text(
+                        "Could not resolve path \"src/missing.rs\": The system cannot find the file specified. (os error 2)",
+                    ),
+                )]),
                 2,
             ),
         ),
@@ -242,6 +247,40 @@ fn states() -> Vec<(&'static str, Call)> {
                 14200,
             ),
         ),
+        ("Failed command", failed()),
+        ("Web page", web()),
+        (
+            "Browser screenshot",
+            finished(
+                "browser",
+                Value::object([("action", text("screenshot")), ("tab_id", text("tab-1"))]),
+                Value::object([
+                    ("tab_id", text("tab-1")),
+                    ("screenshot_path", text("tmp:browser/capture-1.png")),
+                    ("view", text("image")),
+                    (
+                        "attachment",
+                        Value::object([
+                            ("width", Value::number(1280)),
+                            ("height", Value::number(720)),
+                        ]),
+                    ),
+                ]),
+                900,
+            ),
+        ),
+        (
+            "Browser click",
+            finished(
+                "browser",
+                Value::object([
+                    ("action", text("click")),
+                    ("selector", text("button#submit")),
+                ]),
+                Value::object([("clicked", Value::Bool(true)), ("tab_id", text("tab-1"))]),
+                300,
+            ),
+        ),
         ("Long command", long()),
         ("Edit preview", sequence().remove(1)),
         ("Expanded read", selected),
@@ -249,23 +288,128 @@ fn states() -> Vec<(&'static str, Call)> {
     ]
 }
 
-fn card(call: &Call, columns: usize) -> Vec<Line> {
-    let summary = call
-        .result
+fn failed() -> Call {
+    finished(
+        "bash",
+        command("cargo test --locked limiter"),
+        Value::object([
+            (
+                "stdout",
+                text(
+                    "   Compiling jecode v0.1.0
+",
+                ),
+            ),
+            (
+                "stderr",
+                text(
+                    "error[E0425]: cannot find value `LOGIN_WINDOW` in this scope
+  --> src/routes/auth.rs:41:18
+   |
+41 |     let window = LOGIN_WINDOW;
+   |                  ^^^^^^^^^^^^ not found in this scope
+
+error: could not compile `jecode` due to 1 previous error
+",
+                ),
+            ),
+            ("exit_code", Value::number(101)),
+        ]),
+        4200,
+    )
+}
+
+fn web() -> Call {
+    finished(
+        "web",
+        Value::object([
+            ("action", text("fetch")),
+            ("url", text("https://docs.rs/governor/latest/governor/")),
+        ]),
+        Value::object([
+            (
+                "requested_url",
+                text("https://docs.rs/governor/latest/governor/"),
+            ),
+            (
+                "final_url",
+                text("https://docs.rs/governor/latest/governor/"),
+            ),
+            ("status", Value::number(200)),
+            ("bytes", Value::number(18402)),
+            ("title", text("governor - Rust")),
+            (
+                "preview",
+                text(
+                    "# Crate governor\n\nAn implementation of the Generic Cell Rate Algorithm.\n## Quick example\n",
+                ),
+            ),
+        ]),
+        640,
+    )
+}
+
+fn reads(expanded: bool) -> Vec<Call> {
+    [
+        ("src/routes/mod.rs", 38),
+        ("src/routes/auth.rs", 212),
+        ("src/limiter.rs", 88),
+        ("tests/auth.rs", 120),
+        ("src/main.rs", 64),
+    ]
+    .into_iter()
+    .map(|(file, lines)| {
+        let mut call = finished(
+            "read",
+            path(file),
+            Value::object([
+                ("content", text("1: //\n")),
+                ("lines_returned", Value::number(lines)),
+                ("offset", Value::number(1)),
+            ]),
+            4,
+        );
+        call.presentation.expanded = expanded;
+        call
+    })
+    .collect()
+}
+
+fn tool<'a>(call: &'a Call, summary: &'a str) -> Tool<'a> {
+    Tool {
+        name: call.name,
+        arguments: &call.arguments,
+        summary,
+        result: call.result.as_ref(),
+        change: call.change.as_ref(),
+        presentation: &call.presentation,
+    }
+}
+
+fn summary(call: &Call) -> String {
+    call.result
         .as_ref()
         .map(|result| tool_summary(call.name, result))
-        .unwrap_or_default();
-    cards::render(
-        Tool {
-            name: call.name,
-            arguments: &call.arguments,
-            summary: &summary,
-            result: call.result.as_ref(),
-            change: call.change.as_ref(),
-            presentation: &call.presentation,
-        },
-        columns,
-    )
+        .unwrap_or_default()
+}
+
+fn card(call: &Call, columns: usize) -> Vec<Line> {
+    keyed(call, columns, false)
+}
+
+// The latest finished turn names Ctrl+O on its last hidden lines.
+fn keyed(call: &Call, columns: usize, keycap: bool) -> Vec<Line> {
+    cards::card(tool(call, &summary(call)), columns, keycap).rows
+}
+
+fn group(calls: &[Call], columns: usize, keycap: bool) -> Vec<Line> {
+    let summaries: Vec<_> = calls.iter().map(summary).collect();
+    let tools: Vec<_> = calls
+        .iter()
+        .zip(&summaries)
+        .map(|(call, summary)| tool(call, summary))
+        .collect();
+    cards::group(&tools, columns, keycap).rows
 }
 
 // The completed diff remains visible when another tool starts.
@@ -282,7 +426,7 @@ fn turn(rows: &mut Vec<(Line, usize)>, columns: usize) {
         if index > 0 {
             rows.push((Line::default(), columns));
         }
-        for line in card(call, columns) {
+        for line in keyed(call, columns, index == 2) {
             rows.push((line, columns));
         }
     }
@@ -303,10 +447,34 @@ fn tools() {
         &format!("Tool cards  ·  one turn at {WIDE} columns"),
     );
     turn(&mut rows, WIDE);
+    heading(&mut rows, "Tool activity  ·  quiet pulse colour frames");
+    for frame in 0..4 {
+        let call = Call {
+            name: "bash",
+            arguments: command("cargo build --locked"),
+            result: None,
+            change: None,
+            presentation: Presentation {
+                elapsed: Some(Duration::from_millis(frame * 240)),
+                ..Presentation::default()
+            },
+        };
+        for line in card(&call, WIDE) {
+            rows.push((line, WIDE));
+        }
+        rows.push((Line::default(), WIDE));
+    }
     heading(&mut rows, "Tool cards  ·  states");
     for (title, call) in states() {
         rows.push((Line::new(title, MUTED), WIDE));
         for line in card(&call, WIDE) {
+            rows.push((line, WIDE));
+        }
+        rows.push((Line::default(), WIDE));
+    }
+    for (title, expanded) in [("Read group", false), ("Read group expanded", true)] {
+        rows.push((Line::new(title, MUTED), WIDE));
+        for line in group(&reads(expanded), WIDE, !expanded) {
             rows.push((line, WIDE));
         }
         rows.push((Line::default(), WIDE));
@@ -316,6 +484,16 @@ fn tools() {
         &format!("Tool cards  ·  the same turn at {NARROW} columns"),
     );
     turn(&mut rows, NARROW);
+    rows.push((Line::default(), NARROW));
+    rows.push((Line::new("Read group", MUTED), NARROW));
+    for line in group(&reads(false), NARROW, true) {
+        rows.push((line, NARROW));
+    }
+    rows.push((Line::default(), NARROW));
+    rows.push((Line::new("Failed command", MUTED), NARROW));
+    for line in card(&failed(), NARROW) {
+        rows.push((line, NARROW));
+    }
     rows.push((Line::default(), NARROW));
     rows.push((Line::new("Long command", MUTED), NARROW));
     for line in card(&long(), NARROW) {

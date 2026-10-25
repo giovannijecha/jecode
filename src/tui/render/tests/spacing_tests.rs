@@ -80,14 +80,14 @@ fn a_blank_model_request_adds_no_rows_between_tool_blocks() {
         .unwrap();
     assert!(second > first + 1);
     assert_eq!(rows[second - 1].trim(), "");
-    assert!(rows[second + 1].contains("⎿ Exit 0"));
+    assert!(rows[second + 1].contains("⎿ Done"));
     assert!(rows[second + 2].contains("second output"));
     let border = rows.iter().position(|row| row.starts_with('─')).unwrap();
     assert!(!visible.contains("Ctrl+O"));
     assert!(border > second + 4);
-    assert!(rows[second + 3].contains("Elapsed "));
+    assert!(!visible.contains("Elapsed"));
     assert!(
-        rows[second + 4..border]
+        rows[second + 3..border]
             .iter()
             .all(|row| row.trim().is_empty())
     );

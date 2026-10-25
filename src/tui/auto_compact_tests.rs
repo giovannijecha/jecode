@@ -85,10 +85,15 @@ fn a_saved_threshold_applies_to_this_and_new_conversations() {
         .map(|line| line.plain())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rows.contains("55% of the context window"));
-    assert!(rows.contains("Auto 55%"));
+    assert!(rows.contains("Auto-compact at") && rows.contains("55%"));
+    // The footer meter now fills toward the new threshold.
+    assert_eq!(
+        app.state.context.as_ref().map(|status| status.auto_compact),
+        Some(55)
+    );
     let notice = app.state.notice.as_ref().unwrap();
-    assert!(notice.text.contains("Auto-compact at 55% · was 80%"));
+    assert!(notice.text.contains("Auto-compact: 80% → 55%"));
+    assert!(notice.change);
     app.close_selector();
     assert_eq!(app.state.editor.text, "kept draft");
     app.state.editor.take();

@@ -21,14 +21,20 @@ pub struct Summary {
 
 impl Summary {
     pub fn description(&self) -> String {
+        format!("{} · {}", self.age(), self.origin())
+    }
+    pub fn age(&self) -> String {
         let age = super::now().saturating_sub(self.updated) / 1000;
-        let age = match age {
+        match age {
             0..60 => "just now".into(),
             60..3600 => format!("{}m ago", age / 60),
             3600..86400 => format!("{}h ago", age / 3600),
             _ => format!("{}d ago", age / 86400),
-        };
-        format!("{age} · {} / {} · {}", self.backend, self.model, self.id)
+        }
+    }
+    /// Backend, model and ID.
+    pub fn origin(&self) -> String {
+        format!("{} / {} · {}", self.backend, self.model, self.id)
     }
 }
 

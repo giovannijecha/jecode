@@ -105,6 +105,9 @@ impl App {
             let session = import.session.clone();
             let results = import.finish();
             dirty = true;
+            if self.imports.is_empty() {
+                self.state.clear_progress();
+            }
             if session != self.persistence.as_ref().map(|handle| handle.id()) {
                 self.warn("An attachment finished after the session changed; attach it again.");
                 continue;
@@ -126,7 +129,7 @@ impl App {
                 self.persist_input(true);
             }
             if !errors.is_empty() {
-                self.warn(&format!("{} Your draft was kept.", errors.join(" · ")));
+                self.warn(&format!("{} · your draft was kept", errors.join(" · ")));
             } else if attached > 0 {
                 self.state.notify(Feedback::result(
                     Kind::Notice,

@@ -2,6 +2,72 @@ use super::*;
 use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 
 #[test]
+fn rejected_key_keeps_cli_setup_hint_and_emits_a_clean_ui_diagnostic() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        401,
+        Value::object([(
+            "error",
+            Value::object([("message", Value::string("Rejected isolated-fixture-key"))]),
+        )]),
+    )]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let mut ui_message = None;
+    let error = agent
+        .run_turn("Check the account", &mut |event| {
+            if let Event::BackendFailure { reason, diagnostic } = event {
+                assert_eq!(reason, crate::backend::FailureReason::RejectedKey);
+                ui_message = Some(diagnostic);
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(error.ends_with(" Check your key with jecode setup."));
+    assert!(error.contains("[redacted]"));
+    assert!(!error.contains("isolated-fixture-key"));
+    assert_eq!(
+        ui_message.as_deref(),
+        Some("OpenRouter HTTP 401: Rejected [redacted].")
+    );
+    fixture.finish();
+}
+
+#[test]
+fn rate_limit_reason_reaches_recovery_event_without_message_matching() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            429,
+            Value::object([(
+                "error",
+                Value::object([("message", Value::string("unrelated diagnostic"))]),
+            )]),
+        ),
+        (200, completion("Recovered.", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let mut saw_rate_limit = false;
+    agent
+        .run_turn("Continue", &mut |event| {
+            if let Event::Recovering { reason, error, .. } = event {
+                assert_eq!(reason, Some(crate::backend::FailureReason::RateLimited));
+                assert!(!error.contains("rate limit"));
+                saw_rate_limit = true;
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(saw_rate_limit);
+    assert_eq!(fixture.finish().len(), 2);
+}
+
+#[test]
 fn an_empty_completion_is_retried_without_replaying_a_completed_tool() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![

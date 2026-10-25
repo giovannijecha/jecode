@@ -20,7 +20,6 @@ mod jobs;
 mod keys;
 mod line;
 mod markdown;
-mod notice;
 mod persistence;
 mod poll;
 mod processes;
@@ -231,6 +230,9 @@ fn run_inner(
             };
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
+            } else if loading(&app.state) {
+                // The scanner advances every 120 ms.
+                delay.min(Duration::from_millis(120))
             } else if app.state.processes.is_some() {
                 delay.min(processes::REFRESH)
             } else {
@@ -248,10 +250,19 @@ fn run_inner(
                     }
                     dirty = true;
                 }
-                dirty |= app.state.activity.is_some();
+                dirty |= app.state.activity.is_some() || loading(&app.state);
             }
         }
     }
+}
+
+/// A scanner runs outside a turn: a waiting panel or idle progress.
+fn loading(state: &state::State) -> bool {
+    state.current_progress().is_some()
+        || state
+            .selector
+            .as_ref()
+            .is_some_and(|menu| matches!(menu.purpose, selector::Purpose::Loading))
 }
 
 impl App {

@@ -4,7 +4,7 @@ use crate::tui::{
     Feedback,
     information::Information,
     state::Kind,
-    theme::{BAD, MUTED, USER_SURFACE, WARNING},
+    theme::{BAD, USER_SURFACE, WARNING},
 };
 
 fn info() -> Information {
@@ -40,8 +40,9 @@ fn information_scrolls_by_visual_rows_and_reaches_every_entry_after_resize() {
     };
     state.editor.replace("unsent draft".into());
     assert!(plain(&state).contains("/command-0"));
+    // A page is the seven rows beside the title and the key row.
     scroll_information(&mut state, 34);
-    assert_eq!(state.information.as_ref().unwrap().offset, 5);
+    assert_eq!(state.information.as_ref().unwrap().offset, 7);
     scroll_information(&mut state, 35);
     assert!(plain(&state).contains("Description 29"));
     state.width = 80;
@@ -85,7 +86,12 @@ fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_contro
                     .all(|line| text::cells(&line.plain()) <= width)
             );
             if width >= 5 {
-                assert!(plain(&state).contains("Esc") || height == 1);
+                assert!(
+                    plain(&state).contains("Esc") || height == 1,
+                    "{width}x{height}:
+{}",
+                    plain(&state)
+                );
             }
             scroll_information(&mut state, 35);
             state.width = 80;
@@ -97,22 +103,22 @@ fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_contro
 }
 
 #[test]
-fn all_feedback_is_left_aligned_italic_and_unshaded_with_severity_colors() {
-    for (kind, style) in [
-        (Kind::Notice, MUTED),
-        (Kind::Warning, WARNING),
-        (Kind::Error, BAD),
+fn results_are_muted_lines_and_warnings_and_errors_are_upright_banners() {
+    for (kind, lead, style, surface) in [
+        (Kind::Notice, "", MUTED, None),
+        (Kind::Warning, "▌ ", WARNING, Some(USER_SURFACE)),
+        (Kind::Error, "▌ ", BAD, Some(USER_SURFACE)),
     ] {
         let state = State {
             notice: Some(Feedback::result(kind, "A brief result")),
             ..State::default()
         };
         let rendered = frame(&state, "fixture", "fixture");
-        assert_eq!(rendered.live[0].plain(), "A brief result");
-        assert_eq!(rendered.live[0].background, None);
-        assert_eq!(rendered.live[0].spans.last().unwrap().style, style.italic());
-        assert!(!plain(&state).contains('●'));
-        assert!(!plain(&state).contains('•'));
+        let row = &rendered.live[0];
+        assert_eq!(row.plain(), format!("{lead}A brief result"));
+        assert_eq!(row.spans[0].style, style);
+        assert_eq!(row.background, surface);
+        assert!(row.spans.iter().all(|span| span.style != style.italic()));
     }
 }
 
@@ -136,12 +142,16 @@ fn long_errors_wrap_without_losing_the_actionable_text_or_moving_the_draft() {
         .take_while(|line| !line.plain().starts_with('─'))
         .collect();
     assert!(notices.len() > 1);
-    assert!(notices.iter().all(|line| line.background.is_none()));
-    assert!(notices[0].plain().starts_with("Could"));
+    assert!(
+        notices
+            .iter()
+            .all(|line| line.background == Some(USER_SURFACE))
+    );
+    assert!(notices[0].plain().starts_with("▌ Could"));
     assert!(
         notices[1..]
             .iter()
-            .all(|line| !line.plain().starts_with("  "))
+            .all(|line| line.plain().starts_with("  "))
     );
     assert!(
         rendered.live[rendered.cursor.unwrap().0]

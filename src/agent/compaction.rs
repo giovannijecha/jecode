@@ -204,7 +204,7 @@ impl Agent {
                 // Keep every conversation group and its proof. A native preview
                 // can remove oversized tool payloads without a model summary.
                 drop(original);
-                events.emit(Event::Maintenance {
+                events.emit(Event::ContextCompacted {
                     text: "Large tool results shown as context previews · full original results remain readable in history".into(),
                 })?;
                 let previous = std::mem::replace(&mut self.context, preview);

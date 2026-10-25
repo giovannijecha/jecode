@@ -109,6 +109,30 @@ fn empty_provider_detail_uses_a_readable_fallback() {
 }
 
 #[test]
+fn api_status_classifies_rate_limits_and_rejected_keys_without_reading_diagnostics() {
+    let value = Value::object([(
+        "error",
+        Value::object([("message", Value::string("unrelated diagnostic"))]),
+    )]);
+    let limited = Failure::api(&value, 429);
+    assert_eq!(limited.kind, Kind::Temporary);
+    assert_eq!(limited.reason, Some(FailureReason::RateLimited));
+    assert!(!limited.message.contains("rate limit"));
+
+    let rejected = Failure::api(&value, 401);
+    assert_eq!(rejected.reason, Some(FailureReason::RejectedKey));
+    assert!(
+        rejected
+            .message
+            .ends_with(" Check your key with jecode setup.")
+    );
+    assert_eq!(
+        rejected.diagnostic.as_deref(),
+        Some("OpenRouter HTTP 401: unrelated diagnostic.")
+    );
+}
+
+#[test]
 fn provider_regression_nested_error_keeps_diagnostics_and_redacts_credentials() {
     let fixture = HttpFixture::new(vec![(
         400,
@@ -144,4 +168,25 @@ fn provider_regression_long_diagnostics_are_redacted_before_utf8_clipping() {
     assert!(failure.message.len() < 8300);
     assert!(!failure.message.contains("isolated-fixture"));
     assert_eq!(failure.kind, Kind::Terminal);
+}
+
+#[test]
+fn rejected_key_diagnostic_is_redacted_before_independent_clipping() {
+    let api = crate::backend::openrouter::Api::fixture("http://127.0.0.1:1");
+    let detail = format!(
+        "{}isolated-fixture-key{}",
+        "x".repeat(8000),
+        "λ".repeat(2000)
+    );
+    let value = Value::object([("error", Value::object([("message", Value::string(detail))]))]);
+    let failure = api.failure(&value, 401);
+    for text in [
+        failure.message.as_str(),
+        failure.diagnostic.as_deref().unwrap(),
+    ] {
+        assert!(text.ends_with("[provider diagnostic truncated]"));
+        assert!(text.len() < 8300);
+        assert!(!text.contains("isolated-fixture"));
+    }
+    assert_eq!(failure.reason, Some(FailureReason::RejectedKey));
 }

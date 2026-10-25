@@ -15,6 +15,12 @@ pub enum Event {
         attempt: usize,
         delay: std::time::Duration,
         error: String,
+        reason: Option<crate::backend::FailureReason>,
+    },
+    /// A terminal backend failure's redacted diagnostic and reason.
+    BackendFailure {
+        reason: crate::backend::FailureReason,
+        diagnostic: String,
     },
     RecoveryFinished,
     RequestDiscarded,

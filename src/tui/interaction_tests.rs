@@ -151,7 +151,7 @@ fn model_and_effort_commit_together_preserve_context_and_leave_defaults_unchange
             .get("events")
             .unwrap()
             .encode()
-            .contains("Model set to fixture/model-11")
+            .contains("→ fixture/model-11")
     );
 }
 
@@ -271,9 +271,7 @@ fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "first");
-    wait_until(&mut app, |app| {
-        app.state.activity.as_ref().unwrap().label == "Writing the response"
-    });
+    wait_until(&mut app, |app| app.state.status == "Writing the response…");
     submit(&mut app, "/help");
     submit(&mut app, "second\nline");
     submit(&mut app, "/export");
@@ -345,7 +343,7 @@ fn stopping_before_output_restores_input_and_preserves_fifo_drafts() {
     let mut app = app(&directory, &fixture);
     submit(&mut app, "active");
     let started = Instant::now();
-    while app.state.activity.as_ref().unwrap().label != "Thinking" {
+    while app.state.status != "Thinking…" {
         app.poll().unwrap();
         assert!(started.elapsed() < Duration::from_secs(3));
         thread::sleep(Duration::from_millis(5));

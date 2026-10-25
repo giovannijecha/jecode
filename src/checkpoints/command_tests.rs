@@ -18,7 +18,7 @@ fn undo_with_prefix(path: &str, prefix: &str) -> String {
     )]);
     render::details(&value, prefix)
         .into_iter()
-        .find(|(label, _)| label == "undo")
+        .find(|(label, _)| label == "Undo")
         .unwrap()
         .1
 }

@@ -62,7 +62,7 @@ fn plain_checkpoint_commands_restore_without_a_provider_request() {
         output.contains("one"),
         "the recorded file is printed: {output}"
     );
-    assert!(output.contains("restored"), "{output}");
+    assert!(output.contains("Restored"), "{output}");
     assert!(!output.contains(r"\\?\"), "{output}");
     assert!(status.contains("explode"), "{status}");
     assert_eq!(

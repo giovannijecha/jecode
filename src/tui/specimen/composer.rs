@@ -33,11 +33,10 @@ fn state(columns: usize) -> State {
     }
 }
 
-fn working(state: &mut State, label: &'static str, seconds: f64) {
+fn working(state: &mut State, seconds: f64) {
+    state.status = "Working…".into();
     let mut activity = Activity::new();
-    activity.label = label;
     activity.started = Instant::now() - Duration::from_secs_f64(seconds);
-    activity.phase_started = activity.started;
     state.activity = Some(activity);
 }
 
@@ -58,18 +57,27 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     );
 
     let mut work = state(columns);
-    working(&mut work, "Running tools", 12.4);
+    working(&mut work, 12.4);
     work.editor.insert("next draft");
 
     let mut queue = state(columns);
-    working(&mut queue, "Writing the response", 31.7);
+    working(&mut queue, 31.7);
     queued(&mut queue);
 
+    let mut long = state(columns);
+    working(&mut long, 4252.0);
+    queued(&mut long);
+
     let mut editing = state(columns);
-    working(&mut editing, "Running tools", 48.2);
+    working(&mut editing, 48.2);
     queued(&mut editing);
     let slot = editing.queue.slot(0).unwrap();
     editing.queue.begin_edit(slot, &mut editing.editor).unwrap();
+    editing.event(crate::events::Event::InputHeld);
+
+    let mut stopping = state(columns);
+    working(&mut stopping, 48.2);
+    stopping.activity.as_mut().unwrap().stopping = true;
 
     let mut history = state(columns);
     history.history.record("explain the session store");
@@ -97,11 +105,14 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     inspection.finish_tool_turn();
 
     let mut reconnecting = state(columns);
-    working(&mut reconnecting, "Waiting", 64.0);
-    reconnecting.notice = Some(Feedback::progress(
-        Kind::Warning,
-        "Reconnecting · attempt 2 in 4.0s · connection reset by peer",
-    ));
+    working(&mut reconnecting, 64.0);
+    reconnecting.progress = Some(
+        Feedback::progress(
+            Kind::Warning,
+            "Reconnecting · attempt 2 · connection reset by peer",
+        )
+        .until(Instant::now() + Duration::from_millis(3500)),
+    );
 
     let mut unknown = state(columns);
     unknown.context = Some(Status {
@@ -115,7 +126,9 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ("Typing a long draft", typing),
         ("Working", work),
         ("Working with queued messages", queue),
+        ("Working past an hour", long),
         ("Editing a queued message", editing),
+        ("Stopping", stopping),
         ("Prompt history", history),
         ("Completed turn tools", inspection),
         ("Reconnecting", reconnecting),

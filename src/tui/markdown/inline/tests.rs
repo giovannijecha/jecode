@@ -67,9 +67,8 @@ fn links_keep_destinations_visible_and_style_labels() {
             ("See ".into(), BODY),
             ("the ".into(), LINK),
             ("notes".into(), LINK.italic()),
-            (" (".into(), BODY),
-            ("https://example.test/a_(b)".into(), LINK_DESTINATION),
-            (") today.".into(), BODY),
+            (" (https://example.test/a_(b))".into(), LINK_DESTINATION),
+            (" today.".into(), BODY),
         ]
     );
     assert_eq!(

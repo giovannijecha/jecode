@@ -1,5 +1,50 @@
 use super::*;
-use crate::tui::theme::INLINE_CODE;
+use crate::tui::theme::{INLINE_CODE, INLINE_CODE_SURFACE};
+
+#[test]
+fn streamed_three_line_block_transitions_match_full_render() {
+    const LINES: [&str; 13] = [
+        "bar",
+        "bar\\",
+        "-",
+        "- i",
+        "# Head",
+        "> quote",
+        ">",
+        "```",
+        "```rust",
+        "| A | B |",
+        "|---|---|",
+        "=",
+        "",
+    ];
+    for columns in [12, 40] {
+        for first in LINES {
+            for second in LINES {
+                for third in LINES {
+                    let source = format!("{first}\n{second}\n{third}");
+                    let mut stream = Stream::new("", columns);
+                    let mut lines = Vec::new();
+                    let mut prefix = String::new();
+                    for character in source.chars() {
+                        prefix.push(character);
+                        if let Some(keep) = stream.update(&prefix, columns) {
+                            lines.truncate(keep);
+                        }
+                        while !stream.ready() {
+                            stream.advance(&mut lines, 4);
+                        }
+                        assert_eq!(
+                            lines,
+                            render(&prefix, columns),
+                            "{columns} columns, after {prefix:?}, source {source:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[test]
 fn streamed_appends_match_full_markdown_after_each_ambiguous_boundary() {
@@ -66,8 +111,9 @@ fn formats_messages_and_code_without_changing_the_source() {
     let source = "# Result\n**Passed** with `cargo test`.\n```rust\n    let x = 1;\n```";
     let rows = render(source, 60);
     assert_eq!(rows[0].plain(), "Result");
-    assert_eq!(rows[1].plain(), "Passed with cargo test.");
-    assert_eq!(rows[3].plain(), "    let x = 1;");
+    assert_eq!(rows[1].plain(), "");
+    assert_eq!(rows[2].plain(), "Passed with cargo test.");
+    assert_eq!(rows[4].plain(), "     let x = 1;");
     assert!(source.contains("**Passed**"));
     assert!(render("\x1b[2J text", 60)[0].plain().contains("[ESC]"));
 }
@@ -100,11 +146,9 @@ fn code_spans_handle_literal_ticks_bold_nesting_escapes_and_unmatched_markers() 
     let source = "Use ``a`b`` and **`let x`**; \\*literal\\*; `unclosed **";
     let row = &render(source, 120)[0];
     assert_eq!(row.plain(), "Use a`b and let x; *literal*; `unclosed **");
-    assert!(
-        row.spans
-            .iter()
-            .any(|span| span.text == "a`b" && span.style == INLINE_CODE)
-    );
+    assert!(row.spans.iter().any(|span| span.text == "a`b"
+        && span.style == INLINE_CODE
+        && span.background == Some(INLINE_CODE_SURFACE)));
     assert!(
         row.spans
             .iter()
@@ -130,13 +174,13 @@ fn fences_require_matching_markers_and_never_format_the_code_as_markdown() {
     assert_eq!(
         plain,
         [
-            "unknown",
-            "```",
-            "**literal**",
-            "```` suffix",
+            " unknown",
+            " ```",
+            " **literal**",
+            " ```` suffix",
             "",
-            "json",
-            "{\"n\": 40}",
+            " json",
+            " {\"n\": 40}",
             ""
         ]
     );
@@ -148,7 +192,7 @@ fn fences_require_matching_markers_and_never_format_the_code_as_markdown() {
     );
     assert_eq!(
         render("```rust\nlet x = 1;", 80).last().unwrap().plain(),
-        "let x = 1;"
+        " let x = 1;"
     );
 }
 
@@ -164,7 +208,7 @@ fn quotes_and_narrow_code_preserve_visible_content_and_widths() {
             .filter(|row| row.background == Some(CODE_SURFACE))
             .skip(1)
             .take_while(|row| !row.plain().is_empty())
-            .map(Line::plain)
+            .map(|row| row.plain().strip_prefix(' ').unwrap().to_owned())
             .collect();
         assert_eq!(code, "    let città = \"🙂\";");
     }
@@ -178,13 +222,20 @@ fn headings_tasks_and_inline_formatting_keep_their_visible_text() {
         rows.iter().map(Line::plain).collect::<Vec<_>>(),
         [
             "Title",
+            "",
             "Subtitle",
+            "",
             "☐ pending",
             "☑ done",
             "│ old and docs (https://example.test/a)"
         ]
     );
-    assert_eq!(rows[1].spans[0].style, EMPHASIS.bold());
+    // Levels: H1 accent, H2 emphasis, H3 and below body, all bold.
+    assert_eq!(rows[0].spans[0].style, EMPHASIS.bold());
+    assert_eq!(rows[2].spans[0].style, ACCENT.bold());
+    assert_eq!(render("### Small", 60)[0].spans[0].style, BODY.bold());
+    assert_eq!(render("Top\n--", 60)[0].spans[0].style, EMPHASIS.bold());
+    assert_eq!(render("## Last", 60).len(), 1);
     assert_eq!(render("## C#\nLiteral snake_case", 60)[0].plain(), "C#");
     assert!(source.contains("~~old~~"));
 }
@@ -194,8 +245,7 @@ fn partial_table_delimiters_remain_visible_until_a_valid_table_exists() {
     for delimiter in ["|", "| --- | unfinished |", "| --- | --- | --- |"] {
         let source = format!("| A | B |\n{delimiter}");
         let rows = render(&source, 80);
-        assert_eq!(rows[0].plain(), "| A | B |");
-        assert_eq!(rows[1].plain(), delimiter);
+        assert_eq!(rows[0].plain(), format!("| A | B | {delimiter}"));
     }
     assert_eq!(
         render("| A | B |\n|---|---|", 80)
@@ -207,25 +257,23 @@ fn partial_table_delimiters_remain_visible_until_a_valid_table_exists() {
 }
 
 #[test]
-fn source_lines_keep_individual_rows_and_inline_scope() {
+fn soft_breaks_join_paragraphs_and_hard_breaks_keep_rows() {
     let source = "One *two\nthree* four\nfive  \nsix\\\nseven\n- item\n  more\n# Next";
     let rows = render(source, 80);
     let plain: Vec<_> = rows.iter().map(Line::plain).collect();
     assert_eq!(
         plain,
         [
-            "One *two",
-            "three* four",
-            "five  ",
-            "six\\",
+            "One two three four five  ",
+            "six",
             "seven",
-            "• item",
-            "  more",
+            "• item more",
             "Next"
         ]
     );
     assert_eq!(rows[0].origin.unwrap().line, 0);
-    assert_eq!(rows[1].origin.unwrap().line, 9);
+    assert_eq!(rows[1].origin.unwrap().line, source.find("six").unwrap());
+    assert!(rows[0].spans.iter().any(|span| span.text == "two three"));
     let plain = |source, columns| {
         render(source, columns)
             .iter()
@@ -233,9 +281,19 @@ fn source_lines_keep_individual_rows_and_inline_scope() {
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        plain("first line\nsecond line", 12),
+        plain("first line\nsecond line", 16),
         ["first line", "second line"]
     );
+    assert_eq!(
+        plain("first line\nsecond line", 24),
+        ["first line second line"]
+    );
+    assert_eq!(
+        plain("escaped \\\\\ncontinuation", 80),
+        ["escaped \\ continuation"]
+    );
+    assert_eq!(plain("literal \\", 80), ["literal \\"]);
+    assert_eq!(plain("A\n=\nB\ntitle\n---", 80), ["A", "", "B title"]);
     assert_eq!(
         plain("text\n| A | B |\n|---|---|", 80),
         ["text", "A   B", "──  ──"]
@@ -243,10 +301,80 @@ fn source_lines_keep_individual_rows_and_inline_scope() {
 }
 
 #[test]
-fn quotes_repeat_a_muted_bar_and_keep_each_source_line() {
+fn setext_heading_spans_the_whole_preceding_paragraph() {
+    let rows = render("bar\nbar\n-", 80);
+    assert_eq!(
+        rows.iter().map(Line::plain).collect::<Vec<_>>(),
+        ["bar bar"]
+    );
+    assert_eq!(rows[0].spans[0].style, EMPHASIS.bold());
+    assert_eq!(rows[0].origin.unwrap().line, 0);
+    let rows = render("bar\nbar\n- i", 80);
+    assert_eq!(
+        rows.iter().map(Line::plain).collect::<Vec<_>>(),
+        ["bar bar", "• i"]
+    );
+    assert_eq!(rows[0].spans[0].style, BODY);
+    assert_eq!(
+        render("one\ntwo\n===\nnext", 80)
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>(),
+        ["one two", "", "next"]
+    );
+}
+
+#[test]
+fn streamed_ambiguous_block_boundaries_match_full_render() {
+    for source in ["bar\nbar\n- i", "one\ntwo\n===\nnext"] {
+        for columns in [12, 40] {
+            let mut stream = Stream::new("", columns);
+            let mut lines = Vec::new();
+            let mut prefix = String::new();
+            for character in source.chars() {
+                prefix.push(character);
+                if let Some(keep) = stream.update(&prefix, columns) {
+                    lines.truncate(keep);
+                }
+                while !stream.ready() {
+                    stream.advance(&mut lines, 2);
+                }
+                assert_eq!(lines, render(&prefix, columns), "after: {prefix:?}");
+            }
+        }
+    }
+    for (tail, append) in [
+        ("bar\nbar\n", "-"),
+        ("> quote\n>", " q"),
+        ("- i\nbar\n-", " i"),
+    ] {
+        let source = format!("{}{tail}", "# old\n".repeat(200));
+        let mut stream = Stream::new(&source, 80);
+        let mut lines = Vec::new();
+        while !stream.ready() {
+            stream.advance(&mut lines, 4);
+        }
+        let completed = format!("{source}{append}");
+        let keep = stream.update(&completed, 80).unwrap();
+        assert!(keep >= 398, "{tail:?} invalidated older headings");
+        lines.truncate(keep);
+        while !stream.ready() {
+            stream.advance(&mut lines, 4);
+        }
+        assert_eq!(lines, render(&completed, 80));
+    }
+}
+
+#[test]
+fn quotes_repeat_a_muted_bar_and_join_continuation_lines() {
     let rows = render("> one\n> two\nafter", 80);
     let plain: Vec<_> = rows.iter().map(Line::plain).collect();
-    assert_eq!(plain, ["│ one", "│ two", "after"]);
+    assert_eq!(plain, ["│ one two after"]);
+    let paragraphs: Vec<_> = render("> one\n>\n> - two\n\nafter", 80)
+        .iter()
+        .map(Line::plain)
+        .collect();
+    assert_eq!(paragraphs, ["│ one", "│ ", "│ - two", "", "after"]);
     assert_eq!(rows[0].spans[0].style, MUTED);
     assert!(rows[0].spans.iter().all(|span| span.style == MUTED));
     let wrapped: Vec<_> = render("> alpha beta gamma", 10)
@@ -257,11 +385,93 @@ fn quotes_repeat_a_muted_bar_and_keep_each_source_line() {
 }
 
 #[test]
-fn code_uses_the_full_width_and_code_surface() {
+fn trailing_backslashes_are_literal_at_paragraph_and_block_boundaries() {
+    for (source, expected) in [
+        ("foo\\\n\nbar", vec!["foo\\", "", "bar"]),
+        ("C:\\\n\nnext", vec!["C:\\", "", "next"]),
+        ("- item\\\n- next", vec!["• item\\", "• next"]),
+        ("foo\\\n# Head", vec!["foo\\", "Head"]),
+        ("> foo\\\n>\n> next", vec!["│ foo\\", "│ ", "│ next"]),
+        ("foo\\", vec!["foo\\"]),
+        ("foo\\\nbar", vec!["foo", "bar"]),
+        ("> foo\\\n> bar", vec!["│ foo", "│ bar"]),
+    ] {
+        let rows: Vec<_> = render(source, 80).iter().map(Line::plain).collect();
+        assert_eq!(rows, expected, "source: {source:?}");
+    }
+    for next in [
+        "```rust\nlet x = 1;\n```",
+        "| A | B |\n|---|---|\n| x | y |",
+        "> quote",
+    ] {
+        let source = format!("C:\\\n{next}");
+        assert_eq!(render(&source, 80)[0].plain(), "C:\\", "source: {source:?}");
+    }
+}
+
+#[test]
+fn streamed_backslash_boundaries_match_full_render() {
+    for source in [
+        "C:\\\n\nnext",
+        "foo\\\n# Head",
+        "- item\\\n- next",
+        "> foo\\\n>\n> next",
+        "foo\\\nbar",
+    ] {
+        let mut stream = Stream::new("", 28);
+        let mut lines = Vec::new();
+        let mut prefix = String::new();
+        for character in source.chars() {
+            prefix.push(character);
+            if let Some(keep) = stream.update(&prefix, 28) {
+                lines.truncate(keep);
+            }
+            while !stream.ready() {
+                stream.advance(&mut lines, 4);
+            }
+            assert_eq!(lines, render(&prefix, 28), "after: {prefix:?}");
+        }
+    }
+    let source = format!("{}#", "older line\\\n".repeat(200));
+    let mut stream = Stream::new(&source, 80);
+    let mut lines = Vec::new();
+    while !stream.ready() {
+        stream.advance(&mut lines, 4);
+    }
+    let completed = format!("{source} Head");
+    let keep = stream.update(&completed, 80).unwrap();
+    assert!(
+        keep >= 199,
+        "a changed final block invalidated the older hard breaks"
+    );
+    lines.truncate(keep);
+    while !stream.ready() {
+        stream.advance(&mut lines, 4);
+    }
+    assert_eq!(lines, render(&completed, 80));
+}
+
+#[test]
+fn code_panels_pad_one_cell_on_the_code_surface() {
     let rows = render("```text\nabcdefghij\n```", 10);
     let plain: Vec<_> = rows.iter().map(Line::plain).collect();
-    assert_eq!(plain, ["text", "abcdefghij", ""]);
+    assert_eq!(plain, [" text", " abcdefgh", " ij", ""]);
     assert!(rows.iter().all(|row| row.background == Some(CODE_SURFACE)));
+}
+
+#[test]
+fn narrow_code_panels_keep_every_glyph_visible() {
+    for (columns, expected) in [
+        (2, vec!["ab", "界", "c"]),
+        (3, vec!["ab", "界c"]),
+        (4, vec![" ab", " 界", " c"]),
+    ] {
+        let rows = render("```\nab界c\n```", columns);
+        let content: Vec<_> = rows[1..rows.len() - 1].iter().map(Line::plain).collect();
+        assert_eq!(content, expected, "width {columns}");
+        assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
+        assert!(rows.iter().all(|row| row.background == Some(CODE_SURFACE)));
+    }
 }
 
 #[test]
@@ -274,7 +484,7 @@ fn empty_prose_and_blank_code_lines_match_source_rows() {
     let code = render("```rust\n\n```", 40);
     assert_eq!(
         code.iter().map(Line::plain).collect::<Vec<_>>(),
-        ["rust", "", ""]
+        [" rust", "", ""]
     );
     assert!(code.iter().all(|row| row.background == Some(CODE_SURFACE)));
 }

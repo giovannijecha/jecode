@@ -4,15 +4,16 @@ use crate::{
     effort::Effort,
     session::commands::match_text,
 };
+use std::path::Path;
+use std::time::Instant;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Setting {
     Model,
     Effort,
     Routing,
     AutoCompact,
     Key,
-    Close,
 }
 #[derive(Clone, Copy)]
 pub enum Choice {
@@ -24,15 +25,29 @@ pub enum Choice {
     Copy(usize),
     Draft(super::drafts::Slot),
 }
+/// The right-aligned status of an option.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Badge {
+    Current,
+    Note(String),
+    Queued,
+    Paused,
+}
 pub struct OptionRow {
     pub name: String,
-    pub description: String,
+    /// One short fact beside the name, such as a model's friendly name.
+    pub fact: String,
+    /// Searchable detail that does not need space in the row.
+    pub search: String,
+    pub badge: Option<Badge>,
+    /// The focused option's prose, shown in the detail strip.
+    pub prose: String,
     pub choice: Choice,
 }
 pub struct Hit {
     pub index: usize,
     pub name: Vec<usize>,
-    pub description: Vec<usize>,
+    pub fact: Vec<usize>,
 }
 
 pub enum Purpose {
@@ -69,6 +84,13 @@ pub enum Purpose {
 
 pub struct Selector {
     pub title: String,
+    /// Muted context after the title, such as the model a choice applies to.
+    pub context: String,
+    /// The menu this one returns to with Esc, shown as a breadcrumb.
+    pub parent: Option<&'static str>,
+    /// What a waiting panel is doing.
+    pub message: String,
+    pub opened: Instant,
     pub purpose: Purpose,
     pub options: Vec<OptionRow>,
     pub filtered: Vec<Hit>,
@@ -77,11 +99,28 @@ pub struct Selector {
     pub searchable: bool,
 }
 
+fn row(name: impl Into<String>, fact: impl Into<String>, choice: Choice) -> OptionRow {
+    OptionRow {
+        name: name.into(),
+        fact: fact.into(),
+        search: String::new(),
+        badge: None,
+        prose: String::new(),
+        choice,
+    }
+}
+
+const SETTINGS: &str = "Settings";
+
 impl Selector {
     fn new(title: &str, purpose: Purpose, options: Vec<OptionRow>) -> Self {
         let searchable = options.len() > 8;
         let mut selector = Self {
             title: title.into(),
+            context: String::new(),
+            parent: None,
+            message: String::new(),
+            opened: Instant::now(),
             purpose,
             options,
             filtered: vec![],
@@ -92,23 +131,32 @@ impl Selector {
         selector.refresh();
         selector
     }
-    pub fn loading() -> Self {
-        Self::new("Loading model catalog…", Purpose::Loading, vec![])
+    fn under_settings(mut self, defaults: bool) -> Self {
+        self.parent = defaults.then_some(SETTINGS);
+        self
+    }
+    /// A panel that waits for `message`, titled after what it will show.
+    pub fn loading(title: &str, message: &str, settings: bool) -> Self {
+        let mut menu = Self::new(title, Purpose::Loading, vec![]).under_settings(settings);
+        message.clone_into(&mut menu.message);
+        menu
     }
     pub fn copy(targets: &[crate::copy::Target]) -> Self {
-        Self::new(
-            "Copy to clipboard",
-            Purpose::Copy,
-            targets
-                .iter()
-                .enumerate()
-                .map(|(index, target)| OptionRow {
-                    name: super::text::clip(&target.name, 64),
-                    description: crate::copy::preview(&target.text),
-                    choice: Choice::Copy(index),
-                })
-                .collect(),
-        )
+        let options = targets
+            .iter()
+            .enumerate()
+            .map(|(index, target)| {
+                let preview = crate::copy::preview(&target.text);
+                OptionRow {
+                    prose: preview.clone(),
+                    search: preview,
+                    ..row(super::text::clip(&target.name, 64), "", Choice::Copy(index))
+                }
+            })
+            .collect();
+        let mut menu = Self::new("Copy to clipboard", Purpose::Copy, options);
+        "last response".clone_into(&mut menu.context);
+        menu
     }
     pub fn drafts(queue: &super::drafts::Queue) -> Self {
         let options = queue
@@ -120,40 +168,47 @@ impl Selector {
                     name.push('…');
                 }
                 OptionRow {
-                    name,
-                    description: match slot {
+                    badge: Some(match slot {
+                        super::drafts::Slot::Queued(_) => Badge::Queued,
+                        super::drafts::Slot::Paused(_) => Badge::Paused,
+                    }),
+                    prose: text.split_whitespace().collect::<Vec<_>>().join(" "),
+                    search: match slot {
                         super::drafts::Slot::Queued(_) => "Queued",
                         super::drafts::Slot::Paused(_) => "Paused",
                     }
                     .into(),
-                    choice: Choice::Draft(slot),
+                    ..row(name, "", Choice::Draft(slot))
                 }
             })
             .collect();
         Self::new("Drafts", Purpose::Drafts { delete: None }, options)
     }
     pub fn sessions(sessions: &[crate::sessions::Summary], current: &str) -> Self {
+        let options = sessions
+            .iter()
+            .enumerate()
+            .map(|(index, session)| OptionRow {
+                badge: Some(if session.id == current {
+                    Badge::Current
+                } else {
+                    Badge::Note(session.age())
+                }),
+                prose: session.origin(),
+                search: session.description(),
+                ..row(session.title.clone(), "", Choice::Session(index))
+            })
+            .collect();
         let mut menu = Self::new(
-            "Resume · current folder",
+            "Resume",
             Purpose::Sessions {
                 current: sessions.iter().position(|session| session.id == current),
                 delete: None,
                 working: false,
             },
-            sessions
-                .iter()
-                .enumerate()
-                .map(|(index, session)| OptionRow {
-                    name: session.title.clone(),
-                    description: if session.id == current {
-                        format!("current · {}", session.description())
-                    } else {
-                        session.description()
-                    },
-                    choice: Choice::Session(index),
-                })
-                .collect(),
+            options,
         );
+        "current folder".clone_into(&mut menu.context);
         menu.selected = sessions
             .iter()
             .position(|session| session.id != current)
@@ -165,43 +220,38 @@ impl Selector {
             .iter()
             .enumerate()
             .map(|(index, model)| OptionRow {
-                name: model.id.clone(),
-                description: if model.id == current {
-                    format!("{} · current", model.name)
-                } else {
-                    model.name.clone()
-                },
-                choice: Choice::Model(index),
+                badge: (model.id == current).then_some(Badge::Current),
+                ..row(model.id.clone(), model.name.clone(), Choice::Model(index))
             })
             .collect();
-        Self::new(
+        let mut menu = Self::new(
             if defaults { "Default model" } else { "Model" },
             Purpose::Models { defaults },
             options,
         )
+        .under_settings(defaults);
+        if !defaults {
+            "this conversation".clone_into(&mut menu.context);
+        }
+        menu
     }
     pub fn efforts(model: Model, defaults: bool, current: Effort) -> Self {
         let options = model
             .efforts
             .iter()
             .map(|effort| OptionRow {
-                name: effort.name().into(),
-                description: if *effort == current {
-                    "Current selection".into()
-                } else if *effort == Effort::Default {
-                    "Use the model's default reasoning settings".into()
-                } else {
-                    format!("{} reasoning effort", effort.name())
-                },
-                choice: Choice::Effort(*effort),
+                badge: (*effort == current).then_some(Badge::Current),
+                ..row(effort.name(), "", Choice::Effort(*effort))
             })
             .collect();
-        let title = format!(
-            "{} · {}",
+        let context = model.id.clone();
+        let mut menu = Self::new(
             if defaults { "Default effort" } else { "Effort" },
-            model.id
-        );
-        let mut menu = Self::new(&title, Purpose::Efforts { model, defaults }, options);
+            Purpose::Efforts { model, defaults },
+            options,
+        )
+        .under_settings(defaults);
+        menu.context = context;
         menu.selected = menu
             .options
             .iter()
@@ -210,43 +260,67 @@ impl Selector {
         menu
     }
     /// `routing` is the default model's saved routing.
-    pub fn settings(model: &str, effort: Effort, auto_compact: u8, routing: &Routing) -> Self {
-        Self::new(
-            "Settings · saved defaults",
+    pub fn settings(
+        model: &str,
+        effort: Effort,
+        auto_compact: u8,
+        routing: &Routing,
+        config_path: &Path,
+    ) -> Self {
+        let setting = |name: &str, value: String, prose: &str, setting| OptionRow {
+            prose: prose.into(),
+            ..row(name, value, Choice::Setting(setting))
+        };
+        let mut menu = Self::new(
+            SETTINGS,
             Purpose::Settings,
             vec![
-                OptionRow {
-                    name: "Default model".into(),
-                    description: model.into(),
-                    choice: Choice::Setting(Setting::Model),
-                },
-                OptionRow {
-                    name: "Default effort".into(),
-                    description: effort.name().into(),
-                    choice: Choice::Setting(Setting::Effort),
-                },
-                OptionRow {
-                    name: "Default routing".into(),
-                    description: routing.label(),
-                    choice: Choice::Setting(Setting::Routing),
-                },
-                OptionRow {
-                    name: "Auto-compact at".into(),
-                    description: format!("{auto_compact}% of the context window"),
-                    choice: Choice::Setting(Setting::AutoCompact),
-                },
-                OptionRow {
-                    name: "API key".into(),
-                    description: "Configured · replace key (hidden input)".into(),
-                    choice: Choice::Setting(Setting::Key),
-                },
-                OptionRow {
-                    name: "Close".into(),
-                    description: "Return to the draft".into(),
-                    choice: Choice::Setting(Setting::Close),
-                },
+                setting(
+                    "Default model",
+                    model.into(),
+                    "Model for new conversations. /model changes only the current one.",
+                    Setting::Model,
+                ),
+                setting(
+                    "Default effort",
+                    effort.name().into(),
+                    "Reasoning effort for new conversations.",
+                    Setting::Effort,
+                ),
+                setting(
+                    "Default routing",
+                    routing.label(),
+                    "How OpenRouter picks an endpoint for the default model.",
+                    Setting::Routing,
+                ),
+                setting(
+                    "Auto-compact at",
+                    format!("{auto_compact}%"),
+                    "Compact when the next request reaches this share of the context window.",
+                    Setting::AutoCompact,
+                ),
+                setting(
+                    "API key",
+                    "configured".into(),
+                    &format!(
+                        "Your OpenRouter key, kept in plain text in {}. Input stays hidden.",
+                        config_path.display()
+                    ),
+                    Setting::Key,
+                ),
             ],
-        )
+        );
+        "saved defaults".clone_into(&mut menu.context);
+        menu
+    }
+    /// The settings row of `setting`, to restore focus on return.
+    pub fn setting_index(&self, setting: Setting) -> usize {
+        self.options
+            .iter()
+            .position(
+                |option| matches!(option.choice, Choice::Setting(choice) if choice == setting),
+            )
+            .unwrap_or(0)
     }
     /// Focus starts on `current`, which the entries mark.
     pub fn routing(
@@ -260,48 +334,51 @@ impl Selector {
             .iter()
             .enumerate()
             .map(|(index, entry)| OptionRow {
-                name: entry.name.clone(),
-                description: entry.description.clone(),
-                choice: Choice::Routing(index),
+                badge: (entry.routing == *current).then_some(Badge::Current),
+                search: entry.description.clone(),
+                // The table shows the figures; the strip keeps the other facts.
+                prose: if entry.metrics.is_some() && !entry.facts.is_empty() {
+                    format!("{} · {}", entry.help, entry.facts)
+                } else {
+                    entry.help.clone()
+                },
+                ..row(
+                    entry.name.clone(),
+                    entry.facts.clone(),
+                    Choice::Routing(index),
+                )
             })
             .collect();
         let focus = entries
             .iter()
             .position(|entry| entry.routing == *current)
             .unwrap_or(0);
-        let title = format!(
-            "{} · {model}",
-            if defaults {
-                "Default routing"
-            } else {
-                "Routing"
-            }
-        );
         let purpose = Purpose::Routing {
             defaults,
             model: model.into(),
             entries,
             notes,
         };
-        let mut menu = Self::new(&title, purpose, options);
+        let mut menu = Self::new(
+            if defaults {
+                "Default routing"
+            } else {
+                "Routing"
+            },
+            purpose,
+            options,
+        )
+        .under_settings(defaults);
+        model.clone_into(&mut menu.context);
         menu.selected = focus;
         menu
     }
-    /// The focused routing entry's help, when a routing menu is open.
-    pub fn routing_help(&self) -> Option<&str> {
-        let Purpose::Routing { entries, .. } = &self.purpose else {
-            return None;
-        };
-        match self.chosen()? {
-            Choice::Routing(index) => Some(&entries[index].help),
-            _ => None,
-        }
-    }
     pub fn key() -> Self {
-        Self::new("API key", Purpose::Key, vec![])
+        Self::new("API key", Purpose::Key, vec![]).under_settings(true)
     }
     pub fn auto_compact(current: u8) -> Self {
-        let mut menu = Self::new("Auto-compact at", Purpose::AutoCompact, vec![]);
+        let mut menu =
+            Self::new("Auto-compact at", Purpose::AutoCompact, vec![]).under_settings(true);
         menu.editor.set(current.to_string().into());
         menu
     }
@@ -317,8 +394,14 @@ impl Selector {
             .enumerate()
             .filter_map(|(index, option)| {
                 let name = match_text(&self.editor.text, &option.name);
-                let description = match_text(&self.editor.text, &option.description);
-                match (name, description) {
+                let fact = match_text(&self.editor.text, &option.fact);
+                let search = match_text(&self.editor.text, &option.search);
+                let fact = match (fact, search) {
+                    (Some(fact), Some(search)) if fact.0 <= search.0 => Some(fact),
+                    (_, Some((score, _))) => Some((score, vec![])),
+                    (fact, None) => fact,
+                };
+                match (name, fact) {
                     (Some((score, positions)), other)
                         if other.as_ref().is_none_or(|(other, _)| score <= *other) =>
                     {
@@ -327,7 +410,7 @@ impl Selector {
                             Hit {
                                 index,
                                 name: positions,
-                                description: vec![],
+                                fact: vec![],
                             },
                         ))
                     }
@@ -336,7 +419,7 @@ impl Selector {
                         Hit {
                             index,
                             name: vec![],
-                            description: positions,
+                            fact: positions,
                         },
                     )),
                     _ => None,

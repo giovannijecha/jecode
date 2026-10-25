@@ -192,7 +192,7 @@ fn a_missing_tool_finish_event_is_reconciled_from_retained_protocol_results() {
                 .any(|line| line.plain().contains("● Read(missing)"))
         })
         .unwrap();
-    assert!(tool.iter().any(|line| line.plain().contains("⎿ Failed ·")));
+    assert!(tool.iter().any(|line| line.plain().contains("⎿ Not found")));
     assert!(
         view::frame(&app.state, "fixture", "directory")
             .live
@@ -230,22 +230,22 @@ fn settings_remains_open_for_multiple_default_changes_with_updated_values_and_fe
             .as_ref()
             .unwrap()
             .text
-            .contains("Defaults saved")
+            .contains("Default model:")
     );
     app.input(Decoded::Text("2".into())).unwrap();
     wait(&mut app);
     app.input(Decoded::Text("1".into())).unwrap();
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::Settings));
-    assert_eq!(menu.options[0].description, "fixture/model-3");
-    assert_eq!(menu.options[1].description, "default");
+    assert_eq!(menu.options[0].fact, "fixture/model-3");
+    assert_eq!(menu.options[1].fact, "default");
     assert!(
         app.state
             .notice
             .as_ref()
             .unwrap()
             .text
-            .contains("Defaults saved")
+            .contains("Default model:")
     );
     assert_eq!(app.archive.model, "fixture/model");
     assert_eq!(app.state.editor.text, "kept draft");

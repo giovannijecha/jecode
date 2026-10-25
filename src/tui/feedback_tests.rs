@@ -46,6 +46,48 @@ fn wait_job(app: &mut App) {
 }
 
 #[test]
+fn clipped_rejected_key_diagnostic_still_offers_settings() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        401,
+        Value::object([(
+            "error",
+            Value::object([("message", Value::string("x".repeat(9000)))]),
+        )]),
+    )]);
+    let mut app = app(&home, &project, &fixture.endpoint);
+    app.dispatch("Check the account".into()).unwrap();
+    tests::finish(&mut app);
+    let notice = app.state.notice.as_ref().unwrap();
+    assert_eq!(notice.action, Some(("/settings", "update key")));
+    assert!(notice.text.contains("[provider diagnostic truncated]"));
+    assert!(!notice.text.contains("jecode setup"));
+    fixture.finish();
+}
+
+#[test]
+fn a_new_successful_turn_discards_stale_backend_failure_metadata() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let fixture = HttpFixture::new(vec![(200, completion("Done.", vec![]))]);
+    let mut app = app(&home, &project, &fixture.endpoint);
+    app.state.event(Event::BackendFailure {
+        reason: crate::backend::FailureReason::RejectedKey,
+        diagnostic: "Previous failure".into(),
+    });
+    app.dispatch("Continue".into()).unwrap();
+    assert!(app.state.backend_failure.is_none());
+    tests::finish(&mut app);
+    assert!(app.state.backend_failure.is_none());
+    assert_ne!(
+        app.state.notice.as_ref().and_then(|notice| notice.action),
+        Some(("/settings", "update key"))
+    );
+    fixture.finish();
+}
+
+#[test]
 fn automatic_queue_dispatch_and_catalog_loading_keep_an_unread_error() {
     for prompt in ["follow up", "/model", "/new"] {
         let home = Directory::new();
@@ -150,6 +192,7 @@ fn worker_completion_and_connection_events_keep_a_pending_session_error_visible(
         attempt: 1,
         delay: Duration::from_secs(1),
         error: "Connection error".into(),
+        reason: None,
     });
     app.state.event(Event::RecoveryFinished);
     app.state.event(Event::Maintenance {
@@ -188,7 +231,11 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
     app.state.editor.cursor = 2;
     for _ in 0..3 {
         app.local_start("/model");
-        app.state.selector = Some(selector::Selector::loading());
+        app.state.selector = Some(selector::Selector::loading(
+            "Model",
+            "Loading model catalog…",
+            false,
+        ));
         key(&mut app, 27, 0);
         assert!(app.state.selector.is_none());
         assert!(app.state.notice.is_none());
@@ -202,7 +249,7 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
         selector::Purpose::Settings
     ));
     assert!(app.state.notice.is_none());
-    app.input(Decoded::Text("6".into())).unwrap();
+    key(&mut app, 27, 0);
     assert!(app.state.selector.is_none());
     assert!(app.state.notice.is_none());
     assert_eq!(app.state.editor.text, "kept\ndraft");

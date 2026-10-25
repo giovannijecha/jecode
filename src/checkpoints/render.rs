@@ -74,13 +74,13 @@ pub fn details(value: &Value, prefix: &str) -> Vec<(String, String)> {
     };
     let mut rows = Vec::new();
     for (key, value) in fields {
-        let name = key.replace('_', " ");
+        let name = label(key);
         match (key.as_str(), value) {
-            ("undo", Value::Object(_)) => rows.push(("undo".into(), command(value, prefix))),
+            ("undo", Value::Object(_)) => rows.push(("Undo".into(), command(value, prefix))),
             ("retry", Value::Object(retry)) => {
                 let note = retry.get("note").and_then(Value::as_str).unwrap_or("");
                 let expected = retry.get("expected").and_then(Value::as_str).unwrap_or("");
-                rows.push(("retry".into(), format!("{note} (--expected {expected})")));
+                rows.push(("Retry".into(), format!("{note} (--expected {expected})")));
             }
             (_, Value::Array(items)) if items.is_empty() => rows.push((name, "none".into())),
             (_, Value::Array(items)) if items.iter().all(|item| !is_object(item)) => {
@@ -100,6 +100,15 @@ pub fn details(value: &Value, prefix: &str) -> Vec<(String, String)> {
         }
     }
     rows
+}
+
+/// A field name as a label: `created_at` reads "Created at".
+fn label(key: &str) -> String {
+    let name = key.replace('_', " ");
+    let mut characters = name.chars();
+    characters.next().map_or(name.clone(), |first| {
+        first.to_uppercase().chain(characters).collect()
+    })
 }
 
 fn is_object(value: &Value) -> bool {

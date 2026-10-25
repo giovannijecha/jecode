@@ -162,6 +162,14 @@ public sealed class JecodeTestPty : IDisposable {
         }
     }
 
+    void EnsureNoText(string text, int after) {
+        lock (gate) {
+            string plain = System.Text.RegularExpressions.Regex.Replace(
+                received.ToString(after, received.Length - after), "\x1b\\[[0-?]*[ -/]*[@-~]", "");
+            if (plain.Contains(text)) throw new IOException("ConPTY unexpectedly showed " + text);
+        }
+    }
+
     static int ReadCount(string path) {
         for (int attempt = 0; attempt < 20; attempt++) {
             try {
@@ -253,16 +261,27 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("Native row 099");
                 pty.Wait("Complete ·");
                 int expanded = pty.Mark(); pty.Send("\x0f");
-                pty.Wait("native detail 09", expanded);
+                pty.Wait("Tool details expanded", expanded);
+                pty.Send("after expansion");
+                pty.Wait("after expansion", expanded);
+                pty.EnsureNoText("native detail", expanded);
+                int clearExpanded = pty.Mark(); pty.Send("\x15");
+                pty.Wait("Ask anything", clearExpanded);
                 int collapsed = pty.Mark(); pty.Send("\x0f");
-                pty.Wait("Native row 099", collapsed);
+                pty.Wait("Tool details collapsed", collapsed);
+                pty.Send("after collapse");
+                pty.Wait("after collapse", collapsed);
+                int clearCollapsed = pty.Mark(); pty.Send("\x15");
+                pty.Wait("Ask anything", clearCollapsed);
                 // Routing at normal, narrow and short sizes; focus starts on the current row.
                 pty.Send("/routing"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Routing · fixture/model");
-                pty.Wait("current · no routing preferences");
-                pty.Wait("$/M input/output after discounts");
-                pty.Resize(40, 12); pty.Send("\x1b[A"); pty.Wait("Pinned to two/fp8");
-                pty.Resize(44, 6); pty.Send("\x1b[A"); pty.Wait("› 2. one/fp8");
+                pty.Wait("no routing preferences are sent");
+                pty.Wait("$/M after discounts");
+                // The detail strip leaves first as the height shrinks; selection stays.
+                int pinned = pty.Mark(); pty.Send("\x1b[A"); pty.Wait("Pinned to two/fp8", pinned);
+                int narrow = pty.Mark(); pty.Resize(40, 12); pty.Send("\x1b[A"); pty.Wait("› one/fp8", narrow);
+                int shortened = pty.Mark(); pty.Resize(44, 6); pty.Send("\x1b[A"); pty.Wait("› Auto", shortened);
                 // Esc closes quietly; the draft below only reaches an open composer.
                 pty.Send("\x1b"); Thread.Sleep(150);
                 pty.Resize(80, 24);
@@ -299,7 +318,7 @@ public sealed class JecodeTestPty : IDisposable {
                 int openSaved = pty.Mark(); pty.Send("/resume"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("native delete request", openSaved);
                 int confirmDelete = pty.Mark(); pty.Send("\x04");
-                pty.Wait("Delete?", confirmDelete);
+                pty.Wait("Delete this conversation?", confirmDelete);
                 int deleted = pty.Mark(); pty.Send("\r");
                 pty.Wait("No saved conversations", deleted);
                 int afterDelete = pty.Mark(); pty.Send("\x1b");

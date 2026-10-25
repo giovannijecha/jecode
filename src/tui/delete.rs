@@ -100,7 +100,8 @@ impl App {
                     let error = self.archive.redactor.text(&format!(
                         "{text} · Autosave failed: {error}. Session kept in memory."
                     ));
-                    self.state.notice = Some(Feedback::result(Kind::Error, error.clone()));
+                    self.state
+                        .notify(Feedback::result(Kind::Error, error.clone()));
                     self.save_error = Some(error);
                 }
             }
@@ -108,7 +109,7 @@ impl App {
                 if wait {
                     eprintln!("{}", self.archive.redactor.text(&error));
                 }
-                self.state.notice = Some(Feedback::result(
+                self.state.notify(Feedback::result(
                     Kind::Error,
                     self.archive.redactor.text(&error),
                 ));

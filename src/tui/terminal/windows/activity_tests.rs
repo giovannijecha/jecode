@@ -29,37 +29,29 @@ pub(super) fn console(bash: &Path) {
         ..State::default()
     };
     let mut rows = Vec::new();
-    for (event, label) in [
-        (Event::Preparing, "Preparing"),
-        (
-            Event::Waiting {
-                model: "fixture/model".into(),
-            },
-            "Waiting for the model",
-        ),
-        (Event::Reasoning, "Thinking"),
-        (Event::Working, "Working"),
-        (
-            Event::Streaming {
-                text: "Native response".into(),
-            },
-            "Writing the response",
-        ),
-        (
-            Event::Recovering {
-                attempt: 1,
-                delay: Duration::from_secs(2),
-                error: "fixture".into(),
-            },
-            "Reconnecting",
-        ),
+    // Phases never restart the turn's timer, which reads in hours past 60 minutes.
+    for event in [
+        Event::Preparing,
+        Event::Waiting {
+            model: "fixture/model".into(),
+        },
+        Event::Reasoning,
+        Event::Working,
+        Event::Streaming {
+            text: "Native response".into(),
+        },
+        Event::Recovering {
+            attempt: 1,
+            delay: Duration::from_secs(2),
+            error: "fixture".into(),
+            reason: None,
+        },
     ] {
         state.event(event);
         let activity = state.activity.as_ref().unwrap();
         assert_eq!(activity.started, started);
-        let row = activity.line(width, "Esc stops");
-        assert!(row.plain().contains(label));
-        assert!(!row.plain().contains("70m"));
+        let row = activity.line(true);
+        assert!(row.plain().ends_with(" 1h 10m"));
         rows.push(row);
     }
     paint_rows(rows, width, height);
