@@ -90,6 +90,30 @@ fn composer_capture_can_proceed_while_a_save_waits_for_disk_access() {
 }
 
 #[test]
+fn periodic_streaming_save_does_not_wait_for_disk_and_final_flush_recovers_it() {
+    let (_home, _directory, handle) = fixture();
+    handle.flush().unwrap();
+    handle.partial("first prefix").unwrap();
+    handle.0.live.lock().unwrap().dirty = Some(Instant::now() - SAVE_INTERVAL);
+    let io = handle.0.io.lock().unwrap();
+    let (done, received) = mpsc::channel();
+    let streaming = handle.clone();
+    let worker = std::thread::spawn(move || {
+        let result = streaming.partial("streamed response");
+        done.send(result).unwrap();
+    });
+    let result = received.recv_timeout(Duration::from_secs(2));
+    drop(io);
+    worker.join().unwrap();
+    result
+        .expect("streaming must not wait for disk I/O")
+        .unwrap();
+    handle.flush().unwrap();
+    let recovered = handle.store().fixture_load(&handle.id()).unwrap();
+    assert_eq!(recovered.pending.partial, "streamed response");
+}
+
+#[test]
 fn background_save_is_polled_without_waiting_and_exit_flushes_the_last_edit() {
     let (_home, _directory, handle) = fixture();
     handle.capture_input(Input {

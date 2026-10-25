@@ -7,7 +7,7 @@ pub use crate::backend::{validate_id as validate_backend_id, validate_model};
 use crate::effort::Effort;
 use crate::json::Value;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Deliberately no Debug implementation: settings contain a plaintext credential.
 #[derive(Clone)]
@@ -25,6 +25,32 @@ pub struct Settings {
 }
 
 impl Settings {
+    pub fn services(&self, home: &Path, id: &str) -> Result<crate::backend::Services, String> {
+        if id == "openai" {
+            let session = crate::auth::openai::Store::new(home.to_path_buf())
+                .active()?
+                .ok_or(
+                    "OpenAI has no active ChatGPT account; open Settings > Providers > Credentials",
+                )?;
+            crate::backend::Services::for_credential(&crate::auth::Credential::openai(session))
+        } else {
+            let key = self
+                .credential_for(id)
+                .filter(|key| !key.is_empty())
+                .ok_or_else(|| {
+                    format!("{id} has no saved API key; open Settings > Providers > API keys")
+                })?;
+            crate::backend::Services::for_backend(id, key.to_owned())
+        }
+    }
+
+    pub fn configured_services(&self, home: &Path) -> Vec<crate::backend::Services> {
+        crate::backend::available()
+            .iter()
+            .filter_map(|provider| self.services(home, provider.id).ok())
+            .collect()
+    }
+
     pub fn new(api_key: String, model: String) -> Result<Self, String> {
         Self::selected("openrouter", api_key, model)
     }
@@ -39,7 +65,11 @@ impl Settings {
         validate_model(&model)?;
         Ok(Self {
             backend_id: backend_id.into(),
-            credentials: BTreeMap::from([(backend_id.into(), api_key.clone())]),
+            credentials: if api_key.is_empty() {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([(backend_id.into(), api_key.clone())])
+            },
             api_key,
             model,
             effort: Effort::Default,

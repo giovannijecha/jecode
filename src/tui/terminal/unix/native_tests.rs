@@ -93,11 +93,19 @@ fn controls_and_terminal_lifetime() {
     terminal.wait_after("Commands", help);
     terminal.send(b"/settings\r");
     let settings = terminal.wait("Settings · saved defaults");
-    terminal.wait_after("API key", settings);
+    terminal.wait_after("Providers", settings);
     terminal.send(b"5");
-    let key = terminal.wait_after("Enter  validate and save", settings);
+    let providers = terminal.wait_after("Credentials", settings);
+    terminal.send(b"2");
+    let api_keys = terminal.wait_after("OpenRouter key, kept", providers);
+    terminal.send(b"1");
+    let key = terminal.wait_after("Enter  validate and save", api_keys);
     terminal.send(b"\x03");
-    terminal.wait_after("Settings · saved defaults", key);
+    let api_keys = terminal.wait_after("OpenRouter key, kept", key);
+    terminal.send(b"\x03");
+    let providers = terminal.wait_after("Credentials", api_keys);
+    terminal.send(b"\x03");
+    terminal.wait_after("Settings · saved defaults", providers);
     terminal.send(b"\x03");
     terminal.resize(40, 12);
     terminal.resize(5, 2);
@@ -143,11 +151,30 @@ fn controls_and_terminal_lifetime() {
 
     let mut terminal = driver::Pty::new("guardian-loss");
     terminal.finish("PTY_GUARDIAN_RECOVERED");
+
+    for case in ["setup-cancel", "setup-success", "setup-error"] {
+        let mut terminal = driver::Pty::new(case);
+        terminal.wait("SETUP_SIGN_IN_WAITING");
+        if case == "setup-cancel" {
+            terminal.send(b"\r");
+        }
+        terminal.wait("SETUP_NEXT_PROMPT: ");
+        terminal.send(b"next\r");
+        terminal.finish("SETUP_NATIVE_DONE");
+    }
 }
 
 #[test]
 #[ignore = "private child fixture of the native Unix PTY check"]
 fn native_pty_fixture() {
+    let case = std::env::var("JECODE_TUI_CASE").unwrap();
+    if case.starts_with("setup-") {
+        let tty = File::open("/dev/tty").unwrap();
+        let original = mode::stty(&tty, &["-g"]).unwrap();
+        crate::setup::native_sign_in_fixture(&case);
+        assert_mode_restored(&tty, &original);
+        return;
+    }
     let path = std::path::PathBuf::from(std::env::var_os("JECODE_TUI_FIXTURE").unwrap());
     let output = std::process::Command::new("tty")
         .stdin(std::process::Stdio::inherit())

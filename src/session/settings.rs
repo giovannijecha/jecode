@@ -23,15 +23,13 @@ impl SessionConfig {
     ) -> Result<(), String> {
         let mut ui = Terminal::new(input, output, &self.bash);
         if let Some(settings) = setup::configure(&self.store, Some(&self.settings), &mut ui)? {
-            for (id, key) in &settings.credentials {
-                if let Ok(services) = backend::Services::for_backend(id, key.clone()) {
-                    agent.register_backend(services);
-                }
+            let home = self.store.path().parent().expect("configuration directory");
+            for services in settings.configured_services(home) {
+                agent.register_backend(services);
             }
             if agent.backend_id() == settings.backend_id {
-                let mut client = agent
-                    .services()
-                    .with_credential(settings.api_key.clone())?
+                let mut client = settings
+                    .services(home, &settings.backend_id)?
                     .create(agent.model().into())?;
                 client.set_effort(agent.effort());
                 agent.replace_backend(client)?;
@@ -55,14 +53,49 @@ impl SessionConfig {
         input: &mut impl BufRead,
         output: &mut impl Write,
     ) -> Result<(), String> {
-        let services = agent.services();
+        let mut services = agent.services();
         let mut ui = Terminal::new(input, output, &self.bash);
         let manual = id.is_some();
+        if !manual {
+            let home = self.store.path().parent().expect("configuration directory");
+            let configured = self.settings.configured_services(home);
+            if configured.len() > 1 {
+                ui.message("Providers:")?;
+                for (index, provider) in configured.iter().enumerate() {
+                    let name = backend::available()
+                        .iter()
+                        .find(|info| info.id == provider.id())
+                        .map_or(provider.id(), |info| info.name);
+                    ui.message(&format!("{}. {name}", index + 1))?;
+                }
+                let Some(value) =
+                    ui.input("Choose a provider number (/cancel leaves unchanged): ")?
+                else {
+                    return Ok(());
+                };
+                if value.trim() == "/cancel" || value.trim().is_empty() {
+                    return Ok(());
+                }
+                let provider = value
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|n| n.checked_sub(1))
+                    .and_then(|index| configured.get(index))
+                    .ok_or("Choose one of the displayed providers")?;
+                if provider.id() != services.id() || provider.account() != services.account() {
+                    services = provider.clone();
+                }
+            }
+        }
         let id = if let Some(id) = id {
             crate::config::validate_model(id)?;
             id.into()
         } else {
-            let Some(id) = setup::choose_model(&services, Some(agent.model()), &mut ui)? else {
+            let current = (services.id() == agent.backend_id()
+                && services.account() == agent.identity().account)
+                .then(|| agent.model());
+            let Some(id) = setup::choose_model(&services, current, &mut ui)? else {
                 return Ok(());
             };
             id
@@ -79,8 +112,14 @@ impl SessionConfig {
             None => Effort::Default,
         };
         let previous = format!("{} · {}", agent.model(), agent.effort().name());
-        agent.set_model(id)?;
-        agent.set_effort(effort);
+        if services.id() == agent.backend_id() && services.account() == agent.identity().account {
+            agent.set_model(id)?;
+            agent.set_effort(effort);
+        } else {
+            let mut client = services.create(id)?;
+            client.set_effort(effort);
+            agent.replace_backend(client)?;
+        }
         let result = format!(
             "Model set to {} · {} · was {previous}",
             agent.model(),
@@ -127,11 +166,14 @@ impl SessionConfig {
         {
             return Err(format!("Backend is not available: {backend_id}"));
         }
-        let key = self
-            .settings
-            .credential_for(&backend_id)
-            .ok_or_else(|| format!("{backend_id} has no saved credentials; run jecode setup"))?;
-        let services = backend::Services::for_backend(&backend_id, key.into())?;
+        let services = if backend_id == agent.backend_id() {
+            agent.services()
+        } else {
+            self.settings.services(
+                self.store.path().parent().expect("configuration directory"),
+                &backend_id,
+            )?
+        };
         let manual = model.is_some();
         let model = match model {
             Some(model) => {
@@ -159,11 +201,11 @@ impl SessionConfig {
             None => Effort::Default,
         };
         let previous = format!("{} / {}", agent.backend_id(), agent.model());
-        if backend_id == agent.backend_id() {
+        if services.id() == agent.backend_id() && services.account() == agent.identity().account {
             agent.set_model(model.clone())?;
             agent.set_effort(effort);
         } else {
-            let mut client = backend::create(&backend_id, key.into(), model.clone())?;
+            let mut client = services.create(model.clone())?;
             client.set_effort(effort);
             agent.replace_backend(client)?;
         }
@@ -268,8 +310,10 @@ impl SessionConfig {
         output: &mut impl Write,
     ) -> Result<(), String> {
         let requested = argument.map(Effort::parse).transpose()?;
-        let effort = if requested == Some(Effort::Default) {
-            Effort::Default
+        let effort = if let Some(effort) = requested
+            .filter(|effort| *effort == Effort::Default || !agent.services().validates_effort())
+        {
+            effort
         } else {
             let catalog = agent.services().catalog()?;
             let model = catalog

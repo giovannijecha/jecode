@@ -53,7 +53,7 @@ fn measured_history_uses_calibrated_growth_and_falls_back_without_density() {
     let appended = message("tool", &"new output ".repeat(1000));
     let size = appended.encode().len();
     agent.messages.lock().unwrap().push(appended);
-    assert_eq!(agent.context_status().tokens, 1000 + size.div_ceil(2));
+    assert_eq!(agent.context_status().tokens, 1000 + size.div_ceil(4));
     agent.context.calibration = None;
     assert_eq!(agent.context_status().tokens, 1000 + size);
 }
@@ -106,11 +106,18 @@ fn tool_views_expire_from_context_budget_after_an_assistant_response() {
         context::bytes_for(&messages, agent.client.inputs()),
         text_bytes + 85
     );
-    assert_eq!(agent.context.measured_input(&messages), None);
-    let projected = agent.projected_context(&agent.context, &messages);
-    let expected = agent.context.estimate_bytes(
-        context::bytes_for(&projected, agent.client.inputs()) + crate::tools::encoded_size(),
-    ) + agent.request_environment().len();
+    // The measurement stays; only the retired 85-token view leaves it.
+    assert_eq!(
+        agent
+            .context
+            .measured_input(&messages, agent.client.inputs()),
+        Some(500 - 85)
+    );
+    let growth = messages[3..]
+        .iter()
+        .map(|item| portable(item).encode().len())
+        .sum::<usize>();
+    let expected = 500 - 85 + agent.context.estimate_bytes(growth);
     drop(messages);
     assert_eq!(agent.context_status().tokens, expected);
 }

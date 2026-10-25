@@ -232,10 +232,15 @@ impl Pty {
             .windows(8)
             .filter(|bytes| *bytes == b"\x1b[?1049l")
             .count();
-        assert!(
-            entered > 0 && entered == left,
-            "alternate screen was not restored ({entered} entries, {left} exits)"
-        );
+        if marker != "SETUP_NATIVE_DONE" {
+            assert!(
+                entered > 0 && entered == left,
+                "alternate screen was not restored ({entered} entries, {left} exits)"
+            );
+        } else {
+            assert_eq!(entered, 0, "guided setup entered the alternate screen");
+            assert_eq!(left, 0, "guided setup left an unused alternate screen");
+        }
         assert!(!self.bytes.windows(4).any(|bytes| bytes == b"\x1b[3J"));
     }
 }

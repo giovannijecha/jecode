@@ -1,21 +1,28 @@
 # Personal configuration
 
 Start Jecode from the project directory. On the first interactive launch, setup
-asks for a backend API key and model; `jecode setup` runs it again. OpenRouter is
-the currently available backend. In the TUI, use `/settings` to change saved
-defaults and the key. The key and defaults are
+asks for a provider and model; `jecode setup` runs it again. OpenAI uses
+**Continue with ChatGPT**; OpenRouter uses an API key. In the TUI, use
+`/settings` to change saved defaults and **Providers** to manage authentication.
+OpenRouter keys and defaults are
 stored in plain text in `~/.jecode/config.json` (on Windows,
 `%USERPROFILE%\.jecode\config.json`). Keep this personal file private.
+
+During browser-based ChatGPT sign-in from `jecode setup`, press Enter to cancel
+the pending login and return to provider selection. Once sign-in completes,
+Enter belongs to the next setup prompt.
 
 ## Models and effort
 
 | Action | Scope |
 | --- | --- |
-| `/model [ID]` | Choose a model and then its effort for this conversation. |
+| `/model [ID]` | Choose a provider when more than one is configured, then a model and its effort for this conversation. A direct ID uses the current provider. |
 | `/backend` or `/backend ID MODEL` | List available backends or switch this conversation to a configured backend and model. Plain chat also accepts `/backend ID` and prompts for a model. |
 | `/effort [NAME]` | Change this conversation's reasoning effort. |
 | `/settings` → **Default model** | Save the model and effort for future conversations and launches. |
 | `/settings` → **Default effort** | Change the saved model's default effort. |
+| `/settings` → **Providers** → **Credentials** | Connect, select or sign out of a ChatGPT account or workspace. |
+| `/settings` → **Providers** → **API keys** | Configure the OpenRouter key with hidden input. |
 | `jecode --model provider/model-id "task"` | Override the model for one launch. |
 
 The effort selector shows the levels supported by the model. A direct model ID
@@ -23,6 +30,13 @@ is accepted without a catalog lookup. `default` leaves
 reasoning effort to the provider. Model and effort changes preserve the conversation;
 saved defaults do not switch an existing conversation. Replace `provider/model-id`
 with the model's catalog ID.
+
+The ChatGPT catalog supplies the model's effective context window and supported
+reasoning levels. The picker offers these levels and the provider default;
+`/effort NAME` can also explicitly request a level. The context meter and
+automatic compaction use the account's declared window. If metadata is missing,
+capacity displays `?`. OpenAI endpoint
+routing is managed by OpenAI, so `/routing` applies only to OpenRouter.
 
 ## Stored settings
 
@@ -56,7 +70,9 @@ The relevant fields are:
 ```
 
 `selection` is the default for new conversations; switching a conversation does
-not change it. Backend credentials live under `backends.<id>`. The original
+not change it. API keys live under `backends.<id>`. ChatGPT tokens are stored
+separately under `accounts/openai/`; selecting OpenAI requires no API key in
+`config.json`. The original
 `openrouter` block remains readable and is updated for compatibility. Its key,
 model, effort and routing take precedence for OpenRouter when both formats are
 present, so edits made by an older installed binary remain effective. Its
@@ -82,6 +98,7 @@ its own purpose:
 | Path | Contents and owner |
 | --- | --- |
 | `config.json` | Your key and saved settings; Jecode updates it through setup and settings. |
+| `accounts/openai/` | Protected ChatGPT registrations, rotating tokens, active account, stable host ID and refresh lock. |
 | `skills/` | Your reusable skill files; Jecode reads this library. |
 | `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
 | `tmp/` | Session working files, managed by Jecode's temporary-file actions. |

@@ -373,6 +373,36 @@ fn another_backend_configuration_does_not_require_an_openrouter_key() {
 }
 
 #[test]
+fn chatgpt_selection_roundtrips_without_an_api_key_and_keeps_openrouter() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let mut selected = settings("fixture/openrouter-default");
+    store.save(&selected).unwrap();
+    let openrouter_key = selected.api_key.clone();
+    selected.select_backend("openai", String::new()).unwrap();
+    selected.model = "fixture-chatgpt-model".into();
+    store.save(&selected).unwrap();
+    let reopened = store.load().unwrap().unwrap();
+    assert_eq!(reopened.backend_id, "openai");
+    assert_eq!(reopened.model, "fixture-chatgpt-model");
+    assert!(reopened.api_key.is_empty());
+    assert_eq!(
+        reopened.credential_for("openrouter"),
+        Some(openrouter_key.as_str())
+    );
+    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    assert!(
+        document
+            .get("backends")
+            .and_then(|backends| backends.get("openai"))
+            .and_then(|account| account.get("api_key"))
+            .is_none()
+    );
+    assert!(reopened.services(directory.path(), "openai").is_err());
+    assert_eq!(reopened.configured_services(directory.path()).len(), 1);
+}
+
+#[test]
 fn routing_preference_is_scoped_to_its_backend_even_for_the_same_model_id() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());

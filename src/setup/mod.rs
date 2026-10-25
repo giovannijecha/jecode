@@ -1,8 +1,11 @@
+mod accounts;
 mod models;
 mod terminal;
 
 pub use models::choose_model;
 pub use terminal::Terminal;
+#[cfg(test)]
+pub(crate) use terminal::native_sign_in_fixture;
 
 use crate::backend::{self, Services};
 use crate::config::{Settings, Store};
@@ -12,6 +15,21 @@ pub trait Prompter {
     fn message(&mut self, text: &str) -> Result<(), String>;
     fn input(&mut self, prompt: &str) -> Result<Option<String>, String>;
     fn secret(&mut self, prompt: &str) -> Result<Option<String>, String>;
+
+    fn with_sign_in_cancel<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self, crate::cancel::Cancellation) -> Result<T, String>,
+    ) -> Result<SignIn<T>, String>
+    where
+        Self: Sized,
+    {
+        operation(self, crate::cancel::Cancellation::default()).map(SignIn::Completed)
+    }
+}
+
+pub enum SignIn<T> {
+    Completed(T),
+    Back,
 }
 
 pub fn configure(
@@ -19,41 +37,60 @@ pub fn configure(
     current: Option<&Settings>,
     ui: &mut impl Prompter,
 ) -> Result<Option<Settings>, String> {
-    configure_with(store, current, ui, |id, key| {
-        Services::for_backend(id, key.into())
-    })
+    loop {
+        let backend_id = choose_provider(ui)?;
+        let Some(backend_id) = backend_id else {
+            return cancelled(ui);
+        };
+        if backend_id == "openai" {
+            match accounts::configure(store, current, ui)? {
+                accounts::Outcome::Finished(settings) => return Ok(settings),
+                accounts::Outcome::Back => continue,
+            }
+        }
+        return configure_with(store, current, ui, backend_id, |id, key| {
+            Services::for_backend(id, key.into())
+        });
+    }
+}
+
+fn choose_provider(ui: &mut impl Prompter) -> Result<Option<&'static str>, String> {
+    let available = backend::available();
+    loop {
+        ui.message("Providers:")?;
+        for (index, backend) in available.iter().enumerate() {
+            let method = if backend.id == "openai" {
+                "Continue with ChatGPT"
+            } else {
+                "API key"
+            };
+            ui.message(&format!("{}. {} · {method}", index + 1, backend.name))?;
+        }
+        let Some(answer) =
+            answer(ui.input("Choose a provider number (/cancel leaves unchanged): ")?)
+        else {
+            return Ok(None);
+        };
+        if let Some(backend) = answer
+            .parse::<usize>()
+            .ok()
+            .and_then(|number| number.checked_sub(1))
+            .and_then(|index| available.get(index))
+        {
+            return Ok(Some(backend.id));
+        }
+        ui.message("Choose one of the displayed backends.")?;
+    }
 }
 
 fn configure_with(
     store: &Store,
     current: Option<&Settings>,
     ui: &mut impl Prompter,
+    backend_id: &str,
     make_services: impl Fn(&str, &str) -> Result<Services, String>,
 ) -> Result<Option<Settings>, String> {
-    let available = backend::available();
-    let backend_id = if available.len() == 1 {
-        available[0].id
-    } else {
-        loop {
-            ui.message("Available backends:")?;
-            for (index, backend) in available.iter().enumerate() {
-                ui.message(&format!("{}. {}", index + 1, backend.name))?;
-            }
-            let Some(answer) = answer(ui.input("Choose a backend number: ")?) else {
-                return cancelled(ui);
-            };
-            if let Some(backend) = answer
-                .parse::<usize>()
-                .ok()
-                .and_then(|number| number.checked_sub(1))
-                .and_then(|index| available.get(index))
-            {
-                break backend.id;
-            }
-            ui.message("Choose one of the displayed backends.")?;
-        }
-    };
-    let selected = available
+    let selected = backend::available()
         .iter()
         .find(|backend| backend.id == backend_id)
         .unwrap();

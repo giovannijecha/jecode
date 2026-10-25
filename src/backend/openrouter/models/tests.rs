@@ -46,5 +46,5 @@ fn catalog_filters_tools_and_uses_declared_efforts_without_inventing_support() {
         "reasoning",
         Value::object([("supported_efforts", Value::Null)]),
     )]);
-    assert_eq!(efforts(&value).len(), 8);
+    assert_eq!(efforts(&value).len(), 9);
 }

@@ -11,7 +11,7 @@ Paths are relative to `src/`.
 | Area | Modules |
 | --- | --- |
 | Entry and setup | `main.rs`, `cli.rs`, `bootstrap.rs`, `setup/` |
-| Settings, credentials and model effort | `config/`, `auth/`, `effort.rs` |
+| Settings, credentials and model effort | `config/`, `auth/`, `auth/openai/`, `effort.rs` |
 | Agent, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
@@ -21,7 +21,7 @@ Paths are relative to `src/`.
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments | `attachments/`, `tools/attachment.rs` |
-| Model backends | `backend/`, `backend/openrouter/` |
+| Model backends | `backend/`, `backend/openrouter/`, `backend/openai/` |
 | Interfaces | `session.rs`, `session/`, `console.rs`, `tui/` |
 | Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs` |
 
@@ -51,7 +51,10 @@ repeated-command refusals or model-output validation.
 
 Backend updates carry text deltas. The agent masks split credentials incrementally
 and produces display/persistence snapshots at terminal cadence, flushing the final
-text on completion or failure. The TUI worker keeps one latest streaming snapshot;
+text on completion or failure. The first visible prefix saves synchronously;
+later partial snapshots use background autosave to avoid periodic disk waits
+in the stream observer. Completion and tool boundaries save synchronously.
+The TUI worker keeps one latest streaming snapshot;
 transient working indicators never wait for a full queue. Significant events use
 a bounded ordered queue and retain cancellation-aware backpressure.
 
@@ -218,7 +221,7 @@ unsafe Rust FFI.
 
 | Boundary | Implementation and requirements |
 | --- | --- |
-| Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. |
+| Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. Short helpers that never spawn children (the Windows system `curl.exe` and account crypto helpers) bypass the supervisor through `process::run_leaf`; cancellation and timeouts still kill them directly. `JECODE_CURL` overrides and PATH fallbacks retain Job Object supervision, including their descendants. |
 | Checkpoint disk space | Windows uses an owned cached C# helper and `GetDiskFreeSpaceExW` at the archive path; requires Windows PowerShell and `Add-Type`. Unix uses the installed `df -Pk` command. Failed queries prevent payload admission and can retry after five seconds. |
 | Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
 | Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
@@ -243,13 +246,23 @@ Native fixture commands and host-specific checks are in [platform verification](
 typed input/output/cached-token usage, context limits, progress updates and
 failures. The agent can retain its transcript, execute tools, compact context
 and save a session without importing an OpenRouter type. `conversation/` keeps
-portable message fields and tags native extras with their backend and model.
+portable message fields and tags native extras with their backend, model and
+verified account registration when the provider uses account sessions.
 Only the matching adapter receives those extras on a later request. Legacy
 untagged OpenRouter messages are assigned their archived origin on a transient
 request copy; the saved originals remain intact. `auth/` represents user-scoped
 credential material and account identity, while `backend::Services` exposes
 catalog, credential checks and optional routing choices to setup and the TUI.
-The existing user-scoped configuration stays readable.
+The existing user-scoped configuration stays readable. OpenAI OAuth records are
+separate from API-key settings. Shared redaction sources mask newly rotated
+tokens in already-created tools, output readers and persistence handles.
+
+`backend/openai/` translates the same transcript and local tools into stateless
+Responses requests using the selected ChatGPT registration. It preserves ordered
+native output items and assistant phases, and requires `response.completed`
+before returning executable calls. `auth/openai/` owns browser authorization,
+PKCE, ID-token validation, protected records, serialized refresh and logout.
+See [OpenAI](OPENAI.md) for the route contract and native crypto boundary.
 
 `backend/openrouter/` uses the fixed HTTPS OpenRouter API through curl 8.3+,
 with curl's default configuration disabled and TLS certificate validation enabled.

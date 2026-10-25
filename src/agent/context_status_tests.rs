@@ -340,17 +340,14 @@ fn accepted_input_updates_context_before_a_summary_starts() {
 }
 
 #[test]
-fn retired_view_recalculates_with_current_system_and_request_environment() {
+fn retired_view_keeps_the_measurement_less_the_view() {
     use crate::attachments::{MARKER, Prompt};
 
     let project = Directory::new();
-    let home = Directory::new();
     let mut agent = Agent::new(
         OpenRouter::fixture("http://127.0.0.1:1".into()),
         Tools::new(project.path()).unwrap(),
     );
-    agent.enable_sessions(home.path()).unwrap();
-    agent.project_instructions = "A changed project instruction".into();
     let mut image = crate::attachments::tests::attachment("att-1-1-1", "shot.png", "image/png");
     image.width = Some(4);
     image.height = Some(3);
@@ -370,6 +367,7 @@ fn retired_view_recalculates_with_current_system_and_request_environment() {
     agent.context.observe(
         Some(&crate::backend::Usage {
             input_tokens: Some(50_000),
+            output_tokens: Some(700),
             ..Default::default()
         }),
         measured_end,
@@ -380,19 +378,13 @@ fn retired_view_recalculates_with_current_system_and_request_environment() {
         ("content", Value::string("I saw it")),
     ]));
     let messages = agent.messages.lock().unwrap();
-    assert_eq!(agent.context.measured_input(&messages), None);
-    assert!(!agent.request_environment().is_empty());
-    let projected = agent.projected_context(&agent.context, &messages);
-    assert!(
-        projected[0]
-            .get("content")
-            .and_then(Value::as_str)
-            .unwrap()
-            .contains("A changed project instruction")
+    // The 4x3 image view weighs the 85-token minimum and leaves the request;
+    // the reply counts as its 700 generated tokens.
+    assert_eq!(
+        agent
+            .context
+            .measured_input(&messages, agent.client.inputs()),
+        Some(50_000 - 85)
     );
-    let expected = agent
-        .context
-        .estimate_bytes(agent.context_bytes(&projected) + crate::tools::encoded_size())
-        + agent.request_environment().len();
-    assert_eq!(agent.context_estimate(&messages), expected);
+    assert_eq!(agent.context_estimate(&messages), 50_000 - 85 + 700);
 }

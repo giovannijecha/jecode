@@ -7,13 +7,15 @@ use crate::{
 use std::path::Path;
 use std::time::Instant;
 
+mod providers;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Setting {
     Model,
     Effort,
     Routing,
     AutoCompact,
-    Key,
+    Providers,
 }
 #[derive(Clone, Copy)]
 pub enum Choice {
@@ -24,11 +26,20 @@ pub enum Choice {
     Session(usize),
     Copy(usize),
     Draft(super::drafts::Slot),
+    Provider(&'static str),
+    Credentials,
+    ApiKeys,
+    Account(usize),
+    AddAccount,
+    SignOut,
+    ManageUsage,
+    OpenRouterKey,
 }
 /// The right-aligned status of an option.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Badge {
     Current,
+    Default,
     Note(String),
     Queued,
     Paused,
@@ -51,6 +62,16 @@ pub struct Hit {
 }
 
 pub enum Purpose {
+    Providers {
+        defaults: bool,
+    },
+    ProviderSettings,
+    Credentials,
+    ApiKeys,
+    Accounts,
+    Account {
+        confirm_sign_out: bool,
+    },
     Models {
         defaults: bool,
     },
@@ -265,7 +286,7 @@ impl Selector {
         effort: Effort,
         auto_compact: u8,
         routing: &Routing,
-        config_path: &Path,
+        _config_path: &Path,
     ) -> Self {
         let setting = |name: &str, value: String, prose: &str, setting| OptionRow {
             prose: prose.into(),
@@ -300,13 +321,10 @@ impl Selector {
                     Setting::AutoCompact,
                 ),
                 setting(
-                    "API key",
-                    "configured".into(),
-                    &format!(
-                        "Your OpenRouter key, kept in plain text in {}. Input stays hidden.",
-                        config_path.display()
-                    ),
-                    Setting::Key,
+                    "Providers",
+                    String::new(),
+                    "Manage ChatGPT accounts and OpenRouter API keys.",
+                    Setting::Providers,
                 ),
             ],
         );
@@ -374,7 +392,9 @@ impl Selector {
         menu
     }
     pub fn key() -> Self {
-        Self::new("API key", Purpose::Key, vec![]).under_settings(true)
+        let mut menu = Self::new("OpenRouter API key", Purpose::Key, vec![]);
+        menu.parent = Some("Providers");
+        menu
     }
     pub fn auto_compact(current: u8) -> Self {
         let mut menu =

@@ -20,7 +20,8 @@ pub(super) struct Spawned {
     pub child: Child,
     pub stdout: ChildStdout,
     pub writer: JoinHandle<io::Result<()>>,
-    pub completion: JoinHandle<Result<i32, String>>,
+    /// The supervisor's completion report; None for a directly started leaf.
+    pub completion: Option<JoinHandle<Result<i32, String>>>,
 }
 
 pub(super) fn spawn(
@@ -97,7 +98,7 @@ pub(super) fn spawn(
                     child,
                     stdout,
                     writer,
-                    completion,
+                    completion: Some(completion),
                 });
             }
             Ok((_, Err(message))) => {
@@ -128,6 +129,36 @@ pub(super) fn spawn(
             }
         }
     }
+}
+
+/// Starts a leaf executable directly, outside the Job Object supervisor. A
+/// leaf starts no processes of its own, so terminating it ends all its work,
+/// and it skips the supervisor's .NET start-up (about 100 ms per launch).
+pub(super) fn spawn_leaf(command: &Command, input: Option<Vec<u8>>) -> Result<Spawned, RunError> {
+    let mut leaf = Command::new(command.get_program());
+    leaf.args(command.get_args());
+    configure(&mut leaf, command);
+    let mut child = leaf.spawn().map_err(|error| RunError {
+        started: false,
+        message: format!(
+            "Could not start {}: {error}",
+            command.get_program().to_string_lossy()
+        ),
+    })?;
+    let mut stdin = child.stdin.take().unwrap();
+    let writer = thread::spawn(move || {
+        if let Some(input) = input {
+            stdin.write_all(&input)?;
+        }
+        Ok(())
+    });
+    let stdout = child.stdout.take().unwrap();
+    Ok(Spawned {
+        child,
+        stdout,
+        writer,
+        completion: None,
+    })
 }
 
 fn dynamic_supervisor() -> Command {

@@ -302,7 +302,7 @@ impl Agent {
     }
 
     fn projected_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        match context.measured_input(messages) {
+        match context.measured_input(messages, self.client.inputs()) {
             Some(tokens) => context.estimate_growth(messages, tokens, self.client.inputs()),
             None => self.unmeasured_estimate(context, messages),
         }
@@ -320,7 +320,7 @@ impl Agent {
     }
 
     fn context_estimate(&self, messages: &[Value]) -> usize {
-        match self.context.measured_input(messages) {
+        match self.context.measured_input(messages, self.client.inputs()) {
             Some(tokens) => self
                 .context
                 .estimate_growth(messages, tokens, self.client.inputs()),

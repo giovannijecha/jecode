@@ -20,6 +20,11 @@ pub enum Kind {
     Warning,
     Error,
 }
+pub enum ChatGptAccount {
+    Active(String),
+    SignedOut,
+    Unavailable,
+}
 pub enum Item {
     Streaming {
         text: String,
@@ -88,6 +93,8 @@ pub struct State {
     pub processes: Option<super::processes::Panel>,
     /// The engine's latest projection for the footer; None renders no indicator.
     pub context: Option<crate::context::Status>,
+    /// The current backend's ChatGPT plan identity, shown only when the footer has room.
+    pub chatgpt_account: Option<ChatGptAccount>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -115,6 +122,7 @@ impl Default for State {
             selector: None,
             processes: None,
             context: None,
+            chatgpt_account: None,
         }
     }
 }
@@ -164,13 +172,16 @@ impl State {
                 } else {
                     "Reconnecting"
                 };
-                self.recovery = Some(
-                    Feedback::progress(
-                        Kind::Warning,
-                        format!("{subject} · attempt {attempt} · {error}"),
-                    )
-                    .until(std::time::Instant::now() + delay),
+                let recovery = Feedback::progress(
+                    Kind::Warning,
+                    format!("{subject} · attempt {attempt} · {error}"),
                 );
+                // Server delays can exceed the platform's Instant range. The
+                // cancellable retry still honors them without a countdown.
+                self.recovery = Some(match std::time::Instant::now().checked_add(delay) {
+                    Some(until) => recovery.until(until),
+                    None => recovery,
+                });
             }
             Event::RecoveryFinished => {
                 self.recovery = None;

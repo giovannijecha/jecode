@@ -1,10 +1,9 @@
 use crate::json::{self, Value};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant};
 mod protocol;
 pub mod server;
@@ -62,7 +61,8 @@ pub struct Request {
 
 pub struct HttpFixture {
     pub endpoint: String,
-    server: JoinHandle<Vec<Request>>,
+    server: server::Server<Vec<Request>>,
+    expected: usize,
 }
 
 pub enum Response {
@@ -99,24 +99,15 @@ impl HttpFixture {
     }
 
     fn responses(responses: Vec<Response>, wait: Duration) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
-        listener.set_nonblocking(true).unwrap();
-        let server = thread::spawn(move || {
+        let expected = responses.len();
+        let server = server::Server::start(move |listener, stop| {
             let mut requests = Vec::new();
             for response in responses {
-                let started = Instant::now();
-                let mut stream = loop {
-                    match listener.accept() {
-                        Ok((stream, _)) => break stream,
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            assert!(started.elapsed() < wait, "fixture received no request");
-                            thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(error) => panic!("fixture accept: {error}"),
-                    }
+                // Request preparation belongs to the client. Keep listening
+                // until the owning fixture finishes or is dropped.
+                let Ok(mut stream) = server::accept(&listener, &stop) else {
+                    break;
                 };
-                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
@@ -169,7 +160,9 @@ impl HttpFixture {
                         write!(stream, "HTTP/1.1 200 Fixture\r\nContent-Type: text/event-stream\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n").unwrap();
                         stream.flush().unwrap();
                         for (delay, chunk) in chunks {
-                            thread::sleep(delay);
+                            if stop.wait(delay).is_err() {
+                                break;
+                            }
                             if stream
                                 .write_all(chunk.as_bytes())
                                 .and_then(|_| stream.flush())
@@ -186,9 +179,19 @@ impl HttpFixture {
                     } => {
                         write!(stream, "HTTP/1.1 200 Fixture\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{head}", head.len() + tail.len()).unwrap();
                         stream.flush().unwrap();
-                        release
-                            .recv_timeout(wait)
-                            .expect("stream was not observed before completion");
+                        let started = Instant::now();
+                        loop {
+                            if stop.requested() {
+                                return requests;
+                            }
+                            let remaining = wait.saturating_sub(started.elapsed());
+                            match release.recv_timeout(remaining.min(Duration::from_millis(20))) {
+                                Ok(()) => break,
+                                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                                    if !remaining.is_zero() => {}
+                                Err(_) => panic!("stream was not observed before completion"),
+                            }
+                        }
                         stream.write_all(tail.as_bytes()).unwrap();
                         stream.flush().unwrap();
                     }
@@ -196,10 +199,84 @@ impl HttpFixture {
             }
             requests
         });
-        Self { endpoint, server }
+        let endpoint = format!("{}/chat/completions", server.endpoint);
+        Self {
+            endpoint,
+            server,
+            expected,
+        }
     }
 
     pub fn finish(self) -> Vec<Request> {
-        self.server.join().unwrap()
+        let requests = self.server.finish();
+        assert_eq!(
+            requests.len(),
+            self.expected,
+            "fixture did not receive every expected request"
+        );
+        requests
     }
+}
+
+#[test]
+fn http_fixture_survives_slow_client_preparation() {
+    let fixture = HttpFixture::with_wait(vec![(200, Value::Null)], Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(100));
+    let address = fixture
+        .endpoint
+        .strip_prefix("http://")
+        .unwrap()
+        .split('/')
+        .next()
+        .unwrap();
+    let mut client =
+        std::net::TcpStream::connect(address).expect("fixture must live until its client finishes");
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    client
+        .write_all(
+            b"POST /chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}",
+        )
+        .unwrap();
+    let mut response = String::new();
+    client.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert_eq!(fixture.finish().len(), 1);
+}
+
+#[test]
+fn dropping_http_fixture_cancels_an_unreleased_stream() {
+    let (_release, released) = std::sync::mpsc::channel();
+    let fixture = HttpFixture::streaming_with_wait(
+        vec![Response::GatedStream {
+            head: "head".into(),
+            tail: "tail".into(),
+            release: released,
+        }],
+        Duration::from_secs(180),
+    );
+    let address = fixture
+        .endpoint
+        .strip_prefix("http://")
+        .unwrap()
+        .split('/')
+        .next()
+        .unwrap();
+    let mut client = std::net::TcpStream::connect(address).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    client
+        .write_all(
+            b"POST /chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}",
+        )
+        .unwrap();
+    let mut reader = BufReader::new(client);
+    let mut status = String::new();
+    reader.read_line(&mut status).unwrap();
+    assert!(status.starts_with("HTTP/1.1 200"));
+    let started = Instant::now();
+    drop(fixture);
+    assert!(started.elapsed() < Duration::from_secs(2));
 }

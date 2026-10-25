@@ -1,21 +1,89 @@
 use super::*;
 
 #[test]
-fn settings_show_the_store_path_and_restore_focus_from_their_actual_rows() {
+fn settings_restore_focus_from_their_actual_rows() {
     let path = Path::new(r"C:\fixture\custom-home\config.json");
     let menu = Selector::settings("fixture/model", Effort::Default, 80, &Routing::Auto, path);
-    let key = menu.setting_index(Setting::Key);
-    assert!(
-        menu.options[key]
-            .prose
-            .contains(&path.display().to_string())
-    );
+    let providers = menu.setting_index(Setting::Providers);
+    assert_eq!(menu.options[providers].name, "Providers");
     for (index, option) in menu.options.iter().enumerate() {
         let Choice::Setting(setting) = option.choice else {
             panic!("settings menu contains a non-setting row");
         };
         assert_eq!(menu.setting_index(setting), index);
     }
+}
+
+#[test]
+fn provider_settings_have_two_sections_and_account_choices_distinguish_active_from_available() {
+    let providers = Selector::providers_settings();
+    assert_eq!(
+        providers
+            .options
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Credentials", "API keys"]
+    );
+    let credentials = Selector::credentials(false);
+    assert_eq!(credentials.options[0].name, "OpenAI");
+    assert!(credentials.options[0].badge.is_none());
+    let keys = Selector::api_keys(true);
+    assert_eq!(keys.options[0].name, "OpenRouter");
+    assert_eq!(
+        keys.options[0].badge,
+        Some(Badge::Note("configured".into()))
+    );
+
+    let accounts = vec![
+        crate::auth::openai::Account {
+            client_id: "a".into(),
+            subject: "one".into(),
+            email: "one@example.test".into(),
+            label: "First".into(),
+            enabled: true,
+        },
+        crate::auth::openai::Account {
+            client_id: "b".into(),
+            subject: "two".into(),
+            email: "two@example.test".into(),
+            label: "Second".into(),
+            enabled: false,
+        },
+    ];
+    let menu = Selector::accounts(&accounts, Some("b"));
+    assert_eq!(menu.options.len(), 3);
+    assert_eq!(menu.options[0].badge, None);
+    assert_eq!(menu.options[1].badge, Some(Badge::Current));
+    assert!(matches!(menu.options[2].choice, Choice::AddAccount));
+    let account = Selector::account(&accounts[0], false);
+    assert!(
+        account
+            .options
+            .iter()
+            .any(|row| matches!(row.choice, Choice::SignOut))
+    );
+    assert!(
+        account
+            .options
+            .iter()
+            .any(|row| matches!(row.choice, Choice::ManageUsage))
+    );
+}
+
+#[test]
+fn provider_choice_marks_conversation_and_saved_default_separately() {
+    let services = [
+        crate::backend::Services::fixture("http://127.0.0.1:1"),
+        crate::backend::Services::from_service(crate::backend::openai::Api::fixture(
+            crate::auth::openai::Session::fixture("fixture-token"),
+            "http://127.0.0.1:1",
+        )),
+    ];
+    let menu = Selector::providers(&services, false, "openrouter", "openai");
+    assert_eq!(menu.options[0].badge, Some(Badge::Current));
+    assert_eq!(menu.options[1].badge, Some(Badge::Default));
+    assert!(matches!(menu.options[1].choice, Choice::Provider("openai")));
 }
 
 #[test]

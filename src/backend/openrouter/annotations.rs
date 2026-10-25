@@ -37,7 +37,7 @@ fn store_value(value: &mut Value, pool: Option<&Pool>) -> Result<(), String> {
                     "image/gif" => "pdf-page.gif",
                     _ => "pdf-annotation.bin",
                 };
-                let asset = pool.import_bytes(name, &bytes)?;
+                let asset = pool.import_bytes_original(name, &bytes)?;
                 *value = Value::object([
                     (REFERENCE, Value::string(asset.reference())),
                     ("media", Value::string(media)),

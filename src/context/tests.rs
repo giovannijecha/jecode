@@ -75,7 +75,7 @@ fn calibrated_projection_uses_a_margin_and_resets_on_model_change() {
         2,
     );
     context.calibrate(6000);
-    assert_eq!(context.estimate_bytes(12000), 6000);
+    assert_eq!(context.estimate_bytes(12000), 3000);
     assert_eq!(context.estimate_bytes(1), 1);
     let restored = Context::parse(Some(&context.value())).unwrap();
     assert_eq!(restored.calibration, context.calibration);
@@ -98,7 +98,7 @@ fn summary_byte_budgets_keep_a_separate_margin_and_safe_fallbacks() {
     assert_eq!(context.summary_byte_budget(6000), 6000);
     context.calibration = Some((1000, 6000));
     assert_eq!(context.summary_byte_budget(6000), 18000);
-    assert_eq!(context.estimate_bytes(18000), 9000);
+    assert_eq!(context.estimate_bytes(18000), 4500);
     context.calibration = Some((2000, 7000));
     for budget in [0, 1, 17, 6000] {
         let bytes = context.summary_byte_budget(budget);

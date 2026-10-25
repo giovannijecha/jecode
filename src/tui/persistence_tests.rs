@@ -10,6 +10,10 @@ use std::{thread, time::Instant};
 
 mod command_tests;
 
+// Persistence scenarios include multiple requests and durable tool/session
+// checkpoints. Their deadline bounds a stall, not interactive latency.
+const FIXTURE_WAIT: Duration = Duration::from_secs(30);
+
 fn app(home: &Directory, directory: &Directory, endpoint: &str) -> App {
     let mut agent = Agent::new(
         OpenRouter::fixture(endpoint.into()),
@@ -25,10 +29,17 @@ fn submit(app: &mut App, text: &str) {
     assert!(!app.submit().unwrap());
 }
 fn finish(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + FIXTURE_WAIT;
     while app.worker.is_some() {
         app.poll().unwrap();
-        assert!(Instant::now() < deadline);
+        if app.worker.is_none() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Persistence fixture did not finish within {FIXTURE_WAIT:?}; status: {}",
+            app.state.status
+        );
         thread::sleep(Duration::from_millis(5));
     }
 }
@@ -142,23 +153,26 @@ fn failed_queued_preparation_returns_all_unsent_work_in_order() {
 fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_unsent_work() {
     let home = Directory::new();
     let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![
-        (
-            200,
-            completion(
-                "Inspecting",
-                vec![tool_call(
-                    "write",
-                    "write",
-                    Value::object([
-                        ("path", Value::string("file.txt")),
-                        ("content", Value::string("original")),
-                    ]),
-                )],
+    let fixture = HttpFixture::with_wait(
+        vec![
+            (
+                200,
+                completion(
+                    "Inspecting",
+                    vec![tool_call(
+                        "write",
+                        "write",
+                        Value::object([
+                            ("path", Value::string("file.txt")),
+                            ("content", Value::string("original")),
+                        ]),
+                    )],
+                ),
             ),
-        ),
-        (200, completion("Answer preserved", vec![])),
-    ]);
+            (200, completion("Answer preserved", vec![])),
+        ],
+        FIXTURE_WAIT,
+    );
     let mut first = app(&home, &directory, &fixture.endpoint);
     submit(&mut first, "First saved request");
     finish(&mut first);

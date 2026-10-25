@@ -28,8 +28,9 @@ pub fn clipboard_image(cancellation: &Cancellation) -> Result<Vec<u8>, String> {
     }
 }
 
-/// Produces a provider-ready PNG, or JPEG for large photos, at most 2048
-/// pixels on its long side. Returns the file extension and the bytes.
+/// Produces a provider-ready image at most 2048 pixels on its long side: PNG,
+/// or quality-85 JPEG when the PNG exceeds 512 KiB and the JPEG is smaller.
+/// Returns the file extension and the bytes.
 pub fn convert(
     data: &[u8],
     cancellation: &Cancellation,
@@ -120,15 +121,28 @@ $height = [Math]::Max(1, [int]($source.Height * $scale))
 $bitmap = New-Object System.Drawing.Bitmap $width, $height
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.InterpolationMode = 'HighQualityBicubic'
+$graphics.PixelOffsetMode = 'HighQuality'
 $graphics.DrawImage($source, 0, 0, $width, $height)
 $graphics.Dispose()
 $output = New-Object System.IO.MemoryStream
 $bitmap.Save($output, [System.Drawing.Imaging.ImageFormat]::Png)
 $extension = 'png'
-if ($output.Length -gt 3750000) {
-  $output = New-Object System.IO.MemoryStream
-  $bitmap.Save($output, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-  $extension = 'jpg'
+if ($output.Length -gt 524288) {
+  # Transparent areas become white, as image viewers show them.
+  $flat = New-Object System.Drawing.Bitmap $width, $height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  $canvas = [System.Drawing.Graphics]::FromImage($flat)
+  $canvas.Clear([System.Drawing.Color]::White)
+  $canvas.DrawImage($bitmap, 0, 0, $width, $height)
+  $canvas.Dispose()
+  $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+  $parameters = New-Object System.Drawing.Imaging.EncoderParameters 1
+  $parameters.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 85L
+  $jpeg = New-Object System.IO.MemoryStream
+  $flat.Save($jpeg, $codec, $parameters)
+  if ($jpeg.Length -lt $output.Length) {
+    $output = $jpeg
+    $extension = 'jpg'
+  }
 }
 [Console]::Out.Write($extension + "`n" + [Convert]::ToBase64String($output.ToArray()))"#;
 
@@ -263,10 +277,24 @@ fn convert_native(
             .arg("--out")
             .arg(&output);
         run(&mut command, None, Duration::from_secs(60), cancellation)?;
-        Ok((
-            "png",
-            std::fs::read(&output).map_err(|error| error.to_string())?,
-        ))
+        let png = std::fs::read(&output).map_err(|error| error.to_string())?;
+        if png.len() <= 512 * 1024 {
+            return Ok(("png", png));
+        }
+        let jpeg = folder.join("output.jpg");
+        let mut command = Command::new("/usr/bin/sips");
+        command
+            .args(["-s", "format", "jpeg", "-s", "formatOptions", "85"])
+            .arg(&output)
+            .arg("--out")
+            .arg(&jpeg);
+        run(&mut command, None, Duration::from_secs(60), cancellation)?;
+        let smaller = std::fs::read(&jpeg).map_err(|error| error.to_string())?;
+        Ok(if smaller.len() < png.len() {
+            ("jpg", smaller)
+        } else {
+            ("png", png)
+        })
     })();
     let _ = std::fs::remove_dir_all(&folder);
     result
@@ -326,6 +354,72 @@ mod tests {
             Some(5)
         );
         assert!(convert(b"not an image", &Cancellation::default()).is_err());
+        // Detailed large images become a compact JPEG with the same geometry.
+        let mut noise = bmp(3000, 1500);
+        let mut state = 0x2545_f491_u32;
+        for byte in &mut noise[54..] {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            *byte = state as u8;
+        }
+        let (extension, jpeg) = convert(&noise, &Cancellation::default()).unwrap();
+        assert_eq!(extension, "jpg");
+        let detected = crate::attachments::media::detect(&jpeg, "x", true);
+        assert_eq!(
+            (detected.media.as_str(), detected.width, detected.height),
+            ("image/jpeg", Some(2048), Some(1024))
+        );
+    }
+
+    #[test]
+    #[ignore = "runs the native image converter (PowerShell on Windows and WSL, sips on macOS)"]
+    fn native_imports_skip_unused_or_too_large_views() {
+        let (_, png) = convert(&bmp(3000, 10), &Cancellation::default()).unwrap();
+        let root = crate::test_support::Directory::new();
+        let pool = crate::attachments::Pool::new(root.path().to_path_buf());
+
+        let mut large = png.clone();
+        large.resize(16 * 1024 * 1024 + 1, 0);
+        assert!(convert(&large, &Cancellation::default()).unwrap().1.len() < large.len());
+        let image = pool.import_bytes("large.png", &large).unwrap();
+        let stored = pool.load(&image.id).unwrap();
+        assert_eq!(std::fs::read(stored.path).unwrap(), large);
+        assert!(!root.path().join(format!("{}.view.png", image.id)).exists());
+        assert!(!root.path().join(format!("{}.view.jpg", image.id)).exists());
+
+        let mut page = png;
+        page.resize(600_000, 0);
+        assert!(convert(&page, &Cancellation::default()).unwrap().1.len() < page.len());
+        let url = format!(
+            "data:image/png;base64,{}",
+            super::super::base64::encode(&page)
+        );
+        let mut message = crate::json::Value::object([(
+            "annotations",
+            crate::json::Value::Array(vec![crate::json::Value::string(&url)]),
+        )]);
+        crate::backend::openrouter::annotations::store(&mut message, Some(&pool)).unwrap();
+        let reference = message
+            .get("annotations")
+            .and_then(crate::json::Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("jecode_attachment"))
+            .and_then(crate::json::Value::as_str)
+            .unwrap();
+        let id = reference.strip_prefix("attachment:").unwrap();
+        assert_eq!(std::fs::read(pool.load(id).unwrap().path).unwrap(), page);
+        assert!(!root.path().join(format!("{id}.view.png")).exists());
+        assert!(!root.path().join(format!("{id}.view.jpg")).exists());
+        crate::backend::openrouter::annotations::restore(&mut message, Some(&pool)).unwrap();
+        assert_eq!(
+            message
+                .get("annotations")
+                .and_then(crate::json::Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(crate::json::Value::as_str),
+            Some(url.as_str())
+        );
     }
 
     #[test]

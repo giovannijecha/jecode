@@ -88,7 +88,7 @@ impl Api {
             command.args(["--noproxy", "*"]);
         }
         let mut headers = Headers::default();
-        let output = process::run_observed(
+        let output = crate::curl::run(
             &mut command,
             body.map(|body| body.as_bytes().to_vec()),
             None,

@@ -1,5 +1,4 @@
 use crate::cancel::Cancellation;
-use std::io::Read;
 #[cfg(all(windows, test))]
 use std::process::Stdio;
 use std::process::{Child, Command};
@@ -11,16 +10,11 @@ use std::time::{Duration, Instant};
 mod unix;
 #[cfg(windows)]
 mod windows;
+
+mod capture;
+use capture::{Capture, capture};
 #[cfg(windows)]
 pub(crate) use windows::{CREATE_NO_WINDOW, helper as compile_helper};
-
-#[derive(Default)]
-struct Capture {
-    bytes: Vec<u8>,
-    truncated: bool,
-    error: Option<String>,
-    total_bytes: usize,
-}
 
 pub struct Output {
     pub stdout: Vec<u8>,
@@ -49,6 +43,7 @@ impl From<String> for RunError {
     }
 }
 
+/// Observe complete stdout while bounding the bytes retained in `Output`.
 pub fn run_observed(
     command: &mut Command,
     input: Option<Vec<u8>>,
@@ -70,6 +65,37 @@ pub fn run_observed(
             spools: [None, None],
             observed: true,
             idle,
+            leaf: false,
+        },
+    )
+    .map_err(|error| error.message)
+}
+
+/// Like `run_observed`, for an executable that starts no child processes,
+/// such as curl. Windows launches it directly instead of through the Job
+/// Object supervisor; Unix keeps its process-group boundary.
+pub fn run_leaf(
+    command: &mut Command,
+    input: Option<Vec<u8>>,
+    timeout: impl Into<Option<Duration>>,
+    output_limit: usize,
+    cancellation: &Cancellation,
+    idle: Option<Duration>,
+    observer: &mut impl FnMut(&[u8]) -> Result<(), String>,
+) -> Result<Output, String> {
+    run_inner(
+        command,
+        input,
+        timeout.into(),
+        cancellation,
+        observer,
+        CaptureOptions {
+            limit: output_limit,
+            tail: false,
+            spools: [None, None],
+            observed: true,
+            idle,
+            leaf: true,
         },
     )
     .map_err(|error| error.message)
@@ -95,6 +121,7 @@ pub fn run_logged(
             spools: [Some(stdout), Some(stderr)],
             observed: false,
             idle: None,
+            leaf: false,
         },
     )
 }
@@ -105,6 +132,8 @@ struct CaptureOptions {
     spools: [Option<crate::output::Spool>; 2],
     observed: bool,
     idle: Option<Duration>,
+    /// Starts a childless executable directly on Windows.
+    leaf: bool,
 }
 
 fn run_inner(
@@ -138,6 +167,7 @@ pub fn start_logged(
             spools: [Some(stdout), Some(stderr)],
             observed: false,
             idle: None,
+            leaf: false,
         },
     )
 }
@@ -151,7 +181,7 @@ pub struct Started {
     chunks: mpsc::Receiver<Vec<u8>>,
     writer: Option<JoinHandle<std::io::Result<()>>>,
     #[cfg(windows)]
-    completion: JoinHandle<Result<i32, String>>,
+    completion: Option<JoinHandle<Result<i32, String>>>,
     #[cfg(unix)]
     owner: unix::Owner,
     started: Instant,
@@ -170,6 +200,9 @@ fn start(
             message: "Operation cancelled".into(),
         });
     }
+    // Unix keeps its process-group boundary for every command.
+    #[cfg(unix)]
+    let _ = options.leaf;
     #[cfg(unix)]
     let unix::Spawned {
         mut child,
@@ -183,7 +216,11 @@ fn start(
         stdout: child_stdout,
         writer: stdin_writer,
         completion,
-    } = windows::spawn(command, input, cancellation)?;
+    } = if options.leaf {
+        windows::spawn_leaf(command, input)?
+    } else {
+        windows::spawn(command, input, cancellation)?
+    };
     let started = Instant::now();
     let stdout = Arc::new(Mutex::new(Capture::default()));
     let stderr = Arc::new(Mutex::new(Capture::default()));
@@ -356,7 +393,10 @@ impl Started {
 
         #[cfg(windows)]
         let native_exit_code = if !terminated {
-            Some(windows::completion(completion).map_err(RunError::from)?)
+            match completion {
+                Some(completion) => Some(windows::completion(completion).map_err(RunError::from)?),
+                None => status.and_then(|status| status.code()),
+            }
         } else {
             None
         };
@@ -400,60 +440,6 @@ impl Started {
     }
 }
 
-fn capture(
-    mut reader: impl Read + Send + 'static,
-    output: Arc<Mutex<Capture>>,
-    limit: usize,
-    chunks: Option<mpsc::Sender<Vec<u8>>>,
-    tail: bool,
-    mut spool: Option<crate::output::Spool>,
-) -> JoinHandle<()> {
-    thread::spawn(move || {
-        let mut buffer = [0; 8192];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => {
-                    if let Some(spool) = &mut spool
-                        && let Err(error) = spool.finish()
-                    {
-                        output.lock().unwrap().error = Some(error.to_string());
-                    }
-                    break;
-                }
-                Ok(length) => {
-                    if let Some(spool) = &mut spool
-                        && let Err(error) = spool.write(&buffer[..length])
-                    {
-                        output.lock().unwrap().error = Some(error.to_string());
-                        break;
-                    }
-                    let mut output = output.lock().unwrap();
-                    output.total_bytes = output.total_bytes.saturating_add(length);
-                    let keep = length.min(limit.saturating_sub(output.bytes.len()));
-                    if tail {
-                        output.bytes.extend_from_slice(&buffer[..length]);
-                        let drop = output.bytes.len().saturating_sub(limit);
-                        output.bytes.drain(..drop);
-                    } else {
-                        output.bytes.extend_from_slice(&buffer[..keep]);
-                    }
-                    output.truncated |= keep < length;
-                    if keep > 0
-                        && let Some(chunks) = &chunks
-                    {
-                        let _ = chunks.send(buffer[..keep].to_vec());
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) => {
-                    output.lock().unwrap().error = Some(error.to_string());
-                    break;
-                }
-            }
-        }
-    })
-}
-
 #[cfg(unix)]
 use unix::terminate;
 #[cfg(windows)]
@@ -461,5 +447,7 @@ use windows::terminate;
 
 #[cfg(all(test, windows))]
 mod env_tests;
+#[cfg(all(test, windows))]
+mod leaf_tests;
 #[cfg(test)]
 mod tests;

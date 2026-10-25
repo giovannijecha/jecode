@@ -97,7 +97,10 @@ fn persistent_processes_span_turns_and_end_only_with_their_conversation() {
     ]);
     let mut agent = agent(&home, &directory, &fixture.endpoint);
     agent
-        .run_turn("Start the watcher", &mut |_| Ok(()))
+        .run_turn("Start the watcher", &mut |event| match event {
+            Event::Recovering { error, .. } => Err(format!("Unexpected fixture recovery: {error}")),
+            _ => Ok(()),
+        })
         .unwrap();
     let result = agent
         .messages
@@ -123,7 +126,10 @@ fn persistent_processes_span_turns_and_end_only_with_their_conversation() {
     agent.cancellation().cancel();
     agent.cancellation().reset();
     agent
-        .run_turn("Check the watcher", &mut |_| Ok(()))
+        .run_turn("Check the watcher", &mut |event| match event {
+            Event::Recovering { error, .. } => Err(format!("Unexpected fixture recovery: {error}")),
+            _ => Ok(()),
+        })
         .unwrap();
     let listed = agent.messages.lock().unwrap().iter().any(|message| {
         message.get("tool_call_id").and_then(Value::as_str) == Some("check")

@@ -262,7 +262,7 @@ fn run_once(
         command.args(["--data-binary", "@-"]);
     }
     command.arg("--url").arg(&url.value);
-    let output = crate::process::run_observed(
+    let output = crate::curl::run(
         &mut command,
         options.body.as_ref().map(|body| body.as_bytes().to_vec()),
         Some(timeout.saturating_add(Duration::from_secs(1))),

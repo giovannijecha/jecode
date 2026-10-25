@@ -204,10 +204,12 @@ fn auto_keeps_native_routing_and_adds_preferences_only_from_fresh_data() {
     assert_eq!(auto.fields("other/model", false, now).len(), 1);
     assert!(explain(&Routing::Auto, auto.guard(MODEL, false, stale)).contains("too little"));
     assert!(explain(&Routing::Auto, auto.guard(MODEL, false, now)).contains("(provisional)"));
-    assert!(
-        router(Routing::Default, Some(typical()))
-            .fields(MODEL, false, now)
-            .is_empty()
+    let mut default = router(Routing::Default, Some(typical()));
+    assert!(default.fields(MODEL, false, now).is_empty());
+    default.session = Some("conversation-1".into());
+    assert_eq!(
+        encoded(&default.fields(MODEL, false, now)),
+        [r#"session_id="conversation-1""#]
     );
 }
 

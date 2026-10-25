@@ -3,8 +3,10 @@
 //! Auto leaves endpoint choice to OpenRouter's native routing, which weighs
 //! price, latency, throughput and uptime, keeps fallbacks and, for tool
 //! requests, Auto Exacto. It never sorts by price, which would bypass Auto
-//! Exacto. It adds a stable `session_id` to help reuse a warm endpoint, and,
-//! only when fresh measurements exist, a responsiveness guard.
+//! Exacto. Auto and Default add a stable `session_id`, which makes OpenRouter
+//! keep a conversation on the provider holding its prompt cache from the first
+//! request instead of only after a detected cache hit. Auto also adds, only
+//! when fresh measurements exist, a responsiveness guard.
 //! A specific endpoint is an explicit pin without fallbacks.
 
 mod options;
@@ -181,7 +183,7 @@ pub struct Router {
     endpoints: Option<Endpoints>,
     /// The model and time of the last metadata fetch, successful or not.
     attempted: Option<(String, Instant)>,
-    /// The conversation identifier sent as `session_id` in Auto.
+    /// The conversation identifier sent as `session_id` in Auto and Default.
     pub session: Option<String>,
 }
 
@@ -286,7 +288,12 @@ impl Router {
     /// Top-level request fields for `model`'s next request.
     pub fn fields(&self, model: &str, reasoning: bool, now: Instant) -> Vec<(&'static str, Value)> {
         match &self.routing {
-            Routing::Default => vec![],
+            // Cache stickiness only; no routing preference.
+            Routing::Default => self
+                .session
+                .iter()
+                .map(|session| ("session_id", Value::string(session)))
+                .collect(),
             Routing::Auto => {
                 let mut fields = Vec::new();
                 if let Some(session) = &self.session {

@@ -118,14 +118,19 @@ fn small_supported_images_are_sent_unchanged() {
 }
 
 #[test]
-fn large_supported_images_preserve_original_bytes_and_dimensions() {
+fn oversized_images_keep_original_bytes_without_a_smaller_view() {
     let root = Directory::new();
     let pool = Pool::new(root.path().to_path_buf());
     let mut data = png(9001, 600);
     data.resize(4 * 1024 * 1024, 0);
     let image = pool.import_bytes("large.png", &data).unwrap();
     assert_eq!((image.width, image.height), (Some(9001), Some(600)));
-    assert_eq!(pool.view(&image).unwrap(), Some(("image/png".into(), data)));
+    // The header-only fixture cannot be decoded, so the original is the view.
+    assert_eq!(
+        pool.view(&image).unwrap(),
+        Some(("image/png".into(), data.clone()))
+    );
+    assert_eq!(fs::read(pool.load(&image.id).unwrap().path).unwrap(), data);
 }
 
 #[test]

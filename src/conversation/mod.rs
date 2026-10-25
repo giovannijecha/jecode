@@ -28,6 +28,7 @@ const CORE: &[&str] = &[
 pub struct Origin {
     pub backend: String,
     pub model: String,
+    pub account: Option<String>,
 }
 
 impl Origin {
@@ -35,14 +36,29 @@ impl Origin {
         Self {
             backend: backend.into(),
             model: model.into(),
+            account: None,
+        }
+    }
+
+    pub fn with_account(backend: &str, model: &str, account: Option<String>) -> Self {
+        Self {
+            backend: backend.into(),
+            model: model.into(),
+            account,
         }
     }
 
     pub fn value(&self) -> Value {
-        Value::object([
+        let mut value = Value::object([
             ("backend", Value::string(&self.backend)),
             ("model", Value::string(&self.model)),
-        ])
+        ]);
+        if let Some(account) = &self.account
+            && let Value::Object(fields) = &mut value
+        {
+            fields.insert("account".into(), Value::string(account));
+        }
+        value
     }
 
     pub fn parse(value: &Value) -> Result<Self, String> {
@@ -53,7 +69,21 @@ impl Origin {
                 .filter(|field| !field.trim().is_empty())
                 .ok_or_else(|| format!("Conversation origin {key} is invalid"))
         };
-        Ok(Self::new(field("backend")?, field("model")?))
+        let account = value
+            .get("account")
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|account| !account.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| "Conversation origin account is invalid".to_string())
+            })
+            .transpose()?;
+        Ok(Self::with_account(
+            field("backend")?,
+            field("model")?,
+            account,
+        ))
     }
 }
 
@@ -78,14 +108,11 @@ pub fn stamp(message: &mut Value, origin: &Origin) {
             extras.insert(key, value);
         }
     }
-    fields.insert(
-        ENVELOPE.into(),
-        Value::object([
-            ("backend", Value::string(&origin.backend)),
-            ("model", Value::string(&origin.model)),
-            ("extras", Value::Object(extras)),
-        ]),
-    );
+    let mut envelope = origin.value();
+    if let Value::Object(fields) = &mut envelope {
+        fields.insert("extras".into(), Value::Object(extras));
+    }
+    fields.insert(ENVELOPE.into(), envelope);
 }
 
 /// The durable fields that any backend can read. Context summaries use this
@@ -165,7 +192,9 @@ pub fn project(message: &Value, current: &Origin) -> Value {
             if envelope.get("backend").and_then(Value::as_str)
                 == Some(current.backend.as_str())
                 && envelope.get("model").and_then(Value::as_str)
-                    == Some(current.model.as_str()) =>
+                    == Some(current.model.as_str())
+                && envelope.get("account").and_then(Value::as_str)
+                    == current.account.as_deref() =>
         {
             if let Some(Value::Object(extras)) = envelope.get("extras") {
                 projected.extend(

@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn account_owned_items_only_return_to_the_same_verified_registration() {
+    let account_a = Origin::with_account("openai", "model", Some("client-a:subject".into()));
+    let account_b = Origin::with_account("openai", "model", Some("client-b:subject".into()));
+    let original = Value::object([
+        ("role", Value::string("assistant")),
+        ("content", Value::string("portable answer")),
+        (
+            "openai_items",
+            Value::Array(vec![Value::object([
+                ("type", Value::string("reasoning")),
+                ("encrypted_content", Value::string("opaque account data")),
+            ])]),
+        ),
+    ]);
+    let mut stored = original.clone();
+    stamp(&mut stored, &account_a);
+    assert_eq!(Origin::parse(&account_a.value()).unwrap(), account_a);
+    assert_eq!(project(&stored, &account_a), original);
+    for other in [account_b, Origin::new("openai", "model")] {
+        let projected = project(&stored, &other);
+        assert!(projected.get("openai_items").is_none());
+        assert_eq!(
+            projected.get("content"),
+            Some(&Value::string("portable answer"))
+        );
+    }
+    assert_eq!(portable(&stored).get("openai_items"), None);
+}
+
+#[test]
 fn origin_roundtrips_without_provider_assumptions() {
     let origin = Origin::new("local-backend", "custom/model:version");
     assert_eq!(Origin::parse(&origin.value()).unwrap(), origin);

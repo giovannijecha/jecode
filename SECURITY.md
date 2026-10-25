@@ -17,11 +17,16 @@ There is no guaranteed response time.
 
 Jecode runs local tools with the invoking user's permissions. It is not a
 sandbox for untrusted projects or commands. Settings include plaintext backend
-API keys in the user-scoped configuration; sessions, attachment copies
+API keys in the user-scoped configuration and ChatGPT tokens in separate
+protected account records; sessions, attachment copies
 and workspace checkpoint archives are also local data. Checkpoint archives hold
 unredacted project file contents, including Git-ignored secrets such as `.env`.
 Model requests send the selected conversation and supported attachments to the
-active backend. OpenRouter currently forwards them to its selected model provider.
+active backend. OpenRouter forwards them to its selected model provider; OpenAI
+receives them directly through the Responses API using the selected ChatGPT plan.
+OAuth access, refresh and ID tokens remain local. Credential records use
+owner-only Unix permissions or a Windows ACL restricted to the current user.
+Refreshed tokens are masked by existing output and persistence consumers.
 The `web` tool makes direct HTTP(S) requests from the user's machine using local
 curl. The `browser` tool controls a locally installed Chromium-based browser
 through a loopback DevTools connection. Fetched content, browser snapshots,

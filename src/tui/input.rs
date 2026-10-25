@@ -333,6 +333,9 @@ impl App {
             self.state.selector = None;
             return;
         }
+        if self.close_provider_panel() {
+            return;
+        }
         drop(self.job.take());
         if self.settings_parent.is_some() {
             self.cancel_setting();
