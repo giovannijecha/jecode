@@ -226,6 +226,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
                     Effort::High,
                     80,
                     &crate::backend::openrouter::Routing::Auto,
+                    std::path::Path::new("fixture/config.json"),
                 ),
             ),
         ),

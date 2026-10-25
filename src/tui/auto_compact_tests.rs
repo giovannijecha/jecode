@@ -93,6 +93,7 @@ fn a_saved_threshold_applies_to_this_and_new_conversations() {
     );
     let notice = app.state.notice.as_ref().unwrap();
     assert!(notice.text.contains("Auto-compact: 80% → 55%"));
+    assert!(notice.change);
     app.close_selector();
     assert_eq!(app.state.editor.text, "kept draft");
     app.state.editor.take();

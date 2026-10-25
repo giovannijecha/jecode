@@ -122,10 +122,12 @@ fn running(tool: &Tool<'_>) -> Line {
     line
 }
 
-/// A missing path reads `Not found`; the title already names it.
+/// A missing file path reads `Not found`; the title already names it.
 fn short_error(error: &str) -> String {
     let error = text::clean(error);
-    if error.contains("(os error 2)") || error.contains("(os error 3)") {
+    if error.starts_with("Could not resolve path ")
+        && (error.contains("(os error 2)") || cfg!(windows) && error.contains("(os error 3)"))
+    {
         "Not found".into()
     } else {
         error

@@ -1,4 +1,59 @@
 use super::*;
+use crate::events::Event;
+
+#[test]
+fn retry_progress_temporarily_overlays_maintenance_and_restores_its_clock() {
+    let mut state = State::default();
+    state.event(Event::Maintenance {
+        text: "Compacting context".into(),
+    });
+    let started = state.current_progress().unwrap().started();
+    for attempt in 1..=2 {
+        state.event(Event::Recovering {
+            attempt,
+            delay: Duration::from_secs(1),
+            error: "OpenRouter HTTP 429: retry".into(),
+        });
+        assert!(
+            state
+                .current_progress()
+                .unwrap()
+                .text
+                .starts_with("Rate limited")
+        );
+    }
+    state.event(Event::RecoveryFinished);
+    let restored = state
+        .current_progress()
+        .expect("maintenance outlives a retry");
+    assert_eq!(restored.text, "Compacting context");
+    assert_eq!(restored.started(), started);
+    state.event(Event::ContextCompacted {
+        text: "Context compacted".into(),
+    });
+    assert!(state.current_progress().is_none());
+    state.event(Event::Recovering {
+        attempt: 1,
+        delay: Duration::from_secs(1),
+        error: "fixture".into(),
+    });
+    state.event(Event::Maintenance {
+        text: "Compacting context".into(),
+    });
+    assert!(
+        state
+            .current_progress()
+            .unwrap()
+            .text
+            .starts_with("Reconnecting")
+    );
+    state.clear_progress();
+    state.event(Event::RecoveryFinished);
+    assert!(
+        state.current_progress().is_none(),
+        "finishing a retry must not resurrect cleared work"
+    );
+}
 
 #[test]
 fn automatic_success_and_progress_cannot_replace_an_unread_error() {

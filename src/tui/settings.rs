@@ -72,10 +72,33 @@ impl App {
         result: &str,
         details: Vec<(String, String)>,
     ) {
+        self.finish_setting_with_change(kind, result, details, false);
+    }
+
+    pub(super) fn finish_setting_change(
+        &mut self,
+        kind: Kind,
+        result: &str,
+        details: Vec<(String, String)>,
+    ) {
+        self.finish_setting_with_change(kind, result, details, true);
+    }
+
+    fn finish_setting_with_change(
+        &mut self,
+        kind: Kind,
+        result: &str,
+        details: Vec<(String, String)>,
+        change: bool,
+    ) {
         if self.settings_parent.is_some() && self.pending_command.is_none() {
             self.local_start("/settings");
         }
-        self.local_finish(kind, result, details);
+        if change {
+            self.local_finish_change(kind, result, details);
+        } else {
+            self.local_finish(kind, result, details);
+        }
         self.return_to_settings();
     }
 
@@ -87,8 +110,9 @@ impl App {
                 settings.effort,
                 settings.auto_compact,
                 &settings.routing_for(&settings.model),
+                self.config.store.path(),
             );
-            menu.selected = Selector::setting_index(parent);
+            menu.selected = menu.setting_index(parent);
             self.state.selector = Some(menu);
         }
     }
@@ -116,7 +140,7 @@ impl App {
                         self.config.settings.effort.name()
                     );
                     self.config.settings = settings;
-                    self.finish_setting(
+                    self.finish_setting_change(
                         Kind::Notice,
                         &format!(
                             "Default model: {previous} → {model} ({}) · new conversations",
@@ -136,7 +160,7 @@ impl App {
                     self.archive = agent.archive();
                     self.state.effort = effort.name().into();
                     self.refresh_context();
-                    self.finish_setting(
+                    self.finish_setting_change(
                         Kind::Notice,
                         &format!(
                             "Model: {previous} → {model} ({}) · this conversation",
@@ -341,7 +365,7 @@ impl App {
                     agent.set_auto_compact(percent);
                 }
                 self.refresh_context();
-                self.finish_setting(
+                self.finish_setting_change(
                     Kind::Notice,
                     &format!("Auto-compact: {previous}% → {percent}% · this and new conversations"),
                     vec![],

@@ -158,7 +158,7 @@ impl App {
                             &self.config.settings.backend_id,
                             self.config.settings.routing.clone(),
                         );
-                    self.finish_setting(
+                    self.finish_setting_change(
                         Kind::Notice,
                         &format!(
                             "Default routing for {model}: {} → {} · new conversations and model switches",
@@ -182,7 +182,7 @@ impl App {
         }
         let previous = agent.routing().label();
         agent.set_routing(entry.routing.clone());
-        self.finish_setting(
+        self.finish_setting_change(
             Kind::Notice,
             &format!(
                 "Routing: {previous} → {} · from the next request",

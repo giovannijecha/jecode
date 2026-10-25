@@ -4,6 +4,7 @@ use crate::{
     effort::Effort,
     session::commands::match_text,
 };
+use std::path::Path;
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,7 +260,13 @@ impl Selector {
         menu
     }
     /// `routing` is the default model's saved routing.
-    pub fn settings(model: &str, effort: Effort, auto_compact: u8, routing: &Routing) -> Self {
+    pub fn settings(
+        model: &str,
+        effort: Effort,
+        auto_compact: u8,
+        routing: &Routing,
+        config_path: &Path,
+    ) -> Self {
         let setting = |name: &str, value: String, prose: &str, setting| OptionRow {
             prose: prose.into(),
             ..row(name, value, Choice::Setting(setting))
@@ -295,7 +302,10 @@ impl Selector {
                 setting(
                     "API key",
                     "configured".into(),
-                    "Your OpenRouter key, kept in plain text in ~/.jecode/config.json. Input stays hidden.",
+                    &format!(
+                        "Your OpenRouter key, kept in plain text in {}. Input stays hidden.",
+                        config_path.display()
+                    ),
                     Setting::Key,
                 ),
             ],
@@ -304,17 +314,13 @@ impl Selector {
         menu
     }
     /// The settings row of `setting`, to restore focus on return.
-    pub fn setting_index(setting: Setting) -> usize {
-        [
-            Setting::Model,
-            Setting::Effort,
-            Setting::Routing,
-            Setting::AutoCompact,
-            Setting::Key,
-        ]
-        .iter()
-        .position(|candidate| *candidate == setting)
-        .unwrap_or(0)
+    pub fn setting_index(&self, setting: Setting) -> usize {
+        self.options
+            .iter()
+            .position(
+                |option| matches!(option.choice, Choice::Setting(choice) if choice == setting),
+            )
+            .unwrap_or(0)
     }
     /// Focus starts on `current`, which the entries mark.
     pub fn routing(

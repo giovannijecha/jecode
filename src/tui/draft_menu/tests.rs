@@ -174,7 +174,7 @@ fn an_edited_draft_keeps_the_turn_open_and_joins_it_in_fifo_order_when_saved() {
     text(&mut app, " revised");
     release.send(()).unwrap();
     wait_until(&mut app, |app| {
-        app.state.status.starts_with("Waiting for the draft")
+        app.state.status.starts_with("Waiting for your edit")
     });
     assert!(app.worker.is_some());
     assert_eq!(app.state.queue.messages(), ["queued two"]);

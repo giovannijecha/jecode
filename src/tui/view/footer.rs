@@ -7,6 +7,7 @@ use crate::{
         theme::{METER_FILL, METER_TRACK, MUTED, Style, WARNING},
     },
 };
+use std::sync::OnceLock;
 
 /// Panels keep the footer below them from this many rows.
 const PANEL_MIN: usize = 10;
@@ -14,12 +15,14 @@ const PANEL_MIN: usize = 10;
 const METER_CELLS: usize = 8;
 /// The meter and share turn gold this many points before auto-compaction.
 const NEAR: usize = 3;
+static USER_HOME: OnceLock<Option<String>> = OnceLock::new();
 
 /// The footer: the home-relative directory on the left; the context meter and
 /// share, model and effort on the right. Narrow rows fall back to the project
 /// name and the model without its provider, then drop them.
 pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) -> Line {
-    let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok();
+    let home = USER_HOME
+        .get_or_init(|| std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok());
     let directory = text::clean(directory.strip_prefix(r"\\?\").unwrap_or(directory));
     let path = home_relative(&directory, home.as_deref());
     let project = directory
@@ -67,7 +70,7 @@ pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) 
 fn gauge(status: &Status) -> Line {
     let threshold = usize::from(status.auto_compact).max(1);
     let percent = status.percent();
-    let near = percent.is_some_and(|percent| percent + NEAR >= threshold);
+    let near = percent.is_some_and(|percent| percent >= threshold.saturating_sub(NEAR).max(1));
     let fill: Style = if near { WARNING } else { METER_FILL };
     let filled = percent.map_or(0, |percent| {
         (percent.min(threshold) * METER_CELLS * 2 + threshold) / (threshold * 2)

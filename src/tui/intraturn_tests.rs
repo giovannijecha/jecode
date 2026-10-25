@@ -220,7 +220,7 @@ fn cancelling_a_held_edit_delivers_the_message_and_a_later_stop_does_not_requeue
     app.input(Decoded::Text(" unsaved".into())).unwrap();
     release.send(()).unwrap();
     wait_until(&mut app, |app| {
-        app.state.status.starts_with("Waiting for the draft")
+        app.state.status.starts_with("Waiting for your edit")
     });
     assert!(app.worker.is_some());
     // Ctrl+C first cancels the edit; the original message joins the turn.
@@ -265,7 +265,7 @@ fn quitting_while_an_edit_holds_the_turn_returns_promptly_and_keeps_the_draft() 
     key(&mut app, 13, 0);
     release.send(()).unwrap();
     wait_until(&mut app, |app| {
-        app.state.status.starts_with("Waiting for the draft")
+        app.state.status.starts_with("Waiting for your edit")
     });
     let handle = app.persistence.clone().unwrap();
     let started = Instant::now();

@@ -34,6 +34,7 @@ fn state(columns: usize) -> State {
 }
 
 fn working(state: &mut State, seconds: f64) {
+    state.status = "Working…".into();
     let mut activity = Activity::new();
     activity.started = Instant::now() - Duration::from_secs_f64(seconds);
     state.activity = Some(activity);
@@ -72,6 +73,11 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     queued(&mut editing);
     let slot = editing.queue.slot(0).unwrap();
     editing.queue.begin_edit(slot, &mut editing.editor).unwrap();
+    editing.event(crate::events::Event::InputHeld);
+
+    let mut stopping = state(columns);
+    working(&mut stopping, 48.2);
+    stopping.activity.as_mut().unwrap().stopping = true;
 
     let mut history = state(columns);
     history.history.record("explain the session store");
@@ -122,6 +128,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ("Working with queued messages", queue),
         ("Working past an hour", long),
         ("Editing a queued message", editing),
+        ("Stopping", stopping),
         ("Prompt history", history),
         ("Completed turn tools", inspection),
         ("Reconnecting", reconnecting),

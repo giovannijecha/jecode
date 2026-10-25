@@ -194,6 +194,7 @@ impl App {
                     settings.effort,
                     settings.auto_compact,
                     &settings.routing_for(&settings.model),
+                    self.config.store.path(),
                 ));
             }
             "/routing" if arguments.is_empty() => self.open_routing(false),
@@ -257,7 +258,7 @@ impl App {
                                 self.archive = self.agent.as_ref().unwrap().archive();
                                 self.state.effort = Effort::Default.name().into();
                                 self.refresh_context();
-                                self.local_finish(
+                                self.local_finish_change(
                                     Kind::Notice,
                                     &format!(
                                         "Backend: {previous} → {id} / {model} · this conversation"
@@ -326,6 +327,25 @@ impl App {
         result: &str,
         details: Vec<(String, String)>,
     ) {
+        self.local_finish_with_change(kind, result, details, false);
+    }
+
+    pub(super) fn local_finish_change(
+        &mut self,
+        kind: Kind,
+        result: &str,
+        details: Vec<(String, String)>,
+    ) {
+        self.local_finish_with_change(kind, result, details, true);
+    }
+
+    fn local_finish_with_change(
+        &mut self,
+        kind: Kind,
+        result: &str,
+        details: Vec<(String, String)>,
+        change: bool,
+    ) {
         let result = self.archive.redactor.text(result);
         let details: Vec<_> = details
             .into_iter()
@@ -368,7 +388,13 @@ impl App {
                 self.clear_unless_error();
                 self.state.information = Some(information);
             }
-            _ => self.state.notify(Feedback::result(kind, result.clone())),
+            _ => {
+                let mut feedback = Feedback::result(kind, result.clone());
+                if change {
+                    feedback = feedback.change();
+                }
+                self.state.notify(feedback);
+            }
         }
         self.local_finish_quiet(kind, &result, details);
     }

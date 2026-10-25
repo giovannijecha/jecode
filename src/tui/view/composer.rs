@@ -239,7 +239,7 @@ fn scanner(progress: &Feedback) -> Line {
 
 /// The scanner, the turn's time and any progress, as one row.
 fn status(state: &State) -> Option<Line> {
-    let progress = state.current_progress();
+    let progress = state.current_progress().filter(|_| !stopping(state));
     let mut line = match (&state.activity, progress) {
         (Some(activity), _) => activity.line(true),
         (None, Some(progress)) => scanner(progress),
@@ -255,8 +255,29 @@ fn status(state: &State) -> Option<Line> {
             MUTED,
         );
         line = line.append(notices::progress(progress));
+    } else if let Some(phase) = phase(state) {
+        line.push(" · ", MUTED);
+        line = line.append(phase);
     }
     Some(line)
+}
+
+fn stopping(state: &State) -> bool {
+    state
+        .activity
+        .as_ref()
+        .is_some_and(|activity| activity.stopping)
+}
+
+/// Phase text belongs to the rule, below maintenance and retry feedback.
+fn phase(state: &State) -> Option<Line> {
+    state.activity.as_ref()?;
+    let label = if stopping(state) {
+        "Stopping"
+    } else {
+        state.status.trim_end_matches(['.', '…'])
+    };
+    (!matches!(label, "" | "Ready")).then(|| Line::new(label, MUTED))
 }
 
 pub(super) fn information_height(state: &State) -> usize {
@@ -297,8 +318,14 @@ fn draft(
     } else {
         String::new()
     };
-    let progress = state.current_progress();
-    let contexts = contexts(progress, &context, state.queue.len(), contextual);
+    let progress = state.current_progress().filter(|_| !stopping(state));
+    let contexts = contexts(
+        progress,
+        phase(state),
+        &context,
+        state.queue.len(),
+        contextual,
+    );
     let top = if let Some(activity) = state.activity.as_ref().filter(|_| columns >= 7) {
         // Esc names itself only while it stops the turn.
         let escape = !activity.stopping && !contextual && !back_to_bottom;
@@ -349,6 +376,7 @@ fn draft(
 /// The rule's context forms, longest first: progress, then the draft context.
 fn contexts(
     progress: Option<&Feedback>,
+    phase: Option<Line>,
     context: &str,
     drafts: usize,
     contextual: bool,
@@ -358,12 +386,12 @@ fn contexts(
         .as_ref()
         .filter(|_| !contextual)
         .map(|_| Line::new(&format!("Drafts {drafts}"), MUTED));
-    let Some(notice) = progress else {
+    let progress_line = progress.map(notices::progress).or(phase);
+    let Some(progress_line) = progress_line else {
         return context.into_iter().chain(short).collect();
     };
-    let progress = notices::progress(notice);
     let joined = |tail: &Line| {
-        let mut line = progress.clone();
+        let mut line = progress_line.clone();
         line.push(" · ", MUTED);
         line.append(tail.clone())
     };
@@ -371,8 +399,8 @@ fn contexts(
         .iter()
         .chain(short.iter())
         .map(joined)
-        .chain([progress.clone()])
-        .chain(notices::progress_forms(notice))
+        .chain([progress_line.clone()])
+        .chain(progress.into_iter().flat_map(notices::progress_forms))
         .collect()
 }
 

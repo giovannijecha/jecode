@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn settings_show_the_store_path_and_restore_focus_from_their_actual_rows() {
+    let path = Path::new(r"C:\fixture\custom-home\config.json");
+    let menu = Selector::settings("fixture/model", Effort::Default, 80, &Routing::Auto, path);
+    let key = menu.setting_index(Setting::Key);
+    assert!(
+        menu.options[key]
+            .prose
+            .contains(&path.display().to_string())
+    );
+    for (index, option) in menu.options.iter().enumerate() {
+        let Choice::Setting(setting) = option.choice else {
+            panic!("settings menu contains a non-setting row");
+        };
+        assert_eq!(menu.setting_index(setting), index);
+    }
+}
+
+#[test]
 fn model_search_matches_friendly_names_and_keeps_selection_in_the_filtered_list() {
     let models: Vec<_> = (0..12)
         .map(|index| Model {

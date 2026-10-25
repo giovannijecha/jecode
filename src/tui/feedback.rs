@@ -19,6 +19,8 @@ enum Lifetime {
 pub(super) struct Feedback {
     pub kind: Kind,
     pub text: String,
+    /// Whether this result describes a setting changing from an old value to a new one.
+    pub change: bool,
     /// A keycap and its label, naming the next step.
     pub action: Option<(&'static str, &'static str)>,
     /// When paused progress resumes, counted down after the text.
@@ -35,6 +37,7 @@ impl Feedback {
         Self {
             kind,
             text: text.into(),
+            change: false,
             action: None,
             until: None,
             lifetime: if matches!(kind, Kind::Warning | Kind::Error) {
@@ -54,6 +57,11 @@ impl Feedback {
 
     pub fn action(mut self, key: &'static str, label: &'static str) -> Self {
         self.action = Some((key, label));
+        self
+    }
+
+    pub fn change(mut self) -> Self {
+        self.change = true;
         self
     }
 
@@ -107,11 +115,12 @@ impl State {
 
     pub fn clear_progress(&mut self) {
         self.progress = None;
+        self.recovery = None;
     }
 
-    /// The progress beside the scanner: the operation's own, then a copy.
+    /// Retry countdowns overlay the operation's progress; a copy is last.
     pub fn current_progress(&self) -> Option<&Feedback> {
-        self.progress.as_ref().or(self
+        self.recovery.as_ref().or(self.progress.as_ref()).or(self
             .copy_notice
             .as_ref()
             .filter(|notice| notice.in_progress()))

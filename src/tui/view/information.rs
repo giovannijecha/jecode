@@ -124,8 +124,8 @@ pub(super) fn render(
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let width = panel::width(columns);
-    let all = content(info, width, limit(info, width, height));
     let limit = limit(info, width, height);
+    let all = content(info, width, limit);
     let total = all.len();
     let offset = info.offset.min(total.saturating_sub(limit));
     let overflow = total > limit;

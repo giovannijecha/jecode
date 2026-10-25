@@ -220,7 +220,7 @@ fn soft_breaks_join_paragraphs_and_hard_breaks_keep_rows() {
         plain,
         [
             "One two three four five  ",
-            "six\\",
+            "six",
             "seven",
             "• item more",
             "Next"
@@ -243,6 +243,11 @@ fn soft_breaks_join_paragraphs_and_hard_breaks_keep_rows() {
         plain("first line\nsecond line", 24),
         ["first line second line"]
     );
+    assert_eq!(
+        plain("escaped \\\\\ncontinuation", 80),
+        ["escaped \\ continuation"]
+    );
+    assert_eq!(plain("literal \\", 80), ["literal \\"]);
     assert_eq!(plain("A\n=\nB\ntitle\n---", 80), ["A", "", "B", "title"]);
     assert_eq!(
         plain("text\n| A | B |\n|---|---|", 80),

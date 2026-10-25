@@ -43,7 +43,8 @@ fn a_change_reads_old_to_new_with_the_new_value_strong() {
     let notice = Feedback::result(
         Kind::Notice,
         "Auto-compact: 80% → 55% · this and new conversations",
-    );
+    )
+    .change();
     let rows = lines(&notice, 80);
     assert_eq!(
         rows[0].plain(),
@@ -53,6 +54,33 @@ fn a_change_reads_old_to_new_with_the_new_value_strong() {
     assert_eq!(styled(&rows[0], "80% →"), MUTED);
     assert_eq!(styled(&rows[0], "55%"), STRONG);
     assert_eq!(styled(&rows[0], "this and new"), MUTED);
+}
+
+#[test]
+fn a_session_title_with_an_arrow_keeps_its_colon_and_muted_detail() {
+    let rows = lines(
+        &Feedback::result(Kind::Notice, "Previous session: Move A → B"),
+        80,
+    );
+    assert_eq!(rows[0].plain(), "Previous session: Move A → B");
+    assert_eq!(styled(&rows[0], "Move A → B"), MUTED);
+}
+
+#[test]
+fn an_error_cause_after_a_colon_keeps_the_error_colour() {
+    let rows = lines(
+        &Feedback::result(
+            Kind::Error,
+            "Autosave failed: permission denied · prompt restored",
+        ),
+        80,
+    );
+    assert_eq!(
+        rows[0].plain(),
+        "▌ Autosave failed: permission denied · prompt restored"
+    );
+    assert_eq!(styled(&rows[0], "permission denied"), BAD);
+    assert_eq!(styled(&rows[0], "prompt restored"), MUTED);
 }
 
 #[test]

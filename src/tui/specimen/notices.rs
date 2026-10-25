@@ -36,6 +36,7 @@ fn with(columns: usize, notice: Feedback) -> State {
 }
 
 fn working(state: &mut State, seconds: f64) {
+    state.status = "Working…".into();
     let mut activity = Activity::new();
     activity.started = Instant::now() - Duration::from_secs_f64(seconds);
     state.activity = Some(activity);
@@ -85,6 +86,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         crate::effort::Effort::High,
         80,
         &crate::backend::openrouter::Routing::Auto,
+        std::path::Path::new("fixture/config.json"),
     ));
 
     vec![
@@ -117,6 +119,10 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             ),
         ),
         ("Progress", progress),
+        (
+            "Tool details confirmation",
+            noticed(columns, Kind::Notice, "Tool details expanded · 6 tools"),
+        ),
         ("Compacting", compacting),
         (
             "Interrupted",

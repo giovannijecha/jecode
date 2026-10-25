@@ -308,8 +308,8 @@ fn joined<'a>(
 ) -> Cow<'a, str> {
     const LIMIT: usize = 8 * 1024;
     let mut text = Cow::Borrowed(first);
-    // Two trailing spaces or a backslash end the line with a hard break.
-    while text.len() < LIMIT && !text.ends_with("  ") && !text.ends_with('\\') {
+    // Two trailing spaces or an unescaped backslash end the line with a hard break.
+    while text.len() < LIMIT && !text.ends_with("  ") && !backslash_break(&text) {
         let inner = quote
             .then(|| quote_continuation(value, *position))
             .flatten();
@@ -322,7 +322,20 @@ fn joined<'a>(
         joined.push_str(line);
         *position = next;
     }
+    if *position <= value.len() && backslash_break(&text) {
+        text.to_mut().pop();
+    }
     text
+}
+
+fn backslash_break(value: &str) -> bool {
+    value
+        .bytes()
+        .rev()
+        .take_while(|&byte| byte == b'\\')
+        .count()
+        % 2
+        == 1
 }
 
 fn continuation(value: &str, position: usize, columns: usize) -> Option<(&str, usize)> {

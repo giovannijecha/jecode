@@ -141,11 +141,14 @@ Notices follow their lifetime. A result is a line on the terminal background
 with no icon and both subject and detail in `MUTED`;
 a change reads `Subject old → new · scope` with the new value
 strong. Warnings and errors are banners on the user surface with a `▌`
-stripe and subject in `WARNING` or `BAD`, and their next step as a keycap at
-the right. Progress has no row of its own: it rides the composer's upper
+stripe and subject in `WARNING` or `BAD`; an error's cause after a colon
+keeps `BAD`, while trailing context stays muted. Their next step is a keycap
+at the right. Progress has no row of its own: it rides the composer's upper
 rule, which carries the activity scanner (`▰` lit, `▱` resting), muted
 elapsed time while a turn runs, and the progress subject in `STRONG`, or
-`WARNING` with a countdown while a request waits to retry. Queue previews appear above notices and the
+`WARNING` with a countdown while a request waits to retry. Without progress,
+the rule names the current turn phase; `Stopping` takes priority when cancellation
+is requested. Queue previews appear above notices and the
 composer. The footer stays muted, including below an open panel; its context
 meter draws filled `━` cells in `SCANNER_LIT` on a `─` track in
 `SCANNER_REST`, and both meter and share turn `WARNING` near auto-compaction.

@@ -242,6 +242,7 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
         crate::effort::Effort::Default,
         80,
         &crate::backend::openrouter::Routing::Auto,
+        std::path::Path::new("fixture/config.json"),
     ));
     state.selector.as_mut().unwrap().selected = 4;
     let mut screen = Screen::new(state.width, state.height);

@@ -22,7 +22,11 @@ pub(super) fn lines(notice: &Feedback, columns: usize) -> Vec<Line> {
     };
     // A banner keeps one cell of its surface at the right edge.
     let width = columns.saturating_sub(usize::from(banner)).max(1);
-    let mut rows = hang(Line::new(lead, style), body(&notice.text, style), width);
+    let mut rows = hang(
+        Line::new(lead, style),
+        body(&notice.text, style, notice.change),
+        width,
+    );
     if let Some((key, label)) = notice.action {
         let mut action = panel::keycap(key);
         action.push(&format!(" {label}"), MUTED);
@@ -66,7 +70,7 @@ fn label(notice: &Feedback, text: &str) -> Line {
     } else {
         STRONG
     };
-    let mut line = body(text, subject);
+    let mut line = body(text, subject, notice.change);
     if let Some(until) = notice.until {
         let left = until.saturating_duration_since(Instant::now());
         if !left.is_zero() {
@@ -78,9 +82,9 @@ fn label(notice: &Feedback, text: &str) -> Line {
 }
 
 /// `Subject · detail`, where the subject ends at the first ` · ` or `: `.
-/// After a colon, `old → new` reads as a change without the colon: the new
-/// value strong. Any other detail keeps its separator.
-fn body(value: &str, style: Style) -> Line {
+/// Known setting changes render `old → new` without the colon and make the
+/// new value strong. Other details keep their separator.
+fn body(value: &str, style: Style, change: bool) -> Line {
     let value = text::clean(value);
     let at = subject(&value).len();
     if at == value.len() {
@@ -94,10 +98,19 @@ fn body(value: &str, style: Style) -> Line {
     let rest = &value[at + separator.len()..];
     let mut line = Line::new(&value[..at], style);
     let (first, tail) = rest.split_once(" · ").unwrap_or((rest, ""));
-    match first.split_once(" → ").filter(|_| separator == ": ") {
+    match first
+        .split_once(" → ")
+        .filter(|_| separator == ": " && change && style != BAD)
+    {
         Some((from, to)) => {
             line.push(&format!(" {from} → "), MUTED);
             line.push(to, STRONG);
+            if !tail.is_empty() {
+                line.push(&format!(" · {tail}"), MUTED);
+            }
+        }
+        None if style == BAD && separator == ": " => {
+            line.push(&format!("{separator}{first}"), BAD);
             if !tail.is_empty() {
                 line.push(&format!(" · {tail}"), MUTED);
             }

@@ -12,6 +12,59 @@ use crate::{
 };
 
 #[test]
+fn turn_phases_and_waiting_for_an_edit_are_visible_in_the_rule() {
+    let mut state = State {
+        activity: Some(Activity::new()),
+        ..State::default()
+    };
+    for (event, label) in [
+        (Event::Preparing, "Preparing request"),
+        (
+            Event::Waiting {
+                model: "fixture".into(),
+            },
+            "Waiting for model",
+        ),
+        (Event::Reasoning, "Thinking"),
+        (Event::Working, "Working"),
+        (
+            Event::Streaming {
+                text: "response".into(),
+            },
+            "Writing the response",
+        ),
+    ] {
+        state.event(event);
+        assert!(
+            frame(&state, "model", "dir").live[0]
+                .plain()
+                .contains(label)
+        );
+    }
+    state.queue.push("a draft").unwrap();
+    let slot = state.queue.slot(0).unwrap();
+    state.queue.begin_edit(slot, &mut state.editor).unwrap();
+    state.event(Event::InputHeld);
+    let rule = frame(&state, "model", "dir").live[0].plain();
+    assert!(
+        rule.contains("Waiting for your edit") && rule.contains("Editing draft 1/1"),
+        "{rule}"
+    );
+    state.activity.as_mut().unwrap().stopping = true;
+    state.event(Event::Recovering {
+        attempt: 1,
+        delay: std::time::Duration::from_secs(1),
+        error: "fixture".into(),
+    });
+    let rule = frame(&state, "model", "dir").live[0].plain();
+    assert!(
+        rule.contains("Stopping") && !rule.contains("Reconnecting"),
+        "{rule}"
+    );
+    assert!(!rule.contains("esc"));
+}
+
+#[test]
 fn idle_composer_has_four_rows_a_caret_over_placeholder_and_one_gray_footer() {
     let state = State::default();
     let frame = frame(&state, "provider/model", r"C:\project");
@@ -195,6 +248,7 @@ fn selectors_replace_all_composer_rows_but_keep_the_draft_and_mask_keys() {
         Effort::High,
         80,
         &crate::backend::openrouter::Routing::Auto,
+        std::path::Path::new("fixture/config.json"),
     ));
     let selection = frame(&state, "model", "directory");
     assert!(

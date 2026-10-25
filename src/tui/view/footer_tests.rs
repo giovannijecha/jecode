@@ -73,6 +73,28 @@ fn the_meter_turns_gold_near_the_threshold_and_stays_empty_when_unknown() {
 }
 
 #[test]
+fn a_low_auto_compact_threshold_is_not_warned_at_zero_percent() {
+    let mut state = with_status(0, Some(100_000));
+    for threshold in 1..=3 {
+        state.context.as_mut().unwrap().auto_compact = threshold;
+        let idle = frame(&state, "provider/model", r"C:\project");
+        let line = idle.live.last().unwrap();
+        assert!(line.spans.iter().all(|span| span.style != WARNING));
+    }
+    state.context.as_mut().unwrap().tokens = 1_000;
+    let active = frame(&state, "provider/model", r"C:\project");
+    assert!(
+        active
+            .live
+            .last()
+            .unwrap()
+            .spans
+            .iter()
+            .any(|span| span.style == WARNING)
+    );
+}
+
+#[test]
 fn narrow_footers_shorten_the_directory_and_model_before_the_meter() {
     let mut state = with_status(61_000, Some(100_000));
     for (width, left, right) in [
@@ -140,6 +162,7 @@ fn open_panels_keep_the_footer_on_the_terminal_surface_when_space_permits() {
             Effort::Default,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            std::path::Path::new("fixture/config.json"),
         ),
         Selector::auto_compact(80),
     ] {

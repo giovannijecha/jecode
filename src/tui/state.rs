@@ -80,6 +80,8 @@ pub struct State {
     pub notice: Option<Feedback>,
     pub copy_notice: Option<Feedback>,
     pub progress: Option<Feedback>,
+    /// A retry temporarily overlays maintenance without replacing its clock.
+    pub recovery: Option<Feedback>,
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
@@ -106,6 +108,7 @@ impl Default for State {
             notice: None,
             copy_notice: None,
             progress: None,
+            recovery: None,
             information: None,
             selector: None,
             processes: None,
@@ -158,7 +161,7 @@ impl State {
                 } else {
                     "Reconnecting"
                 };
-                self.notify(
+                self.recovery = Some(
                     Feedback::progress(
                         Kind::Warning,
                         format!("{subject} · attempt {attempt} · {error}"),
@@ -167,14 +170,7 @@ impl State {
                 );
             }
             Event::RecoveryFinished => {
-                // Only the retry ends here; compaction keeps its progress.
-                if self
-                    .progress
-                    .as_ref()
-                    .is_some_and(|progress| matches!(progress.kind, Kind::Warning))
-                {
-                    self.clear_progress();
-                }
+                self.recovery = None;
             }
             Event::RequestDiscarded => {
                 if matches!(self.items.last(), Some(Item::Streaming { .. })) {
@@ -198,7 +194,7 @@ impl State {
             Event::Reasoning => self.status = "Thinking…".into(),
             Event::Working => self.status = "Working…".into(),
             Event::InputHeld => {
-                self.status = "Waiting for the draft being edited…".into();
+                self.status = "Waiting for your edit…".into();
             }
             // The application shows accepted input with its prompt history.
             Event::Accepted { .. } => {}

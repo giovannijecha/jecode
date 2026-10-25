@@ -151,11 +151,16 @@ next step when there is one, such as `Alt+↑ review` for paused drafts or
 replaces them. Progress such as compaction, attachments or a retry sits in
 the composer rule beside the scanner, with a countdown to the next attempt.
 Copy feedback has its own slot. Notices do not become conversation messages.
+The rule also names the turn's phase, including `Waiting for your edit` when
+a draft edit holds the turn and `Stopping` after cancellation. Maintenance
+and retry feedback takes priority over normal phases. A retry temporarily
+overlays compaction; its original progress and clock return when the retry ends.
 
 The footer shows the working directory relative to your home folder, a
 context meter with the projected share, the model and effort. The meter fills
 toward the configured automatic compaction threshold, so a full meter means
-compaction is due; it turns gold within three points of it. An empty meter
+compaction is due; it turns gold within three points of it, starting at 1%
+for thresholds of 3% or less. An empty meter
 with `?` means there is no reliable capacity yet. Narrow terminals show the
 project name and the model without its provider, then drop them before the
 meter. Unsent draft text is excluded from the projection. See [Configuration](../usage/CONFIGURATION.md) for model and

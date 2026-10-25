@@ -44,6 +44,7 @@ fn every_menu_has_the_same_padded_surface_without_composer_borders_or_draft_text
             Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            std::path::Path::new("fixture/config.json"),
         ),
         Selector::models(&models, false, "fixture/model-1"),
         Selector::efforts(model(1), false, Effort::High),
@@ -151,6 +152,7 @@ fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_res
             Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            std::path::Path::new("fixture/config.json"),
         )),
     ] {
         let mut state = State {
@@ -198,6 +200,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
             Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            std::path::Path::new("fixture/config.json"),
         )),
         notice: Some(crate::tui::Feedback::result(
             Kind::Error,

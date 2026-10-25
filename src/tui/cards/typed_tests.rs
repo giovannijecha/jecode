@@ -209,6 +209,49 @@ fn failures_lead_with_the_exit_and_first_error_in_the_failure_colour() {
 }
 
 #[test]
+fn only_missing_file_paths_receive_the_short_not_found_summary() {
+    let shown = presentation(0, false);
+    let path = object([("path", "a.rs")]);
+    let missing = Value::object([(
+        "error",
+        Value::string("Could not resolve path \"a.rs\": No such file (os error 2)"),
+    )]);
+    let rows = card(tool("read", &path, &missing, &shown), 80, false).rows;
+    assert_eq!(plain(&rows)[1], "  ⎿ Not found");
+
+    let command = object([("command", "pwd")]);
+    let failed = Value::object([(
+        "error",
+        Value::string("Invalid working directory: No such file (os error 2)"),
+    )]);
+    let rows = card(tool("bash", &command, &failed, &shown), 80, false).rows;
+    assert_eq!(
+        plain(&rows)[1],
+        "  ⎿ Invalid working directory: No such file (os error 2)"
+    );
+
+    let unix_error = Value::object([(
+        "error",
+        Value::string("Could not resolve path \"a.rs\": No such process (os error 3)"),
+    )]);
+    if cfg!(unix) {
+        let rows = card(tool("read", &path, &unix_error, &shown), 80, false).rows;
+        assert_eq!(
+            plain(&rows)[1],
+            "  ⎿ Could not resolve path \"a.rs\": No such process (os error 3)"
+        );
+    }
+    let windows_error = Value::object([(
+        "error",
+        Value::string("Could not resolve path \"a.rs\": The path was not found (os error 3)"),
+    )]);
+    if cfg!(windows) {
+        let rows = card(tool("read", &path, &windows_error, &shown), 80, false).rows;
+        assert_eq!(plain(&rows)[1], "  ⎿ Not found");
+    }
+}
+
+#[test]
 fn pages_and_captures_summarise_what_came_back() {
     let shown = presentation(600, false);
     let fetch = object([("action", "fetch"), ("url", "https://docs.rs/governor/")]);
