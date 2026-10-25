@@ -143,7 +143,8 @@ work, closes a panel, or clears an idle draft; it never exits. See
 [Scrolling and resize](RESIZE.md) for reflow and terminal restoration.
 
 Notices appear above the composer, by lifetime. Results and setting changes
-are a marked line that clears after five seconds or when you start typing.
+are muted text without an icon, clearing after five seconds or when you start
+typing. A changed setting's new value stays strong.
 Warnings and errors are banners that stay until your next key, naming the
 next step when there is one, such as `Alt+↑ review` for paused drafts or
 `/settings update key` for a rejected key; a lower-severity notice never

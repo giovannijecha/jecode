@@ -113,7 +113,6 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             with(
                 columns,
                 Feedback::result(Kind::Notice, "Previous session: Rate limiting for /login")
-                    .info()
                     .action("/resume", "open"),
             ),
         ),

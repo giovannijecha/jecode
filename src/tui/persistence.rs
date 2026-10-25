@@ -60,7 +60,6 @@ impl App {
                     let title = self.archive.redactor.text(&session.title);
                     self.state.notify(
                         Feedback::result(Kind::Notice, format!("Previous session: {title}"))
-                            .info()
                             .action("/resume", "open"),
                     );
                 }

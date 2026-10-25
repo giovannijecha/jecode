@@ -10,31 +10,29 @@ fn styled(line: &Line, text: &str) -> Style {
 }
 
 #[test]
-fn a_result_is_a_marked_line_that_fades_without_a_surface() {
+fn a_result_is_a_muted_line_without_a_marker_or_surface() {
     let rows = lines(
         &Feedback::result(Kind::Notice, "Complete · 48s · 6 tools"),
         80,
     );
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].plain(), "✓ Complete · 48s · 6 tools");
-    assert_eq!(styled(&rows[0], "✓"), GOOD);
-    assert_eq!(styled(&rows[0], "Complete"), STRONG);
+    assert_eq!(rows[0].plain(), "Complete · 48s · 6 tools");
+    assert_eq!(styled(&rows[0], "Complete"), MUTED);
     assert_eq!(styled(&rows[0], "48s"), MUTED);
     assert_eq!(rows[0].background, None);
 }
 
 #[test]
-fn a_fact_uses_the_accent_dot_and_keeps_its_action_at_the_right_edge() {
-    let notice = Feedback::result(Kind::Notice, "Previous session: Rate limiting")
-        .info()
-        .action("/resume", "open");
+fn a_fact_is_muted_and_keeps_its_action_at_the_right_edge() {
+    let notice =
+        Feedback::result(Kind::Notice, "Previous session: Rate limiting").action("/resume", "open");
     let rows = lines(&notice, 60);
     assert_eq!(rows.len(), 1);
-    assert_eq!(styled(&rows[0], "●"), ACCENT);
+    assert_eq!(styled(&rows[0], "Previous session"), MUTED);
     assert!(
         rows[0]
             .plain()
-            .starts_with("● Previous session: Rate limiting")
+            .starts_with("Previous session: Rate limiting")
     );
     assert!(rows[0].plain().ends_with("/resume  open"));
     assert_eq!(panel::cells(&rows[0]), 60);
@@ -49,9 +47,9 @@ fn a_change_reads_old_to_new_with_the_new_value_strong() {
     let rows = lines(&notice, 80);
     assert_eq!(
         rows[0].plain(),
-        "✓ Auto-compact 80% → 55% · this and new conversations"
+        "Auto-compact 80% → 55% · this and new conversations"
     );
-    assert_eq!(styled(&rows[0], "Auto-compact"), STRONG);
+    assert_eq!(styled(&rows[0], "Auto-compact"), MUTED);
     assert_eq!(styled(&rows[0], "80% →"), MUTED);
     assert_eq!(styled(&rows[0], "55%"), STRONG);
     assert_eq!(styled(&rows[0], "this and new"), MUTED);

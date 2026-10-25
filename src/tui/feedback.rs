@@ -14,13 +14,11 @@ enum Lifetime {
 }
 
 /// One notice. Results and progress share it; where it appears follows its
-/// lifetime: progress rides the composer rule, results a marked line, and
+/// lifetime: progress rides the composer rule, results a quiet line, and
 /// warnings and errors a banner.
 pub(super) struct Feedback {
     pub kind: Kind,
     pub text: String,
-    /// A neutral fact rather than a finished action: `●` instead of `✓`.
-    pub info: bool,
     /// A keycap and its label, naming the next step.
     pub action: Option<(&'static str, &'static str)>,
     /// When paused progress resumes, counted down after the text.
@@ -37,7 +35,6 @@ impl Feedback {
         Self {
             kind,
             text: text.into(),
-            info: false,
             action: None,
             until: None,
             lifetime: if matches!(kind, Kind::Warning | Kind::Error) {
@@ -53,11 +50,6 @@ impl Feedback {
             lifetime: Lifetime::Progress(Instant::now()),
             ..Self::at(kind, text, Instant::now())
         }
-    }
-
-    pub fn info(mut self) -> Self {
-        self.info = true;
-        self
     }
 
     pub fn action(mut self, key: &'static str, label: &'static str) -> Self {

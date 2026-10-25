@@ -4,7 +4,7 @@ use crate::tui::{
     Feedback,
     information::Information,
     state::Kind,
-    theme::{BAD, GOOD, USER_SURFACE, WARNING},
+    theme::{BAD, USER_SURFACE, WARNING},
 };
 
 fn info() -> Information {
@@ -103,9 +103,9 @@ fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_contro
 }
 
 #[test]
-fn results_are_marked_lines_and_warnings_and_errors_are_upright_banners() {
+fn results_are_muted_lines_and_warnings_and_errors_are_upright_banners() {
     for (kind, lead, style, surface) in [
-        (Kind::Notice, "✓ ", GOOD, None),
+        (Kind::Notice, "", MUTED, None),
         (Kind::Warning, "▌ ", WARNING, Some(USER_SURFACE)),
         (Kind::Error, "▌ ", BAD, Some(USER_SURFACE)),
     ] {

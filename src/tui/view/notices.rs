@@ -1,4 +1,4 @@
-//! Notices by lifetime: a marked line for results, a banner for warnings and
+//! Notices by lifetime: a quiet line for results, a banner for warnings and
 //! errors, and a label for progress beside the composer's scanner.
 use super::panel;
 use crate::tui::{
@@ -6,11 +6,11 @@ use crate::tui::{
     line::Line,
     state::Kind,
     text,
-    theme::{ACCENT, BAD, GOOD, MUTED, STRONG, Style, USER_SURFACE, WARNING},
+    theme::{BAD, MUTED, STRONG, Style, USER_SURFACE, WARNING},
 };
 use std::time::Instant;
 
-/// `✓ Subject · detail` (`●` for a fact), or a banner on the panel surface
+/// Muted `Subject · detail`, or a banner on the panel surface
 /// with a stripe in the level colour. Rows wrap under the subject; the action
 /// keycap sits at the right of the last row, or on a row of its own.
 pub(super) fn lines(notice: &Feedback, columns: usize) -> Vec<Line> {
@@ -18,13 +18,11 @@ pub(super) fn lines(notice: &Feedback, columns: usize) -> Vec<Line> {
     let (lead, style) = match notice.kind {
         Kind::Error => ("▌ ", BAD),
         Kind::Warning => ("▌ ", WARNING),
-        _ if notice.info => ("● ", ACCENT),
-        _ => ("✓ ", GOOD),
+        _ => ("", MUTED),
     };
     // A banner keeps one cell of its surface at the right edge.
     let width = columns.saturating_sub(usize::from(banner)).max(1);
-    let subject = if banner { style } else { STRONG };
-    let mut rows = hang(Line::new(lead, style), body(&notice.text, subject), width);
+    let mut rows = hang(Line::new(lead, style), body(&notice.text, style), width);
     if let Some((key, label)) = notice.action {
         let mut action = panel::keycap(key);
         action.push(&format!(" {label}"), MUTED);

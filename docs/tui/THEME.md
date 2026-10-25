@@ -138,8 +138,8 @@ and discard confirmations replace the key hints in red and turn the target
 name red until confirmed or canceled.
 
 Notices follow their lifetime. A result is a line on the terminal background
-with a green `✓` (an accent `●` for a fact), a `STRONG` subject and muted
-detail; a change reads `Subject old → new · scope` with the new value
+with no icon and both subject and detail in `MUTED`;
+a change reads `Subject old → new · scope` with the new value
 strong. Warnings and errors are banners on the user surface with a `▌`
 stripe and subject in `WARNING` or `BAD`, and their next step as a keycap at
 the right. Progress has no row of its own: it rides the composer's upper
