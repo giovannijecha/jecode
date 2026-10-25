@@ -140,6 +140,47 @@ fn wrapped_titles_retain_long_unicode_commands_and_fit_narrow_views() {
 }
 
 #[test]
+fn multiline_title_origins_include_line_breaks() {
+    let rows = title::rows("Bash", "one\ntwo\nthree", TOOL_ACCENT, 80, true);
+    let offsets: Vec<_> = rows
+        .iter()
+        .map(|row| row.origin.expect("title origin").character)
+        .collect();
+    assert_eq!(offsets, [0, 4, 8]);
+}
+
+#[test]
+fn grouped_windows_reads_use_distinct_path_suffixes() {
+    let arguments = [
+        args("path", r"C:\shared\mod.rs"),
+        args("path", r"D:\shared\mod.rs"),
+    ];
+    let result = Value::object([
+        ("content", Value::string("1: item\n")),
+        ("offset", Value::number(1)),
+        ("lines_returned", Value::number(1)),
+    ]);
+    let presentation = Presentation::default();
+    let reads: Vec<_> = arguments
+        .iter()
+        .map(|arguments| Tool {
+            name: "read",
+            arguments,
+            summary: "complete",
+            result: Some(&result),
+            change: None,
+            presentation: &presentation,
+        })
+        .collect();
+    let rows = group(&reads, 100, false).rows;
+    let text = plain(&rows);
+    assert!(
+        text.contains(r"C:\shared\mod.rs, D:\shared\mod.rs"),
+        "{text}"
+    );
+}
+
+#[test]
 fn compact_long_lines_stay_bounded_and_expansion_retains_the_tail() {
     let text = format!("{}END", "界x".repeat(8_000));
     let arguments = args("command", &text);

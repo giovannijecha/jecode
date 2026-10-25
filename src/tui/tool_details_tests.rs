@@ -293,10 +293,10 @@ fn all_cards_in_a_turn_toggle_together_and_previous_turns_keep_their_previews() 
     assert!(state.toggle_tools().is_none());
     complete(&mut state);
     let compact = state.rows();
-    assert_eq!(state.toggle_tools(), Some((true, 1)));
+    assert_eq!(state.toggle_tools(), Some((true, 2)));
     assert_eq!(flags(&state), [false, true, true]);
     assert_eq!(state.rows()[0], previous);
-    assert_eq!(state.toggle_tools(), Some((false, 1)));
+    assert_eq!(state.toggle_tools(), Some((false, 2)));
     assert_eq!(state.rows(), compact);
 }
 

@@ -113,13 +113,12 @@ impl Layout {
             self.columns = columns;
         }
         if self.tools != state.tool_revision {
-            // A resize can defer drawing across several toggles or a new turn.
-            // Rebuild from the first item if more than one change was missed.
-            let block = if self.tools.wrapping_add(1) == state.tool_revision {
-                state.tool_details.changed_from + 1
-            } else {
-                1
-            };
+            // Several reads can finish in one event batch. Preserve the
+            // settled prefix while redrawing from the earliest changed card.
+            let block = state
+                .tool_details
+                .changed_since(state.tool_revision.wrapping_sub(self.tools))
+                .map_or(1, |first| first + 1);
             if block < self.blocks.len() {
                 self.context = self.contexts[block];
                 self.blocks.truncate(block);

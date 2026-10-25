@@ -57,23 +57,30 @@ pub fn render(reads: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
             hidden: false,
         };
     }
-    let base = |path: &str| path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned();
-    // Base names, with the parent folder when two would read the same.
+    // Show the shortest path suffix that distinguishes each file, including
+    // its drive when Windows paths have identical parent directories.
     let names: Vec<_> = paths
         .iter()
         .map(|path| {
-            let name = base(path);
-            if paths.iter().filter(|other| base(other) == name).count() > 1 {
-                path.rsplit(['/', '\\'])
-                    .take(2)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("/")
-            } else {
-                name
+            let parts: Vec<_> = path.rsplit(['/', '\\']).collect();
+            for depth in 1..=parts.len() {
+                if paths.iter().all(|other| {
+                    other == path
+                        || !other
+                            .rsplit(['/', '\\'])
+                            .take(depth)
+                            .eq(parts[..depth].iter().copied())
+                }) {
+                    let separator = if path.contains('\\') { "\\" } else { "/" };
+                    return parts[..depth]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(separator);
+                }
             }
+            path.clone()
         })
         .collect();
     let total: usize = reads.iter().map(lines).sum();

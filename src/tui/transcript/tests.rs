@@ -247,6 +247,91 @@ fn finish_read(state: &mut State, id: &str) {
     });
 }
 
+#[test]
+fn simultaneous_read_completions_keep_the_earlier_layout_cached() {
+    let mut state = State::default();
+    for index in 0..150 {
+        state.message(Kind::Assistant, &format!("Message {index}"));
+    }
+    state.begin_tool_turn();
+    for (id, path) in [("a", "src/a.rs"), ("b", "src/b.rs"), ("c", "src/c.rs")] {
+        read(&mut state, id, path);
+    }
+    let mut layout = Layout::default();
+    assert!(shown(&mut layout, &state).contains("Message 149"));
+    let prior = layout.blocks.clone();
+    for id in ["a", "b", "c"] {
+        finish_read(&mut state, id);
+    }
+    assert!(state.tool_revision >= 2);
+    layout.prepare(&state, 80, 1);
+    assert!(
+        layout.blocks.len() >= prior.len(),
+        "settled prefix was rebuilt: {} cached blocks became {}",
+        prior.len(),
+        layout.blocks.len()
+    );
+    assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
+    state.close_tools();
+    let output = shown(&mut layout, &state);
+    assert!(output.contains("Read(3 files)"));
+    assert_eq!(output.matches("● Read(").count(), 1);
+}
+
+#[test]
+fn missed_read_group_and_tool_toggles_redraw_from_the_earliest_change() {
+    let mut state = State::default();
+    for index in 0..150 {
+        state.message(Kind::Assistant, &format!("Message {index}"));
+    }
+    state.begin_tool_turn();
+    for (id, path) in [("a", "src/a.rs"), ("b", "src/b.rs"), ("c", "src/c.rs")] {
+        read(&mut state, id, path);
+    }
+    let mut layout = Layout::default();
+    shown(&mut layout, &state);
+    let prior = layout.blocks.clone();
+    for id in ["a", "b", "c"] {
+        finish_read(&mut state, id);
+    }
+    state.close_tools();
+    state.finish_tool_turn();
+    state.toggle_tools().expect("completed read group");
+    state.begin_tool_turn();
+    assert!(!state.tool_details.expanded);
+    layout.prepare(&state, 80, 64);
+    assert!(
+        layout.blocks.len() >= prior.len(),
+        "settled prefix was rebuilt"
+    );
+    assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
+    let output = shown(&mut layout, &state);
+    assert!(output.contains("Read(3 files)"));
+    assert_eq!(output.matches("● Read(").count(), 1);
+}
+
+#[test]
+fn a_layout_older_than_the_bounded_tool_history_still_matches_a_fresh_layout() {
+    let mut state = State::default();
+    for index in 0..150 {
+        state.message(Kind::Assistant, &format!("Message {index}"));
+    }
+    state.begin_tool_turn();
+    read(&mut state, "a", "src/a.rs");
+    finish_read(&mut state, "a");
+    state.close_tools();
+    state.finish_tool_turn();
+    let mut layout = Layout::default();
+    shown(&mut layout, &state);
+    for _ in 0..66 {
+        state.toggle_tools().unwrap();
+    }
+    assert_eq!(
+        shown(&mut layout, &state),
+        shown(&mut Layout::default(), &state)
+    );
+}
+
 fn shown(layout: &mut Layout, state: &State) -> String {
     for _ in 0..100 {
         layout.prepare(state, 80, 64);

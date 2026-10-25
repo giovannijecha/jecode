@@ -40,7 +40,16 @@ pub(super) fn rows(
     for (index, part) in parts.iter().enumerate() {
         let closing = if index + 1 == parts.len() { ")" } else { "" };
         let width = if texts.is_empty() { first } else { rest };
-        texts.extend(words(&format!("{part}{closing}"), width, rest));
+        let mut wrapped: Vec<_> = words(&format!("{part}{closing}"), width, rest)
+            .into_iter()
+            .map(|row| (row, false))
+            .collect();
+        if index + 1 < parts.len()
+            && let Some((_, newline)) = wrapped.last_mut()
+        {
+            *newline = true;
+        }
+        texts.extend(wrapped);
         if !expanded && texts.len() > 3 {
             break;
         }
@@ -54,7 +63,7 @@ pub(super) fn rows(
     texts
         .into_iter()
         .enumerate()
-        .map(|(index, mut body)| {
+        .map(|(index, (mut body, newline_after))| {
             let room = if index == 0 { first } else { rest };
             if cut && index + 1 == count {
                 if text::cells(&body) + 2 > room {
@@ -78,7 +87,7 @@ pub(super) fn rows(
                 None => line.push(&body, EMPHASIS),
             }
             line.origin = Some(Origin { line: 0, character });
-            character += body.chars().count();
+            character += body.chars().count() + usize::from(newline_after);
             let gutter = if index == 0 {
                 "● ".to_owned()
             } else {
