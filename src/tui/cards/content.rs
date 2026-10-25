@@ -108,7 +108,7 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
                     |number| format!("{number:>digits$}   "),
                 )
             };
-            diff::code_rows(lexer.line(source), &label, MUTED, None, columns, index + 2)
+            diff::code_rows(lexer.line(source), &label, MUTED, columns, index + 2)
         })
         .collect()
 }
@@ -135,7 +135,6 @@ fn written(arguments: &Value, columns: usize, expanded: bool) -> Body {
                 ),
                 &format!("{:>digits$}   ", index + 1),
                 MUTED,
-                None,
                 columns,
                 index + 2,
             )

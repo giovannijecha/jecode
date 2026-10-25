@@ -362,11 +362,11 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
         &Presentation::default(),
     );
     assert!(plain(&initial).contains("● Update(src/auth.rs)\n  ⎿ +2 −1 lines"));
-    assert!(
-        initial
+    assert!(initial.iter().any(|row| {
+        row.spans
             .iter()
-            .any(|row| row.background == Some(DIFF_ADDED_SURFACE))
-    );
+            .any(|span| span.background == Some(DIFF_ADDED_SURFACE))
+    }));
     let collapsed = draw(
         "edit",
         &arguments,

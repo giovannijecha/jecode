@@ -35,8 +35,8 @@ headings are bold. Links use the accent with underline. The palette does not rep
 | `USER_SURFACE` | `#282E39` | Sent requests, warning and error banners, and command, selector, information and process panels. |
 | `SELECTED_SURFACE` | `#353D4B` | Selected menu/process rows and Back to bottom badge. |
 | `CODE_SURFACE` | `#20252C` | Fenced code and inline code. |
-| `DIFF_ADDED_SURFACE` | `#1E2E23` | Added file lines, including new files. |
-| `DIFF_REMOVED_SURFACE` | `#312026` | Removed file lines. |
+| `DIFF_ADDED_SURFACE` | `#1E2E23` | Added fragments; full text for new or unmatched lines. |
+| `DIFF_REMOVED_SURFACE` | `#312026` | Removed fragments; full text for unmatched lines. |
 | `CURSOR` | `#1A1B26` on `#C0CAF5` | Software caret, including in shaded panels. |
 
 ## Conversation and tool cards
@@ -101,8 +101,11 @@ commands start a card of their own.
 
 Update and Write show contextual diffs with three surrounding source lines,
 original coordinates on removals and resulting coordinates on additions and
-context. Syntax colors remain above full-row red/green surfaces. Wrapped code
-keeps an empty number gutter. Up to 14 logical diff rows remain open; larger
+context. Context text is `TOOL_DIM`. Changed fragments use bold `BAD`/`GOOD`
+on the matching removed/added surface, while unchanged code keeps its syntax
+color. Adjacent removed/added runs pair by position; pure additions or
+removals highlight their full text. Wrapped code keeps an empty number gutter.
+Up to 14 logical diff rows remain open; larger
 changes preview both sides of the first hunk and state the hidden row count.
 Expansion reveals all retained hunks; collapse restores the preview. Empty
 creations, no-op edits, final newlines and line-ending conversions have

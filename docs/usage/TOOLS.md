@@ -63,6 +63,9 @@ Web and Browser in one
 inline format. Successful file changes retain a numbered contextual diff,
 including Write on an existing text file. These display records stay in local
 session history and survive resume without changing model-facing tool results.
+Only changed fragments receive a red or green surface; surrounding code keeps
+its syntax color and context is muted. Added or removed lines without a paired
+counterpart highlight their full text.
 Diff capture is optional: inputs above 1 MiB or 20,000 lines, and expensive
 alignments, use a neutral content preview. These display limits never reject
 a valid file modification.

@@ -5,9 +5,11 @@ use crate::{
         line::Line,
         syntax::Highlighter,
         text,
-        theme::{BAD, DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, GOOD, MUTED, Style, Surface},
+        theme::{BAD, GOOD, MUTED, Style, TOOL_DIM},
     },
 };
+
+mod fragments;
 
 pub(super) fn summary(change: &Change) -> String {
     if change.created && change.added == 0 {
@@ -35,7 +37,6 @@ pub(super) fn code_rows(
     mut code: Line,
     label: &str,
     style: Style,
-    background: Option<Surface>,
     columns: usize,
     source: usize,
 ) -> Vec<Line> {
@@ -53,7 +54,6 @@ pub(super) fn code_rows(
             let mut row = Line::new(&gutter, style);
             row.origin = code.origin;
             row.spans.extend(code.spans);
-            row.background = background;
             row.gutter("    ", MUTED).shortened(columns)
         })
         .collect()
@@ -97,6 +97,7 @@ fn render_inner(
         }
         let mut old_lexer = Highlighter::for_path(path);
         let mut new_lexer = Highlighter::for_path(path);
+        let partners = fragments::partners(hunk);
         let mut pending_removed = hunk
             .iter()
             .filter(|entry| entry.kind == Kind::Removed)
@@ -129,6 +130,16 @@ fn render_inner(
                         old.unwrap()
                     } else {
                         new.unwrap()
+                    };
+                    let code = if entry.kind == Kind::Context {
+                        Line::new(&source, TOOL_DIM)
+                    } else {
+                        fragments::highlight(
+                            code,
+                            &source,
+                            partners[at + offset].map(|index| hunk[index].text.as_str()),
+                            entry.kind,
+                        )
                     };
                     let code = preview(code, columns.saturating_sub(8 + digits), expanded);
                     rows.extend(entry_rows(entry, code, digits, columns, origin));
@@ -221,10 +232,10 @@ fn entry_rows(
     columns: usize,
     source: usize,
 ) -> Vec<Line> {
-    let (mark, style, background, number) = match entry.kind {
-        Kind::Removed => ('−', BAD, Some(DIFF_REMOVED_SURFACE), entry.old_line),
-        Kind::Added => ('+', GOOD, Some(DIFF_ADDED_SURFACE), entry.new_line),
-        Kind::Context => (' ', MUTED, None, entry.new_line),
+    let (mark, style, number) = match entry.kind {
+        Kind::Removed => ('−', BAD, entry.old_line),
+        Kind::Added => ('+', GOOD, entry.new_line),
+        Kind::Context => (' ', TOOL_DIM, entry.new_line),
     };
     let coordinate =
         number.map_or_else(|| " ".repeat(digits), |number| format!("{number:>digits$}"));
@@ -232,7 +243,6 @@ fn entry_rows(
         code,
         &format!("{coordinate} {mark}  "),
         style,
-        background,
         columns,
         source,
     );
