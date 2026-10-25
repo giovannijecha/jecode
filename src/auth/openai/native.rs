@@ -5,6 +5,10 @@ use crate::cancel::Cancellation;
 use std::process::Command;
 use std::time::Duration;
 
+#[cfg(all(test, windows))]
+#[path = "native_tests.rs"]
+mod tests;
+
 fn run(
     command: &mut Command,
     input: Option<Vec<u8>>,

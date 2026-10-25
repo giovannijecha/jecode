@@ -45,7 +45,8 @@ public static class JecodeOpenAiNative {
                     acl = new FileSecurity();
                     inheritance = InheritanceFlags.None;
                 }
-                acl.SetOwner(sid);
+                // Change only the DACL: a creator can protect its own object
+                // without the additional WRITE_OWNER right.
                 acl.SetAccessRuleProtection(true, false);
                 acl.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, inheritance, PropagationFlags.None, AccessControlType.Allow));
                 if (op == "protect_directory") Directory.SetAccessControl(path, (DirectorySecurity)acl);

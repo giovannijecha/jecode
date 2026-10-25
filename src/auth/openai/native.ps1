@@ -43,7 +43,7 @@ try {
                 $acl = New-Object System.Security.AccessControl.FileSecurity
                 $inheritance = [System.Security.AccessControl.InheritanceFlags]::None
             }
-            $acl.SetOwner($sid)
+            # Protect access without requesting the unrelated WRITE_OWNER right.
             $acl.SetAccessRuleProtection($true, $false)
             $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
             $acl.AddAccessRule($rule)
