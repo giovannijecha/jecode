@@ -35,6 +35,10 @@ Tests use original Rust fixtures, synthetic credentials, isolated directories
 under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash without
 contacting OpenRouter or reading personal configuration.
 
+Unix owner-loss tests also use the system `ps` command to inspect process groups.
+They synchronize owner exit with live descendants, then wait for the group to
+stop; zombies awaiting reaping do not count as running commands.
+
 OpenAI fixtures also use isolated account records and loopback HTTP. They do
 not read Codex credentials or launch a real ChatGPT sign-in. Native signature
 checks exercise Windows .NET or the Unix `openssl` executable. A successful
