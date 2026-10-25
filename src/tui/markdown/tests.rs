@@ -2,6 +2,51 @@ use super::*;
 use crate::tui::theme::{INLINE_CODE, INLINE_CODE_SURFACE};
 
 #[test]
+fn streamed_three_line_block_transitions_match_full_render() {
+    const LINES: [&str; 13] = [
+        "bar",
+        "bar\\",
+        "-",
+        "- i",
+        "# Head",
+        "> quote",
+        ">",
+        "```",
+        "```rust",
+        "| A | B |",
+        "|---|---|",
+        "=",
+        "",
+    ];
+    for columns in [12, 40] {
+        for first in LINES {
+            for second in LINES {
+                for third in LINES {
+                    let source = format!("{first}\n{second}\n{third}");
+                    let mut stream = Stream::new("", columns);
+                    let mut lines = Vec::new();
+                    let mut prefix = String::new();
+                    for character in source.chars() {
+                        prefix.push(character);
+                        if let Some(keep) = stream.update(&prefix, columns) {
+                            lines.truncate(keep);
+                        }
+                        while !stream.ready() {
+                            stream.advance(&mut lines, 4);
+                        }
+                        assert_eq!(
+                            lines,
+                            render(&prefix, columns),
+                            "{columns} columns, after {prefix:?}, source {source:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn streamed_appends_match_full_markdown_after_each_ambiguous_boundary() {
     let chunks = [
         "Paragraph",
@@ -248,11 +293,76 @@ fn soft_breaks_join_paragraphs_and_hard_breaks_keep_rows() {
         ["escaped \\ continuation"]
     );
     assert_eq!(plain("literal \\", 80), ["literal \\"]);
-    assert_eq!(plain("A\n=\nB\ntitle\n---", 80), ["A", "", "B", "title"]);
+    assert_eq!(plain("A\n=\nB\ntitle\n---", 80), ["A", "", "B title"]);
     assert_eq!(
         plain("text\n| A | B |\n|---|---|", 80),
         ["text", "A   B", "──  ──"]
     );
+}
+
+#[test]
+fn setext_heading_spans_the_whole_preceding_paragraph() {
+    let rows = render("bar\nbar\n-", 80);
+    assert_eq!(
+        rows.iter().map(Line::plain).collect::<Vec<_>>(),
+        ["bar bar"]
+    );
+    assert_eq!(rows[0].spans[0].style, EMPHASIS.bold());
+    assert_eq!(rows[0].origin.unwrap().line, 0);
+    let rows = render("bar\nbar\n- i", 80);
+    assert_eq!(
+        rows.iter().map(Line::plain).collect::<Vec<_>>(),
+        ["bar bar", "• i"]
+    );
+    assert_eq!(rows[0].spans[0].style, BODY);
+    assert_eq!(
+        render("one\ntwo\n===\nnext", 80)
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>(),
+        ["one two", "", "next"]
+    );
+}
+
+#[test]
+fn streamed_ambiguous_block_boundaries_match_full_render() {
+    for source in ["bar\nbar\n- i", "one\ntwo\n===\nnext"] {
+        for columns in [12, 40] {
+            let mut stream = Stream::new("", columns);
+            let mut lines = Vec::new();
+            let mut prefix = String::new();
+            for character in source.chars() {
+                prefix.push(character);
+                if let Some(keep) = stream.update(&prefix, columns) {
+                    lines.truncate(keep);
+                }
+                while !stream.ready() {
+                    stream.advance(&mut lines, 2);
+                }
+                assert_eq!(lines, render(&prefix, columns), "after: {prefix:?}");
+            }
+        }
+    }
+    for (tail, append) in [
+        ("bar\nbar\n", "-"),
+        ("> quote\n>", " q"),
+        ("- i\nbar\n-", " i"),
+    ] {
+        let source = format!("{}{tail}", "# old\n".repeat(200));
+        let mut stream = Stream::new(&source, 80);
+        let mut lines = Vec::new();
+        while !stream.ready() {
+            stream.advance(&mut lines, 4);
+        }
+        let completed = format!("{source}{append}");
+        let keep = stream.update(&completed, 80).unwrap();
+        assert!(keep >= 398, "{tail:?} invalidated older headings");
+        lines.truncate(keep);
+        while !stream.ready() {
+            stream.advance(&mut lines, 4);
+        }
+        assert_eq!(lines, render(&completed, 80));
+    }
 }
 
 #[test]

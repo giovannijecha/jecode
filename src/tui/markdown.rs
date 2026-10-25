@@ -1,5 +1,8 @@
 mod inline;
+mod stream;
 mod table;
+
+pub(super) use stream::Stream;
 
 use super::{
     line::Line,
@@ -49,116 +52,6 @@ impl Rows {
             table: None,
             empty_pending,
         }
-    }
-}
-
-// An append may change the last source line, turn the preceding line into a
-// setext heading or table, or extend an open table. Keep only the prefix before
-// that unstable region. A fence checkpoint carries its lexer state with it.
-pub(super) struct Stream {
-    raw: String,
-    rows: Rows,
-    trailing: String,
-    checkpoint: Checkpoint,
-    previous_plain: Option<(usize, usize)>,
-    ready: bool,
-}
-
-struct Checkpoint {
-    position: usize,
-    rendered: usize,
-    fenced: Option<Fence>,
-}
-
-impl Stream {
-    pub fn new(value: &str, columns: usize) -> Self {
-        let mut cleaned = text::clean(value);
-        let trailing = cleaned.split_off(cleaned.trim_end().len());
-        let rows = Rows::from_clean(cleaned, columns);
-        Self {
-            raw: value.into(),
-            rows,
-            trailing,
-            checkpoint: Checkpoint {
-                position: 0,
-                rendered: 0,
-                fenced: None,
-            },
-            previous_plain: None,
-            ready: false,
-        }
-    }
-
-    // Returns the number of previously rendered rows that remain valid.
-    pub fn update(&mut self, value: &str, columns: usize) -> Option<usize> {
-        if columns == self.rows.columns && value == self.raw {
-            return None;
-        }
-        if columns != self.rows.columns || !value.starts_with(&self.raw) {
-            *self = Self::new(value, columns);
-            return Some(0);
-        }
-        let suffix = text::clean(&value[self.raw.len()..]);
-        self.raw.clear();
-        self.raw.push_str(value);
-        self.rows.value.push_str(&self.trailing);
-        self.rows.value.push_str(&suffix);
-        self.trailing = self.rows.value.split_off(self.rows.value.trim_end().len());
-        self.rows.position = self.checkpoint.position;
-        self.rows.fenced = self.checkpoint.fenced.clone();
-        self.rows.table = None;
-        self.rows.empty_pending = self.rows.value.is_empty();
-        self.previous_plain = None;
-        self.ready = false;
-        Some(self.checkpoint.rendered)
-    }
-
-    pub fn advance(&mut self, lines: &mut Vec<Line>, max_rows: usize) {
-        if self.ready {
-            return;
-        }
-        let mut budget = max_rows.max(1);
-        while budget > 0 {
-            let before = self.rows.table.is_none().then(|| Checkpoint {
-                position: self.rows.position,
-                rendered: lines.len(),
-                fenced: self.rows.fenced.clone(),
-            });
-            let Some(next) = self.rows.next() else {
-                self.ready = true;
-                break;
-            };
-            if let Some(before) = before {
-                let previous = self.previous_plain;
-                self.previous_plain = before
-                    .fenced
-                    .is_none()
-                    .then_some((before.position, before.rendered));
-                // The final line may still become a new block. Revisit the
-                // preceding hard-break candidate too, without losing older rows.
-                let follows_break = before.fenced.is_none()
-                    && self.rows.value[..before.position]
-                        .strip_suffix('\n')
-                        .is_some_and(backslash_break);
-                self.checkpoint = if follows_break && let Some((position, rendered)) = previous {
-                    Checkpoint {
-                        position,
-                        rendered,
-                        fenced: None,
-                    }
-                } else {
-                    before
-                };
-            } else {
-                self.previous_plain = None;
-            }
-            budget = budget.saturating_sub(next.len().max(1));
-            lines.extend(next);
-        }
-    }
-
-    pub fn ready(&self) -> bool {
-        self.ready
     }
 }
 
@@ -246,7 +139,7 @@ impl Iterator for Rows {
                 self.position,
             ));
         } else if let Some(quote) = quoted(trimmed) {
-            let quote = joined(&self.value, quote, &mut self.position, columns, true);
+            let quote = joined(&self.value, quote, &mut self.position, columns, true, false);
             output.extend(prefixed(
                 &quote,
                 (&format!("{indentation}│ "), MUTED),
@@ -257,7 +150,7 @@ impl Iterator for Rows {
             ));
         } else if let Some((marker, body)) = list_item(trimmed) {
             let (marker, body) = task_item(marker, body);
-            let body = joined(&self.value, body, &mut self.position, columns, false);
+            let body = joined(&self.value, body, &mut self.position, columns, false, false);
             output.extend(prefixed(
                 &body,
                 (&format!("{indentation}{marker}"), MUTED),
@@ -267,6 +160,18 @@ impl Iterator for Rows {
                 origin,
             ));
         } else {
+            let source = if trimmed.is_empty() {
+                Cow::Borrowed(source)
+            } else {
+                joined(
+                    &self.value,
+                    source,
+                    &mut self.position,
+                    columns,
+                    false,
+                    true,
+                )
+            };
             if !trimmed.is_empty()
                 && let Some((underline, next)) = table::source_line(&self.value, self.position)
                 && setext(underline)
@@ -277,13 +182,15 @@ impl Iterator for Rows {
                 } else {
                     2
                 };
-                output.extend(heading(trimmed, level, origin, columns, &self.value, next));
+                output.extend(heading(
+                    source.trim_start(),
+                    level,
+                    origin,
+                    columns,
+                    &self.value,
+                    next,
+                ));
             } else {
-                let source = if trimmed.is_empty() {
-                    Cow::Borrowed(source)
-                } else {
-                    joined(&self.value, source, &mut self.position, columns, false)
-                };
                 output.extend(
                     inline::render(&source, BODY)
                         .at_source(origin)
@@ -329,6 +236,7 @@ fn joined<'a>(
     position: &mut usize,
     columns: usize,
     quote: bool,
+    setext_body: bool,
 ) -> Cow<'a, str> {
     const LIMIT: usize = 8 * 1024;
     let mut text = Cow::Borrowed(first);
@@ -340,7 +248,9 @@ fn joined<'a>(
         let inner = quote
             .then(|| quote_continuation(value, *position))
             .flatten();
-        let Some((line, next)) = inner.or_else(|| continuation(value, *position, columns)) else {
+        let Some((line, next)) =
+            inner.or_else(|| continuation(value, *position, columns, setext_body))
+        else {
             return text;
         };
         let joined = text.to_mut();
@@ -353,7 +263,7 @@ fn joined<'a>(
     // At a block boundary (including a blank line), it remains literal.
     if backslash_break(&text)
         && (quote && quote_continuation(value, *position).is_some()
-            || continuation(value, *position, columns).is_some())
+            || continuation(value, *position, columns, setext_body).is_some())
     {
         text.to_mut().pop();
     }
@@ -370,13 +280,20 @@ fn backslash_break(value: &str) -> bool {
         == 1
 }
 
-fn continuation(value: &str, position: usize, columns: usize) -> Option<(&str, usize)> {
+fn continuation(
+    value: &str,
+    position: usize,
+    columns: usize,
+    setext_body: bool,
+) -> Option<(&str, usize)> {
     let (line, next) = table::source_line(value, position)?;
-    // A setext underline or table delimiter below makes this line its own block.
+    // A table header stays separate. Prose may include a line before a setext
+    // underline; the heading is rendered from the whole joined paragraph.
     let own = table::source_line(value, next).is_some_and(|(below, after)| {
-        setext(below) || table::Table::new(line, below, after, columns, 0).is_some()
+        (!setext_body && setext(below))
+            || table::Table::new(line, below, after, columns, 0).is_some()
     });
-    (!line.trim().is_empty() && !table::block_start(line) && !own)
+    (!line.trim().is_empty() && !setext(line) && !table::block_start(line) && !own)
         .then(|| (line.trim_start(), next))
 }
 

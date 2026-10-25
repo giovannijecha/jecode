@@ -9,7 +9,7 @@ original text. Terminal styling does not change what the model said.
 
 | Source | Terminal display |
 | --- | --- |
-| `#` through `######`, or a one-line Setext heading | Bold heading text: level 1 (and `===`) in the accent, level 2 (and `---`) emphasized, deeper levels in the body colour. Optional closing hashes are removed, and one neutral row follows a heading that touches the next line. |
+| `#` through `######`, or a paragraph followed by a Setext underline | Bold heading text: level 1 (and `===`) in the accent, level 2 (and `---`) emphasized, deeper levels in the body colour. Optional closing hashes are removed, and one neutral row follows a heading that touches the next line. |
 | `**strong**`, `__strong__`, `*italic*`, `_italic_`, `~~strike~~` | Styled text; styles can combine. |
 | Matching backtick runs | Inline code on the code surface, with literal spaces and punctuation. |
 | `[label](destination)` | Underlined accent label followed by the muted destination in parentheses. Jecode does not open it. |
