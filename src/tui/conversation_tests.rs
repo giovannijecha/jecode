@@ -143,10 +143,8 @@ fn new_without_a_usable_selection_keeps_the_draft_and_offers_configuration() {
         app.dispatch("/new".into()).unwrap();
         let notice = app.state.notice.as_ref().unwrap();
         assert!(matches!(notice.kind, Kind::Warning));
-        assert_eq!(
-            notice.action.unwrap().0,
-            if selected { "/settings" } else { "/model" }
-        );
+        assert_eq!(notice.text, "No configured provider");
+        assert_eq!(notice.action.unwrap().0, "/settings");
         assert_eq!(app.persistence.as_ref().unwrap().id(), old);
         assert_eq!(app.state.editor.text, "kept draft");
         assert!(
@@ -174,10 +172,8 @@ fn deleting_current_without_a_usable_selection_warns_before_starting_the_job() {
         assert!(app.agent.is_some());
         let notice = app.state.notice.as_ref().unwrap();
         assert!(matches!(notice.kind, Kind::Warning));
-        assert_eq!(
-            notice.action.unwrap().0,
-            if selected { "/settings" } else { "/model" }
-        );
+        assert_eq!(notice.text, "No configured provider");
+        assert_eq!(notice.action.unwrap().0, "/settings");
         assert_eq!(app.persistence.as_ref().unwrap().id(), old);
         assert_eq!(app.state.editor.text, "kept draft");
     }
@@ -197,6 +193,30 @@ fn deleting_another_session_needs_no_provider_or_model() {
     assert_eq!(app.persistence.as_ref().unwrap().id(), current);
     assert!(app.saved_sessions.is_empty());
     assert!(!app.agent.as_ref().unwrap().has_model());
+}
+
+#[test]
+fn a_configured_provider_without_a_model_still_offers_model_selection() {
+    for delete in [false, true] {
+        let directory = Directory::new();
+        let mut app = app(&directory, false, false);
+        app.agent
+            .as_mut()
+            .unwrap()
+            .register_backend(Services::fixture("http://127.0.0.1:1/chat/completions"));
+        let old = app.persistence.as_ref().unwrap().id();
+        if delete {
+            app.start_delete(&old).unwrap();
+            assert!(app.deletion_job.is_none());
+        } else {
+            app.dispatch("/new".into()).unwrap();
+        }
+        let notice = app.state.notice.as_ref().unwrap();
+        assert!(matches!(notice.kind, Kind::Warning));
+        assert_eq!(notice.text, "Choose a model with /model");
+        assert_eq!(notice.action.unwrap().0, "/model");
+        assert_eq!(app.persistence.as_ref().unwrap().id(), old);
+    }
 }
 
 #[test]

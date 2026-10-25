@@ -286,8 +286,7 @@ public sealed class JecodeTestPty : IDisposable {
                 int next = pty.Mark(); pty.Send("/new");
                 pty.Wait("Commands", next); pty.Send("\r");
                 string result = scenario == "startup-fallback-new" ? "current model kept"
-                    : (scenario == "startup-fresh" || scenario == "startup-fallback" || scenario == "startup-unconfigured-prompt")
-                    ? "Choose a model" : "No configured provider";
+                    : scenario == "startup-fallback" ? "Choose a model" : "No configured provider";
                 pty.Wait(result, next);
                 pty.EnsureNoText("has no configured account", next);
                 int settings = pty.Mark(); pty.Send("/settings");

@@ -12,15 +12,15 @@ impl App {
                 settings.effort,
             ));
         }
+        if agent.needs_configuration() && !agent.services().is_configured() {
+            return Err(Feedback::result(Kind::Warning, "No configured provider")
+                .action("/settings", "configure provider"));
+        }
         if !agent.has_model() {
             return Err(
                 Feedback::result(Kind::Warning, "Choose a model with /model")
                     .action("/model", "choose model"),
             );
-        }
-        if agent.needs_configuration() {
-            return Err(Feedback::result(Kind::Warning, "No configured provider")
-                .action("/settings", "configure provider"));
         }
         Ok((
             agent.backend_id().into(),
