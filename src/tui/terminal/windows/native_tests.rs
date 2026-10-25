@@ -13,6 +13,9 @@ use crate::{
 #[path = "activity_tests.rs"]
 mod activity_tests;
 
+#[path = "startup_tests.rs"]
+mod startup_tests;
+
 #[test]
 #[ignore = "requires Windows ConPTY for an isolated native console check"]
 fn native_windows_fullscreen_controls_and_terminal_lifetime() {
@@ -25,6 +28,10 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "setup-cancel",
         "setup-success",
         "setup-error",
+        "startup-removed",
+        "startup-fresh",
+        "startup-fallback",
+        "startup-key-removed",
     ] {
         let directory = Directory::new();
         let script = format!(
@@ -326,6 +333,10 @@ fn tool_cards_console(bash: &std::path::Path) {
 #[ignore = "private child fixture of the native Windows ConPTY check"]
 fn native_console_fixture() {
     let scenario = std::env::var("JECODE_NATIVE_CASE").unwrap();
+    if scenario.starts_with("startup-") {
+        startup_tests::fixture(&scenario);
+        return;
+    }
     if scenario.starts_with("setup-") {
         crate::setup::native_sign_in_fixture(&scenario);
         return;

@@ -52,7 +52,8 @@ impl App {
             return Ok(());
         }
         let agent = self.agent.as_mut().unwrap();
-        if agent.backend_id() == "openrouter" {
+        let choose_model = agent.model() == "unconfigured";
+        if agent.backend_id() == "openrouter" && !choose_model {
             let mut client = agent
                 .services()
                 .with_credential(key.clone())?
@@ -67,6 +68,9 @@ impl App {
         self.catalog.clear();
         self.refresh_context();
         self.finish_setting(Kind::Notice, "API key validated and saved", vec![]);
+        if choose_model {
+            self.open_model_providers(false);
+        }
         Ok(())
     }
 }

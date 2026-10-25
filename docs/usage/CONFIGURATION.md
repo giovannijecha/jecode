@@ -1,7 +1,8 @@
 # Personal configuration
 
-Start Jecode from the project directory. On the first interactive launch, setup
-asks for a provider and model; `jecode setup` runs it again. OpenAI uses
+Start Jecode from the project directory. The TUI opens without credentials and
+shows a warning with `/settings` as the next step. `jecode setup` provides guided
+provider and model selection; plain interactive chat also offers setup. OpenAI uses
 **Continue with ChatGPT**; OpenRouter uses an API key. In the TUI, use
 `/settings` to change saved defaults and **Providers** to manage authentication.
 OpenRouter keys and defaults are
@@ -11,6 +12,13 @@ stored in plain text in `~/.jecode/config.json` (on Windows,
 During browser-based ChatGPT sign-in from `jecode setup`, press Enter to cancel
 the pending login and return to provider selection. Once sign-in completes,
 Enter belongs to the next setup prompt.
+
+If the saved default provider has no credentials, the TUI falls back to another
+configured provider for the current conversation. It uses that provider's saved
+model, or offers `/model` when none is saved. With no configured providers, local
+commands and settings remain available; model requests report that credentials
+are needed. Startup does not rewrite saved defaults or contact a provider to
+validate credentials. Plain chat and single-prompt commands still require configuration.
 
 ## Models and effort
 

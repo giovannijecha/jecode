@@ -94,6 +94,11 @@ public sealed class JecodeTestPty : IDisposable {
     public void Start(string executable, string directory, string scenario) {
         Environment.SetEnvironmentVariable("JECODE_NATIVE_DIR", directory);
         Environment.SetEnvironmentVariable("JECODE_NATIVE_CASE", scenario);
+        if (scenario.StartsWith("startup-")) {
+            Environment.SetEnvironmentVariable("JECODE_HOME", directory);
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", null);
+            Environment.SetEnvironmentVariable("OPENROUTER_MODEL", null);
+        }
         IntPtr bytes = IntPtr.Zero;
         InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref bytes);
         IntPtr attributes = Marshal.AllocHGlobal(bytes);
@@ -131,6 +136,11 @@ public sealed class JecodeTestPty : IDisposable {
         input.Write(bytes, 0, bytes.Length); input.Flush();
     }
     public int Mark() { lock (gate) { return received.Length; } }
+    void EnsureVt(string text) {
+        lock (gate) {
+            if (!received.ToString().Contains(text)) throw new IOException("ConPTY missing warning style");
+        }
+    }
     public void Wait(string text, int after = 0) {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         while (clock.ElapsedMilliseconds < 20000) {
@@ -253,7 +263,18 @@ public sealed class JecodeTestPty : IDisposable {
     public static void Run(string executable, string directory, string scenario) {
         using (var pty = new JecodeTestPty()) {
             pty.Start(executable, directory, scenario);
-            if (scenario.StartsWith("setup-")) {
+            if (scenario.StartsWith("startup-")) {
+                pty.Wait("Ask anything");
+                pty.Wait(scenario == "startup-fallback" ? "Default provider unavailable" : "No configured provider");
+                pty.EnsureVt("\x1b[38;2;224;175;104m");
+                pty.EnsureVt("\x1b[48;2;40;46;57m");
+                int settings = pty.Mark(); pty.Send("/settings");
+                pty.Wait("Commands", settings); pty.Send("\r");
+                pty.Wait("Providers", settings);
+                pty.Send("\x1b"); Thread.Sleep(150); pty.Send("\x11");
+                pty.Wait("NATIVE_STARTUP_RESTORED");
+                pty.Finish(true);
+            } else if (scenario.StartsWith("setup-")) {
                 pty.Wait("SETUP_SIGN_IN_WAITING");
                 if (scenario == "setup-cancel") pty.Send("\r");
                 pty.Wait("SETUP_NEXT_PROMPT: ");

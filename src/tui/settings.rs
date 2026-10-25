@@ -241,7 +241,8 @@ impl App {
             let previous_model = agent.model().to_owned();
             let previous_effort = agent.effort();
             let switch = selected.as_ref().is_some_and(|services| {
-                services.id() != agent.backend_id()
+                agent.needs_configuration()
+                    || services.id() != agent.backend_id()
                     || services.account() != agent.services().account()
             });
             let result = if switch {

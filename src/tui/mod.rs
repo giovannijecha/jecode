@@ -193,23 +193,26 @@ impl App {
 }
 
 /// Opens the TUI; a non-empty `draft` starts the composer, as `--attach` does.
+#[cfg(test)]
 pub fn run(
     agent: Agent,
     config: SessionConfig,
     draft: crate::attachments::Prompt,
 ) -> Result<(), String> {
-    run_inner(agent, config, None, draft)
+    run_inner(agent, config, None, draft, None)
 }
 
+#[cfg(test)]
 pub fn resume(agent: Agent, config: SessionConfig, id: Option<String>) -> Result<(), String> {
-    run_inner(agent, config, Some(id), Default::default())
+    run_inner(agent, config, Some(id), Default::default(), None)
 }
 
-fn run_inner(
+pub(crate) fn run_inner(
     mut agent: Agent,
     config: SessionConfig,
     resume: Option<Option<String>>,
     draft: crate::attachments::Prompt,
+    notice: Option<(String, &'static str, &'static str)>,
 ) -> Result<(), String> {
     agent.enable_sessions(
         config
@@ -229,6 +232,11 @@ fn run_inner(
         None => {}
     }
     app.restore_staged();
+    if let Some((text, key, label)) = notice {
+        let mut feedback = Feedback::result(Kind::Warning, app.archive.redactor.text(&text));
+        feedback.action = Some((key, label));
+        app.state.notify(feedback);
+    }
     let mut decoder = Decoder::default();
     let mut dirty = true;
     let mut pending = None;
@@ -431,6 +439,8 @@ mod shortcut_tests;
 mod spacing_tests;
 #[cfg(test)]
 mod specimen;
+#[cfg(test)]
+mod startup_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

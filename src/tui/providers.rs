@@ -116,7 +116,10 @@ impl App {
             ),
             1 => self.load_catalog_for(
                 super::jobs::CatalogPurpose::Models { defaults, id: None },
-                if services[0].id() == active.id() && services[0].account() == active.account() {
+                if !self.agent.as_ref().unwrap().needs_configuration()
+                    && services[0].id() == active.id()
+                    && services[0].account() == active.account()
+                {
                     active
                 } else {
                     services.remove(0)
@@ -157,7 +160,11 @@ impl App {
     }
 
     pub(super) fn open_api_keys(&mut self) {
-        let configured = self.config.settings.credential_for("openrouter").is_some();
+        let configured = self
+            .config
+            .settings
+            .credential_for("openrouter")
+            .is_some_and(|key| !key.is_empty());
         self.state.selector = Some(Selector::api_keys(configured));
     }
 
@@ -349,9 +356,10 @@ impl App {
                     Kind::Notice,
                     "Connected OpenAI · Using your ChatGPT plan · Manage usage in account details",
                 ));
-                if self.agent.as_ref().unwrap().backend_id() == "openai"
-                    && let Ok(services) = self.config.settings.services(&self.home(), "openai")
-                    && services.account() != self.agent.as_ref().unwrap().services().account()
+                if let Ok(services) = self.config.settings.services(&self.home(), "openai")
+                    && (self.agent.as_ref().unwrap().model() == "unconfigured"
+                        || (self.agent.as_ref().unwrap().backend_id() == "openai"
+                            && services.account() != self.agent.as_ref().unwrap().services().account()))
                 {
                     self.auth_model_switch = true;
                     self.load_catalog_for(

@@ -7,6 +7,10 @@ use crate::{
 };
 
 impl Agent {
+    pub fn needs_configuration(&self) -> bool {
+        self.client.needs_configuration()
+    }
+
     pub fn backend_id(&self) -> &'static str {
         self.client.id()
     }

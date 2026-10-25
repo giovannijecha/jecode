@@ -59,7 +59,7 @@ impl Settings {
         let api_key = api_key.trim().to_string();
         let model = model.trim().to_string();
         validate_backend_id(backend_id)?;
-        if backend_id == "openrouter" {
+        if backend_id == "openrouter" && !api_key.is_empty() {
             validate_key(&api_key)?;
         }
         validate_model(&model)?;
@@ -184,7 +184,7 @@ impl Settings {
                 .and_then(Value::as_str)
         }
         .unwrap_or("");
-        if backend_id == "openrouter" {
+        if backend_id == "openrouter" && !api_key.is_empty() {
             validate_key(api_key)?;
         }
         let legacy_model = legacy

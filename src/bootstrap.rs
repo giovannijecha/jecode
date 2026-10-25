@@ -7,6 +7,8 @@ use crate::{setup, tools::Tools};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 
+mod startup;
+
 pub fn configure() -> Result<(), String> {
     require_terminal()?;
     let store = Store::discover()?;
@@ -64,6 +66,7 @@ fn launch(
 ) -> Result<(), String> {
     let store = Store::discover()?;
     let interactive = io::stdin().is_terminal();
+    let tui = interactive && !plain && prompt.is_none() && io::stdout().is_terminal();
     let settings = resolve_settings(
         &store,
         std::env::var("OPENROUTER_API_KEY").ok(),
@@ -79,6 +82,15 @@ fn launch(
             None
         }
         Err(error) => return Err(error),
+    };
+    let settings = if tui && settings.is_none() {
+        Some(Settings::selected(
+            "openrouter",
+            String::new(),
+            "unconfigured".into(),
+        )?)
+    } else {
+        settings
     };
     if settings.is_none() && !interactive {
         return Err(
@@ -106,12 +118,9 @@ fn launch(
             settings
         }
     };
-    let model = model_override.unwrap_or_else(|| settings.model.clone());
     let config_home = store.path().parent().expect("configuration directory");
-    let mut client = settings
-        .services(config_home, &settings.backend_id)?
-        .create(model)?;
-    if client.model() == settings.model {
+    let (mut client, notice) = startup::client(&store, &settings, model_override, tui)?;
+    if client.id() == settings.backend_id && client.model() == settings.model {
         client.set_effort(settings.effort);
     }
     let mut agent = Agent::with_backend(client, tools);
@@ -121,7 +130,9 @@ fn launch(
     }
     agent.set_auto_compact(settings.auto_compact);
     agent.set_backend_routing_preferences(&settings.backend_id, settings.routing.clone());
-    agent.set_routing(settings.routing_for(agent.model()));
+    if agent.backend_id() == settings.backend_id {
+        agent.set_routing(settings.routing_for(agent.model()));
+    }
     if let Err(error) = std::fs::create_dir_all(config_home.join("skills")) {
         // The optional library must not prevent ordinary work. Its scan also
         // reports unreadable or malformed entries in the catalog.
@@ -169,14 +180,13 @@ fn launch(
         drop(input);
         drop(output);
         drop(status);
-        return match resume {
-            Some(id) => crate::tui::resume(agent, session_config, id),
-            None => crate::tui::run(
-                agent,
-                session_config,
-                Prompt::new(String::new(), attachments),
-            ),
-        };
+        return crate::tui::run_inner(
+            agent,
+            session_config,
+            resume,
+            Prompt::new(String::new(), attachments),
+            notice,
+        );
     }
     match resume {
         Some(id) => session::chat_with_resume(

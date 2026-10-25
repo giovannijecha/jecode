@@ -5,6 +5,7 @@ mod failure;
 pub(crate) mod openai;
 pub(crate) mod openrouter;
 mod retry;
+pub(crate) mod unconfigured;
 pub(crate) use charges::{price, quantity};
 
 use crate::attachments::{Inputs, Pool};
@@ -245,6 +246,9 @@ pub struct Metrics {
 /// Every backend accepts the same canonical transcript and tool catalog.
 pub trait Backend: Send {
     fn id(&self) -> &'static str;
+    fn needs_configuration(&self) -> bool {
+        false
+    }
     fn account(&self) -> Option<String> {
         None
     }
