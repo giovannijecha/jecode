@@ -3,27 +3,33 @@
 use super::Api;
 use crate::backend::{Failure, FailureKind, FailureReason};
 use crate::json::{self, Value};
-use crate::process;
 use crate::redact::Redactor;
 use std::process::Command;
 use std::time::Duration;
 
+pub(super) struct Response {
+    pub body: String,
+    pub status: u16,
+    pub request_id: Option<String>,
+    pub retry_after: Option<Duration>,
+}
+
 impl Api {
     pub(super) fn get(&self, path: &str) -> Result<Value, String> {
-        let (body, _, _) = self
-            .raw("GET", path, None, &mut |_| Ok(()))
+        let response = self
+            .raw("GET", path, None, None, &mut |_| Ok(()))
             .map_err(|error| error.message)?;
-        json::parse(&body).map_err(|error| self.redactor().text(&error))
+        json::parse(&response.body).map_err(|error| self.redactor().text(&error))
     }
 
     pub(super) fn post_stream(
         &self,
         path: &str,
         body: &str,
+        session: Option<&str>,
         observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
-    ) -> Result<(u16, Option<String>), Failure> {
-        self.raw("POST", path, Some(body), observer)
-            .map(|(_, status, request_id)| (status, request_id))
+    ) -> Result<Response, Failure> {
+        self.raw("POST", path, Some(body), session, observer)
     }
 
     fn raw(
@@ -31,8 +37,9 @@ impl Api {
         method: &str,
         path: &str,
         body: Option<&str>,
+        session: Option<&str>,
         observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
-    ) -> Result<(String, u16, Option<String>), Failure> {
+    ) -> Result<Response, Failure> {
         let token = self
             .session
             .access_token(&self.cancellation)
@@ -72,6 +79,10 @@ impl Api {
                 "@-",
             ]);
         }
+        // The ChatGPT route derives prompt cache affinity from this header.
+        if let Some(session) = session {
+            command.args(["--header", &format!("session-id: {session}")]);
+        }
         if self.base_url.starts_with("https://") {
             command.args(["--proto", "=https"]);
         } else {
@@ -79,7 +90,7 @@ impl Api {
         }
         let mut decoder = Headers::default();
         let mut observer_failed = false;
-        let output = process::run_observed(
+        let output = crate::curl::run(
             &mut command,
             body.map(|body| body.as_bytes().to_vec()),
             None,
@@ -107,6 +118,7 @@ impl Api {
             if let Some(id) = &decoder.request_id {
                 failure.message.push_str(&format!("; request id: {id}"));
             }
+            failure.retry_after = decoder.retry_after;
             failure
         })?;
         if output.cancelled {
@@ -150,6 +162,7 @@ impl Api {
         if !(200..300).contains(&status) {
             let parsed = json::parse(&body).ok();
             let mut error = failure(parsed.as_ref(), Some(status));
+            error.retry_after = decoder.retry_after;
             if parsed.is_none() {
                 error.diagnostic = Some(body);
             }
@@ -159,7 +172,12 @@ impl Api {
             sanitize(&mut error, &self.redactor());
             return Err(error);
         }
-        Ok((body, status, decoder.request_id))
+        Ok(Response {
+            body,
+            status,
+            request_id: decoder.request_id,
+            retry_after: decoder.retry_after,
+        })
     }
 }
 
@@ -169,6 +187,7 @@ struct Headers {
     body: Vec<u8>,
     status: Option<u16>,
     request_id: Option<String>,
+    retry_after: Option<Duration>,
     ready: bool,
 }
 
@@ -210,6 +229,12 @@ impl Headers {
                 .and_then(|status| status.parse::<u16>().ok())
                 .ok_or("OpenAI returned invalid HTTP status")?;
             self.status = Some(status);
+            self.retry_after = header.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("retry-after")
+                    .then(|| crate::backend::retry::retry_delay(value.trim()))
+                    .flatten()
+            });
             self.request_id = header.lines().find_map(|line| {
                 let (name, value) = line.split_once(':')?;
                 (name.eq_ignore_ascii_case("x-request-id")
@@ -268,10 +293,13 @@ pub(super) fn failure(value: Option<&Value>, status: Option<u16>) -> Failure {
     }
     let temporary = matches!(status, Some(408 | 425 | 500..=599))
         || (status == Some(429) && code != "subscription_sharing_usage_limit_exceeded")
-        || code == "rate_limit_exceeded"
         || matches!(
             code,
-            "subscription_sharing_usage_unavailable" | "subscription_sharing_user_unavailable"
+            "rate_limit_exceeded"
+                | "slow_down"
+                | "server_is_overloaded"
+                | "subscription_sharing_usage_unavailable"
+                | "subscription_sharing_user_unavailable"
         );
     Failure {
         kind: if temporary {
@@ -283,7 +311,7 @@ pub(super) fn failure(value: Option<&Value>, status: Option<u16>) -> Failure {
         } else {
             FailureKind::Terminal
         },
-        reason: if code == "rate_limit_exceeded"
+        reason: if matches!(code, "rate_limit_exceeded" | "slow_down")
             || (status == Some(429) && code != "subscription_sharing_usage_limit_exceeded")
         {
             Some(FailureReason::RateLimited)
@@ -352,6 +380,19 @@ mod tests {
         assert_eq!(failure.kind, FailureKind::Temporary);
         assert_eq!(failure.reason, Some(FailureReason::RateLimited));
         assert!(!failure.message.contains("settings/usage"));
+    }
+
+    #[test]
+    fn transient_stream_codes_do_not_need_an_http_error_status() {
+        for code in ["slow_down", "server_is_overloaded"] {
+            let value = Value::object([("error", Value::object([("code", Value::string(code))]))]);
+            let failure = failure(Some(&value), None);
+            assert_eq!(failure.kind, FailureKind::Temporary);
+            assert_eq!(
+                failure.reason,
+                (code == "slow_down").then_some(FailureReason::RateLimited)
+            );
+        }
     }
 
     #[test]

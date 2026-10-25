@@ -51,7 +51,10 @@ repeated-command refusals or model-output validation.
 
 Backend updates carry text deltas. The agent masks split credentials incrementally
 and produces display/persistence snapshots at terminal cadence, flushing the final
-text on completion or failure. The TUI worker keeps one latest streaming snapshot;
+text on completion or failure. The first visible prefix saves synchronously;
+later partial snapshots use background autosave to avoid periodic disk waits
+in the stream observer. Completion and tool boundaries save synchronously.
+The TUI worker keeps one latest streaming snapshot;
 transient working indicators never wait for a full queue. Significant events use
 a bounded ordered queue and retain cancellation-aware backpressure.
 
@@ -218,7 +221,7 @@ unsafe Rust FFI.
 
 | Boundary | Implementation and requirements |
 | --- | --- |
-| Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. |
+| Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. Short helpers that never spawn children (the Windows system `curl.exe` and account crypto helpers) bypass the supervisor through `process::run_leaf`; cancellation and timeouts still kill them directly. `JECODE_CURL` overrides and PATH fallbacks retain Job Object supervision, including their descendants. |
 | Checkpoint disk space | Windows uses an owned cached C# helper and `GetDiskFreeSpaceExW` at the archive path; requires Windows PowerShell and `Add-Type`. Unix uses the installed `df -Pk` command. Failed queries prevent payload admission and can retry after five seconds. |
 | Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
 | Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |

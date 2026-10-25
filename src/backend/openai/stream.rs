@@ -1,6 +1,6 @@
 //! SSE assembly and terminal Responses validation.
 
-use crate::backend::{Completion, Failure, FailureKind, ToolCall, Update, Usage};
+use crate::backend::{Charges, Completion, Failure, FailureKind, ToolCall, Update, Usage};
 use crate::json::{self, Value};
 use std::collections::BTreeMap;
 
@@ -63,6 +63,19 @@ impl Stream {
             }
             "response.reasoning_text.delta" | "response.reasoning_summary_text.delta" => {
                 emit(Update::Reasoning)?;
+            }
+            // Reasoning without a requested summary streams no deltas; the
+            // opened item is the only sign that the model is working.
+            "response.output_item.added" => {
+                match event
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(Value::as_str)
+                {
+                    Some("reasoning") => emit(Update::Reasoning)?,
+                    Some("function_call" | "custom_tool_call") => emit(Update::Working)?,
+                    _ => {}
+                }
             }
             "response.output_item.done" => {
                 let index = event
@@ -214,12 +227,23 @@ impl Stream {
                 .and_then(|details| details.get("cache_write_tokens"))
                 .and_then(Value::as_usize),
         });
+        // The plan reports no prices; cache reads still show the cache at work.
+        let charges = usage.as_ref().and_then(|usage| {
+            let cached = usage.cached_tokens.unwrap_or(0);
+            let cache_written = usage.cache_write_tokens.unwrap_or(0);
+            (cached > 0 || cache_written > 0).then(|| Charges {
+                requests: 1,
+                cached,
+                cache_written,
+                ..Charges::default()
+            })
+        });
         Ok(Completion {
             message,
             text,
             calls,
             usage,
-            charges: None,
+            charges,
             postprocess_error: None,
         })
     }
@@ -228,6 +252,53 @@ impl Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_input_is_reported_with_the_completion() {
+        let bytes = concat!(
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}}
+
+",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":9000,\"input_tokens_details\":{\"cached_tokens\":8192},\"output_tokens\":5}}}
+
+"
+        );
+        let mut stream = Stream::default();
+        stream.feed(bytes.as_bytes(), &mut |_| Ok(())).unwrap();
+        let charges = stream.finish().unwrap().charges.unwrap();
+        assert_eq!((charges.requests, charges.cached), (1, 8192));
+        assert_eq!(charges.describe().as_deref(), Some("8.2K cached"));
+    }
+
+    #[test]
+    fn opened_reasoning_and_call_items_report_progress_without_summaries() {
+        let bytes = concat!(
+            "data: {\"type\":\"response.created\",\"response\":{}}
+
+",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\"}}
+
+",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"message\"}}
+
+",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\"}}
+
+",
+        );
+        let mut seen = Vec::new();
+        Stream::default()
+            .feed(bytes.as_bytes(), &mut |update| {
+                seen.push(match update {
+                    Update::Reasoning => "reasoning",
+                    Update::Working => "working",
+                    _ => "other",
+                });
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(seen, ["reasoning", "working"]);
+    }
 
     #[test]
     fn completed_empty_output_keeps_items_already_delivered_by_the_chatgpt_route() {
@@ -255,6 +326,7 @@ mod tests {
             3
         );
         assert_eq!(completion.usage.unwrap().input_tokens, Some(12));
+        assert!(completion.charges.is_none());
     }
 
     #[test]

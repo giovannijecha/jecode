@@ -68,7 +68,7 @@ impl Agent {
         }
     }
 
-    /// Auto's `session_id` follows the saved conversation it belongs to.
+    /// The OpenRouter `session_id` follows the saved conversation it belongs to.
     pub(super) fn sync_conversation(&mut self) {
         let id = self.persistence.as_ref().map(crate::sessions::Handle::id);
         self.client.set_conversation(id);

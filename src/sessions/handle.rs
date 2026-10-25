@@ -283,13 +283,13 @@ impl Handle {
         live.document.pending.partial = live.redactor.text(text);
         live.dirty.get_or_insert_with(Instant::now);
         live.revision = live.revision.wrapping_add(1);
-        let due = first
-            || live
-                .dirty
-                .is_some_and(|since| since.elapsed() >= SAVE_INTERVAL);
         drop(live);
-        if due {
+        // Keep the first visible prefix durable, then let periodic autosaves
+        // run without blocking streaming on journal fsync.
+        if first {
             self.flush()?;
+        } else {
+            self.flush_due_background()?;
         }
         Ok(())
     }

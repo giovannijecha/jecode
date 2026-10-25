@@ -353,3 +353,68 @@ fn refresh_errors_clear_only_confirmed_unusable_tokens() {
         "OpenAI identity request failed: invalid_grant_extra"
     ));
 }
+
+#[test]
+fn access_tokens_come_from_memory_until_the_record_changes() {
+    let cancel = Cancellation::default();
+    let session = Session::fixture("first-access");
+    assert_eq!(session.access_token(&cancel).unwrap(), "first-access");
+    assert_eq!(session.cached_token().as_deref(), Some("first-access"));
+    // Another process signing out rewrites the record and invalidates the copy.
+    let files = session.store.files();
+    let mut record = files
+        .record(session.client_id(), "fixture-subject", &cancel)
+        .unwrap();
+    record.access_token.clear();
+    files.save_record(&record, &cancel).unwrap();
+    assert_eq!(session.cached_token(), None);
+    assert!(session.access_token(&cancel).is_err());
+    record.access_token = "second-access".into();
+    files.save_record(&record, &cancel).unwrap();
+    assert_eq!(session.access_token(&cancel).unwrap(), "second-access");
+    // Tokens near expiry always take the refreshing disk path.
+    record.expires_at = storage::now().unwrap() + 30;
+    record.earliest_refresh_at = u64::MAX;
+    files.save_record(&record, &cancel).unwrap();
+    assert_eq!(session.access_token(&cancel).unwrap(), "second-access");
+    assert_eq!(session.cached_token(), None);
+}
+
+#[test]
+fn cancelled_access_does_not_return_a_cached_token() {
+    let session = Session::fixture("fixture-access");
+    let cancel = Cancellation::default();
+    assert_eq!(session.access_token(&cancel).unwrap(), "fixture-access");
+    cancel.cancel();
+    assert_eq!(
+        session.access_token(&cancel).unwrap_err(),
+        "Operation cancelled"
+    );
+}
+
+#[test]
+fn token_cache_stamp_rejects_a_directory() {
+    let directory = crate::test_support::Directory::new();
+    assert!(stamp(directory.path()).is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn cached_access_reprotects_a_record_with_changed_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let session = Session::fixture("fixture-access");
+    let cancel = Cancellation::default();
+    assert_eq!(session.access_token(&cancel).unwrap(), "fixture-access");
+    let path = session
+        .store
+        .files()
+        .record_path(session.client_id(), "fixture-subject", &cancel)
+        .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(session.access_token(&cancel).unwrap(), "fixture-access");
+    assert_eq!(
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}

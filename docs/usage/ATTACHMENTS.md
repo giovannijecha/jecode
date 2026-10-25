@@ -47,7 +47,7 @@ provider content from the copy just before a request.
 
 | Kind | Delivery |
 | --- | --- |
-| PNG, JPEG, WebP, GIF | Original image bytes and dimensions, without a global provider-size cutoff. |
+| PNG, JPEG, WebP, GIF | Original image bytes. A PNG or JPEG up to 16 MiB that exceeds 512 KiB or 2048 pixels on the long side can use a derived view: scaled to at most 2048 pixels, PNG or JPEG quality 85, whichever is smaller. The view is kept only when it is smaller than the original. Images above 16 MiB use their original bytes to avoid loading the whole file for conversion. The stored original never changes. |
 | Other image formats | Converted to PNG or JPEG, at most 2048 pixels on the long side. Without a converter, the original stays local and the manifest says so. |
 | PDF | File part via OpenRouter's `file-parser`: `native` for a model with file input, otherwise `cloudflare-ai`. PDFs over 32 MiB stay local. |
 | Text | Read through `read attachment:ID` with normal pagination. |

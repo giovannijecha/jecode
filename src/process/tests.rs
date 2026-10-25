@@ -117,7 +117,7 @@ fn supervisor_exit_without_completion_is_unknown() {
     } = spawned;
     child.kill().unwrap();
     child.wait().unwrap();
-    let error = windows::completion(completion).unwrap_err();
+    let error = windows::completion(completion.unwrap()).unwrap_err();
     assert!(error.contains("outcome is unknown"), "{error}");
 }
 

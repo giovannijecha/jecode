@@ -200,7 +200,7 @@ impl OpenRouter {
         self.router = router;
     }
 
-    /// The conversation identifier Auto sends as `session_id`.
+    /// The conversation identifier sent as `session_id` outside endpoint pins.
     pub fn set_conversation(&mut self, id: Option<String>) {
         self.router.session = id;
     }

@@ -15,7 +15,7 @@ fn run(
     cancel: &Cancellation,
 ) -> Result<Vec<u8>, String> {
     crate::auth::isolate_environment(command);
-    let output = crate::process::run_observed(
+    let output = crate::process::run_leaf(
         command,
         input,
         Some(Duration::from_secs(15)),
@@ -119,7 +119,7 @@ pub fn verify_rs256(
         .arg(sig)
         .arg(message);
     crate::auth::isolate_environment(&mut command);
-    let output = crate::process::run_observed(
+    let output = crate::process::run_leaf(
         &mut command,
         None,
         Some(Duration::from_secs(15)),

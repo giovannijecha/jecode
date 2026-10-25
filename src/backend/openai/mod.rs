@@ -41,6 +41,8 @@ pub struct OpenAi {
     api: Api,
     model: String,
     effort: Effort,
+    /// The saved session, sent as the prompt cache key and `session-id`.
+    conversation: Option<String>,
 }
 
 impl Api {
@@ -115,6 +117,7 @@ impl OpenAi {
             api,
             model,
             effort: Effort::Default,
+            conversation: None,
         })
     }
 }
@@ -198,20 +201,28 @@ impl Backend for OpenAi {
             .iter()
             .map(|message| conversation::project(message, &origin))
             .collect();
-        let request = wire::request(&self.model, self.effort, &projected, with_tools, pool)
+        let mut request = wire::request(&self.model, self.effort, &projected, with_tools, pool)
             .map_err(backend::Failure::from)?;
+        // A stable conversation key supports provider prompt-cache affinity.
+        if let (Some(id), Value::Object(fields)) = (&self.conversation, &mut request) {
+            fields.insert("prompt_cache_key".into(), Value::string(id));
+        }
         let body = request.encode();
         emit(backend::Update::Waiting {
             request_bytes: body.len(),
         })
         .map_err(backend::Failure::from)?;
         let mut stream = stream::Stream::default();
-        let (status, request_id) = self
-            .api
-            .post_stream("/responses", &body, &mut |chunk| stream.feed(chunk, emit))?;
+        let response = self.api.post_stream(
+            "/responses",
+            &body,
+            self.conversation.as_deref(),
+            &mut |chunk| stream.feed(chunk, emit),
+        )?;
         let mut completion = stream.finish().map_err(|mut failure| {
-            failure.message = format!("{} (HTTP {status})", failure.message);
-            if let Some(id) = request_id {
+            failure.message = format!("{} (HTTP {})", failure.message, response.status);
+            failure.retry_after = response.retry_after;
+            if let Some(id) = response.request_id {
                 failure.message.push_str(&format!("; request id: {id}"));
             }
             transport::sanitize(&mut failure, &self.api.redactor());
@@ -226,7 +237,16 @@ impl Backend for OpenAi {
     fn set_cancellation(&mut self, cancellation: Cancellation) {
         self.api.cancellation = cancellation;
     }
-    fn set_conversation(&mut self, _id: Option<String>) {}
+    fn set_conversation(&mut self, id: Option<String>) {
+        // The id also travels as an HTTP header, so only plain tokens qualify.
+        self.conversation = id.filter(|id| {
+            !id.is_empty()
+                && id.len() <= 128
+                && id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        });
+    }
     fn services(&self) -> backend::Services {
         backend::Services::from_service(self.api.clone())
     }

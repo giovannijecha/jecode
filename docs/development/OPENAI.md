@@ -104,3 +104,18 @@ behavior. Do not copy Anthropic `cache_control` fields into an OpenAI request.
 Keep tool definitions and reusable prefixes stable, preserve opaque provider
 items in their owning adapter, and record reported cache reads and writes.
 Assess connection reuse separately from cache hits and from context compaction.
+
+Each request carries the conversation ID as `prompt_cache_key` and as the
+`session-id` header to support cache affinity. A stable key does not guarantee
+a cache hit; OpenAI routes requests automatically, and newer models may not
+need the key. Reported `cached_tokens` appear with the completion. The stream
+reports progress when a reasoning or tool-call item opens, before its first
+delta, so the TUI leaves "Waiting for model" as soon as work starts.
+
+The access token is kept in memory until it nears expiry or the account record
+file changes; requests then skip the locked disk read and decryption.
+
+Temporary HTTP and stream failures retain the server's `Retry-After` delay
+(seconds or HTTP date). The recovery loop waits at least that long and remains
+cancellable. `slow_down` and `server_is_overloaded` stream errors are temporary;
+a plan usage-limit error still stops inference.

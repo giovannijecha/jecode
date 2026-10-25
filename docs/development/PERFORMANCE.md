@@ -44,6 +44,77 @@ Run the current stream probe:
 cargo test --locked --offline --release backend::openrouter::stream::tests::tool_argument_stream_bench -- --exact --ignored --nocapture --test-threads=1
 ```
 
+### Request overhead and image payloads
+
+Recorded **2026-10-25**, Windows, release builds of `ae12c40` (before) and the
+working tree that adds image views, leaf processes, the in-memory ChatGPT
+token and ChatGPT cache affinity. Live measurements used the maintainer's
+accounts; they include provider latency and are not reproducible probes.
+
+Two archived sessions from 2026-10-23 explained most waiting time. Every
+request re-sent pasted screenshots as base64:
+
+| Session | Requests | Request body p50 / max | Uploaded | Tool time |
+| --- | ---: | --- | ---: | ---: |
+| OpenRouter | 136 | 5.1 / 14.2 MB | 889 MB | 61 s of 2,307 s |
+| ChatGPT | 76 | 2.6 / 7.1 MB | 187 MB | — |
+
+In the OpenRouter session, time to first update grew with request size
+(r = 0.85, about 1.1 s per MB); requests of 10 MB or more had a median of
+18.6 s. Measured upload bandwidth was 1.5–2.6 MB/s. Parallel tool batches
+would have saved about 22 s.
+
+| Change | Before | After |
+| --- | ---: | ---: |
+| 54 archived screenshots, bytes sent per request | 34.3 MB | 8.8 MB |
+| Session 1 images in every request (base64) | 11.96 MB | 1.17 MB |
+| ChatGPT access token per request | 375–430 ms (1.65 s first) | 15–50 µs when cached |
+| `curl.exe` launch | 100–120 ms supervised | 7–14 ms direct |
+
+Views took about 1 s per converted image, once at import. A synthetic
+2560×1440 noise image barely compresses (674 KB PNG, 623 KB JPEG view), so
+the gain depends on content.
+
+Interleaved CLI runs from a three-file fixture, before / after (medians):
+
+| Workload | Runs | Wall | Requests without progress | Local time outside requests |
+| --- | ---: | ---: | ---: | ---: |
+| ChatGPT, three reads + image | 3 + 3 | 31.9 / 26.3 s | 9 of 12 / 0 of 12 | 3.1 / 3.2 s |
+| ChatGPT, one-word reply | 5 + 5 | 8.4 / 9.3 s | 0 / 0 | 2.83 / 1.99 s |
+| OpenRouter, three reads + image | 3 + 3 | 20.0 / 19.4 s | 0 / 0 | 0.84 / 1.99 s |
+| OpenRouter, one-word reply | 4 + 4 | 1.67 / 1.74 s | 0 / 0 | 0.40 / 0.31 s |
+
+ChatGPT first-update times ranged from 2 to 10 s for the same one-word
+request, so single-request wall times do not separate the versions. Local
+time outside requests is the steadier signal; with the image, it includes the
+one-time view conversion. Before, ChatGPT tool-call requests reported no
+progress until the call completed, so the interface showed "Waiting for model"
+for the whole request.
+
+### Follow-up correctness and streaming checks
+
+The follow-up review on **2026-10-25** uses local fixtures, without live provider
+requests. The historical account timings above were not repeated.
+
+- Optional PNG/JPEG view generation skips originals above 16 MiB to avoid
+  loading and duplicating large files during import. PDF annotation assets
+  retain exact provider bytes without generating unused views.
+- Windows system curl retains direct launch. Configured executables and PATH
+  fallbacks retain descendant supervision; a wrapper fixture verifies that
+  cancellation prevents its child from finishing work.
+- OpenAI preserves `Retry-After` on HTTP and SSE failures, sharing the existing
+  seconds/date parser with OpenRouter. Fixtures cover both error paths.
+- Periodic partial response saves use background autosave; the first visible
+  prefix, completion and tool checkpoints remain synchronous. A test holds
+  the session I/O lock for a due periodic save: the streaming observer returns
+  while I/O is still blocked, and a final flush recovers the text.
+  This verifies removal of foreground disk waiting, not an end-to-end speedup.
+
+Connection reuse, incremental WebSocket requests and executing tools before a
+terminal response remain separate transport/lifecycle changes. They are not
+implemented or included in the reported gains. A stable prompt cache key also
+does not guarantee a cache hit.
+
 ### Large-file batch edits
 
 Recorded **2026-10-24**, Windows, Rust 1.95.0 `x86_64-pc-windows-gnullvm`,

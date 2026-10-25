@@ -253,7 +253,12 @@ fn changed_rules_invalidate_measurements_and_unchanged_rules_keep_them() {
     assert_eq!(agent.context.measured_end, 0);
     assert_eq!(agent.context.calibration, calibration);
     assert_eq!(agent.context.ceiling, Some(100_000));
-    assert!(agent.context_estimate(&agent.messages.lock().unwrap()) > before + 5000);
+    // The new rules are 45,000 bytes; the estimate charges them at least at
+    // the calibrated rate.
+    assert!(
+        agent.context_estimate(&agent.messages.lock().unwrap())
+            > before + agent.context.estimate_bytes(45_000)
+    );
     agent.run_turn("Second", &mut |_| Ok(())).unwrap();
     let calibration = agent.context.calibration;
     let measured_end = agent.context.measured_end;

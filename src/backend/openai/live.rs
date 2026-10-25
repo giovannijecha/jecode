@@ -101,7 +101,7 @@ fn inspect_live_model_and_stream() {
     .encode();
     let mut raw = Vec::new();
     let mut stream = stream::Stream::default();
-    api.post_stream("/responses", &body, &mut |bytes| {
+    api.post_stream("/responses", &body, None, &mut |bytes| {
         raw.extend_from_slice(bytes);
         stream.feed(bytes, &mut |_| Ok(()))
     })

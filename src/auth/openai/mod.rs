@@ -11,6 +11,8 @@ mod wire;
 use crate::cancel::Cancellation;
 use crate::redact::Redactor;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use storage::{Files, Record};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -195,6 +197,7 @@ impl Store {
             client_id: record.client_id.clone(),
             subject: record.subject.clone(),
             redactor,
+            tokens: Arc::default(),
             #[cfg(test)]
             _fixture_dir: None,
         }
@@ -207,8 +210,66 @@ pub struct Session {
     client_id: String,
     subject: String,
     redactor: Redactor,
+    tokens: Arc<Mutex<TokenCache>>,
     #[cfg(test)]
     _fixture_dir: Option<std::sync::Arc<crate::test_support::Directory>>,
+}
+
+/// The last usable access token and the record file state it was read from.
+/// A changed stamp sends the next lookup through the locked disk path again.
+#[derive(Default)]
+struct TokenCache {
+    path: Option<PathBuf>,
+    token: Option<(String, u64, Stamp)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    changed: (i64, i64),
+    #[cfg(unix)]
+    mode: u32,
+    #[cfg(windows)]
+    created: u64,
+    #[cfg(windows)]
+    attributes: u32,
+}
+
+fn stamp(path: &std::path::Path) -> Option<Stamp> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return None;
+    }
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt as _;
+    #[cfg(windows)]
+    use std::os::windows::fs::MetadataExt as _;
+    #[cfg(windows)]
+    if metadata.file_attributes() & 0x400 != 0 {
+        return None;
+    }
+    Some(Stamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        #[cfg(unix)]
+        device: metadata.dev(),
+        #[cfg(unix)]
+        inode: metadata.ino(),
+        #[cfg(unix)]
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+        #[cfg(unix)]
+        mode: metadata.mode(),
+        #[cfg(windows)]
+        created: metadata.creation_time(),
+        #[cfg(windows)]
+        attributes: metadata.file_attributes(),
+    })
 }
 
 impl Session {
@@ -256,7 +317,51 @@ impl Session {
         Ok(Account::from(&record))
     }
 
+    /// A valid access token. While the record file is unchanged and the token
+    /// is not near expiry, this answers from memory: the disk path takes the
+    /// account lock and, on Windows, launches native permission and hashing
+    /// helpers, which cost hundreds of milliseconds per request.
     pub fn access_token(&self, cancel: &Cancellation) -> Result<String, String> {
+        if cancel.requested() {
+            return Err("Operation cancelled".into());
+        }
+        if let Some(token) = self.cached_token() {
+            return Ok(token);
+        }
+        let token = self.stored_token(cancel)?;
+        Ok(token)
+    }
+
+    fn cached_token(&self) -> Option<String> {
+        let cache = self.tokens.lock().ok()?;
+        let (token, expires_at, recorded) = cache.token.as_ref()?;
+        let now = storage::now().ok()?;
+        (*expires_at > now.saturating_add(60) && stamp(cache.path.as_ref()?) == Some(*recorded))
+            .then(|| token.clone())
+    }
+
+    fn remember_token(&self, token: &str, expires_at: u64, cancel: &Cancellation) {
+        let Ok(mut cache) = self.tokens.lock() else {
+            return;
+        };
+        if cache.path.is_none() {
+            cache.path = self
+                .store
+                .files()
+                .record_path(&self.client_id, &self.subject, cancel)
+                .ok();
+        }
+        cache.token = cache
+            .path
+            .as_deref()
+            .and_then(stamp)
+            .map(|recorded| (token.to_owned(), expires_at, recorded));
+    }
+
+    fn stored_token(&self, cancel: &Cancellation) -> Result<String, String> {
+        if let Ok(mut cache) = self.tokens.lock() {
+            cache.token = None;
+        }
         let files = self.store.files();
         let _lock = files.lock(cancel)?;
         let mut record = files.record(&self.client_id, &self.subject, cancel)?;
@@ -294,6 +399,7 @@ impl Session {
                 }
             }
         }
+        self.remember_token(&record.access_token, record.expires_at, cancel);
         Ok(record.access_token)
     }
 

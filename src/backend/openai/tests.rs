@@ -6,6 +6,14 @@ use std::time::Duration;
 type Fixture = Server<Result<(Vec<String>, String), std::io::Error>>;
 
 fn serve(response_status: u16, response_body: &'static str) -> (Fixture, String) {
+    serve_with_headers(response_status, response_body, "")
+}
+
+fn serve_with_headers(
+    response_status: u16,
+    response_body: &'static str,
+    extra_headers: &'static str,
+) -> (Fixture, String) {
     let server = Server::start(move |listener, stop| {
         let mut stream = server::accept(&listener, &stop)?;
         stream
@@ -33,7 +41,7 @@ fn serve(response_status: u16, response_body: &'static str) -> (Fixture, String)
         reader.read_exact(&mut body)?;
         write!(
             stream,
-            "HTTP/1.1 {response_status} Test\r\nContent-Type: application/json\r\nx-request-id: req_fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {response_status} Test\r\n{extra_headers}Content-Type: application/json\r\nx-request-id: req_fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             response_body.len()
         )?;
         stream.write_all(response_body.as_bytes())?;
@@ -41,6 +49,30 @@ fn serve(response_status: u16, response_body: &'static str) -> (Fixture, String)
     });
     let endpoint = server.endpoint.clone();
     (server, endpoint)
+}
+
+#[test]
+fn retry_after_survives_http_and_stream_failures() {
+    for (status, body) in [
+        (
+            429,
+            r#"{"error":{"code":"rate_limit_exceeded","message":"Wait"}}"#,
+        ),
+        (
+            200,
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"Wait\"}}}\n\n",
+        ),
+    ] {
+        let (server, endpoint) = serve_with_headers(status, body, "rEtRy-AfTeR: 90\r\n");
+        let api = Api::fixture(Session::fixture("fixture-access-token"), &endpoint);
+        let backend = OpenAi::with_api(api, "model-a".into()).unwrap();
+        let failure = Backend::sample(&backend, &[], false, None, None, &mut |_| Ok(()))
+            .err()
+            .unwrap();
+        assert_eq!(failure.kind, backend::FailureKind::Temporary);
+        assert_eq!(failure.retry_after, Some(Duration::from_secs(90)));
+        server.finish().unwrap();
+    }
 }
 
 #[test]
@@ -88,7 +120,8 @@ fn local_transport_streams_completed_tool_call_only_after_terminal_event() {
     );
     let (server, endpoint) = serve(200, response);
     let api = Api::fixture(Session::fixture("fixture-access-token"), &endpoint);
-    let backend = OpenAi::with_api(api, "model-a".into()).unwrap();
+    let mut backend = OpenAi::with_api(api, "model-a".into()).unwrap();
+    Backend::set_conversation(&mut backend, Some("session-1".into()));
     let messages = [Value::object([
         ("role", Value::string("user")),
         ("content", Value::string("Read README")),
@@ -107,7 +140,12 @@ fn local_transport_streams_completed_tool_call_only_after_terminal_event() {
             .iter()
             .any(|line| line == "Authorization: Bearer fixture-access-token")
     );
+    assert!(headers.iter().any(|line| line == "session-id: session-1"));
     let request = crate::json::parse(&body).unwrap();
+    assert_eq!(
+        request.get("prompt_cache_key").and_then(Value::as_str),
+        Some("session-1")
+    );
     assert_eq!(request.get("store"), Some(&Value::Bool(false)));
     assert_eq!(request.get("stream"), Some(&Value::Bool(true)));
     assert_eq!(

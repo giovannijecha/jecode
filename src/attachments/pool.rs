@@ -1,6 +1,8 @@
 //! Session-owned attachment storage. Each asset keeps the exact imported bytes
 //! under `<id>/<name>` and its metadata in `<id>.json`; an optional
-//! `<id>.view.png` or `.jpg` holds an embeddable image derived from it.
+//! `<id>.view.png` or `.jpg` holds an embeddable image derived from it, for
+//! formats providers cannot take and for oversized images, which every later
+//! request would otherwise upload again.
 
 use super::{Attachment, Kind, media};
 use crate::cancel::Cancellation;
@@ -17,6 +19,13 @@ pub const LIMIT: u64 = 1024 * 1024 * 1024;
 /// draft that has not reached disk yet.
 const GRACE: Duration = Duration::from_secs(600);
 const HEAD: usize = 64 * 1024;
+/// Large still images may get a lower-detail derived view to reduce upload
+/// size on every request.
+const VIEW_BYTES: u64 = 512 * 1024;
+const VIEW_SIDE: u32 = 2048;
+/// The native converter receives image bytes in memory. Above this size,
+/// preserving the original avoids an allocation proportional to the file.
+const VIEW_CONVERT_MAX: u64 = 16 * 1024 * 1024;
 const PDF_SCAN: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
@@ -71,11 +80,22 @@ impl Pool {
             &mut input,
             Some(crate::scratch::environment_path(&canonical)),
             cancellation,
+            true,
         )
     }
 
     pub fn import_bytes(&self, name: &str, bytes: &[u8]) -> Result<Attachment, String> {
-        self.store(name, &mut &bytes[..], None, &Cancellation::default())
+        self.store(name, &mut &bytes[..], None, &Cancellation::default(), true)
+    }
+
+    /// Parser annotations are replayed from their original bytes, so a
+    /// provider view would never be used.
+    pub(crate) fn import_bytes_original(
+        &self,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<Attachment, String> {
+        self.store(name, &mut &bytes[..], None, &Cancellation::default(), false)
     }
 
     fn store(
@@ -84,6 +104,7 @@ impl Pool {
         input: &mut dyn Read,
         source: Option<PathBuf>,
         cancellation: &Cancellation,
+        make_view: bool,
     ) -> Result<Attachment, String> {
         let id = super::new_id();
         let folder = self.directory.join(&id);
@@ -94,11 +115,20 @@ impl Pool {
             let path = folder.join(&file);
             let size = copy(input, &path, cancellation)?;
             let attachment = describe(&id, name, &path, size)?;
-            if attachment.kind() == Kind::Image && !direct(&attachment) {
+            if make_view && attachment.kind() == Kind::Image && !direct(&attachment) {
                 let data = fs::read(&path).map_err(|error| error.to_string())?;
                 // Without a converter the original stays attached; the model
                 // receives a note instead of an image part.
                 if let Ok((extension, bytes)) = super::capture::convert(&data, cancellation) {
+                    write_new(&self.view_path(&id, extension), &bytes)?;
+                }
+            } else if make_view && derive_view(&attachment) {
+                let data = fs::read(&path).map_err(|error| error.to_string())?;
+                // Without a converter, or when it saves nothing, the original
+                // remains the view.
+                if let Ok((extension, bytes)) = super::capture::convert(&data, cancellation)
+                    && (bytes.len() as u64) < attachment.size
+                {
                     write_new(&self.view_path(&id, extension), &bytes)?;
                 }
             }
@@ -146,15 +176,15 @@ impl Pool {
     /// The image bytes for embedding, if the pool has a usable form.
     pub fn view(&self, attachment: &Attachment) -> Result<Option<(String, Vec<u8>)>, String> {
         let stored = self.load(&attachment.id)?;
-        if direct(&stored.attachment) {
-            let bytes = fs::read(&stored.path)
-                .map_err(|error| format!("Cannot read attachment {}: {error}", attachment.id))?;
-            return Ok(Some((stored.attachment.media, bytes)));
-        }
         for (extension, media) in [("png", "image/png"), ("jpg", "image/jpeg")] {
             if let Ok(bytes) = fs::read(self.view_path(&attachment.id, extension)) {
                 return Ok(Some((media.into(), bytes)));
             }
+        }
+        if direct(&stored.attachment) {
+            let bytes = fs::read(&stored.path)
+                .map_err(|error| format!("Cannot read attachment {}: {error}", attachment.id))?;
+            return Ok(Some((stored.attachment.media, bytes)));
         }
         Ok(None)
     }
@@ -247,6 +277,16 @@ pub fn references(bytes: &[u8]) -> BTreeSet<String> {
 
 fn direct(attachment: &Attachment) -> bool {
     media::VIEW_IMAGES.contains(&attachment.media.as_str())
+}
+
+/// A still PNG or JPEG worth a derived view. GIF and WebP stay unchanged:
+/// the converter cannot keep animation or read WebP. Larger files stay direct
+/// because the converter would load their entire contents into memory.
+fn derive_view(attachment: &Attachment) -> bool {
+    matches!(attachment.media.as_str(), "image/png" | "image/jpeg")
+        && attachment.size <= VIEW_CONVERT_MAX
+        && (attachment.size > VIEW_BYTES
+            || attachment.width.max(attachment.height).unwrap_or(0) > VIEW_SIDE)
 }
 
 fn describe(id: &str, name: &str, path: &Path, size: u64) -> Result<Attachment, String> {

@@ -152,7 +152,7 @@ fn request(url: &str, body: Option<&str>, cancel: &Cancellation) -> Result<Value
         ]);
     }
     crate::auth::isolate_environment(&mut command);
-    let output = crate::process::run_observed(
+    let output = crate::curl::run(
         &mut command,
         body.map(|s| s.as_bytes().to_vec()),
         Some(Duration::from_secs(35)),

@@ -257,7 +257,7 @@ fn an_interrupted_stream_is_archived_and_its_incomplete_tool_call_never_executes
 fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing() {
     let directory = Directory::new();
     let home = Directory::new();
-    let original = "source evidence\n".repeat(800);
+    let original = "source evidence\n".repeat(1600);
     std::fs::write(directory.path().join("source"), &original).unwrap();
     let read = |id| {
         used(
@@ -363,7 +363,7 @@ fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() 
     let home = Directory::new();
     std::fs::write(
         directory.path().join("source"),
-        "original evidence\n".repeat(900),
+        "original evidence\n".repeat(1800),
     )
     .unwrap();
     let fixture = HttpFixture::new(vec![(

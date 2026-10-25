@@ -198,7 +198,7 @@ impl Files {
         Ok(id)
     }
 
-    fn record_path(
+    pub fn record_path(
         &self,
         client_id: &str,
         subject: &str,

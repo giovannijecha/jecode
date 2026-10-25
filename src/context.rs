@@ -62,6 +62,9 @@ pub struct Context {
     pub skill_references: String,
     pub ceiling: Option<usize>,
     pub input_tokens: Option<usize>,
+    /// Generated tokens of the measured response, reasoning included; they
+    /// stand in for the size of the assistant message appended after it.
+    pub output_tokens: Option<usize>,
     pub measured_end: usize,
     pub calibration: Option<(usize, usize)>,
 
@@ -81,6 +84,7 @@ impl Default for Context {
             skill_references: String::new(),
             ceiling: None,
             input_tokens: None,
+            output_tokens: None,
             measured_end: 0,
             calibration: None,
 
@@ -101,6 +105,10 @@ impl Context {
             (
                 "input_tokens",
                 self.input_tokens.map_or(Value::Null, Value::number),
+            ),
+            (
+                "output_tokens",
+                self.output_tokens.map_or(Value::Null, Value::number),
             ),
             ("measured_end", Value::number(self.measured_end)),
             (
@@ -156,6 +164,11 @@ impl Context {
             },
             ceiling: optional("ceiling")?,
             input_tokens: optional("input_tokens")?,
+            // Sessions saved before output measurements existed lack the field.
+            output_tokens: match value.get("output_tokens") {
+                None => None,
+                Some(_) => optional("output_tokens")?,
+            },
             measured_end: number("measured_end")?,
             calibration: match value.get("token_calibration") {
                 None | Some(Value::Null) => None,
@@ -231,6 +244,7 @@ impl Context {
     pub fn reset_usage(&mut self) {
         // Summary allowance belongs to the saved model/effort, not this live projection.
         self.input_tokens = None;
+        self.output_tokens = None;
         self.measured_end = 0;
         self.ceiling = None;
         self.calibration = None;
@@ -239,6 +253,9 @@ impl Context {
         self.input_tokens = usage
             .and_then(|usage| usage.input_tokens)
             .filter(|tokens| *tokens > 0);
+        self.output_tokens = usage
+            .and_then(|usage| usage.output_tokens)
+            .filter(|_| self.input_tokens.is_some());
         self.measured_end = if self.input_tokens.is_some() { end } else { 0 };
         if self.input_tokens.is_none() {
             // A later request cannot reuse tokens measured for a different projection.
@@ -256,9 +273,10 @@ impl Context {
         let Some((tokens, bytes)) = self.calibration else {
             return size;
         };
-        // Use three times the observed token density, capped at the original
-        // byte upper bound. This also bounds newly appended history growth.
-        let numerator = tokens.saturating_mul(3).min(bytes);
+        // Use one and a half times the observed token density, capped at one
+        // token per byte. The next response replaces this growth estimate
+        // with a measurement, and a rejected request still forces compaction.
+        let numerator = tokens.saturating_mul(3).div_ceil(2).min(bytes);
         if numerator == bytes {
             return size;
         }
@@ -369,35 +387,48 @@ impl Context {
         inputs: Inputs,
     ) -> usize {
         let active_start = crate::attachments::active_view_start(messages);
+        let mut generated = 0;
         let bytes = messages
             .iter()
             .enumerate()
             .skip(self.measured_end)
             .filter(|(index, _)| !self.returned.contains(index))
-            .map(|(index, message)| bytes_for_message(message, index >= active_start, inputs))
+            .map(|(index, message)| {
+                // The measured response is counted by its generated tokens:
+                // its bytes omit the reasoning that later requests replay.
+                if let Some(output) = self.output_tokens
+                    && index == self.measured_end
+                    && message.get("role").and_then(Value::as_str) == Some("assistant")
+                {
+                    generated = output;
+                    return 0;
+                }
+                bytes_for_message(message, index >= active_start, inputs)
+            })
             .fold(0usize, usize::saturating_add);
-        tokens.saturating_add(self.estimate_bytes(bytes))
+        tokens
+            .saturating_add(generated)
+            .saturating_add(self.estimate_bytes(bytes))
     }
 
-    pub(crate) fn measured_input(&self, messages: &[Value]) -> Option<usize> {
+    /// The last measured input, less the tool views it carried that later
+    /// requests no longer send.
+    pub(crate) fn measured_input(&self, messages: &[Value], inputs: Inputs) -> Option<usize> {
         let tokens = self.input_tokens?;
-        (self.measured_end >= self.from
-            && self.measured_end <= messages.len()
-            && !self.measured_view_retired(messages))
-        .then_some(tokens)
+        (self.measured_end >= self.from && self.measured_end <= messages.len())
+            .then(|| tokens.saturating_sub(self.retired_views(messages, inputs)))
     }
 
-    fn measured_view_retired(&self, messages: &[Value]) -> bool {
+    fn retired_views(&self, messages: &[Value], inputs: Inputs) -> usize {
         if crate::attachments::active_view_start(messages) <= self.measured_end {
-            return false;
+            return 0;
         }
         let measured = &messages[..self.measured_end];
         measured[crate::attachments::active_view_start(measured)..]
             .iter()
-            .any(|message| {
-                message.get("role").and_then(Value::as_str) == Some("tool")
-                    && crate::attachments::requested(message).is_some()
-            })
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+            .map(|message| crate::attachments::weight_for(message, inputs))
+            .sum()
     }
     /// The effective window: declared capacity lowered by any ceiling learned
     /// from backend rejections, or that ceiling alone without catalog metadata.

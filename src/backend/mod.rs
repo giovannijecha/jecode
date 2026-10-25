@@ -4,6 +4,7 @@ mod charges;
 mod failure;
 pub(crate) mod openai;
 pub(crate) mod openrouter;
+mod retry;
 pub(crate) use charges::{price, quantity};
 
 use crate::attachments::{Inputs, Pool};
