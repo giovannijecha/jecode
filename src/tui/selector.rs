@@ -298,7 +298,11 @@ impl Selector {
             vec![
                 setting(
                     "Default model",
-                    model.into(),
+                    if model.is_empty() {
+                        "Not selected".into()
+                    } else {
+                        model.into()
+                    },
                     "Model for new conversations. /model changes only the current one.",
                     Setting::Model,
                 ),

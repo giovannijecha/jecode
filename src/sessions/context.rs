@@ -21,6 +21,14 @@ pub(super) struct Validation {
 
 pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> Result<(), String> {
     let messages = &document.messages;
+    if document.model.is_none()
+        && (document.pending.active
+            || messages
+                .iter()
+                .any(|message| message.get("role").and_then(Value::as_str) != Some("system")))
+    {
+        return Err("A draft without a selected model cannot contain an execution turn".into());
+    }
     document.context.validate(messages)?;
     if messages
         .first()

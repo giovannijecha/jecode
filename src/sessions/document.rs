@@ -207,7 +207,7 @@ pub struct Document {
     pub created: u64,
     pub updated: u64,
     pub directory: PathBuf,
-    pub model: String,
+    pub model: Option<String>,
     pub backend: String,
     pub legacy_origin: Option<crate::conversation::Origin>,
     pub effort: Effort,
@@ -229,7 +229,7 @@ impl Document {
             created: timestamp,
             updated: timestamp,
             directory,
-            model,
+            model: (!model.is_empty()).then_some(model),
             backend: "openrouter".into(),
             legacy_origin: None,
             effort,
@@ -248,6 +248,10 @@ impl Document {
             .iter()
             .any(|message| message.get("role").and_then(Value::as_str) == Some("user"))
             || !self.input.attachment_ids().is_empty()
+    }
+
+    pub fn model_label(&self) -> &str {
+        model_label(self.model.as_deref())
     }
 
     pub fn title(&self) -> String {
@@ -294,7 +298,10 @@ impl Document {
                 "working_directory",
                 Value::string(self.directory.to_string_lossy()),
             ),
-            ("model", Value::string(&self.model)),
+            (
+                "model",
+                self.model.as_ref().map_or(Value::Null, Value::string),
+            ),
             ("backend", Value::string(&self.backend)),
             (
                 "legacy_origin",
@@ -355,7 +362,7 @@ impl Document {
         if !directory.is_absolute() {
             return Err("Session directory must be absolute".into());
         }
-        let model = string(value, "model")?.to_string();
+        let model = parse_model(value)?;
         let backend = match value.get("backend") {
             None => "openrouter".to_owned(),
             Some(Value::String(id)) if !id.is_empty() && !id.chars().any(char::is_control) => {
@@ -365,11 +372,12 @@ impl Document {
         };
         crate::backend::validate_id(&backend)?;
         let legacy_origin = match value.get("legacy_origin") {
-            None => Some(crate::conversation::Origin::new(&backend, &model)),
+            None => model
+                .as_ref()
+                .map(|model| crate::conversation::Origin::new(&backend, model)),
             Some(Value::Null) => None,
             Some(value) => Some(crate::conversation::Origin::parse(value)?),
         };
-        validate_model(&model)?;
         let pending = required(value, "pending")?;
         let active = match required(pending, "active")? {
             Value::Bool(active) => *active,
@@ -422,6 +430,21 @@ impl Document {
                 .unwrap_or(Routing::Default),
         };
         Ok(document)
+    }
+}
+
+pub(super) fn model_label(model: Option<&str>) -> &str {
+    model.unwrap_or("Not selected")
+}
+
+pub(super) fn parse_model(value: &Value) -> Result<Option<String>, String> {
+    match required(value, "model")? {
+        Value::Null => Ok(None),
+        Value::String(model) => {
+            validate_model(model)?;
+            Ok(Some(model.clone()))
+        }
+        _ => Err("Invalid saved model selection".into()),
     }
 }
 

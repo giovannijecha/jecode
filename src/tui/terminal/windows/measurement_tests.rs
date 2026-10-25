@@ -69,7 +69,7 @@ pub(super) fn fixture(path: &Path, bash: &Path, active: bool) {
         })
     });
 
-    let result = crate::tui::run(agent, config, Default::default());
+    let result = crate::tui::launch(agent, config, None, Default::default(), None);
     stop.store(true, Ordering::Relaxed);
     if let Some(writer) = writer {
         let count = writer.join().unwrap();

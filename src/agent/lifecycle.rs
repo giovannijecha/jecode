@@ -109,14 +109,41 @@ impl Agent {
         self.save_session()?;
         let (handle, status) = Handle::open(current.store(), id, self.redactor.clone())?;
         let document = handle.snapshot();
-        let client = self.connection(
-            &document.backend,
-            document.model.clone(),
-            document.effort,
-            document.routing.clone(),
-        )?;
+        let unselected = document.model.is_none();
+        if unselected {
+            // Bind only the saved draft, before changing the live agent. A
+            // failed selection save must leave the current conversation intact.
+            let mut archive = self.archive();
+            archive.messages =
+                std::sync::Arc::new(std::sync::Mutex::new(document.messages.clone()));
+            archive.events = std::sync::Arc::new(std::sync::Mutex::new(document.events.clone()));
+            archive.legacy_origin = document.legacy_origin.clone();
+            handle.checkpoint(
+                &archive,
+                document.compatible_from,
+                &document.context,
+                &self.routing(),
+                self.has_model(),
+                crate::sessions::Stage::Selection,
+            )?;
+        }
+        let client = document
+            .model
+            .as_ref()
+            .map(|model| {
+                self.connection(
+                    &document.backend,
+                    model.clone(),
+                    document.effort,
+                    document.routing.clone(),
+                )
+            })
+            .transpose()?;
+        let document = handle.snapshot();
         let temporary = handle.store().temporary_area(&document.id)?;
-        self.client = client;
+        if let Some(client) = client {
+            self.client = client;
+        }
         self.redactor.include(self.client.redactor());
         self.tools.include_credentials(self.redactor.clone());
         *self.charges.lock().unwrap() = Charges::default();

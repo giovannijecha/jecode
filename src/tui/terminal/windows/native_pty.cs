@@ -94,6 +94,11 @@ public sealed class JecodeTestPty : IDisposable {
     public void Start(string executable, string directory, string scenario) {
         Environment.SetEnvironmentVariable("JECODE_NATIVE_DIR", directory);
         Environment.SetEnvironmentVariable("JECODE_NATIVE_CASE", scenario);
+        if (scenario.StartsWith("startup-")) {
+            Environment.SetEnvironmentVariable("JECODE_HOME", directory);
+            Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", null);
+            Environment.SetEnvironmentVariable("OPENROUTER_MODEL", null);
+        }
         IntPtr bytes = IntPtr.Zero;
         InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref bytes);
         IntPtr attributes = Marshal.AllocHGlobal(bytes);
@@ -131,6 +136,11 @@ public sealed class JecodeTestPty : IDisposable {
         input.Write(bytes, 0, bytes.Length); input.Flush();
     }
     public int Mark() { lock (gate) { return received.Length; } }
+    void EnsureVt(string text, string label) {
+        lock (gate) {
+            if (!received.ToString().Contains(text)) throw new IOException("ConPTY missing " + label + ": " + text);
+        }
+    }
     public void Wait(string text, int after = 0) {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         while (clock.ElapsedMilliseconds < 20000) {
@@ -253,7 +263,39 @@ public sealed class JecodeTestPty : IDisposable {
     public static void Run(string executable, string directory, string scenario) {
         using (var pty = new JecodeTestPty()) {
             pty.Start(executable, directory, scenario);
-            if (scenario.StartsWith("setup-")) {
+            if (scenario == "startup-plain") {
+                pty.Wait("Providers:"); pty.Send("/cancel\r");
+                pty.Wait("NATIVE_STARTUP_RESTORED"); pty.Finish(true);
+            } else if (scenario == "startup-setup-empty") {
+                pty.Wait("Providers:"); pty.Send("1\r");
+                pty.Wait("OpenRouter API key (hidden):");
+                pty.EnsureNoText("Enter keeps the saved key", 0); pty.Send("/cancel\r");
+                pty.Wait("NATIVE_STARTUP_RESTORED"); pty.Finish(true);
+            } else if (scenario.StartsWith("startup-")) {
+                pty.Wait("Ask anything");
+                pty.Wait(scenario.StartsWith("startup-fallback") ? "Default provider unavailable" : "No configured provider");
+                pty.EnsureVt("JECODE_WARNING_FOREGROUND", "warning foreground");
+                pty.EnsureVt("JECODE_WARNING_SURFACE", "warning surface");
+                if (scenario == "startup-unconfigured-prompt") {
+                    int typed = pty.Mark(); pty.Send("Keep my task");
+                    pty.Wait("Keep my task", typed);
+                    int request = pty.Mark(); pty.Send("\r");
+                    pty.Wait("No configured provider", request);
+                    pty.Send("\x15");
+                }
+                int next = pty.Mark(); pty.Send("/new");
+                pty.Wait("Commands", next); pty.Send("\r");
+                string result = scenario == "startup-fallback-new" ? "current model kept"
+                    : scenario == "startup-fallback" ? "Choose a model" : "No configured provider";
+                pty.Wait(result, next);
+                pty.EnsureNoText("has no configured account", next);
+                int settings = pty.Mark(); pty.Send("/settings");
+                pty.Wait("Commands", settings); pty.Send("\r");
+                pty.Wait("Providers", settings);
+                pty.Send("\x1b"); Thread.Sleep(150); pty.Send("\x11");
+                pty.Wait("NATIVE_STARTUP_RESTORED");
+                pty.Finish(true);
+            } else if (scenario.StartsWith("setup-")) {
                 pty.Wait("SETUP_SIGN_IN_WAITING");
                 if (scenario == "setup-cancel") pty.Send("\r");
                 pty.Wait("SETUP_NEXT_PROMPT: ");

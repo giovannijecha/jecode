@@ -100,7 +100,10 @@ fn configure_with(
         .map_or(String::new(), |url| format!("Get a key at {url}. "));
     ui.message(&format!("Jecode setup\nCredentials and model are saved in plain text in {}.\n{note}Type /cancel to leave setup.", store.path().display()))?;
     let (api_key, services) = loop {
-        let prompt = if current.is_some() {
+        let saved_key = current
+            .and_then(|settings| settings.credential_for(backend_id))
+            .filter(|key| !key.is_empty());
+        let prompt = if saved_key.is_some() {
             format!("{name} API key (hidden; Enter keeps the saved key): ")
         } else {
             format!("{name} API key (hidden): ")
@@ -132,7 +135,7 @@ fn configure_with(
         }
     };
     let current_model = current
-        .filter(|settings| settings.backend_id == backend_id)
+        .filter(|settings| settings.backend_id == backend_id && settings.has_model())
         .map(|settings| settings.model.as_str());
     let Some(model) = choose_model(&services, current_model, ui)? else {
         return cancelled(ui);

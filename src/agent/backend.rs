@@ -7,8 +7,20 @@ use crate::{
 };
 
 impl Agent {
+    pub fn has_model(&self) -> bool {
+        self.client.has_model()
+    }
+
+    pub fn needs_configuration(&self) -> bool {
+        self.client.needs_configuration()
+    }
+
     pub fn backend_id(&self) -> &'static str {
         self.client.id()
+    }
+
+    pub fn has_backend(&self, backend: &str) -> bool {
+        self.accounts.contains_key(backend)
     }
 
     pub fn identity(&self) -> Origin {
@@ -16,12 +28,19 @@ impl Agent {
     }
 
     pub fn services(&self) -> Services {
+        if self.client.needs_configuration()
+            && let Some(services) = self.accounts.get(self.backend_id())
+        {
+            return services.clone();
+        }
         self.client.services()
     }
 
     pub fn register_backend(&mut self, services: Services) {
         self.include_credentials(services.redactor());
-        self.accounts.insert(services.id().into(), services);
+        if services.is_configured() {
+            self.accounts.insert(services.id().into(), services);
+        }
     }
 
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
@@ -41,6 +60,7 @@ impl Agent {
         prepare: bool,
     ) -> Result<(), String> {
         let previous_identity = self.identity();
+        let had_model = self.has_model();
         let identity = Origin::with_account(next.id(), next.model(), next.account());
         let changed = previous_identity != identity;
         let changed_effort = self.effort() != next.effort();
@@ -72,14 +92,16 @@ impl Agent {
         if changed {
             self.compatible_from = self.messages.lock().unwrap().len();
             self.context.reset_usage();
-            self.events.lock().unwrap().push(Value::object([
-                ("type", Value::string("backend_changed")),
-                ("from_backend", Value::string(previous_identity.backend)),
-                ("from_model", Value::string(previous_identity.model)),
-                ("backend", Value::string(&identity.backend)),
-                ("model", Value::string(&identity.model)),
-                ("after_message", Value::number(self.compatible_from)),
-            ]));
+            if had_model {
+                self.events.lock().unwrap().push(Value::object([
+                    ("type", Value::string("backend_changed")),
+                    ("from_backend", Value::string(previous_identity.backend)),
+                    ("from_model", Value::string(previous_identity.model)),
+                    ("backend", Value::string(&identity.backend)),
+                    ("model", Value::string(&identity.model)),
+                    ("after_message", Value::number(self.compatible_from)),
+                ]));
+            }
         }
         if changed || changed_effort {
             self.context.summary_output_tokens = 0;

@@ -74,19 +74,31 @@ Open the project directory you want Jecode to work in, then run:
 jecode
 ```
 
-1. Choose OpenAI and **Continue with ChatGPT**, or enter an [OpenRouter API key](https://openrouter.ai/settings/keys) with hidden input.
-2. Choose a model from the searchable list, or enter `=model-id`.
+1. The TUI opens even without credentials. Open `/settings` → **Providers** to connect a ChatGPT account or add an [OpenRouter API key](https://openrouter.ai/settings/keys).
+2. Choose a model with `/model`, or set the default in `/settings` → **Default model**.
 3. Type a task and press Enter.
 
-Setup checks access without sending an inference request. `/cancel` leaves saved
+`jecode setup` also provides guided configuration and checks access without sending an inference request. `/cancel` leaves saved
 defaults unchanged. OpenRouter keys and defaults live in plaintext at
 `~/.jecode/config.json`; protected ChatGPT account records live separately under
 `~/.jecode/accounts/openai/`. OpenAI API keys are not supported.
+
+First-time configuration is saved after choosing a default model. Until then,
+an OpenRouter key and settings changes stay in memory for the current session;
+cancelling model selection leaves the configuration file absent. Connecting a
+provider and choosing its first model also activates it for the current conversation.
 
 Use `/settings` → **Providers** → **Credentials** for ChatGPT accounts, or
 **API keys** for OpenRouter. With multiple configured providers, `/model` asks
 for the provider before the model. ChatGPT plan usage is managed in
 [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage).
+
+If the default provider's credentials are removed, the TUI uses another configured
+provider for the conversation and shows a warning. It restores that provider's
+saved model when available; otherwise, use `/model` to choose one. With no
+configured provider, the warning points to `/settings`. Saved defaults stay unchanged.
+The warning includes the failure reason and reports when a `--model` override is
+skipped because the fallback provider uses its own model identifiers.
 
 ## Work in a project
 

@@ -138,8 +138,8 @@ impl Store {
                     listing.sessions.push(Summary {
                         title: document.title(),
                         updated: document.updated,
+                        model: document.model_label().into(),
                         backend: document.backend,
-                        model: document.model,
                         id: document.id,
                     });
                 }

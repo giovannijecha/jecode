@@ -13,7 +13,11 @@ impl Agent {
             let store = Store::new(home.to_path_buf(), self.tools.root())?;
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
-                self.model().into(),
+                if self.has_model() {
+                    self.model().into()
+                } else {
+                    String::new()
+                },
                 self.effort(),
             )?;
             document.routing = self.routing().clone();
@@ -61,6 +65,7 @@ impl Agent {
                 self.compatible_from,
                 &self.context,
                 &self.routing(),
+                self.has_model(),
                 stage,
             ),
             None => Ok(()),
@@ -81,6 +86,9 @@ impl Agent {
         }
         if self.prepared.is_some() {
             return Err("A prompt is already prepared".into());
+        }
+        if self.needs_configuration() {
+            self.client.prepare()?;
         }
         self.refresh_project_instructions()?;
         self.refresh_skills();

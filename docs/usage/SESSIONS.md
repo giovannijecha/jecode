@@ -26,7 +26,10 @@ Resume restores the conversation, tool results, backend, model, effort, routing,
 prompt history and saved input. It uses the configured account for that backend
 and does not rerun requests or tools. `/settings` defaults are unchanged.
 Use `/new` to save the old conversation and start an independent one with those
-defaults. The unsent composer and pending drafts move to the new conversation.
+defaults when their provider is available. Otherwise, it keeps the active
+provider, model and effort. The unsent composer and pending drafts move to the
+new conversation. Without a usable selection, an action banner points to
+model or provider configuration and leaves the current conversation intact.
 
 `/model` and `/backend` change the active selection within the same conversation.
 The session ID, original history, attachments, live processes and browser remain
@@ -44,6 +47,13 @@ attachment, unsent input is lost on exit. A failed or interrupted first request
 still leaves a saved session if its initial checkpoint succeeded.
 
 ## Recover unsent work
+
+Sending a task before provider configuration is complete returns it to the
+composer without saving an execution turn. Attachment drafts can still be saved
+and recovered before a model is selected. They appear as **Not selected** in the
+session list and store `model: null`, rather than a made-up model identifier.
+Resuming such a draft uses the current selection, or keeps waiting for
+configuration. Its text and attachment bytes remain intact.
 
 The TUI saves the composer, caret, queued messages, paused drafts and sent
 prompt history after a session has a request or attachment. On resume, queued
@@ -89,8 +99,11 @@ Original snapshots and backups left by a previous migration are removed too;
 an unreadable or foreign original blocks deletion and remains untouched.
 
 Deleting the current session opens a fresh conversation with the saved
-model and effort defaults. Its context and sent prompt history are cleared;
-unsent composer text, queued messages and paused drafts are kept. The new
+model and effort defaults, or the active selection if the default provider is
+unavailable. Without a usable selection, configuration is required before
+deleting the current session; other saved sessions can still be deleted.
+Its context and sent prompt history are cleared; unsent composer text, queued
+messages and paused drafts are kept. The new
 session is saved when a request is sent or inherited input contains
 attachments. If deletion fails partway through, some owned files may already
 be gone. Read the error and retry from `/resume`; Jecode removes the last valid

@@ -146,6 +146,13 @@ newline-terminated transaction appends messages and events with changed metadata
 and input. Streaming text uses UTF-8-safe prefix/suffix updates. Unchanged state
 is omitted; previous messages remain intact.
 
+An attachment draft created before model selection stores a null `model` in its
+metadata and listing cache. It cannot contain an execution turn. Resume binds
+that draft to the current selection before replacing the live conversation;
+without a selection, it remains an unselected draft. Selected models retain
+their string representation, including literal IDs such as `unconfigured`.
+Older builds requiring a model string cannot open these new unselected drafts.
+
 Conversation saves surround provider and tool work. The first streamed text is
 saved immediately; later streaming updates and TUI input use a 250 ms save
 interval. Periodic saves serialize disk access in a worker; explicit saves and

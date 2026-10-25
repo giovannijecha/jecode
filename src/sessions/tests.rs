@@ -13,6 +13,33 @@ fn message(role: &str, text: &str) -> Value {
         ("content", Value::string(text)),
     ])
 }
+
+#[test]
+fn an_absent_model_is_valid_only_for_an_unexecuted_draft() {
+    let directory = Directory::new();
+    let mut draft = Document::new(
+        directory.path().to_path_buf(),
+        String::new(),
+        Effort::Default,
+    )
+    .unwrap();
+    draft.messages = vec![message("system", "Fixture")];
+    assert!(Document::parse(&draft.value()).unwrap().model.is_none());
+    draft.messages.push(message("user", "Request"));
+    assert!(Document::parse(&draft.value()).is_err());
+    draft.messages.truncate(1);
+    draft.pending.active = true;
+    assert!(Document::parse(&draft.value()).is_err());
+    draft.pending.active = false;
+    draft.model = Some("unconfigured".into());
+    draft
+        .messages
+        .push(message("user", "Request to an explicitly selected model"));
+    assert_eq!(
+        Document::parse(&draft.value()).unwrap().model.as_deref(),
+        Some("unconfigured")
+    );
+}
 fn document(directory: &Directory) -> Document {
     let mut document = Document::new(
         directory.path().to_path_buf(),

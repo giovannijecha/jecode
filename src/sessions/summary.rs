@@ -69,18 +69,15 @@ pub(super) fn load(store: &Store, id: &str, stamp: &Stamp) -> Option<Summary> {
         .get("backend")
         .map(Value::as_str)
         .unwrap_or(Some("openrouter"))?;
-    let model = string(&value, "model").ok()?;
-    if title.chars().count() > 100
-        || crate::backend::validate_model(model).is_err()
-        || crate::backend::validate_id(backend).is_err()
-    {
+    let model = super::document::parse_model(&value).ok()?;
+    if title.chars().count() > 100 || crate::backend::validate_id(backend).is_err() {
         return None;
     }
     Some(Summary {
         id: id.into(),
         title: title.into(),
         backend: backend.into(),
-        model: model.into(),
+        model: super::document::model_label(model.as_deref()).into(),
         updated: integer(&value, "updated_at_unix_ms").ok()?,
     })
 }
@@ -99,7 +96,10 @@ pub(super) fn save(store: &Store, document: &Document, observed: &Stamp) -> Resu
         ),
         ("title", Value::string(document.title())),
         ("backend", Value::string(&document.backend)),
-        ("model", Value::string(&document.model)),
+        (
+            "model",
+            document.model.as_ref().map_or(Value::Null, Value::string),
+        ),
         ("updated_at_unix_ms", Value::number(document.updated)),
         ("journal_bytes", Value::number(observed.bytes)),
         ("journal_modified", Value::string(&observed.modified)),

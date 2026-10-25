@@ -13,6 +13,21 @@ use crate::{
 #[path = "activity_tests.rs"]
 mod activity_tests;
 
+#[path = "startup_tests.rs"]
+mod startup_tests;
+
+fn native_pty_source() -> String {
+    include_str!("native_pty.cs")
+        .replace(
+            "JECODE_WARNING_FOREGROUND",
+            &format!("\\x1b[{}m", crate::tui::theme::WARNING),
+        )
+        .replace(
+            "JECODE_WARNING_SURFACE",
+            &format!("\\x1b[{}m", crate::tui::theme::USER_SURFACE),
+        )
+}
+
 #[test]
 #[ignore = "requires Windows ConPTY for an isolated native console check"]
 fn native_windows_fullscreen_controls_and_terminal_lifetime() {
@@ -25,11 +40,19 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "setup-cancel",
         "setup-success",
         "setup-error",
+        "startup-removed",
+        "startup-fresh",
+        "startup-unconfigured-prompt",
+        "startup-fallback",
+        "startup-fallback-new",
+        "startup-key-removed",
+        "startup-plain",
+        "startup-setup-empty",
     ] {
         let directory = Directory::new();
         let script = format!(
             "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', '{}')\n",
-            include_str!("native_pty.cs"),
+            native_pty_source(),
             std::env::current_exe()
                 .unwrap()
                 .to_string_lossy()
@@ -75,7 +98,7 @@ fn native_windows_input_to_vt_latency() {
         let directory = Directory::new();
         let script = format!(
             "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', '{}')\n",
-            include_str!("native_pty.cs"),
+            native_pty_source(),
             std::env::current_exe()
                 .unwrap()
                 .to_string_lossy()
@@ -326,6 +349,10 @@ fn tool_cards_console(bash: &std::path::Path) {
 #[ignore = "private child fixture of the native Windows ConPTY check"]
 fn native_console_fixture() {
     let scenario = std::env::var("JECODE_NATIVE_CASE").unwrap();
+    if scenario.starts_with("startup-") {
+        startup_tests::fixture(&scenario);
+        return;
+    }
     if scenario.starts_with("setup-") {
         crate::setup::native_sign_in_fixture(&scenario);
         return;
@@ -375,7 +402,7 @@ fn native_console_fixture() {
             OpenRouter::fixture(fixture.endpoint.clone()),
             Tools::new(&path).unwrap(),
         );
-        crate::tui::run(agent, config, Default::default()).unwrap();
+        crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
         restored(&path);
         assert_eq!(fixture.finish().len(), 1);
         println!("NATIVE_DELETE_RESTORED");
@@ -446,7 +473,7 @@ fn native_console_fixture() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(&path).unwrap(),
     );
-    crate::tui::run(agent, config, Default::default()).unwrap();
+    crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
     restored(&path);
     let sessions = crate::sessions::Store::new(path.join("home"), &path)
         .unwrap()

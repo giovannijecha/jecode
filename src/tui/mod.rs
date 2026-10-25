@@ -6,6 +6,7 @@ mod cards;
 mod checkpoint_tests;
 mod checkpoints;
 mod commands;
+mod conversations;
 mod copy;
 mod delete;
 mod display;
@@ -55,6 +56,11 @@ use std::time::Duration;
 use std::time::Instant;
 use terminal::{Input, Terminal};
 use worker::Worker;
+
+pub(crate) struct StartupNotice {
+    pub text: String,
+    pub action: (&'static str, &'static str),
+}
 
 struct App {
     agent: Option<Agent>,
@@ -193,23 +199,12 @@ impl App {
 }
 
 /// Opens the TUI; a non-empty `draft` starts the composer, as `--attach` does.
-pub fn run(
-    agent: Agent,
-    config: SessionConfig,
-    draft: crate::attachments::Prompt,
-) -> Result<(), String> {
-    run_inner(agent, config, None, draft)
-}
-
-pub fn resume(agent: Agent, config: SessionConfig, id: Option<String>) -> Result<(), String> {
-    run_inner(agent, config, Some(id), Default::default())
-}
-
-fn run_inner(
+pub(crate) fn launch(
     mut agent: Agent,
     config: SessionConfig,
     resume: Option<Option<String>>,
     draft: crate::attachments::Prompt,
+    notice: Option<StartupNotice>,
 ) -> Result<(), String> {
     agent.enable_sessions(
         config
@@ -229,6 +224,11 @@ fn run_inner(
         None => {}
     }
     app.restore_staged();
+    if let Some(notice) = notice {
+        let mut feedback = Feedback::result(Kind::Warning, app.archive.redactor.text(&notice.text));
+        feedback.action = Some(notice.action);
+        app.state.notify(feedback);
+    }
     let mut decoder = Decoder::default();
     let mut dirty = true;
     let mut pending = None;
@@ -400,6 +400,8 @@ mod exit;
 #[cfg(test)]
 mod auto_compact_tests;
 #[cfg(test)]
+mod conversation_tests;
+#[cfg(test)]
 mod copy_tests;
 #[cfg(test)]
 mod delete_tests;
@@ -431,6 +433,10 @@ mod shortcut_tests;
 mod spacing_tests;
 #[cfg(test)]
 mod specimen;
+#[cfg(test)]
+mod startup_session_tests;
+#[cfg(test)]
+mod startup_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

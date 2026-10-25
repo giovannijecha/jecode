@@ -220,7 +220,10 @@ fn a_failed_preparation_or_save_preserves_the_active_and_persisted_selection() {
         before.get("events").unwrap().as_array().unwrap().len()
     );
     assert_eq!(handle.snapshot().backend, "alpha");
-    assert_eq!(handle.snapshot().model, "shared-model-name");
+    assert_eq!(
+        handle.snapshot().model.as_deref(),
+        Some("shared-model-name")
+    );
     agent.save_session().unwrap();
     assert_eq!(
         handle.store().fixture_load(&handle.id()).unwrap().backend,

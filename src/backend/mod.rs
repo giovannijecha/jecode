@@ -5,6 +5,7 @@ mod failure;
 pub(crate) mod openai;
 pub(crate) mod openrouter;
 mod retry;
+pub(crate) mod unconfigured;
 pub(crate) use charges::{price, quantity};
 
 use crate::attachments::{Inputs, Pool};
@@ -245,6 +246,12 @@ pub struct Metrics {
 /// Every backend accepts the same canonical transcript and tool catalog.
 pub trait Backend: Send {
     fn id(&self) -> &'static str;
+    fn needs_configuration(&self) -> bool {
+        false
+    }
+    fn has_model(&self) -> bool {
+        true
+    }
     fn account(&self) -> Option<String> {
         None
     }
@@ -320,6 +327,10 @@ pub fn validate_credential(id: &str, key: &str) -> Result<(), String> {
 }
 
 pub trait Service: Send + Sync {
+    /// Whether this is a credential-backed service rather than a setup placeholder.
+    fn is_configured(&self) -> bool {
+        true
+    }
     fn id(&self) -> &'static str;
     fn account(&self) -> Option<String> {
         None
@@ -354,6 +365,9 @@ pub struct Services {
 }
 
 impl Services {
+    pub fn is_configured(&self) -> bool {
+        self.inner.is_configured()
+    }
     pub fn for_backend(id: &str, key: String) -> Result<Self, String> {
         Self::for_credential(&crate::auth::Credential::api_key(id, key))
     }

@@ -24,23 +24,81 @@ pub struct Settings {
     pub routing: BTreeMap<String, Routing>,
 }
 
+pub struct ServiceError {
+    pub diagnostic: String,
+    pub settings: Option<&'static str>,
+}
+
+impl From<String> for ServiceError {
+    fn from(diagnostic: String) -> Self {
+        Self {
+            diagnostic,
+            settings: None,
+        }
+    }
+}
+
+impl std::fmt::Display for ServiceError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.diagnostic)?;
+        if let Some(settings) = self.settings {
+            write!(formatter, "; open {settings}")?;
+        }
+        Ok(())
+    }
+}
+
 impl Settings {
+    pub fn unconfigured() -> Self {
+        Self {
+            backend_id: "openrouter".into(),
+            credentials: BTreeMap::new(),
+            api_key: String::new(),
+            model: String::new(),
+            effort: Effort::Default,
+            auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
+            routing: BTreeMap::new(),
+        }
+    }
+
+    pub fn has_model(&self) -> bool {
+        !self.model.is_empty()
+    }
+
     pub fn services(&self, home: &Path, id: &str) -> Result<crate::backend::Services, String> {
+        self.service_status(home, id)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn service_status(
+        &self,
+        home: &Path,
+        id: &str,
+    ) -> Result<crate::backend::Services, ServiceError> {
         if id == "openai" {
             let session = crate::auth::openai::Store::new(home.to_path_buf())
                 .active()?
-                .ok_or(
-                    "OpenAI has no active ChatGPT account; open Settings > Providers > Credentials",
-                )?;
+                .ok_or_else(|| ServiceError {
+                    diagnostic: "OpenAI has no active ChatGPT account".into(),
+                    settings: Some("Settings > Providers > Credentials"),
+                })?;
             crate::backend::Services::for_credential(&crate::auth::Credential::openai(session))
+                .map_err(Into::into)
         } else {
             let key = self
                 .credential_for(id)
                 .filter(|key| !key.is_empty())
                 .ok_or_else(|| {
-                    format!("{id} has no saved API key; open Settings > Providers > API keys")
+                    let name = crate::backend::available()
+                        .iter()
+                        .find(|info| info.id == id)
+                        .map_or(id, |info| info.name);
+                    ServiceError {
+                        diagnostic: format!("{name} has no saved API key"),
+                        settings: Some("Settings > Providers > API keys"),
+                    }
                 })?;
-            crate::backend::Services::for_backend(id, key.to_owned())
+            crate::backend::Services::for_backend(id, key.to_owned()).map_err(Into::into)
         }
     }
 
@@ -59,7 +117,7 @@ impl Settings {
         let api_key = api_key.trim().to_string();
         let model = model.trim().to_string();
         validate_backend_id(backend_id)?;
-        if backend_id == "openrouter" {
+        if backend_id == "openrouter" && !api_key.is_empty() {
             validate_key(&api_key)?;
         }
         validate_model(&model)?;
@@ -171,7 +229,8 @@ impl Settings {
         // mirrored fields. It remains authoritative for OpenRouter.
         let legacy_key = legacy
             .and_then(|value| value.get("api_key"))
-            .and_then(Value::as_str);
+            .and_then(Value::as_str)
+            .filter(|key| !key.is_empty());
         let api_key = if backend_id == "openrouter" {
             legacy_key.or_else(|| {
                 provider
@@ -184,7 +243,7 @@ impl Settings {
                 .and_then(Value::as_str)
         }
         .unwrap_or("");
-        if backend_id == "openrouter" {
+        if backend_id == "openrouter" && !api_key.is_empty() {
             validate_key(api_key)?;
         }
         let legacy_model = legacy
@@ -302,3 +361,6 @@ pub fn environment_settings(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod recovery_tests;

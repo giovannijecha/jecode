@@ -146,23 +146,8 @@ impl App {
             return Ok(false);
         }
         if name == "/new" && arguments.is_empty() {
-            self.cancel_copy();
-            let result = self.agent.as_mut().unwrap().start_new_selection(
-                &self.config.settings.backend_id,
-                self.config.settings.model.clone(),
-                self.config.settings.effort,
-            );
-            if let Err(error) = result {
-                self.local_start(value);
-                self.local_finish(Kind::Error, &error, vec![]);
-                return Ok(false);
-            }
-            let agent = self.agent.as_ref().unwrap();
-            self.archive = agent.archive();
-            self.persistence = agent.sessions();
-            self.state.effort = agent.effort().name().into();
-            self.state.clear();
-            self.refresh_context();
+            self.new_conversation();
+            return Ok(false);
         }
         self.local_start(value);
         match name.as_str() {
@@ -172,11 +157,6 @@ impl App {
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
             "/checkpoints" => self.start_checkpoints(arguments),
-            "/new" if arguments.is_empty() => self.local_finish(
-                Kind::Notice,
-                "New conversation · saved defaults applied",
-                vec![],
-            ),
             "/export" if arguments.is_empty() => match self.archive.save() {
                 Ok(path) => self.local_finish(
                     Kind::Notice,
@@ -209,6 +189,11 @@ impl App {
                     });
                 }
             }
+            "/effort" if !self.agent.as_ref().unwrap().has_model() => self.local_finish(
+                Kind::Warning,
+                "No model selected · Choose a model with /model before setting effort",
+                vec![],
+            ),
             "/effort" => match if arguments.is_empty() {
                 Ok(None)
             } else {

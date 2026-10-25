@@ -265,7 +265,7 @@ fn native_pty_fixture() {
             Tools::new(&path).unwrap(),
         )
     };
-    crate::tui::run(agent(), config(), Default::default()).unwrap();
+    crate::tui::launch(agent(), config(), None, Default::default(), None).unwrap();
     assert_mode_restored(&tty, &original);
     assert!(!path.join("late.txt").exists());
     let sessions = crate::sessions::Store::new(path.join("home"), &path).unwrap();
@@ -301,7 +301,14 @@ fn native_pty_fixture() {
             .any(|event| event.get("type").and_then(Value::as_str) == Some("turn_error"))
     );
     eprintln!("\r\nPTY_PHASE_RESUME");
-    crate::tui::resume(agent(), config(), Some(id.clone())).unwrap();
+    crate::tui::launch(
+        agent(),
+        config(),
+        Some(Some(id.clone())),
+        Default::default(),
+        None,
+    )
+    .unwrap();
     assert_mode_restored(&tty, &original);
     assert!(
         sessions
@@ -326,7 +333,7 @@ fn native_pty_fixture() {
     other.save_session().unwrap();
     drop(other);
     eprintln!("\r\nPTY_PHASE_MANAGE");
-    crate::tui::resume(agent(), config(), None).unwrap();
+    crate::tui::launch(agent(), config(), Some(None), Default::default(), None).unwrap();
     assert_mode_restored(&tty, &original);
     assert!(sessions.list().unwrap().sessions.is_empty());
     assert!(sessions.fixture_load(id).is_err());
