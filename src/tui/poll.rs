@@ -1,5 +1,5 @@
 use super::{App, Feedback, Kind, activity};
-use crate::{attachments::Prompt, backend::openrouter::KEY_HINT, events::Event};
+use crate::{attachments::Prompt, backend::FailureReason, events::Event};
 use std::time::Instant;
 
 impl App {
@@ -29,6 +29,7 @@ impl App {
             let cancelled = activity.as_ref().is_some_and(|activity| activity.stopping);
             match result {
                 Ok(()) if !cancelled => {
+                    self.state.backend_failure = None;
                     self.submission = None;
                     self.state.status = "Ready".into();
                     self.state.clear_progress();
@@ -55,14 +56,21 @@ impl App {
                     self.state.queue.pause();
                     self.state.clear_progress();
                     let returned = self.return_unanswered(&mut agent);
+                    let backend_failure = self.state.backend_failure.take();
+                    let key = !cancelled
+                        && matches!(
+                            backend_failure.as_ref(),
+                            Some((FailureReason::RejectedKey, _))
+                        );
                     let mut message = if cancelled {
                         "Interrupted".into()
                     } else {
-                        agent.redact(&error)
+                        agent.redact(
+                            backend_failure
+                                .as_ref()
+                                .map_or(error.as_str(), |(_, diagnostic)| diagnostic.as_str()),
+                        )
                     };
-                    // A rejected key is fixed in /settings, not the CLI's setup.
-                    let key = message.contains(KEY_HINT);
-                    message = message.replace(KEY_HINT, "");
                     if returned {
                         message.push_str(" · prompt restored");
                         if let Some(error) = &self.save_error {

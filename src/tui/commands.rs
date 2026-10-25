@@ -104,6 +104,7 @@ impl App {
             self.state
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());
+            self.state.backend_failure = None;
             self.process_observer = self.agent.as_ref().unwrap().processes();
             self.worker = Some(Worker::start(self.agent.take().unwrap(), execution));
             self.state.status = "Starting...".into();

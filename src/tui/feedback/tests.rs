@@ -2,6 +2,18 @@ use super::*;
 use crate::events::Event;
 
 #[test]
+fn a_new_preparation_discards_stale_backend_failure_metadata() {
+    let mut state = State::default();
+    state.event(Event::BackendFailure {
+        reason: crate::backend::FailureReason::RejectedKey,
+        diagnostic: "Previous failure".into(),
+    });
+    assert!(state.backend_failure.is_some());
+    state.event(Event::Preparing);
+    assert!(state.backend_failure.is_none());
+}
+
+#[test]
 fn retry_progress_temporarily_overlays_maintenance_and_restores_its_clock() {
     let mut state = State::default();
     state.event(Event::Maintenance {
@@ -12,7 +24,8 @@ fn retry_progress_temporarily_overlays_maintenance_and_restores_its_clock() {
         state.event(Event::Recovering {
             attempt,
             delay: Duration::from_secs(1),
-            error: "OpenRouter HTTP 429: retry".into(),
+            error: "provider asked us to retry".into(),
+            reason: Some(crate::backend::FailureReason::RateLimited),
         });
         assert!(
             state
@@ -35,7 +48,8 @@ fn retry_progress_temporarily_overlays_maintenance_and_restores_its_clock() {
     state.event(Event::Recovering {
         attempt: 1,
         delay: Duration::from_secs(1),
-        error: "fixture".into(),
+        error: "a diagnostic mentions HTTP 429 without a rate limit".into(),
+        reason: None,
     });
     state.event(Event::Maintenance {
         text: "Compacting context".into(),

@@ -3,6 +3,23 @@ use crate::test_support::server::{self, Server};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::time::Duration;
 
+#[test]
+fn input_error_preserves_cli_hint_order_and_updates_diagnostic() {
+    let value = Value::object([(
+        "error",
+        Value::object([("message", Value::string("Key rejected"))]),
+    )]);
+    let failure = with_input_error(Failure::api(&value, 401), Some("input closed"));
+    assert_eq!(
+        failure.message,
+        "OpenRouter HTTP 401: Key rejected. Check your key with jecode setup.; input closed"
+    );
+    assert_eq!(
+        failure.diagnostic.as_deref(),
+        Some("OpenRouter HTTP 401: Key rejected.; input closed")
+    );
+}
+
 fn round_trip(body: &str) -> (Vec<String>, Vec<u8>) {
     let server = Server::start(move |listener, stop| {
         let mut stream = server::accept(&listener, &stop)?;

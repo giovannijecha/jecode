@@ -1,8 +1,7 @@
-use crate::backend::{Failure, FailureKind as Kind};
+use crate::backend::{Failure, FailureKind as Kind, FailureReason};
 use crate::json::Value;
 
-/// The CLI's fix for a rejected key; the TUI offers /settings instead.
-pub(crate) const KEY_HINT: &str = " Check your key with jecode setup.";
+const KEY_HINT: &str = " Check your key with jecode setup.";
 
 impl Failure {
     pub fn response(message: impl Into<String>) -> Self {
@@ -12,14 +11,18 @@ impl Failure {
         } else if message == "OpenRouter returned neither text nor executable tool calls" {
             Self {
                 kind: Kind::Empty,
+                reason: None,
                 message,
+                diagnostic: None,
                 retry_after: None,
                 charges: None,
             }
         } else if message.contains("finish_reason: length") {
             Self {
                 kind: Kind::Length,
+                reason: None,
                 message,
+                diagnostic: None,
                 retry_after: None,
                 charges: None,
             }
@@ -74,9 +77,14 @@ impl Failure {
         if !matches!(message.chars().last(), Some('.' | '!' | '?')) {
             message.push('.');
         }
-        if status == 401 {
+        let diagnostic = if status == 401 {
+            let diagnostic = message.clone();
             message.push_str(KEY_HINT);
-        } else if status == 404
+            Some(diagnostic)
+        } else {
+            None
+        };
+        if status == 404
             && text.contains("no endpoints found")
             && text.contains("filter by image support")
         {
@@ -94,7 +102,15 @@ impl Failure {
             } else {
                 Kind::Terminal
             },
+            reason: if status == 401 {
+                Some(FailureReason::RejectedKey)
+            } else if status == 429 || markers.contains(&"rate_limit_exceeded") {
+                Some(FailureReason::RateLimited)
+            } else {
+                None
+            },
             message,
+            diagnostic,
             retry_after: None,
             charges: None,
         }
@@ -108,13 +124,20 @@ impl super::Api {
 
     pub(super) fn sanitize_failure(&self, mut failure: Failure) -> Failure {
         // Redact before clipping: otherwise a clipped key could retain a secret prefix.
-        failure.message = self.redact(&failure.message);
-        if failure.message.len() > 8192 {
-            let end = failure.message.floor_char_boundary(8192);
-            failure.message.truncate(end);
-            failure.message.push_str(" [provider diagnostic truncated]");
+        self.sanitize_message(&mut failure.message);
+        if let Some(diagnostic) = &mut failure.diagnostic {
+            self.sanitize_message(diagnostic);
         }
         failure
+    }
+
+    fn sanitize_message(&self, message: &mut String) {
+        *message = self.redact(message);
+        if message.len() > 8192 {
+            let end = message.floor_char_boundary(8192);
+            message.truncate(end);
+            message.push_str(" [provider diagnostic truncated]");
+        }
     }
 }
 

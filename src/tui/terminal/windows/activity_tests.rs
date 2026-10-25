@@ -44,6 +44,7 @@ pub(super) fn console(bash: &Path) {
             attempt: 1,
             delay: Duration::from_secs(2),
             error: "fixture".into(),
+            reason: None,
         },
     ] {
         state.event(event);

@@ -17,7 +17,6 @@ pub use crate::backend::{
     Charges, Completion, Failure, FailureKind, Limits, ToolCall, Update, validate_model,
 };
 pub use endpoints::Endpoints;
-pub(crate) use failure::KEY_HINT;
 pub use routing::{Router, Routing};
 
 use crate::cancel::Cancellation;
@@ -370,6 +369,12 @@ impl OpenRouter {
                 "{} Pinned endpoint {tag} has no fallbacks; use /routing to choose Auto or another endpoint.",
                 failure.message.trim_end()
             );
+            if let Some(diagnostic) = &mut failure.diagnostic {
+                *diagnostic = format!(
+                    "{} Pinned endpoint {tag} has no fallbacks; use /routing to choose Auto or another endpoint.",
+                    diagnostic.trim_end()
+                );
+            }
         }
         failure
     }

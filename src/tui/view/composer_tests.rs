@@ -72,6 +72,7 @@ fn turn_phases_and_waiting_for_an_edit_are_visible_in_the_rule() {
         attempt: 1,
         delay: std::time::Duration::from_secs(1),
         error: "fixture".into(),
+        reason: None,
     });
     let rule = frame(&state, "model", "dir").live[0].plain();
     assert!(

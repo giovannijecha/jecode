@@ -46,6 +46,48 @@ fn wait_job(app: &mut App) {
 }
 
 #[test]
+fn clipped_rejected_key_diagnostic_still_offers_settings() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        401,
+        Value::object([(
+            "error",
+            Value::object([("message", Value::string("x".repeat(9000)))]),
+        )]),
+    )]);
+    let mut app = app(&home, &project, &fixture.endpoint);
+    app.dispatch("Check the account".into()).unwrap();
+    tests::finish(&mut app);
+    let notice = app.state.notice.as_ref().unwrap();
+    assert_eq!(notice.action, Some(("/settings", "update key")));
+    assert!(notice.text.contains("[provider diagnostic truncated]"));
+    assert!(!notice.text.contains("jecode setup"));
+    fixture.finish();
+}
+
+#[test]
+fn a_new_successful_turn_discards_stale_backend_failure_metadata() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let fixture = HttpFixture::new(vec![(200, completion("Done.", vec![]))]);
+    let mut app = app(&home, &project, &fixture.endpoint);
+    app.state.event(Event::BackendFailure {
+        reason: crate::backend::FailureReason::RejectedKey,
+        diagnostic: "Previous failure".into(),
+    });
+    app.dispatch("Continue".into()).unwrap();
+    assert!(app.state.backend_failure.is_none());
+    tests::finish(&mut app);
+    assert!(app.state.backend_failure.is_none());
+    assert_ne!(
+        app.state.notice.as_ref().and_then(|notice| notice.action),
+        Some(("/settings", "update key"))
+    );
+    fixture.finish();
+}
+
+#[test]
 fn automatic_queue_dispatch_and_catalog_loading_keep_an_unread_error() {
     for prompt in ["follow up", "/model", "/new"] {
         let home = Directory::new();
@@ -150,6 +192,7 @@ fn worker_completion_and_connection_events_keep_a_pending_session_error_visible(
         attempt: 1,
         delay: Duration::from_secs(1),
         error: "Connection error".into(),
+        reason: None,
     });
     app.state.event(Event::RecoveryFinished);
     app.state.event(Event::Maintenance {

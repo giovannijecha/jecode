@@ -38,10 +38,19 @@ pub enum FailureKind {
     Terminal,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureReason {
+    RateLimited,
+    RejectedKey,
+}
+
 #[derive(Clone, Debug)]
 pub struct Failure {
     pub kind: FailureKind,
+    pub reason: Option<FailureReason>,
     pub message: String,
+    /// Diagnostic without a consumer-specific next-step hint, when one exists.
+    pub diagnostic: Option<String>,
     pub retry_after: Option<Duration>,
     pub charges: Option<Box<Charges>>,
 }

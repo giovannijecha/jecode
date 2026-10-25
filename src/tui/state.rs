@@ -7,8 +7,8 @@ use super::{
     information::Information,
     suggestions::Suggestions,
 };
-use crate::events::Event;
 use crate::json::Value;
+use crate::{backend::FailureReason, events::Event};
 
 pub(super) mod rows;
 
@@ -82,6 +82,7 @@ pub struct State {
     pub progress: Option<Feedback>,
     /// A retry temporarily overlays maintenance without replacing its clock.
     pub recovery: Option<Feedback>,
+    pub backend_failure: Option<(FailureReason, String)>,
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
@@ -109,6 +110,7 @@ impl Default for State {
             copy_notice: None,
             progress: None,
             recovery: None,
+            backend_failure: None,
             information: None,
             selector: None,
             processes: None,
@@ -149,6 +151,7 @@ impl State {
                 attempt,
                 delay,
                 error,
+                reason,
             } => {
                 if matches!(self.items.last(), Some(Item::Streaming { .. })) {
                     self.items.pop();
@@ -156,7 +159,7 @@ impl State {
                 }
                 self.status = "Waiting for connection…".into();
                 // The rule counts down to the next attempt.
-                let subject = if error.contains("HTTP 429") {
+                let subject = if reason == Some(FailureReason::RateLimited) {
                     "Rate limited"
                 } else {
                     "Reconnecting"
@@ -172,6 +175,9 @@ impl State {
             Event::RecoveryFinished => {
                 self.recovery = None;
             }
+            Event::BackendFailure { reason, diagnostic } => {
+                self.backend_failure = Some((reason, diagnostic));
+            }
             Event::RequestDiscarded => {
                 if matches!(self.items.last(), Some(Item::Streaming { .. })) {
                     self.items.pop();
@@ -186,6 +192,7 @@ impl State {
                 self.message(Kind::Notice, &text);
             }
             Event::Preparing => {
+                self.backend_failure = None;
                 self.status = "Preparing request…".into();
             }
             Event::Waiting { .. } => {
@@ -305,6 +312,7 @@ impl State {
         self.clear_notice();
         self.clear_copy_notice();
         self.clear_progress();
+        self.backend_failure = None;
         self.information = None;
         self.processes = None;
     }
