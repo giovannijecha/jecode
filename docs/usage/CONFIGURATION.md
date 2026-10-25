@@ -27,8 +27,10 @@ provider diagnostic and a single settings action.
 
 If the saved default provider has no credentials, the TUI falls back to another
 configured provider for the current conversation. It uses that provider's saved
-model, or offers `/model` when none is saved. With no configured providers, local
-commands and settings remain available; model requests report that credentials
+model, or offers `/model` when none is saved. `/new` and deletion of the current
+session keep the active provider, model and effort while the saved default
+provider is unavailable. With no configured providers, local commands and
+settings remain available; model requests report that credentials
 are needed. Startup does not rewrite saved defaults or contact a provider to
 validate credentials. A fallback warning includes the failure reason and states
 when a `--model` override is skipped across providers. Plain interactive chat

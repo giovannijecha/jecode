@@ -15,6 +15,26 @@ pub(super) struct Job {
 
 impl App {
     pub(super) fn start_delete(&mut self, id: &str) -> Result<(), String> {
+        let agent = self
+            .agent
+            .as_ref()
+            .ok_or("Session deletion requires a ready turn")?;
+        let (backend, model, effort) = if agent.sessions().is_some_and(|handle| handle.id() == id) {
+            match self.new_conversation_selection() {
+                Ok(selection) => selection,
+                Err(notice) => {
+                    self.state.notify(notice);
+                    return Ok(());
+                }
+            }
+        } else {
+            // Deleting another session never creates a replacement connection.
+            (
+                agent.backend_id().into(),
+                agent.model().into(),
+                agent.effort(),
+            )
+        };
         self.capture_input();
         self.cancel_copy();
         let title = self
@@ -27,9 +47,6 @@ impl App {
             .agent
             .take()
             .ok_or("Session deletion requires a ready turn")?;
-        let model = self.config.settings.model.clone();
-        let effort = self.config.settings.effort;
-        let backend = self.config.settings.backend_id.clone();
         let selected = id.to_string();
         self.deletion_job = Some(Job {
             task: thread::spawn(move || {

@@ -6,6 +6,7 @@ mod cards;
 mod checkpoint_tests;
 mod checkpoints;
 mod commands;
+mod conversations;
 mod copy;
 mod delete;
 mod display;
@@ -398,6 +399,8 @@ mod exit;
 
 #[cfg(test)]
 mod auto_compact_tests;
+#[cfg(test)]
+mod conversation_tests;
 #[cfg(test)]
 mod copy_tests;
 #[cfg(test)]

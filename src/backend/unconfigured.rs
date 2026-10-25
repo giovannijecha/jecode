@@ -87,6 +87,9 @@ impl Backend for Unconfigured {
 }
 
 impl Service for Unconfigured {
+    fn is_configured(&self) -> bool {
+        false
+    }
     fn id(&self) -> &'static str {
         self.id
     }

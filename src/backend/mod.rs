@@ -327,6 +327,10 @@ pub fn validate_credential(id: &str, key: &str) -> Result<(), String> {
 }
 
 pub trait Service: Send + Sync {
+    /// Whether this is a credential-backed service rather than a setup placeholder.
+    fn is_configured(&self) -> bool {
+        true
+    }
     fn id(&self) -> &'static str;
     fn account(&self) -> Option<String> {
         None
@@ -361,6 +365,9 @@ pub struct Services {
 }
 
 impl Services {
+    pub fn is_configured(&self) -> bool {
+        self.inner.is_configured()
+    }
     pub fn for_backend(id: &str, key: String) -> Result<Self, String> {
         Self::for_credential(&crate::auth::Credential::api_key(id, key))
     }

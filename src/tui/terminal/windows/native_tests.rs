@@ -44,6 +44,7 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "startup-fresh",
         "startup-unconfigured-prompt",
         "startup-fallback",
+        "startup-fallback-new",
         "startup-key-removed",
         "startup-plain",
         "startup-setup-empty",

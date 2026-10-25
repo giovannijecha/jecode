@@ -19,6 +19,10 @@ impl Agent {
         self.client.id()
     }
 
+    pub fn has_backend(&self, backend: &str) -> bool {
+        self.accounts.contains_key(backend)
+    }
+
     pub fn identity(&self) -> Origin {
         Origin::with_account(self.backend_id(), self.model(), self.client.account())
     }
@@ -34,7 +38,9 @@ impl Agent {
 
     pub fn register_backend(&mut self, services: Services) {
         self.include_credentials(services.redactor());
-        self.accounts.insert(services.id().into(), services);
+        if services.is_configured() {
+            self.accounts.insert(services.id().into(), services);
+        }
     }
 
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
