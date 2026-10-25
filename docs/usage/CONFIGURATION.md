@@ -21,6 +21,10 @@ provider/model selection is written to `config.json`. Choosing the first model
 also activates it for the current conversation; later default changes retain
 their usual scope of new conversations.
 
+On a first launch, the banner says **No configured provider** and points to
+`/settings`. If a saved selection becomes unavailable, its warning includes the
+provider diagnostic and a single settings action.
+
 If the saved default provider has no credentials, the TUI falls back to another
 configured provider for the current conversation. It uses that provider's saved
 model, or offers `/model` when none is saved. With no configured providers, local

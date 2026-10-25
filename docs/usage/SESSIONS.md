@@ -45,6 +45,13 @@ still leaves a saved session if its initial checkpoint succeeded.
 
 ## Recover unsent work
 
+Sending a task before provider configuration is complete returns it to the
+composer without saving an execution turn. Attachment drafts can still be saved
+and recovered before a model is selected. They appear as **Not selected** in the
+session list and store `model: null`, rather than a made-up model identifier.
+Resuming such a draft uses the current selection, or keeps waiting for
+configuration. Its text and attachment bytes remain intact.
+
 The TUI saves the composer, caret, queued messages, paused drafts and sent
 prompt history after a session has a request or attachment. On resume, queued
 messages become separate paused drafts; the composer retains its own text.

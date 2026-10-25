@@ -276,6 +276,13 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait(scenario == "startup-fallback" ? "Default provider unavailable" : "No configured provider");
                 pty.EnsureVt("JECODE_WARNING_FOREGROUND", "warning foreground");
                 pty.EnsureVt("JECODE_WARNING_SURFACE", "warning surface");
+                if (scenario == "startup-unconfigured-prompt") {
+                    int typed = pty.Mark(); pty.Send("Keep my task");
+                    pty.Wait("Keep my task", typed);
+                    int request = pty.Mark(); pty.Send("\r");
+                    pty.Wait("No configured provider", request);
+                    pty.Send("\x15");
+                }
                 int settings = pty.Mark(); pty.Send("/settings");
                 pty.Wait("Commands", settings); pty.Send("\r");
                 pty.Wait("Providers", settings);

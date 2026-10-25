@@ -19,8 +19,8 @@ pub(crate) fn sessions(agent: &Agent) -> Result<(Vec<Summary>, Vec<String>), Str
                 id: document.id.clone(),
                 title: document.title(),
                 updated: document.updated,
+                model: document.model_label().into(),
                 backend: document.backend,
-                model: document.model,
             },
         );
     }

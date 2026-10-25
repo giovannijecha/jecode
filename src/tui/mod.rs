@@ -431,6 +431,8 @@ mod spacing_tests;
 #[cfg(test)]
 mod specimen;
 #[cfg(test)]
+mod startup_session_tests;
+#[cfg(test)]
 mod startup_tests;
 #[cfg(test)]
 mod tests;

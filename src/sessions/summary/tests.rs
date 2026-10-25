@@ -21,6 +21,22 @@ fn fixture() -> (Directory, Directory, Store, Document) {
 }
 
 #[test]
+fn an_unselected_draft_is_listed_without_inventing_a_model_identifier() {
+    let (_home, _directory, store, mut document) = fixture();
+    document.model = None;
+    let lease = store.create(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    for _ in 0..2 {
+        let listing = store.list().unwrap();
+        assert!(listing.warnings.is_empty());
+        assert_eq!(listing.sessions[0].model, "Not selected");
+    }
+    let cached = load(&store, &document.id, &stamp(&store, &document.id).unwrap()).unwrap();
+    assert_eq!(cached.model, "Not selected");
+    assert!(store.fixture_load(&document.id).unwrap().model.is_none());
+}
+
+#[test]
 fn summaries_track_the_committed_journal_and_bound_large_titles() {
     let (_home, _directory, store, mut document) = fixture();
     let lease = store.create(&document.id).unwrap();
@@ -35,7 +51,7 @@ fn summaries_track_the_committed_journal_and_bound_large_titles() {
         ("role", Value::string("user")),
         ("content", Value::string("🦀 ".repeat(256 * 1024))),
     ]));
-    document.model = "fixture/changed".into();
+    document.model = Some("fixture/changed".into());
     lease.save(&document).unwrap();
     assert!(load(&store, &document.id, &first).is_none());
     let summary = load(&store, &document.id, &stamp(&store, &document.id).unwrap()).unwrap();

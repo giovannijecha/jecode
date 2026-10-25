@@ -27,7 +27,7 @@ pub(super) fn client(
     let model = model_override
         .clone()
         .or_else(|| settings.has_model().then(|| settings.model.clone()));
-    let unavailable = match settings.services(home, &settings.backend_id) {
+    let unavailable = match settings.service_status(home, &settings.backend_id) {
         Ok(services) => {
             if let Some(model) = model {
                 return services.create(model).map(|client| (client, None));
@@ -43,12 +43,7 @@ pub(super) fn client(
         }
         Err(error) => error,
     };
-    // The banner already carries an action; retain the diagnostic without a
-    // second settings instruction embedded in the provider error.
-    let cause = unavailable
-        .split("; open Settings")
-        .next()
-        .unwrap_or(&unavailable);
+    let cause = &unavailable.diagnostic;
     if let Some(services) = settings.configured_services(home).into_iter().next() {
         let id = services.id();
         let name = crate::backend::available()
@@ -81,7 +76,14 @@ pub(super) fn client(
             }),
         ));
     }
-    let text = format!("No configured provider · {cause}");
+    let text = if !settings.has_model()
+        && settings.credentials.is_empty()
+        && unavailable.settings.is_some()
+    {
+        "No configured provider".into()
+    } else {
+        format!("No configured provider · {cause}")
+    };
     Ok((
         unconfigured::client(&settings.backend_id, model, None, text.clone()),
         Some(StartupNotice {

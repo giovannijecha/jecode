@@ -140,6 +140,7 @@ fn crash_child() {
             0,
             &crate::context::Context::default(),
             &crate::backend::openrouter::Routing::Default,
+            true,
             Stage::Completion,
         )
         .unwrap();
@@ -158,6 +159,7 @@ fn crash_child() {
             0,
             &crate::context::Context::default(),
             &crate::backend::openrouter::Routing::Default,
+            true,
             Stage::Tool("write".into()),
         )
         .unwrap();

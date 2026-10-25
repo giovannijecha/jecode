@@ -55,3 +55,19 @@ fn incomplete_first_launch_state_is_never_written_as_a_default_model() {
     );
     assert!(!store.path().exists());
 }
+
+#[test]
+fn provider_diagnostics_and_settings_actions_are_separate() {
+    let directory = Directory::new();
+    let settings = Settings::unconfigured();
+    let error = settings
+        .service_status(directory.path(), "openrouter")
+        .err()
+        .unwrap();
+    assert_eq!(error.diagnostic, "OpenRouter has no saved API key");
+    assert_eq!(error.settings, Some("Settings > Providers > API keys"));
+    assert_eq!(
+        error.to_string(),
+        "OpenRouter has no saved API key; open Settings > Providers > API keys"
+    );
+}

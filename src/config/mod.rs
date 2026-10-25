@@ -24,6 +24,30 @@ pub struct Settings {
     pub routing: BTreeMap<String, Routing>,
 }
 
+pub struct ServiceError {
+    pub diagnostic: String,
+    pub settings: Option<&'static str>,
+}
+
+impl From<String> for ServiceError {
+    fn from(diagnostic: String) -> Self {
+        Self {
+            diagnostic,
+            settings: None,
+        }
+    }
+}
+
+impl std::fmt::Display for ServiceError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.diagnostic)?;
+        if let Some(settings) = self.settings {
+            write!(formatter, "; open {settings}")?;
+        }
+        Ok(())
+    }
+}
+
 impl Settings {
     pub fn unconfigured() -> Self {
         Self {
@@ -42,21 +66,39 @@ impl Settings {
     }
 
     pub fn services(&self, home: &Path, id: &str) -> Result<crate::backend::Services, String> {
+        self.service_status(home, id)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn service_status(
+        &self,
+        home: &Path,
+        id: &str,
+    ) -> Result<crate::backend::Services, ServiceError> {
         if id == "openai" {
             let session = crate::auth::openai::Store::new(home.to_path_buf())
                 .active()?
-                .ok_or(
-                    "OpenAI has no active ChatGPT account; open Settings > Providers > Credentials",
-                )?;
+                .ok_or_else(|| ServiceError {
+                    diagnostic: "OpenAI has no active ChatGPT account".into(),
+                    settings: Some("Settings > Providers > Credentials"),
+                })?;
             crate::backend::Services::for_credential(&crate::auth::Credential::openai(session))
+                .map_err(Into::into)
         } else {
             let key = self
                 .credential_for(id)
                 .filter(|key| !key.is_empty())
                 .ok_or_else(|| {
-                    format!("{id} has no saved API key; open Settings > Providers > API keys")
+                    let name = crate::backend::available()
+                        .iter()
+                        .find(|info| info.id == id)
+                        .map_or(id, |info| info.name);
+                    ServiceError {
+                        diagnostic: format!("{name} has no saved API key"),
+                        settings: Some("Settings > Providers > API keys"),
+                    }
                 })?;
-            crate::backend::Services::for_backend(id, key.to_owned())
+            crate::backend::Services::for_backend(id, key.to_owned()).map_err(Into::into)
         }
     }
 

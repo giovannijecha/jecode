@@ -141,6 +141,7 @@ impl Handle {
         compatible_from: usize,
         context: &crate::context::Context,
         routing: &crate::backend::Routing,
+        has_model: bool,
         stage: Stage,
     ) -> Result<(), String> {
         let messages = archive.messages.lock().unwrap();
@@ -179,7 +180,7 @@ impl Handle {
             .map(|event| live.redactor.value(event))
             .collect::<Vec<_>>();
         live.document.events.extend(appended);
-        live.document.model = live.redactor.text(&archive.model);
+        live.document.model = has_model.then(|| live.redactor.text(&archive.model));
         live.document.backend = archive.backend.clone();
         live.document.legacy_origin = archive.legacy_origin.clone();
         if let Stage::Accept(queued) = &stage {

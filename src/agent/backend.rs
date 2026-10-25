@@ -54,6 +54,7 @@ impl Agent {
         prepare: bool,
     ) -> Result<(), String> {
         let previous_identity = self.identity();
+        let had_model = self.has_model();
         let identity = Origin::with_account(next.id(), next.model(), next.account());
         let changed = previous_identity != identity;
         let changed_effort = self.effort() != next.effort();
@@ -85,14 +86,16 @@ impl Agent {
         if changed {
             self.compatible_from = self.messages.lock().unwrap().len();
             self.context.reset_usage();
-            self.events.lock().unwrap().push(Value::object([
-                ("type", Value::string("backend_changed")),
-                ("from_backend", Value::string(previous_identity.backend)),
-                ("from_model", Value::string(previous_identity.model)),
-                ("backend", Value::string(&identity.backend)),
-                ("model", Value::string(&identity.model)),
-                ("after_message", Value::number(self.compatible_from)),
-            ]));
+            if had_model {
+                self.events.lock().unwrap().push(Value::object([
+                    ("type", Value::string("backend_changed")),
+                    ("from_backend", Value::string(previous_identity.backend)),
+                    ("from_model", Value::string(previous_identity.model)),
+                    ("backend", Value::string(&identity.backend)),
+                    ("model", Value::string(&identity.model)),
+                    ("after_message", Value::number(self.compatible_from)),
+                ]));
+            }
         }
         if changed || changed_effort {
             self.context.summary_output_tokens = 0;

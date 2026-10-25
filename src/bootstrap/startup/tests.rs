@@ -92,7 +92,9 @@ fn first_launch_needs_no_credentials_or_saved_configuration() {
     let store = Store::new(directory.path().to_path_buf());
     let settings = Settings::unconfigured();
     let (backend, notice) = client(&store, &settings, None, true).unwrap();
-    assert_eq!(notice.unwrap().action.0, "/settings");
+    let notice = notice.unwrap();
+    assert_eq!(notice.action.0, "/settings");
+    assert_eq!(notice.text, "No configured provider");
     assert!(!store.path().exists());
     assert!(backend.services().catalog().is_err());
     assert!(
