@@ -5,8 +5,8 @@ shows a warning with `/settings` as the next step. `jecode setup` provides guide
 provider and model selection; plain interactive chat also offers setup. OpenAI uses
 **Continue with ChatGPT**; OpenRouter uses an API key. In the TUI, use
 `/settings` to change saved defaults and **Providers** to manage authentication.
-OpenRouter keys and defaults are
-stored in plain text in `~/.jecode/config.json` (on Windows,
+Saved defaults and the OpenRouter API key are stored in plain text in
+`~/.jecode/config.json` (on Windows,
 `%USERPROFILE%\.jecode\config.json`). Keep this personal file private.
 
 During browser-based ChatGPT sign-in from `jecode setup`, press Enter to cancel
@@ -65,25 +65,32 @@ routing is managed by OpenAI, so `/routing` applies only to OpenRouter.
 
 ## Stored settings
 
-The relevant fields are:
+The relevant fields can look like this after selecting OpenAI and retaining a
+previous OpenRouter selection. Model IDs and the key value are illustrative;
+choose available models and replace the key placeholder through setup or
+Settings. Connect the ChatGPT account separately.
 
 ```json
 {
   "selection": {
-    "backend": "openrouter",
-    "model": "provider/model-id",
+    "backend": "openai",
+    "model": "chatgpt-model-id",
     "effort": "default"
   },
   "backends": {
+    "openai": {
+      "model": "chatgpt-model-id"
+    },
     "openrouter": {
-      "api_key": "your-key",
+      "api_key": "REPLACE_WITH_OPENROUTER_KEY",
+      "model": "provider/model-id",
       "routing": {
         "provider/model-id": { "mode": "auto" }
       }
     }
   },
   "openrouter": {
-    "api_key": "your-key",
+    "api_key": "REPLACE_WITH_OPENROUTER_KEY",
     "model": "provider/model-id",
     "effort": "default",
     "routing": {
@@ -95,21 +102,25 @@ The relevant fields are:
 ```
 
 `selection` is the default for new conversations; switching a conversation does
-not change it. API keys live under `backends.<id>`. ChatGPT tokens are stored
-separately under `accounts/openai/`; selecting OpenAI requires no API key in
-`config.json`. The original
-`openrouter` block remains readable and is updated for compatibility. Its key,
-model, effort and routing take precedence for OpenRouter when both formats are
-present, so edits made by an older installed binary remain effective. Its
-values do not replace another backend's selection. Routing
-choices belong to a backend, so an OpenRouter pin cannot affect another backend
-using the same model ID. Other backend selections do not require
-an OpenRouter key. The model ID and key must be valid; `effort` defaults to `default` in older
-files. The file must be a JSON object of at most 64 KiB. Jecode retains unknown
-fields when saving. An invalid or unreadable file blocks setup and launch with
-an error; Jecode leaves it unchanged so you can correct it. Saves replace the
-file atomically. New Unix configuration directories and files use permissions
-`0700` and `0600`; Windows inherits permissions from the user's directory.
+not change it. Each `backends.<id>.model` remembers that provider's last saved
+model. If the default provider is unavailable at launch, Jecode restores the
+fallback provider's model from this field; OpenRouter first checks the legacy
+`openrouter.model`. Conversation-only model switches do not rewrite these saved
+models. The OpenRouter API key lives under `backends.openrouter`.
+ChatGPT tokens are stored separately under `accounts/openai/`; selecting OpenAI
+requires no API key in `config.json`. The original `openrouter` block remains
+readable and is updated for compatibility. Its key, model, effort and routing
+take precedence for OpenRouter when both formats are present, so edits made by
+an older installed binary remain effective. Its values do not replace another
+backend's selection. Routing choices belong to a backend, so an OpenRouter pin
+cannot affect another backend using the same model ID. Other backend selections
+do not require an OpenRouter key. The model ID and any OpenRouter key must be
+valid; `effort` defaults to `default` in older files. The file must be a JSON
+object of at most 64 KiB. Jecode retains unknown fields when saving. An invalid
+or unreadable file blocks setup and launch with an error; Jecode leaves it
+unchanged so you can correct it. Saves replace the file atomically. New Unix
+configuration directories and files use permissions `0700` and `0600`; Windows
+inherits permissions from the user's directory.
 Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
 storage and resume. Per-call checkpoints have a fixed 24-hour lifetime and no
 policy file; see [Checkpoints](CHECKPOINTS.md).
@@ -122,7 +133,7 @@ its own purpose:
 
 | Path | Contents and owner |
 | --- | --- |
-| `config.json` | Your key and saved settings; Jecode updates it through setup and settings. |
+| `config.json` | Saved settings and the OpenRouter API key; Jecode updates it through setup and settings. |
 | `accounts/openai/` | Protected ChatGPT registrations, rotating tokens, active account, stable host ID and refresh lock. |
 | `skills/` | Your reusable skill files; Jecode reads this library. |
 | `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
@@ -218,10 +229,15 @@ model for one launch without editing defaults; a different model starts at
 always manages the personal file.
 
 `JECODE_HOME` selects an absolute configuration directory, including sessions,
-temporary storage, checkpoint archives and the personal [skill library](SKILLS.md), and `JECODE_BASH`
-selects the Bash executable. These are
-useful for isolated development.
+temporary storage, checkpoint archives and the personal [skill library](SKILLS.md).
+`JECODE_BASH` selects the Bash executable. These are useful for isolated
+development.
 
-`/backend`, `/model`, `/effort` and `/routing` change the conversation without changing
-saved defaults. Changing the key in `/settings` updates current authentication.
-For what resumes with a conversation, see [Sessions](SESSIONS.md).
+`/backend`, `/model`, `/effort` and `/routing` change the conversation without
+changing saved defaults. Changing the OpenRouter key in `/settings` refreshes
+authentication for an active OpenRouter conversation; otherwise it registers
+the key for later use. Connecting or selecting a ChatGPT account registers that
+account separately. The TUI opens the model selector when the conversation
+needs configuration or its active OpenAI account changes; connecting an account
+while another backend is active does not switch that conversation. For what
+resumes with a conversation, see [Sessions](SESSIONS.md).

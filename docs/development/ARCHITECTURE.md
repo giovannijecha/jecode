@@ -72,8 +72,9 @@ headers. Crawls save GET request options with their queue for consistent resume.
 The `browser` tool launches an installed Chromium-based executable and communicates
 with its local DevTools
 endpoint. Isolated profiles and browser artifacts use the session area; named
-profiles use dedicated storage under the Jecode home. Neither path uses an
-OpenRouter web service. Browser and curl availability are native host boundaries.
+profiles use dedicated storage under the Jecode home. Both tools run locally,
+independent of the selected model backend. Browser and curl availability are
+native host boundaries.
 
 File writes and exact edits capture contextual changes at execution time.
 `file_change.rs` owns their text alignment and serializable hunks, independently
@@ -310,7 +311,8 @@ after credential masking and length bounding. See
 
 `agent/backend_tests.rs` exercises two synthetic backends with different wire
 layouts through tool execution, compaction, save, resume and a failed switch.
-The OpenRouter adapter keeps loopback fixtures for its HTTP and streaming path.
+Both OpenRouter and OpenAI adapters have loopback fixtures for their HTTP and
+streaming paths.
 
 Auto routing keeps OpenRouter fallbacks. With enough fresh comparable endpoint
 statistics, it requests throughput near or above half the median and first-token

@@ -8,7 +8,7 @@ scripts run from the Jecode repository root.
 
 | Task | Guide |
 | --- | --- |
-| Choose a model, reasoning effort or endpoint; edit defaults | [Configuration](usage/CONFIGURATION.md) |
+| Connect OpenRouter or OpenAI ChatGPT; choose a model, effort or endpoint | [Configuration](usage/CONFIGURATION.md) |
 | Initialize project rules and scope `AGENTS.md` files | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
 | Add personal workflows and inspect the skill library | [Skills](usage/SKILLS.md) |
 | Understand file tools, command output and background processes | [Tools](usage/TOOLS.md) |
@@ -34,7 +34,7 @@ scripts run from the Jecode repository root.
 | Reference | Contents |
 | --- | --- |
 | [Architecture](development/ARCHITECTURE.md) | Module map, agent flow, persistence and native boundaries. |
-| [OpenAI backend direction](development/OPENAI.md) | Planned provider boundary and the independent Sign in with ChatGPT flow. |
+| [OpenAI backend](development/OPENAI.md) | Implemented provider boundary, Sign in with ChatGPT and native cryptography. |
 | [Development and testing](development/TESTING.md) | Offline checks, isolated fixtures and manual smoke tests. |
 | [Platform verification](development/PLATFORMS.md) | Native test commands, local coverage and host checks. |
 | [Performance](development/PERFORMANCE.md) | Recorded measurements, methodology and current benchmark commands. |
