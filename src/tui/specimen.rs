@@ -41,6 +41,8 @@ const BACKGROUNDS: &[(&str, Surface)] = &[
     ("CODE_SURFACE", CODE_SURFACE),
     ("DIFF_ADDED_SURFACE", DIFF_ADDED_SURFACE),
     ("DIFF_REMOVED_SURFACE", DIFF_REMOVED_SURFACE),
+    ("DIFF_ADDED_STRONG", DIFF_ADDED_STRONG),
+    ("DIFF_REMOVED_STRONG", DIFF_REMOVED_STRONG),
 ];
 
 const ATTRIBUTES: &[(&str, Style)] = &[
@@ -259,10 +261,13 @@ fn specimen() {
     print!("{painted}");
 }
 
+mod chapter_live;
 mod composer;
 mod menus;
 mod messages;
 mod notices;
 mod panels;
+mod rhythm;
+mod tinted;
 mod tools;
 mod work_chapters;

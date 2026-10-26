@@ -15,14 +15,14 @@ Tool errors return as results so the model can correct the call.
 
 | Tool | Required arguments | Optional arguments | Result or constraint |
 | --- | --- | --- | --- |
-| `read` | `path` | `offset`, `limit`, `byte_offset`, `work` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
+| `read` | `path` | `offset`, `limit`, `byte_offset`, `work`, `description` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
 | `edit` | `path`, `edits` | — | Applies one or more exact unique replacements in order, installing the file only after all succeed. Returns `bytes_written`. |
-| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes`, `work` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
-| `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes`, `output_mode`, `work` | Lists, polls or stops this conversation's persistent processes. |
+| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes`, `work`, `description` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
+| `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes`, `output_mode`, `work`, `description` | Lists, polls or stops this conversation's persistent processes. |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
-| `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
-| `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `work` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
+| `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work`, `description` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
+| `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `work`, `description` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
 
 `work` is an optional short label chosen by the assistant for related `read`,
 `bash`, `process`, `web` and `browser` calls. At least two adjacent eligible calls
@@ -36,6 +36,13 @@ grouping compares the same normalized label before display truncation. Labels
 are saved with their original tool arguments and survive resume; they do not
 change execution. See
 [tool presentation](../tui/THEME.md) for the summary and `Ctrl+O` behavior.
+
+`description` is an optional short caption on those same five routine tools.
+It is stored unchanged with the original tool arguments alongside `work` and
+survives resume; it does not change execution. Bash and Process use it as the
+compact title above their command. When omitted, the command or tool target
+remains the visible fallback. Browser keeps its action in the title and shows
+its payload beneath it. See [tool presentation](../tui/THEME.md) for the layout.
 
 `write`, `edit` and protected `bash` calls return a `checkpoint` receipt whose
 `status` is `saved`, `partial` or `none`. Saved references expire 24 hours after
@@ -76,9 +83,12 @@ Web and Browser in one
 inline format. Successful file changes retain a numbered contextual diff,
 including Write on an existing text file. These display records stay in local
 session history and survive resume without changing model-facing tool results.
-Only changed fragments receive a red or green surface; surrounding code keeps
-its syntax color and context is muted. Added or removed lines without a paired
-counterpart highlight their full text.
+The four-cell indent stays on the terminal surface; changed rows carry a red
+or green tint through the right edge. Paired changed fragments use a stronger
+surface, while unpaired code keeps its syntax colours without whole-line bold.
+Context remains dim and unshaded. A new Write shows `New file · N lines` and
+the first six numbered source lines instead of an all-added diff; Ctrl+O
+reveals the complete new file.
 Diff capture is optional: inputs above 1 MiB or 20,000 lines, and expensive
 alignments, use a neutral content preview. These display limits never reject
 a valid file modification.
@@ -90,6 +100,12 @@ success, including in older turns. The shortcut is ignored
 during generation and does nothing when the latest finished turn has no tools.
 It keeps your reading position and briefly confirms the change with the
 number of completed tools.
+Compact Work chapters keep their facts row and one shared activity row for
+the latest Read, Web or Browser attempt, including failures; the activity
+stays visible after completion. The chapter's `Ctrl+O expand` keycap shares
+its title row. Bash and Process members keep one quiet compact row; Ctrl+O
+opens their process IDs and retained output. A compact Read summarizes its
+page on one line, naming the total when known or the next page otherwise.
 See [TUI theme](../tui/THEME.md) for presentation and controls.
 
 ## Local web and browser tools

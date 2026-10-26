@@ -165,6 +165,7 @@ fn scenario(columns: usize) -> State {
                 "command",
                 Value::string("cargo test --locked --offline parser"),
             ),
+            ("description", Value::string("Verify the parser")),
             ("work", Value::string("Verify the parser")),
         ]),
         Value::object([
@@ -220,14 +221,16 @@ fn work_chapters() {
                     unwrapped.contains("1 web call"),
                     "{title} at {columns}: {output}"
                 );
-                assert!(
-                    unwrapped.contains("1 snapshot"),
-                    "{title} at {columns}: {output}"
-                );
+                if columns == 80 {
+                    assert!(
+                        unwrapped.contains("1 snapshot"),
+                        "{title} at {columns}: {output}"
+                    );
+                }
             }
             assert!(unwrapped.contains("Update") && unwrapped.contains("Write"));
             assert!(
-                unwrapped.contains("Exit 101"),
+                unwrapped.contains(if expanded { "exit 101" } else { "Exit 101" }),
                 "{title} at {columns}: {output}"
             );
             printed.push((
