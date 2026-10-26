@@ -54,8 +54,9 @@ turn time. Both timing event types use Unix milliseconds for
 locate the attempt in the transcript. Timing events stay outside model history
 and do not copy request payloads or credentials.
 
-Credentials from registered backend accounts are masked, but other conversation
-content is retained. Review the export before sharing it. Bash tool results
+Known credentials, including the configured OpenRouter key and registered
+ChatGPT tokens, are masked, but other conversation content is retained. Review
+the export before sharing it. Bash tool results
 contain bounded output previews (16 KiB per stream by default) and references
 to the complete streams in the personal session store; those files are not
 embedded in the JSON. See

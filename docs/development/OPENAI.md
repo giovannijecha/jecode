@@ -32,8 +32,8 @@ reuse a Codex client ID, or depend on the Codex CLI or app-server.
   plan inference; an ID token alone is insufficient.
 - Keep protected, atomically written local records per issued client ID and
   verified identity. Replace rotating refresh tokens, access tokens, scopes and
-  expiry together. Preserve account/workspace separation and the retained ID
-  token for later `id_token_hint` use. Never log credentials.
+  expiry together. Preserve account/workspace separation and the verified ID
+  token in the local account record. Never log credentials.
 
 The native crypto boundary uses Windows PowerShell/.NET for secure random
 bytes, SHA-256 and RSA signature verification. Unix requires the installed
