@@ -16,9 +16,16 @@ pub fn groupable(tool: &Tool<'_>) -> bool {
         && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
 }
 
-pub fn label<'a>(tool: &Tool<'a>) -> &'a str {
-    let work = field(tool.arguments, "work").trim();
-    if work.is_empty() { "Activity" } else { work }
+pub fn label(tool: &Tool<'_>) -> String {
+    let work = field(tool.arguments, "work")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if work.is_empty() {
+        "Activity".into()
+    } else {
+        text::clean(&work)
+    }
 }
 
 pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
@@ -38,10 +45,7 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
         state.style()
     };
 
-    let label = text::clean(tools.first().map_or("Activity", label))
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let label = tools.first().map_or_else(|| "Activity".into(), label);
     let mut title = Line::new(&text::ellipsize(&label, 60), TOOL_ACCENT.bold());
     title.push(&format!(" ({}", counted(tools.len(), "call")), MUTED);
     let state_text = match state {

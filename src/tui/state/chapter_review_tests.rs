@@ -175,3 +175,61 @@ fn a_second_matching_call_converts_the_singleton_and_invalidates_its_cached_prev
         "{rows}"
     );
 }
+
+#[test]
+fn whitespace_equivalent_labels_share_one_chapter_without_rewriting_arguments() {
+    let mut state = State::default();
+    state.begin_tool_turn();
+    let labels = [
+        " Inspect  parser ",
+        "Inspect parser",
+        "Inspect\n\tparser",
+        "Inspect\u{a0}parser",
+    ];
+    for (index, label) in labels.iter().enumerate() {
+        command(
+            &mut state,
+            &index.to_string(),
+            "printf example",
+            Some(label),
+        );
+    }
+    state.close_tools();
+    let text = visible(&state);
+    assert_eq!(
+        text.matches("● Inspect parser (4 calls)").count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(text.matches("● ").count(), 1, "{text}");
+    for (item, original) in state.items.iter().zip(labels) {
+        let Item::Tool { arguments, .. } = item else {
+            panic!("expected a tool")
+        };
+        assert_eq!(
+            arguments.get("work").and_then(Value::as_str),
+            Some(original)
+        );
+    }
+}
+
+#[test]
+fn labels_with_distinct_suffixes_beyond_the_display_limit_keep_separate_chapters() {
+    let mut state = State::default();
+    state.begin_tool_turn();
+    for (group, suffix) in ["first", "second"].into_iter().enumerate() {
+        let work = format!("{} {suffix}", "Inspect parser ".repeat(8));
+        for member in 0..2 {
+            command(
+                &mut state,
+                &format!("{group}-{member}"),
+                "printf example",
+                Some(&work),
+            );
+        }
+    }
+    state.close_tools();
+    let text = visible(&state);
+    assert_eq!(text.matches("(2 calls)").count(), 2, "{text}");
+    assert!(!text.contains("(4 calls)"));
+}

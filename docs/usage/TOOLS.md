@@ -27,13 +27,14 @@ Tool errors return as results so the model can correct the call.
 `work` is an optional short label chosen by the assistant for related `read`,
 `bash`, `process`, `web` and `browser` calls. At least two adjacent eligible calls
 share a TUI Work chapter only within the same execution turn and with matching
-trimmed labels. A single eligible call keeps its normal compact tool card.
+normalized labels. A single eligible call keeps its normal compact tool card.
 A changed label, assistant narration or another tool breaks the chapter; skill
 reads stay separate. Missing or blank labels appear as Activity, including in
 older sessions. Displayed labels collapse whitespace to one line and are
 ellipsized to at most 60 terminal cells; the saved label stays unchanged and
-grouping compares the trimmed original. Labels are saved with the tool arguments and
-survive resume; they do not change execution. See
+grouping compares the same normalized label before display truncation. Labels
+are saved with their original tool arguments and survive resume; they do not
+change execution. See
 [tool presentation](../tui/THEME.md) for the summary and `Ctrl+O` behavior.
 
 `write`, `edit` and protected `bash` calls return a `checkpoint` receipt whose

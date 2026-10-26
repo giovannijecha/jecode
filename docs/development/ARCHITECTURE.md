@@ -88,15 +88,16 @@ The optional `work` argument on `read`, `bash`, `process`, `web` and `browser`
 stays in each tool call's canonical arguments. Both provider adapters replay it
 through their native function-call wire shape, and saved sessions retain it
 without a separate event or metadata envelope. `tui/state/rows.rs` forms a
-chapter from two or more contiguous eligible calls with the same trimmed label
+chapter from two or more contiguous eligible calls with the same normalized label
 and execution-turn ID (`Presentation.turn_id`); text and other tools end the
 group. Single eligible calls keep their normal cards. `tui/cards/chapter.rs`
 derives aggregate facts and status from chapter members, omitting a facts row
 that only repeats the homogeneous header status. It keeps every Bash target
 visible in compact chapters. Missing labels, including older sessions, display
-as Activity. Display normalization collapses whitespace and limits the heading
-to 60 terminal cells without changing the saved or compared label. The existing
-latest-turn `Ctrl+O` state reveals complete individual cards inline.
+as Activity. Label normalization collapses whitespace; only the heading is
+truncated to 60 terminal cells. Grouping compares the full normalized label;
+the original saved arguments stay unchanged. The existing latest-turn `Ctrl+O`
+state reveals complete individual cards inline.
 
 ### Context and compaction
 

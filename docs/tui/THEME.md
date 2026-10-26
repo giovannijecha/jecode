@@ -93,15 +93,15 @@ call's `Checkpoint rc-ID` reference. Checkpoint calls preview three labeled
 result rows. Standalone previews stay visible when the next call starts.
 
 Two or more adjacent `read`, `bash`, `process`, `web` and `browser` calls share a
-Work chapter when their trimmed `work` labels and execution turn match. A single
-eligible call keeps its normal compact card and full expansion. Skill reads,
+Work chapter when their normalized `work` labels and execution turn match. A
+single eligible call keeps its normal compact card and full expansion. Skill reads,
 assistant narration and other tools break the chapter. Missing or blank labels
 display as **Activity**, including in older sessions. The displayed label
 collapses whitespace to one line and is ellipsized to at most 60 terminal cells;
-the saved label stays unchanged and grouping compares the trimmed original. The
-chapter has one status dot, a bold label and call count, then an `⎿` summary
-of completed work: unique
-files read, other reads, web calls, browser captures and actions, commands and
+the saved label stays unchanged and grouping compares the full normalized label
+before display truncation. The chapter has one status dot, a bold label and call
+count, then an `⎿` summary of completed work: unique files read, other reads,
+web calls, browser captures and actions, commands and
 process calls. Failures, running calls, background work and stopped calls add
 explicit counts and keep their target and result visible below the summary.
 The facts row is omitted when it would only repeat a homogeneous outcome already
