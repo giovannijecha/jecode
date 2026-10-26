@@ -80,6 +80,17 @@ verified the change. Use `-- --list` to inspect available names.
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
 
+Work chapters have focused card, state and viewport tests, including a 10,000-call
+replay and latest-turn expansion. To paint the actual compact and expanded cards
+at 80 and 40 cells with synthetic events:
+
+```text
+cargo test --locked --offline tui::specimen::work_chapters -- --ignored --nocapture
+```
+
+The [native terminal fixture](PLATFORMS.md#windows) also checks compact chapter
+facts and existing-card expansion through Ctrl+O.
+
 Run the applicable normal checks after focused verification. Keep credentials,
 logs, screenshots and temporary drivers out of tracked files; use ignored `.tmp/`
 or `target` directories.

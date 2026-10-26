@@ -99,3 +99,54 @@ fn reflow_of_a_wrapped_table_header_keeps_its_text_instead_of_the_separator() {
     assert_eq!(after.lines[0].origin, Some(origin));
     assert!(after.lines[0].plain().contains("delta"));
 }
+
+#[test]
+fn a_folding_source_can_remap_its_reading_anchor_to_the_chapter_header() {
+    let mut expanded = vec![
+        vec![Line::new("chapter", BODY).at_source(0)],
+        vec![
+            Line::new("later call", BODY).at_source(0),
+            Line::new("later output", BODY).at_source(1),
+        ],
+    ];
+    expanded.extend(blocks(10));
+    let mut view = Viewport::default();
+    view.view(&expanded, &[], 4);
+    view.scroll(Scroll::Start);
+    view.view(&expanded, &[], 4);
+    view.scroll(Scroll::Rows(2));
+    assert_eq!(
+        view.view(&expanded, &[], 4).lines[0].plain(),
+        "later output"
+    );
+
+    view.remap_anchor(|block, origin| {
+        assert_eq!(block, 1);
+        assert_eq!(origin.unwrap().line, 1);
+        Some(0)
+    });
+    let mut compact = vec![vec![Line::new("chapter", BODY).at_source(0)], vec![]];
+    compact.extend(blocks(10));
+    assert_eq!(view.view(&compact, &[], 4).lines[0].plain(), "chapter");
+}
+
+#[test]
+fn remap_leaves_tail_following_and_unselected_reading_anchors_alone() {
+    let source = blocks(20);
+    let mut following = Viewport::default();
+    following.view(&source, &[], 5);
+    following.remap_anchor(|_, _| panic!("tail following must not be remapped"));
+    assert!(following.following());
+    assert_eq!(following.view(&source, &[], 5).lines[0].plain(), "line 15");
+
+    let mut reading = Viewport::default();
+    reading.scroll(Scroll::Start);
+    reading.view(&source, &[], 5);
+    reading.scroll(Scroll::Rows(3));
+    assert_eq!(reading.view(&source, &[], 5).lines[0].plain(), "line 3");
+    reading.remap_anchor(|block, _| {
+        assert_eq!(block, 3);
+        None
+    });
+    assert_eq!(reading.view(&source, &[], 5).lines[0].plain(), "line 3");
+}

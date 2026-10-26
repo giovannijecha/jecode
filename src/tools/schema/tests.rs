@@ -7,6 +7,32 @@ fn tool_catalog_and_encoded_size_are_reused() {
 }
 
 #[test]
+fn work_label_is_optional_only_for_routine_tools() {
+    for tool in definitions().as_array().unwrap() {
+        let name = tool.get("name").and_then(Value::as_str).unwrap();
+        let parameters = tool.get("parameters").unwrap();
+        let properties = parameters.get("properties").unwrap();
+        let required = parameters
+            .get("required")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert!(!required.contains(&Value::string("work")), "{name}");
+        assert_eq!(
+            parameters.get("additionalProperties"),
+            Some(&Value::Bool(false)),
+            "{name}"
+        );
+        if matches!(name, "read" | "bash" | "process" | "web" | "browser") {
+            let work = properties.get("work").unwrap();
+            assert_eq!(work.get("type"), Some(&Value::string("string")), "{name}");
+            assert!(work.get("description").and_then(Value::as_str).is_some());
+        } else {
+            assert!(properties.get("work").is_none(), "{name}");
+        }
+    }
+}
+
+#[test]
 fn shell_and_process_budgets_advertise_the_same_bounded_preview_contract() {
     for tool in definitions().as_array().unwrap().iter().filter(|tool| {
         matches!(

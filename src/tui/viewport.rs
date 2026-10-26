@@ -43,6 +43,21 @@ impl Viewport {
         }
     }
 
+    /// Move a reading anchor when its logical source is folded into another
+    /// block. Following the tail has no anchor and is unaffected.
+    pub fn remap_anchor(&mut self, map: impl FnOnce(usize, Option<Origin>) -> Option<usize>) {
+        if let Some(anchor) = &mut self.anchor
+            && let Some(block) = map(anchor.block, anchor.origin)
+        {
+            anchor.block = block;
+            anchor.row = 0;
+            anchor.origin = Some(Origin {
+                line: 0,
+                character: 0,
+            });
+        }
+    }
+
     pub fn view(&mut self, blocks: &[Vec<Line>], pending: &[Vec<Line>], height: usize) -> Slice {
         if height == 0 {
             return Slice {

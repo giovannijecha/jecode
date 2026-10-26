@@ -177,16 +177,25 @@ fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals
         Tools::new(directory.path()).unwrap(),
     );
     let original = history(&mut agent, &"Earlier findings ".repeat(1800));
+    // Leave room for native instructions and the retained exchange while
+    // keeping the transcript large enough to require a second portion.
+    let fixed = agent.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + agent.request_environment().len();
+    let capacity = (fixed + 8192).div_ceil(4) * 5;
     let previous = agent.context.value();
     let result = agent.compact_if_needed(
         Some(Limits {
-            context: 24000,
+            context: capacity,
             output: Some(4096),
         }),
         true,
         &mut |_| Ok(()),
     );
-    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().contains("Fixture credential rejection"),
+        "compaction must reach the second summary portion"
+    );
     assert_eq!(agent.context.value(), previous);
     assert_eq!(*agent.messages.lock().unwrap(), original);
     assert_eq!(fixture.finish().len(), 2);

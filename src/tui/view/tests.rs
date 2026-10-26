@@ -104,7 +104,17 @@ fn pending_tools_and_following_notices_remain_live_until_the_result_arrives() {
         completed
             .live
             .iter()
-            .any(|line| line.plain().contains("fixture-command"))
+            .any(|line| line.plain().starts_with("● Activity"))
+    );
+    assert!(
+        completed
+            .live
+            .iter()
+            .any(|line| line.plain().contains("1 command"))
+    );
+    assert!(
+        matches!(&state.items[1], crate::tui::state::Item::Tool { result: Some(result), .. }
+        if result.get("exit_code") == Some(&Value::number(0)))
     );
     assert_eq!(completed.composer, state.height - 5);
 }
@@ -188,7 +198,7 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
         provisional
             .live
             .iter()
-            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .any(|line| line.plain().starts_with("● Activity"))
     );
     state.event(Event::Waiting {
         model: "fixture".into(),
@@ -199,22 +209,18 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
         waiting
             .live
             .iter()
-            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .any(|line| line.plain().starts_with("● Activity"))
     );
     state.message(Kind::Assistant, "Finished.");
     let settled = frame(&state, "fixture", "folder");
     assert_eq!(settled.history.len(), 2);
-    assert!(
-        settled.history[0][0]
-            .plain()
-            .starts_with("● Bash(fixture-command)")
-    );
+    assert!(settled.history[0][0].plain().starts_with("● Activity"));
     assert_eq!(
         settled.history[0],
         provisional.live[provisional
             .live
             .iter()
-            .position(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .position(|line| line.plain().starts_with("● Activity"))
             .unwrap()..]
             .iter()
             .take(2)

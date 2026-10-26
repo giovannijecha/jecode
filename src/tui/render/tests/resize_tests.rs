@@ -120,6 +120,7 @@ fn resizing_during_streaming_then_tools_and_finalization_never_saves_provisional
     state.event(Event::Message {
         text: "A completed answer.".into(),
     });
+    state.begin_tool_turn();
     start(&mut state, "inspect-command");
     let settled = now + Duration::from_millis(75);
     assert!(!step(&mut display, &mut screen, &state, settled).contains("\x1b[3J"));
@@ -131,6 +132,8 @@ fn resizing_during_streaming_then_tools_and_finalization_never_saves_provisional
     state.event(Event::Message {
         text: "All done.".into(),
     });
+    state.finish_tool_turn();
+    state.toggle_tools().expect("completed tool output");
     state.activity = None;
     let final_frame = step(&mut display, &mut screen, &state, settled);
     assert!(!final_frame.contains("\x1b[3J"));

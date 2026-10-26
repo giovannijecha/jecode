@@ -60,6 +60,20 @@ fn native_curl_sends_json_and_bearer_auth() {
             .len(),
         8
     );
+    assert_eq!(
+        requests[0]
+            .body
+            .get("tools")
+            .and_then(Value::as_array)
+            .unwrap()[0]
+            .get("function")
+            .and_then(|function| function.get("parameters"))
+            .and_then(|parameters| parameters.get("properties"))
+            .and_then(|properties| properties.get("work"))
+            .and_then(|work| work.get("type"))
+            .and_then(Value::as_str),
+        Some("string")
+    );
     assert!(
         requests[0]
             .headers

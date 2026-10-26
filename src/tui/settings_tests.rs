@@ -401,10 +401,14 @@ fn a_missing_tool_finish_event_is_reconciled_from_retained_protocol_results() {
         .find(|block| {
             block
                 .iter()
-                .any(|line| line.plain().contains("● Read(missing)"))
+                .any(|line| line.plain().contains("Read missing"))
         })
         .unwrap();
-    assert!(tool.iter().any(|line| line.plain().contains("⎿ Not found")));
+    assert!(tool.iter().any(|line| line.plain().contains("● Activity")));
+    assert!(tool.iter().any(|line| line.plain().contains("Not found")));
+    assert!(app.state.items.iter().any(|item| matches!(item,
+        state::Item::Tool { result: Some(result), .. }
+            if result.get("error").and_then(Value::as_str).is_some())));
     assert!(
         view::frame(&app.state, "fixture", "directory")
             .live

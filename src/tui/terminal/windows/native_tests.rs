@@ -216,6 +216,7 @@ fn tool_cards_console(bash: &std::path::Path) {
         height,
         ..State::default()
     };
+    state.begin_tool_turn();
     state.event(Event::ToolStarted {
         id: "update".into(),
         name: "edit".into(),
@@ -309,6 +310,14 @@ fn tool_cards_console(bash: &std::path::Path) {
         rows.iter()
             .any(|row| row.plain().contains("1 +  let limit = LOGIN_LIMIT;"))
     );
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().contains("Activity (3 calls)"))
+    );
+    assert!(rows.iter().any(|row| row.plain().contains("1 screenshot")));
+    state.finish_tool_turn();
+    assert_eq!(state.toggle_tools(), Some((true, 4)));
+    let rows: Vec<_> = state.rows().into_iter().flatten().collect();
     assert!(
         rows.iter()
             .any(|row| row.plain().contains("Web(fetch https://example.org/)"))
@@ -443,10 +452,13 @@ fn native_console_fixture() {
                     tool_call(
                         "native-read",
                         "read",
-                        crate::json::Value::object([(
-                            "path",
-                            crate::json::Value::string("drop me.txt"),
-                        )]),
+                        crate::json::Value::object([
+                            ("path", crate::json::Value::string("drop me.txt")),
+                            (
+                                "work",
+                                crate::json::Value::string("Inspect the dropped file"),
+                            ),
+                        ]),
                     ),
                     tool_call(
                         "native-write",

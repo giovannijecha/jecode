@@ -289,7 +289,7 @@ fn pages_and_captures_summarise_what_came_back() {
 }
 
 #[test]
-fn reads_group_by_file_name_and_expand_to_one_row_per_read() {
+fn read_chapter_counts_files_and_expands_to_individual_cards() {
     let shown = presentation(0, false);
     let calls = [
         read("src/routes/auth.rs", 212),
@@ -300,35 +300,52 @@ fn reads_group_by_file_name_and_expand_to_one_row_per_read() {
         .iter()
         .map(|(arguments, result)| tool("read", arguments, result, &shown))
         .collect();
-    assert!(tools.iter().all(groupable));
-    let card = group(&tools, 80, true);
-    let rows = plain(&card.rows);
-    assert!(card.hidden);
-    assert_eq!(rows[0], "● Read(3 files)");
-    assert!(rows[1].starts_with("  ⎿ routes/auth.rs, tests/auth.rs, limiter.rs · 420 lines"));
-    assert!(rows[1].ends_with("Ctrl+O  list"));
+    assert!(tools.iter().all(chapter_groupable));
+    let chapter = chapter_header(&tools, 80, true);
+    let rows = plain(&chapter.rows);
+    assert!(chapter.hidden);
+    assert_eq!(rows[0], "● Activity (3 calls)");
+    assert!(rows.join("\n").contains("⎿ 3 files read"));
+    assert!(rows.join("\n").contains("Ctrl+O"));
     let expanded = presentation(0, true);
-    let tools: Vec<_> = calls
+    let cards: Vec<_> = calls
         .iter()
-        .map(|(arguments, result)| tool("read", arguments, result, &expanded))
+        .map(|(arguments, result)| card(tool("read", arguments, result, &expanded), 80, false))
         .collect();
-    assert_eq!(
-        plain(&group(&tools, 80, false).rows)[1..],
-        [
-            "  ⎿ src/routes/auth.rs · 212 lines",
-            "    tests/auth.rs · 120 lines",
-            "    src/limiter.rs · 88 lines",
-        ]
-    );
+    for (card, (path, lines)) in cards.iter().zip([
+        ("src/routes/auth.rs", 212),
+        ("tests/auth.rs", 120),
+        ("src/limiter.rs", 88),
+    ]) {
+        let rows = plain(&card.rows);
+        assert!(rows[0].contains(&format!("Read({path})")), "{rows:?}");
+        assert!(rows.join("\n").contains(&format!("Read {lines} lines")));
+        assert!(rows.iter().any(|row| row.trim() == "1   x"));
+    }
     let pages = [read("big.rs", 40), read("big.rs", 40)];
     let tools: Vec<_> = pages
         .iter()
         .map(|(arguments, result)| tool("read", arguments, result, &shown))
         .collect();
-    assert_eq!(
-        plain(&group(&tools, 80, false).rows),
-        ["● Read(big.rs)", "  ⎿ 2 reads · 80 lines"]
-    );
+    let chapter = chapter_header(&tools, 80, false);
+    let chapter_text = plain(&chapter.rows).join("\n");
+    assert!(chapter_text.contains("2 calls"));
+    assert!(chapter_text.contains("1 file read"));
+    let page_cards: Vec<_> = pages
+        .iter()
+        .map(|(arguments, result)| card(tool("read", arguments, result, &expanded), 80, false))
+        .collect();
+    assert_eq!(page_cards.len(), 2);
+    for page in &page_cards {
+        assert!(plain(&page.rows)[0].contains("Read(big.rs)"));
+        assert!(plain(&page.rows).join("\n").contains("Read 40 lines"));
+    }
     let failed = Value::object([("error", Value::string("denied"))]);
-    assert!(!groupable(&tool("read", &calls[0].0, &failed, &shown)));
+    let failed = tool("read", &calls[0].0, &failed, &shown);
+    assert!(chapter_groupable(&failed));
+    assert!(
+        chapter_exception(&failed, 80)
+            .iter()
+            .any(|row| row.plain().contains("denied"))
+    );
 }

@@ -84,6 +84,16 @@ Optional capture bounds input size and alignment work; unavailable diffs never
 reject an otherwise valid write or edit. Local `turn_start` events preserve
 execution-turn grouping across queued follow-ups and resume.
 
+The optional `work` argument on `read`, `bash`, `process`, `web` and `browser`
+stays in each tool call's canonical arguments. Both provider adapters replay it
+through their native function-call wire shape, and saved sessions retain it
+without a separate event or metadata envelope. `tui/state/rows.rs` groups only
+contiguous eligible calls from the same execution turn with the same trimmed
+label; text and other tools end the group. `tui/cards/chapter.rs` derives its
+aggregate facts and status from those calls. Missing labels, including older
+sessions, display as Activity. The existing latest-turn `Ctrl+O` state reveals
+the complete individual cards inline.
+
 ### Context and compaction
 
 `context.rs` derives the input budget from the Auto-compact percentage and the

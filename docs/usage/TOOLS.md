@@ -15,14 +15,23 @@ Tool errors return as results so the model can correct the call.
 
 | Tool | Required arguments | Optional arguments | Result or constraint |
 | --- | --- | --- | --- |
-| `read` | `path` | `offset`, `limit`, `byte_offset` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
+| `read` | `path` | `offset`, `limit`, `byte_offset`, `work` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
 | `edit` | `path`, `edits` | — | Applies one or more exact unique replacements in order, installing the file only after all succeed. Returns `bytes_written`. |
-| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
-| `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes`, `output_mode` | Lists, polls or stops this conversation's persistent processes. |
+| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes`, `work` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
+| `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes`, `output_mode`, `work` | Lists, polls or stops this conversation's persistent processes. |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
-| `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
-| `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
+| `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
+| `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `work` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
+
+`work` is an optional short label chosen by the assistant for related `read`,
+`bash`, `process`, `web` and `browser` calls. Adjacent calls share a TUI Work
+chapter only within the same execution turn and with matching trimmed labels.
+A changed label, assistant narration or another tool breaks the chapter; skill
+reads stay separate. Missing or blank labels appear as Activity, including in
+older sessions. Labels are saved with the tool arguments and survive resume;
+they do not change execution. See [tool presentation](../tui/THEME.md) for the
+summary and `Ctrl+O` behavior.
 
 `write`, `edit` and protected `bash` calls return a `checkpoint` receipt whose
 `status` is `saved`, `partial` or `none`. Saved references expire 24 hours after

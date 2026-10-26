@@ -286,7 +286,10 @@ mod tests {
                             ("type", Value::string("function_call")),
                             ("call_id", Value::string("c")),
                             ("name", Value::string("read")),
-                            ("arguments", Value::string("{}")),
+                            (
+                                "arguments",
+                                Value::string(r#"{"path":"src/main.rs","work":"Inspect source"}"#),
+                            ),
                         ]),
                     ]),
                 ),
@@ -310,6 +313,10 @@ mod tests {
             Some("opaque")
         );
         assert_eq!(
+            input[2].get("arguments").and_then(Value::as_str),
+            Some(r#"{"path":"src/main.rs","work":"Inspect source"}"#)
+        );
+        assert_eq!(
             input[3].get("type").and_then(Value::as_str),
             Some("function_call_output")
         );
@@ -327,6 +334,19 @@ mod tests {
                 .get("type")
                 .and_then(Value::as_str),
             Some("namespace")
+        );
+        let read = &request.get("tools").and_then(Value::as_array).unwrap()[0]
+            .get("tools")
+            .and_then(Value::as_array)
+            .unwrap()[0];
+        assert_eq!(read.get("strict"), Some(&Value::Bool(false)));
+        assert_eq!(
+            read.get("parameters")
+                .and_then(|parameters| parameters.get("properties"))
+                .and_then(|properties| properties.get("work"))
+                .and_then(|work| work.get("type"))
+                .and_then(Value::as_str),
+            Some("string")
         );
     }
 

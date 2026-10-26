@@ -261,8 +261,11 @@ impl State {
                     result: None,
                     change: None,
                     last: None,
-                    presentation: Presentation::live(),
+                    presentation: Presentation { turn: self.tool_details.turn_id, ..Presentation::live() },
                 });
+                let index = self.items.len() - 1;
+                self.cache_chapter(index);
+                self.update_chapters(&[index]);
             }
             Event::ToolNote { id, text } => {
                 if let Some(Item::Tool { presentation, .. }) = self.items.iter_mut().rev().find(
@@ -295,7 +298,7 @@ impl State {
                     *current = summary;
                     *captured = Some(result);
                     presentation.finish();
-                    self.join_reads(&[index]);
+                    self.update_chapters(&[index]);
                 }
             }
         }
@@ -339,6 +342,7 @@ impl State {
                         | Item::Tool { last: None, .. }
                 )
             })
+            .map(|index| rows::chapter_start(&self.items, index))
             .unwrap_or(self.items.len())
     }
     pub fn finish_stream(&mut self) {
@@ -393,13 +397,15 @@ impl State {
             }
         }
         drop(messages);
-        self.join_reads(&settled);
+        self.update_chapters(&settled);
     }
     pub fn changed(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
 }
 
+#[cfg(test)]
+mod chapter_tests;
 #[cfg(test)]
 mod tests;
 mod tools;

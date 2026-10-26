@@ -48,12 +48,46 @@ impl Item {
     }
 
     pub(in crate::tui) fn groupable(&self) -> bool {
-        self.tool().is_some_and(|tool| cards::groupable(&tool))
+        self.tool()
+            .is_some_and(|tool| cards::chapter_groupable(&tool))
     }
 }
 
-/// A tool's card. A run of reads shares one card, drawn at its first read;
-/// the later reads draw nothing.
+fn same_chapter(left: &Item, right: &Item) -> bool {
+    let (Some(left), Some(right)) = (left.tool(), right.tool()) else {
+        return false;
+    };
+    cards::chapter_groupable(&left)
+        && cards::chapter_groupable(&right)
+        && left.presentation.turn == right.presentation.turn
+        && cards::chapter_label(&left) == cards::chapter_label(&right)
+}
+
+/// Item positions stay stable in both views. Only the first member draws the
+/// chapter heading; expanded calls retain their own viewport blocks.
+pub(in crate::tui) fn chapter_start(items: &[Item], index: usize) -> usize {
+    let Some(item) = items.get(index) else {
+        return index;
+    };
+    if !item.groupable() {
+        return index;
+    }
+    if let Some(start) = item.tool().and_then(|tool| tool.presentation.chapter_start) {
+        return start;
+    }
+    let mut start = index;
+    while start > 0 && same_chapter(&items[start - 1], item) {
+        start -= 1;
+        if let Some(cached) = items[start]
+            .tool()
+            .and_then(|tool| tool.presentation.chapter_start)
+        {
+            return cached;
+        }
+    }
+    start
+}
+
 pub(in crate::tui) fn tool_card(
     items: &[Item],
     index: usize,
@@ -61,19 +95,41 @@ pub(in crate::tui) fn tool_card(
     keycap: bool,
 ) -> Option<cards::Card> {
     let tool = items[index].tool()?;
-    if cards::groupable(&tool) {
-        if index > 0 && items[index - 1].groupable() {
-            return None;
-        }
-        let run: Vec<_> = items[index..]
+    if !cards::chapter_groupable(&tool) {
+        return Some(cards::card(tool, columns, keycap));
+    }
+    let first = index == 0 || !same_chapter(&items[index - 1], &items[index]);
+    let mut chapter = if first {
+        let calls: Vec<_> = items[index..]
             .iter()
-            .map_while(|item| item.tool().filter(|tool| cards::groupable(tool)))
+            .take_while(|item| same_chapter(&items[index], item))
+            .filter_map(Item::tool)
             .collect();
-        if run.len() > 1 {
-            return Some(cards::group(&run, columns, keycap));
+        cards::chapter_header(&calls, columns, keycap)
+    } else {
+        cards::Card {
+            rows: Vec::new(),
+            hidden: false,
+        }
+    };
+    let mut detail = if tool.presentation.expanded {
+        let rows = cards::card(tool, columns, false).rows;
+        if first {
+            chapter.rows.push(Line::default());
+        }
+        rows
+    } else {
+        cards::chapter_exception(&tool, columns)
+    };
+    if first {
+        for line in &mut detail {
+            if let Some(origin) = &mut line.origin {
+                origin.line = origin.line.saturating_add(2);
+            }
         }
     }
-    Some(cards::card(tool, columns, keycap))
+    chapter.rows.extend(detail);
+    (!chapter.rows.is_empty()).then_some(chapter)
 }
 
 impl Rows {
@@ -126,7 +182,14 @@ impl Rows {
             }
         };
         let mut lines = lines;
-        self.finish(&mut lines);
+        let joined = index > 0
+            && same_chapter(&items[index - 1], item)
+            && item.tool().is_some_and(|tool| !tool.presentation.expanded);
+        if joined {
+            self.previous |= !lines.is_empty();
+        } else {
+            self.finish(&mut lines);
+        }
         lines
     }
     pub fn finish(&mut self, lines: &mut Vec<Line>) {

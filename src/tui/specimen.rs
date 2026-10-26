@@ -265,3 +265,4 @@ mod messages;
 mod notices;
 mod panels;
 mod tools;
+mod work_chapters;

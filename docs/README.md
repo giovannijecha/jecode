@@ -27,7 +27,7 @@ scripts run from the Jecode repository root.
 | [Composer and controls](tui/COMPOSER.md) | Editing, keyboard shortcuts, commands, selectors and pending messages. |
 | [Markdown](tui/MARKDOWN.md) | Supported syntax, code blocks, tables and display limits. |
 | [Scrolling and resize](tui/RESIZE.md) | Reading position, reflow and terminal restoration. |
-| [Theme and tool cards](tui/THEME.md) | Semantic colors, components and tool presentation. |
+| [Theme and Work chapters](tui/THEME.md) | Semantic colors, compact Work chapters, tool cards and `Ctrl+O`. |
 
 ## Development
 
