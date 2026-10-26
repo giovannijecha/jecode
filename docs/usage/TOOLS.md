@@ -22,7 +22,7 @@ Tool errors return as results so the model can correct the call.
 | `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes`, `output_mode`, `work`, `description` | Lists, polls or stops this conversation's persistent processes. |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
 | `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work`, `description` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
-| `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `work`, `description` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
+| `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor`, `work`, `description` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
 
 `work` is an optional short label chosen by the assistant for related `read`,
 `bash`, `process`, `web` and `browser` calls. At least two adjacent eligible calls
@@ -161,18 +161,63 @@ The browser actions are `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`,
 `press`, `scroll`, `wait`, `screenshot`, `evaluate`, `cdp`, `logs`, `close` and
 `stop`. `open` returns `browser_id` and `tab_id`. The newest browser is selected
 when `browser_id` is omitted. Without `tab_id`, Jecode selects an available page
-tab; pass an explicit ID when the tab matters. `snapshot` returns the page text, interactive
-elements and references such as `@1`; `selector` accepts a snapshot reference
-or CSS selector in interaction actions. `wait` matches `text` in the selected
-element or the page body, and accepts `timeout_ms`. `scroll` takes signed
+tab; pass an explicit ID when the tab matters.
+
+`width` and `height` set the page viewport in CSS pixels (`innerWidth` and
+`innerHeight`), not the outer window size. Supply both or neither; each is an
+integer from 1 to 10,000. On `open`, the viewport applies to the first tab
+before the optional `url` loads. On `screenshot`, it applies before capture.
+The size stays with the tab across navigation and DevTools reconnection until
+another size is requested, and the result's `viewport` reports the measured
+size. Without them, `open` keeps the browser's default viewport and returns no
+`viewport`; a screenshot captures the current viewport.
+
+`snapshot` returns the page text separately from interactive elements. Each
+element has a reference such as `@1`, its tag and visibility, Chromium's
+computed `role` and accessible `name` (covering `<label for>`, wrapping labels,
+`aria-label` and `aria-labelledby`), and, when present, `type`, `id`,
+`html_name` (the `name` attribute), `placeholder`, its own `text` when it
+differs from the name, the current `value` of text fields and selects (never
+passwords), `checked` and `disabled`. Accessibility details cover the first 500
+elements. Element strings are capped at 200 Unicode characters; field values
+retain their whitespace. The response lists at most 100 elements, with
+`elements_total` when more exist, and 12,000 characters of page text;
+`snapshot_path` saves the full
+snapshot. `selector` accepts a snapshot reference or CSS selector in
+interaction actions.
+
+`wait` matches `text` in the selected element or the page body, and accepts
+`timeout_ms` (default 15,000). Every check uses only the remaining budget. An
+unmet condition fails with the configured timeout, the elapsed time, the tab,
+the last known URL and whether the selector matched nothing or the text was
+missing. Cancellation, JavaScript errors and DevTools failures keep their own
+errors. `scroll` takes signed
 `delta_y` and optional `x`/`y` coordinates. `evaluate` runs a JavaScript
 `expression` on the page. `cdp` accepts a raw DevTools `method` and object
 `params` for operations beyond the high-level actions. `screenshot` saves a
 `tmp:browser/` image and automatically delivers it to the model on the next
 request. The returned `attachment:ID` reference remains usable after temporary
-cleanup. `logs` returns
-up to 30 recent events and a saved path containing the current connection's
-retained event window (up to 1,000 events). `close` closes a tab; `stop` ends a browser.
+cleanup.
+
+`logs` reads the selected tab's event log in pages. Capture starts when Jecode
+first connects to the tab and keeps the newest 1,000 events, so it is not a
+complete browser-session log. `filter` selects `default` (console messages,
+exceptions, failed requests and HTTP errors), `console`, `errors`, `network`
+or `all`. `limit` caps entries per page (default 50, maximum 200). Each entry
+has `seq`, `kind`, `level`, `text` and, when known, `source`. Pass the returned
+`next_cursor` as `cursor` to read only later events; `more` means retained
+events after that cursor are still unread. `missed` counts events evicted
+before this read could examine them. If the DevTools connection is recreated,
+the log continues with a `gap` entry for events that could not be captured. A
+malformed cursor, a future cursor or one from another tab or browser session is
+an error; omit `cursor` to start from the oldest retained event.
+Each page also examines at most 200 raw events or about 256 KiB of raw event
+JSON; a single larger event is included so the cursor can advance. A page can
+contain fewer than `limit` entries, even zero, while `more` is true. Continue
+with `next_cursor` to examine the remaining retained events.
+`logs_path` saves one JSON line for every event the page examined, including
+non-matching ones, with the raw CDP message in `event`. `close` closes a tab;
+`stop` ends a browser.
 Browser behavior depends on the target site and its current state.
 
 Text reads use one-based `offset` (default 1) and `limit` (default 200, maximum

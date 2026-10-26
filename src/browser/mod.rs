@@ -2,10 +2,20 @@
 mod actions;
 mod launch;
 #[cfg(test)]
+mod live_tests;
+mod logs;
+#[cfg(test)]
+mod logs_tests;
+#[cfg(test)]
 mod recovery_tests;
+mod snapshot;
 #[cfg(test)]
 mod tests;
 mod transport;
+mod viewport;
+mod wait;
+#[cfg(test)]
+mod wait_tests;
 
 use crate::cancel::Cancellation;
 use crate::json::Value;
@@ -33,6 +43,8 @@ struct Browser {
     lease: Option<launch::ProfileLease>,
     port: u16,
     tabs: BTreeMap<String, transport::Cdp>,
+    /// Requested page viewports, reapplied when a tab connection is recreated.
+    viewports: BTreeMap<String, (u32, u32)>,
     id: String,
 }
 
@@ -69,6 +81,7 @@ impl Browser {
             }
         }
         self.tabs.clear();
+        self.viewports.clear();
         self.lease.take();
         self.port = 0;
         outcome
@@ -101,6 +114,7 @@ impl Registry {
             .lock()
             .map_err(|_| "Browser registry lock failed")?;
         if action == "open" {
+            let viewport = viewport::requested(arguments)?;
             let visible = matches!(arguments.get("visible"), Some(Value::Bool(true)));
             let name = arguments.get("profile").and_then(Value::as_str);
             if name.is_some()
@@ -124,11 +138,23 @@ impl Registry {
                 .and_then(Value::as_str)
                 .ok_or("Browser has no page target")?
                 .to_string();
+            // The viewport applies before navigation, so the page loads at size.
+            let measured = viewport
+                .map(|size| {
+                    viewport::apply(
+                        &mut browser,
+                        &tab_id,
+                        size,
+                        cancellation,
+                        actions::DEFAULT_TIMEOUT,
+                    )
+                })
+                .transpose()?;
             if let Some(url) = arguments.get("url").and_then(Value::as_str) {
                 actions::navigate(&mut browser, &tab_id, url, cancellation)?;
             }
             browsers.push(browser);
-            return Ok(Value::object([
+            let mut result = Value::object([
                 ("browser_id", Value::string(id)),
                 ("tab_id", Value::string(tab_id)),
                 (
@@ -138,7 +164,11 @@ impl Registry {
                         .cloned()
                         .unwrap_or(Value::string("about:blank")),
                 ),
-            ]));
+            ]);
+            if let (Some(measured), Value::Object(fields)) = (measured, &mut result) {
+                fields.insert("viewport".into(), measured);
+            }
+            return Ok(result);
         }
         let selected = if let Some(id) = arguments.get("browser_id").and_then(Value::as_str) {
             browsers.iter().position(|b| b.id == id)

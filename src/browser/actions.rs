@@ -1,5 +1,5 @@
 use super::{
-    Browser,
+    Browser, logs,
     transport::{self, Cdp},
 };
 use crate::cancel::Cancellation;
@@ -7,10 +7,10 @@ use crate::json::Value;
 use crate::scratch::Area;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 static NEXT_FILE: AtomicU64 = AtomicU64::new(1);
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
+pub(super) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(super) fn list_tabs(browser: &Browser) -> Result<Vec<Value>, String> {
     let value = transport::http_get(browser.port, "/json/list")?;
@@ -34,14 +34,7 @@ pub(super) fn tab<'a>(
     id: &str,
     cancellation: &Cancellation,
 ) -> Result<&'a mut Cdp, String> {
-    if browser
-        .tabs
-        .get(id)
-        .is_some_and(|connection| !connection.usable())
-    {
-        browser.tabs.remove(id);
-    }
-    if !browser.tabs.contains_key(id) {
+    if !browser.tabs.get(id).is_some_and(Cdp::usable) {
         let targets = transport::http_get(browser.port, "/json/list")?;
         let target = targets
             .as_array()
@@ -56,10 +49,33 @@ pub(super) fn tab<'a>(
             .and_then(Value::as_str)
             .ok_or("Browser tab has no DevTools endpoint")?;
         let mut connection = Cdp::connect(url)?;
-        connection.call("Page.enable", empty(), cancellation, DEFAULT_TIMEOUT)?;
-        connection.call("Runtime.enable", empty(), cancellation, DEFAULT_TIMEOUT)?;
-        connection.call("Network.enable", empty(), cancellation, DEFAULT_TIMEOUT)?;
+        // A recreated connection continues the tab's event log and viewport.
+        if let Some(previous) = browser.tabs.remove(id) {
+            connection.events = previous.events;
+            connection
+                .events
+                .gap("DevTools connection was recreated; events in between were not captured");
+        }
+        let viewport = browser.viewports.get(id).copied();
+        let mut prepare = || {
+            for domain in ["Page", "Runtime", "Network"] {
+                connection.call(
+                    &format!("{domain}.enable"),
+                    empty(),
+                    cancellation,
+                    DEFAULT_TIMEOUT,
+                )?;
+            }
+            viewport.map_or(Ok(()), |size| {
+                super::viewport::set(&mut connection, size, cancellation, DEFAULT_TIMEOUT)
+            })
+        };
+        let prepared = prepare();
+        if prepared.is_err() {
+            connection.invalidate();
+        }
         browser.tabs.insert(id.to_string(), connection);
+        prepared?;
     }
     browser
         .tabs
@@ -135,6 +151,7 @@ pub(super) fn execute(
             return Err("Browser tab did not close".into());
         }
         browser.tabs.remove(&id);
+        browser.viewports.remove(&id);
         return Ok(Value::object([("closed", Value::Bool(true))]));
     }
     if action == "navigate" {
@@ -148,6 +165,18 @@ pub(super) fn execute(
         return Err("browser timeout_ms must be positive".into());
     }
     let timeout = Duration::from_millis(timeout_ms as u64);
+    let mut viewport = None;
+    if action == "screenshot"
+        && let Some(size) = super::viewport::requested(arguments)?
+    {
+        viewport = Some(super::viewport::apply(
+            browser,
+            &id,
+            size,
+            cancellation,
+            timeout,
+        )?);
+    }
     let connection = tab(browser, &id, cancellation)?;
     match action {
         "cdp" => {
@@ -167,7 +196,7 @@ pub(super) fn execute(
                 timeout,
             )?,
         )])),
-        "snapshot" => snapshot(connection, area, &id, cancellation),
+        "snapshot" => super::snapshot::capture(connection, area, &id, cancellation),
         "click" => {
             let element = element_expr(required(arguments, "selector")?);
             let script = format!(
@@ -283,54 +312,8 @@ pub(super) fn execute(
                 ("tab_id", Value::string(id)),
             ]))
         }
-        "wait" => {
-            let selector = arguments
-                .get("selector")
-                .and_then(Value::as_str)
-                .map(element_expr);
-            let text = arguments.get("text").and_then(Value::as_str);
-            if selector.is_none() && text.is_none() {
-                return Err("wait needs selector or text".into());
-            }
-            let script = format!(
-                "(()=>{{const e={};return !!e&&{} }})()",
-                selector.unwrap_or("document.body".into()),
-                text.map(|t| format!("(e.innerText||'').includes({})", Value::string(t).encode()))
-                    .unwrap_or("true".into())
-            );
-            let deadline = Instant::now()
-                .checked_add(timeout)
-                .ok_or("Browser wait timeout is too large")?;
-            loop {
-                if evaluate(connection, &script, cancellation, Duration::from_secs(2))?
-                    == Value::Bool(true)
-                {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    return Err("Browser wait timed out".into());
-                }
-                cancellation.wait(Duration::from_millis(100))?;
-            }
-            Ok(Value::object([
-                ("found", Value::Bool(true)),
-                ("tab_id", Value::string(id)),
-            ]))
-        }
+        "wait" => super::wait::run(connection, &id, arguments, timeout, cancellation),
         "screenshot" => {
-            if let (Some(width), Some(height)) = (arguments.get("width"), arguments.get("height")) {
-                connection.call(
-                    "Emulation.setDeviceMetricsOverride",
-                    Value::object([
-                        ("width", width.clone()),
-                        ("height", height.clone()),
-                        ("deviceScaleFactor", Value::number(1)),
-                        ("mobile", Value::Bool(false)),
-                    ]),
-                    cancellation,
-                    timeout,
-                )?;
-            }
             let result = connection.call(
                 "Page.captureScreenshot",
                 Value::object([
@@ -347,33 +330,52 @@ pub(super) fn execute(
             let bytes = crate::attachments::base64::decode(data)?;
             let (path, relative) = output_path(area, "png")?;
             fs::write(path, bytes).map_err(|e| e.to_string())?;
-            Ok(Value::object([
+            let mut result = Value::object([
                 ("tab_id", Value::string(id)),
                 ("screenshot_path", Value::string(relative)),
-            ]))
+            ]);
+            if let (Some(viewport), Value::Object(fields)) = (viewport, &mut result) {
+                fields.insert("viewport".into(), viewport);
+            }
+            Ok(result)
         }
         "logs" => {
-            let _ = connection.call(
+            let filter = logs::Filter::parse(arguments.get("filter").and_then(Value::as_str))?;
+            let limit = match arguments.get("limit") {
+                None => logs::DEFAULT_LIMIT,
+                Some(limit) => limit
+                    .as_usize()
+                    .filter(|n| (1..=logs::MAX_LIMIT).contains(n))
+                    .ok_or(format!(
+                        "browser logs limit must be an integer from 1 to {}",
+                        logs::MAX_LIMIT
+                    ))?,
+            };
+            // Receives the events queued since the previous DevTools call.
+            connection.call(
                 "Runtime.evaluate",
                 Value::object([("expression", Value::string("void 0"))]),
                 cancellation,
                 timeout,
             )?;
-            let events = Value::Array(connection.events.clone());
-            let (path, relative) = output_path(area, "json")?;
-            fs::write(path, events.encode()).map_err(|e| e.to_string())?;
-            let recent = connection
-                .events
-                .iter()
-                .rev()
-                .take(30)
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect();
+            let page = connection.events.page(
+                filter,
+                limit,
+                arguments.get("cursor").and_then(Value::as_str),
+            )?;
+            let mut lines = String::new();
+            for record in &page.records {
+                lines.push_str(&record.encode());
+                lines.push('\n');
+            }
+            let (path, relative) = output_path(area, "jsonl")?;
+            fs::write(path, lines).map_err(|e| e.to_string())?;
             Ok(Value::object([
-                ("events", Value::Array(recent)),
+                ("tab_id", Value::string(id)),
+                ("entries", Value::Array(page.entries)),
+                ("next_cursor", Value::string(page.next_cursor)),
+                ("more", Value::Bool(page.more)),
+                ("missed", Value::number(page.missed)),
                 ("logs_path", Value::string(relative)),
             ]))
         }
@@ -381,38 +383,7 @@ pub(super) fn execute(
     }
 }
 
-fn snapshot(
-    connection: &mut Cdp,
-    area: &Area,
-    id: &str,
-    cancellation: &Cancellation,
-) -> Result<Value, String> {
-    let script = r#"(()=>{const nodes=[...document.querySelectorAll('a,button,input,textarea,select,[role="button"],[contenteditable="true"]')];Object.defineProperty(window,Symbol.for('jecode.browser.refs'),{value:nodes,configurable:true});const els=nodes.map((e,i)=>{const r=e.getBoundingClientRect();return {ref:'@'+(i+1),tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',text:(e.innerText||e.getAttribute('aria-label')||e.getAttribute('placeholder')||'').trim().slice(0,200),type:e.getAttribute('type')||'',visible:r.width>0&&r.height>0}});return {title:document.title,url:location.href,text:document.body?.innerText||'',elements:els}})()"#;
-    let value = evaluate(connection, script, cancellation, DEFAULT_TIMEOUT)?;
-    let (path, relative) = output_path(area, "json")?;
-    fs::write(path, value.encode()).map_err(|e| e.to_string())?;
-    let mut short = value.clone();
-    if let Value::Object(ref mut map) = short {
-        if let Some(Value::String(text)) = map.get_mut("text")
-            && text.len() > 12000
-        {
-            let mut end = 12000;
-            while !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            text.truncate(end);
-            text.push_str("\n[truncated; full snapshot saved]");
-        }
-        if let Some(Value::Array(elements)) = map.get_mut("elements") {
-            elements.truncate(100);
-        }
-        map.insert("snapshot_path".into(), Value::string(relative));
-        map.insert("tab_id".into(), Value::string(id));
-    }
-    Ok(short)
-}
-
-fn evaluate(
+pub(super) fn evaluate(
     connection: &mut Cdp,
     expression: &str,
     cancellation: &Cancellation,
@@ -447,7 +418,7 @@ fn required<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
 fn empty() -> Value {
     Value::object([])
 }
-fn element_expr(input: &str) -> String {
+pub(super) fn element_expr(input: &str) -> String {
     if let Some(digits) = input.strip_prefix('@')
         && !digits.is_empty()
         && digits.bytes().all(|b| b.is_ascii_digit())
@@ -465,7 +436,10 @@ fn number(value: &Value, key: &str) -> Result<f64, String> {
         _ => Err(format!("Missing {key} coordinate")),
     }
 }
-fn output_path(area: &Area, extension: &str) -> Result<(std::path::PathBuf, String), String> {
+pub(super) fn output_path(
+    area: &Area,
+    extension: &str,
+) -> Result<(std::path::PathBuf, String), String> {
     let name = format!(
         "capture-{}-{}.{}",
         std::process::id(),

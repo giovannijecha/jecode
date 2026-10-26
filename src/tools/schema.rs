@@ -295,7 +295,7 @@ fn build_definitions() -> Value {
         ),
         routine(
             "browser",
-            "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives element refs such as @1; selector accepts refs or CSS. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
+            "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). width+height set the page viewport on open (before url) or screenshot. Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives elements with refs such as @1, role, name and state; selector accepts refs or CSS. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. logs pages events (default console and errors); pass next_cursor as cursor; missed counts evicted events. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
             Value::object([
                 (
                     "action",
@@ -345,8 +345,24 @@ fn build_definitions() -> Value {
                     "delta_y",
                     Value::object([("type", Value::string("integer"))]),
                 ),
-                ("width", integer(1, None)),
-                ("height", integer(1, None)),
+                ("width", integer(1, Some(10_000))),
+                ("height", integer(1, Some(10_000))),
+                (
+                    "filter",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(
+                                ["default", "console", "errors", "network", "all"]
+                                    .map(Value::string)
+                                    .into(),
+                            ),
+                        ),
+                    ]),
+                ),
+                ("limit", integer(1, Some(200))),
+                ("cursor", string()),
             ]),
             &["action"],
         ),

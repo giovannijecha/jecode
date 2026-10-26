@@ -80,6 +80,19 @@ verified the change. Use `-- --list` to inspect available names.
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
+| Browser | `browser::` tests use loopback DevTools fixtures for waits, log paging, eviction and reconnection, plus the installed-browser fixtures below. |
+
+Installed Chrome or Edge fixtures serve a loopback site and use isolated
+profiles under `target` or ignored `.tmp/`. Run them one at a time after
+browser changes; the last one briefly opens a visible window:
+
+```text
+cargo test --locked --offline browser::tests::live_chromium_localhost_interaction_and_profile_persistence -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::live_tests::live_chromium_viewport_dimensions_and_validation -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::live_tests::live_chromium_snapshot_semantics_logs_and_wait_diagnostics -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::snapshot::tests::live_chromium_snapshot_values_text_and_refs -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::live_tests::live_chromium_visible_viewport -- --exact --ignored --test-threads=1
+```
 
 Work chapters have focused card, state and viewport tests, including a 10,000-call
 replay and latest-turn expansion. To paint the actual compact and expanded cards
