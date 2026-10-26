@@ -1,5 +1,4 @@
 use super::{
-    cards,
     line::{Line, Span},
     render::Renderer,
     resize::Resize,
@@ -75,7 +74,7 @@ impl Display {
                     return None;
                 }
                 let tool = state.items.get(index)?.tool()?;
-                if !cards::chapter_groupable(&tool) || tool.presentation.expanded {
+                if !state::rows::in_chapter(&state.items, index) || tool.presentation.expanded {
                     return None;
                 }
                 let start = state::rows::chapter_start(&state.items, index);

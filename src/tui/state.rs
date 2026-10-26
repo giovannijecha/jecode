@@ -261,7 +261,7 @@ impl State {
                     result: None,
                     change: None,
                     last: None,
-                    presentation: Presentation { turn: self.tool_details.turn_id, ..Presentation::live() },
+                    presentation: Presentation { turn_id: self.tool_details.turn_id, ..Presentation::live() },
                 });
                 let index = self.items.len() - 1;
                 self.cache_chapter(index);
@@ -404,6 +404,8 @@ impl State {
     }
 }
 
+#[cfg(test)]
+mod chapter_review_tests;
 #[cfg(test)]
 mod chapter_tests;
 #[cfg(test)]

@@ -87,12 +87,16 @@ execution-turn grouping across queued follow-ups and resume.
 The optional `work` argument on `read`, `bash`, `process`, `web` and `browser`
 stays in each tool call's canonical arguments. Both provider adapters replay it
 through their native function-call wire shape, and saved sessions retain it
-without a separate event or metadata envelope. `tui/state/rows.rs` groups only
-contiguous eligible calls from the same execution turn with the same trimmed
-label; text and other tools end the group. `tui/cards/chapter.rs` derives its
-aggregate facts and status from those calls. Missing labels, including older
-sessions, display as Activity. The existing latest-turn `Ctrl+O` state reveals
-the complete individual cards inline.
+without a separate event or metadata envelope. `tui/state/rows.rs` forms a
+chapter from two or more contiguous eligible calls with the same trimmed label
+and execution-turn ID (`Presentation.turn_id`); text and other tools end the
+group. Single eligible calls keep their normal cards. `tui/cards/chapter.rs`
+derives aggregate facts and status from chapter members, omitting a facts row
+that only repeats the homogeneous header status. It keeps every Bash target
+visible in compact chapters. Missing labels, including older sessions, display
+as Activity. Display normalization collapses whitespace and limits the heading
+to 60 terminal cells without changing the saved or compared label. The existing
+latest-turn `Ctrl+O` state reveals complete individual cards inline.
 
 ### Context and compaction
 

@@ -25,13 +25,16 @@ Tool errors return as results so the model can correct the call.
 | `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `work` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
 
 `work` is an optional short label chosen by the assistant for related `read`,
-`bash`, `process`, `web` and `browser` calls. Adjacent calls share a TUI Work
-chapter only within the same execution turn and with matching trimmed labels.
+`bash`, `process`, `web` and `browser` calls. At least two adjacent eligible calls
+share a TUI Work chapter only within the same execution turn and with matching
+trimmed labels. A single eligible call keeps its normal compact tool card.
 A changed label, assistant narration or another tool breaks the chapter; skill
 reads stay separate. Missing or blank labels appear as Activity, including in
-older sessions. Labels are saved with the tool arguments and survive resume;
-they do not change execution. See [tool presentation](../tui/THEME.md) for the
-summary and `Ctrl+O` behavior.
+older sessions. Displayed labels collapse whitespace to one line and are
+ellipsized to at most 60 terminal cells; the saved label stays unchanged and
+grouping compares the trimmed original. Labels are saved with the tool arguments and
+survive resume; they do not change execution. See
+[tool presentation](../tui/THEME.md) for the summary and `Ctrl+O` behavior.
 
 `write`, `edit` and protected `bash` calls return a `checkpoint` receipt whose
 `status` is `saved`, `partial` or `none`. Saved references expire 24 hours after
@@ -80,7 +83,9 @@ alignments, use a neutral content preview. These display limits never reject
 a valid file modification.
 Short diffs stay open when another tool starts. After the execution turn ends,
 `Ctrl+O` expands every call from that turn, including long diffs and retained
-output; another `Ctrl+O` restores the normal previews. The shortcut is ignored
+output; another `Ctrl+O` restores compact single-call previews and chapter
+summaries. Every Bash target in a multi-call chapter stays visible even after
+success, including in older turns. The shortcut is ignored
 during generation and does nothing when the latest finished turn has no tools.
 It keeps your reading position and briefly confirms the change with the
 number of completed tools.

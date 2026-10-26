@@ -7,7 +7,7 @@ pub struct Presentation {
     pub elapsed: Option<Duration>,
     pub expanded: bool,
     /// Rebuilt execution-turn identity; keeps adjacent resumed turns separate.
-    pub turn: u64,
+    pub turn_id: u64,
     /// First item in this chapter; rebuilt when retained items are reindexed.
     pub chapter_start: Option<usize>,
     /// Shown while the call runs, such as the checkpoint before a command.

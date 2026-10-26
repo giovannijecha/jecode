@@ -24,16 +24,25 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .lines()
         .find(|line| line.contains("fixture command"))
         .unwrap();
-    assert!(header.contains("⎿ Bash fixture command"));
+    assert!(header.contains("● Bash(fixture command)"));
     let summary = visible
         .lines()
         .find(|line| {
             line.trim()
+                .strip_prefix("⎿ ")
+                .map(str::trim)
+                .unwrap_or_default()
                 .strip_suffix('s')
                 .is_some_and(|value| value.parse::<f64>().is_ok())
         })
         .unwrap();
-    let seconds: f64 = summary.trim().trim_end_matches('s').parse().unwrap();
+    let seconds: f64 = summary
+        .trim()
+        .strip_prefix("⎿ ")
+        .unwrap()
+        .trim_end_matches('s')
+        .parse()
+        .unwrap();
     assert!(seconds >= 12.0);
     assert!(!header.contains('▰'));
     assert!(!summary.contains(['▰', '▱']));

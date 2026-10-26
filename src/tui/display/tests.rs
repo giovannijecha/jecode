@@ -243,12 +243,24 @@ fn collapsing_the_latest_turn_preserves_older_chapters_and_unrelated_prose() {
     state.message(Kind::User, "Earlier request");
     state.begin_tool_turn();
     work_read(&mut state, "earlier", "Earlier work", "earlier output\n");
+    work_read(
+        &mut state,
+        "earlier-2",
+        "Earlier work",
+        "other earlier output\n",
+    );
     state.close_tools();
     state.finish_tool_turn();
     state.message(Kind::Assistant, "Unrelated prose anchor.");
     state.message(Kind::User, "Latest request");
     state.begin_tool_turn();
     work_read(&mut state, "latest", "Latest work", "latest output\n");
+    work_read(
+        &mut state,
+        "latest-2",
+        "Latest work",
+        "other latest output\n",
+    );
     state.close_tools();
     state.finish_tool_turn();
     state.message(Kind::Assistant, &"Long tail for scrolling.\n".repeat(80));
@@ -293,5 +305,40 @@ fn collapsing_while_following_keeps_the_tail_in_view() {
             .visible
             .iter()
             .any(|line| line.plain().contains("Tail output."))
+    );
+}
+
+#[test]
+fn singleton_preview_anchor_stays_on_its_visible_source_when_collapsed() {
+    let mut state = State::default();
+    state.begin_tool_turn();
+    state.event(Event::ToolStarted {
+        id: "single".into(),
+        name: "bash".into(),
+        arguments: Value::object([("command", Value::string("printf example"))]),
+    });
+    state.event(Event::ToolFinished {
+        id: "single".into(),
+        name: "bash".into(),
+        summary: "Done".into(),
+        result: Value::object([
+            ("exit_code", Value::number(0)),
+            ("stdout", Value::string("singleton preview anchor\n")),
+        ]),
+    });
+    state.close_tools();
+    state.finish_tool_turn();
+    state.message(Kind::Assistant, &"Long tail for scrolling.\n".repeat(80));
+    state.toggle_tools().unwrap();
+    let mut display = Display::new((80, 24));
+    ready(&mut display, &state);
+    read_at(&mut display, "singleton preview anchor");
+    state.toggle_tools().unwrap();
+    ready(&mut display, &state);
+    assert!(
+        display
+            .visible
+            .first()
+            .is_some_and(|row| row.plain().contains("singleton preview anchor"))
     );
 }

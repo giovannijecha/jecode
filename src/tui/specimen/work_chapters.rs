@@ -202,31 +202,32 @@ fn work_chapters() {
                 assert!(state.toggle_tools().is_some());
             }
             let output = plain(&state);
+            let unwrapped = output.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(
-                output.contains("Inspect the parser"),
+                unwrapped.contains("Inspect the parser"),
                 "{title} at {columns}: {output}"
             );
             assert!(
-                output.contains("Verify the parser"),
+                unwrapped.contains("cargo test --locked --offline parser"),
                 "{title} at {columns}: {output}"
             );
             if !expanded {
                 assert!(
-                    output.contains("1 file read"),
+                    unwrapped.contains("1 file read"),
                     "{title} at {columns}: {output}"
                 );
                 assert!(
-                    output.contains("1 web call"),
+                    unwrapped.contains("1 web call"),
                     "{title} at {columns}: {output}"
                 );
                 assert!(
-                    output.contains("1 snapshot"),
+                    unwrapped.contains("1 snapshot"),
                     "{title} at {columns}: {output}"
                 );
             }
-            assert!(output.contains("Update") && output.contains("Write"));
+            assert!(unwrapped.contains("Update") && unwrapped.contains("Write"));
             assert!(
-                output.contains("Exit 101"),
+                unwrapped.contains("Exit 101"),
                 "{title} at {columns}: {output}"
             );
             printed.push((

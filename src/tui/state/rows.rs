@@ -59,8 +59,16 @@ fn same_chapter(left: &Item, right: &Item) -> bool {
     };
     cards::chapter_groupable(&left)
         && cards::chapter_groupable(&right)
-        && left.presentation.turn == right.presentation.turn
+        && left.presentation.turn_id == right.presentation.turn_id
         && cards::chapter_label(&left) == cards::chapter_label(&right)
+}
+
+/// Only runs of two or more routine calls become chapters.
+pub(in crate::tui) fn in_chapter(items: &[Item], index: usize) -> bool {
+    index > 0 && same_chapter(&items[index - 1], &items[index])
+        || items
+            .get(index + 1)
+            .is_some_and(|next| same_chapter(&items[index], next))
 }
 
 /// Item positions stay stable in both views. Only the first member draws the
@@ -95,7 +103,7 @@ pub(in crate::tui) fn tool_card(
     keycap: bool,
 ) -> Option<cards::Card> {
     let tool = items[index].tool()?;
-    if !cards::chapter_groupable(&tool) {
+    if !in_chapter(items, index) {
         return Some(cards::card(tool, columns, keycap));
     }
     let first = index == 0 || !same_chapter(&items[index - 1], &items[index]);

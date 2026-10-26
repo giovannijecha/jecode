@@ -60,6 +60,46 @@ fn labels_are_trimmed_and_skill_reads_stay_outside_chapters() {
 }
 
 #[test]
+fn displayed_work_label_is_one_line_and_bounded_without_changing_arguments() {
+    let shown = Presentation::default();
+    for work in [
+        "  Inspect\n\t parser\r\n now  ".to_string(),
+        "界👩‍💻e\u{301} ".repeat(100),
+    ] {
+        let args = object([("path", "src/lib.rs"), ("work", &work)]);
+        let calls = [
+            tool("read", &args, None, &shown),
+            tool("read", &args, None, &shown),
+        ];
+        let card = chapter::header(&calls, 200, false);
+        let title = card
+            .rows
+            .iter()
+            .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
+            .map(Line::plain)
+            .collect::<Vec<_>>();
+        assert_eq!(title.len(), 1, "{title:?}");
+        let label = title[0]
+            .strip_prefix("● ")
+            .unwrap()
+            .split(" (2 calls")
+            .next()
+            .unwrap();
+        assert!(text::cells(label) <= 60, "{label}");
+        assert!(!label.contains(['\n', '\r', '\t']));
+        assert_eq!(
+            args.get("work").and_then(Value::as_str),
+            Some(work.as_str())
+        );
+        if work.contains("parser") {
+            assert_eq!(label, "Inspect parser now");
+        } else {
+            assert!(label.ends_with('…'));
+        }
+    }
+}
+
+#[test]
 fn header_counts_unique_files_and_completed_routine_actions() {
     let shown = Presentation::default();
     let args = [
@@ -103,12 +143,12 @@ fn header_counts_unique_files_and_completed_routine_actions() {
         "10 calls",
         "2 files read",
         "1 other read",
-        "1 web call completed",
+        "1 web call",
         "1 screenshot",
         "1 snapshot",
         "1 browser action",
-        "1 command completed",
-        "1 process call completed",
+        "1 command",
+        "1 process call",
     ] {
         assert!(text.contains(expected), "missing {expected}: {text}");
     }
@@ -143,9 +183,7 @@ fn status_priority_counts_every_outcome_without_summing_durations() {
     let text = plain(&card);
     assert_eq!(card.rows[0].spans[0].style, BAD);
     assert!(text.contains("5 calls · 1 failed"));
-    assert!(
-        text.contains("1 command completed · 1 failed · 1 stopped · 1 running · 1 in background")
-    );
+    assert!(text.contains("1 command · 1 failed · 1 stopped · 1 running · 1 in background"));
     assert!(!text.contains("6s") && !text.contains('▶'));
 
     let running = chapter::header(&tools[1..], 200, false);
@@ -167,7 +205,8 @@ fn status_priority_counts_every_outcome_without_summing_durations() {
         false,
     );
     assert_eq!(stopped.rows[0].spans[0].style, WARNING);
-    assert!(plain(&stopped).contains("1 stopped"));
+    assert!(plain(&stopped).contains("stopped"));
+    assert_eq!(stopped.rows.len(), 1);
 }
 
 #[test]
@@ -239,7 +278,27 @@ fn visible_exceptions_have_target_and_result_without_a_second_dot() {
         assert!(rows.iter().all(|row| text::cells(&row.plain()) <= 40));
     }
     let ok = Value::object([("exit_code", Value::number(0))]);
-    assert!(chapter::exception(&tool("bash", &args, Some(&ok), &shown), 40).is_empty());
+    let rows = chapter::exception(&tool("bash", &args, Some(&ok), &shown), 40);
+    assert_eq!(rows[0].plain(), "  ⎿ Bash cargo test");
+    assert_eq!(rows.len(), 1);
+    assert!(chapter::exception(&tool("read", &args, Some(&ok), &shown), 40).is_empty());
+}
+
+#[test]
+fn facts_omit_repeated_uniform_states_but_keep_mixed_outcomes() {
+    let shown = Presentation::default();
+    let args = object([("command", "cargo test"), ("work", "Verify")]);
+    let failed = object([("error", "failed")]);
+    let stopped = Value::object([("cancelled", Value::Bool(true))]);
+    let calls = [tool("bash", &args, Some(&failed), &shown); 2];
+    let card = chapter::header(&calls, 80, false);
+    assert_eq!(plain(&card), "● Verify (2 calls · 2 failed)");
+    let mixed = chapter::header(
+        &[calls[0], tool("bash", &args, Some(&stopped), &shown)],
+        80,
+        false,
+    );
+    assert!(plain(&mixed).contains("⎿ 1 failed · 1 stopped"));
 }
 
 #[test]
@@ -269,5 +328,21 @@ fn successful_calls_keep_checkpoint_and_capture_notices_when_collapsed() {
             "{text}"
         );
         assert!(!text.contains("Exit 0"), "{text}");
+    }
+}
+
+#[test]
+fn long_compact_command_targets_keep_a_visible_ellipsis_within_two_rows() {
+    let args = object([(
+        "command",
+        &format!("printf {} tail", "界example ".repeat(80)),
+    )]);
+    let shown = Presentation::default();
+    let result = Value::object([("exit_code", Value::number(0))]);
+    for columns in [20, 40, 80] {
+        let rows = chapter::exception(&tool("bash", &args, Some(&result), &shown), columns);
+        assert!(rows.len() <= 2);
+        assert!(rows.last().unwrap().plain().ends_with('…'));
+        assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
     }
 }

@@ -30,7 +30,7 @@ fn visible(state: &State) -> String {
 }
 
 #[test]
-fn every_turn_keeps_short_previews_and_its_original_results() {
+fn earlier_chapter_and_latest_singleton_keep_compact_previews_and_original_results() {
     let mut state = State::default();
     state.message(Kind::User, "Inspect the fixture.");
     for _ in 0..2 {
@@ -43,14 +43,16 @@ fn every_turn_keeps_short_previews_and_its_original_results() {
     state.begin_tool_turn();
     start(&mut state, "future");
     let running = visible(&state);
-    assert!(running.contains("● Activity") && running.contains("Bash fixture-command"));
+    assert!(running.contains("● Activity (2 calls)"));
+    assert!(running.contains("● Bash(fixture-command)"));
     assert!(running.contains("⎿ ") && running.contains('●'));
     assert!(!running.contains(['▰', '▱']));
     finish(&mut state, "future", "one\ntwo\nthree\nfour\nfuture detail");
     let text = visible(&state);
-    assert!(text.contains("2 commands") && text.contains("1 command"));
+    assert!(text.contains("2 commands") && text.contains("● Bash(fixture-command)"));
     assert!(!text.contains("omitted"));
-    assert!(!text.contains("retained detail") && !text.contains("future detail"));
+    assert!(!text.contains("retained detail"));
+    assert!(text.contains("future detail")); // The singleton keeps its normal result preview.
     assert!(!text.lines().any(|row| row.trim() == "one"));
     for item in &state.items {
         if let Item::Tool {
@@ -65,7 +67,11 @@ fn every_turn_keeps_short_previews_and_its_original_results() {
     state.close_tools();
     state.finish_tool_turn();
     state.toggle_tools().unwrap();
-    assert!(visible(&state).contains("future detail"));
+    assert!(
+        visible(&state)
+            .lines()
+            .any(|row| row == "    future detail")
+    );
 }
 
 #[test]
@@ -124,7 +130,12 @@ fn clearing_changes_the_display_generation_without_discarding_an_unsent_draft() 
     state.begin_tool_turn();
     start(&mut state, "new");
     finish(&mut state, "new", "fresh preview");
-    assert!(!visible(&state).contains("fresh preview"));
+    assert!(visible(&state).contains("fresh preview"));
+    assert!(
+        !visible(&state)
+            .lines()
+            .any(|row| row == "    fresh preview")
+    );
     state.close_tools();
     state.finish_tool_turn();
     state.toggle_tools().unwrap();
@@ -132,7 +143,7 @@ fn clearing_changes_the_display_generation_without_discarding_an_unsent_draft() 
 }
 
 #[test]
-fn consecutive_tools_keep_independent_blocks_across_model_requests() {
+fn consecutive_calls_share_a_chapter_across_model_requests_and_keep_targets() {
     let mut state = State::default();
     start(&mut state, "first");
     finish(&mut state, "first", "first result");
@@ -170,7 +181,14 @@ fn consecutive_tools_keep_independent_blocks_across_model_requests() {
             .iter()
             .any(|row| row.plain().contains("3 commands"))
     );
-    assert!(current[1].is_empty() && current[2].is_empty());
+    assert!(current[1][0].plain().contains("Bash fixture-command"));
+    assert!(current[2][0].plain().contains("Bash fixture-command"));
+    assert!(
+        !current[1..3]
+            .iter()
+            .flatten()
+            .any(|row| row.plain().contains("result"))
+    );
     for (item, output) in
         state.items[..3]
             .iter()
@@ -219,11 +237,15 @@ fn captured_file_diff_stays_visible_when_the_next_tool_starts() {
     assert_eq!(state.rows()[0], original);
     assert!(matches!(&state.items[0], Item::Tool { change: Some(saved), .. } if **saved == change));
     assert_eq!(state.rows()[1][0], Line::default());
-    assert!(state.rows()[1][1].plain().starts_with("● Activity"));
+    assert!(
+        state.rows()[1][1]
+            .plain()
+            .starts_with("● Bash(fixture-command)")
+    );
     assert!(
         state.rows()[1]
             .iter()
-            .any(|row| row.plain().contains("Bash fixture-command"))
+            .any(|row| row.plain().contains("Bash(fixture-command)"))
     );
 }
 
@@ -285,9 +307,7 @@ fn a_notice_settles_tool_bookkeeping_without_losing_its_pending_result() {
     state.close_tools();
     assert_ne!(state.rows()[..1], settled);
     assert!(visible(&state).contains("2 calls"));
-    assert!(
-        visible(&state).contains("1 command completed") && visible(&state).contains("1 running")
-    );
+    assert!(visible(&state).contains("1 command") && visible(&state).contains("1 running"));
     assert!(
         matches!(&state.items[0], Item::Tool { result: Some(result), .. }
         if result.get("stdout").and_then(Value::as_str) == Some("retained result"))

@@ -81,7 +81,7 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled_without_visual_change
     assert!(
         layout.pending(&state)[0]
             .plain()
-            .starts_with("● Activity (1 call)")
+            .starts_with("● Read(fixture.rs)")
     );
     let pending = layout.pending(&state).to_vec();
     state.close_tools();

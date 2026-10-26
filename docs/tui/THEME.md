@@ -92,15 +92,24 @@ quiet: partial or missing coverage shows a warning, and expansion adds the
 call's `Checkpoint rc-ID` reference. Checkpoint calls preview three labeled
 result rows. Standalone previews stay visible when the next call starts.
 
-Adjacent `read`, `bash`, `process`, `web` and `browser` calls share a Work
-chapter when their trimmed `work` labels and execution turn match. Skill reads,
+Two or more adjacent `read`, `bash`, `process`, `web` and `browser` calls share a
+Work chapter when their trimmed `work` labels and execution turn match. A single
+eligible call keeps its normal compact card and full expansion. Skill reads,
 assistant narration and other tools break the chapter. Missing or blank labels
-display as **Activity**, including in older sessions. The chapter has one status
-dot, a bold label and call count, then an `⎿` summary of completed work: unique
-files read, other reads, completed web calls, browser captures and actions,
-commands and process calls. Failures, running calls, background work and stopped
-calls add explicit counts and keep their target and result visible below the
-summary. Command capture and checkpoint notices also remain visible when compact.
+display as **Activity**, including in older sessions. The displayed label
+collapses whitespace to one line and is ellipsized to at most 60 terminal cells;
+the saved label stays unchanged and grouping compares the trimmed original. The
+chapter has one status dot, a bold label and call count, then an `⎿` summary
+of completed work: unique
+files read, other reads, web calls, browser captures and actions, commands and
+process calls. Failures, running calls, background work and stopped calls add
+explicit counts and keep their target and result visible below the summary.
+The facts row is omitted when it would only repeat a homogeneous outcome already
+named in the header, such as a chapter where every call failed. Every Bash
+command retains a compact target after success, even in older turns. Chapter
+targets keep at most two wrapped rows and show an ellipsis when shortened; full
+output remains available through latest-turn `Ctrl+O`. Command capture and
+checkpoint notices also remain visible when compact.
 The summary does not add durations across calls. `Ctrl+O` shows each
 call's existing complete card inline for the latest finished turn, then restores
 the compact view; it adds no panel or separate shortcut.

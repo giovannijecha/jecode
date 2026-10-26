@@ -95,15 +95,16 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
     let summary = block(&rows[0]);
     for fact in [
         "1 file read",
-        "1 web call completed",
+        "1 web call",
         "1 screenshot",
-        "1 command completed",
-        "1 process call completed",
+        "1 command",
+        "1 process call",
     ] {
         assert!(summary.contains(fact), "missing {fact}: {summary}");
     }
     assert!(!summary.contains("What happened") && !summary.contains("Bash("));
-    assert!(rows[1..].iter().all(Vec::is_empty));
+    assert!(block(&rows[1]).contains("Bash printf example"));
+    assert!(rows[2..].iter().all(Vec::is_empty));
 
     assert_eq!(state.toggle_tools(), Some((true, 5)));
     let opened = state.rows();
@@ -127,7 +128,9 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
     assert_eq!(bash[first + 1].plain(), "    ");
     assert_eq!(bash[first + 2].plain(), "    last");
     assert_eq!(state.toggle_tools(), Some((false, 5)));
-    assert!(state.rows()[1..].iter().all(Vec::is_empty));
+    let closed = state.rows();
+    assert!(block(&closed[1]).contains("Bash printf example"));
+    assert!(closed[2..].iter().all(Vec::is_empty));
 }
 
 #[test]
@@ -156,7 +159,7 @@ fn trimmed_labels_group_and_missing_or_blank_labels_use_activity() {
     assert!(rows[1].is_empty());
     assert_eq!(heading(&rows[2]).plain(), "● Activity (2 calls)");
     assert!(rows[3].is_empty());
-    assert_eq!(heading(&rows[4]).plain(), "● Review (1 call)");
+    assert_eq!(heading(&rows[4]).plain(), "● Read(src/a.rs)");
 }
 
 #[test]
@@ -211,7 +214,7 @@ fn narration_mutations_checkpoint_and_skill_reads_break_chapters() {
     assert_eq!(
         headings
             .iter()
-            .filter(|text| text.starts_with("● Inspect"))
+            .filter(|text| text.starts_with("● Read("))
             .count(),
         6
     );
@@ -280,7 +283,7 @@ fn a_pending_call_reopens_its_chapter_header_until_results_arrive() {
     assert!(state.tool_revision > revision);
     let working = block(&state.rows()[0]);
     assert!(working.contains("● Verify (3 calls · running)"));
-    assert!(working.contains("2 commands completed · 1 running"));
+    assert!(working.contains("2 commands · 1 running"));
     finish(
         &mut state,
         "pending",
@@ -289,7 +292,7 @@ fn a_pending_call_reopens_its_chapter_header_until_results_arrive() {
     );
     let finished = block(&state.rows()[0]);
     assert!(finished.contains("● Verify (3 calls)"));
-    assert!(finished.contains("3 commands completed"));
+    assert!(finished.contains("3 commands"));
     state.close_tools();
     assert_eq!(state.settled_len(), 3);
 }
@@ -317,9 +320,9 @@ fn a_failed_call_stays_red_and_explicit_after_later_success() {
     assert_eq!(heading(&rows[0]).spans[0].style, BAD);
     let visible = block(&rows[0]);
     assert!(visible.contains("● Inspect (2 calls · 1 failed)"));
-    assert!(visible.contains("1 command completed · 1 failed"));
+    assert!(visible.contains("1 command · 1 failed"));
     assert!(visible.contains("Read missing.rs") && visible.contains("permission denied"));
-    assert!(rows[1].is_empty());
+    assert!(block(&rows[1]).contains("Bash printf ok"));
 }
 
 #[test]
@@ -345,7 +348,7 @@ fn a_long_replayed_chapter_keeps_one_compact_heading() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(text.matches("● Replay work (10000 calls)").count(), 1);
-    assert!(text.contains("10000 commands completed"));
+    assert!(text.contains("10000 commands"));
     assert_eq!(state.settled_len(), state.items.len());
 }
 
@@ -372,6 +375,6 @@ fn removing_withdrawn_items_rebuilds_chapters_without_merging_execution_turns() 
     state.reset_tool_details();
     let rows = state.rows();
     assert!(block(&rows[0]).contains("● Inspect (2 calls)"));
-    assert!(rows[1].is_empty());
-    assert!(block(&rows[2]).contains("● Inspect (1 call)"));
+    assert!(block(&rows[1]).contains("Bash fixture"));
+    assert!(block(&rows[2]).contains("● Bash(fixture)"));
 }

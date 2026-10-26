@@ -38,10 +38,11 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
         state.style()
     };
 
-    let mut title = Line::new(
-        &text::clean(tools.first().map_or("Activity", label)),
-        TOOL_ACCENT.bold(),
-    );
+    let label = text::clean(tools.first().map_or("Activity", label))
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut title = Line::new(&text::ellipsize(&label, 60), TOOL_ACCENT.bold());
     title.push(&format!(" ({}", counted(tools.len(), "call")), MUTED);
     let state_text = match state {
         Status::Failed => format!("{} failed", outcomes.failed),
@@ -58,7 +59,9 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
     let mut rows = line_rows(&title, columns, 0, "● ", "  ", marker);
 
     let what = facts(tools, &outcomes);
-    rows.extend(line_rows(&what, columns, 1, "  ⎿ ", "    ", TOOL_DIM));
+    if !what.spans.is_empty() {
+        rows.extend(line_rows(&what, columns, 1, "  ⎿ ", "    ", TOOL_DIM));
+    }
 
     let hidden = tools.iter().any(|tool| tool.result.is_some())
         && !tools.iter().any(|tool| tool.presentation.expanded);
@@ -73,7 +76,7 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
     Card { rows, hidden }
 }
 
-/// A visible exception under a collapsed chapter, without another status dot.
+/// Compact command targets and exceptional results, without another status dot.
 pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     let state = Status::of(tool);
     let notices = tool
@@ -82,7 +85,7 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         .map_or_else(Vec::new, |result| {
             content::notices(tool.name, result, columns, false)
         });
-    if state == Status::Done && notices.is_empty() {
+    if state == Status::Done && tool.name != "bash" && notices.is_empty() {
         return Vec::new();
     }
     let (name, target) = heading(tool);
@@ -165,6 +168,17 @@ impl Outcomes {
 }
 
 fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
+    if outcomes.done == 0
+        && [
+            outcomes.failed,
+            outcomes.running,
+            outcomes.background,
+            outcomes.stopped,
+        ]
+        .contains(&tools.len())
+    {
+        return Line::default();
+    }
     let mut files = BTreeSet::new();
     let mut other_reads = 0;
     let mut web = 0;
@@ -223,12 +237,7 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
         (processes, "process call"),
     ] {
         if count > 0 {
-            let completed = matches!(noun, "web call" | "command" | "process call");
-            parts.push(format!(
-                "{}{}",
-                counted(count, noun),
-                if completed { " completed" } else { "" }
-            ));
+            parts.push(counted(count, noun));
         }
     }
     let mut line = Line::new(&parts.join(" · "), MUTED);
