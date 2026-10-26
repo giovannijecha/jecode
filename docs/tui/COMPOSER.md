@@ -35,7 +35,8 @@ images.
 Prompt history preserves the unsent draft and caret. `Esc` leaves history and
 returns to that draft. `Ctrl+O` is ignored during generation and becomes
 available when the worker ends, including after a stop or error. It opens all
-tools from that turn; pressing it again restores the normal previews. Both
+tools from that turn; pressing it again restores compact single-call cards and
+multi-call chapter summaries, with each Bash command target still visible. Both
 actions preserve the reading position, including following the tail. A finished
 turn without tools has no toggle, and earlier turns are never substituted. Typing
 an unsent draft keeps details open. Accepting a new user prompt collapses the

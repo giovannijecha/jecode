@@ -83,6 +83,7 @@ impl App {
             index += 1;
             keep
         });
+        self.state.reindex_chapters();
         self.state.reset_tool_details();
         self.state.generation = self.state.generation.wrapping_add(1);
         self.state.changed();

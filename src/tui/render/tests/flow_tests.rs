@@ -25,13 +25,21 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .find(|line| line.contains("fixture command"))
         .unwrap();
     assert!(header.contains("● Bash(fixture command)"));
-    let summary = visible.lines().find(|line| line.contains("⎿ ")).unwrap();
+    let summary = visible
+        .lines()
+        .find(|line| {
+            line.trim()
+                .strip_prefix("⎿ ")
+                .map(str::trim)
+                .unwrap_or_default()
+                .strip_suffix('s')
+                .is_some_and(|value| value.parse::<f64>().is_ok())
+        })
+        .unwrap();
     let seconds: f64 = summary
-        .trim_end()
-        .rsplit(' ')
-        .next()
-        .unwrap()
         .trim()
+        .strip_prefix("⎿ ")
+        .unwrap()
         .trim_end_matches('s')
         .parse()
         .unwrap();
@@ -84,13 +92,13 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     display.scroll(Scroll::Start);
     display.scroll(Scroll::Rows(2));
     step(&mut display, &mut screen, &state, now);
-    assert!(screen.visible().starts_with("● Bash(first)"));
+    assert!(screen.visible().starts_with("● Activity (2 calls)"));
     assert!(!screen.visible().contains("    one"));
     let generation = state.generation;
     state.toggle_tools();
     step(&mut display, &mut screen, &state, now);
     assert_eq!(state.generation, generation);
-    assert!(screen.visible().starts_with("● Bash(first)"));
+    assert!(screen.visible().starts_with("● Activity (2 calls)"));
     assert!(screen.visible().contains("    one"));
     assert_eq!(screen.visible().matches("● Bash(first)").count(), 1);
 
@@ -101,7 +109,7 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
         &state,
         now + Duration::from_millis(100),
     );
-    assert!(screen.visible().starts_with("● Bash(first)"));
+    assert!(screen.visible().starts_with("● Activity (2 calls)"));
     assert!(screen.visible().contains("    one"));
     state.toggle_tools();
     step(

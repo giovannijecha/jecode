@@ -69,6 +69,75 @@ fn tool_change_survives_journal_and_replays_without_entering_tool_result() {
 }
 
 #[test]
+fn work_labels_in_tool_arguments_survive_journal_resume_and_record_projection() {
+    let (_directory, _home, store, mut doc) = fixture();
+    let read = Value::object([
+        ("path", Value::string("src/lib.rs")),
+        ("work", Value::string("Inspect the parser")),
+    ]);
+    let bash = Value::object([
+        ("command", Value::string("cargo test --locked --offline")),
+        ("work", Value::string("Verify the parser")),
+    ]);
+    let calls = vec![
+        tool_call("read-labeled", "read", read.clone()),
+        crate::conversation::ToolCall::parse(&tool_call("bash-labeled", "bash", bash.clone()))
+            .unwrap()
+            .value(),
+        tool_call(
+            "read-legacy",
+            "read",
+            Value::object([("path", Value::string("README.md"))]),
+        ),
+    ];
+    doc.messages.push(Value::object([
+        ("role", Value::string("assistant")),
+        ("tool_calls", Value::Array(calls)),
+    ]));
+    for id in ["read-labeled", "bash-labeled", "read-legacy"] {
+        doc.messages.push(Value::object([
+            ("role", Value::string("tool")),
+            ("tool_call_id", Value::string(id)),
+            ("content", Value::string("{}")),
+        ]));
+    }
+
+    let lease = store.create(&doc.id).unwrap();
+    lease.save(&doc).unwrap();
+    drop(lease);
+    let (handle, _) = Handle::open(store, &doc.id, Redactor::empty()).unwrap();
+    let restored = handle.snapshot();
+    assert_eq!(restored.messages, doc.messages);
+    let tools: Vec<_> = restored
+        .records()
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Tool {
+                id,
+                name,
+                arguments,
+                ..
+            } => Some((id, name, arguments)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tools.len(), 3);
+    assert_eq!(tools[0].0, "read-labeled");
+    assert_eq!(tools[0].1, "read");
+    assert_eq!(tools[0].2, read);
+    assert_eq!(tools[1].0, "bash-labeled");
+    assert_eq!(tools[1].1, "bash");
+    assert_eq!(tools[1].2, bash);
+    assert_eq!(tools[2].0, "read-legacy");
+    assert_eq!(tools[2].1, "read");
+    assert_eq!(
+        tools[2].2,
+        Value::object([("path", Value::string("README.md"))])
+    );
+    assert!(tools[2].2.get("work").is_none());
+}
+
+#[test]
 fn long_history_passes_the_previous_save_limit_and_each_checkpoint_appends_only_new_data() {
     let (_directory, _home, store, mut doc) = fixture();
     let lease = store.create(&doc.id).unwrap();

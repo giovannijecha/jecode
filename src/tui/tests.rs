@@ -216,14 +216,14 @@ fn one_tool_per_model_request_keeps_each_read_and_the_next_turn_preserves_it() {
         .iter()
         .flatten()
         .map(line::Line::plain)
-        .filter(|row| row.starts_with("● Read("))
+        .filter(|row| row.starts_with("● Activity ("))
         .collect::<Vec<_>>();
-    // Pages of one file share a card, drawn at the first read.
-    assert_eq!(headers, ["● Read(fixture.txt)"]);
+    // Pages of one file share a chapter, drawn at the first read.
+    assert_eq!(headers, ["● Activity (3 calls)"]);
     assert!(
         settled[1]
             .iter()
-            .any(|row| row.plain().contains("⎿ 3 reads · 3 lines"))
+            .any(|row| row.plain().contains("⎿ 1 file read"))
     );
     assert!(settled[2].is_empty() && settled[3].is_empty());
     for (index, word) in ["first", "second", "third"].into_iter().enumerate() {

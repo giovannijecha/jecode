@@ -8,17 +8,21 @@ use super::{
 };
 use crate::{file_change::Change, json::Value};
 
+mod chapter;
 mod content;
 mod diff;
 mod edit_fallback;
-mod group;
 mod presentation;
 mod streams;
 mod summary;
 mod title;
-pub use group::{groupable, render as group};
+pub use chapter::{
+    exception as chapter_exception, groupable as chapter_groupable, header as chapter_header,
+    label as chapter_label,
+};
 pub use presentation::Presentation;
 
+#[derive(Clone, Copy)]
 pub struct Tool<'a> {
     pub name: &'a str,
     pub arguments: &'a Value,
@@ -297,6 +301,8 @@ fn field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
+#[cfg(test)]
+mod chapter_tests;
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]

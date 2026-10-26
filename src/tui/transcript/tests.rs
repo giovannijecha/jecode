@@ -275,8 +275,9 @@ fn simultaneous_read_completions_keep_the_earlier_layout_cached() {
         assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
         state.close_tools();
         let output = shown(&mut layout, &state);
-        assert!(output.contains(&format!("Read({calls} files)")));
-        assert_eq!(output.matches("● Read(").count(), 1);
+        assert!(output.contains(&format!("● Activity ({calls} calls)")));
+        assert!(output.contains(&format!("{calls} files read")));
+        assert_eq!(output.matches("● Activity (").count(), 1);
     }
 }
 
@@ -308,8 +309,9 @@ fn missed_read_group_and_tool_toggles_redraw_from_the_earliest_change() {
     );
     assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
     let output = shown(&mut layout, &state);
-    assert!(output.contains("Read(3 files)"));
-    assert_eq!(output.matches("● Read(").count(), 1);
+    assert!(output.contains("● Activity (3 calls)"));
+    assert!(output.contains("3 files read"));
+    assert_eq!(output.matches("● Activity (").count(), 1);
 }
 
 #[test]
@@ -364,16 +366,18 @@ fn reads_join_one_card_as_they_finish_and_the_keycap_follows_the_latest_turn() {
     finish_read(&mut state, "a");
     read(&mut state, "b", "src/b.rs");
     let text = shown(&mut layout, &state);
-    assert!(text.contains("● Read(src/a.rs)") && text.contains("● Read(src/b.rs)"));
+    assert!(text.contains("● Activity (2 calls · running)"));
+    assert!(text.contains("1 file read") && text.contains("Read src/b.rs"));
+    assert!(!text.contains("Read(src/a.rs)"));
     finish_read(&mut state, "b");
     let text = shown(&mut layout, &state);
-    assert!(text.contains("● Read(2 files)\n  ⎿ a.rs, b.rs · 2 lines"));
+    assert!(text.contains("● Activity (2 calls)\n  ⎿ 2 files read"));
     assert!(!text.contains("● Read(src/a.rs)") && !text.contains("Ctrl+O"));
     state.close_tools();
     state.finish_tool_turn();
     let text = shown(&mut layout, &state);
-    assert_eq!(text.matches("Ctrl+O  list").count(), 1);
-    assert_eq!(text.matches("● Read(").count(), 1);
+    assert_eq!(text.matches("Ctrl+O  expand").count(), 1);
+    assert_eq!(text.matches("● Activity (").count(), 1);
     state.message(Kind::User, "Next request.");
     state.begin_tool_turn();
     assert!(!shown(&mut layout, &state).contains("Ctrl+O"));

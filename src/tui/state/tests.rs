@@ -30,7 +30,7 @@ fn visible(state: &State) -> String {
 }
 
 #[test]
-fn every_turn_keeps_short_previews_and_its_original_results() {
+fn earlier_chapter_and_latest_singleton_keep_compact_previews_and_original_results() {
     let mut state = State::default();
     state.message(Kind::User, "Inspect the fixture.");
     for _ in 0..2 {
@@ -40,18 +40,19 @@ fn every_turn_keeps_short_previews_and_its_original_results() {
     state.message(Kind::Assistant, &"newer message\n".repeat(40));
     state.message(Kind::Notice, "Saved fixture export.");
     state.message(Kind::User, "Another request.");
+    state.begin_tool_turn();
     start(&mut state, "future");
     let running = visible(&state);
+    assert!(running.contains("● Activity (2 calls)"));
     assert!(running.contains("● Bash(fixture-command)"));
     assert!(running.contains("⎿ ") && running.contains('●'));
     assert!(!running.contains(['▰', '▱']));
     finish(&mut state, "future", "one\ntwo\nthree\nfour\nfuture detail");
     let text = visible(&state);
-    assert_eq!(text.matches("⎿ retained detail").count(), 2);
-    assert_eq!(text.matches("4 more lines").count(), 3);
+    assert!(text.contains("2 commands") && text.contains("● Bash(fixture-command)"));
     assert!(!text.contains("omitted"));
-    assert!(text.contains("retained detail"));
-    assert!(text.contains("future detail"));
+    assert!(!text.contains("retained detail"));
+    assert!(text.contains("future detail")); // The singleton keeps its normal result preview.
     assert!(!text.lines().any(|row| row.trim() == "one"));
     for item in &state.items {
         if let Item::Tool {
@@ -63,6 +64,14 @@ fn every_turn_keeps_short_previews_and_its_original_results() {
             assert!(capture.ends_with("detail"));
         }
     }
+    state.close_tools();
+    state.finish_tool_turn();
+    state.toggle_tools().unwrap();
+    assert!(
+        visible(&state)
+            .lines()
+            .any(|row| row == "    future detail")
+    );
 }
 
 #[test]
@@ -118,13 +127,23 @@ fn clearing_changes_the_display_generation_without_discarding_an_unsent_draft() 
     assert!(state.items.is_empty());
     assert_ne!(state.generation, generation);
     assert_eq!(state.editor.text, "kept draft");
+    state.begin_tool_turn();
     start(&mut state, "new");
     finish(&mut state, "new", "fresh preview");
+    assert!(visible(&state).contains("fresh preview"));
+    assert!(
+        !visible(&state)
+            .lines()
+            .any(|row| row == "    fresh preview")
+    );
+    state.close_tools();
+    state.finish_tool_turn();
+    state.toggle_tools().unwrap();
     assert!(visible(&state).contains("fresh preview"));
 }
 
 #[test]
-fn consecutive_tools_keep_independent_blocks_across_model_requests() {
+fn consecutive_calls_share_a_chapter_across_model_requests_and_keep_targets() {
     let mut state = State::default();
     start(&mut state, "first");
     finish(&mut state, "first", "first result");
@@ -155,17 +174,29 @@ fn consecutive_tools_keep_independent_blocks_across_model_requests() {
     });
     state.message(Kind::Assistant, "Finished.");
     let current = state.rows();
-    assert_eq!(current[0], first);
-    assert!(current[0][0].plain().starts_with("● Bash(fixture-command)"));
-    assert_eq!(current[1][0], Line::default());
-    assert!(current[1][1].plain().starts_with("● Bash(fixture-command)"));
-    assert_eq!(current[2][0], Line::default());
-    assert!(current[2][1].plain().starts_with("● Bash(fixture-command)"));
+    assert_ne!(current[0], first);
+    assert!(current[0][0].plain().starts_with("● Activity (3 calls"));
     assert!(
-        current[..3]
+        current[0]
             .iter()
-            .all(|block| block.iter().any(|row| row.plain().starts_with("  ⎿ ")))
+            .any(|row| row.plain().contains("3 commands"))
     );
+    assert!(current[1][0].plain().contains("Bash fixture-command"));
+    assert!(current[2][0].plain().contains("Bash fixture-command"));
+    assert!(
+        !current[1..3]
+            .iter()
+            .flatten()
+            .any(|row| row.plain().contains("result"))
+    );
+    for (item, output) in
+        state.items[..3]
+            .iter()
+            .zip(["first result", "second result", "third result"])
+    {
+        assert!(matches!(item, Item::Tool { result: Some(result), .. }
+            if result.get("stdout").and_then(Value::as_str) == Some(output)));
+    }
     start(&mut state, "later");
     finish(&mut state, "later", "later result");
     state.close_tools();
@@ -210,6 +241,11 @@ fn captured_file_diff_stays_visible_when_the_next_tool_starts() {
         state.rows()[1][1]
             .plain()
             .starts_with("● Bash(fixture-command)")
+    );
+    assert!(
+        state.rows()[1]
+            .iter()
+            .any(|row| row.plain().contains("Bash(fixture-command)"))
     );
 }
 
@@ -269,6 +305,11 @@ fn a_notice_settles_tool_bookkeeping_without_losing_its_pending_result() {
     let settled = state.rows();
     start(&mut state, "second");
     state.close_tools();
-    assert_eq!(state.rows()[..1], settled);
-    assert!(visible(&state).contains("retained result"));
+    assert_ne!(state.rows()[..1], settled);
+    assert!(visible(&state).contains("2 calls"));
+    assert!(visible(&state).contains("1 command") && visible(&state).contains("1 running"));
+    assert!(
+        matches!(&state.items[0], Item::Tool { result: Some(result), .. }
+        if result.get("stdout").and_then(Value::as_str) == Some("retained result"))
+    );
 }

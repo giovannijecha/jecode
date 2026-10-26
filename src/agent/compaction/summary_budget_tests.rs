@@ -88,7 +88,10 @@ fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
         let mut client = OpenRouter::fixture(fixture.endpoint.clone());
         client.fixture_limits(24000, None);
         client.set_effort(Effort::High);
-        Agent::new(client, Tools::new(directory.path()).unwrap())
+        let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+        // Keep the 24K output allowances while reserving room for native tools.
+        agent.set_auto_compact(90);
+        agent
     };
     let limits = Some(Limits {
         context: 24000,

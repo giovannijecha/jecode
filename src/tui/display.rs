@@ -2,13 +2,14 @@ use super::{
     line::{Line, Span},
     render::Renderer,
     resize::Resize,
-    state::State,
+    state::{self, State},
     transcript::Layout,
     view,
     viewport::{Scroll, Viewport},
 };
 use std::{
     io::{self, Write},
+    ops::Range,
     time::{Duration, Instant},
 };
 
@@ -20,6 +21,7 @@ pub(super) struct Display {
     layout: Layout,
     viewport: Viewport,
     generation: Option<u64>,
+    expanded_turn: Option<Range<usize>>,
     visible: Vec<Line>,
     working: bool,
 }
@@ -32,6 +34,7 @@ impl Display {
             layout: Layout::default(),
             viewport: Viewport::default(),
             generation: None,
+            expanded_turn: None,
             visible: vec![],
             working: true,
         }
@@ -53,6 +56,33 @@ impl Display {
         }
         self.viewport.scroll(Scroll::End);
         true
+    }
+
+    fn remap_collapsed_chapter(&mut self, state: &State) {
+        let expanded = state
+            .tool_details
+            .expanded
+            .then(|| state.tool_details.turn.clone())
+            .flatten();
+        if self.expanded_turn == expanded {
+            return;
+        }
+        if let Some(previous) = self.expanded_turn.take() {
+            self.viewport.remap_anchor(|block, origin| {
+                let index = block.checked_sub(1)?;
+                if !previous.contains(&index) {
+                    return None;
+                }
+                let tool = state.items.get(index)?.tool()?;
+                if !state::rows::in_chapter(&state.items, index) || tool.presentation.expanded {
+                    return None;
+                }
+                let start = state::rows::chapter_start(&state.items, index);
+                (index > start || origin.is_some_and(|origin| origin.line >= 2))
+                    .then_some(start + 1)
+            });
+        }
+        self.expanded_turn = expanded;
     }
 
     pub fn needs_draw(&self, state: &State, now: Instant) -> bool {
@@ -94,6 +124,7 @@ impl Display {
         }
         if self.generation != Some(state.generation) {
             self.viewport = Viewport::default();
+            self.expanded_turn = None;
             self.visible.clear();
             self.generation = Some(state.generation);
         }
@@ -107,6 +138,7 @@ impl Display {
             self.layout.prepare(state, columns, LAYOUT_BLOCKS);
             self.working = !self.layout.ready(state);
             if !self.working {
+                self.remap_collapsed_chapter(state);
                 self.layout.prepare_pending(state, 256);
                 self.working = !self.layout.pending_ready(state);
                 let slice =
@@ -184,116 +216,4 @@ fn back_to_bottom_line(columns: usize, alt_end: bool) -> Line {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tui::state::Kind;
-    use crate::tui::theme::{ACCENT, BODY, SELECTED_SURFACE};
-
-    #[test]
-    fn back_to_bottom_badge_is_centered_and_uses_the_blue_palette() {
-        let line = back_to_bottom_line(40, false);
-        assert_eq!(
-            line.plain(),
-            format!("{} ↓ Back to bottom · esc ", " ".repeat(8))
-        );
-        assert_eq!(line.spans[0].style, BODY);
-        assert_eq!(line.spans[0].background, None);
-        assert_eq!(line.spans[1].style, ACCENT);
-        assert_eq!(line.spans[1].background, Some(SELECTED_SURFACE));
-        assert!(
-            line.paint(40)
-                .contains(&format!("\x1b[{SELECTED_SURFACE}m"))
-        );
-    }
-
-    #[test]
-    fn back_to_bottom_badge_fits_small_widths() {
-        for alt_end in [false, true] {
-            for width in 0..30 {
-                let line = back_to_bottom_line(width, alt_end);
-                assert!(super::super::text::cells(&line.plain()) <= width);
-            }
-        }
-        assert_eq!(back_to_bottom_line(1, false).plain(), "↓");
-        assert_eq!(back_to_bottom_line(7, false).plain(), " ↓ esc ");
-        assert_eq!(back_to_bottom_line(11, true).plain(), " ↓ alt+end ");
-    }
-
-    #[test]
-    fn contextual_escape_actions_use_alt_end_in_the_badge() {
-        let mut state = State::default();
-        assert!(!back_to_bottom_uses_alt_end(&state));
-        state.history.record("saved prompt");
-        state.history.navigate(&mut state.editor, true);
-        assert!(back_to_bottom_uses_alt_end(&state));
-        state.history.cancel(&mut state.editor);
-        state.queue.push("queued draft").unwrap();
-        let slot = state.queue.slot(0).unwrap();
-        state.queue.begin_edit(slot, &mut state.editor).unwrap();
-        assert!(back_to_bottom_uses_alt_end(&state));
-        state.queue.cancel_edit(&mut state.editor);
-        state.suggestions.panel = true;
-        assert!(back_to_bottom_uses_alt_end(&state));
-        state.suggestions.panel = false;
-        state.tool_details.expanded = true;
-        assert!(!back_to_bottom_uses_alt_end(&state));
-        assert!(
-            back_to_bottom_line(40, true)
-                .plain()
-                .contains("Back to bottom · alt+end")
-        );
-    }
-
-    #[test]
-    fn back_to_bottom_only_requests_the_end_while_reading() {
-        let mut display = Display::new((40, 20));
-        let blocks: Vec<_> = (0..20)
-            .map(|index| vec![Line::new(&index.to_string(), BODY)])
-            .collect();
-        assert!(!display.back_to_bottom());
-        display.viewport.view(&blocks, &[], 5);
-        display.scroll(Scroll::Page(true));
-        assert!(display.viewport.view(&blocks, &[], 5).reading);
-        assert!(display.back_to_bottom());
-        assert!(!display.viewport.view(&blocks, &[], 5).reading);
-        assert!(!display.back_to_bottom());
-    }
-
-    #[test]
-    fn badge_appears_above_the_composer_only_while_reading() {
-        let mut state = State::default();
-        state.message(
-            Kind::Assistant,
-            &(0..60)
-                .map(|index| format!("Row {index:02}  \n"))
-                .collect::<String>(),
-        );
-        let mut display = Display::new((state.width, state.height));
-        let now = Instant::now();
-        let initial = display.update(&state, "fixture/model", "fixture directory", now);
-        assert!(!initial.contains("Back to bottom"));
-        display.scroll(Scroll::Page(true));
-        let reading = display.update(&state, "fixture/model", "fixture directory", now);
-        assert!(reading.contains("Back to bottom · esc"));
-        state.history.record("saved prompt");
-        state.history.navigate(&mut state.editor, true);
-        let contextual = display.update(&state, "fixture/model", "fixture directory", now);
-        assert!(contextual.contains("Back to bottom · alt+end"));
-        assert!(display.back_to_bottom());
-        let following = display.update(&state, "fixture/model", "fixture directory", now);
-        assert!(!following.contains("Back to bottom"));
-    }
-
-    #[test]
-    fn short_conversations_do_not_show_a_badge_after_scroll_start() {
-        let mut state = State::default();
-        state.message(Kind::Assistant, "A short answer.");
-        let mut display = Display::new((state.width, state.height));
-        let now = Instant::now();
-        display.update(&state, "fixture/model", "fixture directory", now);
-        display.scroll(Scroll::Start);
-        let output = display.update(&state, "fixture/model", "fixture directory", now);
-        assert!(!output.contains("Back to bottom"));
-        assert!(!display.back_to_bottom());
-    }
-}
+mod tests;

@@ -309,6 +309,10 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native row 099");
                 pty.Wait("Complete ·");
+                int chapter = pty.Mark(); pty.Send("\x1b[1;3H");
+                pty.Wait("Read(drop me.txt)", chapter);
+                pty.Wait("Read 1 line", chapter);
+                pty.Send("\x1b");
                 int expanded = pty.Mark(); pty.Send("\x0f");
                 pty.Wait("Tool details expanded", expanded);
                 pty.Send("after expansion");

@@ -88,7 +88,7 @@ mod tests {
         let call = ToolCall {
             id: "call-1".into(),
             name: "read".into(),
-            arguments: "{}".into(),
+            arguments: r#"{"path":"src/main.rs","work":"Inspect source"}"#.into(),
         };
         let mut message = Value::object([
             ("role", Value::string("assistant")),
@@ -102,6 +102,13 @@ mod tests {
                 .and_then(|function| function.get("name"))
                 .and_then(Value::as_str),
             Some("read")
+        );
+        assert_eq!(
+            wire[0].get("tool_calls").and_then(Value::as_array).unwrap()[0]
+                .get("function")
+                .and_then(|function| function.get("arguments"))
+                .and_then(Value::as_str),
+            Some(call.arguments.as_str())
         );
         response(&mut message, std::slice::from_ref(&call));
         assert_eq!(

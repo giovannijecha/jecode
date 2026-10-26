@@ -21,7 +21,10 @@ fn start(state: &mut State, label: &str) {
     state.event(Event::ToolStarted {
         id: label.into(),
         name: "bash".into(),
-        arguments: Value::object([("command", Value::string(label))]),
+        arguments: Value::object([
+            ("command", Value::string(label)),
+            ("work", Value::string(label)),
+        ]),
     });
 }
 
@@ -150,16 +153,16 @@ fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
     let rows = state.rows();
     assert!(rows[1].is_empty());
     assert!(rows[0][0].plain().starts_with("● Bash(first)"));
-    assert!(rows[0][1].plain().contains("⎿ five"));
-    assert!(
-        rows[0]
-            .iter()
-            .any(|row| row.plain().starts_with("    … 3 more lines"))
-    );
+    assert!(rows[0][1].plain().contains("five"));
     assert!(!rows[0].iter().any(|row| row.plain() == "    one"));
     assert_eq!(rows[2][0], Line::default());
     assert!(rows[2][1].plain().starts_with("● Bash(second)"));
-    assert!(rows[2].iter().any(|row| row.plain() == "  ⎿ second output"));
+    assert!(
+        rows[2]
+            .iter()
+            .any(|row| row.plain().contains("second output"))
+    );
+    assert!(!rows[2].iter().any(|row| row.plain() == "    second output"));
     // Earlier results remain available when the completed turn expands.
     state.toggle_tools();
     let expanded = state
@@ -198,13 +201,21 @@ fn tool_output_keeps_actual_trailing_empty_rows_only_when_expanded() {
         state.close_tools();
         state.finish_tool_turn();
         let rows = state.rows();
-        assert_eq!(rows[0][1].plain(), "  ⎿ line");
+        assert!(rows[0][0].plain().starts_with("● Bash(fixture)"));
+        assert!(rows[0][1].plain().contains("line"));
         assert_eq!(rows[0].len(), 2);
         state.toggle_tools();
         let rows = state.rows();
-        assert_eq!(rows[0].len(), count + 2);
-        assert_eq!(rows[0][2].plain(), "    line");
-        assert!(rows[0][3..].iter().all(|row| row.plain() == "    "));
+        let output_row = rows[0]
+            .iter()
+            .position(|row| row.plain() == "    line")
+            .unwrap();
+        assert_eq!(rows[0].len(), output_row + count);
+        assert!(
+            rows[0][output_row + 1..]
+                .iter()
+                .all(|row| row.plain() == "    ")
+        );
         let Item::Tool {
             result: Some(result),
             ..

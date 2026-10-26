@@ -48,7 +48,7 @@ level and keep one row before the text they introduce. Fenced code spans the
 full row width with one cell of padding; inline code sits on the same surface.
 See [Markdown responses](MARKDOWN.md) for the display subset.
 
-Every call uses `● Tool(target)` and an indented `⎿` result. The display
+Individual calls use `● Tool(target)` and an indented `⎿` result. The display
 names are Read, Skill (a `read` of a skill's `SKILL.md`), Update (the `edit`
 tool), Write, Bash, Process, Checkpoint, Web and Browser. The `●` marker
 carries the status: success green, failure red, stopped or timed-out work
@@ -56,7 +56,7 @@ gold, and running or background work the tool accent. The bold name and its
 parentheses carry the tool's family: reading tools (Read, Skill, Web, Browser)
 use `ACCENT`, file changes (Update, Write, Checkpoint) `KEYWORD`, and commands
 (Bash, Process) `TOOL_ACCENT`; the target stays `EMPHASIS`. One neutral row
-separates calls.
+separates visible blocks.
 
 Titles wrap on words and continue under the open parenthesis, or two cells in
 when fewer than 24 columns would remain. Each command line takes its own row.
@@ -82,22 +82,37 @@ Tool cards retain the result reported when a call returned. `/terminal` shows
 the current active processes and removes them from its list when they finish.
 
 Collapsed cards skip blank output lines and count the rest as `… N more
-lines`. The last card with hidden lines in the latest finished turn names
-`Ctrl+O expand` as a keycap on that row. Expansion shows the exact output,
+lines`. The last hidden card or Work chapter in the latest finished turn names
+`Ctrl+O expand` as a keycap on its summary row. Expansion shows the exact output,
 with stdout and stderr labeled when both exist, numbered source for reads,
 raw Web and Browser results, and attachment metadata. Capture limits stay
 visible in either state as upright muted notes, such as `stdout trimmed to the
 last 64 KiB of 89 KiB · full output saved`. Checkpoint saves are otherwise
 quiet: partial or missing coverage shows a warning, and expansion adds the
 call's `Checkpoint rc-ID` reference. Checkpoint calls preview three labeled
-result rows. Completed previews stay visible when the next call starts.
+result rows. Standalone previews stay visible when the next call starts.
 
-Consecutive successful line reads share one card: `● Read(N files)` with the
-file names, the parent folder when two names match, and the total lines.
-Pages of one file keep its path as the target and count the reads. The list
-keeps two rows and names `Ctrl+O list` when it is the last hidden card;
-expansion gives each read its own `path · N lines` row. Failures, edits and
-commands start a card of their own.
+Two or more adjacent `read`, `bash`, `process`, `web` and `browser` calls share a
+Work chapter when their normalized `work` labels and execution turn match. A
+single eligible call keeps its normal compact card and full expansion. Skill reads,
+assistant narration and other tools break the chapter. Missing or blank labels
+display as **Activity**, including in older sessions. The displayed label
+collapses whitespace to one line and is ellipsized to at most 60 terminal cells;
+the saved label stays unchanged and grouping compares the full normalized label
+before display truncation. The chapter has one status dot, a bold label and call
+count, then an `⎿` summary of completed work: unique files read, other reads,
+web calls, browser captures and actions, commands and
+process calls. Failures, running calls, background work and stopped calls add
+explicit counts and keep their target and result visible below the summary.
+The facts row is omitted when it would only repeat a homogeneous outcome already
+named in the header, such as a chapter where every call failed. Every Bash
+command retains a compact target after success, even in older turns. Chapter
+targets keep at most two wrapped rows and show an ellipsis when shortened; full
+output remains available through latest-turn `Ctrl+O`. Command capture and
+checkpoint notices also remain visible when compact.
+The summary does not add durations across calls. `Ctrl+O` shows each
+call's existing complete card inline for the latest finished turn, then restores
+the compact view; it adds no panel or separate shortcut.
 
 Update and Write show contextual diffs with three surrounding source lines,
 original coordinates on removals and resulting coordinates on additions and

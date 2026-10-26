@@ -106,6 +106,11 @@ The draft stays editable during a turn. Enter sends a follow-up before the next
 model request; Ctrl+J inserts a newline. Ctrl+Q quits and saves input in an existing
 saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard shortcuts.
 
+The TUI groups two or more related routine calls into Work chapters with a
+short result summary; single calls keep their normal cards. `Ctrl+O` opens the
+complete tool cards inline for the latest finished turn; see
+[tool presentation](docs/tui/THEME.md).
+
 | Command | Purpose |
 | --- | --- |
 | `/new` | Start a fresh conversation with saved defaults. |

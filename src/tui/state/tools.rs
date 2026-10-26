@@ -8,6 +8,7 @@ pub struct ToolDetails {
     pub turn: Option<Range<usize>>,
     pub active: bool,
     pub expanded: bool,
+    pub(super) turn_id: u64,
     /// Equal consecutive starts share a record, even across a large read batch.
     changes: VecDeque<(usize, u64)>,
 }
@@ -30,6 +31,26 @@ impl ToolDetails {
 }
 
 impl State {
+    pub(super) fn cache_chapter(&mut self, index: usize) {
+        if self.items[index].groupable() {
+            let start = super::rows::chapter_start(&self.items, index);
+            if let Item::Tool { presentation, .. } = &mut self.items[index] {
+                presentation.chapter_start = Some(start);
+            }
+        }
+    }
+
+    /// Item removal changes indices; reconstruct derived chapter starts in a
+    /// forward pass, retaining the original execution-turn identities.
+    pub fn reindex_chapters(&mut self) {
+        for index in 0..self.items.len() {
+            if let Item::Tool { presentation, .. } = &mut self.items[index] {
+                presentation.chapter_start = None;
+            }
+            self.cache_chapter(index);
+        }
+    }
+
     fn tool_changed_from(&mut self, first: usize) {
         self.tool_revision = self.tool_revision.wrapping_add(1);
         if let Some((index, count)) = self.tool_details.changes.back_mut()
@@ -46,6 +67,7 @@ impl State {
 
     pub fn begin_tool_turn(&mut self) {
         self.reset_tool_details();
+        self.tool_details.turn_id = self.tool_details.turn_id.wrapping_add(1);
         self.tool_details.turn = Some(self.items.len()..self.items.len());
         self.tool_details.active = true;
     }
@@ -108,21 +130,13 @@ impl State {
         Some((expanded, count))
     }
 
-    /// Finished reads can join the reads before them; their shared card is
-    /// drawn again from the first read of the run.
-    pub(super) fn join_reads(&mut self, finished: &[usize]) {
-        let start = finished
+    /// A changed call updates the chapter heading at its first member without
+    /// invalidating earlier conversation blocks.
+    pub(super) fn update_chapters(&mut self, changed: &[usize]) {
+        let start = changed
             .iter()
-            .filter(|&&index| {
-                index > 0 && self.items[index].groupable() && self.items[index - 1].groupable()
-            })
-            .map(|&index| {
-                (0..index)
-                    .rev()
-                    .take_while(|&before| self.items[before].groupable())
-                    .last()
-                    .unwrap_or(index)
-            })
+            .filter(|&&index| self.items[index].groupable())
+            .map(|&index| super::rows::chapter_start(&self.items, index))
             .min();
         if let Some(start) = start {
             self.tool_changed_from(start);

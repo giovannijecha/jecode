@@ -112,7 +112,7 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         (200, completion("Finished.", vec![])),
     ]);
     let limits = Limits {
-        context: 32000,
+        context: 36000,
         output: Some(4096),
     };
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());

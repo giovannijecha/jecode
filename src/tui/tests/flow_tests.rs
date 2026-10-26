@@ -129,7 +129,8 @@ fn tool_toggle_preserves_the_draft_and_source_and_returns_to_editing() {
         .iter()
         .map(|row| row.plain())
         .collect::<Vec<_>>();
-    assert!(compact.iter().any(|row| row.contains("five")));
+    assert!(compact.iter().any(|row| row.contains("2 commands")));
+    assert!(!compact.iter().any(|row| row.contains("five")));
     assert!(!compact.iter().any(|row| row.trim() == "one"));
 
     key(&mut app, 79, 4); // Ctrl+O expands every tool in the completed turn.

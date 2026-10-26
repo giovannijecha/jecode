@@ -409,7 +409,16 @@ fn group(calls: &[Call], columns: usize, keycap: bool) -> Vec<Line> {
         .zip(&summaries)
         .map(|(call, summary)| tool(call, summary))
         .collect();
-    cards::group(&tools, columns, keycap).rows
+    let mut rows = cards::chapter_header(&tools, columns, keycap).rows;
+    for tool in tools {
+        if tool.presentation.expanded {
+            rows.push(Line::default());
+            rows.extend(cards::card(tool, columns, false).rows);
+        } else {
+            rows.extend(cards::chapter_exception(&tool, columns));
+        }
+    }
+    rows
 }
 
 // The completed diff remains visible when another tool starts.

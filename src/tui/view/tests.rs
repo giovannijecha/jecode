@@ -104,7 +104,17 @@ fn pending_tools_and_following_notices_remain_live_until_the_result_arrives() {
         completed
             .live
             .iter()
-            .any(|line| line.plain().contains("fixture-command"))
+            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
+    );
+    assert!(
+        completed
+            .live
+            .iter()
+            .any(|line| line.plain().contains("⎿ Done"))
+    );
+    assert!(
+        matches!(&state.items[1], crate::tui::state::Item::Tool { result: Some(result), .. }
+        if result.get("exit_code") == Some(&Value::number(0)))
     );
     assert_eq!(completed.composer, state.height - 5);
 }

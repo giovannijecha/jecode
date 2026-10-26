@@ -267,6 +267,7 @@ fn an_unattainable_threshold_fails_once_and_preserves_history() {
 
 #[test]
 fn accepted_input_updates_context_before_a_summary_starts() {
+    let capacity = 36000;
     for with_tool in [false, true] {
         let directory = Directory::new();
         let workspace = directory
@@ -292,7 +293,7 @@ fn accepted_input_updates_context_before_a_summary_starts() {
             (200, completion("Finished.", vec![])),
         ]);
         let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-        client.fixture_limits(32000, Some(4096));
+        client.fixture_limits(capacity, Some(4096));
         let mut agent = Agent::new(client, Tools::new(&workspace).unwrap());
         let inbox = agent.inbox();
         let update = "Updated requirement. ".repeat(800);
@@ -332,7 +333,7 @@ fn accepted_input_updates_context_before_a_summary_starts() {
         let status = before_summary.expect("Accepted input should trigger a summary");
         assert_eq!(summaries_started, 1);
         assert!(
-            status.tokens >= threshold(32000, AUTO_COMPACT_DEFAULT),
+            status.tokens >= threshold(capacity, AUTO_COMPACT_DEFAULT),
             "The footer must show accepted input before summarizing it (with_tool={with_tool}): {status:?}"
         );
         assert_eq!(fixture.finish().len(), 3);
