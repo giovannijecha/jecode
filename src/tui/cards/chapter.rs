@@ -1,13 +1,12 @@
 //! A compact header for related routine tool calls. Individual cards stay in
 //! the normal renderer and are shown by the caller when expanded.
 
-use super::{
-    Card, Status, Tool, content, field, heading, hint, line_rows, preview, summary, title,
-};
+use super::{Card, Status, Tool, content, failure, field, heading, rhythm, summary, title};
 use crate::tui::{
-    line::Line,
+    activity as timer,
+    line::{Line, Span},
     text,
-    theme::{BAD, EMPHASIS, MUTED, Style, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE, WARNING},
+    theme::{BODY, MUTED, SELECTED_SURFACE, STRONG, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE},
 };
 use std::collections::BTreeSet;
 
@@ -47,7 +46,7 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
 
     let label = tools.first().map_or_else(|| "Activity".into(), label);
     let mut title = Line::new(&text::ellipsize(&label, 60), TOOL_ACCENT.bold());
-    title.push(&format!(" ({}", counted(tools.len(), "call")), MUTED);
+    title.push(&format!("  {}", counted(tools.len(), "call")), TOOL_DIM);
     let state_text = match state {
         Status::Failed => format!("{} failed", outcomes.failed),
         Status::Running => "running".into(),
@@ -56,82 +55,240 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
         Status::Done => String::new(),
     };
     if !state_text.is_empty() {
-        title.push(" · ", MUTED);
+        title.push(" · ", TOOL_DIM);
         title.push(&state_text, marker);
     }
-    title.push(")", MUTED);
-    let mut rows = line_rows(&title, columns, 0, "● ", "  ", marker);
-
-    let what = facts(tools, &outcomes);
-    if !what.spans.is_empty() {
-        rows.extend(line_rows(&what, columns, 1, "  ⎿ ", "    ", TOOL_DIM));
-    }
-
     let hidden = tools.iter().any(|tool| tool.result.is_some())
         && !tools.iter().any(|tool| tool.presentation.expanded);
-    if keycap && hidden {
-        let last = rows.pop().unwrap_or_default();
-        rows.extend(
-            hint(last, "expand", columns)
-                .into_iter()
-                .map(|row| row.shortened(columns)),
-        );
-    }
+    let title = if keycap && hidden {
+        title_with_keycap(title, columns, marker)
+    } else {
+        rhythm::one(title, columns, "● ", marker, 0)
+    };
+    let mut rows = vec![title];
+
+    rows.push(rhythm::one(
+        facts(tools, &outcomes),
+        columns,
+        "  ⎿ ",
+        TOOL_DIM,
+        1,
+    ));
+
     Card { rows, hidden }
 }
 
-/// Compact command targets and exceptional results, without another status dot.
-pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
-    let state = Status::of(tool);
-    let notices = tool
-        .result
-        .filter(|_| matches!(tool.name, "bash" | "process"))
-        .map_or_else(Vec::new, |result| {
-            content::notices(tool.name, result, columns, false)
-        });
-    if state == Status::Done && tool.name != "bash" && notices.is_empty() {
-        return Vec::new();
+fn title_with_keycap(title: Line, columns: usize, marker: crate::tui::theme::Style) -> Line {
+    let mut cap = Line::default();
+    cap.spans.push(Span {
+        text: " Ctrl+O ".into(),
+        style: STRONG,
+        background: Some(SELECTED_SURFACE),
+    });
+    if columns >= 19 {
+        cap.push(" expand", MUTED);
     }
-    let (name, target) = heading(tool);
-    let mut title = Line::new(name, title::family(name).bold());
-    if !target.is_empty() {
-        title.push(" ", EMPHASIS);
-        title.push(&text::clean(&target), EMPHASIS);
-    }
-    let mut rows = compact(&title, columns, 2, "  ⎿ ", TOOL_DIM);
-    if state == Status::Done {
-        rows.extend(notices);
-        return rows;
-    }
+    let cap_width = text::cells(&cap.plain());
+    let left_width = columns.saturating_sub(cap_width + 1);
+    let mut line = rhythm::one(title, left_width, "● ", marker, 0);
+    let gap = columns.saturating_sub(text::cells(&line.plain()) + cap_width);
+    line.push(&" ".repeat(gap), MUTED);
+    line.append(cap).shortened(columns)
+}
 
-    let result = summary::line(tool, state, None);
-    let result = if result.plain().trim().is_empty() {
-        Line::new("Running", TOOL_DIM)
+/// The latest ordinary read or navigation remains at the foot of the chapter.
+pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
+    let tool = tools
+        .iter()
+        .rev()
+        .find(|tool| matches!(tool.name, "read" | "web" | "browser"))?;
+    let (name, target) = heading(tool);
+    let mut line = Line::new(name, title::family(name).bold());
+    if !target.is_empty() {
+        line.push(&format!("  {}", text::clean(&target)), BODY);
+    }
+    let status = Status::of(tool);
+    let elapsed = tool
+        .presentation
+        .duration()
+        .or_else(|| (tool.result.is_none()).then(Default::default));
+    let mut suffix = String::new();
+    if let Some(elapsed) = elapsed {
+        suffix.push_str(&format!("  {}", timer::duration(elapsed)));
+    }
+    if matches!(
+        status,
+        Status::Failed | Status::Stopped | Status::Background
+    ) {
+        let state = match status {
+            Status::Failed => "failed",
+            Status::Stopped => "stopped",
+            Status::Background => "background",
+            _ => unreachable!(),
+        };
+        suffix.push_str(&format!("  {state}"));
+    }
+    if !suffix.is_empty() {
+        line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
+        line.push(&suffix, TOOL_DIM);
+    }
+    Some(rhythm::one(line, columns, "  ⎿ ", TOOL_DIM, 4))
+}
+
+/// Facts retained from the former singleton while a new chapter takes shape.
+/// The caller uses only as many rows as its content height requires.
+pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
+    let Some(result) = tool.result else {
+        return activity(std::slice::from_ref(tool), columns)
+            .into_iter()
+            .collect();
+    };
+    let mut rows = Vec::new();
+    if matches!(tool.name, "bash" | "process") {
+        rows.extend(content::notices(tool.name, result, columns, false));
+        let outcome = match Status::of(tool) {
+            Status::Failed => result.get("exit_code").map_or_else(
+                || "Command failed".into(),
+                |code| format!("exit {}", code.encode()),
+            ),
+            Status::Done => result.get("exit_code").map_or_else(
+                || "Command completed".into(),
+                |code| format!("exit {}", code.encode()),
+            ),
+            Status::Background => "Process in background".into(),
+            Status::Stopped => "Process stopped".into(),
+            Status::Running => "Command running".into(),
+        };
+        rows.push(rhythm::one(
+            Line::new(&outcome, TOOL_DIM),
+            columns,
+            "  ⎿ ",
+            TOOL_DIM,
+            3,
+        ));
+        let output_lines = [field(result, "stderr"), field(result, "stdout")]
+            .into_iter()
+            .flat_map(str::lines)
+            .filter(|line| !line.trim().is_empty())
+            .count();
+        if output_lines > 0 {
+            rows.push(rhythm::one(
+                Line::new(&format!("{output_lines} output lines captured"), TOOL_DIM),
+                columns,
+                "  ⎿ ",
+                TOOL_DIM,
+                4,
+            ));
+        }
+        let command = result
+            .get("command")
+            .and_then(crate::json::Value::as_str)
+            .filter(|command| !command.is_empty())
+            .unwrap_or_else(|| field(tool.arguments, "command"));
+        if !rhythm::description(tool).is_empty() && !command.is_empty() {
+            rows.push(rhythm::one(
+                Line::new(&format!("Command: {}", text::clean(command)), TOOL_DIM),
+                columns,
+                "  ⎿ ",
+                TOOL_DIM,
+                5,
+            ));
+        }
     } else {
-        result
-    };
-    let lead = match state {
-        Status::Failed => BAD,
-        Status::Stopped => WARNING,
-        _ => TOOL_DIM,
-    };
-    rows.extend(compact(&result, columns, 3, "    ", lead));
-    rows.extend(notices);
+        rows.push(rhythm::one(
+            summary::line(tool, Status::of(tool), None),
+            columns,
+            "  ⎿ ",
+            TOOL_DIM,
+            3,
+        ));
+        rows.extend(content::notices(tool.name, result, columns, false));
+    }
     rows
 }
 
-fn compact(line: &Line, columns: usize, source: usize, first: &str, gutter: Style) -> Vec<Line> {
-    let line = preview(
-        line.clone(),
-        columns.saturating_sub(text::cells(first)),
-        false,
-    );
-    let mut rows = line_rows(&line, columns, source, first, "    ", gutter);
-    if rows.len() > 2 {
-        rows.truncate(2);
-        let mut last = rows.pop().unwrap_or_default();
-        last.push("…", MUTED);
-        rows.push(last.shortened(columns));
+/// One primary row for commands and exceptional calls; errors add detail below.
+pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
+    let state = Status::of(tool);
+    if matches!(tool.name, "bash" | "process") {
+        let (name, _) = heading(tool);
+        let mut line = Line::new(name, title::family(name).bold());
+        line.push("  ", BODY);
+        let description = rhythm::description(tool);
+        let target = if !description.is_empty() {
+            text::clean(description)
+        } else if tool.name == "process" {
+            let command = tool
+                .result
+                .map(|result| field(result, "command"))
+                .filter(|command| !command.is_empty())
+                .unwrap_or_else(|| field(tool.arguments, "command"));
+            if command.is_empty() {
+                field(tool.arguments, "action").into()
+            } else {
+                text::clean(command)
+            }
+        } else {
+            rhythm::payload(tool)
+        };
+        line.push(&target, BODY);
+        let detail = match state {
+            Status::Running => Some(format!(
+                "running · {}",
+                timer::duration(tool.presentation.duration().unwrap_or_default())
+            )),
+            Status::Done => tool.presentation.duration().map(timer::duration),
+            Status::Failed => Some(
+                tool.result
+                    .and_then(|result| result.get("exit_code"))
+                    .filter(|code| **code != crate::json::Value::Null)
+                    .map_or_else(|| "failed".into(), |code| format!("exit {}", code.encode())),
+            ),
+            Status::Background => Some("background".into()),
+            Status::Stopped => Some("stopped".into()),
+        };
+        if let Some(detail) = detail {
+            let suffix = format!("  {detail}");
+            line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
+            line.push(&suffix, TOOL_DIM);
+        }
+        return vec![rhythm::one(line, columns, "  ⎿ ", TOOL_DIM, 2)];
+    }
+    if matches!(tool.name, "read" | "web" | "browser")
+        && matches!(state, Status::Running | Status::Done)
+    {
+        return Vec::new();
+    }
+    let (name, _) = heading(tool);
+    let mut title = Line::new(name, title::family(name).bold());
+    if tool.name == "browser" {
+        title.push(&format!(" {}", field(tool.arguments, "action")), MUTED);
+    }
+    title.push("  ", BODY);
+    let description = rhythm::description(tool);
+    if !description.is_empty() {
+        title.push(&text::clean(description), BODY);
+    } else if matches!(tool.name, "bash" | "process" | "browser") {
+        title = title.append(rhythm::code(tool));
+    } else {
+        title.push(&rhythm::payload(tool), BODY);
+    }
+    let detail = match state {
+        Status::Running => Some(format!(
+            "Running · {}",
+            timer::duration(tool.presentation.duration().unwrap_or_default())
+        )),
+        Status::Background | Status::Stopped => Some(summary::line(tool, state, None).plain()),
+        Status::Failed | Status::Done => None,
+    };
+    if let Some(detail) = detail {
+        let suffix = format!("  {detail}");
+        title = title.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
+        title.push(&suffix, TOOL_DIM);
+    }
+    let mut rows = vec![rhythm::one(title, columns, "  ⎿ ", TOOL_DIM, 2)];
+    if state == Status::Failed {
+        rows.extend(failure::rows(tool, columns, "    "));
     }
     rows
 }
@@ -172,17 +329,6 @@ impl Outcomes {
 }
 
 fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
-    if outcomes.done == 0
-        && [
-            outcomes.failed,
-            outcomes.running,
-            outcomes.background,
-            outcomes.stopped,
-        ]
-        .contains(&tools.len())
-    {
-        return Line::default();
-    }
     let mut files = BTreeSet::new();
     let mut other_reads = 0;
     let mut web = 0;
@@ -244,25 +390,21 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
             parts.push(counted(count, noun));
         }
     }
-    let mut line = Line::new(&parts.join(" · "), MUTED);
+    let mut line = Line::new(&parts.join(" · "), TOOL_DIM);
     for (count, label, style) in [
-        (outcomes.failed, "failed", BAD),
-        (outcomes.stopped, "stopped", WARNING),
-        (outcomes.running, "running", TOOL_ACCENT),
-        (outcomes.background, "in background", TOOL_ACCENT),
+        (outcomes.stopped, "stopped", TOOL_DIM),
+        (outcomes.running, "running", TOOL_DIM),
+        (outcomes.background, "in background", TOOL_DIM),
     ] {
         if count > 0 {
             if !line.spans.is_empty() {
-                line.push(" · ", MUTED);
+                line.push(" · ", TOOL_DIM);
             }
             line.push(&format!("{count} {label}"), style);
         }
     }
     if line.spans.is_empty() {
-        Line::new(
-            &format!("{} completed", counted(outcomes.done, "call")),
-            MUTED,
-        )
+        Line::new(&format!("{} completed", outcomes.done), TOOL_DIM)
     } else {
         line
     }

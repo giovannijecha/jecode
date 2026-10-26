@@ -217,7 +217,7 @@ fn worker_completion_and_connection_events_keep_a_pending_session_error_visible(
             .rows()
             .iter()
             .flatten()
-            .any(|line| line.plain() == "Completed answer")
+            .any(|line| line.plain() == "● Completed answer")
     );
     fixture.finish();
 }

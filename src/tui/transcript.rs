@@ -1,6 +1,6 @@
 use super::{
     line::Line,
-    markdown,
+    prose,
     state::{
         Item, Kind, State,
         rows::{self, Rows},
@@ -88,14 +88,14 @@ pub(super) struct Layout {
 }
 
 struct Partial {
-    markdown: markdown::Rows,
+    markdown: prose::Rows,
     lines: Vec<Line>,
 }
 
 struct PendingStream {
     index: usize,
     prefix: usize,
-    markdown: markdown::Stream,
+    markdown: prose::Stream,
 }
 
 impl Layout {
@@ -145,7 +145,7 @@ impl Layout {
                 } = item
             {
                 self.partial = Some(Partial {
-                    markdown: markdown::Rows::new(text, columns),
+                    markdown: prose::Rows::new(text, columns),
                     lines: vec![],
                 });
             }
@@ -245,7 +245,7 @@ impl Layout {
                         self.pending_stream = Some(PendingStream {
                             index,
                             prefix: usize::from(context.previous),
-                            markdown: markdown::Stream::new(text, self.columns),
+                            markdown: prose::Stream::new(text, self.columns),
                         });
                         let mut lines = Vec::new();
                         if context.previous {

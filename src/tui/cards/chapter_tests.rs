@@ -82,7 +82,7 @@ fn displayed_work_label_is_one_line_and_bounded_without_changing_arguments() {
         let label = title[0]
             .strip_prefix("● ")
             .unwrap()
-            .split(" (2 calls")
+            .split("  2 calls")
             .next()
             .unwrap();
         assert!(text::cells(label) <= 60, "{label}");
@@ -183,7 +183,8 @@ fn status_priority_counts_every_outcome_without_summing_durations() {
     let text = plain(&card);
     assert_eq!(card.rows[0].spans[0].style, BAD);
     assert!(text.contains("5 calls · 1 failed"));
-    assert!(text.contains("1 command · 1 failed · 1 stopped · 1 running · 1 in background"));
+    assert!(text.contains("1 command · 1 stopped · 1 running · 1 in background"));
+    assert!(!card.rows[1].plain().contains("failed"));
     assert!(!text.contains("6s") && !text.contains('▶'));
 
     let running = chapter::header(&tools[1..], 200, false);
@@ -206,7 +207,8 @@ fn status_priority_counts_every_outcome_without_summing_durations() {
     );
     assert_eq!(stopped.rows[0].spans[0].style, WARNING);
     assert!(plain(&stopped).contains("stopped"));
-    assert_eq!(stopped.rows.len(), 1);
+    assert_eq!(stopped.rows.len(), 2);
+    assert_eq!(stopped.rows[1].plain(), "  ⎿ 1 stopped");
 }
 
 #[test]
@@ -225,7 +227,14 @@ fn unicode_titles_wrap_under_two_cells_and_keycap_only_hints_hidden_calls() {
         let call = tool("read", &args, Some(&result), &collapsed);
         let card = chapter::header(&[call], columns, true);
         assert!(card.hidden);
-        assert!(plain(&card).contains("Ctrl+O"));
+        assert_eq!(card.rows.len(), 2);
+        assert!(card.rows[0].plain().contains("Ctrl+O"));
+        assert!(!card.rows[1].plain().contains("Ctrl+O"));
+        assert!(card.rows[0].plain().trim_end().ends_with(if columns >= 19 {
+            "expand"
+        } else {
+            "Ctrl+O"
+        }));
         assert!(
             card.rows
                 .iter()
@@ -263,25 +272,56 @@ fn visible_exceptions_have_target_and_result_without_a_second_dot() {
     let stopped = Value::object([("cancelled", Value::Bool(true))]);
     let background = object([("process_id", "p1"), ("status", "running")]);
     for (result, expected) in [
-        (Some(&failed), "Exit 101"),
-        (Some(&stopped), "Cancelled"),
-        (Some(&background), "p1 running"),
-        (None, "Running"),
+        (Some(&failed), "exit 101"),
+        (Some(&stopped), "stopped"),
+        (Some(&background), "background"),
+        (None, "running"),
     ] {
         let rows = chapter::exception(&tool("bash", &args, result, &shown), 40);
         let text = rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n");
-        assert!(text.starts_with("  ⎿ Bash cargo test"), "{text}");
+        assert!(text.starts_with("  ⎿ Bash  cargo test"), "{text}");
         assert!(text.contains(expected), "{text}");
+        assert_eq!(rows.len(), 1, "{text}");
+        assert!(!text.contains("p1") && !text.contains("missing import"));
         assert!(!text.contains('●') && !text.contains('▶'));
         assert_eq!(rows[0].spans[1].style, TOOL_ACCENT.bold());
-        assert_eq!(rows[0].spans[2].style, crate::tui::theme::EMPHASIS);
+        assert_eq!(rows[0].spans[2].style, crate::tui::theme::BODY);
         assert!(rows.iter().all(|row| text::cells(&row.plain()) <= 40));
     }
     let ok = Value::object([("exit_code", Value::number(0))]);
     let rows = chapter::exception(&tool("bash", &args, Some(&ok), &shown), 40);
-    assert_eq!(rows[0].plain(), "  ⎿ Bash cargo test");
+    assert_eq!(rows[0].plain(), "  ⎿ Bash  cargo test");
     assert_eq!(rows.len(), 1);
     assert!(chapter::exception(&tool("read", &args, Some(&ok), &shown), 40).is_empty());
+}
+
+#[test]
+fn compact_process_never_shows_ids_or_streams_and_activity_tracks_last_failure() {
+    let args = object([("action", "poll"), ("process_id", "private-pid")]);
+    let result = Value::object([
+        ("process_id", Value::string("private-pid")),
+        ("status", Value::string("running")),
+        ("stdout", Value::string("raw process output")),
+    ]);
+    let shown = Presentation::default();
+    let rows = chapter::exception(&tool("process", &args, Some(&result), &shown), 80);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].plain(), "  ⎿ Process  poll  background");
+    assert!(!rows[0].plain().contains("private-pid"));
+    assert!(!rows[0].plain().contains("raw process output"));
+
+    let first = object([("path", "src/good.rs")]);
+    let last = object([("path", "src/missing.rs")]);
+    let ok = Value::object([]);
+    let failed = object([("error", "permission denied")]);
+    let calls = [
+        tool("read", &first, Some(&ok), &shown),
+        tool("read", &last, Some(&failed), &shown),
+    ];
+    let activity = chapter::activity(&calls, 80).unwrap().plain();
+    assert!(activity.contains("Read  src/missing.rs"), "{activity}");
+    assert!(activity.contains("failed"), "{activity}");
+    assert!(!activity.contains("src/good.rs"), "{activity}");
 }
 
 #[test]
@@ -292,17 +332,20 @@ fn facts_omit_repeated_uniform_states_but_keep_mixed_outcomes() {
     let stopped = Value::object([("cancelled", Value::Bool(true))]);
     let calls = [tool("bash", &args, Some(&failed), &shown); 2];
     let card = chapter::header(&calls, 80, false);
-    assert_eq!(plain(&card), "● Verify (2 calls · 2 failed)");
+    assert_eq!(
+        plain(&card),
+        "● Verify  2 calls · 2 failed\n  ⎿ 0 completed"
+    );
     let mixed = chapter::header(
         &[calls[0], tool("bash", &args, Some(&stopped), &shown)],
         80,
         false,
     );
-    assert!(plain(&mixed).contains("⎿ 1 failed · 1 stopped"));
+    assert_eq!(plain(&mixed), "● Verify  2 calls · 1 failed\n  ⎿ 1 stopped");
 }
 
 #[test]
-fn successful_calls_keep_checkpoint_and_capture_notices_when_collapsed() {
+fn compact_commands_keep_notices_as_receipts_when_content_height_needs_them() {
     let args = object([("command", "cargo test")]);
     let shown = Presentation::default();
     for status in ["partial", "none"] {
@@ -316,18 +359,26 @@ fn successful_calls_keep_checkpoint_and_capture_notices_when_collapsed() {
             ("stdout_bytes", Value::number(2048)),
             ("output_limit_bytes", Value::number(1024)),
         ]);
-        let rows = chapter::exception(&tool("bash", &args, Some(&result), &shown), 80);
-        let text = rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n");
-        assert!(text.starts_with("  ⎿ Bash cargo test"), "{text}");
-        assert!(
+        let call = tool("bash", &args, Some(&result), &shown);
+        let rows = chapter::exception(&call, 80);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].plain(), "  ⎿ Bash  cargo test");
+        let receipts = chapter::receipts(&call, 80);
+        let text = receipts
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
             text.contains(&format!("Checkpoint {status} · Untracked files")),
+            status == "partial",
             "{text}"
         );
         assert!(
             text.contains("stdout capture kept 1 KiB of 2 KiB"),
             "{text}"
         );
-        assert!(!text.contains("Exit 0"), "{text}");
+        assert!(text.contains("exit 0"), "{text}");
     }
 }
 

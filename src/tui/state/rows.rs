@@ -4,7 +4,7 @@ use super::{Item, Kind};
 use crate::tui::{
     cards,
     line::Line,
-    markdown, text,
+    prose, text,
     theme::{STRONG, USER_SURFACE},
 };
 
@@ -137,6 +137,33 @@ pub(in crate::tui) fn tool_card(
         }
     }
     chapter.rows.extend(detail);
+    let last = index + 1 == items.len() || !same_chapter(&items[index], &items[index + 1]);
+    if last {
+        let start = chapter_start(items, index);
+        let calls: Vec<_> = items[start..=index].iter().filter_map(Item::tool).collect();
+        let activity = cards::chapter_activity(&calls, columns);
+        let has_activity = activity.is_some();
+        if !calls.iter().any(|tool| tool.presentation.expanded) {
+            // Preserve the former singleton's content height with result
+            // facts. A keycap is presentation, not content, and cannot set
+            // the chapter's floor.
+            let singleton = cards::card(calls[0], columns, false).rows.len();
+            let chapter_height = cards::chapter_header(&calls, columns, false).rows.len()
+                + calls
+                    .iter()
+                    .map(|tool| cards::chapter_exception(tool, columns).len())
+                    .sum::<usize>()
+                + usize::from(has_activity);
+            chapter.rows.extend(
+                cards::chapter_receipts(&calls[0], columns)
+                    .into_iter()
+                    .take(singleton.saturating_sub(chapter_height)),
+            );
+        }
+        if let Some(activity) = activity {
+            chapter.rows.push(activity);
+        }
+    }
     (!chapter.rows.is_empty()).then_some(chapter)
 }
 
@@ -158,7 +185,7 @@ impl Rows {
             return Vec::new();
         }
         let lines = match item {
-            Item::Streaming { text } => markdown::render(text, columns),
+            Item::Streaming { text } => prose::render(text, columns),
             Item::Text {
                 kind: Kind::User,
                 text,
@@ -183,7 +210,7 @@ impl Rows {
             Item::Text {
                 kind: Kind::Assistant,
                 text,
-            } => markdown::render(text, columns),
+            } => prose::render(text, columns),
             Item::Local { .. } | Item::Text { .. } => Vec::new(),
             Item::Tool { .. } => {
                 tool_card(items, index, columns, keycap).map_or_else(Vec::new, |card| card.rows)

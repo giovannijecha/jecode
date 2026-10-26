@@ -43,7 +43,7 @@ fn layout_work_is_bounded_and_finalization_appends_the_original_stream_only_once
         layout
             .pending(&state)
             .iter()
-            .any(|line| line.plain() == "Live response.")
+            .any(|line| line.plain() == "● Live response.")
     );
     state.event(Event::Message {
         text: "Live response.".into(),
@@ -55,7 +55,7 @@ fn layout_work_is_bounded_and_finalization_appends_the_original_stream_only_once
             .blocks
             .iter()
             .flatten()
-            .filter(|line| line.plain() == "Live response.")
+            .filter(|line| line.plain() == "● Live response.")
             .count(),
         1
     );
@@ -127,12 +127,12 @@ fn retained_invisible_assistant_keeps_a_single_separator_between_visible_message
     assert!(layout.ready(&state));
     assert_eq!(
         layout.blocks[1].iter().map(Line::plain).collect::<Vec<_>>(),
-        ["First"]
+        ["● First"]
     );
     assert!(layout.blocks[2].is_empty());
     assert_eq!(
         layout.blocks[3].iter().map(Line::plain).collect::<Vec<_>>(),
-        ["", "Second"]
+        ["", "● Second"]
     );
     assert_eq!(layout.blocks[1..], state.rows());
 }
@@ -163,22 +163,22 @@ fn a_single_long_markdown_block_yields_between_passes_and_keeps_fence_state() {
     let body = &layout.blocks[1];
     assert_eq!(
         body.iter()
-            .filter(|line| line.plain() == " comment line")
+            .filter(|line| line.plain().trim() == "comment line")
             .count(),
         600
     );
-    assert_eq!(body[0].plain(), " rust");
+    assert_eq!(body[0].plain(), "●  rust");
     // After the panel's one-cell padding, the comment keeps its colour.
-    assert!(body[500].spans[1..].iter().all(|span| span.style == MUTED));
+    assert!(body[500].spans[2..].iter().all(|span| span.style == MUTED));
     let code = body
         .iter()
-        .find(|line| line.plain() == " let value = 1;")
+        .find(|line| line.plain().trim() == "let value = 1;")
         .unwrap();
     assert!(
         code.paint(39)
             .contains(&crate::tui::theme::KEYWORD.to_string())
     );
-    assert_eq!(body.last().unwrap().plain(), "Final paragraph.");
+    assert_eq!(body.last().unwrap().plain(), "  Final paragraph.");
 }
 
 #[test]
@@ -275,9 +275,9 @@ fn simultaneous_read_completions_keep_the_earlier_layout_cached() {
         assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
         state.close_tools();
         let output = shown(&mut layout, &state);
-        assert!(output.contains(&format!("● Activity ({calls} calls)")));
+        assert!(output.contains(&format!("● Activity  {calls} calls")));
         assert!(output.contains(&format!("{calls} files read")));
-        assert_eq!(output.matches("● Activity (").count(), 1);
+        assert_eq!(output.matches("● Activity  ").count(), 1);
     }
 }
 
@@ -309,9 +309,9 @@ fn missed_read_group_and_tool_toggles_redraw_from_the_earliest_change() {
     );
     assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
     let output = shown(&mut layout, &state);
-    assert!(output.contains("● Activity (3 calls)"));
+    assert!(output.contains("● Activity  3 calls"));
     assert!(output.contains("3 files read"));
-    assert_eq!(output.matches("● Activity (").count(), 1);
+    assert_eq!(output.matches("● Activity  ").count(), 1);
 }
 
 #[test]
@@ -366,18 +366,18 @@ fn reads_join_one_card_as_they_finish_and_the_keycap_follows_the_latest_turn() {
     finish_read(&mut state, "a");
     read(&mut state, "b", "src/b.rs");
     let text = shown(&mut layout, &state);
-    assert!(text.contains("● Activity (2 calls · running)"));
-    assert!(text.contains("1 file read") && text.contains("Read src/b.rs"));
+    assert!(text.contains("● Activity  2 calls · running"));
+    assert!(text.contains("1 file read") && text.contains("Read  src/b.rs"));
     assert!(!text.contains("Read(src/a.rs)"));
     finish_read(&mut state, "b");
     let text = shown(&mut layout, &state);
-    assert!(text.contains("● Activity (2 calls)\n  ⎿ 2 files read"));
+    assert!(text.contains("● Activity  2 calls\n  ⎿ 2 files read"));
     assert!(!text.contains("● Read(src/a.rs)") && !text.contains("Ctrl+O"));
     state.close_tools();
     state.finish_tool_turn();
     let text = shown(&mut layout, &state);
     assert_eq!(text.matches("Ctrl+O  expand").count(), 1);
-    assert_eq!(text.matches("● Activity (").count(), 1);
+    assert_eq!(text.matches("● Activity  ").count(), 1);
     state.message(Kind::User, "Next request.");
     state.begin_tool_turn();
     assert!(!shown(&mut layout, &state).contains("Ctrl+O"));

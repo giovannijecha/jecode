@@ -12,13 +12,15 @@ mod chapter;
 mod content;
 mod diff;
 mod edit_fallback;
+mod failure;
 mod presentation;
+mod rhythm;
 mod streams;
 mod summary;
 mod title;
 pub use chapter::{
-    exception as chapter_exception, groupable as chapter_groupable, header as chapter_header,
-    label as chapter_label,
+    activity as chapter_activity, exception as chapter_exception, groupable as chapter_groupable,
+    header as chapter_header, label as chapter_label, receipts as chapter_receipts,
 };
 pub use presentation::Presentation;
 
@@ -84,6 +86,7 @@ impl Status {
 pub(super) struct Body {
     rows: Vec<Line>,
     hidden: usize,
+    hidden_hunks: usize,
     unit: &'static str,
 }
 
@@ -92,6 +95,7 @@ impl Body {
         Self {
             rows,
             hidden: 0,
+            hidden_hunks: 0,
             unit: "lines",
         }
     }
@@ -104,6 +108,9 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
 
 /// One card. `keycap` names Ctrl+O on the row that counts hidden lines.
 pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
+    if !matches!(tool.name, "read" | "write" | "edit") {
+        return rhythm::card(tool, columns, keycap);
+    }
     let status = Status::of(&tool);
     let expanded = tool.presentation.expanded;
     // Diff limits leave only the supplied replacements; file coordinates
@@ -128,23 +135,20 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     } else {
         TOOL_DIM
     };
-    rows.extend(line_rows(
-        &preview(
-            summary::line(&tool, status, change),
-            columns.saturating_sub(4),
-            expanded,
-        ),
-        columns,
-        1,
-        "  ⎿ ",
-        "    ",
-        lead,
-    ));
+    let summary = summary::line(&tool, status, change);
+    let summary = if tool.name == "read" && !expanded {
+        summary::compact_read(summary, columns.saturating_sub(4))
+    } else {
+        preview(summary, columns.saturating_sub(4), expanded)
+    };
+    rows.extend(line_rows(&summary, columns, 1, "  ⎿ ", "    ", lead));
     let mut hidden = false;
     if let Some(result) = tool.result {
         let mut body =
             if result.get("error").is_some() || (tool.name == "edit" && status != Status::Done) {
                 Body::new(Vec::new())
+            } else if let Some(change) = change.filter(|change| change.created) {
+                content::created(change, field(tool.arguments, "path"), columns, expanded)
             } else if let Some(change) = change {
                 diff::render(change, field(tool.arguments, "path"), columns, expanded)
             } else {
@@ -165,13 +169,27 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
             } else {
                 body.unit
             };
+            let label = if body.hidden_hunks > 0 {
+                format!(
+                    "+{} {} · {} rows",
+                    body.hidden_hunks,
+                    if body.hidden_hunks == 1 {
+                        "hunk"
+                    } else {
+                        "hunks"
+                    },
+                    body.hidden
+                )
+            } else {
+                format!("+{} {unit}", body.hidden)
+            };
             let mut more = line_rows(
-                &Line::new(&format!("… {} more {unit}", body.hidden), MUTED),
+                &Line::new(&label, TOOL_DIM),
                 columns,
                 origin,
                 "    ",
                 "    ",
-                MUTED,
+                TOOL_DIM,
             );
             if keycap && let Some(last) = more.pop() {
                 more.extend(hint(last, "expand", columns));
@@ -203,7 +221,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
         "process" | "checkpoint" | "web" | "browser" => {
-            crate::events::description(tool.name, tool.arguments)
+            crate::events::target(tool.name, tool.arguments)
         }
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
@@ -307,6 +325,10 @@ mod chapter_tests;
 mod checkpoint_tests;
 #[cfg(test)]
 mod edit_fallback_tests;
+#[cfg(test)]
+mod files_tests;
+#[cfg(test)]
+mod rhythm_tests;
 #[cfg(test)]
 mod skill_tests;
 #[cfg(test)]

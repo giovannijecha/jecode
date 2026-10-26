@@ -38,6 +38,122 @@ fn heading(rows: &[Line]) -> &Line {
 }
 
 #[test]
+fn a_live_mixed_chapter_never_loses_rows_and_keeps_its_last_activity() {
+    for columns in [80, 40] {
+        let mut state = State {
+            width: columns,
+            ..State::default()
+        };
+        let mut prior = [0; 2];
+        let mut check = |state: &State, phase: &str| {
+            for (slot, keycap) in [false, true].into_iter().enumerate() {
+                let mut renderer = rows::Rows::default();
+                let height: usize = (0..state.items.len())
+                    .map(|index| {
+                        renderer
+                            .render_at(&state.items, index, columns, keycap && index == 0)
+                            .len()
+                    })
+                    .sum();
+                assert!(
+                    height >= prior[slot],
+                    "{columns} columns, {phase}, keycap {keycap}: {height} < {}\n{}",
+                    prior[slot],
+                    block(&state.rows().into_iter().flatten().collect::<Vec<_>>())
+                );
+                prior[slot] = height;
+            }
+        };
+        let work = "Inspect sources";
+        state.begin_tool_turn();
+        start(
+            &mut state,
+            "bash-one",
+            "bash",
+            args([("command", "printf one"), ("work", work)]),
+        );
+        check(&state, "first bash starts");
+        finish(
+            &mut state,
+            "bash-one",
+            "bash",
+            Value::object([("exit_code", Value::number(0))]),
+        );
+        check(&state, "first bash finishes");
+        start(
+            &mut state,
+            "read-one",
+            "read",
+            args([("path", "src/a.rs"), ("work", work)]),
+        );
+        check(&state, "read starts and singleton becomes chapter");
+        finish(
+            &mut state,
+            "read-one",
+            "read",
+            Value::object([("content", Value::string("1: source\n"))]),
+        );
+        check(&state, "read finishes");
+        assert!(
+            block(&state.rows()[1]).contains("Read  src/a.rs"),
+            "{}",
+            block(&state.rows()[1])
+        );
+        start(
+            &mut state,
+            "read-bad",
+            "read",
+            args([("path", "missing.rs"), ("work", work)]),
+        );
+        check(&state, "second read starts");
+        finish(
+            &mut state,
+            "read-bad",
+            "read",
+            args([("error", "permission denied")]),
+        );
+        check(&state, "second read fails");
+        let visible = block(&state.rows().into_iter().flatten().collect::<Vec<_>>());
+        assert!(visible.contains("Read  missing.rs"), "{visible}");
+        assert!(!visible.contains("Read  src/a.rs"), "{visible}");
+        start(
+            &mut state,
+            "bash-two",
+            "bash",
+            args([("command", "printf two"), ("work", work)]),
+        );
+        check(&state, "second bash starts");
+        finish(
+            &mut state,
+            "bash-two",
+            "bash",
+            Value::object([("exit_code", Value::number(0))]),
+        );
+        check(&state, "second bash finishes");
+        start(
+            &mut state,
+            "browser",
+            "browser",
+            args([("action", "snapshot"), ("tab_id", "tab-1"), ("work", work)]),
+        );
+        check(&state, "browser starts");
+        finish(
+            &mut state,
+            "browser",
+            "browser",
+            args([("snapshot_path", "tmp:browser/snapshot.txt")]),
+        );
+        check(&state, "browser finishes");
+        let activity = block(&state.rows()[4]);
+        assert!(activity.contains("Browser  snapshot tab-1"), "{activity}");
+        state.close_tools();
+        state.finish_tool_turn();
+        check(&state, "turn closes");
+        assert_eq!(block(&state.rows()[4]), activity);
+    }
+}
+
+#[test]
 fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
     let mut state = State {
         width: 120,
@@ -91,7 +207,7 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
 
     let rows = state.rows();
     assert_eq!(rows.len(), 5);
-    assert_eq!(heading(&rows[0]).plain(), "● Inspect app (5 calls)");
+    assert_eq!(heading(&rows[0]).plain(), "● Inspect app  5 calls");
     let summary = block(&rows[0]);
     for fact in [
         "1 file read",
@@ -103,8 +219,9 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
         assert!(summary.contains(fact), "missing {fact}: {summary}");
     }
     assert!(!summary.contains("What happened") && !summary.contains("Bash("));
-    assert!(block(&rows[1]).contains("Bash printf example"));
-    assert!(rows[2..].iter().all(Vec::is_empty));
+    assert!(block(&rows[1]).contains("Bash  printf example"));
+    assert!(rows[2..4].iter().all(Vec::is_empty));
+    assert!(block(&rows[4]).contains("Browser  screenshot"));
 
     assert_eq!(state.toggle_tools(), Some((true, 5)));
     let opened = state.rows();
@@ -129,8 +246,9 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
     assert_eq!(bash[first + 2].plain(), "    last");
     assert_eq!(state.toggle_tools(), Some((false, 5)));
     let closed = state.rows();
-    assert!(block(&closed[1]).contains("Bash printf example"));
-    assert!(closed[2..].iter().all(Vec::is_empty));
+    assert!(block(&closed[1]).contains("Bash  printf example"));
+    assert!(closed[2..4].iter().all(Vec::is_empty));
+    assert!(block(&closed[4]).contains("Browser  screenshot"));
 }
 
 #[test]
@@ -155,10 +273,10 @@ fn trimmed_labels_group_and_missing_or_blank_labels_use_activity() {
     }
     state.close_tools();
     let rows = state.rows();
-    assert_eq!(heading(&rows[0]).plain(), "● Audit (2 calls)");
-    assert!(rows[1].is_empty());
-    assert_eq!(heading(&rows[2]).plain(), "● Activity (2 calls)");
-    assert!(rows[3].is_empty());
+    assert_eq!(heading(&rows[0]).plain(), "● Audit  2 calls");
+    assert!(block(&rows[1]).contains("Read  src/a.rs"));
+    assert_eq!(heading(&rows[2]).plain(), "● Activity  2 calls");
+    assert!(block(&rows[3]).contains("Read  src/a.rs"));
     assert_eq!(heading(&rows[4]).plain(), "● Read(src/a.rs)");
 }
 
@@ -224,7 +342,7 @@ fn narration_mutations_checkpoint_and_skill_reads_break_chapters() {
             "{headings:?}"
         );
     }
-    assert!(headings.iter().all(|text| !text.contains("(2 calls)")));
+    assert!(headings.iter().all(|text| !text.contains("  2 calls")));
 }
 
 #[test]
@@ -245,10 +363,10 @@ fn adjacent_turns_never_merge_and_ctrl_o_opens_only_the_latest() {
         state.finish_tool_turn();
     }
     let rows = state.rows();
-    assert_eq!(heading(&rows[0]).plain(), "● Inspect (2 calls)");
-    assert!(rows[1].is_empty());
-    assert_eq!(heading(&rows[2]).plain(), "● Inspect (2 calls)");
-    assert!(rows[3].is_empty());
+    assert_eq!(heading(&rows[0]).plain(), "● Inspect  2 calls");
+    assert!(block(&rows[1]).contains("Read  old-1.rs"));
+    assert_eq!(heading(&rows[2]).plain(), "● Inspect  2 calls");
+    assert!(block(&rows[3]).contains("Read  new-1.rs"));
     assert_eq!(state.toggle_tools(), Some((true, 2)));
     let opened = state.rows();
     assert!(!block(&opened[0]).contains("Read(old-0.rs)"));
@@ -282,7 +400,7 @@ fn a_pending_call_reopens_its_chapter_header_until_results_arrive() {
     assert_eq!(state.settled_len(), 0);
     assert!(state.tool_revision > revision);
     let working = block(&state.rows()[0]);
-    assert!(working.contains("● Verify (3 calls · running)"));
+    assert!(working.contains("● Verify  3 calls · running"));
     assert!(working.contains("2 commands · 1 running"));
     finish(
         &mut state,
@@ -291,7 +409,7 @@ fn a_pending_call_reopens_its_chapter_header_until_results_arrive() {
         Value::object([("exit_code", Value::number(0))]),
     );
     let finished = block(&state.rows()[0]);
-    assert!(finished.contains("● Verify (3 calls)"));
+    assert!(finished.contains("● Verify  3 calls"));
     assert!(finished.contains("3 commands"));
     state.close_tools();
     assert_eq!(state.settled_len(), 3);
@@ -319,10 +437,11 @@ fn a_failed_call_stays_red_and_explicit_after_later_success() {
     let rows = state.rows();
     assert_eq!(heading(&rows[0]).spans[0].style, BAD);
     let visible = block(&rows[0]);
-    assert!(visible.contains("● Inspect (2 calls · 1 failed)"));
-    assert!(visible.contains("1 command · 1 failed"));
-    assert!(visible.contains("Read missing.rs") && visible.contains("permission denied"));
-    assert!(block(&rows[1]).contains("Bash printf ok"));
+    assert!(visible.contains("● Inspect  2 calls · 1 failed"));
+    assert!(visible.contains("1 command"));
+    assert!(!visible.contains("1 command · 1 failed"));
+    assert!(visible.contains("Read  missing.rs") && visible.contains("permission denied"));
+    assert!(block(&rows[1]).contains("Bash  printf ok"));
 }
 
 #[test]
@@ -347,7 +466,7 @@ fn a_long_replayed_chapter_keeps_one_compact_heading() {
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(text.matches("● Replay work (10000 calls)").count(), 1);
+    assert_eq!(text.matches("● Replay work  10000 calls").count(), 1);
     assert!(text.contains("10000 commands"));
     assert_eq!(state.settled_len(), state.items.len());
 }
@@ -374,7 +493,7 @@ fn removing_withdrawn_items_rebuilds_chapters_without_merging_execution_turns() 
     state.reindex_chapters();
     state.reset_tool_details();
     let rows = state.rows();
-    assert!(block(&rows[0]).contains("● Inspect (2 calls)"));
-    assert!(block(&rows[1]).contains("Bash fixture"));
+    assert!(block(&rows[0]).contains("● Inspect  2 calls"));
+    assert!(block(&rows[1]).contains("Bash  fixture"));
     assert!(block(&rows[2]).contains("● Bash(fixture)"));
 }

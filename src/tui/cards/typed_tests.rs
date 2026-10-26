@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::theme::{ACCENT, EMPHASIS, KEYWORD};
+use crate::tui::theme::{ACCENT, BODY, KEYWORD};
 use std::time::Duration;
 
 fn presentation(milliseconds: u64, expanded: bool) -> Presentation {
@@ -58,8 +58,11 @@ fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
         let spans = &rows[0].spans;
         assert_eq!(spans[0].style, GOOD);
         assert_eq!(spans[1].style, family.bold());
-        assert_eq!(spans[2].style, EMPHASIS);
-        assert_eq!(spans.last().unwrap().style, family.bold());
+        assert_eq!(spans[2].style, BODY);
+        assert_eq!(
+            spans.last().unwrap().style,
+            if name == "bash" { BODY } else { family.bold() }
+        );
     }
 }
 
@@ -100,9 +103,15 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
             assert_eq!(rows[0].spans[0].text, "● ");
             assert_eq!(rows[0].spans[0].style, *shade, "{name}, frame {frame}");
             let expected = crate::tui::activity::duration(shown.elapsed.unwrap());
+            let running = if matches!(name, "read" | "write" | "edit") {
+                ""
+            } else {
+                "Running · "
+            };
+            let prefix = if name == "browser" { "    " } else { "  ⎿ " };
             assert_eq!(
-                rows[1].plain(),
-                format!("  ⎿ {expected} · checkpoint rc-fixture")
+                rows.last().unwrap().plain(),
+                format!("{prefix}{running}{expected} · checkpoint rc-fixture")
             );
             assert!(!plain(&rows).join("").contains(['▰', '▱']));
         }
@@ -130,7 +139,7 @@ fn returned_tools_keep_their_static_outcome_marker() {
 }
 
 #[test]
-fn titles_wrap_on_words_under_the_open_paren_and_compact_titles_close_with_an_ellipsis() {
+fn compact_routine_titles_use_one_clipped_row() {
     let arguments = object([(
         "command",
         "cargo build --locked --release --target x86_64-pc-windows-gnullvm\ncargo test --locked",
@@ -138,19 +147,31 @@ fn titles_wrap_on_words_under_the_open_paren_and_compact_titles_close_with_an_el
     let result = Value::object([("exit_code", Value::number(0))]);
     let shown = presentation(0, false);
     let rows = plain(&card(tool("bash", &arguments, &result, &shown), 60, false).rows);
-    assert_eq!(rows[0], "● Bash(cargo build --locked --release --target");
-    assert_eq!(rows[1], "       x86_64-pc-windows-gnullvm");
-    assert_eq!(rows[2], "       cargo test --locked)");
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].starts_with("● Bash(cargo build --locked --release"));
+    assert!(rows[0].ends_with('…'));
+    assert_eq!(rows[1], "  ⎿ Done");
     let long = object([("command", &"word ".repeat(60))]);
     let compact = plain(&card(tool("bash", &long, &result, &shown), 60, false).rows);
-    assert!(compact[2].ends_with("…)") && !compact[3].starts_with("    "));
+    assert_eq!(compact.len(), 2);
+    assert!(compact[0].ends_with('…'));
     let expanded = presentation(0, true);
     let full = card(tool("bash", &long, &result, &expanded), 60, false).rows;
-    assert!(
-        full.iter()
-            .filter(|row| row.origin.unwrap().line == 0)
-            .count()
-            > 3
+    let title: Vec<_> = full
+        .iter()
+        .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
+        .collect();
+    assert!(title.len() > 1);
+    assert!(!title.iter().any(|row| row.plain().contains('…')));
+    let retained = title
+        .iter()
+        .map(|row| row.plain().chars().skip(2).collect::<String>())
+        .collect::<String>();
+    assert_eq!(
+        retained.split_whitespace().collect::<String>(),
+        format!("Bash({})", "word ".repeat(60).trim())
+            .split_whitespace()
+            .collect::<String>()
     );
 }
 
@@ -168,9 +189,9 @@ fn commands_name_their_result_line_and_count_the_rest_with_a_keycap() {
     let card = card(tool("bash", &arguments, &result, &shown), 60, true);
     let rows = plain(&card.rows);
     assert!(card.hidden);
-    assert_eq!(rows[1], "  ⎿ test result: ok. 3 passed · 6.8s");
-    assert!(rows[2].starts_with("    … 2 more lines") && rows[2].ends_with("Ctrl+O  expand"));
-    assert_eq!(rows[2].chars().count(), 60);
+    assert!(rows[1].starts_with("  ⎿ test result: ok. 3 passed · 6.8s  +2 lines"));
+    assert!(rows.iter().any(|row| row.ends_with("Ctrl+O  expand")));
+    assert!(rows.iter().all(|row| crate::tui::text::cells(row) <= 60));
     let quick = presentation(400, false);
     let empty = Value::object([("exit_code", Value::number(0))]);
     let rows = plain(&super::card(tool("bash", &arguments, &empty, &quick), 60, true).rows);
@@ -192,13 +213,17 @@ fn failures_lead_with_the_exit_and_first_error_in_the_failure_colour() {
     assert_eq!(
         plain(&rows)[1..],
         [
-            "  ⎿ Exit 101 · error[E0425]: missing",
-            "      --> a.rs",
+            "  ⎿ Exit 101 · error[E0425]: missing · a.rs",
             "    note",
-            "    … 1 more line"
+            "    more"
         ]
     );
-    assert_eq!(rows[1].spans[0].style, BAD);
+    assert!(
+        rows[1]
+            .spans
+            .iter()
+            .any(|span| span.style == BAD && span.text.contains("Exit 101"))
+    );
     let missing = Value::object([(
         "error",
         Value::string("Could not resolve path \"a.rs\": No such file (os error 2)"),
@@ -268,10 +293,7 @@ fn pages_and_captures_summarise_what_came_back() {
     let rows = plain(&card(tool("web", &fetch, &page, &shown), 80, false).rows);
     assert_eq!(
         rows[1..],
-        [
-            "  ⎿ governor - Rust · 18 KiB · docs.rs",
-            "    … 2 more lines"
-        ]
+        ["  ⎿ governor - Rust · 18 KiB · docs.rs  +2 lines"]
     );
     let capture = object([("action", "screenshot"), ("tab_id", "tab-1")]);
     let image = Value::object([
@@ -285,7 +307,12 @@ fn pages_and_captures_summarise_what_came_back() {
         ),
     ]);
     let rows = plain(&card(tool("browser", &capture, &image, &shown), 80, false).rows);
-    assert_eq!(rows[1], "  ⎿ Screenshot 1280×720 · tmp:browser/shot.png");
+    assert_eq!(rows[0], "● Browser(screenshot)");
+    assert_eq!(rows[1], "  ⎿ tab-1");
+    assert_eq!(
+        rows[2],
+        "    Screenshot 1280×720 · tmp:browser/shot.png  +7 lines"
+    );
 }
 
 #[test]
@@ -304,7 +331,7 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
     let chapter = chapter_header(&tools, 80, true);
     let rows = plain(&chapter.rows);
     assert!(chapter.hidden);
-    assert_eq!(rows[0], "● Activity (3 calls)");
+    assert!(rows[0].starts_with("● Activity  3 calls"));
     assert!(rows.join("\n").contains("⎿ 3 files read"));
     assert!(rows.join("\n").contains("Ctrl+O"));
     let expanded = presentation(0, true);
@@ -319,7 +346,7 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
     ]) {
         let rows = plain(&card.rows);
         assert!(rows[0].contains(&format!("Read({path})")), "{rows:?}");
-        assert!(rows.join("\n").contains(&format!("Read {lines} lines")));
+        assert!(rows.join("\n").contains(&format!("{lines} lines")));
         assert!(rows.iter().any(|row| row.trim() == "1   x"));
     }
     let pages = [read("big.rs", 40), read("big.rs", 40)];
@@ -338,7 +365,7 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
     assert_eq!(page_cards.len(), 2);
     for page in &page_cards {
         assert!(plain(&page.rows)[0].contains("Read(big.rs)"));
-        assert!(plain(&page.rows).join("\n").contains("Read 40 lines"));
+        assert!(plain(&page.rows).join("\n").contains("40 lines"));
     }
     let failed = Value::object([("error", Value::string("denied"))]);
     let failed = tool("read", &calls[0].0, &failed, &shown);

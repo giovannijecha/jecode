@@ -212,7 +212,7 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
             .rows()
             .iter()
             .flatten()
-            .any(|row| row.plain() == "Done.")
+            .any(|row| row.plain() == "● Done.")
     );
     assert_eq!(fixture.finish().len(), 2);
 

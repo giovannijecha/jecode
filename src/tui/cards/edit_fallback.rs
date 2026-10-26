@@ -80,6 +80,7 @@ pub(super) fn body(
                 .unwrap_or(origin)
                 + 1;
             body.hidden += snippet.hidden;
+            body.hidden_hunks += snippet.hidden_hunks;
             body.rows.extend(snippet.rows);
         } else {
             body.rows.extend(wrapped(

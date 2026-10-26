@@ -122,10 +122,9 @@ fn panels_keep_their_padding_and_text_without_a_sent_prompt_marker() {
     assert_eq!(blocks[0][0].plain(), "");
     assert_eq!(blocks[0][4].plain(), "");
     assert_eq!(blocks[0][1].plain(), "  one");
-    assert_eq!(
-        blocks[1],
-        [Line::default(), Line::new("answer", super::theme::BODY)]
-    );
+    assert_eq!(blocks[1][0], Line::default());
+    assert_eq!(blocks[1][1].plain(), "● answer");
+    assert_eq!(blocks[1][1].spans[0].style, super::theme::BODY);
 }
 
 #[test]
@@ -183,7 +182,10 @@ fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
     let streamed = state.rows();
     let answer = streamed.last().unwrap();
     assert_eq!(answer.len(), 4); // External separator and two initial Markdown blanks.
-    assert!(answer[..3].iter().all(|row| row == &Line::default()));
+    assert_eq!(answer[0], Line::default());
+    assert_eq!(answer[1].plain(), "● ");
+    assert_eq!(answer[2].plain(), "  ");
+    assert_eq!(answer[3].plain(), "  answer");
     state.event(Event::Message {
         text: response.into(),
     });
@@ -203,19 +205,26 @@ fn tool_output_keeps_actual_trailing_empty_rows_only_when_expanded() {
         let rows = state.rows();
         assert!(rows[0][0].plain().starts_with("● Bash(fixture)"));
         assert!(rows[0][1].plain().contains("line"));
-        assert_eq!(rows[0].len(), 2);
+        assert!((2..=3).contains(&rows[0].len()));
+        assert!(!rows[0].iter().any(|row| row.plain() == "    "));
         state.toggle_tools();
         let rows = state.rows();
         let output_row = rows[0]
             .iter()
             .position(|row| row.plain() == "    line")
             .unwrap();
-        assert_eq!(rows[0].len(), output_row + count);
+        assert_eq!(
+            rows[0].len(),
+            output_row + count + 1,
+            "{:?}",
+            rows[0].iter().map(Line::plain).collect::<Vec<_>>()
+        );
         assert!(
-            rows[0][output_row + 1..]
+            rows[0][output_row + 1..output_row + count]
                 .iter()
                 .all(|row| row.plain() == "    ")
         );
+        assert!(rows[0].last().unwrap().plain().contains("exit 0"));
         let Item::Tool {
             result: Some(result),
             ..

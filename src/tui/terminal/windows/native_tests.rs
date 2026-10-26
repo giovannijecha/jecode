@@ -299,11 +299,6 @@ fn tool_cards_console(bash: &std::path::Path) {
     let rows: Vec<_> = state.rows().into_iter().flatten().collect();
     assert!(
         rows.iter()
-            .any(|row| row.plain().contains("Checkpoint partial")),
-        "partial checkpoint status is missing from the Bash tool card"
-    );
-    assert!(
-        rows.iter()
             .any(|row| row.plain().contains("1 −  let limit = 10;"))
     );
     assert!(
@@ -312,7 +307,7 @@ fn tool_cards_console(bash: &std::path::Path) {
     );
     assert!(
         rows.iter()
-            .any(|row| row.plain().contains("Activity (3 calls)"))
+            .any(|row| row.plain().contains("Activity  3 calls"))
     );
     assert!(rows.iter().any(|row| row.plain().contains("1 screenshot")));
     state.finish_tool_turn();
@@ -320,15 +315,21 @@ fn tool_cards_console(bash: &std::path::Path) {
     let rows: Vec<_> = state.rows().into_iter().flatten().collect();
     assert!(
         rows.iter()
+            .any(|row| row.plain().contains("Checkpoint partial")),
+        "expanded Bash details lost the partial checkpoint status"
+    );
+    assert!(
+        rows.iter()
             .any(|row| row.plain().contains("Web(fetch https://example.org/)"))
     );
     assert!(
         rows.iter()
-            .any(|row| row.plain().contains("Browser(screenshot tab-1)"))
+            .any(|row| row.plain().contains("Browser(screenshot)"))
     );
+    assert!(rows.iter().any(|row| row.plain().contains("⎿ tab-1")));
     assert!(rows.iter().any(|row| {
         row.plain()
-            .contains("Screenshot · tmp:browser/screenshot.png")
+            .contains("\"screenshot_path\": \"tmp:browser/screenshot.png\"")
     }));
     let expected: String = (0..height)
         .map(|index| {

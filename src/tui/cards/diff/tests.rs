@@ -1,5 +1,7 @@
 use super::*;
-use crate::tui::theme::{DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, Surface};
+use crate::tui::theme::{
+    DIFF_ADDED_STRONG, DIFF_ADDED_SURFACE, DIFF_REMOVED_STRONG, DIFF_REMOVED_SURFACE, Surface,
+};
 
 fn highlighted(rows: &[Line], surface: Surface) -> String {
     rows.iter()
@@ -10,7 +12,7 @@ fn highlighted(rows: &[Line], surface: Surface) -> String {
 }
 
 #[test]
-fn context_changes_keep_coordinates_and_syntax_with_fragment_surfaces() {
+fn context_changes_keep_coordinates_and_syntax_on_tinted_rows() {
     let change = Change::between(
         Some("fn main() {\n    let limit = 3;\n}\n"),
         "fn main() {\n    let limit = 12;\n}\n",
@@ -26,9 +28,12 @@ fn context_changes_keep_coordinates_and_syntax_with_fragment_surfaces() {
             "    3    }"
         ]
     );
-    assert!(body.rows.iter().all(|row| row.background.is_none()));
-    assert_eq!(highlighted(&body.rows, DIFF_REMOVED_SURFACE), "3");
-    assert_eq!(highlighted(&body.rows, DIFF_ADDED_SURFACE), "12");
+    assert_eq!(body.rows[0].background, None);
+    assert_eq!(body.rows[1].background, Some(DIFF_REMOVED_SURFACE));
+    assert_eq!(body.rows[2].background, Some(DIFF_ADDED_SURFACE));
+    assert_eq!(body.rows[3].background, None);
+    assert_eq!(highlighted(&body.rows, DIFF_REMOVED_STRONG), "3");
+    assert_eq!(highlighted(&body.rows, DIFF_ADDED_STRONG), "12");
     assert!(
         body.rows[0]
             .spans
@@ -44,8 +49,14 @@ fn context_changes_keep_coordinates_and_syntax_with_fragment_surfaces() {
     );
     let painted = body.rows[2].paint(80);
     let (margin, rest) = painted.split_once("    ").unwrap();
-    assert!(!margin.contains(&DIFF_ADDED_SURFACE.to_string()));
+    assert!(margin.contains(&Surface::TERMINAL.to_string()));
     assert!(rest.contains(&DIFF_ADDED_SURFACE.to_string()));
+    assert!(rest.contains(&DIFF_ADDED_STRONG.to_string()));
+    assert!(painted.ends_with(&format!(
+        "\x1b[0m\x1b[{}m{}\x1b[0m",
+        DIFF_ADDED_SURFACE,
+        " ".repeat(80 - text::cells(&body.rows[2].plain()))
+    )));
 }
 
 #[test]
@@ -66,12 +77,12 @@ fn long_previews_keep_both_sides_and_expand_every_hunk() {
     assert!(preview.rows.iter().any(|row| {
         row.spans
             .iter()
-            .any(|span| span.background == Some(DIFF_REMOVED_SURFACE))
+            .any(|span| span.background == Some(DIFF_REMOVED_STRONG))
     }));
     assert!(preview.rows.iter().any(|row| {
         row.spans
             .iter()
-            .any(|span| span.background == Some(DIFF_ADDED_SURFACE))
+            .any(|span| span.background == Some(DIFF_ADDED_STRONG))
     }));
     let full = render(&change, "notes.txt", 80, true);
     assert_eq!(full.hidden, 0);
@@ -81,8 +92,32 @@ fn long_previews_keep_both_sides_and_expand_every_hunk() {
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("changed 55") && text.contains("changed 81") && text.contains("    …"));
+    assert!(text.contains("changed 55") && text.contains("changed 81") && text.contains(" ⋮"));
+    let separator = full
+        .rows
+        .iter()
+        .find(|row| row.plain().contains('⋮'))
+        .unwrap();
+    assert_eq!(separator.plain().chars().nth(7), Some('⋮'));
+    assert_eq!(separator.background, None);
+    assert!(separator.spans.iter().all(|span| span.style == TOOL_DIM));
+    assert_eq!(preview.hidden_hunks, change.hunks.len());
+    assert_eq!(full.hidden_hunks, 0);
     assert!(full.rows.len() > preview.rows.len());
+}
+
+#[test]
+fn compact_preview_counts_wholly_hidden_hunks() {
+    let old = (0..60).map(|n| format!("line {n}\n")).collect::<String>();
+    let new = old
+        .replace("line 5\n", "changed 5\n")
+        .replace("line 30\n", "changed 30\n")
+        .replace("line 55\n", "changed 55\n");
+    let change = Change::between(Some(&old), &new).unwrap();
+    assert_eq!(change.hunks.len(), 3);
+    let body = render(&change, "notes.txt", 80, false);
+    assert_eq!(body.hidden_hunks, 2);
+    assert_eq!(body.hidden, change.hunks[1].len() + change.hunks[2].len());
 }
 
 #[test]
@@ -105,10 +140,7 @@ fn context_between_deletion_and_addition_cannot_hide_the_added_side() {
         assert!(
             body.rows
                 .iter()
-                .filter(|row| row
-                    .spans
-                    .iter()
-                    .any(|span| span.background == Some(surface)))
+                .filter(|row| row.background == Some(surface))
                 .count()
                 >= 3
         );
@@ -126,11 +158,7 @@ fn wrapped_code_stays_complete_with_empty_continuation_gutters() {
         let rows: Vec<_> = body
             .rows
             .iter()
-            .filter(|row| {
-                row.spans
-                    .iter()
-                    .any(|span| span.background == Some(DIFF_ADDED_SURFACE))
-            })
+            .filter(|row| row.background == Some(DIFF_ADDED_SURFACE))
             .collect();
         let retained: String = rows
             .iter()
@@ -147,6 +175,24 @@ fn wrapped_code_stays_complete_with_empty_continuation_gutters() {
                 .all(|row| row.origin.unwrap().line == rows[0].origin.unwrap().line)
         );
     }
+}
+
+#[test]
+fn empty_added_line_keeps_its_tint_through_the_right_edge() {
+    let change = Change::between(Some("a\n"), "a\n\n").unwrap();
+    let body = render(&change, "notes.txt", 20, true);
+    let blank = body
+        .rows
+        .iter()
+        .find(|row| row.background == Some(DIFF_ADDED_SURFACE))
+        .unwrap();
+    assert_eq!(blank.plain(), "    2 +  ");
+    assert_eq!(blank.spans[0].background, Some(Surface::TERMINAL));
+    assert!(blank.paint(20).ends_with(&format!(
+        "\x1b[0m\x1b[{}m{}\x1b[0m",
+        DIFF_ADDED_SURFACE,
+        " ".repeat(20 - text::cells(&blank.plain()))
+    )));
 }
 
 #[test]
@@ -199,9 +245,9 @@ fn changed_fragments_keep_whole_unicode_glyphs_and_insertion_boundaries() {
         let change = Change::between(Some(&old), &new).unwrap();
         for width in [20, 40, 80] {
             let body = render(&change, "source.rs", width, true);
-            assert_eq!(highlighted(&body.rows, DIFF_REMOVED_SURFACE), removed);
-            assert_eq!(highlighted(&body.rows, DIFF_ADDED_SURFACE), added);
-            assert!(body.rows.iter().all(|row| row.background.is_none()));
+            assert_eq!(highlighted(&body.rows, DIFF_REMOVED_STRONG), removed);
+            assert_eq!(highlighted(&body.rows, DIFF_ADDED_STRONG), added);
+            assert!(body.rows.iter().all(|row| row.background.is_some()));
             assert!(
                 body.rows
                     .iter()
@@ -212,7 +258,7 @@ fn changed_fragments_keep_whole_unicode_glyphs_and_insertion_boundaries() {
 }
 
 #[test]
-fn unmatched_lines_highlight_their_whole_text_and_keep_the_outside_gutter_clear() {
+fn unmatched_lines_keep_syntax_and_tint_without_bold_fragments() {
     let old = "let first = 10;\nlet second = 20;\nlet gone = 30;\n";
     let new = "let first = 11;\nlet second = 21;\n";
     let change = Change::between(Some(old), new).unwrap();
@@ -223,7 +269,14 @@ fn unmatched_lines_highlight_their_whole_text_and_keep_the_outside_gutter_clear(
         .filter(|row| row.plain().contains("gone"))
         .cloned()
         .collect();
-    assert_eq!(highlighted(&gone, DIFF_REMOVED_SURFACE), "let gone = 30;");
+    assert_eq!(gone[0].background, Some(DIFF_REMOVED_SURFACE));
+    assert_eq!(highlighted(&gone, DIFF_REMOVED_STRONG), "");
+    assert!(
+        gone[0]
+            .spans
+            .iter()
+            .any(|span| span.text == "let" && span.style == crate::tui::theme::KEYWORD)
+    );
     assert_eq!(gone[0].spans[0].background, Some(Surface::TERMINAL));
     assert!(gone[0].spans[1].background.is_none());
     let created = render(
@@ -232,11 +285,43 @@ fn unmatched_lines_highlight_their_whole_text_and_keep_the_outside_gutter_clear(
         80,
         true,
     );
-    assert_eq!(
-        highlighted(&created.rows, DIFF_ADDED_SURFACE),
-        "let ready = true;"
+    assert_eq!(highlighted(&created.rows, DIFF_ADDED_STRONG), "");
+    assert!(
+        created
+            .rows
+            .iter()
+            .all(|row| row.background == Some(DIFF_ADDED_SURFACE))
     );
-    assert!(created.rows.iter().all(|row| row.background.is_none()));
+}
+
+#[test]
+fn fallback_snippets_tint_rows_without_inventing_coordinates() {
+    let mut change = Change::between(Some("let value = 3;\n"), "let value = 12;\n").unwrap();
+    for entry in change.hunks.iter_mut().flatten() {
+        entry.old_line = None;
+        entry.new_line = None;
+    }
+    let body = render_snippet(&change, "source.rs", 40, true);
+    let removed = body
+        .rows
+        .iter()
+        .find(|row| row.background == Some(DIFF_REMOVED_SURFACE))
+        .unwrap();
+    let added = body
+        .rows
+        .iter()
+        .find(|row| row.background == Some(DIFF_ADDED_SURFACE))
+        .unwrap();
+    assert!(removed.plain().starts_with("     −  "));
+    assert!(added.plain().starts_with("     +  "));
+    assert_eq!(highlighted(&body.rows, DIFF_REMOVED_STRONG), "3");
+    assert_eq!(highlighted(&body.rows, DIFF_ADDED_STRONG), "12");
+    assert!(
+        !body
+            .rows
+            .iter()
+            .any(|row| row.plain().contains("Original file coordinates"))
+    );
 }
 
 #[test]
@@ -248,8 +333,8 @@ fn long_paired_lines_keep_their_shared_tail_and_exact_changed_fragment() {
     let compact = render(&change, "source.txt", 40, false);
     assert!(compact.rows.len() <= 6);
     let full = render(&change, "source.txt", 40, true);
-    assert_eq!(highlighted(&full.rows, DIFF_REMOVED_SURFACE), "OLD");
-    assert_eq!(highlighted(&full.rows, DIFF_ADDED_SURFACE), "NEW");
+    assert_eq!(highlighted(&full.rows, DIFF_REMOVED_STRONG), "OLD");
+    assert_eq!(highlighted(&full.rows, DIFF_ADDED_STRONG), "NEW");
     for (source, expected) in [(2, before.trim_end()), (3, after.trim_end())] {
         let retained: String = full
             .rows

@@ -26,6 +26,7 @@ mod markdown;
 mod persistence;
 mod poll;
 mod processes;
+mod prose;
 mod providers;
 mod recovery;
 mod render;

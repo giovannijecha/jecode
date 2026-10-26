@@ -43,7 +43,7 @@ fn earlier_chapter_and_latest_singleton_keep_compact_previews_and_original_resul
     state.begin_tool_turn();
     start(&mut state, "future");
     let running = visible(&state);
-    assert!(running.contains("● Activity (2 calls)"));
+    assert!(running.contains("● Activity  2 calls"));
     assert!(running.contains("● Bash(fixture-command)"));
     assert!(running.contains("⎿ ") && running.contains('●'));
     assert!(!running.contains(['▰', '▱']));
@@ -112,7 +112,7 @@ fn messages_are_distinguished_by_presentation_and_keep_their_original_content() 
     assert!(
         rows[1]
             .iter()
-            .any(|row| row.plain() == "response" && row.background.is_none())
+            .any(|row| row.plain() == "● response" && row.background.is_none())
     );
     assert!(matches!(&state.items[1], Item::Text { text, .. } if text == "**response**"));
 }
@@ -175,14 +175,14 @@ fn consecutive_calls_share_a_chapter_across_model_requests_and_keep_targets() {
     state.message(Kind::Assistant, "Finished.");
     let current = state.rows();
     assert_ne!(current[0], first);
-    assert!(current[0][0].plain().starts_with("● Activity (3 calls"));
+    assert!(current[0][0].plain().starts_with("● Activity  3 calls"));
     assert!(
         current[0]
             .iter()
             .any(|row| row.plain().contains("3 commands"))
     );
-    assert!(current[1][0].plain().contains("Bash fixture-command"));
-    assert!(current[2][0].plain().contains("Bash fixture-command"));
+    assert!(current[1][0].plain().contains("Bash  fixture-command"));
+    assert!(current[2][0].plain().contains("Bash  fixture-command"));
     assert!(
         !current[1..3]
             .iter()
