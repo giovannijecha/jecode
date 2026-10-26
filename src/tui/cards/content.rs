@@ -1,15 +1,15 @@
 use super::{
-    Body, Status, Tool, diff, edit_fallback, field, flag, line_rows, preview,
-    streams::{self, Preview},
+    Body, Status, Tool, diff, edit_fallback, field, flag, line_rows, preview, streams,
     summary::size,
 };
 use crate::{
+    file_change::Change,
     json::Value,
     tui::{
         line::Line,
         syntax::Highlighter,
         text,
-        theme::{BODY, MUTED, Style, WARNING},
+        theme::{CODE_TEXT, MUTED, Style, WARNING},
     },
 };
 
@@ -39,28 +39,23 @@ pub(super) fn render(
         "read" if result.get("content").and_then(Value::as_str).is_some() => {
             Body::new(read(arguments, result, columns))
         }
+        "read" if result.get("attachment").is_some() || result.get("view").is_some() => {
+            Body::new(Vec::new())
+        }
         "write" => written(arguments, columns, expanded),
         "edit" => edit_fallback::body(arguments, result, columns, expanded)
             .unwrap_or_else(|| Body::new(Vec::new())),
         _ if result.get("processes").is_some() => processes(result, columns, expanded),
         "bash" | "process" => {
-            let (skip, rows) = match status {
-                Status::Failed => (
-                    streams::headline(&streams::entries(result, true), true),
-                    Preview::First(2),
-                ),
-                Status::Stopped => (None, Preview::Last(3)),
-                _ => (
-                    streams::headline(&streams::entries(result, false), false),
-                    Preview::Quiet,
-                ),
-            };
             let failed = status == Status::Failed;
-            streams::render(result, failed, skip, rows, columns, expanded)
+            let skip = (status != Status::Stopped)
+                .then(|| streams::headline(&streams::entries(result, failed), failed))
+                .flatten();
+            streams::render(result, failed, skip, columns, expanded)
         }
         "checkpoint" => {
             let lines = payload(&crate::checkpoints::render::text(result, "/checkpoints"));
-            selected(&lines, columns, expanded, 3)
+            selected(&lines, columns, expanded, 0)
         }
         // A page's text, or the raw result, waits for Ctrl+O.
         "web" if result.get("preview").and_then(Value::as_str).is_some() => {
@@ -114,25 +109,40 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
 }
 
 fn written(arguments: &Value, columns: usize, expanded: bool) -> Body {
-    let lines = payload(field(arguments, "content"));
+    source(
+        &payload(field(arguments, "content")),
+        field(arguments, "path"),
+        columns,
+        expanded,
+    )
+}
+
+/// A new file is captured source, with the same number gutter as an open Read.
+pub(super) fn created(change: &Change, path: &str, columns: usize, expanded: bool) -> Body {
+    let lines: Vec<_> = change
+        .hunks
+        .iter()
+        .flatten()
+        .map(|entry| text::clean(&entry.text))
+        .collect();
+    source(&lines, path, columns, expanded)
+}
+
+fn source(lines: &[String], path: &str, columns: usize, expanded: bool) -> Body {
     let count = if expanded {
         lines.len()
     } else {
-        lines.len().min(14)
+        lines.len().min(6)
     };
-    let digits = lines.len().max(1).to_string().len();
-    let mut lexer = Highlighter::for_path(field(arguments, "path"));
+    let digits = count.max(1).to_string().len();
+    let mut lexer = Highlighter::for_path(path);
     let rows = lines
         .iter()
         .take(count)
         .enumerate()
-        .flat_map(|(index, source)| {
+        .flat_map(|(index, line)| {
             diff::code_rows(
-                preview(
-                    lexer.line(source),
-                    columns.saturating_sub(7 + digits),
-                    expanded,
-                ),
+                lexer.line(line),
                 &format!("{:>digits$}   ", index + 1),
                 MUTED,
                 columns,
@@ -143,6 +153,7 @@ fn written(arguments: &Value, columns: usize, expanded: bool) -> Body {
     Body {
         rows,
         hidden: lines.len() - count,
+        hidden_hunks: 0,
         unit: "lines",
     }
 }
@@ -166,7 +177,7 @@ fn processes(result: &Value, columns: usize, expanded: bool) -> Body {
             )
         })
         .collect();
-    selected(&lines, columns, expanded, 3)
+    selected(&lines, columns, expanded, 0)
 }
 
 /// The first `preview_rows` lines, or every line when expanded.
@@ -182,7 +193,11 @@ fn selected(lines: &[String], columns: usize, expanded: bool, preview_rows: usiz
         .enumerate()
         .flat_map(|(index, line)| {
             line_rows(
-                &preview(Line::new(line, BODY), columns.saturating_sub(4), expanded),
+                &preview(
+                    Line::new(line, CODE_TEXT),
+                    columns.saturating_sub(4),
+                    expanded,
+                ),
                 columns,
                 index + 2,
                 "    ",
@@ -194,6 +209,7 @@ fn selected(lines: &[String], columns: usize, expanded: bool, preview_rows: usiz
     Body {
         rows,
         hidden: lines.len() - count,
+        hidden_hunks: 0,
         unit: "lines",
     }
 }
@@ -202,21 +218,12 @@ fn selected(lines: &[String], columns: usize, expanded: bool, preview_rows: usiz
 pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool) -> Vec<Line> {
     let mut notices: Vec<(Style, String)> = Vec::new();
     let number = |key: &str| result.get(key).and_then(Value::as_usize).unwrap_or(0);
-    if name == "read" && result.get("offset") == Some(&Value::Null) {
-        if let Some(next) = result.get("next_byte_offset").and_then(Value::as_usize) {
-            notices.push((MUTED, format!("More bytes available from byte {next}")));
-        }
-    } else if name == "read"
-        && let Some(next) = result.get("next_offset").and_then(Value::as_usize)
+    if name == "read"
+        && expanded
+        && (result.get("attachment").is_some() || result.get("view").is_some())
+        && let Some(note) = result.get("note").and_then(Value::as_str)
     {
-        notices.push((
-            MUTED,
-            if flag(result, "partial_line") {
-                format!("Line continues at byte {}", number("next_byte_offset"))
-            } else {
-                format!("More lines available from line {next}")
-            },
-        ));
+        notices.push((MUTED, note.into()));
     }
     if matches!(name, "bash" | "process") {
         for stream in ["stdout", "stderr"] {
@@ -248,7 +255,9 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
     }
     if let Some(checkpoint) = result.get("checkpoint") {
         let text = |key| checkpoint.get(key).and_then(Value::as_str);
-        if let Some(status @ ("partial" | "none")) = text("status") {
+        if let Some(status @ ("partial" | "none")) = text("status")
+            && (expanded || status == "partial" || matches!(name, "read" | "write" | "edit"))
+        {
             notices.push((
                 WARNING,
                 text("reason").map_or_else(

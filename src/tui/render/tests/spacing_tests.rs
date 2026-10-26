@@ -13,7 +13,7 @@ fn stream_updates_and_finalization_keep_one_block_and_one_gap_without_replaying_
     update(&mut renderer, &mut screen, &mut state);
     let short = screen.visible();
     let rows = short.lines().collect::<Vec<_>>();
-    let answer = rows.iter().position(|row| row.trim_end() == "A").unwrap();
+    let answer = rows.iter().position(|row| row.trim_end() == "● A").unwrap();
     assert!(rows[answer + 1].trim().is_empty());
     let border = rows.iter().position(|row| row.starts_with('─')).unwrap();
     assert!(
@@ -30,7 +30,7 @@ fn stream_updates_and_finalization_keep_one_block_and_one_gap_without_replaying_
     assert_eq!(screen.visible(), before);
     let rows = before.lines().collect::<Vec<_>>();
     assert_eq!(rows[answer + 1].trim(), "");
-    assert_eq!(rows[answer + 2].trim_end(), "B");
+    assert_eq!(rows[answer + 2].trim_end(), "  B");
     assert_eq!(rows[answer + 3].trim(), "");
     let border = rows.iter().position(|row| row.starts_with('─')).unwrap();
     assert!(
@@ -80,8 +80,8 @@ fn a_blank_model_request_adds_no_rows_between_tool_blocks() {
         .unwrap();
     assert!(second > first + 1);
     assert_eq!(rows[second - 1].trim(), "");
-    assert!(rows[second + 1].contains("⎿ Done"));
-    assert!(rows[second + 2].contains("second output"));
+    assert!(rows[second + 1].contains("second output"), "{visible}");
+    assert!(rows[second + 2].contains("exit 0"));
     let border = rows.iter().position(|row| row.starts_with('─')).unwrap();
     assert!(!visible.contains("Ctrl+O"));
     assert!(border > second + 4);

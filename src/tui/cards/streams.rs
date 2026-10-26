@@ -4,7 +4,7 @@ use crate::{
     tui::{
         line::Line,
         text,
-        theme::{BODY, MUTED},
+        theme::{BODY, CODE_TEXT, MUTED, TOOL_DIM},
     },
 };
 
@@ -68,25 +68,14 @@ pub(super) fn headline(entries: &[Entry], failed: bool) -> Option<usize> {
         .or_else(|| entries.len().checked_sub(1))
 }
 
-pub(super) enum Preview {
-    /// Hidden until expanded; the summary names the result.
-    Quiet,
-    /// The first lines, as after a failure.
-    First(usize),
-    /// The last lines, as after a stop.
-    Last(usize),
-}
-
 pub(super) fn render(
     result: &Value,
     failed: bool,
     skip: Option<usize>,
-    preview_rows: Preview,
     columns: usize,
     expanded: bool,
 ) -> Body {
-    // A collapsed card previews non-blank lines beside its summary; Ctrl+O
-    // shows the output exactly.
+    // The compact lead names the result; Ctrl+O shows the output exactly.
     let entries: Vec<_> = if expanded {
         exact(result, failed).into_iter().enumerate().collect()
     } else {
@@ -96,15 +85,7 @@ pub(super) fn render(
             .filter(|(index, _)| Some(*index) != skip)
             .collect()
     };
-    let range = if expanded {
-        0..entries.len()
-    } else {
-        match preview_rows {
-            Preview::Quiet => 0..0,
-            Preview::First(count) => 0..entries.len().min(count),
-            Preview::Last(count) => entries.len().saturating_sub(count)..entries.len(),
-        }
-    };
+    let range = if expanded { 0..entries.len() } else { 0..0 };
     let both = entries
         .first()
         .zip(entries.last())
@@ -114,7 +95,7 @@ pub(super) fn render(
     for (index, entry) in &entries[range.clone()] {
         if expanded && both && previous != entry.stream {
             rows.extend(line_rows(
-                &Line::new(entry.stream, MUTED),
+                &Line::new(entry.stream, TOOL_DIM),
                 columns,
                 index * 2 + 2,
                 "    ",
@@ -125,6 +106,8 @@ pub(super) fn render(
         previous = entry.stream;
         let style = if entry.stream == "stderr" && !failed {
             MUTED
+        } else if entry.stream == "stdout" {
+            CODE_TEXT
         } else {
             BODY
         };
@@ -144,6 +127,7 @@ pub(super) fn render(
     Body {
         rows,
         hidden: entries.len() - range.len(),
+        hidden_hunks: 0,
         unit: "lines",
     }
 }

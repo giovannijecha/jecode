@@ -91,10 +91,7 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         "read" => {
             let read = read(tool.arguments, result);
             match skill_name(field(tool.arguments, "path")) {
-                Some(_) => Line::new(
-                    &format!("Loaded skill · {}", read.trim_start_matches("Read ")),
-                    MUTED,
-                ),
+                Some(_) => Line::new(&format!("Loaded skill · {read}"), MUTED),
                 None => Line::new(&read, MUTED),
             }
         }
@@ -109,8 +106,15 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
 }
 
 fn running(tool: &Tool<'_>) -> Line {
-    let mut line = Line::default();
+    let mut line = if matches!(tool.name, "read" | "write" | "edit") {
+        Line::default()
+    } else {
+        Line::new("Running", TOOL_DIM)
+    };
     if let Some(elapsed) = tool.presentation.duration() {
+        if !line.spans.is_empty() {
+            line.push(" · ", TOOL_DIM);
+        }
         line.push(&activity::duration(elapsed), TOOL_DIM);
     }
     if let Some(note) = &tool.presentation.note {
@@ -171,7 +175,13 @@ fn command(result: &Value, failed: bool, elapsed: Option<Duration>, expanded: bo
 }
 
 fn changed(change: &Change) -> Line {
-    if change.added == 0 && (change.removed == 0 || change.created) {
+    if change.created {
+        return Line::new(
+            &format!("New file · {} {}", change.added, plural(change.added)),
+            MUTED,
+        );
+    }
+    if change.added == 0 && change.removed == 0 {
         return Line::new(&diff::summary(change), MUTED);
     }
     let mut line = Line::default();
@@ -193,7 +203,29 @@ fn changed(change: &Change) -> Line {
 
 pub(super) fn read(arguments: &Value, result: &Value) -> String {
     if let Some(view) = result.get("view").and_then(Value::as_str) {
-        return format!("Opened {}", if view == "pdf" { "PDF" } else { view });
+        let mut summary = format!("Opened {}", if view == "pdf" { "PDF" } else { view });
+        if let Some(attachment) = result.get("attachment") {
+            if view == "image"
+                && let (Some(width), Some(height)) = (
+                    attachment.get("width").and_then(Value::as_usize),
+                    attachment.get("height").and_then(Value::as_usize),
+                )
+            {
+                summary.push_str(&format!(" · {width}×{height}"));
+            }
+            if view == "pdf"
+                && let Some(pages) = attachment.get("pages").and_then(Value::as_usize)
+            {
+                summary.push_str(&format!(
+                    " · {pages} {}",
+                    if pages == 1 { "page" } else { "pages" }
+                ));
+            }
+            if let Some(bytes) = attachment.get("size").and_then(Value::as_usize) {
+                summary.push_str(&format!(" · {}", size(bytes)));
+            }
+        }
+        return summary;
     }
     if result.get("attachment").is_some() && result.get("content").is_none() {
         return "Attachment available".into();
@@ -207,11 +239,15 @@ pub(super) fn read(arguments: &Value, result: &Value) -> String {
             .get("byte_offset")
             .and_then(Value::as_usize)
             .unwrap_or(0);
-        return match (count, start) {
-            (0, _) => "Read 0 bytes".into(),
-            (count, 0) => format!("Read {count} bytes"),
-            (count, start) => format!("Read {count} bytes · from byte {start}"),
+        let mut summary = match (count, start) {
+            (0, _) => "0 bytes".into(),
+            (count, 0) => format!("{count} bytes"),
+            (count, start) => format!("{count} bytes · from byte {start}"),
         };
+        if let Some(next) = result.get("next_byte_offset").and_then(Value::as_usize) {
+            summary.push_str(&format!(" · more from {next}"));
+        }
+        return summary;
     }
     let count = lines(result);
     let start = result
@@ -219,11 +255,45 @@ pub(super) fn read(arguments: &Value, result: &Value) -> String {
         .or_else(|| arguments.get("offset"))
         .and_then(Value::as_usize)
         .unwrap_or(1);
-    match (count, start) {
-        (0, _) => "Read 0 lines".into(),
-        (count, 0 | 1) => format!("Read {count} {}", plural(count)),
-        (count, start) => format!("Read {count} {} · from line {start}", plural(count)),
+    let mut summary = match (count, start) {
+        (0, _) => "0 lines".into(),
+        (count, 0 | 1) => format!("{count} {}", plural(count)),
+        (count, start) => format!("{count} {} · from line {start}", plural(count)),
+    };
+    if start > 1
+        && let Some(total) = result.get("total_lines").and_then(Value::as_usize)
+    {
+        summary.push_str(&format!(" of {total}"));
+    } else if flag(result, "partial_line") {
+        if let Some(next) = result.get("next_byte_offset").and_then(Value::as_usize) {
+            summary.push_str(&format!(" · continues at byte {next}"));
+        }
+    } else if let Some(next) = result.get("next_offset").and_then(Value::as_usize) {
+        summary.push_str(&format!(" · more from {next}"));
     }
+    summary
+}
+
+/// Preserve the continuation on a narrow row by dropping its redundant start.
+pub(super) fn compact_read(mut line: Line, width: usize) -> Line {
+    if text::cells(&line.plain()) > width {
+        for span in &mut line.spans {
+            let start = span
+                .text
+                .find(" · from line ")
+                .or_else(|| span.text.find(" · from byte "));
+            let continuation = span
+                .text
+                .find(" · more from ")
+                .or_else(|| span.text.find(" · continues at byte "));
+            if let (Some(start), Some(continuation)) = (start, continuation)
+                && continuation > start
+            {
+                span.text.replace_range(start..continuation, "");
+            }
+        }
+    }
+    line.shortened(width)
 }
 
 pub(super) fn lines(result: &Value) -> usize {

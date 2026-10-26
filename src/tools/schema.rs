@@ -63,6 +63,18 @@ fn build_definitions() -> Value {
                 ),
             ]),
         );
+        fields.insert(
+            "description".into(),
+            Value::object([
+                ("type", Value::string("string")),
+                (
+                    "description",
+                    Value::string(
+                        "Optional short description of this call for the user. Omit it when the command is clear enough.",
+                    ),
+                ),
+            ]),
+        );
         tool(name, description, properties, required)
     };
     Value::Array(vec![

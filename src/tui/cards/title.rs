@@ -1,7 +1,7 @@
 use crate::tui::{
     line::{Line, Origin},
     text,
-    theme::{ACCENT, EMPHASIS, KEYWORD, MUTED, Style, TOOL_ACCENT},
+    theme::{ACCENT, BODY, EMPHASIS, KEYWORD, MUTED, Style, TOOL_ACCENT},
 };
 
 /// The tool name takes its family colour: reads blue, changes violet and
@@ -15,8 +15,8 @@ pub(super) fn family(name: &str) -> Style {
     }
 }
 
-/// `● Name(target)`. Words wrap under the open paren, each command line takes
-/// its own row, and a compact title keeps three rows ending in `…)`.
+/// File cards retain their original `● Name(path)` grammar. Routine calls use
+/// the rhythm renderer; file targets use BODY and their three-row preview.
 pub(super) fn rows(
     name: &str,
     target: &str,
@@ -67,7 +67,7 @@ pub(super) fn rows(
             let room = if index == 0 { first } else { rest };
             if cut && index + 1 == count {
                 if text::cells(&body) + 2 > room {
-                    body = Line::new(&body, EMPHASIS)
+                    body = Line::new(&body, BODY)
                         .shortened(room.saturating_sub(1))
                         .plain();
                     body.pop();
@@ -81,10 +81,10 @@ pub(super) fn rows(
             };
             match body.strip_suffix(')').filter(|_| index + 1 == count) {
                 Some(open) => {
-                    line.push(open, EMPHASIS);
+                    line.push(open, BODY);
                     line.push(")", named);
                 }
-                None => line.push(&body, EMPHASIS),
+                None => line.push(&body, BODY),
             }
             line.origin = Some(Origin { line: 0, character });
             character += body.chars().count() + usize::from(newline_after);
@@ -101,7 +101,7 @@ pub(super) fn rows(
 
 /// Word-wrapped rows: the first `first` cells wide, the rest `rest` cells.
 fn words(value: &str, first: usize, rest: usize) -> Vec<String> {
-    let mut wrapped = Line::new(value, EMPHASIS).into_wrapped(first, true);
+    let mut wrapped = Line::new(value, BODY).into_wrapped(first, true);
     let mut rows = Vec::new();
     if let Some(row) = wrapped.next() {
         rows.push(row.plain());

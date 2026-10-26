@@ -26,6 +26,8 @@ pub const SELECTED_SURFACE: Surface = Surface::rgb(53, 61, 75); // #353D4B
 pub const CODE_SURFACE: Surface = Surface::rgb(32, 37, 44); // #20252C
 pub const DIFF_ADDED_SURFACE: Surface = Surface::rgb(30, 46, 35); // #1E2E23
 pub const DIFF_REMOVED_SURFACE: Surface = Surface::rgb(49, 32, 38); // #312026
+pub const DIFF_ADDED_STRONG: Surface = Surface::rgb(44, 74, 51); // #2C4A33
+pub const DIFF_REMOVED_STRONG: Surface = Surface::rgb(82, 48, 57); // #523039
 
 // The software caret carries its own fill, even inside a shaded panel.
 pub const CURSOR: Style = Style::rgb(26, 27, 38).filled(192, 202, 245); // #1A1B26 / #C0CAF5
@@ -161,5 +163,39 @@ mod tests {
         assert_eq!(SELECTED_SURFACE.to_string(), "48;2;53;61;75");
         assert_eq!(CODE_SURFACE.to_string(), "48;2;32;37;44");
         assert_eq!(Surface::TERMINAL.to_string(), "49");
+    }
+
+    fn luminance(Rgb(red, green, blue): Rgb) -> f64 {
+        let linear = |channel: u8| {
+            let channel = f64::from(channel) / 255.0;
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    }
+
+    fn contrast(foreground: Style, surface: Surface) -> f64 {
+        let fore = luminance(foreground.foreground.unwrap());
+        let back = luminance(surface.0.unwrap());
+        (fore.max(back) + 0.05) / (fore.min(back) + 0.05)
+    }
+
+    #[test]
+    fn tinted_diff_rows_keep_text_and_changed_fragments_legible() {
+        for (foreground, surface) in [
+            (CODE_TEXT, DIFF_ADDED_SURFACE),
+            (CODE_TEXT, DIFF_REMOVED_SURFACE),
+            (TOOL_DIM, DIFF_ADDED_SURFACE),
+            (TOOL_DIM, DIFF_REMOVED_SURFACE),
+            (GOOD, DIFF_ADDED_STRONG),
+            (BAD, DIFF_REMOVED_STRONG),
+        ] {
+            assert!(contrast(foreground, surface) >= 4.5);
+        }
+        assert_eq!(DIFF_ADDED_STRONG.to_string(), "48;2;44;74;51");
+        assert_eq!(DIFF_REMOVED_STRONG.to_string(), "48;2;82;48;57");
     }
 }

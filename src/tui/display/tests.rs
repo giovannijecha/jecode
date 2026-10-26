@@ -211,14 +211,14 @@ fn collapsing_a_later_call_returns_reading_to_its_chapter_then_leaves_error_read
         "collapse should place the corresponding chapter at the reading position"
     );
 
-    read_at(&mut display, "Exit 101");
+    read_at(&mut display, "exit 101");
     ready(&mut display, &state);
     assert!(
         display
             .visible
             .iter()
             .take(3)
-            .any(|line| line.plain().contains("Exit 101")),
+            .any(|line| line.plain().contains("exit 101")),
         "ordinary reading of a visible error must not jump back to the chapter"
     );
 

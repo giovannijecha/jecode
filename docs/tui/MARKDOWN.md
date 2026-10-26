@@ -4,6 +4,9 @@ The TUI styles a practical subset of Markdown in assistant responses. The
 original response text remains available in the conversation archive,
 `/copy`, and `/export`; single-prompt and `--plain` output also use the
 original text. Terminal styling does not change what the model said.
+In the conversation, a neutral `●` opens each assistant response. Wrapped
+rows and later paragraphs hang two cells in; the dot is presentation, not
+part of the archived or copied response.
 
 ## Supported display syntax
 
@@ -15,7 +18,7 @@ original text. Terminal styling does not change what the model said.
 | `[label](destination)` | Underlined accent label followed by the muted destination in parentheses. Jecode does not open it. |
 | `-`, `*`, `+`, or numbered list items | A hanging indent when the item wraps. `[ ]` and `[x]`/`[X]` render as task boxes. |
 | `>` quote lines | A muted quote with a vertical guide. |
-| Three or more matching backticks or tildes | A full-width code panel with a language label and one cell of padding on each side when space allows. |
+| Three or more matching backticks or tildes | A code panel spanning the indented response width, with a language label and one cell of padding on each side when space allows. |
 | Three or more matching `-`, `*`, or `_` markers | A horizontal rule. |
 
 Fenced Rust, shell, JSON, JavaScript/TypeScript and XML/HTML code gets light

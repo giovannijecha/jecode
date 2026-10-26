@@ -57,7 +57,7 @@ fn the_composer_stays_at_the_bottom_below_a_short_transcript() {
     state.editor.insert("next draft");
     let frame = frame(&state, "fixture/model", "fixture folder");
     assert_eq!(frame.history.len(), 2);
-    assert_eq!(frame.history[1].last().unwrap().plain(), "response");
+    assert_eq!(frame.history[1].last().unwrap().plain(), "● response");
     assert_eq!(frame.composer, state.height - 4);
     assert_eq!(frame.live[frame.composer - 1], Line::default());
     assert_eq!(frame.live.len(), state.height);

@@ -1,6 +1,7 @@
 use super::*;
-use crate::tui::theme::{BODY, DIFF_ADDED_SURFACE, KEYWORD};
+use crate::tui::theme::{CODE_TEXT, DIFF_ADDED_SURFACE, KEYWORD};
 
+mod files;
 mod reads;
 
 fn draw(
@@ -53,7 +54,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
                 ("tab_id", Value::string("tab-1")),
             ]),
             Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]),
-            "Browser(screenshot tab-1)",
+            "Browser(screenshot)",
             "Screenshot · tmp:browser/shot.png",
         ),
     ];
@@ -72,6 +73,9 @@ fn web_and_browser_cards_show_action_target_and_result() {
         let text = plain(&rows);
         assert!(text.contains(title), "{text}");
         assert!(text.contains(outcome), "{text}");
+        if name == "browser" {
+            assert_eq!(rows[1].plain(), "  ⎿ tab-1");
+        }
     }
 }
 
@@ -94,13 +98,13 @@ fn title_and_result_are_left_aligned_without_a_tree_or_status_column() {
         rows[0]
             .spans
             .iter()
-            .any(|span| span.text == "Bash(" && span.style == TOOL_ACCENT.bold())
+            .any(|span| span.text == "Bash" && span.style == TOOL_ACCENT.bold())
     );
     assert!(rows[0].background.is_none());
 }
 
 #[test]
-fn wrapped_titles_retain_long_unicode_commands_and_fit_narrow_views() {
+fn expanded_titles_keep_long_unicode_commands_and_fit_narrow_views() {
     let command = "cargo test --locked --offline -- test_é_東京_🦀 --nocapture";
     for columns in [20, 40, 80, 120] {
         let rows = draw(
@@ -114,18 +118,22 @@ fn wrapped_titles_retain_long_unicode_commands_and_fit_narrow_views() {
                 ..Presentation::default()
             },
         );
-        // Words wrap under the open paren; every character survives.
-        let title: String = rows
+        let title: Vec<_> = rows
             .iter()
             .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
-            .flat_map(|row| row.plain().chars().skip(2).collect::<Vec<_>>())
-            .filter(|character| !character.is_whitespace())
             .collect();
-        let expected: String = format!("Bash({command})")
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .collect();
-        assert_eq!(title, expected);
+        assert!(title[0].plain().starts_with("● Bash(cargo"));
+        assert!(!title.iter().any(|row| row.plain().contains('…')));
+        let retained = title
+            .iter()
+            .map(|row| row.plain().chars().skip(2).collect::<String>())
+            .collect::<String>();
+        assert_eq!(
+            retained.split_whitespace().collect::<String>(),
+            format!("Bash({command})")
+                .split_whitespace()
+                .collect::<String>()
+        );
         assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
     }
     for columns in 2..20 {
@@ -182,7 +190,11 @@ fn compact_long_lines_stay_bounded_and_expansion_retains_the_tail() {
                 ..Presentation::default()
             },
         );
-        assert!(plain(&expanded).contains("END"));
+        let output: String = plain(&expanded)
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        assert!(output.contains("END"));
         assert!(expanded.len() > compact.len());
     }
 }
@@ -202,7 +214,7 @@ fn running_states_stay_explicit_without_a_selection_mode() {
     );
     assert!(rows[0].background.is_none());
     assert_eq!(rows[0].spans[0].style, crate::tui::theme::TOOL_PULSE[2]);
-    assert!(plain(&rows).contains("⎿ 2.4s"));
+    assert!(plain(&rows).contains("⎿ Running · 2.4s"));
     assert!(rows[1..].iter().all(|row| row.background.is_none()));
 }
 
@@ -230,7 +242,7 @@ fn failed_commands_prioritize_errors_and_expand_both_streams() {
         text.contains("⎿ Exit 101 · error 1")
             && text.contains("    error 3")
             && !text.contains("error 4")
-            && text.contains("7 more lines")
+            && !text.contains("more lines")
     );
     assert!(!text.contains("compiled one"));
     let rows = draw(
@@ -254,7 +266,7 @@ fn failed_commands_prioritize_errors_and_expand_both_streams() {
     assert!(
         rows.iter()
             .flat_map(|row| &row.spans)
-            .any(|span| span.text == "compiled one" && span.style == BODY)
+            .any(|span| span.text == "compiled one" && span.style == CODE_TEXT)
     );
 }
 
@@ -283,86 +295,14 @@ fn capture_notices_survive_collapse_and_expansion() {
         let text = plain(&rows);
         assert!(text.contains("last") && text.contains("full output saved"));
         assert_eq!(text.contains("    old"), expanded);
-        assert!(text.contains(if expanded { "⎿ Done" } else { "⎿ last" }));
-        assert_eq!(text.contains("2 more lines"), !expanded);
+        if expanded {
+            assert!(!text.contains("⎿ Done"));
+            assert!(text.contains("exit 0"));
+        } else {
+            assert!(text.contains("⎿ last"));
+        }
+        assert_eq!(text.contains("+2 lines"), !expanded);
     }
-}
-
-#[test]
-fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
-    let change = Change::between(
-        Some("fn login() {\n    old();\n}\n"),
-        "fn login() {\n    new();\n    save();\n}\n",
-    )
-    .unwrap();
-    let arguments = args("path", "src/auth.rs");
-    let initial = draw(
-        "edit",
-        &arguments,
-        Some(&ok()),
-        Some(&change),
-        80,
-        &Presentation::default(),
-    );
-    assert!(plain(&initial).contains("● Update(src/auth.rs)\n  ⎿ +2 −1 lines"));
-    assert!(initial.iter().any(|row| {
-        row.spans
-            .iter()
-            .any(|span| span.background == Some(DIFF_ADDED_SURFACE))
-    }));
-    let collapsed = draw(
-        "edit",
-        &arguments,
-        Some(&ok()),
-        Some(&change),
-        80,
-        &Presentation {
-            expanded: false,
-            ..Presentation::default()
-        },
-    );
-    assert_eq!(initial, collapsed);
-    let failed = Value::object([(
-        "error",
-        Value::string("File is read-only; its content was not changed"),
-    )]);
-    let rows = draw(
-        "edit",
-        &arguments,
-        Some(&failed),
-        Some(&change),
-        80,
-        &Presentation::default(),
-    );
-    assert!(!plain(&rows).contains("new();") && !plain(&rows).contains("+2"));
-    assert!(plain(&rows).contains("⎿ File is read-only"));
-}
-
-#[test]
-fn old_sessions_keep_snippet_diffs_without_fake_file_coordinates_or_eof() {
-    let arguments = Value::object([
-        ("path", Value::string("legacy.rs")),
-        ("old_text", Value::string("same\nold")),
-        ("new_text", Value::string("same\nnew")),
-    ]);
-    let rows = draw(
-        "edit",
-        &arguments,
-        Some(&ok()),
-        None,
-        80,
-        &Presentation::default(),
-    );
-    let text = plain(&rows);
-    assert!(
-        text.contains("+1 −1 lines") && text.contains("Original file coordinates unavailable.")
-    );
-    assert!(
-        !text.contains("No newline at end of file")
-            && !text.contains("    1 −")
-            && !text.contains("    1 +")
-    );
-    assert_eq!(text.matches("same").count(), 1);
 }
 
 #[test]
@@ -409,9 +349,21 @@ fn process_states_and_lists_name_their_actual_outcomes() {
         &Presentation::default(),
     );
     assert!(
-        plain(&rows).contains("1 process · 1 running")
-            && plain(&rows).contains("p1  running  cargo check")
+        plain(&rows).contains("1 process · 1 running  +1 line")
+            && !plain(&rows).contains("p1  running  cargo check")
     );
+    let expanded = draw(
+        "process",
+        &arguments,
+        Some(&list),
+        None,
+        80,
+        &Presentation {
+            expanded: true,
+            ..Presentation::default()
+        },
+    );
+    assert!(plain(&expanded).contains("p1  running  cargo check"));
 }
 
 #[test]
@@ -480,5 +432,5 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
         &Presentation::default(),
     );
     assert_eq!(rows.len(), 2);
-    assert!(plain(&rows).contains("Created an empty file"));
+    assert!(plain(&rows).contains("New file · 0 lines"));
 }

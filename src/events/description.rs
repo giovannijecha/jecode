@@ -1,0 +1,85 @@
+use crate::json::Value;
+
+pub fn description(name: &str, arguments: &Value) -> String {
+    if matches!(name, "read" | "bash" | "process" | "web" | "browser")
+        && let Some(label) = arguments.get("description").and_then(Value::as_str)
+        && !label.trim().is_empty()
+    {
+        return label.trim().into();
+    }
+    target(name, arguments)
+}
+
+/// The invocation target, independently of an optional display description.
+pub fn target(name: &str, arguments: &Value) -> String {
+    if name == "web" || name == "browser" {
+        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        let action = field("action");
+        let target = if name == "web" {
+            if action == "crawl" {
+                let urls = arguments
+                    .get("urls")
+                    .and_then(Value::as_array)
+                    .unwrap_or(&[]);
+                if let Some(first) = urls.first().and_then(Value::as_str) {
+                    return if urls.len() == 1 {
+                        format!("crawl {first}")
+                    } else {
+                        format!("crawl {first} (+{} URLs)", urls.len() - 1)
+                    };
+                }
+                field("crawl_id")
+            } else {
+                field("url")
+            }
+        } else {
+            match action {
+                "open" | "navigate" => field("url"),
+                "click" | "fill" | "wait" => field("selector"),
+                "press" => field("key"),
+                "evaluate" => field("expression"),
+                "cdp" => field("method"),
+                _ => field("tab_id"),
+            }
+        };
+        return format!("{action} {target}").trim_end().into();
+    }
+    if name == "process" {
+        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        return format!("{} {}", field("action"), field("process_id"))
+            .trim_end()
+            .into();
+    }
+    if name == "checkpoint" {
+        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        let mut words = vec![field("action"), field("ref")];
+        if let Some(paths) = arguments.get("paths").and_then(Value::as_array) {
+            words.extend(paths.iter().filter_map(Value::as_str));
+        }
+        words.retain(|word| !word.is_empty());
+        return words.join(" ");
+    }
+    if name == "bash" {
+        return arguments
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid arguments")
+            .into();
+    }
+    let path = arguments
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("invalid arguments");
+    if name == "read" {
+        let offset = arguments
+            .get("offset")
+            .and_then(Value::as_usize)
+            .unwrap_or(1);
+        let limit = arguments
+            .get("limit")
+            .and_then(Value::as_usize)
+            .unwrap_or(200);
+        return format!("{path} (from line {offset}, up to {limit} lines)");
+    }
+    path.into()
+}

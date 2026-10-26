@@ -29,7 +29,7 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .lines()
         .find(|line| {
             line.trim()
-                .strip_prefix("⎿ ")
+                .strip_prefix("⎿ Running · ")
                 .map(str::trim)
                 .unwrap_or_default()
                 .strip_suffix('s')
@@ -38,7 +38,7 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .unwrap();
     let seconds: f64 = summary
         .trim()
-        .strip_prefix("⎿ ")
+        .strip_prefix("⎿ Running · ")
         .unwrap()
         .trim_end_matches('s')
         .parse()
@@ -92,13 +92,13 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     display.scroll(Scroll::Start);
     display.scroll(Scroll::Rows(2));
     step(&mut display, &mut screen, &state, now);
-    assert!(screen.visible().starts_with("● Activity (2 calls)"));
+    assert!(screen.visible().starts_with("● Activity  2 calls"));
     assert!(!screen.visible().contains("    one"));
     let generation = state.generation;
     state.toggle_tools();
     step(&mut display, &mut screen, &state, now);
     assert_eq!(state.generation, generation);
-    assert!(screen.visible().starts_with("● Activity (2 calls)"));
+    assert!(screen.visible().starts_with("● Activity  2 calls"));
     assert!(screen.visible().contains("    one"));
     assert_eq!(screen.visible().matches("● Bash(first)").count(), 1);
 
@@ -109,7 +109,7 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
         &state,
         now + Duration::from_millis(100),
     );
-    assert!(screen.visible().starts_with("● Activity (2 calls)"));
+    assert!(screen.visible().starts_with("● Activity  2 calls"));
     assert!(screen.visible().contains("    one"));
     state.toggle_tools();
     step(
@@ -120,6 +120,156 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     );
     assert!(!screen.visible().contains("    one"));
     assert!(screen.history.is_empty());
+}
+
+#[test]
+fn tail_rows_above_a_growing_work_chapter_never_move_down() {
+    for columns in [80, 40] {
+        let now = Instant::now();
+        let mut state = State {
+            width: columns,
+            height: 20,
+            ..State::default()
+        };
+        state.message(Kind::Assistant, &"Earlier transcript line.  \n".repeat(25));
+        state.begin_tool_turn();
+        let mut screen = Screen::new(columns, state.height);
+        let mut display = Display::new((columns, state.height));
+        let mut previous = usize::MAX;
+        let mut observe = |state: &State, phase: &str| {
+            step(&mut display, &mut screen, state, now);
+            drain(&mut display, &mut screen, state, now);
+            let title = if state.items.len() == 2 {
+                "● Bash(printf one)"
+            } else {
+                "● Inspect sources"
+            };
+            let current = screen
+                .visible()
+                .lines()
+                .position(|line| line.contains(title))
+                .unwrap_or_else(|| panic!("{phase}: work chapter missing\n{}", screen.visible()));
+            assert!(
+                current <= previous,
+                "{columns} columns, {phase}: chapter moved from {previous} to {current}\n{}",
+                screen.visible()
+            );
+            previous = current;
+        };
+        let begin = |state: &mut State, id: &str, name: &str, args: Value| {
+            state.event(Event::ToolStarted {
+                id: id.into(),
+                name: name.into(),
+                arguments: args,
+            });
+        };
+        let done = |state: &mut State, id: &str, name: &str, result: Value| {
+            state.event(Event::ToolFinished {
+                id: id.into(),
+                name: name.into(),
+                summary: crate::events::tool_summary(name, &result),
+                result,
+            });
+        };
+        let work = "Inspect sources";
+        begin(
+            &mut state,
+            "b1",
+            "bash",
+            Value::object([
+                ("command", Value::string("printf one")),
+                ("work", Value::string(work)),
+            ]),
+        );
+        observe(&state, "singleton bash starts");
+        done(
+            &mut state,
+            "b1",
+            "bash",
+            Value::object([("exit_code", Value::number(0))]),
+        );
+        observe(&state, "singleton bash finishes");
+        begin(
+            &mut state,
+            "r1",
+            "read",
+            Value::object([
+                ("path", Value::string("src/a.rs")),
+                ("work", Value::string(work)),
+            ]),
+        );
+        observe(&state, "singleton becomes chapter");
+        done(
+            &mut state,
+            "r1",
+            "read",
+            Value::object([("content", Value::string("1: source\n"))]),
+        );
+        observe(&state, "read finishes");
+        begin(
+            &mut state,
+            "r2",
+            "read",
+            Value::object([
+                ("path", Value::string("missing.rs")),
+                ("work", Value::string(work)),
+            ]),
+        );
+        observe(&state, "read starts");
+        done(
+            &mut state,
+            "r2",
+            "read",
+            Value::object([("error", Value::string("permission denied"))]),
+        );
+        observe(&state, "read fails");
+        begin(
+            &mut state,
+            "b2",
+            "bash",
+            Value::object([
+                ("command", Value::string("printf two")),
+                ("work", Value::string(work)),
+            ]),
+        );
+        observe(&state, "bash starts");
+        done(
+            &mut state,
+            "b2",
+            "bash",
+            Value::object([("exit_code", Value::number(0))]),
+        );
+        observe(&state, "bash finishes");
+        begin(
+            &mut state,
+            "browser",
+            "browser",
+            Value::object([
+                ("action", Value::string("snapshot")),
+                ("tab_id", Value::string("tab-1")),
+                ("work", Value::string(work)),
+            ]),
+        );
+        observe(&state, "browser starts");
+        done(
+            &mut state,
+            "browser",
+            "browser",
+            Value::object([("snapshot_path", Value::string("tmp:browser/snapshot.txt"))]),
+        );
+        observe(&state, "browser finishes");
+        state.close_tools();
+        state.finish_tool_turn();
+        observe(&state, "turn closes");
+        state.begin_tool_turn();
+        begin(
+            &mut state,
+            "next-turn",
+            "read",
+            Value::object([("path", Value::string("src/next.rs"))]),
+        );
+        observe(&state, "new turn takes the keycap");
+    }
 }
 
 #[test]

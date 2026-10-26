@@ -3,7 +3,7 @@ use crate::{
     tui::{
         line::Line,
         text,
-        theme::{BAD, DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, GOOD},
+        theme::{BAD, DIFF_ADDED_STRONG, DIFF_REMOVED_STRONG, GOOD},
     },
 };
 use std::ops::Range;
@@ -61,17 +61,17 @@ fn changed(source: &str, other: &str) -> Range<usize> {
 
 /// Keep syntax outside the changed fragment; the fragment owns its surface.
 pub(super) fn highlight(code: Line, source: &str, other: Option<&str>, kind: Kind) -> Line {
-    let range = other.map_or_else(
-        || 0..source.len(),
-        |other| changed(source, &text::clean(other)),
-    );
+    let Some(other) = other else {
+        return code;
+    };
+    let range = changed(source, &text::clean(other));
     if range.is_empty() {
         return code;
     }
     let (style, background) = if kind == Kind::Removed {
-        (BAD.bold(), DIFF_REMOVED_SURFACE)
+        (BAD.bold(), DIFF_REMOVED_STRONG)
     } else {
-        (GOOD.bold(), DIFF_ADDED_SURFACE)
+        (GOOD.bold(), DIFF_ADDED_STRONG)
     };
     let mut result = Line::default();
     let mut at = 0;

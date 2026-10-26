@@ -5,7 +5,7 @@ use crate::{
         line::Line,
         syntax::Highlighter,
         text,
-        theme::{BAD, GOOD, MUTED, Style, TOOL_DIM},
+        theme::{BAD, DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, GOOD, MUTED, Style, TOOL_DIM},
     },
 };
 
@@ -93,7 +93,12 @@ fn render_inner(
             break;
         }
         if index > 0 {
-            rows.extend(wrapped("…", MUTED, columns, origin, "    ", "    ", true));
+            rows.push(
+                Line::new(&format!("{} ⋮", " ".repeat(digits)), TOOL_DIM)
+                    .at_source(origin)
+                    .gutter("    ", TOOL_DIM)
+                    .shortened(columns),
+            );
         }
         let mut old_lexer = Highlighter::for_path(path);
         let mut new_lexer = Highlighter::for_path(path);
@@ -218,9 +223,17 @@ fn render_inner(
             true,
         ));
     }
+    let hidden = total - shown;
+    let hidden_hunks = if hidden > 0 {
+        change.hunks.len().saturating_sub(1)
+            + usize::from(shown < change.hunks.first().map_or(0, Vec::len))
+    } else {
+        0
+    };
     Body {
         rows,
-        hidden: total - shown,
+        hidden,
+        hidden_hunks,
         unit: "diff rows",
     }
 }
@@ -246,6 +259,15 @@ fn entry_rows(
         columns,
         source,
     );
+    if let Some(surface) = match entry.kind {
+        Kind::Removed => Some(DIFF_REMOVED_SURFACE),
+        Kind::Added => Some(DIFF_ADDED_SURFACE),
+        Kind::Context => None,
+    } {
+        for row in &mut rows {
+            row.background = Some(surface);
+        }
+    }
     if entry.no_newline {
         rows.extend(wrapped(
             "No newline at end of file",

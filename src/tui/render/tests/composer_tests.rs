@@ -70,7 +70,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
             .rows()
             .iter()
             .flatten()
-            .filter(|line| line.plain().trim_end() == "retained answer")
+            .filter(|line| line.plain().trim_end().ends_with("retained answer"))
             .count(),
         20
     );
@@ -135,7 +135,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
             .rows()
             .iter()
             .flatten()
-            .filter(|line| line.plain().trim_end() == "retained paragraph")
+            .filter(|line| line.plain().trim_end().ends_with("retained paragraph"))
             .count(),
         40
     );
@@ -144,7 +144,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
             .rows()
             .iter()
             .flatten()
-            .filter(|line| line.plain().trim_end() == "streamed paragraph")
+            .filter(|line| line.plain().trim_end().ends_with("streamed paragraph"))
             .count(),
         20
     );

@@ -20,6 +20,7 @@ struct Fence {
 }
 
 // An owned display subset. Original messages stay in the conversation/archive.
+#[cfg(test)]
 pub fn render(value: &str, columns: usize) -> Vec<Line> {
     Rows::new(value, columns).flatten().collect()
 }

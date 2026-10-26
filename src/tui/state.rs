@@ -405,6 +405,8 @@ impl State {
 }
 
 #[cfg(test)]
+mod chapter_height_tests;
+#[cfg(test)]
 mod chapter_review_tests;
 #[cfg(test)]
 mod chapter_tests;

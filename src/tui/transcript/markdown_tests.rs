@@ -56,7 +56,7 @@ fn growing_streamed_tables_rebuild_from_source_and_settle_once() {
             .last()
             .unwrap()
             .iter()
-            .any(|row| row.plain() == "Name:")
+            .any(|row| row.plain().ends_with("Name:"))
     );
     complete(&mut layout, &state, 79);
     assert_eq!(layout.blocks, wide);
@@ -81,12 +81,15 @@ fn table_measurement_yields_and_a_resize_discards_the_partial_width_layout() {
     complete(&mut layout, &state, 10);
     let narrow = layout.blocks.last().unwrap();
     assert_eq!(
-        narrow.iter().filter(|row| row.plain() == "Name:").count(),
+        narrow
+            .iter()
+            .filter(|row| row.plain().ends_with("Name:"))
+            .count(),
         600
     );
     complete(&mut layout, &state, 40);
     let wide = layout.blocks.last().unwrap();
-    assert_eq!(wide, &markdown::render(&source, 40));
+    assert_eq!(wide, &prose::render(&source, 40));
     assert_eq!(wide.len(), 602);
     assert_eq!(
         wide.iter()
@@ -138,7 +141,7 @@ fn live_stream_renders_a_bounded_prefix_and_discards_replaced_or_removed_text() 
     assert!(!layout.pending_ready(&state));
     // A pass emits a bounded number of complete source lines.
     let prefix: Vec<_> = layout.pending_blocks()[0].iter().map(Line::plain).collect();
-    assert_eq!(&prefix[..3], ["Line 0", "", "Line 1"]);
+    assert_eq!(&prefix[..3], ["● Line 0", "  ", "  Line 1"]);
     assert!(prefix.len() <= 32);
     assert!(!prefix.iter().any(|line| line == "Line 599"));
 
@@ -148,10 +151,7 @@ fn live_stream_renders_a_bounded_prefix_and_discards_replaced_or_removed_text() 
     });
     layout.prepare_pending(&state, 32);
     assert!(layout.pending_ready(&state));
-    assert_eq!(
-        layout.pending_blocks()[0],
-        markdown::render(replacement, 40)
-    );
+    assert_eq!(layout.pending_blocks()[0], prose::render(replacement, 40));
 
     state.event(Event::RequestDiscarded);
     layout.prepare(&state, 40, 64);
@@ -189,7 +189,7 @@ fn empty_stream_snapshot_emits_no_phantom_row_before_visible_text() {
             .iter()
             .map(Line::plain)
             .collect::<Vec<_>>(),
-        ["", "Answer"]
+        ["", "● Answer"]
     );
 }
 

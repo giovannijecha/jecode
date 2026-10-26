@@ -290,78 +290,8 @@ pub fn process_status(result: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-pub fn description(name: &str, arguments: &Value) -> String {
-    if name == "web" || name == "browser" {
-        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
-        let action = field("action");
-        let target = if name == "web" {
-            if action == "crawl" {
-                let urls = arguments
-                    .get("urls")
-                    .and_then(Value::as_array)
-                    .unwrap_or(&[]);
-                if let Some(first) = urls.first().and_then(Value::as_str) {
-                    return if urls.len() == 1 {
-                        format!("crawl {first}")
-                    } else {
-                        format!("crawl {first} (+{} URLs)", urls.len() - 1)
-                    };
-                }
-                field("crawl_id")
-            } else {
-                field("url")
-            }
-        } else {
-            match action {
-                "open" | "navigate" => field("url"),
-                "click" | "fill" | "wait" => field("selector"),
-                "press" => field("key"),
-                "evaluate" => field("expression"),
-                "cdp" => field("method"),
-                _ => field("tab_id"),
-            }
-        };
-        return format!("{action} {target}").trim_end().into();
-    }
-    if name == "process" {
-        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
-        return format!("{} {}", field("action"), field("process_id"))
-            .trim_end()
-            .into();
-    }
-    if name == "checkpoint" {
-        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
-        let mut words = vec![field("action"), field("ref")];
-        if let Some(paths) = arguments.get("paths").and_then(Value::as_array) {
-            words.extend(paths.iter().filter_map(Value::as_str));
-        }
-        words.retain(|word| !word.is_empty());
-        return words.join(" ");
-    }
-    if name == "bash" {
-        return arguments
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or("invalid arguments")
-            .into();
-    }
-    let path = arguments
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or("invalid arguments");
-    if name == "read" {
-        let offset = arguments
-            .get("offset")
-            .and_then(Value::as_usize)
-            .unwrap_or(1);
-        let limit = arguments
-            .get("limit")
-            .and_then(Value::as_usize)
-            .unwrap_or(200);
-        return format!("{path} (from line {offset}, up to {limit} lines)");
-    }
-    path.into()
-}
+mod description;
+pub use description::{description, target};
 
 #[cfg(test)]
 mod tests {
@@ -474,5 +404,41 @@ mod tests {
             tool_summary("web", &crawl),
             "crawled 35 pages; 1 failed in preview; 4 queued; manifest repaired"
         );
+    }
+
+    #[test]
+    fn routine_description_overrides_command_and_blank_falls_back() {
+        for (name, key, command, fallback) in [
+            (
+                "read",
+                "path",
+                "src/lib.rs",
+                "src/lib.rs (from line 1, up to 200 lines)",
+            ),
+            ("bash", "command", "cargo test", "cargo test"),
+            ("process", "action", "list", "list"),
+            ("web", "action", "fetch", "fetch"),
+            ("browser", "action", "tabs", "tabs"),
+        ] {
+            let arguments = Value::object([
+                (key, Value::string(command)),
+                ("description", Value::string("Inspect relevant results")),
+            ]);
+            assert_eq!(
+                description(name, &arguments),
+                "Inspect relevant results",
+                "{name}"
+            );
+            assert_eq!(target(name, &arguments), fallback, "{name}");
+            for blank in ["", " \t "] {
+                let arguments = Value::object([
+                    (key, Value::string(command)),
+                    ("description", Value::string(blank)),
+                ]);
+                assert_eq!(description(name, &arguments), fallback, "{name}");
+            }
+            let arguments = Value::object([(key, Value::string(command))]);
+            assert_eq!(description(name, &arguments), fallback, "{name}");
+        }
     }
 }

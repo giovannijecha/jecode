@@ -73,7 +73,7 @@ fn every_completed_bash_target_stays_visible_below_a_label_and_in_older_turns() 
         state.close_tools();
         state.finish_tool_turn();
         let before = visible(&state);
-        assert!(before.contains("(2 calls)"), "{before}");
+        assert!(before.contains("  2 calls"), "{before}");
         for cmd in ["printf first-command", "printf second-command"] {
             assert!(before.contains(cmd), "{before}");
         }
@@ -165,9 +165,9 @@ fn a_second_matching_call_converts_the_singleton_and_invalidates_its_cached_prev
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rows.contains("● Inspect (2 calls)"), "{rows}");
+    assert!(rows.contains("● Inspect  2 calls"), "{rows}");
     assert!(
-        rows.contains("Bash printf first") && rows.contains("Bash printf second"),
+        rows.contains("Bash  printf first") && rows.contains("Bash  printf second"),
         "{rows}"
     );
     assert!(
@@ -197,7 +197,7 @@ fn whitespace_equivalent_labels_share_one_chapter_without_rewriting_arguments() 
     state.close_tools();
     let text = visible(&state);
     assert_eq!(
-        text.matches("● Inspect parser (4 calls)").count(),
+        text.matches("● Inspect parser  4 calls").count(),
         1,
         "{text}"
     );
@@ -230,6 +230,6 @@ fn labels_with_distinct_suffixes_beyond_the_display_limit_keep_separate_chapters
     }
     state.close_tools();
     let text = visible(&state);
-    assert_eq!(text.matches("(2 calls)").count(), 2, "{text}");
-    assert!(!text.contains("(4 calls)"));
+    assert_eq!(text.matches("  2 calls").count(), 2, "{text}");
+    assert!(!text.contains("  4 calls"));
 }

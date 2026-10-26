@@ -7,7 +7,7 @@ fn tool_catalog_and_encoded_size_are_reused() {
 }
 
 #[test]
-fn work_label_is_optional_only_for_routine_tools() {
+fn work_and_description_are_optional_only_for_routine_tools() {
     for tool in definitions().as_array().unwrap() {
         let name = tool.get("name").and_then(Value::as_str).unwrap();
         let parameters = tool.get("parameters").unwrap();
@@ -16,7 +16,9 @@ fn work_label_is_optional_only_for_routine_tools() {
             .get("required")
             .and_then(Value::as_array)
             .unwrap();
-        assert!(!required.contains(&Value::string("work")), "{name}");
+        for field in ["work", "description"] {
+            assert!(!required.contains(&Value::string(field)), "{name}: {field}");
+        }
         assert_eq!(
             parameters.get("additionalProperties"),
             Some(&Value::Bool(false)),
@@ -26,8 +28,22 @@ fn work_label_is_optional_only_for_routine_tools() {
             let work = properties.get("work").unwrap();
             assert_eq!(work.get("type"), Some(&Value::string("string")), "{name}");
             assert!(work.get("description").and_then(Value::as_str).is_some());
+            let description = properties.get("description").unwrap();
+            assert_eq!(
+                description.get("type"),
+                Some(&Value::string("string")),
+                "{name}"
+            );
+            assert!(
+                description
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .is_some(),
+                "{name}"
+            );
         } else {
             assert!(properties.get("work").is_none(), "{name}");
+            assert!(properties.get("description").is_none(), "{name}");
         }
     }
 }

@@ -69,15 +69,17 @@ fn tool_change_survives_journal_and_replays_without_entering_tool_result() {
 }
 
 #[test]
-fn work_labels_in_tool_arguments_survive_journal_resume_and_record_projection() {
+fn routine_labels_and_descriptions_survive_journal_resume_and_record_projection() {
     let (_directory, _home, store, mut doc) = fixture();
     let read = Value::object([
         ("path", Value::string("src/lib.rs")),
         ("work", Value::string("Inspect the parser")),
+        ("description", Value::string("Read the parser entry point")),
     ]);
     let bash = Value::object([
         ("command", Value::string("cargo test --locked --offline")),
         ("work", Value::string("Verify the parser")),
+        ("description", Value::string("Run the parser tests")),
     ]);
     let calls = vec![
         tool_call("read-labeled", "read", read.clone()),
@@ -135,6 +137,7 @@ fn work_labels_in_tool_arguments_survive_journal_resume_and_record_projection() 
         Value::object([("path", Value::string("README.md"))])
     );
     assert!(tools[2].2.get("work").is_none());
+    assert!(tools[2].2.get("description").is_none());
 }
 
 #[test]
