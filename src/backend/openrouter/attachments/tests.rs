@@ -86,6 +86,22 @@ fn user_attachments_become_content_parts_with_a_manifest() {
 }
 
 #[test]
+fn pdf_inline_limit_keeps_oversized_files_local() {
+    let root = Directory::new();
+    let pool = Pool::new(root.path().to_path_buf());
+    let mut pdf = pool.import_bytes("report.pdf", PDF).unwrap();
+    pdf.size = PDF_INLINE_BYTES;
+    let message = |pdf: &Attachment| Prompt::new(MARKER.to_string(), vec![pdf.clone()]).message();
+    let included = materialize(vec![message(&pdf)], Some(&pool), Inputs::default()).unwrap();
+    assert_eq!(types(&included[0]), ["text", "file"]);
+    pdf.size += 1;
+    let local = materialize(vec![message(&pdf)], Some(&pool), Inputs::default()).unwrap();
+    assert_eq!(types(&local[0]), ["text"]);
+    assert!(texts(&local[0]).contains("not sent: larger than 32.0 MiB"));
+    assert!(texts(&local[0]).contains(&pdf.reference()));
+}
+
+#[test]
 fn model_capabilities_choose_parts_and_the_pdf_engine() {
     let root = Directory::new();
     let pool = Pool::new(root.path().to_path_buf());

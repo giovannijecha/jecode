@@ -182,8 +182,8 @@ pub(super) fn refresh(record: &Record, cancel: &Cancellation) -> Result<Record, 
     updated.access_token = required(&response, "access_token")?.to_string();
     updated.refresh_token = refresh_token(&response, &record.refresh_token)?;
     if let Some(id) = response.get("id_token").and_then(Value::as_str) {
-        // A refresh ID token has no per-attempt nonce; retain the previously
-        // verified ID token for reauthorization instead of trusting this one.
+        // A refresh ID token has no per-attempt nonce; leave the ID token
+        // verified at sign-in unchanged in the existing account record.
         if id.is_empty() {
             return Err("OpenAI returned an empty ID token".into());
         }

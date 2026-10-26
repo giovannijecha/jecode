@@ -93,7 +93,7 @@ fn tokens(attachment: &Attachment) -> usize {
             }
             _ => 1600,
         },
-        Kind::Pdf if attachment.size <= 32 * 1024 * 1024 => attachment
+        Kind::Pdf if attachment.size <= super::PDF_INLINE_BYTES => attachment
             .pages
             .map_or((attachment.size / 64) as usize, |pages| {
                 pages as usize * 1500

@@ -185,7 +185,7 @@ fn user(message: &Value, pool: Option<&Pool>) -> Result<Value, String> {
                 Ok(None) => "image unavailable in a supported form".into(),
                 Err(error) => format!("image unavailable: {error}"),
             },
-            (Kind::Pdf, Some(pool)) if attachment.size <= 32 * 1024 * 1024 => {
+            (Kind::Pdf, Some(pool)) if attachment.size <= attachments::PDF_INLINE_BYTES => {
                 match pool.load(&attachment.id).and_then(|stored| {
                     std::fs::read(stored.path).map_err(|error| error.to_string())
                 }) {
@@ -369,6 +369,58 @@ mod tests {
         let text = parts[0].get("text").and_then(Value::as_str).unwrap();
         assert!(text.contains(&attachment.reference()));
         assert!(!text.contains(attachments::MARKER));
+    }
+
+    #[test]
+    fn pdf_inline_limit_retains_a_local_reference_above_the_boundary() {
+        let directory = crate::test_support::Directory::new();
+        let pool = Pool::new(directory.path().join("attachments"));
+        let mut pdf = pool
+            .import_bytes("report.pdf", b"%PDF-1.4\n%%EOF\n")
+            .unwrap();
+        pdf.size = attachments::PDF_INLINE_BYTES;
+        let message = |pdf: &attachments::Attachment| {
+            attachments::Prompt::new(attachments::MARKER.to_string(), vec![pdf.clone()]).message()
+        };
+        let at_limit = request(
+            "model",
+            Effort::Default,
+            &[message(&pdf)],
+            false,
+            Some(&pool),
+        )
+        .unwrap();
+        let input = at_limit.get("input").and_then(Value::as_array).unwrap();
+        let parts = input[0].get("content").and_then(Value::as_array).unwrap();
+        assert_eq!(
+            parts[1].get("type").and_then(Value::as_str),
+            Some("input_file")
+        );
+        let data = parts[1]
+            .get("file_data")
+            .and_then(Value::as_str)
+            .unwrap()
+            .strip_prefix("data:application/pdf;base64,")
+            .unwrap();
+        assert_eq!(
+            attachments::base64::decode(data).unwrap(),
+            b"%PDF-1.4\n%%EOF\n"
+        );
+        pdf.size += 1;
+        let above = request(
+            "model",
+            Effort::Default,
+            &[message(&pdf)],
+            false,
+            Some(&pool),
+        )
+        .unwrap();
+        let input = above.get("input").and_then(Value::as_array).unwrap();
+        let parts = input[0].get("content").and_then(Value::as_array).unwrap();
+        assert_eq!(parts.len(), 1);
+        let manifest = parts[0].get("text").and_then(Value::as_str).unwrap();
+        assert!(manifest.contains("PDF not inlined; read the local reference"));
+        assert!(manifest.contains(&pdf.reference()));
     }
 
     #[test]

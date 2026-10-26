@@ -7,13 +7,13 @@
 //! reach it again. Tool-requested views remain until the next assistant
 //! response; their references remain in history for later reads.
 
-use crate::attachments::{Attachment, Inputs, Kind, Pool, active_view_start, base64, requested};
+use crate::attachments::{
+    Attachment, Inputs, Kind, PDF_INLINE_BYTES, Pool, active_view_start, base64, requested,
+};
 #[cfg(test)]
 pub use crate::attachments::{user_text, weight, weight_for};
 use crate::json::Value;
 
-/// PDFs above this size stay local; the manifest points at them instead.
-const PDF_BYTES: u64 = 32 * 1024 * 1024;
 /// The OpenRouter PDF engine. Models with native file input read the PDF
 /// themselves; the others use the free Cloudflare parser instead of the
 /// paid OCR default.
@@ -136,11 +136,11 @@ fn content(
             ),
             Err(error) => (None, format!("not sent: {error}")),
         },
-        Kind::Pdf if attachment.size > PDF_BYTES => (
+        Kind::Pdf if attachment.size > PDF_INLINE_BYTES => (
             None,
             format!(
                 "not sent: larger than {}; the original stays local",
-                crate::attachments::size(PDF_BYTES)
+                crate::attachments::size(PDF_INLINE_BYTES)
             ),
         ),
         Kind::Pdf => match pool

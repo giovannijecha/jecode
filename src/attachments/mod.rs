@@ -23,6 +23,9 @@ use crate::json::Value;
 /// Stands in for one attachment inside prompt text.
 pub const MARKER: char = '\u{fffc}';
 
+/// Largest PDF included in model requests and counted in context estimates.
+pub(crate) const PDF_INLINE_BYTES: u64 = 32 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Image,

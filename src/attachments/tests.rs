@@ -25,6 +25,17 @@ pub fn attachment(id: &str, name: &str, media: &str) -> Attachment {
 }
 
 #[test]
+fn pdf_context_weight_stops_above_the_inline_limit() {
+    let mut pdf = attachment("att-1-1-2", "report.pdf", "application/pdf");
+    pdf.pages = Some(3);
+    pdf.size = PDF_INLINE_BYTES;
+    let message = |pdf: &Attachment| Prompt::new(MARKER.to_string(), vec![pdf.clone()]).message();
+    assert_eq!(weight(&message(&pdf)), 4500);
+    pdf.size += 1;
+    assert_eq!(weight(&message(&pdf)), 0);
+}
+
+#[test]
 fn labels_are_derived_and_lookalikes_stay_text() {
     let image = attachment("att-1-1-1", "shot.png", "image/png");
     let report = attachment("att-1-1-2", "report.pdf", "application/pdf");
