@@ -52,6 +52,8 @@ fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     client.fixture_limits(24000, None);
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    // Leave room for the native prompt and evolving tool schemas at 24K.
+    agent.set_auto_compact(90);
     historical_notes(&agent);
     agent.prepare_turn("Inspect only").unwrap();
     agent

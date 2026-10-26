@@ -74,6 +74,8 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
         (200, completion("Inspection finished.", vec![])),
     ]);
     let (mut agent, original) = measured_growth_agent(&directory, &fixture);
+    // The provider's tightened ceiling still needs room for the native tools.
+    agent.set_auto_compact(90);
     agent
         .run_turn("Continue the current inspection", &mut |_| Ok(()))
         .unwrap();
