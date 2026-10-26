@@ -311,7 +311,8 @@ after credential masking and length bounding. See
 
 `agent/backend_tests.rs` exercises two synthetic backends with different wire
 layouts through tool execution, compaction, save, resume and a failed switch.
-The OpenRouter adapter keeps loopback fixtures for its HTTP and streaming path.
+Both OpenRouter and OpenAI adapters have loopback fixtures for their HTTP and
+streaming paths.
 
 Auto routing keeps OpenRouter fallbacks. With enough fresh comparable endpoint
 statistics, it requests throughput near or above half the median and first-token

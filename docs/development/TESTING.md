@@ -32,8 +32,9 @@ All four commands must exit successfully. Ignored tests require an explicit
 invocation; a normal test run does not establish their coverage.
 
 Tests use original Rust fixtures, synthetic credentials, isolated directories
-under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash without
-contacting OpenRouter or OpenAI or reading personal configuration.
+under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash
+without contacting OpenRouter or OpenAI and without reading personal
+configuration.
 
 Unix owner-loss tests also use the system `ps` command to inspect process groups.
 They synchronize owner exit with live descendants, then wait for the group to

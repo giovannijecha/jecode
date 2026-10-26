@@ -80,9 +80,10 @@ jecode
 2. Choose a model with `/model`, or set the default in `/settings` → **Default model**.
 3. Type a task and press Enter.
 
-`jecode setup` also provides guided configuration and checks access without sending an inference request. `/cancel` leaves saved
-defaults unchanged. OpenRouter keys and defaults live in plaintext at
-`~/.jecode/config.json`; protected ChatGPT account records live separately under
+`jecode setup` also provides guided configuration and checks access without
+sending an inference request. `/cancel` leaves saved defaults unchanged. Saved
+defaults and the OpenRouter API key live in plaintext at `~/.jecode/config.json`;
+protected ChatGPT account records live separately under
 `~/.jecode/accounts/openai/`. OpenAI API keys are not supported.
 
 First-time configuration is saved after choosing a default model. Until then,

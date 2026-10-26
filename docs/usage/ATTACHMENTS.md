@@ -54,8 +54,11 @@ provider content from the copy just before a request.
 | Other binaries | Kept locally; the manifest gives the path for a suitable tool. |
 
 When an OpenRouter model's catalog entry rules out image input, it receives a
-note instead of the image. OpenRouter PDF parse annotations are stored with the
-response and reused on later requests, avoiding a repeat parse.
+note instead of the image. The OpenAI adapter sends a supported image view
+without filtering it against the ChatGPT catalog's input modalities; the service
+may reject an image for a model that cannot accept it. OpenRouter PDF parse
+annotations are stored with the response and reused on later requests, avoiding
+a repeat parse.
 
 `read attachment:ID` can revisit copies in the session's project bucket.
 Text returns pages; images and PDFs are shown to the model in the next

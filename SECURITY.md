@@ -25,7 +25,9 @@ Model requests send the selected conversation and supported attachments to the
 active backend. OpenRouter forwards them to its selected model provider; OpenAI
 receives them directly through the Responses API using the selected ChatGPT plan.
 The ChatGPT access token authenticates OpenAI requests; its refresh token is
-sent to OpenAI for renewal or revocation. Credential records use
+sent to OpenAI for renewal or revocation. The verified sign-in ID token stays
+in the local account record; it is not sent for inference, refresh or returning
+sign-in. Credential records use
 owner-only Unix permissions or a Windows ACL restricted to the current user.
 Refreshed tokens are masked by existing output and persistence consumers.
 The `web` tool makes direct HTTP(S) requests from the user's machine using local
