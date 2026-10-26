@@ -49,13 +49,16 @@ provider content from the copy just before a request.
 | --- | --- |
 | PNG, JPEG, WebP, GIF | Original image bytes. A PNG or JPEG up to 16 MiB that exceeds 512 KiB or 2048 pixels on the long side can use a derived view: scaled to at most 2048 pixels, PNG or JPEG quality 85, whichever is smaller. The view is kept only when it is smaller than the original. Images above 16 MiB use their original bytes to avoid loading the whole file for conversion. The stored original never changes. |
 | Other image formats | Converted to PNG or JPEG, at most 2048 pixels on the long side. Without a converter, the original stays local and the manifest says so. |
-| PDF | File part via OpenRouter's `file-parser`: `native` for a model with file input, otherwise `cloudflare-ai`. PDFs over 32 MiB stay local. |
+| PDF | Sent as a file part up to 32 MiB. OpenRouter uses its `file-parser`: `native` for a model with file input, otherwise `cloudflare-ai`. OpenAI sends an `input_file` with the PDF bytes. Larger PDFs stay local. |
 | Text | Read through `read attachment:ID` with normal pagination. |
 | Other binaries | Kept locally; the manifest gives the path for a suitable tool. |
 
-If the model's catalog entry lacks image input, it receives a note instead of
-the image. OpenRouter PDF parse annotations are stored with the response and
-reused on later requests, avoiding a repeat parse.
+When an OpenRouter model's catalog entry rules out image input, it receives a
+note instead of the image. The OpenAI adapter sends a supported image view
+without filtering it against the ChatGPT catalog's input modalities; the service
+may reject an image for a model that cannot accept it. OpenRouter PDF parse
+annotations are stored with the response and reused on later requests, avoiding
+a repeat parse.
 
 `read attachment:ID` can revisit copies in the session's project bucket.
 Text returns pages; images and PDFs are shown to the model in the next

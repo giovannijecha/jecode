@@ -97,12 +97,16 @@ confirmation. Current values remain marked independently of the highlighted
 row. On short terminals the detail strip leaves first, then spacing, then
 column headers; the selected row, search field and key hints stay.
 
+- `/backend [ID MODEL]` lists backends or switches this conversation to a
+  configured backend and model.
 - `/model [ID]` chooses a model and effort for this conversation;
   `/effort [NAME]` changes effort directly.
-- `/routing` chooses automatic or a specific endpoint for this conversation.
+- `/routing` chooses automatic or a specific OpenRouter endpoint for this
+  conversation; OpenAI does not expose endpoint routing here.
   See [Configuration](../usage/CONFIGURATION.md#endpoint-routing).
-- `/settings` edits saved defaults, automatic compaction threshold, routing,
-  and the OpenRouter key. See [Configuration](../usage/CONFIGURATION.md).
+- `/settings` edits saved defaults, automatic compaction threshold, OpenRouter
+  routing and key, and ChatGPT accounts. See
+  [Configuration](../usage/CONFIGURATION.md).
 - `/resume [ID]` opens saved conversations in this folder. In the list,
   `Ctrl+D` marks one for deletion; `Enter` confirms and `Esc` cancels. See
   [Sessions](../usage/SESSIONS.md).

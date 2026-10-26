@@ -26,8 +26,9 @@ without response bytes triggers recovery; received chunks, including stream
 comments, reset that idle timer.
 
 An empty provider response is retried, but three empty responses for one
-request return an error. Invalid requests, credential or credit failures, and
-other permanent errors return control immediately. Interrupted or incomplete
+request return an error. Invalid requests, credential failures, ChatGPT plan
+usage limits, OpenRouter credit failures and other permanent errors return
+control immediately. Interrupted or incomplete
 responses never execute their partial tool calls. Completed tool results from
 earlier requests remain in the conversation while a later request retries.
 
@@ -85,4 +86,4 @@ Resume restores the saved context view; it does not restart work. See
 [Sessions](SESSIONS.md) for resume and storage behavior.
 
 Work runs only while Jecode is open. Disk space, memory, provider availability,
-context capacity and account credit remain practical limits.
+context capacity and account usage limits or credit remain practical limits.

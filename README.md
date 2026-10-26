@@ -2,9 +2,11 @@
 
 [![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
 
-A terminal coding agent written in Rust. Jecode connects to OpenRouter or your ChatGPT account and works
-in your project through eight tools: `read`, `write`, `edit`, `bash`, `process`,
-`checkpoint`, `web` and `browser`.
+A terminal coding agent in Rust.
+
+Jecode connects to OpenRouter with an API key or to OpenAI through your ChatGPT
+account. It works in your project through eight tools: `read`, `write`,
+`edit`, `bash`, `process`, `checkpoint`, `web` and `browser`.
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
 One Cargo package, the Rust standard library, no external crates. Installed system
@@ -78,9 +80,10 @@ jecode
 2. Choose a model with `/model`, or set the default in `/settings` → **Default model**.
 3. Type a task and press Enter.
 
-`jecode setup` also provides guided configuration and checks access without sending an inference request. `/cancel` leaves saved
-defaults unchanged. OpenRouter keys and defaults live in plaintext at
-`~/.jecode/config.json`; protected ChatGPT account records live separately under
+`jecode setup` also provides guided configuration and checks access without
+sending an inference request. `/cancel` leaves saved defaults unchanged. Saved
+defaults and the OpenRouter API key live in plaintext at `~/.jecode/config.json`;
+protected ChatGPT account records live separately under
 `~/.jecode/accounts/openai/`. OpenAI API keys are not supported.
 
 First-time configuration is saved after choosing a default model. Until then,
@@ -116,7 +119,7 @@ complete tool cards inline for the latest finished turn; see
 | `/new` | Start a fresh conversation with saved defaults. |
 | `/resume [ID]` | Choose a saved conversation from this project. |
 | `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
-| `/backend [ID [MODEL]]` | List available backends or switch this conversation to a configured backend and model. |
+| `/backend [ID MODEL]` | List available backends or switch this conversation to a configured backend and model. |
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
 | `/settings` | Edit saved defaults and manage provider accounts or API keys. |
 | `/init` | Inspect this project and create or update its `AGENTS.md`. |

@@ -23,8 +23,9 @@ process cannot be resumed at the same time.
 
 The exit summary prints `jecode resume SESSION_ID` after a successful save.
 Resume restores the conversation, tool results, backend, model, effort, routing,
-prompt history and saved input. It uses the configured account for that backend
-and does not rerun requests or tools. `/settings` defaults are unchanged.
+prompt history and saved input. It uses the current credential for that backend
+(the OpenRouter key or active ChatGPT account) and does not rerun requests or
+tools. `/settings` defaults are unchanged.
 Use `/new` to save the old conversation and start an independent one with those
 defaults when their provider is available. Otherwise, it keeps the active
 provider, model and effort. The unsent composer and pending drafts move to the

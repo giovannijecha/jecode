@@ -32,8 +32,9 @@ All four commands must exit successfully. Ignored tests require an explicit
 invocation; a normal test run does not establish their coverage.
 
 Tests use original Rust fixtures, synthetic credentials, isolated directories
-under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash without
-contacting OpenRouter or reading personal configuration.
+under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash
+without contacting OpenRouter or OpenAI and without reading personal
+configuration.
 
 Unix owner-loss tests also use the system `ps` command to inspect process groups.
 They synchronize owner exit with live descendants, then wait for the group to
@@ -74,7 +75,7 @@ verified the change. Use `-- --list` to inspect available names.
 
 | Change | Relevant checks |
 | --- | --- |
-| Agent/context/backend | `agent::backend_tests` uses two synthetic protocols across tool execution, compaction, save and resume. `backend/openrouter/` tests use loopback responses for the adapter. |
+| Agent/context/backend | `agent::backend_tests` uses two synthetic protocols across tool execution, compaction, save and resume. Both `backend/openrouter/` and `backend/openai/` tests use loopback responses for their adapters. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |

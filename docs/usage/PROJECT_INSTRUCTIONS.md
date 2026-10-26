@@ -89,4 +89,5 @@ An unreadable instruction file or directory, invalid UTF-8, a non-file instructi
 path, an out-of-scope file link or an exceeded size limit stops the new request
 before contacting the model. Fix or remove the cause and submit the request
 again. Instructions are never silently truncated.
-The configured OpenRouter key is masked by the existing credential redactor.
+The credential redactor masks the configured OpenRouter key and saved ChatGPT
+tokens before project instructions enter a model request.

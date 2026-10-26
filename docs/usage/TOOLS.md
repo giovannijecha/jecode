@@ -196,9 +196,10 @@ cleanup.
 
 `bash` starts a fresh `bash -c` process with closed stdin and no shared shell
 state. It has normal system access; the project working directory is not a
-sandbox. Startup profiles are disabled, and Jecode removes `BASH_ENV`, `ENV`
-and `OPENROUTER_API_KEY` from the command environment. No timeout is imposed
-unless `timeout_seconds` is a positive integer, measured from command start.
+sandbox. Startup profiles are disabled, and Jecode removes `BASH_ENV`, `ENV`,
+`OPENROUTER_API_KEY` and `JECODE_OPENAI_ACCESS_TOKEN` from the command
+environment. No timeout is imposed unless `timeout_seconds` is a positive
+integer, measured from command start.
 Commands use Bash syntax on Windows too; use an explicit PowerShell invocation
 when a PowerShell command is needed.
 
@@ -210,9 +211,10 @@ per-stream preview, up to 256 KiB. Larger values are clamped before reading
 the logs; the result's `output_limit_bytes` reports the effective budget.
 This bounds the preview and its allocation, not command execution or saved logs.
 `stdout_file` and `stderr_file` point to the complete saved streams; read those
-references when a preview is truncated. Known configured keys are
-masked before storage. If saving output or confirming cleanup fails after a
-command starts, the result reports `outcome: "unknown"` with output references.
+references when a preview is truncated. Known credentials, including the
+OpenRouter key and registered ChatGPT tokens, are masked before storage. If
+saving output or confirming cleanup fails after a command starts, the result
+reports `outcome: "unknown"` with output references.
 Inspect the workspace before repeating a command that may have changed it.
 
 ## Persistent processes
