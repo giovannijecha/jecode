@@ -296,7 +296,7 @@ fn visible_exceptions_have_target_and_result_without_a_second_dot() {
 }
 
 #[test]
-fn compact_process_never_shows_ids_or_streams_and_activity_tracks_last_failure() {
+fn compact_process_hides_streams_and_activity_skips_a_visible_failure() {
     let args = object([("action", "poll"), ("process_id", "private-pid")]);
     let result = Value::object([
         ("process_id", Value::string("private-pid")),
@@ -319,9 +319,10 @@ fn compact_process_never_shows_ids_or_streams_and_activity_tracks_last_failure()
         tool("read", &last, Some(&failed), &shown),
     ];
     let activity = chapter::activity(&calls, 80).unwrap().plain();
-    assert!(activity.contains("Read  src/missing.rs"), "{activity}");
-    assert!(activity.contains("failed"), "{activity}");
-    assert!(!activity.contains("src/good.rs"), "{activity}");
+    assert!(activity.contains("Read  src/good.rs"), "{activity}");
+    assert!(!activity.contains("src/missing.rs"), "{activity}");
+    assert!(!activity.contains("failed"), "{activity}");
+    assert!(chapter::activity(&calls[1..], 80).is_none());
 }
 
 #[test]

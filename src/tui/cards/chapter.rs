@@ -96,12 +96,11 @@ fn title_with_keycap(title: Line, columns: usize, marker: crate::tui::theme::Sty
     line.append(cap).shortened(columns)
 }
 
-/// The latest ordinary read or navigation remains at the foot of the chapter.
+/// The latest ordinary call without separate error detail stays at the foot.
 pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
-    let tool = tools
-        .iter()
-        .rev()
-        .find(|tool| matches!(tool.name, "read" | "web" | "browser"))?;
+    let tool = tools.iter().rev().find(|tool| {
+        matches!(tool.name, "read" | "web" | "browser") && Status::of(tool) != Status::Failed
+    })?;
     let (name, target) = heading(tool);
     let mut line = Line::new(name, title::family(name).bold());
     if !target.is_empty() {
@@ -147,25 +146,30 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     if matches!(tool.name, "bash" | "process") {
         rows.extend(content::notices(tool.name, result, columns, false));
         let outcome = match Status::of(tool) {
-            Status::Failed => result.get("exit_code").map_or_else(
-                || "Command failed".into(),
-                |code| format!("exit {}", code.encode()),
-            ),
-            Status::Done => result.get("exit_code").map_or_else(
+            // Exit status already appears on the member. Keep a distinct
+            // error fact, or let the captured-output count supply the receipt.
+            Status::Failed => field(result, "stderr")
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(text::clean),
+            Status::Done => Some(result.get("exit_code").map_or_else(
                 || "Command completed".into(),
                 |code| format!("exit {}", code.encode()),
-            ),
-            Status::Background => "Process in background".into(),
-            Status::Stopped => "Process stopped".into(),
-            Status::Running => "Command running".into(),
+            )),
+            Status::Background => Some("Process in background".into()),
+            Status::Stopped => Some("Process stopped".into()),
+            Status::Running => Some("Command running".into()),
         };
-        rows.push(rhythm::one(
-            Line::new(&outcome, TOOL_DIM),
-            columns,
-            "  ⎿ ",
-            TOOL_DIM,
-            3,
-        ));
+        if let Some(outcome) = outcome {
+            rows.push(rhythm::one(
+                Line::new(&outcome, TOOL_DIM),
+                columns,
+                "  ⎿ ",
+                TOOL_DIM,
+                3,
+            ));
+        }
         let output_lines = [field(result, "stderr"), field(result, "stdout")]
             .into_iter()
             .flat_map(str::lines)

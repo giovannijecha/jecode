@@ -135,11 +135,14 @@ the command. Running time and a failed `exit N` sit inline; process IDs,
 captured output and raw HTTP logs wait for Ctrl+O. A tool error can add two
 bounded message rows only for non-command members; Bash and Process failures
 stay on one member row. A former singleton can retain an outcome receipt at
-the chapter foot when needed to preserve compact height. Other exceptional calls
+the chapter foot when needed to preserve compact height. A failed command uses
+its first nonempty stderr line or captured-output count instead of repeating
+the exit status already shown on its member. Other exceptional calls
 keep a primary row and bounded errors when useful. Ordinary Read, Web and
 Browser calls share one activity row at the bottom. It names the latest
-attempt, including a failure, with a two-space gap after the name and freezes
-its timer when done. Failed, stopped and background states remain named. A
+call without dedicated error detail, with a two-space gap after the name and
+freezes its timer when done. Failed calls stay in their exception rows and do
+not repeat in activity. Stopped and background states remain named. A
 compact chapter never loses height, including when a new turn starts; it uses
 meaningful content or the retained activity receipt instead of empty internal
 padding. A second related call turns an eligible singleton into a chapter.

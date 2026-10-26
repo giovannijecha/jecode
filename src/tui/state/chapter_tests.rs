@@ -115,7 +115,8 @@ fn a_live_mixed_chapter_never_loses_rows_and_keeps_its_last_activity() {
         check(&state, "second read fails");
         let visible = block(&state.rows().into_iter().flatten().collect::<Vec<_>>());
         assert!(visible.contains("Read  missing.rs"), "{visible}");
-        assert!(!visible.contains("Read  src/a.rs"), "{visible}");
+        assert_eq!(visible.matches("Read  missing.rs").count(), 1);
+        assert_eq!(visible.matches("Read  src/a.rs").count(), 1);
         start(
             &mut state,
             "bash-two",

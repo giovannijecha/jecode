@@ -1,6 +1,8 @@
 use super::*;
 use crate::tui::line::Line;
 
+mod singleton;
+
 fn start(state: &mut State, id: &str, name: &str, arguments: Value) {
     state.event(Event::ToolStarted {
         id: id.into(),
@@ -114,110 +116,129 @@ fn chapter_keycap_handoff_keeps_content_height_without_blank_rows() {
 }
 
 #[test]
-fn failed_command_singleton_keeps_height_without_raw_chapter_streams() {
+fn failed_command_and_read_do_not_repeat_chapter_facts_or_lose_height() {
     for columns in [80, 40] {
         let mut state = State {
             width: columns,
             ..State::default()
         };
+        let mut previous = [0; 2];
+        let mut check = |state: &State, phase: &str, members: usize| {
+            for (slot, keycap) in [false, true].into_iter().enumerate() {
+                let current = height(state, keycap);
+                assert!(
+                    current >= previous[slot],
+                    "{columns} columns, {phase}, keycap {keycap}: {current} < {}\n{}",
+                    previous[slot],
+                    shown(state)
+                );
+                previous[slot] = current;
+            }
+            if members >= 2 {
+                let lines: Vec<_> = state.rows()[..members]
+                    .iter()
+                    .flat_map(|rows| rows.iter())
+                    .map(Line::plain)
+                    .collect();
+                let text = lines.join("\n");
+                assert!(
+                    lines.iter().all(|line| !line.trim().is_empty()),
+                    "{columns} columns, {phase}: {text}"
+                );
+                assert_eq!(
+                    text.to_ascii_lowercase().matches("exit 101").count(),
+                    1,
+                    "{columns} columns, {phase}: {text}"
+                );
+                assert!(
+                    text.matches("Read  missing.rs").count() <= 1,
+                    "{columns} columns, {phase}: {text}"
+                );
+            }
+        };
         state.begin_tool_turn();
         start(
             &mut state,
-            "failed",
+            "command",
             "bash",
             Value::object([
-                (
-                    "command",
-                    Value::string("printf very_long_argument_".repeat(12)),
-                ),
+                ("command", Value::string("printf long_argument_".repeat(16))),
                 ("description", Value::string("Run parser checks")),
                 ("work", Value::string("Inspect")),
             ]),
         );
+        check(&state, "command starts", 1);
         finish(
             &mut state,
-            "failed",
+            "command",
             "bash",
             Value::object([
                 ("exit_code", Value::number(101)),
                 (
                     "stderr",
-                    Value::string("raw-error-one\nraw-error-two\nraw-error-three\n"),
+                    Value::string("error one\nerror two\nerror three\n"),
                 ),
             ]),
         );
-        let singleton = height(&state, false);
-        let singleton_with_keycap = height(&state, true);
-        assert!(
-            singleton >= 6,
-            "{columns} columns: singleton {singleton}\n{}",
-            shown(&state)
-        );
+        check(&state, "command fails", 1);
         start(
             &mut state,
-            "second",
-            "bash",
+            "read",
+            "read",
             Value::object([
-                ("command", Value::string("printf second")),
+                ("path", Value::string("missing.rs")),
                 ("work", Value::string("Inspect")),
             ]),
         );
-        let chapter = shown(&state);
-        assert!(
-            height(&state, false) >= singleton,
-            "{columns} columns: {} < {singleton}\n{chapter}",
-            height(&state, false)
+        check(&state, "chapter forms", 2);
+        finish(
+            &mut state,
+            "read",
+            "read",
+            Value::object([("error", Value::string("permission denied"))]),
         );
-        assert!(
-            height(&state, true) >= singleton_with_keycap,
-            "{columns} columns: {} < {singleton_with_keycap} with keycap\n{chapter}",
-            height(&state, true)
+        check(&state, "read fails", 2);
+        start(
+            &mut state,
+            "next",
+            "bash",
+            Value::object([
+                ("command", Value::string("printf next")),
+                ("work", Value::string("Inspect")),
+            ]),
         );
-        assert!(!chapter.contains("raw-error-one"));
-        assert!(!chapter.contains("raw-error-two"));
-        assert!(!chapter.contains("raw-error-three"));
-    }
-}
-
-#[test]
-fn pending_browser_singleton_keeps_height_when_next_browser_starts() {
-    for columns in [80, 40] {
-        let mut state = State {
-            width: columns,
-            ..State::default()
-        };
+        check(&state, "next call starts", 3);
+        finish(
+            &mut state,
+            "next",
+            "bash",
+            Value::object([("exit_code", Value::number(0))]),
+        );
+        check(&state, "next call finishes", 3);
+        state.close_tools();
+        state.finish_tool_turn();
+        check(&state, "turn closes", 3);
+        let chapter_height = height(&state, true);
         state.begin_tool_turn();
         start(
             &mut state,
-            "first",
-            "browser",
-            Value::object([
-                ("action", Value::string("evaluate")),
-                (
-                    "expression",
-                    Value::string("const value = browser.evaluate(); ".repeat(12)),
-                ),
-                ("work", Value::string("Inspect")),
-            ]),
+            "new-turn",
+            "read",
+            Value::object([("path", Value::string("src/new.rs"))]),
         );
-        let singleton = height(&state, false);
-        assert!(singleton >= 4, "{columns} columns: singleton {singleton}");
-        start(
-            &mut state,
-            "second",
-            "browser",
-            Value::object([
-                ("action", Value::string("snapshot")),
-                ("work", Value::string("Inspect")),
-            ]),
-        );
+        check(&state, "new turn takes keycap", 3);
+        let mut renderer = rows::Rows::default();
+        let old_height: usize = (0..3)
+            .map(|index| {
+                renderer
+                    .render_at(&state.items, index, columns, false)
+                    .len()
+            })
+            .sum();
         assert!(
-            height(&state, false) >= singleton,
-            "{columns} columns: {} < {singleton}\n{}",
-            height(&state, false),
-            shown(&state)
+            old_height >= chapter_height,
+            "{columns} columns: old chapter {old_height} < {chapter_height}"
         );
-        assert!(shown(&state).contains("Browser  snapshot"));
     }
 }
 
@@ -301,7 +322,7 @@ fn long_singletons_keep_their_height_when_the_second_call_forms_a_chapter() {
 }
 
 #[test]
-fn first_ordinary_call_that_fails_leaves_a_frozen_activity_receipt() {
+fn first_ordinary_call_that_fails_keeps_error_detail_without_duplicate_activity() {
     let mut state = State::default();
     state.begin_tool_turn();
     start(
@@ -338,7 +359,7 @@ fn first_ordinary_call_that_fails_leaves_a_frozen_activity_receipt() {
     );
     assert!(height(&state, false) >= running);
     let failed = shown(&state);
-    assert!(failed.contains("Read  missing.rs"));
+    assert_eq!(failed.matches("Read  missing.rs").count(), 1);
     assert!(failed.contains("failed"));
     assert!(failed.contains("permission denied"));
     state.close_tools();
