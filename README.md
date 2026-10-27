@@ -36,8 +36,9 @@ macOS use `curl` from PATH. Web tools and model requests use the same selection.
 Older Windows or Linux installations may need a newer curl even when the OS
 already provides one.
 
-The TUI uses 24-bit color. On macOS, install Apple's Command Line Tools for the
-native linker. See [platform verification](docs/development/PLATFORMS.md) for
+The TUI always uses 24-bit color, ignores `NO_COLOR`, and keeps the terminal's
+own background on the alternate screen; its palette assumes a dark terminal
+theme. On macOS, install Apple's Command Line Tools for the native linker. See [platform verification](docs/development/PLATFORMS.md) for
 executed coverage and checks that still need a native host.
 
 ### Windows
@@ -107,8 +108,8 @@ skipped because the fallback provider uses its own model identifiers.
 ## Work in a project
 
 The draft stays editable during a turn. Enter sends a follow-up before the next
-model request; Ctrl+J inserts a newline. Ctrl+Q quits and saves input in an existing
-saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard shortcuts.
+model request; Ctrl+J inserts a newline. Ctrl+Q quits, asking first while a turn
+or background process runs, and saves input in an existing saved session. See [composer and controls](docs/tui/COMPOSER.md) for keyboard shortcuts.
 
 The TUI groups two or more related routine calls into Work chapters with a
 short result summary; single calls keep their normal cards. `Ctrl+O` opens the
