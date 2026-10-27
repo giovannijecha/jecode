@@ -120,6 +120,58 @@ fn missing_text_names_the_text_and_where_it_was_searched() {
 }
 
 #[test]
+fn unanswered_final_check_preserves_the_last_completed_observation() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    for (key, value, element, diagnosis) in [
+        (
+            "selector",
+            "#missing",
+            false,
+            "no element matched selector \"#missing\"",
+        ),
+        (
+            "text",
+            "Saved",
+            true,
+            "text \"Saved\" not found in the page body",
+        ),
+    ] {
+        let checks = Arc::new(AtomicUsize::new(0));
+        let received = Arc::clone(&checks);
+        let (endpoint, server) = fake_page(move |_, _| {
+            let reply = (received.fetch_add(1, Ordering::SeqCst) == 0).then(|| {
+                Value::object([("result", Value::object([("value", state(false, element))]))])
+            });
+            (Vec::new(), reply)
+        });
+        let mut browser = browser(&endpoint);
+        let error = wait(
+            &mut browser,
+            vec![
+                (key, Value::string(value)),
+                ("timeout_ms", Value::number(250)),
+            ],
+            &Cancellation::default(),
+        )
+        .unwrap_err();
+        assert!(
+            checks.load(Ordering::SeqCst) >= 2,
+            "the final check must go unanswered"
+        );
+        assert!(error.contains(diagnosis), "{error}");
+        assert!(error.contains("last completed check"), "{error}");
+        assert!(error.contains("did not answer"), "{error}");
+        assert!(error.contains("http://fixture.test/form"), "{error}");
+        drop(browser);
+        server.join().unwrap();
+    }
+}
+
+#[test]
 fn successful_wait_keeps_its_result() {
     let (endpoint, server) = page(state(true, true));
     let mut browser = browser(&endpoint);

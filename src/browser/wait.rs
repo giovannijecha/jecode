@@ -86,7 +86,7 @@ impl Condition<'_> {
             .and_then(Value::as_str)
             .unwrap_or("an unknown URL");
         let reason = match (last, self.selector, self.text) {
-            _ if unanswered || last.is_none() => {
+            _ if last.is_none() => {
                 let target = match (self.selector, self.text) {
                     (Some(selector), Some(text)) => {
                         format!("text {} in selector {}", quote(text), quote(selector))
@@ -108,6 +108,13 @@ impl Condition<'_> {
                 selector.map_or("the page body".into(), |s| format!("selector {}", quote(s)))
             ),
             _ => "the page has no body".to_string(),
+        };
+        let reason = if unanswered && last.is_some() {
+            format!(
+                "{reason} (last completed check); the page did not answer the final check before the deadline"
+            )
+        } else {
+            reason
         };
         format!(
             "Browser wait timed out after {} ms (elapsed {} ms) on tab {} at {url}: {reason}",
