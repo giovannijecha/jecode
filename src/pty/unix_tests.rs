@@ -162,8 +162,12 @@ fn immediate_interrupt_allows_startup_or_target_progress() {
     assert!(matches!(finished(&mut bridge.child).code(), Some(0 | 130)));
 }
 
+#[cfg(target_os = "linux")]
 #[path = "unix_no_foreground_tests.rs"]
 mod no_foreground;
+
+#[path = "unix_no_foreground_contract_tests.rs"]
+mod no_foreground_contract;
 
 #[test]
 fn interrupt_flushes_canonical_typeahead() {

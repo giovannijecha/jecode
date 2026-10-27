@@ -2,6 +2,7 @@ use super::*;
 
 const DETACHED_TARGET: &str = r#"
 #define _XOPEN_SOURCE 600
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <sys/ioctl.h>
@@ -10,12 +11,24 @@ const DETACHED_TARGET: &str = r#"
 int main(void) {
     char line[64];
     struct winsize size;
-    if (signal(SIGHUP, SIG_IGN) == SIG_ERR ||
-        ioctl(STDIN_FILENO, TIOCNOTTY) < 0) return 2;
+    if (signal(SIGHUP, SIG_IGN) == SIG_ERR) {
+        perror("signal SIGHUP");
+        return 2;
+    }
+    if (ioctl(STDIN_FILENO, TIOCNOTTY) < 0) {
+        perror("TIOCNOTTY");
+        return 2;
+    }
     puts("DETACHED");
     fflush(stdout);
-    if (!fgets(line, sizeof(line), stdin) ||
-        ioctl(STDIN_FILENO, TIOCGWINSZ, &size) < 0) return 3;
+    if (!fgets(line, sizeof(line), stdin)) {
+        perror("fgets stdin");
+        return 3;
+    }
+    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) < 0) {
+        perror("TIOCGWINSZ");
+        return 3;
+    }
     printf("LINE:%sSIZE:%u:%u\n", line, size.ws_col, size.ws_row);
     return 0;
 }
@@ -68,6 +81,32 @@ impl Drop for Fixture {
     }
 }
 
+fn until_target(
+    bridge: &mut Bridge,
+    receiver: &mpsc::Receiver<Vec<u8>>,
+    seen: &mut Vec<u8>,
+    marker: &[u8],
+) {
+    while !seen.windows(marker.len()).any(|bytes| bytes == marker) {
+        seen.extend(
+            receiver
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap_or_else(|error| {
+                    let _ = bridge.child.kill();
+                    let status = bridge.child.wait();
+                    let mut stderr = String::new();
+                    let _ = bridge
+                        .child
+                        .stderr
+                        .take()
+                        .unwrap()
+                        .read_to_string(&mut stderr);
+                    panic!("target output ended ({error}); status={status:?}; stderr={stderr:?}");
+                }),
+        );
+    }
+}
+
 #[test]
 fn detached_target_reads_input_without_interrupt() {
     let fixture = Fixture::compile();
@@ -75,9 +114,9 @@ fn detached_target_reads_input_without_interrupt() {
         launch_command(&[fixture.executable.to_str().unwrap()], None);
     let (receiver, reader) = output_events(&mut bridge);
     let mut seen = Vec::new();
-    until(&receiver, &mut seen, b"DETACHED");
+    until_target(&mut bridge, &receiver, &mut seen, b"DETACHED");
     input.write_all(&input_frame(0, b"hello\n")).unwrap();
-    until(&receiver, &mut seen, b"LINE:hello");
+    until_target(&mut bridge, &receiver, &mut seen, b"LINE:hello");
     assert_eq!(finished(&mut bridge.child).code(), Some(0));
     reader.join().unwrap();
 }
@@ -89,7 +128,7 @@ fn interrupts_without_foreground_do_not_block_input_or_resize() {
         launch_command(&[fixture.executable.to_str().unwrap()], None);
     let (receiver, reader) = output_events(&mut bridge);
     let mut seen = Vec::new();
-    until(&receiver, &mut seen, b"DETACHED");
+    until_target(&mut bridge, &receiver, &mut seen, b"DETACHED");
     for generation in 1..=20 {
         control.write_all(&interrupt_frame(generation)).unwrap();
     }
@@ -98,7 +137,7 @@ fn interrupts_without_foreground_do_not_block_input_or_resize() {
         .unwrap();
     control.write_all(&interrupt_frame(21)).unwrap();
     input.write_all(&input_frame(21, b"hello\n")).unwrap();
-    until(&receiver, &mut seen, b"SIZE:107:41");
+    until_target(&mut bridge, &receiver, &mut seen, b"SIZE:107:41");
     assert!(String::from_utf8_lossy(&seen).contains("LINE:hello\r\n"));
     assert_eq!(finished(&mut bridge.child).code(), Some(0));
     reader.join().unwrap();

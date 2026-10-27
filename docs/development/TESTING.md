@@ -172,6 +172,8 @@ terminal modes and queued input. They cover raw input, remapped or disabled
 `VINTR`, `NOFLSH`, delayed input frames, saturated connections and input/resize
 after a client detaches its controlling terminal.
 The Linux-only blocked raw-input probe also uses system `tty` and `kill`.
+The `TIOCNOTTY` detachment fixture is Linux-only; both Unix platforms check
+no-foreground handling on a newly opened PTY before terminal acquisition.
 
 The Windows direct-input fixture drives the real Rust renderer and verifies
 that local terminal input, including emoji, stays outside conversation history:
