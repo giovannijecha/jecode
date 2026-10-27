@@ -120,6 +120,18 @@ fn until(receiver: &mpsc::Receiver<Vec<u8>>, seen: &mut Vec<u8>, marker: &[u8]) 
     }
 }
 
+fn assert_etx_dump(seen: &[u8]) {
+    let text = String::from_utf8_lossy(seen);
+    let dump = text
+        .split_once("READY")
+        .unwrap()
+        .1
+        .split_once("DONE")
+        .unwrap()
+        .0;
+    assert_eq!(dump.trim(), "3", "{text}");
+}
+
 #[test]
 #[cfg(target_os = "linux")]
 fn linux_bridge_cleanup_works_without_ps_in_path() {
@@ -270,7 +282,7 @@ fn interrupt_in_raw_mode_delivers_literal_etx() {
     until(&receiver, &mut seen, b"READY");
     control.write_all(&interrupt_frame(1)).unwrap();
     until(&receiver, &mut seen, b"DONE");
-    assert!(String::from_utf8_lossy(&seen).contains(" 3\n"), "{seen:?}");
+    assert_etx_dump(&seen);
     assert_eq!(finished(&mut bridge.child).code(), Some(0));
     reader.join().unwrap();
 }
@@ -350,10 +362,7 @@ fn interrupt_with_disabled_vintr_delivers_literal_etx() {
     control.write_all(&interrupt_frame(1)).unwrap();
     input.write_all(&input_frame(1, b"\n")).unwrap();
     until(&receiver, &mut seen, b"DONE");
-    assert!(
-        String::from_utf8_lossy(&seen).contains(" 3\r\n"),
-        "{seen:?}"
-    );
+    assert_etx_dump(&seen);
     assert_eq!(finished(&mut bridge.child).code(), Some(0));
     reader.join().unwrap();
 }
