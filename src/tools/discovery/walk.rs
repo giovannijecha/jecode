@@ -10,7 +10,7 @@ use std::{
 };
 
 #[derive(Default)]
-pub(super) struct Skipped {
+pub(crate) struct Skipped {
     pub hidden: usize,
     pub ignored: usize,
     pub links: usize,
@@ -32,7 +32,7 @@ impl Skipped {
     }
 }
 
-pub(super) struct Entry {
+pub(crate) struct Entry {
     pub absolute: PathBuf,
     pub relative: String,
     pub kind: &'static str,
@@ -46,7 +46,7 @@ struct Pending {
     explicit: bool,
 }
 
-pub(super) struct Walk<'a> {
+pub(crate) struct Walk<'a> {
     root: &'a Path,
     cancellation: &'a Cancellation,
     pending: Vec<Pending>,
@@ -59,7 +59,9 @@ pub(super) struct Walk<'a> {
     pub skipped: Skipped,
     pub errors: Vec<Value>,
     pub errors_count: usize,
+    pub(crate) truncated: bool,
     error_bytes: usize,
+    remaining_candidates: Option<usize>,
 }
 
 impl<'a> Walk<'a> {
@@ -69,6 +71,35 @@ impl<'a> Walk<'a> {
         recursive: bool,
         file_allowed: bool,
         cancellation: &'a Cancellation,
+    ) -> Result<Self, String> {
+        Self::construct(root, arguments, recursive, file_allowed, cancellation, None)
+    }
+
+    pub(crate) fn new_bounded(
+        root: &'a Path,
+        arguments: &Value,
+        recursive: bool,
+        file_allowed: bool,
+        cancellation: &'a Cancellation,
+        candidates: usize,
+    ) -> Result<Self, String> {
+        Self::construct(
+            root,
+            arguments,
+            recursive,
+            file_allowed,
+            cancellation,
+            Some(candidates),
+        )
+    }
+
+    fn construct(
+        root: &'a Path,
+        arguments: &Value,
+        recursive: bool,
+        file_allowed: bool,
+        cancellation: &'a Cancellation,
+        remaining_candidates: Option<usize>,
     ) -> Result<Self, String> {
         if cancellation.requested() {
             return Err("Operation cancelled".into());
@@ -112,7 +143,9 @@ impl<'a> Walk<'a> {
             skipped: Skipped::default(),
             errors: Vec::new(),
             errors_count: 0,
+            truncated: false,
             error_bytes: 0,
+            remaining_candidates,
         })
     }
 
@@ -205,6 +238,10 @@ impl<'a> Walk<'a> {
     }
 
     fn descend(&mut self, absolute: &Path, relative: &str, depth: usize) {
+        if self.remaining_candidates == Some(0) {
+            self.truncated = true;
+            return;
+        }
         let directory = match fs::read_dir(absolute) {
             Ok(directory) => directory,
             Err(error) => {
@@ -213,9 +250,18 @@ impl<'a> Walk<'a> {
             }
         };
         let mut children = Vec::new();
+        let mut cut = false;
         for entry in directory {
             if self.cancellation.requested() {
                 break;
+            }
+            if let Some(remaining) = &mut self.remaining_candidates {
+                if *remaining == 0 {
+                    self.truncated = true;
+                    cut = true;
+                    break;
+                }
+                *remaining -= 1;
             }
             match entry {
                 Ok(entry) => children.push(entry.path()),
@@ -226,7 +272,8 @@ impl<'a> Walk<'a> {
             if relative == "." { "" } else { relative },
             children
                 .iter()
-                .any(|path| path.file_name().is_some_and(|name| name == ".gitignore")),
+                .any(|path| path.file_name().is_some_and(|name| name == ".gitignore"))
+                || (cut && absolute.join(".gitignore").exists()),
         );
         children.sort();
         self.pending

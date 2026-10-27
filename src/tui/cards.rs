@@ -12,6 +12,7 @@ mod diff;
 mod discovery;
 mod edit_fallback;
 mod failure;
+mod map;
 mod presentation;
 mod rhythm;
 mod streams;
@@ -219,6 +220,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         "read" => "Read",
         "list" => "List",
         "search" => "Search",
+        "map" => "Map",
         "write" => "Write",
         "edit" => "Update",
         "bash" => "Bash",
@@ -231,7 +233,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
-        "list" | "search" | "exec" | "process" | "checkpoint" | "web" | "browser" => {
+        "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser" => {
             crate::events::target(tool.name, tool.arguments)
         }
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
@@ -340,6 +342,8 @@ mod discovery_tests;
 mod edit_fallback_tests;
 #[cfg(test)]
 mod files_tests;
+#[cfg(test)]
+mod map_tests;
 #[cfg(test)]
 mod rhythm_tests;
 #[cfg(test)]

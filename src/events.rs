@@ -146,6 +146,61 @@ fn outcome_summary(name: &str, result: &Value) -> String {
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return format!("error: {error}");
     }
+    if name == "map" {
+        match result.get("action").and_then(Value::as_str) {
+            Some("remember") => return "Note saved".into(),
+            Some("forget") => {
+                return if result.get("removed") == Some(&Value::Bool(true)) {
+                    "Note forgotten".into()
+                } else {
+                    "Note not found".into()
+                };
+            }
+            _ => {}
+        }
+        let count = result
+            .get("entries_returned")
+            .and_then(Value::as_usize)
+            .or_else(|| {
+                result
+                    .get("entries")
+                    .and_then(Value::as_array)
+                    .map(<[Value]>::len)
+            })
+            .unwrap_or(0);
+        let mut summary = format!("{count} {}", if count == 1 { "entry" } else { "entries" });
+        if let Some(files) = result.get("files").and_then(Value::as_usize) {
+            summary.push_str(&format!(" in {}", counted(files, "file")));
+        }
+        if let Some(notes) = result
+            .get("notes_count")
+            .and_then(Value::as_usize)
+            .filter(|n| *n > 0)
+        {
+            summary.push_str(&format!("; {}", counted(notes, "note")));
+        }
+        let errors = result
+            .get("errors_count")
+            .and_then(Value::as_usize)
+            .or_else(|| {
+                result
+                    .get("errors")
+                    .and_then(Value::as_array)
+                    .map(<[Value]>::len)
+            })
+            .unwrap_or(0);
+        if errors > 0 {
+            summary.push_str(&format!("; {}", counted(errors, "error")));
+        }
+        if let Some(next) = result.get("next_offset").and_then(Value::as_usize) {
+            summary.push_str(&format!("; more from {next}"));
+        } else if result.get("complete") == Some(&Value::Bool(false))
+            || result.get("inventory_truncated") == Some(&Value::Bool(true))
+        {
+            summary.push_str("; partial");
+        }
+        return summary;
+    }
     if matches!(name, "list" | "search") {
         let count_key = if name == "list" {
             "entries_returned"

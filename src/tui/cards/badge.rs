@@ -13,7 +13,7 @@ use crate::tui::{
 /// The family surface: reads, edits, shell, and one for the rest.
 fn family(name: &str) -> Surface {
     match name {
-        "Read" | "List" | "Search" | "Skill" | "Web" | "Browser" => BADGE_READ,
+        "Read" | "List" | "Search" | "Map" | "Skill" | "Web" | "Browser" => BADGE_READ,
         "Update" | "Write" => BADGE_EDIT,
         "Bash" | "Exec" | "Process" => BADGE_SHELL,
         _ => BADGE_OTHER,

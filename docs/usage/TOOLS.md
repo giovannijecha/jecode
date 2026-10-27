@@ -1,6 +1,6 @@
 # Tools
 
-Jecode offers eleven tools to the model. An assistant message describing a command
+Jecode offers twelve tools to the model. An assistant message describing a command
 or file change does not execute it; only a native tool call can do that. Check
 the tool result or resulting state before treating a change as complete. Calls
 run only after the complete model response arrives; streamed partial calls never
@@ -26,9 +26,10 @@ Tool errors return as results so the model can correct the call.
 | `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `protect`, `wait_ms`, `timeout_seconds`, `output_limit_bytes`, `work`, `description` | Runs an executable with separate arguments and no shell parsing. `tty:true` returns a controllable terminal process. |
 | `list` | None | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Lists project entries, optionally as a recursive tree, with types and workspace-relative paths. |
 | `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Finds literal text in UTF-8 project files; returns line numbers, context and byte offsets. |
+| `map` | None | `action`, `path`, `query`, `pattern`, `offset`, `limit`, `include_hidden`, `include_ignored`, `id`, `title`, `summary`, `sources`, `work`, `description` | Surveys the project on demand and manages source-backed project notes. `action` defaults to `overview`; `remember` requires `title`, `summary` and `sources` at execution. |
 
 `work` is an optional short label chosen by the assistant for related `read`,
-`list`, `search`, `bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls
+`list`, `search`, `map`, `bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls
 share a TUI Work chapter only within the same execution turn and with matching
 normalized labels. A single eligible call keeps its normal compact tool card.
 A changed label, assistant narration or another tool breaks the chapter; skill
@@ -40,7 +41,7 @@ are saved with their original tool arguments and survive resume; they do not
 change execution. See
 [tool presentation](../tui/THEME.md) for the summary and `Ctrl+O` behavior.
 
-`description` is an optional short caption on those same eight routine tools.
+`description` is an optional short caption on those same nine routine tools.
 It is stored unchanged with the original tool arguments alongside `work` and
 survives resume; it does not change execution. Bash and Process use it as the
 compact title above their command. When omitted, the command or tool target
@@ -110,6 +111,62 @@ candidate files, including candidates subsequently identified as non-text.
 search. `skipped` reports exclusions separately. An empty result proves absence
 only within the selected and readable text scope. Compact TUI cards show counts,
 continuation and errors; `Ctrl+O` expands structured entries, matches and context.
+
+## Project map
+
+Call `map` with no arguments for an overview of the current project. The map is
+built when called; Jecode does not scan the project or put a complete map in the
+starting model context. The overview surveys candidate paths and extracts a
+focused lexical outline from Rust and Markdown files. It identifies areas,
+landmarks and symbols without claiming a language-wide call graph.
+
+```json
+{"action":"overview","path":"src","query":"config","limit":50}
+```
+
+`path` defaults to the project root. `pattern`, `include_hidden` and
+`include_ignored` use the same path filtering as `list` and `search`. `query`
+matches literal text in paths, titles, summaries and roles without case
+sensitivity. Pagination uses a 1-based `offset` (default 1) and `limit` (default
+100, maximum 1000). The encoded result is capped at 64 KiB; continue with a
+numeric `next_offset` and identical arguments. Inventory collection processes
+at most 100,000 candidate entries, keeps 2,000 rows, reads up to 80 candidate
+headers of 8 KiB each, and reads at most 4 MiB for a focused outline.
+`inventory_truncated` means narrow the path or query to recover omitted areas;
+pagination alone cannot recover an inventory cut. Results include `entries`,
+`entries_returned`, `files`, `notes_count`, `complete`, `errors`, `errors_count`
+and `skipped`. Each entry identifies its kind (`area`, `landmark`, `symbol` or
+`note`) and origin (`filesystem`, `source` or `model`).
+
+Filename roles are candidates and lexical declarations are source anchors;
+saved explanations remain model interpretations. Notes are read on demand.
+Unreadable note storage preserves the structural result with
+`notes_available:false`, `notes_count:null`, errors and `complete:false`.
+
+The assistant can save a project note with `remember`:
+
+```json
+{"action":"remember","title":"Configuration entry point","summary":"Setup reads the user-scoped config here.","sources":[{"path":"src/config.rs","line":1}]}
+```
+
+`title`, `summary` and at least one source path are required. A source can omit
+`line` to refer to the whole file; when supplied, the line is 1-based. The
+receipt returns an `id`; pass that `id` to `remember` to update the note or to
+`{"action":"forget","id":"..."}` to remove it. Notes are saved per project in
+the Jecode home, separately from conversations. After a source changes, the
+next overview reports its freshness as `changed`; absent sources report
+`missing`. `current` means the full source content still matches the saved
+fingerprint, while `unverified` means Jecode could not establish that state.
+Inspect the cited files again before relying on a changed or unverified note.
+
+Freshness checks only the notes on the requested page and references at most
+64 MiB of source content per call; sources beyond that budget are `unverified`.
+`remember` needs complete fingerprints within the same budget. Unchanged
+references do not establish semantic correctness or cover unreferenced
+dependencies. A note holds at most 16 sources, a 200-byte title and an
+8 KiB summary; the store holds at most 256 notes and 8 MiB. Writes coordinate
+across processes and preserve unrelated notes. Source paths and excerpts stay
+available for focused reads even when the saved explanation needs revisiting.
 
 ## File recovery receipts
 

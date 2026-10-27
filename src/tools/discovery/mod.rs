@@ -2,11 +2,11 @@
 use crate::{cancel::Cancellation, json::Value};
 use std::path::Path;
 
-mod page;
+pub(crate) mod page;
 mod schema;
 mod search;
 mod text;
-mod walk;
+pub(crate) mod walk;
 
 use page::Page;
 pub(super) use schema::definitions;

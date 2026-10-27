@@ -299,6 +299,15 @@ fn messages_sent_during_compaction_join_the_request_after_it() {
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = agent(&directory, &fixture);
+    let fixed = agent.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + agent.request_environment().len()
+        + prompt.len();
+    agent
+        .messages
+        .lock()
+        .unwrap()
+        .extend(crate::test_support::prior_compactable_exchange(fixed));
     agent.set_auto_compact(90);
     let inbox = agent.inbox();
     let mut sent = false;

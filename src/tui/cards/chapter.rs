@@ -13,8 +13,9 @@ use std::collections::BTreeSet;
 pub fn groupable(tool: &Tool<'_>) -> bool {
     matches!(
         tool.name,
-        "read" | "list" | "search" | "bash" | "exec" | "process" | "web" | "browser"
+        "read" | "list" | "search" | "map" | "bash" | "exec" | "process" | "web" | "browser"
     ) && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
+        && (tool.name != "map" || matches!(field(tool.arguments, "action"), "" | "overview"))
 }
 
 pub fn label(tool: &Tool<'_>) -> String {
@@ -91,8 +92,10 @@ fn named(tool: &Tool<'_>) -> Line {
 /// The latest ordinary call without separate error detail stays at the foot.
 pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
     let tool = tools.iter().rev().find(|tool| {
-        matches!(tool.name, "read" | "list" | "search" | "web" | "browser")
-            && Status::of(tool) != Status::Failed
+        matches!(
+            tool.name,
+            "read" | "list" | "search" | "map" | "web" | "browser"
+        ) && Status::of(tool) != Status::Failed
     })?;
     let (_, target) = heading(tool);
     let mut line = named(tool);
@@ -203,7 +206,7 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
 /// One primary row for commands and exceptional calls; errors add detail below.
 pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     let state = Status::of(tool);
-    if matches!(tool.name, "list" | "search")
+    if matches!(tool.name, "list" | "search" | "map")
         && let Some(result) = tool.result
         && (result.get("complete") == Some(&crate::json::Value::Bool(false))
             || result
@@ -266,8 +269,10 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         }
         return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
     }
-    if matches!(tool.name, "read" | "list" | "search" | "web" | "browser")
-        && matches!(state, Status::Running | Status::Done)
+    if matches!(
+        tool.name,
+        "read" | "list" | "search" | "map" | "web" | "browser"
+    ) && matches!(state, Status::Running | Status::Done)
     {
         return Vec::new();
     }
@@ -344,6 +349,7 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
     let mut other_reads = 0;
     let mut listings = 0;
     let mut searches = 0;
+    let mut maps = 0;
     let mut web = 0;
     let mut screenshots = 0;
     let mut snapshots = 0;
@@ -370,6 +376,7 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
             "bash" | "exec" => commands += 1,
             "list" => listings += 1,
             "search" => searches += 1,
+            "map" => maps += 1,
             "process" => processes += 1,
             "web" => web += 1,
             "browser" => {
@@ -396,6 +403,7 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
         (other_reads, "other read"),
         (listings, "listing"),
         (searches, "search"),
+        (maps, "map"),
         (web, "web call"),
         (screenshots, "screenshot"),
         (snapshots, "snapshot"),

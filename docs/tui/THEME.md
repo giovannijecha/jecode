@@ -48,7 +48,7 @@ Tool badges carry the family colour when done and the state otherwise:
 
 | Badge surface | Value | Use |
 | --- | --- | --- |
-| `BADGE_READ` | `#4C4AB2` | Read, Skill, Web, Browser. |
+| `BADGE_READ` | `#4C4AB2` | Read, List, Search, Map, Skill, Web, Browser. |
 | `BADGE_EDIT` | `#7A3F9E` | Update, Write. |
 | `BADGE_SHELL` | `#3D58A3` | Bash, Exec, Process. |
 | `BADGE_OTHER` | `#4C4AB2` | Checkpoint and any other tool. |
@@ -134,7 +134,7 @@ call keeps its family colour, a running one shimmers on `BADGE_IDLE`, a
 background one shows a `LIT` name on `BADGE_IDLE`, a failed one turns
 `BADGE_BAD` and a stopped one `BADGE_WARN`. The names are READ, SKILL (a
 `read` of a skill's `SKILL.md`), UPDATE (the `edit` tool), WRITE, BASH, EXEC,
-PROCESS, CHECKPOINT, WEB, BROWSER, LIST and SEARCH. List and Search use the
+PROCESS, CHECKPOINT, WEB, BROWSER, LIST, SEARCH and MAP. List, Search and Map use the
 read-family Violet surface; an optional description keeps the concrete target
 on the following tree row.
 
@@ -162,6 +162,7 @@ and `DIM` while running:
 | Running | The elapsed time, after `Running` for routine calls, and any note, such as the [checkpoint](../usage/CHECKPOINTS.md) `checkpoint rc-ID` recorded before a Bash call. |
 | Read | `9 lines · from line 33 of 212`, or `9 lines · from line 33 · more from 42` when the total is unknown. Narrow rows drop the start clause; split lines keep `continues at byte N`. Skill reads `Loaded skill · …`. |
 | List, Search | Entry or matching-line counts, searched files, errors and `more from N` when paged. Expanded cards show structured paths, source context and exclusions. |
+| Map | Overview counts entries, files, notes, errors and continuation; inventory truncation reads `partial`. Expanded cards show areas, landmarks, symbols, notes, source references, freshness and source inspection errors. Remember and forget show concise note receipts. |
 | Update, existing-file Write | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
 | New Write | `New file · N lines`, then the first six numbered source rows. |
 | Checkpoint | One quiet result with the hidden row count. |
@@ -192,9 +193,9 @@ expanded, the turn's first card names `collapse` on its title. Tool cards keep t
 
 ### Work chapters
 
-Two or more adjacent Read, Bash, Exec, Process, Web and Browser calls share a
+Two or more adjacent Read, List, Search, Map overview, Bash, Exec, Process, Web and Browser calls share a
 Work chapter when their normalized `work` labels and execution turn match.
-Skill reads, assistant text and other tools break the chapter; a single call
+Skill reads, Map remember/forget, assistant text and other tools break the chapter; a single call
 keeps its normal card. A missing label displays as **Activity**; the label is
 collapsed to one line and ellipsized to 60 cells for display only.
 
@@ -205,7 +206,7 @@ stop. When the chapter carries the turn's ` Ctrl+O ` keycap, it sits at the
 title's right edge and the title clips before it.
 
 One tree runs from the title to the chapter's last row. The first row counts
-successful work: unique files read, listings, searches, other reads, web calls, screenshots,
+successful work: unique files read, listings, searches, maps, other reads, web calls, screenshots,
 snapshots, browser actions, commands and process calls, plus running,
 background and stopped calls; it reads `0 completed` when it has nothing else.
 Each command keeps one row with its family-coloured name and description or

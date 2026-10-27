@@ -31,6 +31,7 @@ fn build_definitions() -> Value {
     let strings = || Value::object([("type", Value::string("array")), ("items", string())]);
     let mut tools = base_definitions(string, integer, boolean, strings);
     tools.extend(super::discovery::definitions());
+    tools.extend(crate::project_map::definitions());
     Value::Array(tools)
 }
 
@@ -53,7 +54,7 @@ pub(super) fn tool(name: &str, description: &str, properties: Value, required: &
     ])
 }
 
-pub(super) fn routine(
+pub(crate) fn routine(
     name: &str,
     description: &str,
     mut properties: Value,

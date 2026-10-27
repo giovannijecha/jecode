@@ -1,6 +1,5 @@
 //! Private archive file helpers and exact workspace file installation.
 use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -65,41 +64,7 @@ pub fn normal_component(part: &str) -> bool {
     normal
 }
 
-/// Replaces a private archive file through a synced temporary file.
-pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let parent = path.parent().unwrap_or(Path::new("."));
-    crate::disk::private_directory(parent)?;
-    let temporary = parent.join(format!(".{}.tmp", unique("write")));
-    let result = (|| {
-        let mut file = crate::disk::private_options()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temporary, path)?;
-        sync_directory(parent)?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
-}
-
-/// Persists a directory entry change where the platform exposes it through std.
-/// Windows does not expose directory flushing through std.
-pub fn sync_directory(_path: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        fs::File::open(_path)?.sync_all()
-    }
-    #[cfg(not(unix))]
-    {
-        Ok(())
-    }
-}
+pub use crate::disk::{atomic_write, sync_directory};
 
 /// Exact workspace file metadata that recovery can reproduce.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

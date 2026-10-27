@@ -5,7 +5,7 @@ mod clock;
 pub mod command;
 mod files;
 mod format;
-mod hash;
+use crate::disk::hash;
 mod locks;
 mod paths;
 mod pressure;

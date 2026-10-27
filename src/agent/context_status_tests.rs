@@ -216,6 +216,15 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
         Tools::new(directory.path()).unwrap(),
     );
     agent.client.fixture_unknown_limits();
+    let fixed = agent.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + agent.request_environment().len()
+        + prompt.len();
+    agent
+        .messages
+        .lock()
+        .unwrap()
+        .extend(crate::test_support::prior_compactable_exchange(fixed));
     agent.set_auto_compact(90);
     let (result, trace) = trace(&mut agent, &prompt);
     result.unwrap();

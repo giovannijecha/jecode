@@ -10,6 +10,7 @@ impl Agent {
         if self.persistence.is_none() {
             self.skills.configure(home);
             self.tools.configure_browser_profiles(home);
+            self.tools.configure_project_map(home);
             let store = Store::new(home.to_path_buf(), self.tools.root())?;
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),

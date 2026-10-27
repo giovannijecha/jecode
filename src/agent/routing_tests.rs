@@ -123,6 +123,15 @@ fn a_pin_reaches_summary_requests_and_its_failures_say_how_to_change_it() {
         error(404, "No endpoints found matching your data policy"),
     ]);
     let mut agent = agent(&directory, &fixture.endpoint, Routing::Endpoint(PIN.into()));
+    let fixed = agent.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + agent.request_environment().len()
+        + prompt.len();
+    agent
+        .messages
+        .lock()
+        .unwrap()
+        .extend(crate::test_support::prior_compactable_exchange(fixed));
     agent.set_auto_compact(90);
     agent.run_turn(&prompt, &mut |_| Ok(())).unwrap();
     let failure = agent.run_turn("Next task", &mut |_| Ok(())).unwrap_err();

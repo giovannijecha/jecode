@@ -434,6 +434,8 @@ mod local_read_tests;
 #[cfg(test)]
 mod long_work_tests;
 #[cfg(test)]
+mod map_tests;
+#[cfg(test)]
 mod network_tests;
 #[cfg(test)]
 mod persistence_tests;

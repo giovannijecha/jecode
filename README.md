@@ -5,8 +5,10 @@
 A terminal coding agent in Rust.
 
 Jecode connects to OpenRouter with an API key or to OpenAI through your ChatGPT
-account. It works in your project through nine tools: `read`, `write`,
-`edit`, `bash`, `exec`, `process`, `checkpoint`, `web` and `browser`.
+account. It works in your project through twelve tools: `read`, `list`,
+`search`, `map`, `write`, `edit`, `bash`, `exec`, `process`, `checkpoint`, `web`
+and `browser`. `map` surveys code structure and can save or forget sourced
+notes; `list` and `search` discover files and matching lines.
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
 One Cargo package, the Rust standard library, no external crates. Installed system

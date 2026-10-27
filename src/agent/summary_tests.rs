@@ -282,9 +282,21 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
         "Original evidence\n".repeat(1900),
     )
     .unwrap();
+    let probe_fixture = HttpFixture::new(vec![]);
+    let probe = Agent::new(
+        OpenRouter::fixture(probe_fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let fixed = probe.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + probe.request_environment().len();
+    assert!(probe_fixture.finish().is_empty());
+    // Keep the carried constraints near native prompt/catalog overhead. The
+    // memory then remains between a quarter and half of the fixture window.
     let memory = format!(
         "Continue existing work. Constraints: {}end.",
-        "Preserve detailed constraint; ".repeat(400)
+        "Preserve detailed constraint; "
+            .repeat(fixed.div_ceil("Preserve detailed constraint; ".len()))
     );
     let mut first = large_read();
     if let Value::Object(fields) = &mut first {

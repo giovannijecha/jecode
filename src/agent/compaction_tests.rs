@@ -137,6 +137,15 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
+    let fixed = agent.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + agent.request_environment().len()
+        + prompt.len();
+    agent
+        .messages
+        .lock()
+        .unwrap()
+        .extend(crate::test_support::prior_compactable_exchange(fixed));
     agent.set_auto_compact(90);
     agent
         .run_turn(&prompt, &mut |event| {
@@ -147,12 +156,10 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
         })
         .unwrap();
     assert!(agent.context.ceiling.is_some());
-    assert_eq!(
-        agent.messages.lock().unwrap()[1]
-            .get("content")
-            .and_then(Value::as_str),
-        Some(prompt.as_str())
-    );
+    assert!(agent.messages.lock().unwrap().iter().any(|message| {
+        message.get("role").and_then(Value::as_str) == Some("user")
+            && message.get("content").and_then(Value::as_str) == Some(prompt.as_str())
+    }));
     let requests = fixture.finish();
     assert_eq!(requests.len(), 4);
     assert!(

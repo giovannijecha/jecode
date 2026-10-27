@@ -26,7 +26,7 @@ fn work_and_description_are_optional_only_for_routine_tools() {
         );
         if matches!(
             name,
-            "read" | "bash" | "process" | "web" | "browser" | "exec" | "list" | "search"
+            "read" | "bash" | "process" | "web" | "browser" | "exec" | "list" | "search" | "map"
         ) {
             let work = properties.get("work").unwrap();
             assert_eq!(work.get("type"), Some(&Value::string("string")), "{name}");
@@ -142,7 +142,7 @@ fn provider_regression_unbounded_offsets_have_no_platform_sized_schema_maximum()
 fn web_and_browser_advertise_local_actions_and_signed_scroll() {
     let tools = definitions();
     let functions = tools.as_array().unwrap();
-    assert_eq!(functions.len(), 11);
+    assert_eq!(functions.len(), 12);
     assert!(functions.iter().all(|tool| tool.get("function").is_none()));
     for (name, action) in [("web", "crawl"), ("browser", "cdp")] {
         let function = functions
@@ -180,6 +180,61 @@ fn web_and_browser_advertise_local_actions_and_signed_scroll() {
         .unwrap();
     assert_eq!(scroll.get("type").and_then(Value::as_str), Some("integer"));
     assert!(scroll.get("minimum").is_none());
+}
+
+#[test]
+fn map_is_appended_as_a_bounded_routine_tool() {
+    let tools = definitions().as_array().unwrap();
+    assert_eq!(tools[11].get("name").and_then(Value::as_str), Some("map"));
+    let parameters = tools[11].get("parameters").unwrap();
+    assert_eq!(parameters.get("required"), Some(&Value::Array(vec![])));
+    let properties = parameters.get("properties").unwrap();
+    let actions = properties.get("action").unwrap().get("enum").unwrap();
+    assert_eq!(
+        actions,
+        &Value::Array(["overview", "remember", "forget"].map(Value::string).into())
+    );
+    assert_eq!(
+        properties.get("offset").unwrap().get("minimum"),
+        Some(&Value::number(1))
+    );
+    let limit = properties.get("limit").unwrap();
+    assert_eq!(limit.get("minimum"), Some(&Value::number(1)));
+    assert_eq!(limit.get("maximum"), Some(&Value::number(1000)));
+    let sources = properties.get("sources").unwrap();
+    assert_eq!(sources.get("type"), Some(&Value::string("array")));
+    let source = sources.get("items").unwrap();
+    assert_eq!(
+        source.get("additionalProperties"),
+        Some(&Value::Bool(false))
+    );
+    assert_eq!(
+        source.get("required"),
+        Some(&Value::Array(vec![Value::string("path")]))
+    );
+    assert_eq!(
+        source
+            .get("properties")
+            .unwrap()
+            .get("line")
+            .unwrap()
+            .get("minimum"),
+        Some(&Value::number(1))
+    );
+    for name in ["path", "query", "id", "title", "summary"] {
+        assert_eq!(
+            properties.get(name).unwrap().get("type"),
+            Some(&Value::string("string")),
+            "{name}"
+        );
+    }
+    for name in ["include_hidden", "include_ignored"] {
+        assert_eq!(
+            properties.get(name).unwrap().get("type"),
+            Some(&Value::string("boolean")),
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -356,7 +411,8 @@ fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
             "browser",
             "exec",
             "list",
-            "search"
+            "search",
+            "map"
         ]
     );
     for (name, required, limit_max, context_max) in [

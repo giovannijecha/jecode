@@ -28,6 +28,7 @@ mod json;
 mod output;
 mod path_filter;
 mod process;
+mod project_map;
 mod pty;
 mod redact;
 mod scratch;

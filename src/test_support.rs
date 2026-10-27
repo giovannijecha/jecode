@@ -54,6 +54,27 @@ impl Drop for Directory {
     }
 }
 
+/// A prior exchange large enough to make a synthetic provider rejection
+/// recoverable without shrinking the original user request under test.
+pub fn prior_compactable_exchange(bytes: usize) -> [Value; 2] {
+    const PHRASE: &str = "Earlier assistant observation. ";
+    // About three fifths of the fixed request leaves summary room after the
+    // learned 75% ceiling without creating extra summary portions.
+    [
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Review earlier observations.")),
+        ]),
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "content",
+                Value::string(PHRASE.repeat(bytes.saturating_mul(3).div_ceil(5 * PHRASE.len()))),
+            ),
+        ]),
+    ]
+}
+
 pub struct Request {
     pub headers: Vec<String>,
     pub body: Value,

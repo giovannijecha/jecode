@@ -1,12 +1,12 @@
 mod attachment;
-mod discovery;
+pub(crate) mod discovery;
 pub(crate) mod edit;
 mod exec;
 mod files;
 mod interactive;
 mod network;
 pub mod processes;
-mod schema;
+pub(crate) mod schema;
 mod shell;
 
 pub(crate) use files::read_source;
@@ -53,6 +53,7 @@ pub struct Tools {
     checkpoints: Option<Arc<Session>>,
     browsers: crate::browser::Registry,
     browser_profiles: Option<PathBuf>,
+    project_map: crate::project_map::Map,
 }
 
 impl Tools {
@@ -63,6 +64,7 @@ impl Tools {
             return Err("The working directory must be a directory".into());
         }
         Ok(Self {
+            project_map: crate::project_map::Map::new(root.clone()),
             outputs: crate::output::Store::new(
                 root.join(".jecode-output"),
                 crate::redact::Redactor::empty(),
@@ -104,7 +106,12 @@ impl Tools {
         self.outputs = outputs;
     }
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
+        self.project_map.include_credentials(redactor.clone());
         self.outputs.include(redactor);
+    }
+
+    pub fn configure_project_map(&mut self, home: &Path) {
+        self.project_map.configure(home);
     }
 
     pub fn configure_attachments(&mut self, pool: crate::attachments::Pool) {
@@ -247,6 +254,10 @@ impl Tools {
                         discovery::execute(&self.root, name, &arguments, cancellation)
                             .map(|value| (value, None))
                     }
+                    "map" => self
+                        .project_map
+                        .execute(&arguments, cancellation)
+                        .map(|value| (value, None)),
                     "read" => {
                         let path = required_string(&arguments, "path")?;
                         if attachment::is_reference(path) {
@@ -404,14 +415,14 @@ impl Tools {
     }
 }
 
-fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, String> {
+pub(crate) fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, String> {
     arguments
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("{name} must be a string"))
 }
 
-fn optional_number(
+pub(crate) fn optional_number(
     arguments: &Value,
     name: &str,
     default: usize,

@@ -17,6 +17,7 @@ Paths are relative to `src/`.
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
 | Native file discovery and shared path filtering | `tools/discovery/`, `path_filter.rs`, `path_filter/` |
+| Project orientation and shared source-backed notes | `project_map/` |
 | Local web and browser | `web/`, `browser/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
@@ -24,7 +25,7 @@ Paths are relative to `src/`.
 | Attachments | `attachments/`, `tools/attachment.rs` |
 | Model backends | `backend/`, `backend/openrouter/`, `backend/openai/` |
 | Interfaces | `session.rs`, `session/`, `console.rs`, `tui/` |
-| Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs` |
+| Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs`, `disk.rs`, `disk/` |
 
 ## Request lifecycle
 
@@ -86,12 +87,14 @@ Optional capture bounds input size and alignment work; unavailable diffs never
 reject an otherwise valid write or edit. Local `turn_start` events preserve
 execution-turn grouping across queued follow-ups and resume.
 
-The optional `work` argument on `read`, `bash`, `process`, `web` and `browser`
+The optional `work` argument on `read`, `list`, `search`, `map`, `bash`, `exec`,
+`process`, `web` and `browser`
 stays in each tool call's canonical arguments. Both provider adapters replay it
 through their native function-call wire shape, and saved sessions retain it
 without a separate event or metadata envelope. `tui/state/rows.rs` forms a
 chapter from two or more contiguous eligible calls with the same normalized label
-and execution-turn ID (`Presentation.turn_id`); text and other tools end the
+and execution-turn ID (`Presentation.turn_id`); only map overview is eligible.
+Text and other tools end the
 group. Single eligible calls keep their normal cards. `tui/cards/chapter.rs`
 derives aggregate facts and status from chapter members, omitting a facts row
 that only repeats the homogeneous header status. It keeps every Bash target
@@ -100,6 +103,28 @@ as Activity. Label normalization collapses whitespace; only the heading is
 truncated to 60 terminal cells. Grouping compares the full normalized label;
 the original saved arguments stay unchanged. The existing latest-turn `Ctrl+O`
 state reveals complete individual cards inline.
+
+### Project map
+
+`project_map/survey.rs` uses discovery's filtered filesystem walker for live
+directory areas and candidate landmarks. A focused Rust or Markdown file adds
+lexical declarations or headings with line references; this is not compiler or
+dependency analysis. Collection is bounded and reports omitted inventory.
+
+`map remember` stores model-authored explanations with source paths, optional
+line excerpts and full-file content fingerprints. `sources.rs` compares those
+fingerprints on requested result pages, including edits outside Jecode, and
+returns current, changed, missing or unverified status. Freshness covers the
+referenced content; it cannot establish semantic correctness or account for
+unreferenced dependencies.
+
+`storage.rs` keeps notes at `~/.jecode/projects/<canonical-root-key>/map.json`,
+separate from session deletion and backend state. Writes lock, reload and
+atomically replace the project file so concurrent conversations preserve
+independent notes. Checkpoints and map storage share original fingerprint,
+file-lock and synced replacement helpers in `disk/`. Neither startup nor the
+system message scans or injects the map. The tool's overview is eligible for
+existing read batches and Work chapters; remember/forget execute in order.
 
 ### Context and compaction
 

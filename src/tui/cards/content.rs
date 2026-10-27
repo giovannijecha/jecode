@@ -1,6 +1,6 @@
 use super::{
-    Body, Status, Tool, diff, discovery, edit_fallback, field, flag, line_rows, preview, streams,
-    summary::size,
+    Body, Status, Tool, diff, discovery, edit_fallback, field, flag, line_rows, map, preview,
+    streams, summary::size,
 };
 use crate::{
     file_change::Change,
@@ -36,6 +36,7 @@ pub(super) fn render(
     let arguments = tool.arguments;
     match tool.name {
         "list" | "search" => discovery::render(tool.name, result, columns, expanded),
+        "map" => map::render(result, columns, expanded),
         "read" if !expanded => Body::new(Vec::new()),
         "read" if result.get("content").and_then(Value::as_str).is_some() => {
             Body::new(read(arguments, result, columns))

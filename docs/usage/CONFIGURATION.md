@@ -137,6 +137,7 @@ its own purpose:
 | `accounts/openai/` | Protected ChatGPT registrations, rotating tokens, active account, stable host ID and refresh lock. |
 | `skills/` | Your reusable skill files; Jecode reads this library. |
 | `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
+| `projects/<canonical-root-key>/map.json` | Source-backed project notes saved by `map remember` and removed by `map forget`; shared across conversations for the same canonical project root. |
 | `tmp/` | Session working files, managed by Jecode's temporary-file actions. |
 | `browser/profiles/` | Named persistent Chromium profiles selected by the `browser` tool. |
 | `cache/` | Native helper binaries generated when needed. |
@@ -148,6 +149,12 @@ workspace files. Provider-free checkpoint commands also open the workspace
 directory. Each pack expires 24 hours after capture and Jecode removes expired
 packs while running or on the next use. The deadline does not apply to
 `.internal/` metadata. Checkpoint cleanup does not manage the other home paths.
+
+Project notes are separate from session storage, so resuming or starting a new
+conversation in the same project can use them. Jecode loads notes when `map`
+is called and checks saved source fingerprints against the current full file
+contents. Opening a project does not scan its files for the map. See
+[Project map](TOOLS.md#project-map) for the tool actions and freshness states.
 
 ## Automatic compaction threshold
 
