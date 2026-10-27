@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 pub fn groupable(tool: &Tool<'_>) -> bool {
     matches!(
         tool.name,
-        "read" | "bash" | "exec" | "process" | "web" | "browser"
+        "read" | "list" | "search" | "bash" | "exec" | "process" | "web" | "browser"
     ) && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
 }
 
@@ -91,7 +91,8 @@ fn named(tool: &Tool<'_>) -> Line {
 /// The latest ordinary call without separate error detail stays at the foot.
 pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
     let tool = tools.iter().rev().find(|tool| {
-        matches!(tool.name, "read" | "web" | "browser") && Status::of(tool) != Status::Failed
+        matches!(tool.name, "read" | "list" | "search" | "web" | "browser")
+            && Status::of(tool) != Status::Failed
     })?;
     let (_, target) = heading(tool);
     let mut line = named(tool);
@@ -202,6 +203,26 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
 /// One primary row for commands and exceptional calls; errors add detail below.
 pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     let state = Status::of(tool);
+    if matches!(tool.name, "list" | "search")
+        && let Some(result) = tool.result
+        && (result.get("complete") == Some(&crate::json::Value::Bool(false))
+            || result
+                .get("errors_count")
+                .and_then(crate::json::Value::as_usize)
+                .unwrap_or(0)
+                > 0
+            || result
+                .get("errors")
+                .and_then(crate::json::Value::as_array)
+                .is_some_and(|errors| !errors.is_empty()))
+    {
+        let mut line = named(tool);
+        line.push(
+            &format!(" {}", summary::line(tool, state, None).plain()),
+            BODY,
+        );
+        return vec![rhythm::one(line, columns, "    ", DIM, 2)];
+    }
     if matches!(tool.name, "bash" | "exec" | "process") {
         let mut line = named(tool);
         line.push(" ", BODY);
@@ -245,7 +266,7 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         }
         return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
     }
-    if matches!(tool.name, "read" | "web" | "browser")
+    if matches!(tool.name, "read" | "list" | "search" | "web" | "browser")
         && matches!(state, Status::Running | Status::Done)
     {
         return Vec::new();
@@ -321,6 +342,8 @@ impl Outcomes {
 fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
     let mut files = BTreeSet::new();
     let mut other_reads = 0;
+    let mut listings = 0;
+    let mut searches = 0;
     let mut web = 0;
     let mut screenshots = 0;
     let mut snapshots = 0;
@@ -345,6 +368,8 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
                 }
             }
             "bash" | "exec" => commands += 1,
+            "list" => listings += 1,
+            "search" => searches += 1,
             "process" => processes += 1,
             "web" => web += 1,
             "browser" => {
@@ -369,6 +394,8 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
     }
     for (count, noun) in [
         (other_reads, "other read"),
+        (listings, "listing"),
+        (searches, "search"),
         (web, "web call"),
         (screenshots, "screenshot"),
         (snapshots, "snapshot"),

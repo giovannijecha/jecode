@@ -79,6 +79,7 @@ verified the change. Use `-- --list` to inspect available names.
 | --- | --- |
 | Agent/context/backend | `agent::backend_tests` uses two synthetic protocols across tool execution, compaction, save and resume. Both `backend/openrouter/` and `backend/openai/` tests use loopback responses for their adapters. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
+| Native discovery | `tools::discovery` covers filtering, paging, literal matches, UTF-8/long lines, bounds and cancellation. `path_filter::tests` retains checkpoint ignore-rule coverage; `agent::discovery_tests` exercises both provider wrappers and session resume. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
@@ -102,6 +103,7 @@ at 80 and 40 cells with synthetic events:
 
 ```text
 cargo test --locked --offline tui::specimen::work_chapters -- --ignored --nocapture
+cargo test --locked --offline tui::specimen::discovery::discovery_cards -- --exact --ignored --nocapture
 ```
 
 The [native terminal fixture](PLATFORMS.md#windows) also checks compact chapter

@@ -1,4 +1,5 @@
 mod attachment;
+mod discovery;
 pub(crate) mod edit;
 mod exec;
 mod files;
@@ -242,6 +243,10 @@ impl Tools {
                     return Err("Tool arguments must be a JSON object".into());
                 }
                 match name {
+                    "list" | "search" => {
+                        discovery::execute(&self.root, name, &arguments, cancellation)
+                            .map(|value| (value, None))
+                    }
                     "read" => {
                         let path = required_string(&arguments, "path")?;
                         if attachment::is_reference(path) {

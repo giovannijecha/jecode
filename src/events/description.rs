@@ -3,7 +3,7 @@ use crate::json::Value;
 pub fn description(name: &str, arguments: &Value) -> String {
     if matches!(
         name,
-        "read" | "bash" | "exec" | "process" | "web" | "browser"
+        "read" | "list" | "search" | "bash" | "exec" | "process" | "web" | "browser"
     ) && let Some(label) = arguments.get("description").and_then(Value::as_str)
         && !label.trim().is_empty()
     {
@@ -14,6 +14,21 @@ pub fn description(name: &str, arguments: &Value) -> String {
 
 /// The invocation target, independently of an optional display description.
 pub fn target(name: &str, arguments: &Value) -> String {
+    if name == "list" {
+        return arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or(".")
+            .into();
+    }
+    if name == "search" {
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid arguments");
+        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+        return format!("{query} in {path}");
+    }
     if name == "web" || name == "browser" {
         let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
         let action = field("action");

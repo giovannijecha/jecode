@@ -333,6 +333,15 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
         }
     };
     match name {
+        "list" => labelled(
+            "Listing",
+            if field("path").is_empty() {
+                ".".into()
+            } else {
+                file("path")
+            },
+        ),
+        "search" => labelled("Searching", short(field("query"))),
         "read" => match field("path").strip_prefix("skill:") {
             Some(skill) => labelled(
                 "Loading skill",

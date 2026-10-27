@@ -3,7 +3,7 @@ use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 
 fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent, Vec<Value>) {
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(37500, None);
+    client.fixture_limits(45000, None);
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent
         .prepare_turn("Continue the current inspection")
@@ -20,12 +20,12 @@ fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent
         ("role", Value::string("assistant")),
         (
             "content",
-            Value::string("Recorded inspection data ".repeat(640)),
+            Value::string("Recorded inspection data ".repeat(960)),
         ),
     ]));
     let original = agent.messages.lock().unwrap().clone();
     // Raw growth crosses the default 80% budget; the calibrated estimate does not.
-    let budget = crate::context::threshold(37500, crate::context::AUTO_COMPACT_DEFAULT);
+    let budget = crate::context::threshold(45000, crate::context::AUTO_COMPACT_DEFAULT);
     assert!(16635 + crate::context::bytes(&original[2..]) > budget);
     assert!(agent.context_estimate(&original) < budget);
     (agent, original)
@@ -71,6 +71,10 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
             200,
             completion(&String::from("Keep the current inspection"), vec![]),
         ),
+        (
+            200,
+            completion(&String::from("Keep the current inspection"), vec![]),
+        ),
         (200, completion("Inspection finished.", vec![])),
     ]);
     let (mut agent, original) = measured_growth_agent(&directory, &fixture);
@@ -84,12 +88,13 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
     assert!(agent.context.from > 1);
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     assert!(requests[0].body.get("tools").is_some());
     assert!(requests[1].body.get("tools").is_none());
-    assert!(requests[2].body.get("tools").is_some());
+    assert!(requests[2].body.get("tools").is_none());
+    assert!(requests[3].body.get("tools").is_some());
     assert!(
-        requests[2]
+        requests[3]
             .body
             .encode()
             .contains("Keep the current inspection")
@@ -275,7 +280,7 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
     );
     agent.context.summary = memory;
     // Preserve room for this >8 KiB carried memory within the active context.
-    let capacity = agent.fixture_capacity(agent.context.summary.len() + 4_096, 80);
+    let capacity = agent.fixture_capacity(agent.context.summary.len() + 16_384, 80);
     agent.client.fixture_limits(capacity, Some(4096));
     agent.messages.lock().unwrap().extend([
         Value::object([
@@ -287,11 +292,11 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
         ]),
         Value::object([
             ("role", Value::string("assistant")),
-            ("content", Value::string("a".repeat(9000))),
+            ("content", Value::string("a".repeat(14000))),
         ]),
         Value::object([
             ("role", Value::string("assistant")),
-            ("content", Value::string("b".repeat(9000))),
+            ("content", Value::string("b".repeat(14000))),
         ]),
     ]);
     agent

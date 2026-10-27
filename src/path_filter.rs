@@ -1,8 +1,7 @@
-//! Git ignore rules for implicit directory walks, read without running Git.
-//! Walks test directories only: they skip a tree Git would not descend into,
-//! while individually ignored files such as `.env` stay protected. Rules come
-//! from `.gitignore` files and the repository's `info/exclude`; the user's
-//! global excludes file is not read.
+//! Shared Git-style path filtering, read without running Git.
+//! Checkpoints test directories only; discovery can also filter individual files.
+//! Rules come from `.gitignore` files and the repository's `info/exclude`;
+//! the user's global excludes file is not read.
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -88,7 +87,7 @@ impl Ignore {
     fn local(&mut self, directory: &str) -> &RuleFile {
         self.local.entry(directory.to_owned()).or_insert_with(|| {
             self.root.as_ref().map_or_else(RuleFile::default, |root| {
-                load(&super::absolute(root, directory).join(".gitignore"))
+                load(&root.join(directory).join(".gitignore"))
             })
         })
     }
@@ -136,6 +135,11 @@ impl Ignore {
     /// ancestors were traversed. The nearest rule file decides first, and
     /// within one file the last matching rule wins.
     pub fn ignored(&mut self, path: &str) -> bool {
+        self.ignored_entry(path, true)
+    }
+
+    /// Whether this entry is ignored, after its parents have been traversed.
+    pub fn ignored_entry(&mut self, path: &str, directory: bool) -> bool {
         let name = path.rsplit('/').next().unwrap_or(path);
         let mut parent = path;
         loop {
@@ -145,7 +149,7 @@ impl Ignore {
             } else {
                 &path[parent.len() + 1..]
             };
-            if let Some(ignored) = decide(&self.local(parent).rules, below, name) {
+            if let Some(ignored) = decide_entry(&self.local(parent).rules, below, name, directory) {
                 return ignored;
             }
             if parent.is_empty() {
@@ -158,7 +162,7 @@ impl Ignore {
             } else {
                 format!("{prefix}/{path}")
             };
-            decide(&rules.rules, &below, name)
+            decide_entry(&rules.rules, &below, name, directory)
         }) == Some(true)
     }
 
@@ -220,10 +224,16 @@ fn load(path: &Path) -> RuleFile {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn decide(rules: &[Rule], below: &str, name: &str) -> Option<bool> {
+    decide_entry(rules, below, name, true)
+}
+
+fn decide_entry(rules: &[Rule], below: &str, name: &str, directory: bool) -> Option<bool> {
     rules.iter().rev().find_map(|rule| {
         let text = if rule.anchored { below } else { name };
-        matches(&rule.tokens, text.as_bytes()).then_some(!rule.negated)
+        ((!rule.directory_only || directory) && matches(&rule.tokens, text.as_bytes()))
+            .then_some(!rule.negated)
     })
 }
 
@@ -233,6 +243,7 @@ struct Rule {
     /// A rule with an inner or leading slash matches the path below its
     /// file's directory; any other rule matches a name at any depth.
     anchored: bool,
+    directory_only: bool,
 }
 
 enum Token {
@@ -263,7 +274,7 @@ fn rule(line: &str) -> Option<Rule> {
     if negated {
         pattern = &pattern[1..];
     }
-    // Walks test directories only, so a directory-only rule needs no flag.
+    let directory_only = pattern.ends_with('/');
     let pattern = pattern.strip_suffix('/').unwrap_or(pattern);
     let anchored = pattern.contains('/');
     let pattern = pattern.strip_prefix('/').unwrap_or(pattern);
@@ -271,6 +282,7 @@ fn rule(line: &str) -> Option<Rule> {
         tokens: tokens(pattern.as_bytes()),
         negated,
         anchored,
+        directory_only,
     })
 }
 
@@ -343,34 +355,74 @@ fn class(pattern: &[u8]) -> Option<(Token, usize)> {
 }
 
 fn matches(tokens: &[Token], text: &[u8]) -> bool {
-    let Some((token, rest)) = tokens.split_first() else {
-        return text.is_empty();
-    };
-    let single = |accept: &dyn Fn(u8) -> bool| {
-        text.first()
-            .is_some_and(|byte| *byte != b'/' && accept(fold(*byte)))
-            && matches(rest, &text[1..])
-    };
-    match token {
-        Token::Byte(expected) => {
-            text.first().is_some_and(|byte| fold(*byte) == *expected) && matches(rest, &text[1..])
-        }
-        Token::One => single(&|_| true),
-        Token::Class { negated, ranges } => single(&|byte| {
-            ranges
-                .iter()
-                .any(|(low, high)| (*low..=*high).contains(&byte))
-                != *negated
-        }),
-        Token::Star => (0..=text.len())
-            .take_while(|at| *at == 0 || text[at - 1] != b'/')
-            .any(|at| matches(rest, &text[at..])),
-        Token::Dirs => {
-            matches(rest, text)
-                || (0..text.len()).any(|at| text[at] == b'/' && matches(rest, &text[at + 1..]))
-        }
-        Token::All => true,
+    match_tokens(tokens, text, None).unwrap()
+}
+
+/// Reachable byte positions after each token avoid exponential star backtracking.
+fn match_tokens(
+    tokens: &[Token],
+    text: &[u8],
+    cancellation: Option<&crate::cancel::Cancellation>,
+) -> Result<bool, String> {
+    if cancellation.is_some_and(crate::cancel::Cancellation::requested) {
+        return Err("Operation cancelled".into());
     }
+    if tokens.iter().all(|token| matches!(token, Token::Byte(_))) {
+        return Ok(tokens.len() == text.len()
+            && tokens.iter().zip(text).all(
+                |(token, byte)| matches!(token, Token::Byte(expected) if *expected == fold(*byte)),
+            ));
+    }
+    let mut current = vec![false; text.len() + 1];
+    let mut next = current.clone();
+    current[0] = true;
+    for token in tokens {
+        if cancellation.is_some_and(crate::cancel::Cancellation::requested) {
+            return Err("Operation cancelled".into());
+        }
+        next.fill(false);
+        match token {
+            Token::All => return Ok(current.iter().any(|matched| *matched)),
+            Token::Star => {
+                next[0] = current[0];
+                for index in 0..text.len() {
+                    next[index + 1] = current[index + 1] || (next[index] && text[index] != b'/');
+                }
+            }
+            Token::Dirs => {
+                next.copy_from_slice(&current);
+                let mut active = false;
+                for index in 0..text.len() {
+                    active |= current[index];
+                    if active && text[index] == b'/' {
+                        next[index + 1] = true;
+                    }
+                }
+            }
+            _ => {
+                for (index, byte) in text.iter().copied().enumerate() {
+                    if !current[index] {
+                        continue;
+                    }
+                    let accepted = match token {
+                        Token::Byte(expected) => fold(byte) == *expected,
+                        Token::One => byte != b'/',
+                        Token::Class { negated, ranges } => {
+                            byte != b'/'
+                                && (ranges
+                                    .iter()
+                                    .any(|(low, high)| (*low..=*high).contains(&fold(byte)))
+                                    != *negated)
+                        }
+                        _ => unreachable!(),
+                    };
+                    next[index + 1] = accepted;
+                }
+            }
+        }
+        std::mem::swap(&mut current, &mut next);
+    }
+    Ok(current[text.len()])
 }
 
 /// Git defaults to case-insensitive matching on Windows volumes.
@@ -385,6 +437,33 @@ fn fold(byte: u8) -> u8 {
     }
 }
 
+/// An explicit path glob. Unlike ignore rules, `!` and `#` are literal here.
+pub struct Pattern {
+    tokens: Vec<Token>,
+    anchored: bool,
+}
+
+impl Pattern {
+    pub fn new(pattern: &str) -> Self {
+        Self {
+            tokens: tokens(pattern.trim_start_matches('/').as_bytes()),
+            anchored: pattern.contains('/'),
+        }
+    }
+
+    pub fn matches(
+        &self,
+        relative: &str,
+        cancellation: &crate::cancel::Cancellation,
+    ) -> Result<bool, String> {
+        let text = if self.anchored {
+            relative
+        } else {
+            relative.rsplit('/').next().unwrap_or(relative)
+        };
+        match_tokens(&self.tokens, text.as_bytes(), Some(cancellation))
+    }
+}
+
 #[cfg(test)]
-#[path = "ignore_tests.rs"]
 mod tests;

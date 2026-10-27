@@ -16,6 +16,7 @@ Paths are relative to `src/`.
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
+| Native file discovery and shared path filtering | `tools/discovery/`, `path_filter.rs`, `path_filter/` |
 | Local web and browser | `web/`, `browser/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
@@ -38,7 +39,7 @@ Paths are relative to `src/`.
    request, then streams text and progress through agent events.
 4. The agent saves tool boundaries, executes calls and records their results.
    Up to four adjacent eligible calls run together after the complete model
-   response: file reads, checkpoint list/inspect, process list, and web
+   response: directory listings, text searches, file reads, checkpoint list/inspect, process list, and web
    fetch/download using GET or HEAD without a body. History and skill reads,
    process cursors, crawls and modifying calls break the batch. Results and
    checkpoints keep model call order. Follow-up messages

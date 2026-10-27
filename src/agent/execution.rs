@@ -196,6 +196,7 @@ fn parallel_call(call: &ToolCall) -> bool {
     };
     let action = arguments.get("action").and_then(Value::as_str);
     match call.name.as_str() {
+        "list" | "search" => true,
         // History depends on preceding results; skills keep a per-turn snapshot.
         "read" => arguments
             .get("path")

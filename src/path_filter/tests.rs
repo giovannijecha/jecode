@@ -57,6 +57,39 @@ fn patterns_follow_gitignore_syntax() {
 }
 
 #[test]
+fn many_wildcards_do_not_backtrack_and_explicit_matching_is_cancellable() {
+    let pattern = Pattern::new(&format!("{}b", "*a".repeat(40)));
+    let cancellation = crate::cancel::Cancellation::default();
+    assert!(
+        !pattern
+            .matches(&format!("{}c", "a".repeat(100)), &cancellation)
+            .unwrap()
+    );
+    assert!(
+        pattern
+            .matches(&format!("{}b", "a".repeat(100)), &cancellation)
+            .unwrap()
+    );
+    cancellation.cancel();
+    assert!(
+        pattern
+            .matches("ab", &cancellation)
+            .unwrap_err()
+            .contains("cancelled")
+    );
+}
+
+#[test]
+fn discovery_directory_only_rules_do_not_ignore_files_of_the_same_name() {
+    let fixture = Fixture::new();
+    fixture.write(".gitignore", "cache/\n*.log\n");
+    let mut rules = Ignore::new(&fixture.0);
+    assert!(rules.ignored_entry("cache", true));
+    assert!(!rules.ignored_entry("cache", false));
+    assert!(rules.ignored_entry("out.log", false));
+}
+
+#[test]
 fn nearest_file_and_last_rule_decide() {
     let fixture = Fixture::new();
     fixture.write(".gitignore", "build/\n.tmp/\nlogs/\n!logs/\n");

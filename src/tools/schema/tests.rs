@@ -26,7 +26,7 @@ fn work_and_description_are_optional_only_for_routine_tools() {
         );
         if matches!(
             name,
-            "read" | "bash" | "process" | "web" | "browser" | "exec"
+            "read" | "bash" | "process" | "web" | "browser" | "exec" | "list" | "search"
         ) {
             let work = properties.get("work").unwrap();
             assert_eq!(work.get("type"), Some(&Value::string("string")), "{name}");
@@ -142,7 +142,7 @@ fn provider_regression_unbounded_offsets_have_no_platform_sized_schema_maximum()
 fn web_and_browser_advertise_local_actions_and_signed_scroll() {
     let tools = definitions();
     let functions = tools.as_array().unwrap();
-    assert_eq!(functions.len(), 9);
+    assert_eq!(functions.len(), 11);
     assert!(functions.iter().all(|tool| tool.get("function").is_none()));
     for (name, action) in [("web", "crawl"), ("browser", "cdp")] {
         let function = functions
@@ -333,5 +333,91 @@ fn browser_advertises_viewport_bounds_and_log_paging() {
     let description = browser.get("description").and_then(Value::as_str).unwrap();
     for phrase in ["page viewport", "role, name", "next_cursor", "missed"] {
         assert!(description.contains(phrase), "{phrase}");
+    }
+}
+
+#[test]
+fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
+    let tools = definitions().as_array().unwrap();
+    let names = tools
+        .iter()
+        .map(|tool| tool.get("name").and_then(Value::as_str).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "process",
+            "checkpoint",
+            "web",
+            "browser",
+            "exec",
+            "list",
+            "search"
+        ]
+    );
+    for (name, required, limit_max, context_max) in [
+        ("list", Vec::new(), 2_000, None),
+        ("search", vec![Value::string("query")], 1_000, Some(10)),
+    ] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+            .unwrap();
+        let parameters = tool.get("parameters").unwrap();
+        assert_eq!(parameters.get("required"), Some(&Value::Array(required)));
+        assert_eq!(
+            parameters.get("additionalProperties"),
+            Some(&Value::Bool(false))
+        );
+        let fields = parameters.get("properties").unwrap();
+        for field in ["path", "pattern", "work", "description"] {
+            assert_eq!(
+                fields.get(field).unwrap().get("type"),
+                Some(&Value::string("string")),
+                "{name}: {field}"
+            );
+        }
+        for field in ["include_hidden", "include_ignored"] {
+            assert_eq!(
+                fields.get(field).unwrap().get("type"),
+                Some(&Value::string("boolean")),
+                "{name}: {field}"
+            );
+        }
+        for field in ["offset", "limit"] {
+            let value = fields.get(field).unwrap();
+            assert_eq!(value.get("type"), Some(&Value::string("integer")));
+            assert_eq!(value.get("minimum"), Some(&Value::number(1)));
+            if field == "limit" {
+                assert_eq!(value.get("maximum"), Some(&Value::number(limit_max)));
+            } else {
+                assert!(value.get("maximum").is_none());
+            }
+        }
+        if let Some(context_max) = context_max {
+            assert!(fields.get("recursive").is_none());
+            assert_eq!(
+                fields.get("case_sensitive").unwrap().get("type"),
+                Some(&Value::string("boolean"))
+            );
+            assert_eq!(
+                fields.get("context").unwrap().get("maximum"),
+                Some(&Value::number(context_max))
+            );
+            assert_eq!(
+                fields.get("query").unwrap().get("type"),
+                Some(&Value::string("string"))
+            );
+        } else {
+            assert!(fields.get("query").is_none());
+            assert_eq!(
+                fields.get("recursive").unwrap().get("type"),
+                Some(&Value::string("boolean"))
+            );
+        }
     }
 }

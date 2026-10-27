@@ -420,6 +420,8 @@ mod context_tests;
 #[cfg(test)]
 mod delete_tests;
 #[cfg(test)]
+mod discovery_tests;
+#[cfg(test)]
 mod history_tests;
 #[cfg(test)]
 mod input_tests;

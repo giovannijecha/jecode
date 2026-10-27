@@ -288,6 +288,21 @@ fn tool_labels_prefer_the_description_then_a_verb_and_a_short_target() {
             "Editing main.rs",
         ),
         ("write", vec![("path", "NOTES.md")], "Writing NOTES.md"),
+        ("list", vec![], "Listing ."),
+        ("list", vec![("path", "src/tools")], "Listing tools"),
+        (
+            "search",
+            vec![("query", "Cancellation")],
+            "Searching Cancellation",
+        ),
+        (
+            "search",
+            vec![
+                ("query", "needle"),
+                ("description", "Find cancellation handling"),
+            ],
+            "Find cancellation handling",
+        ),
         (
             "web",
             vec![("action", "fetch"), ("url", "https://docs.rs/serde?x=1")],

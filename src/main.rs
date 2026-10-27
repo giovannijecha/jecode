@@ -26,6 +26,7 @@ mod inbox;
 mod input;
 mod json;
 mod output;
+mod path_filter;
 mod process;
 mod pty;
 mod redact;

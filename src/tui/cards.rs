@@ -9,6 +9,7 @@ mod badge;
 mod chapter;
 mod content;
 mod diff;
+mod discovery;
 mod edit_fallback;
 mod failure;
 mod presentation;
@@ -216,6 +217,8 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     let name = match tool.name {
         "read" if skill.is_some() => "Skill",
         "read" => "Read",
+        "list" => "List",
+        "search" => "Search",
         "write" => "Write",
         "edit" => "Update",
         "bash" => "Bash",
@@ -228,7 +231,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
-        "exec" | "process" | "checkpoint" | "web" | "browser" => {
+        "list" | "search" | "exec" | "process" | "checkpoint" | "web" | "browser" => {
             crate::events::target(tool.name, tool.arguments)
         }
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
@@ -331,6 +334,8 @@ fn field<'a>(value: &'a Value, key: &str) -> &'a str {
 mod chapter_tests;
 #[cfg(test)]
 mod checkpoint_tests;
+#[cfg(test)]
+mod discovery_tests;
 #[cfg(test)]
 mod edit_fallback_tests;
 #[cfg(test)]

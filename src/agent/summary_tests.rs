@@ -187,7 +187,7 @@ fn large_read() -> Value {
     if let Value::Object(fields) = &mut response {
         fields.insert(
             "usage".into(),
-            Value::object([("prompt_tokens", Value::number(6000))]),
+            Value::object([("prompt_tokens", Value::number(18000))]),
         );
     }
     response
@@ -213,7 +213,7 @@ fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    let capacity = agent.fixture_capacity(8_192, crate::context::AUTO_COMPACT_DEFAULT);
+    let capacity = agent.fixture_capacity(11_000, crate::context::AUTO_COMPACT_DEFAULT);
     agent.client.fixture_limits(capacity, Some(4096));
     agent
         .run_turn("Inspect source; preserve protected.txt", &mut |event| {

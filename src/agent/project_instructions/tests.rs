@@ -367,7 +367,7 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     agent.enable_sessions(home.path()).unwrap();
     agent.set_auto_compact(90);
     let temporary = agent.tools.temporary_instructions();
-    let prompt = "original objective ".repeat(1500);
+    let prompt = "original objective ".repeat(2500);
     let original = agent.messages.lock().unwrap().clone();
     let mut notices = Vec::new();
     let result = agent.run_turn(&prompt, &mut |event| {

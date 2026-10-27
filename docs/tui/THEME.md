@@ -134,7 +134,9 @@ call keeps its family colour, a running one shimmers on `BADGE_IDLE`, a
 background one shows a `LIT` name on `BADGE_IDLE`, a failed one turns
 `BADGE_BAD` and a stopped one `BADGE_WARN`. The names are READ, SKILL (a
 `read` of a skill's `SKILL.md`), UPDATE (the `edit` tool), WRITE, BASH, EXEC,
-PROCESS, CHECKPOINT, WEB and BROWSER.
+PROCESS, CHECKPOINT, WEB, BROWSER, LIST and SEARCH. List and Search use the
+read-family Violet surface; an optional description keeps the concrete target
+on the following tree row.
 
 Result rows hang under the title on a `DIM` tree: `│` on every row, `└` on the
 last, wrapped continuations included. Diffs run from column 2 without a tree.
@@ -159,6 +161,7 @@ and `DIM` while running:
 | --- | --- |
 | Running | The elapsed time, after `Running` for routine calls, and any note, such as the [checkpoint](../usage/CHECKPOINTS.md) `checkpoint rc-ID` recorded before a Bash call. |
 | Read | `9 lines · from line 33 of 212`, or `9 lines · from line 33 · more from 42` when the total is unknown. Narrow rows drop the start clause; split lines keep `continues at byte N`. Skill reads `Loaded skill · …`. |
+| List, Search | Entry or matching-line counts, searched files, errors and `more from N` when paged. Expanded cards show structured paths, source context and exclusions. |
 | Update, existing-file Write | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
 | New Write | `New file · N lines`, then the first six numbered source rows. |
 | Checkpoint | One quiet result with the hidden row count. |
@@ -202,7 +205,7 @@ stop. When the chapter carries the turn's ` Ctrl+O ` keycap, it sits at the
 title's right edge and the title clips before it.
 
 One tree runs from the title to the chapter's last row. The first row counts
-successful work: unique files read, other reads, web calls, screenshots,
+successful work: unique files read, listings, searches, other reads, web calls, screenshots,
 snapshots, browser actions, commands and process calls, plus running,
 background and stopped calls; it reads `0 completed` when it has nothing else.
 Each command keeps one row with its family-coloured name and description or

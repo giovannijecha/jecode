@@ -62,7 +62,9 @@ fn labels_are_trimmed_and_skill_reads_stay_outside_chapters() {
         chapter::label(&tool("read", &missing, None, &shown)),
         "Activity"
     );
-    for name in ["read", "bash", "exec", "process", "web", "browser"] {
+    for name in [
+        "read", "list", "search", "bash", "exec", "process", "web", "browser",
+    ] {
         assert!(chapter::groupable(&tool(name, &missing, None, &shown)));
     }
     let skill = object([("path", "skill:review/SKILL.md")]);
@@ -70,6 +72,29 @@ fn labels_are_trimmed_and_skill_reads_stay_outside_chapters() {
     for name in ["write", "edit", "checkpoint"] {
         assert!(!chapter::groupable(&tool(name, &missing, None, &shown)));
     }
+}
+
+#[test]
+fn discovery_calls_join_work_chapters_and_count_each_kind() {
+    let shown = Presentation::default();
+    let args = object([("path", "src"), ("work", "Locate implementation")]);
+    let listing = Value::object([("entries_returned", Value::number(2))]);
+    let search = Value::object([("matches_returned", Value::number(1))]);
+    let calls = [
+        tool("list", &args, Some(&listing), &shown),
+        tool("search", &args, Some(&search), &shown),
+    ];
+    let text = plain(&chapter::header(&calls, 80, false));
+    assert!(text.contains("Locate implementation"), "{text}");
+    assert!(text.contains("1 listing"), "{text}");
+    assert!(text.contains("1 search"), "{text}");
+    let partial = Value::object([
+        ("entries_returned", Value::number(2)),
+        ("errors_count", Value::number(1)),
+        ("complete", Value::Bool(false)),
+    ]);
+    let warning = chapter::exception(&tool("list", &args, Some(&partial), &shown), 80);
+    assert!(warning[0].plain().contains("1 error"));
 }
 
 #[test]

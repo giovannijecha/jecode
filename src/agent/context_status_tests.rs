@@ -158,14 +158,14 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
-        (200, completion("Goal kept; next action: finish.", vec![])),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    agent.client.fixture_limits(32000, Some(4096));
+    let capacity = agent.fixture_capacity(12_000, AUTO_COMPACT_DEFAULT);
+    agent.client.fixture_limits(capacity, Some(4096));
     agent.messages.lock().unwrap().extend([
         Value::object([
             ("role", Value::string("user")),
@@ -178,7 +178,7 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
     let original = agent.messages.lock().unwrap().clone();
     let (result, trace) = trace(&mut agent, "Continue.");
     result.unwrap();
-    let budget = threshold(32000, AUTO_COMPACT_DEFAULT);
+    let budget = threshold(capacity, AUTO_COMPACT_DEFAULT);
     assert!(trace[0].1.tokens >= budget);
     let compacted = trace.iter().position(|(label, _)| *label == "compacted");
     let reduced = trace[compacted.unwrap()..]
@@ -187,9 +187,9 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
         .unwrap()
         .1;
     assert!(reduced.tokens > 0 && reduced.tokens < budget);
-    assert_eq!(reduced.capacity, Some(32000));
+    assert_eq!(reduced.capacity, Some(capacity));
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(fixture.finish().len(), 3);
+    assert_eq!(fixture.finish().len(), 2);
 }
 
 #[test]

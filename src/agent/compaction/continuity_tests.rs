@@ -176,7 +176,7 @@ fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    let original = history(&mut agent, &"Earlier findings ".repeat(1800));
+    let original = history(&mut agent, &"Earlier findings ".repeat(4000));
     // Leave room for native instructions and the retained exchange while
     // keeping the transcript large enough to require a second portion.
     let fixed = agent.current_system_message().encode().len()

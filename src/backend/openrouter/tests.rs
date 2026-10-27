@@ -58,7 +58,7 @@ fn native_curl_sends_json_and_bearer_auth() {
             .as_array()
             .unwrap()
             .len(),
-        9
+        crate::tools::definitions().as_array().unwrap().len()
     );
     assert_eq!(
         requests[0]

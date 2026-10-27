@@ -1,10 +1,10 @@
 # Tools
 
-Jecode offers nine tools to the model. An assistant message describing a command
+Jecode offers eleven tools to the model. An assistant message describing a command
 or file change does not execute it; only a native tool call can do that. Check
 the tool result or resulting state before treating a change as complete. Calls
 run only after the complete model response arrives; streamed partial calls never
-execute. Up to four adjacent independent calls run together: `read` except
+execute. Up to four adjacent independent calls run together: `list`, `search`, `read` except
 `history:`/`skill:`, `checkpoint list`/`inspect`, `process list`, and
 `web fetch`/`download` with GET or HEAD and no body. Other calls end the batch,
 including process polling, crawls and workspace modifications. Results enter the
@@ -24,9 +24,11 @@ Tool errors return as results so the model can correct the call.
 | `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work`, `description` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
 | `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor`, `work`, `description` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
 | `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `protect`, `wait_ms`, `timeout_seconds`, `output_limit_bytes`, `work`, `description` | Runs an executable with separate arguments and no shell parsing. `tty:true` returns a controllable terminal process. |
+| `list` | None | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Lists project entries, optionally as a recursive tree, with types and workspace-relative paths. |
+| `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Finds literal text in UTF-8 project files; returns line numbers, context and byte offsets. |
 
 `work` is an optional short label chosen by the assistant for related `read`,
-`bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls
+`list`, `search`, `bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls
 share a TUI Work chapter only within the same execution turn and with matching
 normalized labels. A single eligible call keeps its normal compact tool card.
 A changed label, assistant narration or another tool breaks the chapter; skill
@@ -38,12 +40,78 @@ are saved with their original tool arguments and survive resume; they do not
 change execution. See
 [tool presentation](../tui/THEME.md) for the summary and `Ctrl+O` behavior.
 
-`description` is an optional short caption on those same six routine tools.
+`description` is an optional short caption on those same eight routine tools.
 It is stored unchanged with the original tool arguments alongside `work` and
 survives resume; it does not change execution. Bash and Process use it as the
 compact title above their command. When omitted, the command or tool target
 remains the visible fallback. Browser keeps its action in the title and shows
 its payload beneath it. See [tool presentation](../tui/THEME.md) for the layout.
+
+## Native file discovery
+
+`list` and `search` use Jecode's own Rust implementation; neither requires an
+installed search program or shell. Paths default to the project root (`.`),
+and returned paths are always workspace-relative with `/` separators. Absolute
+paths inside the project are accepted; paths outside it are rejected.
+
+Examples of tool arguments:
+
+```json
+{"path":"src","recursive":true,"pattern":"*.rs"}
+```
+
+The `list` call above returns Rust file entries under `src`. Without a pattern,
+it also returns directories and links. `recursive` defaults to `false`;
+immediate children have depth 1. Links and Windows junctions are listed without
+descending into them.
+
+```json
+{"query":"Cancellation","path":"src","pattern":"src/**/*.rs","context":2}
+```
+
+The `search` call above returns one result per matching line, including the
+first matched byte's `byte_offset`, a 1-based `line`, `text` and `before`/`after`
+context. Search is recursive under directories; `path` can also select one file.
+`query` is literal nonempty single-line UTF-8 text. `case_sensitive` defaults to
+`true`; `false` ignores ASCII case only. `context` defaults to 2, from 0 to 10.
+Use Bash or exec with an installed program for regular-expression searches.
+
+Both tools accept a path glob in `pattern`: `*`, `?`, `**` and bracket classes.
+A pattern without `/` matches an entry's basename; one containing `/` matches
+its workspace-relative path, even when `path` selects a subdirectory. Windows
+matching folds ASCII case. Patterns filter results without pruning unmatched
+directories from recursive exploration.
+
+Hidden dot-prefixed entries and ignored files/directories are excluded by
+default. `include_hidden` and `include_ignored` opt in independently. Ignore rules
+come from local and repository-ancestor `.gitignore` files and repository
+`info/exclude`, including Git worktrees; the global Git excludes file is not
+read. Git metadata is omitted unless `include_ignored` is true. Selecting an
+explicit path bypasses that path's own exclusions, while descendants still use
+normal filtering. Implicit traversal never follows links or junctions.
+
+`offset` is 1-based and defaults to 1. `list` defaults to 200 entries per page
+(maximum 2000); `search` defaults to 100 matching lines (maximum 1000). Encoded
+results are capped at 64 KiB, so a page can contain fewer results than `limit`.
+Repeat the same arguments with `next_offset` until it is null. Traversal uses
+deterministic depth-first path order and ascending line order, reading live
+files on each call; restart pagination after changes to the workspace.
+
+Long lines are searched in streaming chunks. Their bounded previews center on
+the first match, with `text_truncated` marking omitted text. Use `read` with the
+returned path and `byte_offset` to recover source text without a temporary script.
+Binary and non-UTF-8 files are counted in `skipped`; invalid tails after valid
+lines produce an error while retaining earlier matches. Unreadable paths also
+appear in `errors`. Error details are bounded; `errors_count` and
+`errors_truncated` describe any omitted details. `files_searched` counts opened
+candidate files, including candidates subsequently identified as non-text.
+
+`complete` is false when more results are available or errors prevented a full
+search. `skipped` reports exclusions separately. An empty result proves absence
+only within the selected and readable text scope. Compact TUI cards show counts,
+continuation and errors; `Ctrl+O` expands structured entries, matches and context.
+
+## File recovery receipts
 
 `write`, `edit` and protected `bash` calls return a `checkpoint` receipt whose
 `status` is `saved`, `partial` or `none`. Saved references expire 24 hours after

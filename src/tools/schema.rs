@@ -29,41 +29,50 @@ fn build_definitions() -> Value {
     };
     let boolean = || Value::object([("type", Value::string("boolean"))]);
     let strings = || Value::object([("type", Value::string("array")), ("items", string())]);
-    let tool = |name, description, properties, required: &[&str]| {
-        Value::object([
-            ("name", Value::string(name)),
-            ("description", Value::string(description)),
-            (
-                "parameters",
-                Value::object([
-                    ("type", Value::string("object")),
-                    ("properties", properties),
-                    (
-                        "required",
-                        Value::Array(required.iter().map(|name| Value::string(*name)).collect()),
-                    ),
-                    ("additionalProperties", Value::Bool(false)),
-                ]),
-            ),
-        ])
-    };
-    let routine = |name, description, mut properties: Value, required: &[&str]| {
-        let Value::Object(fields) = &mut properties else {
-            unreachable!()
-        };
-        fields.insert(
-            "work".into(),
+    let mut tools = base_definitions(string, integer, boolean, strings);
+    tools.extend(super::discovery::definitions());
+    Value::Array(tools)
+}
+
+pub(super) fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    Value::object([
+        ("name", Value::string(name)),
+        ("description", Value::string(description)),
+        (
+            "parameters",
             Value::object([
-                ("type", Value::string("string")),
+                ("type", Value::string("object")),
+                ("properties", properties),
                 (
-                    "description",
-                    Value::string(
-                        "Optional short work label. Repeat it exactly for related calls.",
-                    ),
+                    "required",
+                    Value::Array(required.iter().map(|name| Value::string(*name)).collect()),
                 ),
+                ("additionalProperties", Value::Bool(false)),
             ]),
-        );
-        fields.insert(
+        ),
+    ])
+}
+
+pub(super) fn routine(
+    name: &str,
+    description: &str,
+    mut properties: Value,
+    required: &[&str],
+) -> Value {
+    let Value::Object(fields) = &mut properties else {
+        unreachable!()
+    };
+    fields.insert(
+        "work".into(),
+        Value::object([
+            ("type", Value::string("string")),
+            (
+                "description",
+                Value::string("Optional short work label. Repeat it exactly for related calls."),
+            ),
+        ]),
+    );
+    fields.insert(
             "description".into(),
             Value::object([
                 ("type", Value::string("string")),
@@ -75,9 +84,16 @@ fn build_definitions() -> Value {
                 ),
             ]),
         );
-        tool(name, description, properties, required)
-    };
-    Value::Array(vec![
+    tool(name, description, properties, required)
+}
+
+fn base_definitions(
+    string: impl Fn() -> Value,
+    integer: impl Fn(usize, Option<usize>) -> Value,
+    boolean: impl Fn() -> Value,
+    strings: impl Fn() -> Value,
+) -> Vec<Value> {
+    vec![
         routine(
             "read",
             "Read a project file or tmp:relative/path. UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary). Input withdrawn to the composer is excluded from history reads. checkpoint:rc-ID:path reads a saved preimage (expires after 24 hours). History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
@@ -439,7 +455,7 @@ fn build_definitions() -> Value {
             ]),
             &["executable"],
         ),
-    ])
+    ]
 }
 
 #[cfg(test)]

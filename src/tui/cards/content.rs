@@ -1,5 +1,5 @@
 use super::{
-    Body, Status, Tool, diff, edit_fallback, field, flag, line_rows, preview, streams,
+    Body, Status, Tool, diff, discovery, edit_fallback, field, flag, line_rows, preview, streams,
     summary::size,
 };
 use crate::{
@@ -35,6 +35,7 @@ pub(super) fn render(
 ) -> Body {
     let arguments = tool.arguments;
     match tool.name {
+        "list" | "search" => discovery::render(tool.name, result, columns, expanded),
         "read" if !expanded => Body::new(Vec::new()),
         "read" if result.get("content").and_then(Value::as_str).is_some() => {
             Body::new(read(arguments, result, columns))
