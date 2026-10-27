@@ -82,7 +82,7 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         return Line::new(&summary, MUTED);
     }
     match tool.name {
-        "bash" | "process" => command(
+        "bash" | "exec" | "process" => command(
             result,
             status == Status::Failed,
             elapsed,

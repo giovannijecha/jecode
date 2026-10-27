@@ -13,6 +13,9 @@ use crate::{
 #[path = "activity_tests.rs"]
 mod activity_tests;
 
+#[path = "native_direct_input.rs"]
+mod native_direct_input;
+
 #[path = "startup_tests.rs"]
 mod startup_tests;
 
@@ -376,6 +379,11 @@ fn native_console_fixture() {
     println!("NATIVE_SHELL_SENTINEL");
     std::fs::write(path.join("modes.txt"), probe().lines().next().unwrap()).unwrap();
     let bash = crate::tools::find_bash().unwrap();
+    if scenario == "direct-input" {
+        native_direct_input::fixture(&path, &bash);
+        restored(&path);
+        return;
+    }
     if scenario == "latency-idle" || scenario == "latency-active" {
         super::measurement_tests::fixture(&path, &bash, scenario == "latency-active");
         restored(&path);

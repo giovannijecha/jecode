@@ -1,6 +1,6 @@
 # Tools
 
-Jecode offers eight tools to the model. An assistant message describing a command
+Jecode offers nine tools to the model. An assistant message describing a command
 or file change does not execute it; only a native tool call can do that. Check
 the tool result or resulting state before treating a change as complete. Calls
 run only after the complete model response arrives; streamed partial calls never
@@ -19,13 +19,14 @@ Tool errors return as results so the model can correct the call.
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
 | `edit` | `path`, `edits` | — | Applies one or more exact unique replacements in order, installing the file only after all succeed. Returns `bytes_written`. |
 | `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes`, `work`, `description` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
-| `process` | `action` | `process_id` for `poll`/`stop`, `wait_ms` for `poll`, `output_limit_bytes`, `output_mode`, `work`, `description` | Lists, polls or stops this conversation's persistent processes. |
+| `process` | `action` | `process_id` for actions except `list`; `text` or `key` for `write`; `cols`, `rows` for `resize`; `protect` for `write`/`resize`/`interrupt`; `wait_ms` for `poll`; `output_limit_bytes`, `output_mode`, `work`, `description` | Lists, polls, stops and controls this conversation's persistent processes. |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
 | `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work`, `description` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
 | `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor`, `work`, `description` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
+| `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `protect`, `wait_ms`, `timeout_seconds`, `output_limit_bytes`, `work`, `description` | Runs an executable with separate arguments and no shell parsing. `tty:true` returns a controllable terminal process. |
 
 `work` is an optional short label chosen by the assistant for related `read`,
-`bash`, `process`, `web` and `browser` calls. At least two adjacent eligible calls
+`bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls
 share a TUI Work chapter only within the same execution turn and with matching
 normalized labels. A single eligible call keeps its normal compact tool card.
 A changed label, assistant narration or another tool breaks the chapter; skill
@@ -37,7 +38,7 @@ are saved with their original tool arguments and survive resume; they do not
 change execution. See
 [tool presentation](../tui/THEME.md) for the summary and `Ctrl+O` behavior.
 
-`description` is an optional short caption on those same five routine tools.
+`description` is an optional short caption on those same six routine tools.
 It is stored unchanged with the original tool arguments alongside `work` and
 survives resume; it does not change execution. Bash and Process use it as the
 compact title above their command. When omitted, the command or tool target
@@ -78,8 +79,8 @@ The result returns an `attachment:ID` reference to a session-owned copy. Read
 that reference to revisit it after the original changes, temporary cleanup or
 session resume. Other binary or invalid UTF-8 file reads still fail.
 
-The interactive TUI shows Read, Update (`edit`), Write, Bash, Process, Checkpoint,
-Web and Browser in one
+The interactive TUI shows Read, Update (`edit`), Write, Bash, Exec, Process,
+Checkpoint, Web and Browser in one
 inline format. Successful file changes retain a numbered contextual diff,
 including Write on an existing text file. These display records stay in local
 session history and survive resume without changing model-facing tool results.
@@ -103,7 +104,7 @@ number of completed tools.
 Compact Work chapters keep their facts row and one shared activity row for
 the latest Read, Web or Browser attempt, including failures; the activity
 stays visible after completion. The chapter's `Ctrl+O expand` keycap shares
-its title row. Bash and Process members keep one quiet compact row; Ctrl+O
+its title row. Bash, Exec and Process members keep one quiet compact row; Ctrl+O
 opens their process IDs and retained output. A compact Read summarizes its
 page on one line, naming the total when known or the next page otherwise.
 See [TUI theme](../tui/THEME.md) for presentation and controls.
@@ -232,7 +233,7 @@ The `path` argument also accepts these read-only references:
 
 | Reference | What it retrieves |
 | --- | --- |
-| `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | Complete saved Bash stream, including text omitted from a result preview. Older `output:OUTPUT_ID:stdout` and `:stderr` references also work. |
+| `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | Complete saved command stream, including text omitted from a result preview. Older `output:OUTPUT_ID:stdout` and `:stderr` references also work. |
 | `history:N` | Original message at zero-based index `N`, excluding input withdrawn to the composer. A `context_truncated` result includes its `history_reference`. |
 | `history:requests` / `history:memory` | Ordered original user requests / current compaction summary. |
 | `skill:NAME` / `skill:NAME/relative/path` | A personal skill's `SKILL.md` / a resource inside that skill. See [Skills](SKILLS.md). |
@@ -247,8 +248,10 @@ Known credentials are masked. History, checkpoints, skills, attachments and save
 output cannot be changed with `write` or `edit`.
 
 For disposable files, use `tmp:relative/path` with the file tools. Its parent
-directories are created as needed, and Bash receives `JECODE_TMP`, `TMPDIR`,
-`TEMP` and `TMP` pointing to the session's temporary area. Bash still starts in
+directories are created as needed, and command tools receive `JECODE_TMP` and
+`TMPDIR` pointing to the session's temporary area. On Unix, `TEMP` and `TMP`
+also point there; on Windows, native `TEMP` and `TMP` stay inherited so Git Bash
+can initialize its shared `/tmp` mount. Bash still starts in
 the project directory, so use an explicit path such as `"$JECODE_TMP/check.log"`
 for disposable output. See [Temporary files](TEMPORARY.md) for lifetime and
 cleanup.
@@ -278,13 +281,47 @@ saving output or confirming cleanup fails after a command starts, the result
 reports `outcome: "unknown"` with output references.
 Inspect the workspace before repeating a command that may have changed it.
 
+## Direct execution and terminals
+
+`exec` runs `executable` directly. `args` is an array of literal argument strings:
+spaces, quotes and shell metacharacters are passed unchanged. Jecode does not
+start an implicit shell or rewrite the executable. A bare name follows normal
+PATH search, which can select a shim already on PATH.
+Executable and argument strings cannot contain NUL characters.
+The process starts in the project directory unless `cwd` names an absolute
+directory or a directory relative to the project. An executable path containing
+a directory is resolved against that `cwd`; a bare name uses normal PATH search.
+Changing `cwd` does not change the project root or checkpoint scope.
+
+`env` maps names to strings to set or `null` to remove. Jecode removes inherited
+provider credentials first, then applies explicit `env` values. `stdin` sends a
+UTF-8 string and closes the stream; omitted `stdin` closes it immediately.
+Session temporary paths are available as `JECODE_TMP` and `TMPDIR`, with `TEMP`
+and `TMP` also set on Unix. On Windows those two native variables remain
+inherited to preserve Git Bash's `/tmp` mount.
+
+For a command that needs interactive input, set `tty:true`. This always returns
+a persistent `process_id`, even when `wait_ms` is omitted. `stdin` cannot be
+combined with `tty:true`; use `process write` instead. Initial `cols` and `rows`
+default to 80 by 24 and accept values from 1 to 1000.
+Terminal stdout includes the child's stdout and stderr together; the result's
+stderr stream is reserved for terminal bridge diagnostics. Windows uses ConPTY
+on Windows 10 or later. On Unix, Jecode compiles its owned POSIX helper with an
+installed system `cc` on first PTY use. Unix PTY cleanup also needs `/bin/ps`.
+The helper is cached afterwards.
+
+Without `tty`, `wait_ms`, timeouts, saved output and previews follow the Bash
+contract above. `protect` uses the same declared workspace paths as Bash; a
+receipt describes the prelaunch snapshot, not command success.
+
 ## Persistent processes
 
-Pass `wait_ms` to `bash` for a server, watcher or long build. Jecode waits up to
+Pass `wait_ms` to `bash` or non-terminal `exec` for a server, watcher or long
+build. Jecode waits up to
 that many milliseconds and returns a `process_id` plus status; `wait_ms: 0`
-returns immediately. Expiring the wait does not stop the process. There is no
-PTY or later stdin input. An optional `timeout_seconds` remains a separate
-deadline from launch.
+returns immediately. Expiring the wait does not stop the process. Bash and
+non-terminal exec have no later stdin input; terminal exec accepts input through
+`process`. An optional `timeout_seconds` remains a separate deadline from launch.
 
 Tool results describe the state when the call returned. The TUI labels a Bash
 launch `Started in background` and a running Process check `Running at last
@@ -297,6 +334,15 @@ check`; these cards are snapshots. Use `/terminal` for the current active list.
 | `list` | Returns IDs, commands, statuses and output references for this conversation. Use it to recover an ID after compaction. |
 | `poll` | With `process_id`, returns current status and new output since the previous result; optional `wait_ms` defaults to 0. |
 | `stop` | With `process_id`, requests termination of the process and descendants and waits up to 10 seconds. If the result is `stopping`, poll again to confirm. |
+| `write` | Sends `text` or one `key` to a terminal process. Supported keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D and Ctrl+Z. At most 64 KiB of input per call. |
+| `resize` | Changes a terminal process to `cols` by `rows`, each from 1 to 1000. |
+| `interrupt` | Sends Ctrl+C to a terminal process. |
+
+A `write` receipt confirms delivery to the terminal control pipe, not completion
+of the child's command. If delivery is unconfirmed, the input may still have
+arrived. Inspect process output and workspace state before retrying. `protect`
+on `write`, `resize` or `interrupt` captures preimages for that call's declared
+workspace paths before sending input or control.
 
 Statuses are `running`, `stopping`, `exited`, `timed_out`, `stopped` and
 `unknown`. Only a finished `exited` process has an `exit_code` (possibly
@@ -306,7 +352,7 @@ readiness or completion: check `status`.
 
 Each result reads the next 16 KiB of saved output per stream by default;
 `output_limit_bytes` changes this budget, capped at 256 KiB, for the initial
-Bash result or a `process poll`/`stop`. A budget smaller than one UTF-8
+command result or a `process poll`/`stop`. A budget smaller than one UTF-8
 character still returns that complete character so the cursor can advance.
 `stdout_offset`/`stderr_offset` identify the start of returned text;
 `stdout_next_offset`/`stderr_next_offset` identify the next cursor; and
@@ -340,8 +386,10 @@ message or consuming the model's `process poll` output cursor. In the TUI, it
 opens the process list; Enter shows output, Tab switches stdout/stderr, and
 Ctrl+D asks for confirmation before stopping the selected process.
 `/terminal ID` opens a known process directly, and `/terminal stop ID` requests
-its stop. In plain chat, `/terminal` lists active processes and `/terminal ID`
-shows status and the last 64 KiB of each stream. A stop request can remain
+its stop. For an interactive terminal in the TUI, press `i` to send keys
+directly; Ctrl+] leaves input mode. These keystrokes do not enter model history.
+In plain chat, `/terminal` lists active processes and `/terminal ID` shows
+status and the last 64 KiB of each stream. A stop request can remain
 pending; check again for its final status.
 
 For connection retries and context compaction during long turns, see

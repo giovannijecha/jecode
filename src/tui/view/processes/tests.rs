@@ -25,6 +25,8 @@ fn logs(stream: usize) -> Logs {
         process: Some(process("running")),
         stream,
         views: Default::default(),
+        interactive: false,
+        input_mode: false,
     }
 }
 
@@ -98,6 +100,42 @@ fn output_has_breadcrumb_status_stream_tabs_and_follow_mode() {
         .unwrap()
         .plain();
     assert_eq!(names.chars().position(|c| c == 'E'), Some(start));
+}
+
+#[test]
+fn interactive_output_shows_input_entry_and_explicit_exit_keys() {
+    let mut panel = Panel::new(vec![process("running")]);
+    let mut log = logs(0);
+    log.interactive = true;
+    panel.logs = Some(log);
+    let browsing = plain(&panel, 80, 14);
+    assert!(browsing.contains(" i  input"), "{browsing}");
+
+    panel.logs.as_mut().unwrap().input_mode = true;
+    let typing = plain(&panel, 80, 14);
+    assert!(typing.contains("Ctrl+]  back"), "{typing}");
+    assert!(typing.contains("Ctrl+C  interrupt"), "{typing}");
+    assert!(!typing.contains("Tab  Errors"), "{typing}");
+}
+
+#[test]
+fn terminal_log_view_strips_vt_without_changing_saved_stream_bytes() {
+    let mut panel = Panel::new(vec![process("running")]);
+    let mut log = logs(0);
+    log.interactive = true;
+    let raw = "\x1b]0;secret title\x07hello\rDONE\x1b[31m\n";
+    log.views[0].pages.push_back(crate::tools::processes::Page {
+        text: raw.into(),
+        start: 0,
+        end: raw.len() as u64,
+        length: raw.len() as u64,
+    });
+    panel.logs = Some(log);
+    let rendered = plain(&panel, 80, 14);
+    assert!(rendered.contains("DONEo"), "{rendered}");
+    assert!(!rendered.contains("[ESC]"), "{rendered}");
+    assert!(!rendered.contains("secret title"), "{rendered}");
+    assert_eq!(panel.logs.as_ref().unwrap().views[0].text(), raw);
 }
 
 #[test]

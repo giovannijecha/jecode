@@ -1,4 +1,4 @@
-//! Plain-chat `/terminal`: local inspection and stop control for this conversation.
+//! Plain-chat `/terminal`: local inspection and control for this conversation.
 //! It uses the observer, so the model's next poll is unchanged.
 
 use crate::agent::Agent;
@@ -21,12 +21,50 @@ pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> 
         } else {
             format!("{} · {}\n", process.id, process.label())
         }
+    } else if let Some(rest) = action(arguments, "write") {
+        let (id, text) = rest
+            .split_once(char::is_whitespace)
+            .ok_or("Usage: /terminal write PROCESS_ID TEXT")?;
+        if id.is_empty() || text.is_empty() {
+            return Err("Usage: /terminal write PROCESS_ID TEXT".into());
+        }
+        let mut line = text.as_bytes().to_vec();
+        line.push(b'\r');
+        observer.write_direct(id, &line).map_err(|_| {
+            "Could not send direct input; check that the process is active and interactive"
+                .to_string()
+        })?;
+        format!("Input sent to {id}.\n")
+    } else if let Some(id) = action(arguments, "interrupt") {
+        if id.is_empty() || id.split_whitespace().count() != 1 {
+            return Err("Usage: /terminal interrupt PROCESS_ID".into());
+        }
+        observer.write_direct(id, &[3])?;
+        format!("Interrupt sent to {id}.\n")
+    } else if let Some(rest) = action(arguments, "resize") {
+        let fields: Vec<_> = rest.split_whitespace().collect();
+        let [id, cols, rows] = fields.as_slice() else {
+            return Err("Usage: /terminal resize PROCESS_ID COLS ROWS".into());
+        };
+        let size = (
+            cols.parse::<u16>().map_err(|_| "Invalid terminal width")?,
+            rows.parse::<u16>().map_err(|_| "Invalid terminal height")?,
+        );
+        observer.resize_direct(id, size)?;
+        format!("Terminal {id} resized to {}x{}.\n", size.0, size.1)
     } else if arguments.is_empty() {
         list(&observer)
     } else {
         details(&observer, arguments)?
     };
     write!(output, "{text}").map_err(|error| error.to_string())
+}
+
+fn action<'a>(arguments: &'a str, name: &str) -> Option<&'a str> {
+    let (verb, rest) = arguments
+        .split_once(char::is_whitespace)
+        .unwrap_or((arguments, ""));
+    verb.eq_ignore_ascii_case(name).then_some(rest.trim_start())
 }
 
 fn list(observer: &Observer) -> String {
@@ -47,7 +85,7 @@ fn list(observer: &Observer) -> String {
             single_line(&process.command)
         ));
     }
-    text.push_str("Use /terminal PROCESS_ID to show saved output, or /terminal stop PROCESS_ID to stop one.\n");
+    text.push_str("Use /terminal PROCESS_ID for output, /terminal write PROCESS_ID TEXT to send a line, or /terminal stop PROCESS_ID to stop one.\n");
     text
 }
 

@@ -32,6 +32,24 @@ Windows runs, along with ConPTY and Linux PTY checks. Loopback regressions cover
 requests above 10 MiB, literal `@` data, exact image bytes, a native write followed
 by `avanti`, incomplete stdin diagnostics and Windows child environment overrides.
 
+## Interactive command boundary
+
+`exec` launches literal executable arguments through the existing process
+supervisor. With `tty:true`, an owned native bridge supplies a pseudo-terminal:
+Windows uses ConPTY and a current-user-only named pipe; Linux and macOS use
+POSIX PTYs and a private Unix-domain socket. Input is carried over the control
+channel and is not staged in regular files. Terminal output combines stdout
+and stderr and remains available through the normal saved-output references.
+
+Windows requires its existing PowerShell/.NET compiler and Windows 10+ ConPTY.
+Unix first use compiles the owned bridge with system `cc`, caches it under the
+Jecode home, and uses `/bin/ps` to clean up interactive job-control groups.
+Control sockets need a native Unix temporary filesystem; WSL's Windows-backed
+mounts do not support them. Local input bypasses model messages and tool-call
+history, while output that the target echoes remains visible and retained.
+The fullscreen terminal panel displays a transcript rather than emulating
+cursor-addressed full-screen applications.
+
 ## Local web and browser tools
 
 The web HTTP, crawl recovery and WebSocket fixtures run in the ordinary suite.

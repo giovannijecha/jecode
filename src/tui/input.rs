@@ -6,7 +6,16 @@ impl App {
             // Terminals deliver a file drop as a paste of its paths.
             // The process panel keeps typed and pasted text out of the hidden
             // draft.
-            Decoded::Text(_) | Decoded::Paste(_) if self.state.processes.is_some() => {
+            Decoded::Text(text) if self.state.processes.is_some() => {
+                self.process_text(&text, false);
+                return Ok(false);
+            }
+            Decoded::Paste(text) if self.state.processes.is_some() => {
+                self.process_text(&text, true);
+                return Ok(false);
+            }
+            Decoded::Error if self.state.processes.is_some() => {
+                self.warn("Input exceeds 1 MiB · terminal input rejected");
                 return Ok(false);
             }
             Decoded::Paste(text) => {
@@ -73,6 +82,9 @@ impl App {
             }
             Decoded::Key(key) => key,
         };
+        if self.direct_input_active() {
+            return self.process_key(key);
+        }
         self.state.feedback_input(false);
         if key.ctrl() && key.code == 81 {
             self.stop();

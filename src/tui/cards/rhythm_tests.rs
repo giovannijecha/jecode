@@ -258,3 +258,52 @@ fn long_commands_and_failures_keep_one_ellipsis_and_two_extra_stderr_rows() {
         );
     }
 }
+
+#[test]
+fn exec_cards_keep_structured_target_and_command_status_across_states() {
+    let args = Value::object([
+        ("executable", Value::string("cargo")),
+        (
+            "args",
+            Value::Array(vec![Value::string("test"), Value::string("a b")]),
+        ),
+    ]);
+    let collapsed = Presentation::default();
+    let pending = draw("exec", &args, None, &collapsed, 80);
+    assert!(
+        pending.rows[0]
+            .plain()
+            .starts_with("● Exec(cargo [\"test\",\"a b\"])")
+    );
+    let success = Value::object([
+        ("exit_code", Value::number(0)),
+        ("stdout", Value::string("ready\n")),
+    ]);
+    let done = draw("exec", &args, Some(&success), &collapsed, 80);
+    assert!(plain(&done).contains("ready"));
+    let failed = Value::object([
+        ("exit_code", Value::number(7)),
+        ("stderr", Value::string("failed step\n")),
+    ]);
+    let failed_card = draw("exec", &args, Some(&failed), &collapsed, 80);
+    assert!(plain(&failed_card).contains("failed step"));
+    assert_eq!(failed_card.rows[0].spans[0].style, BAD);
+    let background = object([("status", "running"), ("process_id", "process-fixture")]);
+    let running = draw("exec", &args, Some(&background), &collapsed, 80);
+    assert!(plain(&running).contains("process-fixture"));
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let open = draw("exec", &args, Some(&failed), &expanded, 80);
+    assert!(plain(&open).contains("failed step"));
+    assert!(plain(&open).contains("exit 7"));
+    let described = Value::object([
+        ("executable", Value::string("cargo")),
+        ("args", Value::Array(vec![Value::string("test")])),
+        ("description", Value::string("Run checks")),
+    ]);
+    let card = draw("exec", &described, Some(&success), &collapsed, 80);
+    assert_eq!(card.rows[0].plain(), "● Exec  Run checks");
+    assert!(card.rows[1].plain().contains("> cargo [\"test\"]"));
+}

@@ -108,10 +108,22 @@ pub fn run_logged(
     cancellation: &Cancellation,
     spools: [crate::output::Spool; 2],
 ) -> Result<Output, RunError> {
+    run_logged_input(command, None, timeout, output_limit, cancellation, spools)
+}
+
+/// Runs a supervised command while saving both streams and sending optional stdin.
+pub fn run_logged_input(
+    command: &mut Command,
+    input: Option<Vec<u8>>,
+    timeout: Option<Duration>,
+    output_limit: usize,
+    cancellation: &Cancellation,
+    spools: [crate::output::Spool; 2],
+) -> Result<Output, RunError> {
     let [stdout, stderr] = spools;
     run_inner(
         command,
-        None,
+        input,
         timeout,
         cancellation,
         &mut |_| Ok(()),
@@ -155,10 +167,20 @@ pub fn start_logged(
     cancellation: &Cancellation,
     spools: [crate::output::Spool; 2],
 ) -> Result<Started, RunError> {
+    start_logged_input(command, None, cancellation, spools)
+}
+
+/// Starts a logged command with optional stdin for conversation-owned processes.
+pub fn start_logged_input(
+    command: &mut Command,
+    input: Option<Vec<u8>>,
+    cancellation: &Cancellation,
+    spools: [crate::output::Spool; 2],
+) -> Result<Started, RunError> {
     let [stdout, stderr] = spools;
     start(
         command,
-        None,
+        input,
         cancellation,
         CaptureOptions {
             // Output lives in the spools; nothing is kept in memory.

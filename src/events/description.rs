@@ -1,8 +1,10 @@
 use crate::json::Value;
 
 pub fn description(name: &str, arguments: &Value) -> String {
-    if matches!(name, "read" | "bash" | "process" | "web" | "browser")
-        && let Some(label) = arguments.get("description").and_then(Value::as_str)
+    if matches!(
+        name,
+        "read" | "bash" | "exec" | "process" | "web" | "browser"
+    ) && let Some(label) = arguments.get("description").and_then(Value::as_str)
         && !label.trim().is_empty()
     {
         return label.trim().into();
@@ -65,6 +67,18 @@ pub fn target(name: &str, arguments: &Value) -> String {
             .and_then(Value::as_str)
             .unwrap_or("invalid arguments")
             .into();
+    }
+    if name == "exec" {
+        let executable = arguments
+            .get("executable")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid arguments");
+        return match arguments.get("args").and_then(Value::as_array) {
+            Some(args) if !args.is_empty() => {
+                format!("{executable} {}", Value::Array(args.to_vec()).encode())
+            }
+            _ => executable.into(),
+        };
     }
     let path = arguments
         .get("path")

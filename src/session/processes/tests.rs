@@ -19,6 +19,74 @@ fn printed(agent: &Agent, arguments: &str) -> String {
 }
 
 #[test]
+fn write_action_preserves_whitespace_after_the_id_separator() {
+    let rest = action("write process-1   padded  ", "write").unwrap();
+    let (id, text) = rest.split_once(char::is_whitespace).unwrap();
+    assert_eq!(id, "process-1");
+    assert_eq!(text, "  padded  ");
+}
+
+#[test]
+fn plain_direct_write_sends_a_line_without_adding_text_to_model_archive() {
+    let directory = Directory::new();
+    #[cfg(windows)]
+    let (executable, args) = (
+        "powershell.exe",
+        vec![
+            "-NoProfile",
+            "-Command",
+            "$null = Read-Host; Write-Output DONE",
+        ],
+    );
+    #[cfg(unix)]
+    let (executable, args) = ("sh", vec!["-c", "IFS= read -r line; printf 'DONE\\n'"]);
+    let launch = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "exec-1",
+                    "exec",
+                    Value::object([
+                        ("executable", Value::string(executable)),
+                        (
+                            "args",
+                            Value::Array(args.into_iter().map(Value::string).collect()),
+                        ),
+                        ("tty", Value::Bool(true)),
+                        ("wait_ms", Value::number(0)),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("Started.", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(launch.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    turn(&mut agent, &launch, "Start an interactive command");
+    let observer = agent.processes();
+    let id = observer.processes().unwrap()[0].id.clone();
+    assert!(observer.terminal_size(&id).is_some());
+    let sent = printed(&agent, &format!("write {id} SECRET_DIRECT_INPUT_42"));
+    assert_eq!(sent, format!("Input sent to {id}.\n"));
+    let started = Instant::now();
+    while observer.processes().unwrap()[0].active() {
+        assert!(started.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let archive = format!(
+        "{:?}{:?}",
+        agent.archive().messages.lock().unwrap(),
+        agent.archive().events.lock().unwrap()
+    );
+    assert!(!archive.contains("SECRET_DIRECT_INPUT_42"));
+    assert_eq!(launch.finish().len(), 2);
+}
+
+#[test]
 fn plain_terminal_prints_locally_without_consuming_model_output() {
     let directory = Directory::new();
     let launch = HttpFixture::new(vec![

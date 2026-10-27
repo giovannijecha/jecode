@@ -2,14 +2,12 @@
 //! stop requests. The registry stays in the core; this
 //! module keeps only what the panel shows and its own read positions.
 
-use super::{App, terminal::Key, text};
+use super::{App, terminal::Key};
 use crate::tools::processes::{Observer, Page, Process, Window};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 pub(super) const REFRESH: Duration = Duration::from_millis(250);
-/// Loaded log text stays within this many saved bytes.
-const RETAINED: u64 = 128 * 1024;
 pub(super) const STREAMS: [&str; 2] = ["Output", "Errors"];
 
 pub(super) struct Panel {
@@ -25,6 +23,8 @@ pub(super) struct Logs {
     pub process: Option<Process>,
     pub stream: usize,
     pub views: [Stream; 2],
+    pub interactive: bool,
+    pub input_mode: bool,
 }
 
 /// A contiguous, bounded window of one saved stream.
@@ -36,70 +36,6 @@ pub(super) struct Stream {
     pub anchor: usize,
     pub follow: bool,
     pub error: Option<String>,
-}
-
-impl Default for Stream {
-    fn default() -> Self {
-        Self {
-            pages: VecDeque::new(),
-            offset: 0,
-            anchor: 0,
-            follow: true,
-            error: None,
-        }
-    }
-}
-
-impl Stream {
-    pub fn text(&self) -> String {
-        self.pages.iter().map(|page| page.text.as_str()).collect()
-    }
-    fn start(&self) -> u64 {
-        self.pages.front().map_or(0, |page| page.start)
-    }
-    fn end(&self) -> u64 {
-        self.pages.back().map_or(0, |page| page.end)
-    }
-    pub fn length(&self) -> u64 {
-        self.pages.back().map_or(0, |page| page.length)
-    }
-
-    fn display_chars(text: &str) -> usize {
-        text::clean(text).chars().count()
-    }
-
-    fn select_row(&mut self, starts: &[usize], row: usize) {
-        self.offset = row;
-        self.anchor = starts.get(row).copied().unwrap_or(0);
-    }
-
-    /// Appends output after the window; returns the pages trimmed from its start.
-    fn append(&mut self, page: Page) -> Vec<Page> {
-        if page.start != self.end() {
-            self.pages.clear();
-        }
-        if page.end > page.start || self.pages.is_empty() {
-            self.pages.push_back(page);
-        } else if let Some(last) = self.pages.back_mut() {
-            last.length = page.length;
-        }
-        let mut trimmed = Vec::new();
-        while self.end() - self.start() > RETAINED && self.pages.len() > 1 {
-            trimmed.extend(self.pages.pop_front());
-        }
-        trimmed
-    }
-
-    /// Prepends output before the window and trims its end to stay bounded.
-    fn prepend(&mut self, page: Page) {
-        if page.end != self.start() {
-            return;
-        }
-        self.pages.push_front(page);
-        while self.end() - self.start() > RETAINED && self.pages.len() > 1 {
-            self.pages.pop_back();
-        }
-    }
 }
 
 impl Panel {
@@ -123,6 +59,10 @@ impl Panel {
                 .cloned();
             changed |= logs.process != current;
             logs.process = current;
+            if !logs.process.as_ref().is_some_and(Process::active) && logs.input_mode {
+                logs.input_mode = false;
+                changed = true;
+            }
         }
         if let Some(confirm) = &mut self.confirm_stop
             && let Some(current) = processes.iter().find(|process| process.id == confirm.id)
@@ -218,7 +158,26 @@ impl App {
         };
         let mut dirty = panel.update(processes);
         if let Some(logs) = &mut panel.logs {
+            let terminal = self.process_observer.terminal_size(&logs.id).is_some();
+            if terminal && !logs.interactive {
+                logs.interactive = true;
+                dirty = true;
+            }
+            if !logs.process.as_ref().is_some_and(Process::active) && logs.input_mode {
+                logs.input_mode = false;
+                dirty = true;
+            }
             dirty |= follow(&self.process_observer, logs);
+        }
+        if let Some((id, size)) = self.direct_resize_target()
+            && self.process_observer.terminal_size(&id) != Some(size)
+        {
+            if let Err(error) = self.process_observer.resize_direct(&id, size) {
+                self.leave_direct_input(&error);
+                dirty = true;
+            } else {
+                dirty = true;
+            }
         }
         dirty
     }
@@ -242,12 +201,19 @@ impl App {
             process: Some(process),
             stream: 0,
             views: Default::default(),
+            interactive: false,
+            input_mode: false,
         };
+        logs.interactive = self.process_observer.terminal_size(&logs.id).is_some();
         follow(&self.process_observer, &mut logs);
         self.state.processes.as_mut().unwrap().logs = Some(logs);
     }
 
     pub(super) fn process_key(&mut self, key: Key) -> Result<bool, String> {
+        if self.direct_input_active() {
+            self.direct_key(key);
+            return Ok(false);
+        }
         if self.process_control(key) {
             return Ok(false);
         }
@@ -335,8 +301,9 @@ impl App {
             return;
         };
         let (id, index) = (logs.id.clone(), logs.stream);
+        let terminal = logs.interactive && index == 0;
         let stream = &mut logs.views[index];
-        let mut starts = super::view::processes::row_starts(&stream.text(), width);
+        let mut starts = super::view::processes::row_starts(&stream.display_text(terminal), width);
         let bottom = starts.len().saturating_sub(capacity);
         let offset = if stream.follow {
             bottom
@@ -350,11 +317,14 @@ impl App {
             if offset < up && stream.start() > 0 {
                 match observer.read(&id, index, Window::Before(stream.start())) {
                     Ok(page) => {
-                        let added = Stream::display_chars(&page.text);
+                        let added = Stream::display_chars(&page.text, terminal);
                         if page.end == stream.start() {
                             stream.prepend(page);
                             anchor += added;
-                            starts = super::view::processes::row_starts(&stream.text(), width);
+                            starts = super::view::processes::row_starts(
+                                &stream.display_text(terminal),
+                                width,
+                            );
                         }
                     }
                     Err(error) => stream.error = Some(error),
@@ -376,13 +346,13 @@ impl App {
                 if continuous {
                     let removed = trimmed
                         .iter()
-                        .map(|page| Stream::display_chars(&page.text))
+                        .map(|page| Stream::display_chars(&page.text, terminal))
                         .sum::<usize>();
                     anchor = anchor.saturating_sub(removed);
                 } else {
                     anchor = 0;
                 }
-                starts = super::view::processes::row_starts(&stream.text(), width);
+                starts = super::view::processes::row_starts(&stream.display_text(terminal), width);
                 let row = super::view::processes::row_at(&starts, anchor)
                     .saturating_add(delta as usize)
                     .min(starts.len().saturating_sub(capacity));
@@ -454,7 +424,12 @@ fn follow(observer: &Observer, logs: &mut Logs) -> bool {
     }
 }
 
+mod ansi;
 mod control;
+mod input;
+mod stream;
+#[cfg(test)]
+use stream::RETAINED;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]

@@ -29,6 +29,15 @@ pub(super) fn spawn(
     input: Option<Vec<u8>>,
     cancellation: &Cancellation,
 ) -> Result<Spawned, RunError> {
+    // The supervisor serializes argv instead of calling Command::spawn on
+    // the target. Preserve the native API's rejection of embedded NULs.
+    let contains_nul = |value: &OsStr| value.encode_wide().any(|unit| unit == 0);
+    if contains_nul(command.get_program()) || command.get_args().any(contains_nul) {
+        return Err(RunError {
+            started: false,
+            message: "Executable and arguments must not contain NUL characters".into(),
+        });
+    }
     let executable = cache::supervisor(cancellation);
     if cancellation.requested() {
         return Err(RunError {

@@ -299,6 +299,7 @@ fn messages_sent_during_compaction_join_the_request_after_it() {
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = agent(&directory, &fixture);
+    agent.set_auto_compact(90);
     let inbox = agent.inbox();
     let mut sent = false;
     agent

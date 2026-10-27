@@ -385,7 +385,7 @@ fn finished_and_unknown_references_behave_predictably() {
     let unknown = process(&tools, "poll", "process-1-2-3", None);
     assert!(text(&unknown, "error").contains("process-1-2-3"));
     let invalid = tools.execute("process", r#"{"action":"restart","process_id":"x"}"#);
-    assert!(text(&invalid, "error").contains("list, poll or stop"));
+    assert!(text(&invalid, "error").contains("list, poll, stop, write, resize or interrupt"));
     let negative = bash(&tools, "true", &[("wait_ms", Value::number(-1))]);
     assert!(text(&negative, "error").contains("wait_ms"));
 }
@@ -423,6 +423,7 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
     let stderr = directory.path().join("stderr");
     std::fs::write(&stdout, "unread stdout").unwrap();
     let entry = Entry {
+        terminal: None,
         id: "process-fixture".into(),
         command: "fixture".into(),
         streams: [

@@ -10,7 +10,7 @@ pub(super) fn family(name: &str) -> Style {
     match name {
         "Read" | "Skill" | "Web" | "Browser" => ACCENT,
         "Update" | "Write" | "Checkpoint" => KEYWORD,
-        "Bash" | "Process" => TOOL_ACCENT,
+        "Bash" | "Exec" | "Process" => TOOL_ACCENT,
         _ => EMPHASIS,
     }
 }

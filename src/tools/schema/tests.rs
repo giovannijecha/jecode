@@ -24,7 +24,10 @@ fn work_and_description_are_optional_only_for_routine_tools() {
             Some(&Value::Bool(false)),
             "{name}"
         );
-        if matches!(name, "read" | "bash" | "process" | "web" | "browser") {
+        if matches!(
+            name,
+            "read" | "bash" | "process" | "web" | "browser" | "exec"
+        ) {
             let work = properties.get("work").unwrap();
             assert_eq!(work.get("type"), Some(&Value::string("string")), "{name}");
             assert!(work.get("description").and_then(Value::as_str).is_some());
@@ -49,11 +52,11 @@ fn work_and_description_are_optional_only_for_routine_tools() {
 }
 
 #[test]
-fn shell_and_process_budgets_advertise_the_same_bounded_preview_contract() {
+fn command_and_process_budgets_advertise_the_same_bounded_preview_contract() {
     for tool in definitions().as_array().unwrap().iter().filter(|tool| {
         matches!(
             tool.get("name").and_then(Value::as_str),
-            Some("bash" | "process")
+            Some("bash" | "process" | "exec")
         )
     }) {
         let budget = tool
@@ -139,7 +142,7 @@ fn provider_regression_unbounded_offsets_have_no_platform_sized_schema_maximum()
 fn web_and_browser_advertise_local_actions_and_signed_scroll() {
     let tools = definitions();
     let functions = tools.as_array().unwrap();
-    assert_eq!(functions.len(), 8);
+    assert_eq!(functions.len(), 9);
     assert!(functions.iter().all(|tool| tool.get("function").is_none()));
     for (name, action) in [("web", "crawl"), ("browser", "cdp")] {
         let function = functions
@@ -177,6 +180,87 @@ fn web_and_browser_advertise_local_actions_and_signed_scroll() {
         .unwrap();
     assert_eq!(scroll.get("type").and_then(Value::as_str), Some("integer"));
     assert!(scroll.get("minimum").is_none());
+}
+
+#[test]
+fn exec_is_appended_without_moving_browser_and_advertises_structured_terminal_input() {
+    let tools = definitions().as_array().unwrap();
+    assert_eq!(
+        tools[7].get("name").and_then(Value::as_str),
+        Some("browser")
+    );
+    let exec = &tools[8];
+    assert_eq!(exec.get("name").and_then(Value::as_str), Some("exec"));
+    let parameters = exec.get("parameters").unwrap();
+    assert_eq!(
+        parameters.get("required"),
+        Some(&Value::Array(vec![Value::string("executable")]))
+    );
+    let fields = parameters.get("properties").unwrap();
+    assert_eq!(
+        fields
+            .get("args")
+            .unwrap()
+            .get("items")
+            .unwrap()
+            .get("type"),
+        Some(&Value::string("string"))
+    );
+    assert_eq!(
+        fields.get("tty").unwrap().get("type"),
+        Some(&Value::string("boolean"))
+    );
+    for field in ["cols", "rows"] {
+        assert_eq!(
+            fields.get(field).unwrap().get("minimum"),
+            Some(&Value::number(1))
+        );
+        assert_eq!(
+            fields.get(field).unwrap().get("maximum"),
+            Some(&Value::number(1000))
+        );
+    }
+    assert_eq!(
+        fields
+            .get("env")
+            .unwrap()
+            .get("additionalProperties")
+            .unwrap()
+            .get("type"),
+        Some(&Value::Array(vec![
+            Value::string("string"),
+            Value::string("null")
+        ]))
+    );
+    let process = tools
+        .iter()
+        .find(|tool| tool.get("name").and_then(Value::as_str) == Some("process"))
+        .unwrap();
+    let fields = process
+        .get("parameters")
+        .unwrap()
+        .get("properties")
+        .unwrap();
+    let actions = fields
+        .get("action")
+        .unwrap()
+        .get("enum")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    for action in ["write", "resize", "interrupt"] {
+        assert!(actions.contains(&Value::string(action)));
+    }
+    assert!(
+        fields
+            .get("key")
+            .unwrap()
+            .get("enum")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .contains(&Value::string("Ctrl+C"))
+    );
 }
 
 #[test]

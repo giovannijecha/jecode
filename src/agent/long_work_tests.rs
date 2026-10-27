@@ -38,6 +38,13 @@ fn fixture_agent(
     agent
 }
 
+fn compacting_agent(directory: &Directory, home: &Directory, endpoint: &str) -> Agent {
+    let mut agent = fixture_agent(directory, home, endpoint, usize::MAX);
+    let capacity = agent.fixture_capacity(6_000, crate::context::AUTO_COMPACT_DEFAULT);
+    agent.client.fixture_limits(capacity, Some(4096));
+    agent
+}
+
 #[test]
 fn temporary_failures_have_no_attempt_cap_and_completed_tools_are_not_replayed() {
     let directory = Directory::new();
@@ -261,6 +268,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
     let home = Directory::new();
     let original = "source evidence\n".repeat(1600);
     std::fs::write(directory.path().join("source"), &original).unwrap();
+    // Budget-relative synthetic usage keeps each compaction at the post-read boundary.
     let read = |id| {
         used(
             completion(
@@ -274,7 +282,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
                     ]),
                 )],
             ),
-            6000,
+            6000 + crate::tools::encoded_size(),
         )
     };
     let fixture = HttpFixture::new(vec![
@@ -296,7 +304,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
         ),
         (200, completion("Inspection complete.", vec![])),
     ]);
-    let mut agent = fixture_agent(&directory, &home, &fixture.endpoint, 24000);
+    let mut agent = compacting_agent(&directory, &home, &fixture.endpoint);
     let handle = agent.sessions().unwrap();
     let mut compacted = 0;
     agent
@@ -336,12 +344,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
     let id = handle.id();
     drop(handle);
     drop(agent);
-    let mut resumed = fixture_agent(
-        &directory,
-        &home,
-        "http://127.0.0.1:1/chat/completions",
-        24000,
-    );
+    let mut resumed = compacting_agent(&directory, &home, "http://127.0.0.1:1/chat/completions");
     resumed.resume(&id).unwrap();
     assert_eq!(resumed.context.from, saved_from);
     assert!(
@@ -370,6 +373,7 @@ fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() 
     .unwrap();
     let fixture = HttpFixture::new(vec![(
         200,
+        // Budget-relative synthetic usage keeps cancellation at the compaction boundary.
         used(
             completion(
                 "",
@@ -382,10 +386,10 @@ fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() 
                     ]),
                 )],
             ),
-            6000,
+            6000 + crate::tools::encoded_size(),
         ),
     )]);
-    let mut agent = fixture_agent(&directory, &home, &fixture.endpoint, 24000);
+    let mut agent = compacting_agent(&directory, &home, &fixture.endpoint);
     let signal = agent.cancellation.clone();
     assert!(
         agent

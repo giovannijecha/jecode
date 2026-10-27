@@ -70,6 +70,45 @@ pub struct Page {
 }
 
 impl Observer {
+    fn terminal(&self, id: &str) -> Result<std::sync::Arc<crate::pty::Control>, String> {
+        let scope = self.scope.upgrade().ok_or(ENDED)?;
+        let entries = scope.entries.lock().unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| format!("No process {id} belongs to this conversation runtime"))?;
+        if entry.stop.requested() || entry.state.lock().unwrap().outcome.is_some() {
+            return Err("The process has ended or is stopping".into());
+        }
+        entry
+            .terminal
+            .clone()
+            .ok_or_else(|| "This process has no interactive terminal".into())
+    }
+
+    pub fn terminal_size(&self, id: &str) -> Option<(u16, u16)> {
+        let scope = self.scope.upgrade()?;
+        let entries = scope.entries.lock().unwrap();
+        entries
+            .iter()
+            .find(|entry| entry.id == id)?
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.size())
+    }
+
+    /// Writes local user input without creating a model message or tool call.
+    pub fn write_direct(&self, id: &str, bytes: &[u8]) -> Result<(), String> {
+        self.terminal(id)?.write_direct(bytes)
+    }
+
+    pub fn resize_direct(&self, id: &str, size: (u16, u16)) -> Result<(), String> {
+        if size.0 == 0 || size.1 == 0 || size.0 > 1000 || size.1 > 1000 {
+            return Err("Terminal dimensions must be from 1 to 1000".into());
+        }
+        self.terminal(id)?.resize_direct(size)
+    }
+
     pub(super) fn new(scope: Weak<Scope>, redactor: Redactor) -> Self {
         Self { scope, redactor }
     }

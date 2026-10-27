@@ -201,7 +201,7 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
         }
         assert_eq!(
             request.body.get("tools").unwrap().as_array().unwrap().len(),
-            8
+            9
         );
     }
     let fourth = requests[3]

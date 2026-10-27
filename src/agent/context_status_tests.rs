@@ -216,6 +216,7 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
         Tools::new(directory.path()).unwrap(),
     );
     agent.client.fixture_unknown_limits();
+    agent.set_auto_compact(90);
     let (result, trace) = trace(&mut agent, &prompt);
     result.unwrap();
     let discarded = trace
@@ -267,7 +268,6 @@ fn an_unattainable_threshold_fails_once_and_preserves_history() {
 
 #[test]
 fn accepted_input_updates_context_before_a_summary_starts() {
-    let capacity = 36000;
     for with_tool in [false, true] {
         let directory = Directory::new();
         let workspace = directory
@@ -284,19 +284,36 @@ fn accepted_input_updates_context_before_a_summary_starts() {
         } else {
             vec![]
         };
+        let update = "Updated requirement. ".repeat(800);
+        let probe = Agent::new(
+            OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
+            Tools::new(&workspace).unwrap(),
+        );
+        let capacity = probe.fixture_capacity(update.len() + 2_048, AUTO_COMPACT_DEFAULT);
+        // A measured first request plus the accepted input crosses the budget;
+        // the accepted request itself still fits beside the native catalog.
+        let measured = threshold(capacity, AUTO_COMPACT_DEFAULT) - update.len() / 2;
+        let mut first = completion("First result.", calls);
+        if let Value::Object(fields) = &mut first {
+            fields.insert(
+                "usage".into(),
+                Value::object([("prompt_tokens", Value::number(measured))]),
+            );
+        }
         let fixture = HttpFixture::new(vec![
-            (200, completion("First result.", calls)),
+            (200, first),
             (
                 200,
                 completion("Continue with the updated requirement.", vec![]),
             ),
             (200, completion("Finished.", vec![])),
         ]);
-        let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-        client.fixture_limits(capacity, Some(4096));
-        let mut agent = Agent::new(client, Tools::new(&workspace).unwrap());
+        let mut agent = Agent::new(
+            OpenRouter::fixture(fixture.endpoint.clone()),
+            Tools::new(&workspace).unwrap(),
+        );
+        agent.client.fixture_limits(capacity, Some(4096));
         let inbox = agent.inbox();
-        let update = "Updated requirement. ".repeat(800);
         let mut submitted = false;
         let mut accepted = false;
         let mut accepted_context = None;

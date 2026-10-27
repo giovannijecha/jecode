@@ -64,6 +64,8 @@ fn logs(process: Process, stream: usize, streams: [&str; 2], follow: bool) -> Lo
         process: Some(process),
         stream,
         views: Default::default(),
+        interactive: false,
+        input_mode: false,
     };
     for (view, text) in logs.views.iter_mut().zip(streams) {
         let length = text.len() as u64;

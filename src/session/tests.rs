@@ -23,6 +23,45 @@ fn response(text: &str) -> Value {
 }
 
 #[test]
+fn failed_plain_direct_write_records_only_a_safe_command_label() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    let mut config = SessionConfig {
+        store: Store::new(home.path().to_path_buf()),
+        settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
+        bash: crate::tools::find_bash().unwrap(),
+    };
+    let mut output = Vec::new();
+    let mut status = Vec::new();
+    chat(
+        &mut agent,
+        &mut config,
+        &mut Cursor::new(
+            "/terminal write missing SECRET_DIRECT_INPUT_42\n/terminal write SECRET_AS_ID\n/exit\n",
+        ),
+        &mut output,
+        &mut status,
+        Vec::new(),
+    )
+    .unwrap();
+    let archive = format!(
+        "{:?}{:?}",
+        agent.archive().messages.lock().unwrap(),
+        agent.archive().events.lock().unwrap()
+    );
+    assert!(!archive.contains("SECRET_DIRECT_INPUT_42"));
+    assert!(!archive.contains("SECRET_AS_ID"));
+    assert!(archive.contains("/terminal write [direct input]"));
+    let status = String::from_utf8(status).unwrap();
+    assert!(!status.contains("SECRET_DIRECT_INPUT_42"));
+    assert!(!status.contains("SECRET_AS_ID"));
+}
+
+#[test]
 fn backend_command_keeps_the_conversation_and_saved_default() {
     let home = Directory::new();
     let project = Directory::new();

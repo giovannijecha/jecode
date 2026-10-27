@@ -27,6 +27,7 @@ mod input;
 mod json;
 mod output;
 mod process;
+mod pty;
 mod redact;
 mod scratch;
 mod session;

@@ -49,17 +49,20 @@ fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
         (200, charged(truncated(), 0.004)),
         (200, charged(completion(&candidate(), vec![]), 0.001)),
     ]);
-    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(24000, None);
-    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
-    // Leave room for the native prompt and evolving tool schemas at 24K.
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    // Reserve a fixed history margin beyond the native prompt and tool schema.
     agent.set_auto_compact(90);
+    let capacity = agent.fixture_capacity(8_192, 90);
+    agent.client.fixture_limits(capacity, None);
     historical_notes(&agent);
     agent.prepare_turn("Inspect only").unwrap();
     agent
         .compact_if_needed(
             Some(Limits {
-                context: 24000,
+                context: capacity,
                 output: None,
             }),
             true,
@@ -87,36 +90,40 @@ fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
         (200, completion(&candidate(), vec![])),
     ]);
     let new_agent = || {
-        let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-        client.fixture_limits(24000, None);
-        client.set_effort(Effort::High);
-        let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
-        // Keep the 24K output allowances while reserving room for native tools.
+        let mut agent = Agent::new(
+            OpenRouter::fixture(fixture.endpoint.clone()),
+            Tools::new(directory.path()).unwrap(),
+        );
+        agent.set_effort(Effort::High);
+        // Keep output allowances while reserving room for native tools.
         agent.set_auto_compact(90);
+        agent.enable_sessions(home.path()).unwrap();
+        let capacity = agent.fixture_capacity(8_192, 90);
+        agent.client.fixture_limits(capacity, None);
         agent
     };
+    let mut first = new_agent();
+    let capacity = first.fixture_capacity(8_192, 90);
     let limits = Some(Limits {
-        context: 24000,
+        context: capacity,
         output: None,
     });
-    let mut first = new_agent();
-    first.enable_sessions(home.path()).unwrap();
     historical_notes(&first);
     first.prepare_turn("Inspect only").unwrap();
     let original = first.messages.lock().unwrap().clone();
     first
         .compact_if_needed(limits, true, &mut |_| Ok(()))
         .unwrap();
-    assert_eq!(first.context.summary_output_tokens, 6000);
+    let learned = first.context.summary_output_tokens;
+    assert!(learned > capacity / 8 && learned <= capacity / 4);
     assert_eq!(*first.messages.lock().unwrap(), original);
     first.save_session().unwrap();
     let id = first.sessions().unwrap().id();
     drop(first);
 
     let mut resumed = new_agent();
-    resumed.enable_sessions(home.path()).unwrap();
     resumed.resume(&id).unwrap();
-    assert_eq!(resumed.context.summary_output_tokens, 6000);
+    assert_eq!(resumed.context.summary_output_tokens, learned);
     historical_notes(&resumed);
     resumed
         .prepare_turn("Continue the same inspection")
@@ -125,7 +132,7 @@ fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
     resumed
         .compact_if_needed(limits, true, &mut |_| Ok(()))
         .unwrap();
-    assert_eq!(resumed.context.summary_output_tokens, 6000);
+    assert_eq!(resumed.context.summary_output_tokens, learned);
     assert_eq!(*resumed.messages.lock().unwrap(), original);
     let requests = fixture.finish();
     let allowances = requests
@@ -139,7 +146,7 @@ fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
                 .unwrap()
         })
         .collect::<Vec<_>>();
-    assert_eq!(allowances, [3000, 6000, 6000]);
+    assert_eq!(allowances, [capacity / 8, learned, learned]);
 }
 
 #[test]

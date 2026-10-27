@@ -66,6 +66,8 @@ cargo test --locked --offline backend::openrouter::calls::tests::
 cargo test --locked --offline auth::openai::
 cargo test --locked --offline backend::openai::
 cargo test --locked --offline tools::processes::tests::
+cargo test --locked --offline tools::exec::tests::
+cargo test --locked --offline tools::interactive::tests::
 cargo test --locked --offline sessions::journal_tests::
 cargo test --locked --offline checkpoint
 ```
@@ -156,6 +158,19 @@ The Unix installer accepts an absolute root: `sh INSTALL.sh /absolute/test/root`
 Both installers build offline and print the installed executable's version.
 
 ## Native and manual checks
+
+Interactive execution tests use original Rust fixtures and isolated native
+terminals. Unix PTY tests require `cc` on first use and `/bin/ps` for session
+cleanup. They check input, resize, interrupt, owner loss, job-control groups,
+saved output and per-control checkpoints. Password-entry checks use synthetic
+values with the target's echo disabled.
+
+The Windows direct-input fixture drives the real Rust renderer and verifies
+that local terminal input, including emoji, stays outside conversation history:
+
+```text
+cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
+```
 
 [Platform verification](PLATFORMS.md) contains native ConPTY/PTY commands,
 local coverage and physical host checks. Use those fixtures for input, resize,

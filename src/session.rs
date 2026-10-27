@@ -70,15 +70,29 @@ fn chat_inner(
         write!(output, "\n> ")
             .and_then(|_| output.flush())
             .map_err(|error| error.to_string())?;
-        let Some(line) = read_line(input)? else {
+        let Some(raw_line) = read_line(input)? else {
             return agent.save_session();
         };
-        let line = line.trim();
+        let line = raw_line.trim();
         if line.is_empty() && staged.is_empty() {
             continue;
         }
         let (name, arguments) = commands::split(line).unwrap_or(("", ""));
         let name = commands::canonical(name).to_ascii_lowercase();
+        let terminal_arguments = if name == "/terminal"
+            && arguments
+                .split_whitespace()
+                .next()
+                .is_some_and(|action| action.eq_ignore_ascii_case("write"))
+        {
+            raw_line
+                .trim_end_matches(['\r', '\n'])
+                .trim_start()
+                .split_once(char::is_whitespace)
+                .map_or(arguments, |(_, rest)| rest.trim_start())
+        } else {
+            arguments
+        };
         let result = match (name.as_str(), arguments) {
             ("/exit", "") => return agent.save_session(),
             ("/help", "") => {
@@ -125,7 +139,7 @@ fn chat_inner(
                 persistence::resume(agent, config, None, input, output, status)
                     .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
             }
-            ("/terminal", _) => processes::print(agent, arguments, output),
+            ("/terminal", _) => processes::print(agent, terminal_arguments, output),
             ("/tmp", _) => temporary::print(agent, arguments, output),
             ("/checkpoints", _) => checkpoints::print(agent, arguments, output),
             ("/resume", _) => {
@@ -185,7 +199,21 @@ fn chat_inner(
         let result = result.and(agent.save_session());
         if let Err(error) = result {
             if line.starts_with('/') {
-                agent.record_local_details(line, &error, "error", &[]);
+                let direct_write = name == "/terminal"
+                    && arguments
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|action| action.eq_ignore_ascii_case("write"));
+                if direct_write {
+                    agent.record_local_details(
+                        "/terminal write [direct input]",
+                        "Direct terminal input failed",
+                        "error",
+                        &[],
+                    );
+                } else {
+                    agent.record_local_details(line, &error, "error", &[]);
+                }
             }
             writeln!(status, "{}", agent.redact(&error)).map_err(|error| error.to_string())?;
         }

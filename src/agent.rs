@@ -37,6 +37,18 @@ pub struct Agent {
 
 impl Agent {
     #[cfg(test)]
+    fn fixture_capacity(&self, headroom: usize, auto_percent: u8) -> usize {
+        // Keep fixture budgets relative to native prompt/tool overhead, not
+        // to the conversation whose compaction the test exercises.
+        let fixed = self.current_system_message().encode().len()
+            + crate::tools::encoded_size()
+            + self.request_environment().len();
+        (fixed + headroom)
+            .saturating_mul(100)
+            .div_ceil(usize::from(auto_percent))
+    }
+
+    #[cfg(test)]
     pub fn new<B: Backend + 'static>(client: B, tools: Tools) -> Self {
         Self::with_backend(Box::new(client), tools)
     }
