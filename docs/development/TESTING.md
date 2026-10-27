@@ -160,10 +160,17 @@ Both installers build offline and print the installed executable's version.
 ## Native and manual checks
 
 Interactive execution tests use original Rust fixtures and isolated native
-terminals. Unix PTY tests require `cc` on first use and `/bin/ps` for session
-cleanup. They check input, resize, interrupt, owner loss, job-control groups,
+terminals. Unix PTY tests require `cc` on first use, plus `/proc` on Linux or
+`/bin/ps` on macOS for session cleanup. The compiled helper cache is reused
+across test runs under `target/measurements/pty-cache`, keyed by platform and
+source contents. They check input, resize, interrupt, owner loss, job-control groups,
 saved output and per-control checkpoints. Password-entry checks use synthetic
 values with the target's echo disabled.
+
+Unix interrupt probes also use system `stty` and `od` to check synthetic bytes,
+terminal modes and queued input. They cover raw input, remapped or disabled
+`VINTR`, `NOFLSH`, delayed input frames and saturated connections.
+The Linux-only blocked raw-input probe also uses system `tty` and `kill`.
 
 The Windows direct-input fixture drives the real Rust renderer and verifies
 that local terminal input, including emoji, stays outside conversation history:

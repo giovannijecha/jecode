@@ -61,24 +61,38 @@ static int terminal_size(int slave, uint16_t columns, uint16_t rows) {
     return ioctl(slave, TIOCSWINSZ, &size);
 }
 
-static int send_interrupt(int master) {
+static int send_interrupt(int master, int slave, int *flush_input) {
     pid_t foreground = tcgetpgrp(master);
     if (foreground < 0) {
         if (errno == ENOTTY || errno == EIO) return 0;
         return -1;
     }
     if (foreground == 0) return 0;
-    if (kill(-foreground, SIGINT) < 0) {
-        if (errno == ESRCH) return 0;
-        return -1;
+    struct termios settings;
+    if (tcgetattr(slave, &settings) < 0) return -1;
+    unsigned char key = 3;
+    *flush_input = 0;
+    if (settings.c_lflag & ISIG) {
+        errno = 0;
+        long disabled = fpathconf(slave, _PC_VDISABLE);
+        if (disabled < 0 && errno != 0) return -1;
+        if (disabled < 0 || settings.c_cc[VINTR] != (cc_t)disabled) {
+            key = settings.c_cc[VINTR];
+            *flush_input = !(settings.c_lflag & NOFLSH);
+        }
     }
+    if (*flush_input && tcflush(slave, TCIFLUSH) < 0) return -1;
+    ssize_t count = write(master, &key, 1);
+    if (count < 0 && (errno == EAGAIN || errno == EINTR)) return 0;
+    if (count != 1) return -1;
     return 1;
 }
 
 /* One socket frame: opcode, little-endian u32 length, payload. Input frames
-   are bounded to 4096 bytes; resize carries two little-endian u16 values. */
+   carry an eight-byte generation then up to 4096 bytes. Interrupt carries
+   the next generation; resize carries two little-endian u16 values. */
 struct frame {
-    unsigned char bytes[5 + 4096];
+    unsigned char bytes[5 + 8 + 4096];
     size_t have;
     size_t need;
 };
@@ -86,13 +100,56 @@ struct frame {
 struct input_queue {
     unsigned char bytes[16][4096];
     size_t length[16];
+    uint64_t generation[16];
     size_t first;
     size_t count;
     size_t sent;
 };
 
+struct interrupt_state {
+    uint64_t generation[16];
+    size_t first;
+    size_t count;
+    uint64_t applied_generation;
+    uint64_t cutoff;
+};
+
+static uint64_t frame_generation(const unsigned char *bytes) {
+    uint64_t value = 0;
+    for (int index = 7; index >= 0; --index)
+        value = (value << 8) | bytes[index];
+    return value;
+}
+
+static void discard_old_input(struct input_queue *queue, uint64_t cutoff) {
+    while (queue->count && queue->generation[queue->first] < cutoff) {
+        queue->first = (queue->first + 1) % 16;
+        --queue->count;
+        queue->sent = 0;
+    }
+}
+
+static int deliver_interrupt(int master, int slave, struct input_queue *queue,
+                             struct interrupt_state *state) {
+    uint64_t generation = state->generation[state->first];
+    int flush_input;
+    int sent = send_interrupt(master, slave, &flush_input);
+    if (sent < 0) return -1;
+    if (!sent) return 0;
+    if (flush_input) {
+        state->cutoff = generation;
+        discard_old_input(queue, state->cutoff);
+    }
+    state->applied_generation = generation;
+    state->first = (state->first + 1) % 16;
+    --state->count;
+    return 1;
+}
+
 static int read_frame(int socket, struct frame *frame, int slave, int master,
-                      struct input_queue *queue, int *interrupt_pending) {
+                      struct input_queue *queue,
+                      struct interrupt_state *interrupt,
+                      struct input_queue *input_queue) {
     ssize_t count = read(socket, frame->bytes + frame->have,
                          frame->need - frame->have);
     if (count == 0) return -1;
@@ -105,21 +162,24 @@ static int read_frame(int socket, struct frame *frame, int slave, int master,
             ((uint32_t)frame->bytes[3] << 16) |
             ((uint32_t)frame->bytes[4] << 24);
         unsigned char operation = frame->bytes[0];
-        if ((operation == 1 && (length > 4096 || !queue)) ||
+        if ((operation == 1 && (length < 8 || length > 4104 || !queue)) ||
             (operation == 2 && length != 4) ||
-            (operation == 3 && length != 0) ||
+            (operation == 3 && length != 8) ||
             (operation != 1 && operation != 2 && operation != 3) ||
             (queue && operation != 1)) return -2;
         frame->need += length;
         if (length) return 0;
     }
     if (frame->bytes[0] == 1) {
-        size_t length = frame->need - 5;
+        uint64_t generation = frame_generation(frame->bytes + 5);
+        size_t length = frame->need - 13;
         if (length) {
+            if (generation < interrupt->cutoff) goto complete;
             if (queue->count == 16) return -2;
             size_t last = (queue->first + queue->count) % 16;
-            memcpy(queue->bytes[last], frame->bytes + 5, length);
+            memcpy(queue->bytes[last], frame->bytes + 13, length);
             queue->length[last] = length;
+            queue->generation[last] = generation;
             ++queue->count;
         }
     } else if (frame->bytes[0] == 2) {
@@ -129,10 +189,14 @@ static int read_frame(int socket, struct frame *frame, int slave, int master,
         if (!columns || !rows || terminal_size(slave, columns, rows) < 0)
             return -2;
     } else {
-        int sent = send_interrupt(master);
-        if (sent < 0) return -2;
-        *interrupt_pending = !sent;
+        if (interrupt->count == 16) return -2;
+        size_t last = (interrupt->first + interrupt->count) % 16;
+        interrupt->generation[last] = frame_generation(frame->bytes + 5);
+        ++interrupt->count;
+        if (deliver_interrupt(master, slave, input_queue, interrupt) < 0)
+            return -2;
     }
+complete:
     frame->have = 0;
     frame->need = 5;
     return 0;
@@ -148,21 +212,25 @@ static int bridge(int master, int *slave, int input, int control,
     input_frame.need = control_frame.need = 5;
     int child_status = 0;
     int child_done = 0;
-    int interrupt_pending = 0;
+    struct interrupt_state interrupt;
+    memset(&interrupt, 0, sizeof(interrupt));
     for (;;) {
         if (stopping) return 125;
-        if (interrupt_pending) {
-            int sent = send_interrupt(master);
+        while (interrupt.count) {
+            int sent = deliver_interrupt(master, *slave, &queue, &interrupt);
             if (sent < 0) return 125;
-            interrupt_pending = !sent;
+            if (!sent) break;
         }
         struct pollfd events[4] = {
-            { master, POLLIN | (queue.count ? POLLOUT : 0), 0 },
+            { master, POLLIN |
+                (queue.count && !interrupt.count &&
+                 queue.generation[queue.first] <= interrupt.applied_generation
+                     ? POLLOUT : 0), 0 },
             { child_done ? -1 : input, queue.count < 16 ? POLLIN : 0, 0 },
-            { child_done ? -1 : control, POLLIN, 0 },
+            { child_done || interrupt.count == 16 ? -1 : control, POLLIN, 0 },
             { child_done ? -1 : status_read, POLLIN, 0 },
         };
-        int ready = poll(events, 4, child_done ? 100 : interrupt_pending ? 50 : 1000);
+        int ready = poll(events, 4, child_done ? 100 : interrupt.count ? 50 : 1000);
         if (ready < 0) {
             if (errno == EINTR) continue;
             fprintf(stderr, "Unix PTY poll failed: %s\n", strerror(errno));
@@ -179,7 +247,7 @@ static int bridge(int master, int *slave, int input, int control,
                 return 125;
             }
             child_done = 1;
-            interrupt_pending = 0;
+            interrupt.count = 0;
             queue.count = 0;
             close(*slave);
             *slave = -1;
@@ -199,16 +267,18 @@ static int bridge(int master, int *slave, int input, int control,
                 return 125;
             }
         }
-        if (!child_done && events[2].revents) {
+        if (!child_done && interrupt.count < 16 && events[2].revents) {
             int result = read_frame(control, &control_frame, *slave, master,
-                                    NULL, &interrupt_pending);
+                                    NULL, &interrupt, &queue);
             if (result < 0) {
                 fprintf(stderr, "Unix PTY control read or command failed: %s\n",
                         strerror(errno));
                 return 125;
             }
         }
-        if ((events[0].revents & POLLOUT) && queue.count) {
+        if ((events[0].revents & POLLOUT) && queue.count &&
+            !interrupt.count &&
+            queue.generation[queue.first] <= interrupt.applied_generation) {
             ssize_t count = write(master, queue.bytes[queue.first] + queue.sent,
                                   queue.length[queue.first] - queue.sent);
             if (count > 0) {
@@ -225,7 +295,7 @@ static int bridge(int master, int *slave, int input, int control,
         }
         if (!child_done && queue.count < 16 && events[1].revents) {
             int result = read_frame(input, &input_frame, *slave, master,
-                                    &queue, &interrupt_pending);
+                                    &queue, &interrupt, &queue);
             if (result < 0) {
                 if (result == -2)
                     fprintf(stderr, "Unix PTY input frame was invalid\n");

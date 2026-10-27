@@ -5,11 +5,14 @@ public static class JecodeWindowsCommand {
         if (program.IndexOfAny(new char[] { '\\', '/' }) >= 0 || program.IndexOf(':') >= 0)
             return program;
         string path = System.Environment.GetEnvironmentVariable("PATH") ?? "";
-        string file = System.IO.Path.HasExtension(program) ? program : program + ".exe";
+        bool alreadyExe = program.EndsWith(".exe", System.StringComparison.OrdinalIgnoreCase);
         foreach (string entry in path.Split(';')) {
             string directory = entry.Trim().Trim('"');
             if (directory.Length == 0) continue;
-            string candidate = System.IO.Path.Combine(directory, file);
+            string candidate = System.IO.Path.Combine(directory, program);
+            if (System.IO.File.Exists(candidate)) return System.IO.Path.GetFullPath(candidate);
+            if (alreadyExe) continue;
+            candidate += ".exe";
             if (System.IO.File.Exists(candidate)) return System.IO.Path.GetFullPath(candidate);
         }
         throw new System.IO.FileNotFoundException("Executable was not found on PATH", program);

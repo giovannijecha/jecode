@@ -288,7 +288,8 @@ spaces, quotes and shell metacharacters are passed unchanged. Jecode does not
 start an implicit shell or rewrite the executable. A bare name follows normal
 PATH search, which can select a shim already on PATH. On Windows, only the
 effective PATH entries are searched in order: the project directory and system
-directories are not implicitly searched before them.
+directories are not implicitly searched before them. Each entry is checked for
+the exact name, then a `.exe` suffix if needed, including names such as `python3.11`.
 Executable and argument strings cannot contain NUL characters.
 The process starts in the project directory unless `cwd` names an absolute
 directory or a directory relative to the project. An executable path containing
@@ -339,13 +340,17 @@ check`; these cards are snapshots. Use `/terminal` for the current active list.
 | `stop` | With `process_id`, requests termination of the process and descendants and waits up to 10 seconds. If the result is `stopping`, poll again to confirm. |
 | `write` | Sends `text` or one `key` to a terminal process. Supported keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D and Ctrl+Z. At most 64 KiB of input per call. |
 | `resize` | Changes a terminal process to `cols` by `rows`, each from 1 to 1000. |
-| `interrupt` | Interrupts the terminal foreground process group on Unix; sends Ctrl+C through ConPTY on Windows. `write` with `key:"Ctrl+C"` uses the same operation. |
+| `interrupt` | Sends the terminal interrupt character. Unix follows the current `ISIG`, `VINTR` and `NOFLSH` settings; raw mode receives byte `0x03`. Windows sends Ctrl+C through ConPTY. `write` with `key:"Ctrl+C"` uses the same operation. |
 
 A `write` receipt confirms delivery to the terminal control pipe, not completion
 of the child's command. If delivery is unconfirmed, the input may still have
 arrived or remain queued; the timeout does not close the channel. Resize and
-interrupt use a separate control connection so input backpressure on Unix
-cannot block them. Inspect process output and workspace state before retrying. `protect`
+interrupt use a separate control connection so bridge input backpressure on Unix
+cannot block control requests. When terminal signal processing flushes input,
+older queued input is discarded, including bytes still arriving from the writer;
+input submitted after the interrupt is retained. `NOFLSH` preserves queued input.
+In raw mode, the interrupt remains input data and requires the application to read it.
+Inspect process output and workspace state before retrying. `protect`
 on `write`, `resize` or `interrupt` captures preimages for that call's declared
 workspace paths before sending input or control.
 

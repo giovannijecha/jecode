@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn terminal_bare_program_uses_path_order_without_current_directory() {
+fn terminal_bare_program_uses_path_order_and_dotted_fallback() {
     let root = Directory::new();
     let cwd = root.path().join("cwd");
     let first = root.path().join("first");
@@ -60,4 +60,73 @@ fn terminal_bare_program_uses_path_order_without_current_directory() {
             selected
         );
     }
+
+    let dotted = "jecode-python3.11";
+    std::fs::copy(cwd.join(program), first.join(dotted)).unwrap();
+    std::fs::copy(cwd.join(program), first.join(format!("{dotted}.exe"))).unwrap();
+    std::fs::copy(cwd.join(program), second.join(dotted)).unwrap();
+    let cases = [
+        (
+            format!("{};{}", first.display(), second.display()),
+            first.join(dotted),
+        ),
+        (
+            format!("{};{}", second.display(), first.display()),
+            second.join(dotted),
+        ),
+    ];
+    for (path, expected) in cases {
+        let started = execute(
+            &tools,
+            Path::new(dotted),
+            &[],
+            &[
+                ("cwd", Value::string("cwd")),
+                ("env", Value::object([("PATH", Value::string(path))])),
+            ],
+        );
+        let id = text(&started, "process_id").to_owned();
+        let mut output = text(&started, "stdout").to_owned();
+        let ended = finish(&tools, &id, &mut output);
+        let selected = expected.to_string_lossy().replace('/', "\\");
+        assert_eq!(
+            ended.get("exit_code").and_then(Value::as_usize),
+            Some(0),
+            "{ended:?}; {output:?}"
+        );
+        assert!(
+            output.contains(&format!("SELECTED:{selected}")),
+            "{output:?}"
+        );
+    }
+
+    std::fs::remove_file(first.join(dotted)).unwrap();
+    let started = execute(
+        &tools,
+        Path::new(dotted),
+        &[],
+        &[
+            ("cwd", Value::string("cwd")),
+            (
+                "env",
+                Value::object([("PATH", Value::string(first.to_string_lossy()))]),
+            ),
+        ],
+    );
+    let id = text(&started, "process_id").to_owned();
+    let mut output = text(&started, "stdout").to_owned();
+    let ended = finish(&tools, &id, &mut output);
+    let selected = first
+        .join(format!("{dotted}.exe"))
+        .to_string_lossy()
+        .replace('/', "\\");
+    assert_eq!(
+        ended.get("exit_code").and_then(Value::as_usize),
+        Some(0),
+        "{ended:?}; {output:?}"
+    );
+    assert!(
+        output.contains(&format!("SELECTED:{selected}")),
+        "{output:?}"
+    );
 }

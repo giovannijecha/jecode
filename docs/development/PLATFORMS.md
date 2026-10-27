@@ -39,10 +39,16 @@ supervisor. With `tty:true`, an owned native bridge supplies a pseudo-terminal:
 Windows uses ConPTY and current-user-only named pipes, with the opened server
 handle checked against the launched bridge PID before any input is sent.
 Linux and macOS use POSIX PTYs and private Unix-domain sockets. Input and control
-have separate connections, so a full input queue cannot block Unix resize or
-foreground-process-group interrupts. Input is carried over the control
-channel and is not staged in regular files. Terminal output combines stdout
+have separate connections, so bridge input backpressure cannot block resize
+or delivery of an interrupt request. Input travels over its dedicated
+connection and is not staged in regular files. Terminal output combines stdout
 and stderr and remains available through the normal saved-output references.
+
+Unix interrupts pass through the terminal line discipline. The configured
+`VINTR` character produces signals only while `ISIG` is enabled; otherwise the
+application receives literal ETX input. `NOFLSH` preserves pending input. When
+flushing is enabled, input generations prevent older bytes still in the Rust
+writer or socket from being replayed after the interrupt, while preserving later input.
 
 Windows requires its existing PowerShell/.NET compiler and Windows 10+ ConPTY.
 Unix first use compiles the owned bridge with system `cc`, caches it under the

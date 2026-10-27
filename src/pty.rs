@@ -31,6 +31,8 @@ pub(crate) struct Control {
     failure: Arc<Mutex<Option<String>>>,
     closed: Arc<AtomicBool>,
     size: Mutex<(u16, u16)>,
+    #[cfg(unix)]
+    generation: Mutex<u64>,
     _endpoint: Endpoint,
 }
 
@@ -142,6 +144,8 @@ pub(crate) fn start(
             failure,
             closed,
             size: Mutex::new(size),
+            #[cfg(unix)]
+            generation: Mutex::new(0),
             _endpoint: endpoint,
         }),
     ))
@@ -197,6 +201,42 @@ fn frame(op: u8, bytes: &[u8]) -> Vec<u8> {
 }
 
 impl Control {
+    #[cfg(unix)]
+    fn enqueue_input(
+        &self,
+        bytes: &[u8],
+        receipt: Option<mpsc::SyncSender<Result<(), String>>>,
+    ) -> Result<(), String> {
+        if bytes.len() > MAX_INPUT {
+            return Err(format!(
+                "Terminal input must be at most {MAX_INPUT} bytes per call"
+            ));
+        }
+        let generation = self.generation.lock().unwrap();
+        let mut packet = Vec::new();
+        for chunk in bytes.chunks(4096) {
+            let mut payload = Vec::with_capacity(chunk.len() + 8);
+            payload.extend_from_slice(&generation.to_le_bytes());
+            payload.extend_from_slice(chunk);
+            packet.extend(frame(1, &payload));
+        }
+        self.enqueue(packet, false, receipt)
+    }
+
+    #[cfg(unix)]
+    fn enqueue_interrupt(
+        &self,
+        receipt: Option<mpsc::SyncSender<Result<(), String>>>,
+    ) -> Result<(), String> {
+        let mut generation = self.generation.lock().unwrap();
+        let next = generation
+            .checked_add(1)
+            .ok_or("Terminal interrupt sequence exhausted")?;
+        self.enqueue(frame(3, &next.to_le_bytes()), true, receipt)?;
+        *generation = next;
+        Ok(())
+    }
+
     pub fn size(&self) -> (u16, u16) {
         *self.size.lock().unwrap()
     }
@@ -240,11 +280,21 @@ impl Control {
         control: bool,
         cancellation: &Cancellation,
     ) -> Result<(), String> {
+        self.deliver_with(cancellation, |receipt| {
+            self.enqueue(bytes, control, receipt)
+        })
+    }
+
+    fn deliver_with(
+        &self,
+        cancellation: &Cancellation,
+        enqueue: impl FnOnce(Option<mpsc::SyncSender<Result<(), String>>>) -> Result<(), String>,
+    ) -> Result<(), String> {
         if cancellation.requested() {
             return Err("Operation cancelled".into());
         }
         let (sender, receiver) = mpsc::sync_channel(1);
-        self.enqueue(bytes, control, Some(sender))?;
+        enqueue(Some(sender))?;
         let deadline = Instant::now() + DELIVERY;
         loop {
             match receiver.recv_timeout(Duration::from_millis(20)) {
@@ -260,6 +310,7 @@ impl Control {
         }
     }
 
+    #[cfg(windows)]
     fn input_packet(bytes: &[u8]) -> Result<Vec<u8>, String> {
         if bytes.len() > MAX_INPUT {
             return Err(format!(
@@ -273,11 +324,17 @@ impl Control {
     }
 
     pub fn write(&self, bytes: &[u8], cancellation: &Cancellation) -> Result<(), String> {
+        #[cfg(unix)]
+        return self.deliver_with(cancellation, |receipt| self.enqueue_input(bytes, receipt));
+        #[cfg(windows)]
         self.deliver(Self::input_packet(bytes)?, false, cancellation)
     }
 
     /// Local user input is not a tool call or a conversation message.
     pub fn write_direct(&self, bytes: &[u8]) -> Result<(), String> {
+        #[cfg(unix)]
+        return self.enqueue_input(bytes, None);
+        #[cfg(windows)]
         self.enqueue(Self::input_packet(bytes)?, false, None)
     }
 
@@ -298,10 +355,16 @@ impl Control {
     }
 
     pub fn interrupt(&self, cancellation: &Cancellation) -> Result<(), String> {
+        #[cfg(unix)]
+        return self.deliver_with(cancellation, |receipt| self.enqueue_interrupt(receipt));
+        #[cfg(windows)]
         self.deliver(frame(3, &[]), true, cancellation)
     }
 
     pub fn interrupt_direct(&self) -> Result<(), String> {
+        #[cfg(unix)]
+        return self.enqueue_interrupt(None);
+        #[cfg(windows)]
         self.enqueue(frame(3, &[]), true, None)
     }
 }

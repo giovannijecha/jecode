@@ -175,9 +175,7 @@ fn helper(cancellation: &Cancellation) -> Result<PathBuf, String> {
 fn cache_root() -> Result<PathBuf, String> {
     #[cfg(test)]
     {
-        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target/measurements")
-            .join(format!("pty-cache-{}", std::process::id())))
+        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/measurements/pty-cache"))
     }
     #[cfg(not(test))]
     {
