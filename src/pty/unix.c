@@ -62,16 +62,17 @@ static int terminal_size(int slave, uint16_t columns, uint16_t rows) {
 }
 
 static int send_interrupt(int master, int slave, int *flush_input) {
+    *flush_input = 0;
     pid_t foreground = tcgetpgrp(master);
+    /* No foreground is a handled no-op; only a full PTY write needs retry. */
     if (foreground < 0) {
-        if (errno == ENOTTY || errno == EIO) return 0;
+        if (errno == ENOTTY || errno == EIO) return 1;
         return -1;
     }
-    if (foreground == 0) return 0;
+    if (foreground == 0) return 1;
     struct termios settings;
     if (tcgetattr(slave, &settings) < 0) return -1;
     unsigned char key = 3;
-    *flush_input = 0;
     if (settings.c_lflag & ISIG) {
         errno = 0;
         long disabled = fpathconf(slave, _PC_VDISABLE);
@@ -82,8 +83,13 @@ static int send_interrupt(int master, int slave, int *flush_input) {
         }
     }
     if (*flush_input && tcflush(slave, TCIFLUSH) < 0) return -1;
-    ssize_t count = write(master, &key, 1);
-    if (count < 0 && (errno == EAGAIN || errno == EINTR)) return 0;
+    /* The interrupt key takes priority over queued input, including in raw
+       mode where it becomes a literal ETX byte. */
+    ssize_t count;
+    do {
+        count = write(master, &key, 1);
+    } while (count < 0 && errno == EINTR);
+    if (count < 0 && errno == EAGAIN) return 0;
     if (count != 1) return -1;
     return 1;
 }

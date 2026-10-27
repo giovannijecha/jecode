@@ -53,6 +53,10 @@ impl Drop for Bridge {
 }
 
 fn launch(script: &str, path: Option<&str>) -> (Bridge, File, File) {
+    launch_command(&["/bin/sh", "-c", script], path)
+}
+
+fn launch_command(args: &[&str], path: Option<&str>) -> (Bridge, File, File) {
     let directory =
         std::env::temp_dir().join(format!("jecode-pty-test-{}", crate::sessions::identifier()));
     fs::create_dir(&directory).unwrap();
@@ -61,7 +65,8 @@ fn launch(script: &str, path: Option<&str>) -> (Bridge, File, File) {
     let mut command = Command::new(helper(&cancellation).unwrap());
     command
         .arg(&endpoint)
-        .args(["80", "24", "/bin/sh", "-c", script])
+        .args(["80", "24"])
+        .args(args)
         .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -149,11 +154,16 @@ fn linux_bridge_cleanup_works_without_ps_in_path() {
 }
 
 #[test]
-fn immediate_interrupt_waits_for_foreground_process_group() {
-    let (mut bridge, _input, mut control) = launch("sleep 30", None);
+fn immediate_interrupt_allows_startup_or_target_progress() {
+    let script = "trap 'exit 130' INT; IFS= read -r line; [ \"$line\" = OK ]";
+    let (mut bridge, mut input, mut control) = launch(script, None);
     control.write_all(&interrupt_frame(1)).unwrap();
-    assert_eq!(finished(&mut bridge.child).code(), Some(130));
+    input.write_all(&input_frame(1, b"OK\n")).unwrap();
+    assert!(matches!(finished(&mut bridge.child).code(), Some(0 | 130)));
 }
+
+#[path = "unix_no_foreground_tests.rs"]
+mod no_foreground;
 
 #[test]
 fn interrupt_flushes_canonical_typeahead() {

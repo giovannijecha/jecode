@@ -49,6 +49,10 @@ Unix interrupts pass through the terminal line discipline. The configured
 application receives literal ETX input. `NOFLSH` preserves pending input. When
 flushing is enabled, input generations prevent older bytes still in the Rust
 writer or socket from being replayed after the interrupt, while preserving later input.
+Without a foreground process group, including after a client detaches its
+controlling terminal, an interrupt is consumed as a no-op without flushing input.
+Only a temporarily full master keeps the request queued. Raw ETX intentionally
+has priority over data still buffered in the bridge.
 
 Windows requires its existing PowerShell/.NET compiler and Windows 10+ ConPTY.
 Unix first use compiles the owned bridge with system `cc`, caches it under the

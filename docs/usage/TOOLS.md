@@ -288,8 +288,9 @@ spaces, quotes and shell metacharacters are passed unchanged. Jecode does not
 start an implicit shell or rewrite the executable. A bare name follows normal
 PATH search, which can select a shim already on PATH. On Windows, only the
 effective PATH entries are searched in order: the project directory and system
-directories are not implicitly searched before them. Each entry is checked for
-the exact name, then a `.exe` suffix if needed, including names such as `python3.11`.
+directories are not implicitly searched before them. A bare name without a dot
+is searched as `name.exe`. Dotted names such as `python3.11` try the exact name
+before adding `.exe`; explicit paths remain literal.
 Executable and argument strings cannot contain NUL characters.
 The process starts in the project directory unless `cwd` names an absolute
 directory or a directory relative to the project. An executable path containing
@@ -350,6 +351,8 @@ cannot block control requests. When terminal signal processing flushes input,
 older queued input is discarded, including bytes still arriving from the writer;
 input submitted after the interrupt is retained. `NOFLSH` preserves queued input.
 In raw mode, the interrupt remains input data and requires the application to read it.
+If the terminal has no foreground process group, the interrupt is consumed as
+a no-op; it does not hold up later input or resize requests.
 Inspect process output and workspace state before retrying. `protect`
 on `write`, `resize` or `interrupt` captures preimages for that call's declared
 workspace paths before sending input or control.

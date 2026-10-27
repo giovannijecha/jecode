@@ -6,11 +6,12 @@ public static class JecodeWindowsCommand {
             return program;
         string path = System.Environment.GetEnvironmentVariable("PATH") ?? "";
         bool alreadyExe = program.EndsWith(".exe", System.StringComparison.OrdinalIgnoreCase);
+        bool tryExact = program.IndexOf('.') >= 0;
         foreach (string entry in path.Split(';')) {
             string directory = entry.Trim().Trim('"');
             if (directory.Length == 0) continue;
             string candidate = System.IO.Path.Combine(directory, program);
-            if (System.IO.File.Exists(candidate)) return System.IO.Path.GetFullPath(candidate);
+            if (tryExact && System.IO.File.Exists(candidate)) return System.IO.Path.GetFullPath(candidate);
             if (alreadyExe) continue;
             candidate += ".exe";
             if (System.IO.File.Exists(candidate)) return System.IO.Path.GetFullPath(candidate);

@@ -169,7 +169,8 @@ values with the target's echo disabled.
 
 Unix interrupt probes also use system `stty` and `od` to check synthetic bytes,
 terminal modes and queued input. They cover raw input, remapped or disabled
-`VINTR`, `NOFLSH`, delayed input frames and saturated connections.
+`VINTR`, `NOFLSH`, delayed input frames, saturated connections and input/resize
+after a client detaches its controlling terminal.
 The Linux-only blocked raw-input probe also uses system `tty` and `kill`.
 
 The Windows direct-input fixture drives the real Rust renderer and verifies

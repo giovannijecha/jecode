@@ -78,6 +78,57 @@ fn supervised_bare_program_uses_path_order_without_current_directory() {
 }
 
 #[test]
+fn supervised_extensionless_program_requires_exe_even_with_script_names_on_path() {
+    let directory = crate::test_support::Directory::new();
+    let bin = directory.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let name = "jecode-tsc-fixture";
+    std::fs::write(bin.join(name), "echo wrong > marker").unwrap();
+    std::fs::write(bin.join(format!("{name}.cmd")), "echo wrong > marker").unwrap();
+
+    let mut command = Command::new(name);
+    command.current_dir(directory.path()).env("PATH", &bin);
+    let result = run_observed(
+        &mut command,
+        None,
+        Duration::from_secs(10),
+        1024,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    );
+    let error = match result {
+        Ok(_) => panic!("script name unexpectedly launched"),
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("Executable was not found on PATH"),
+        "{error}"
+    );
+    assert!(!directory.path().join("marker").exists());
+
+    let system = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+    std::fs::copy(system.join("hostname.exe"), bin.join(format!("{name}.exe"))).unwrap();
+    let expected = Command::new(system.join("hostname.exe"))
+        .output()
+        .unwrap()
+        .stdout;
+    let output = run_observed(
+        &mut command,
+        None,
+        Duration::from_secs(10),
+        1024,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, Some(0));
+    assert_eq!(output.stdout, expected);
+    assert!(!directory.path().join("marker").exists());
+}
+
+#[test]
 fn supervised_dotted_bare_program_prefers_exact_file_then_exe_in_each_path_entry() {
     let directory = crate::test_support::Directory::new();
     let first = directory.path().join("first");
