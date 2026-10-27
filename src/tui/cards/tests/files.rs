@@ -16,11 +16,11 @@ fn new_file_previews_six_numbered_lines_and_expands_all_source() {
         &Presentation::default(),
     );
     let text = plain(&compact);
-    assert!(text.contains("⎿ New file · 9 lines"));
-    assert!(text.contains("    1   const value_1 = 1;"));
-    assert!(text.contains("    6   const value_6 = 6;"));
+    assert!(text.starts_with(" WRITE  new.rs  New file · 9 lines\n"));
+    assert!(text.contains("  │ 1   const value_1 = 1;"));
+    assert!(text.contains("  │ 6   const value_6 = 6;"));
     assert!(!text.contains("value_7"));
-    assert!(text.contains("+3 lines"));
+    assert!(text.ends_with("  └ +3 lines"));
     assert!(compact.iter().all(|row| row.background.is_none()));
 
     let expanded = draw(
@@ -35,7 +35,7 @@ fn new_file_previews_six_numbered_lines_and_expands_all_source() {
         },
     );
     let text = plain(&expanded);
-    assert!(text.contains("    9   const value_9 = 9;"));
+    assert!(text.ends_with("  └ 9   const value_9 = 9;"));
     assert!(!text.contains("+3 lines"));
 }
 
@@ -59,7 +59,7 @@ fn compact_existing_file_diff_names_hidden_hunks_and_rows() {
         .iter()
         .find(|row| row.plain().contains("+2 hunks · 16 rows"))
         .unwrap_or_else(|| panic!("{}", plain(&rows)));
-    assert!(hidden.spans.iter().all(|span| span.style == TOOL_DIM));
+    assert!(hidden.spans.iter().all(|span| span.style == DIM));
     assert!(
         rows.iter()
             .any(|row| row.background == Some(DIFF_ADDED_SURFACE))
@@ -82,12 +82,27 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
         80,
         &Presentation::default(),
     );
-    assert!(plain(&initial).contains("● Update(src/auth.rs)\n  ⎿ +2 −1 lines"));
+    // The fact joins the title; the diff starts at column 2, not hung.
+    assert!(plain(&initial).starts_with(" UPDATE  src/auth.rs  +2 −1 lines\n    1   fn login"));
     assert!(
         initial
             .iter()
             .any(|row| row.background == Some(DIFF_ADDED_SURFACE))
     );
+    // Too narrow to join, the fact hangs on its result row above the diff.
+    let narrow = plain(&draw(
+        "edit",
+        &arguments,
+        Some(&ok()),
+        Some(&change),
+        28,
+        &Presentation::default(),
+    ));
+    assert!(
+        narrow.starts_with(" UPDATE  src/auth.rs\n  └ +2 −1 lines\n    1"),
+        "{narrow}"
+    );
+    assert!(!narrow.contains('⎿'));
     let collapsed = draw(
         "edit",
         &arguments,
@@ -113,7 +128,7 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
         &Presentation::default(),
     );
     assert!(!plain(&rows).contains("new();") && !plain(&rows).contains("+2"));
-    assert!(plain(&rows).contains("⎿ File is read-only"));
+    assert!(plain(&rows).contains("src/auth.rs  File is read-only"));
 }
 
 #[test]

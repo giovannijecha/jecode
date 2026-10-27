@@ -66,7 +66,8 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
             | Event::RequestDiscarded
             | Event::Accepted { .. }
             | Event::InputHeld
-            | Event::Context(_) => return Ok(()),
+            | Event::Context(_)
+            | Event::Generated { .. } => return Ok(()),
         };
         writeln!(self.status, "{text}")
             .and_then(|_| self.status.flush())

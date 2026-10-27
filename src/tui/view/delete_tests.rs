@@ -36,7 +36,7 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("Resume · current folder"));
+    assert!(rendered.contains("─ Resume · current folder"));
     // The marked row keeps its place and names the pending deletion.
     let marked = full
         .live
@@ -45,18 +45,35 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
         .unwrap();
     let name = marked.spans.iter().find(|span| span.text.contains("Saved"));
     assert_eq!(name.unwrap().style, BAD);
-    assert!(
-        rendered.contains("owned outputs and temporary files"),
-        "{rendered}"
-    );
-    assert!(rendered.contains("unsent input is kept"));
-    assert!(rendered.contains("Delete this conversation?"));
-    assert!(rendered.contains(" Enter  delete"));
-    assert!(
-        full.live
+    // The question in BAD replaces the keys, with its own keycaps.
+    let confirmation = |frame: &Frame| {
+        frame
+            .live
             .iter()
-            .any(|line| focused(line) && line.spans.iter().any(|span| span.style == BAD))
+            .find(|line| line.plain().trim_start().starts_with("Del"))
+            .cloned()
+    };
+    let question = confirmation(&full).unwrap();
+    assert_eq!(
+        question.plain().trim_end(),
+        "  Delete this conversation and its files?    Enter  delete    Esc  cancel"
     );
+    assert_eq!(
+        question
+            .spans
+            .iter()
+            .find(|span| !span.text.trim().is_empty())
+            .unwrap()
+            .style,
+        BAD
+    );
+    assert!(!rendered.contains("↑↓  move"));
+    let marked = |line: &Line| {
+        line.plain().starts_with("› ")
+            && focused(line)
+            && line.spans.iter().any(|span| span.style == BAD)
+    };
+    assert!(full.live.iter().any(marked));
     for width in [8, 18, 40, 80] {
         for height in [1, 2, 4, 6, 10, 20] {
             state.width = width;
@@ -69,17 +86,20 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
                     .iter()
                     .all(|line| text::cells(&line.plain()) <= width)
             );
-            // The search field and the confirmation come first, then the row.
-            if height >= 4 {
-                assert!(fitted.live.iter().any(focused), "{width}x{height}");
+            // The search field and the confirmation come first, then the
+            // title and the marked row; below eighty columns the confirmation
+            // wraps its keys onto a second row.
+            let rows: Vec<_> = fitted.live.iter().map(Line::plain).collect();
+            assert!(fitted.cursor.is_some(), "{width}x{height} {rows:?}");
+            if height >= 2 {
+                assert!(confirmation(&fitted).is_some(), "{width}x{height} {rows:?}");
             }
-            if width >= 18 && height >= 2 {
-                assert!(
-                    fitted
-                        .live
-                        .iter()
-                        .any(|line| line.plain().contains("Delete"))
-                );
+            if width >= 18 && height >= 4 + usize::from(width < 80) {
+                assert!(fitted.live.iter().any(marked), "{width}x{height} {rows:?}");
+            } else if height >= 5 {
+                // The focused option row, beside the scrollbar.
+                let option = |line: &Line| focused(line) && line.plain().ends_with(['┃', '│']);
+                assert!(fitted.live.iter().any(option), "{width}x{height} {rows:?}");
             }
             assert_eq!(state.editor.text, "kept draft");
         }

@@ -26,6 +26,8 @@ pub(super) fn console(bash: &Path) {
     let started = activity.started;
     let mut state = State {
         activity: Some(activity),
+        width,
+        height,
         ..State::default()
     };
     let mut rows = Vec::new();
@@ -50,8 +52,10 @@ pub(super) fn console(bash: &Path) {
         state.event(event);
         let activity = state.activity.as_ref().unwrap();
         assert_eq!(activity.started, started);
-        let row = activity.line(true);
-        assert!(row.plain().ends_with(" 1h 10m"));
+        let row = crate::tui::view::composer_frame(&state, "fixture/model", "project")
+            .live
+            .remove(0);
+        assert!(row.plain().contains("1h 10m"), "{}", row.plain());
         rows.push(row);
     }
     paint_rows(rows, width, height);

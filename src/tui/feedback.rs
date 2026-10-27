@@ -7,15 +7,24 @@ const BRIEF: Duration = Duration::from_secs(5);
 enum Lifetime {
     /// Results fade.
     Brief(Instant),
-    /// Warnings and errors stay until the next key.
+    /// Warnings stay until the next key.
     Action,
-    /// Progress runs beside the scanner until its operation ends.
-    Progress(Instant),
+    /// Errors and turn endings stay until the next send.
+    Send,
+    /// Progress runs beside the caret until its operation ends.
+    Progress,
 }
 
-/// One notice. Results and progress share it; where it appears follows its
-/// lifetime: progress rides the composer rule, results a quiet line, and
-/// warnings and errors a banner.
+/// How a turn ended, as the status row keeps it until the next send.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Ending {
+    Done,
+    Stopped,
+    Failed,
+}
+
+/// One notice in the status row: `Subject · fact · fact`, its lifetime and
+/// an optional keycap naming the next step.
 pub(super) struct Feedback {
     pub kind: Kind,
     pub text: String,
@@ -25,6 +34,8 @@ pub(super) struct Feedback {
     pub action: Option<(&'static str, &'static str)>,
     /// When paused progress resumes, counted down after the text.
     pub until: Option<Instant>,
+    /// The turn ending this notice reports, if any.
+    pub ending: Option<Ending>,
     lifetime: Lifetime,
 }
 
@@ -40,17 +51,38 @@ impl Feedback {
             change: false,
             action: None,
             until: None,
-            lifetime: if matches!(kind, Kind::Warning | Kind::Error) {
-                Lifetime::Action
-            } else {
-                Lifetime::Brief(now + BRIEF)
+            ending: None,
+            lifetime: match kind {
+                Kind::Error => Lifetime::Send,
+                Kind::Warning => Lifetime::Action,
+                _ => Lifetime::Brief(now + BRIEF),
             },
+        }
+    }
+
+    /// `Done`, `Stopped` or `Failed` with its facts, kept until the next send.
+    pub fn ending(ending: Ending, facts: impl Into<String>) -> Self {
+        let (kind, subject) = match ending {
+            Ending::Done => (Kind::Notice, "Done"),
+            Ending::Stopped => (Kind::Warning, "Stopped"),
+            Ending::Failed => (Kind::Error, "Failed"),
+        };
+        let facts = facts.into();
+        let text = if facts.is_empty() {
+            subject.into()
+        } else {
+            format!("{subject} · {facts}")
+        };
+        Self {
+            ending: Some(ending),
+            lifetime: Lifetime::Send,
+            ..Self::at(kind, text, Instant::now())
         }
     }
 
     pub fn progress(kind: Kind, text: impl Into<String>) -> Self {
         Self {
-            lifetime: Lifetime::Progress(Instant::now()),
+            lifetime: Lifetime::Progress,
             ..Self::at(kind, text, Instant::now())
         }
     }
@@ -71,15 +103,7 @@ impl Feedback {
     }
 
     pub fn in_progress(&self) -> bool {
-        matches!(self.lifetime, Lifetime::Progress(_))
-    }
-
-    /// When progress started, for its scanner frame.
-    pub fn started(&self) -> Option<Instant> {
-        match self.lifetime {
-            Lifetime::Progress(started) => Some(started),
-            _ => None,
-        }
+        matches!(self.lifetime, Lifetime::Progress)
     }
 
     fn rank(&self) -> u8 {
@@ -92,12 +116,25 @@ impl Feedback {
 }
 
 impl State {
-    /// Progress takes its own slot, so it never hides a result or a banner.
+    /// Progress and turn endings take their own slots, so neither hides a
+    /// result, warning or error.
     pub fn notify(&mut self, notice: Feedback) {
         if notice.in_progress() {
             self.progress = Some(notice);
+        } else if notice.ending.is_some() {
+            self.ending = Some(notice);
         } else {
             replace(&mut self.notice, notice);
+        }
+    }
+
+    /// A send clears what waited for it: errors and the last turn's ending.
+    pub fn sent(&mut self) {
+        self.ending = None;
+        for slot in [&mut self.notice, &mut self.copy_notice] {
+            if slot.as_ref().is_some_and(|notice| !notice.in_progress()) {
+                *slot = None;
+            }
         }
     }
 
@@ -131,7 +168,7 @@ impl State {
             if slot.as_ref().is_some_and(|notice| match notice.lifetime {
                 Lifetime::Brief(_) => editing,
                 Lifetime::Action => true,
-                Lifetime::Progress(_) => false,
+                Lifetime::Send | Lifetime::Progress => false,
             }) {
                 *slot = None;
             }

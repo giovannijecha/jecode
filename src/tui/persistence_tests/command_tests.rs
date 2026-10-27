@@ -110,7 +110,7 @@ fn loaded_skill_card_replays_from_tool_history_after_resume() {
         .map(|line| line.plain())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("Skill(review)"), "{rendered}");
+    assert!(rendered.contains(" SKILL  review"), "{rendered}");
     assert!(rendered.contains("Loaded skill"), "{rendered}");
     let id = first.persistence.as_ref().unwrap().id();
     drop(first);
@@ -124,10 +124,16 @@ fn loaded_skill_card_replays_from_tool_history_after_resume() {
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    assert!(rows.iter().any(|row| row.plain().contains("Skill(review)")));
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().contains(" SKILL  review"))
+    );
     assert!(rows.iter().any(|row| row.plain().contains("Loaded skill")));
+    // A replayed successful skill keeps the read-family success badge.
     assert!(rows.iter().any(|row| {
-        row.plain().contains("Skill(review)") && row.spans[0].style == crate::tui::theme::GOOD
+        row.plain().starts_with(" SKILL  review")
+            && row.spans[0].style == crate::tui::theme::BADGE_TEXT.bold()
+            && row.spans[0].background == Some(crate::tui::theme::BADGE_READ)
     }));
 }
 

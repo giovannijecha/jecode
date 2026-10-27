@@ -43,13 +43,13 @@ fn earlier_chapter_and_latest_singleton_keep_compact_previews_and_original_resul
     state.begin_tool_turn();
     start(&mut state, "future");
     let running = visible(&state);
-    assert!(running.contains("● Activity  2 calls"));
-    assert!(running.contains("● Bash(fixture-command)"));
-    assert!(running.contains("⎿ ") && running.contains('●'));
+    assert!(running.contains(" WORK  Activity  2 calls"));
+    assert!(running.contains(" BASH  fixture-command"));
+    assert!(running.contains("  │ ") && running.contains("  └ "));
     assert!(!running.contains(['▰', '▱']));
     finish(&mut state, "future", "one\ntwo\nthree\nfour\nfuture detail");
     let text = visible(&state);
-    assert!(text.contains("2 commands") && text.contains("● Bash(fixture-command)"));
+    assert!(text.contains("2 commands") && text.contains(" BASH  fixture-command"));
     assert!(!text.contains("omitted"));
     assert!(!text.contains("retained detail"));
     assert!(text.contains("future detail")); // The singleton keeps its normal result preview.
@@ -70,7 +70,7 @@ fn earlier_chapter_and_latest_singleton_keep_compact_previews_and_original_resul
     assert!(
         visible(&state)
             .lines()
-            .any(|row| row == "    future detail")
+            .any(|row| row == "  │ future detail")
     );
 }
 
@@ -107,7 +107,7 @@ fn messages_are_distinguished_by_presentation_and_keep_their_original_content() 
     assert!(
         rows[0]
             .iter()
-            .any(|row| row.plain().trim() == "my request" && row.background.is_some())
+            .any(|row| row.plain() == "› my request" && row.background.is_some())
     );
     assert!(
         rows[1]
@@ -115,6 +115,62 @@ fn messages_are_distinguished_by_presentation_and_keep_their_original_content() 
             .any(|row| row.plain() == "● response" && row.background.is_none())
     );
     assert!(matches!(&state.items[1], Item::Text { text, .. } if text == "**response**"));
+}
+
+#[test]
+fn requests_open_with_an_accent_marker_and_draw_attachment_labels_as_chips() {
+    use crate::tui::theme::{ACCENT, BADGE_IDLE, LIT, USER_SURFACE};
+    let mut state = State {
+        width: 24,
+        ..State::default()
+    };
+    state.message(
+        Kind::User,
+        "see [1# Image] and [2# File: wake.log] near [docs] [3# ]",
+    );
+    let rows = state.rows().remove(0);
+    let plain: Vec<_> = rows
+        .iter()
+        .map(|row| row.plain().replace('\u{a0}', " "))
+        .collect();
+    assert_eq!(
+        plain,
+        [
+            "",
+            "› see  1 Image  and",
+            "   2 wake.log  near",
+            "  [docs] [3# ]",
+            ""
+        ]
+    );
+    assert!(rows.iter().all(|row| row.background == Some(USER_SURFACE)));
+    assert_eq!(rows[1].spans[0].text, "› ");
+    assert_eq!(rows[1].spans[0].style, ACCENT.bold());
+    let chips: Vec<_> = rows
+        .iter()
+        .flat_map(|row| &row.spans)
+        .filter(|span| span.background == Some(BADGE_IDLE))
+        .map(|span| (span.text.replace('\u{a0}', " "), span.style))
+        .collect();
+    assert_eq!(
+        chips,
+        [(" 1 Image ".into(), LIT), (" 2 wake.log ".into(), LIT)]
+    );
+}
+
+#[test]
+fn a_diagnostic_hangs_its_text_after_a_bad_cross() {
+    use crate::tui::theme::{BAD, BODY};
+    let mut state = State {
+        width: 24,
+        ..State::default()
+    };
+    state.diagnostic("OpenRouter HTTP 401: the key was rejected");
+    let rows = state.rows().remove(0);
+    let plain: Vec<_> = rows.iter().map(Line::plain).collect();
+    assert_eq!(plain, ["✕ OpenRouter HTTP 401:", "  the key was rejected"]);
+    assert_eq!(rows[0].spans[0].style, BAD.bold());
+    assert_eq!(rows[0].spans[1].style, BODY);
 }
 
 #[test]
@@ -175,14 +231,18 @@ fn consecutive_calls_share_a_chapter_across_model_requests_and_keep_targets() {
     state.message(Kind::Assistant, "Finished.");
     let current = state.rows();
     assert_ne!(current[0], first);
-    assert!(current[0][0].plain().starts_with("● Activity  3 calls"));
+    assert!(
+        current[0][0]
+            .plain()
+            .starts_with(" WORK  Activity  3 calls")
+    );
     assert!(
         current[0]
             .iter()
             .any(|row| row.plain().contains("3 commands"))
     );
-    assert!(current[1][0].plain().contains("Bash  fixture-command"));
-    assert!(current[2][0].plain().contains("Bash  fixture-command"));
+    assert!(current[1][0].plain().contains("BASH fixture-command"));
+    assert!(current[2][0].plain().contains("BASH fixture-command"));
     assert!(
         !current[1..3]
             .iter()
@@ -230,8 +290,10 @@ fn captured_file_diff_stays_visible_when_the_next_tool_starts() {
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("● Update(fixture.rs)"));
-    assert!(text.contains("⎿ +1 −1 lines"));
+    assert!(
+        text.starts_with(" UPDATE  fixture.rs  +1 −1 lines\n"),
+        "{text}"
+    );
     assert!(text.contains("old();") && text.contains("new();"));
     start(&mut state, "next");
     assert_eq!(state.rows()[0], original);
@@ -240,12 +302,12 @@ fn captured_file_diff_stays_visible_when_the_next_tool_starts() {
     assert!(
         state.rows()[1][1]
             .plain()
-            .starts_with("● Bash(fixture-command)")
+            .starts_with(" BASH  fixture-command")
     );
     assert!(
         state.rows()[1]
             .iter()
-            .any(|row| row.plain().contains("Bash(fixture-command)"))
+            .any(|row| row.plain().contains(" BASH  fixture-command"))
     );
 }
 

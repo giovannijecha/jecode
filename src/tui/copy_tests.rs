@@ -312,8 +312,34 @@ fn clipboard_failure_is_visible_masked_and_keeps_the_session_warning() {
     assert!(!notice.text.contains("fixture-key"));
     assert_eq!(app.state.notice.as_ref().unwrap().text, warning);
     assert!(!app.state.expire_feedback(Instant::now()));
+    // The warning yields to the next key; the error waits for the next send.
     app.state.feedback_input(false);
-    assert!(app.state.copy_notice.is_none());
+    assert!(app.state.copy_notice.is_some());
     assert!(app.state.notice.is_none());
+    app.state.sent();
+    assert!(app.state.copy_notice.is_none());
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn copied_code_blocks_keep_their_source_when_the_card_wraps_at_tokens() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let code = "    const targets = document.querySelectorAll('.intro > p, .stats > div, footer');";
+    let text = format!("Intro\n```js\n{code}\n```\n");
+    source(&mut app, &text);
+    // The card hangs continuation rows under the indentation.
+    let rows = crate::tui::markdown::render(&text, 30);
+    assert!(rows.len() > 6);
+    assert!(rows[4].plain().starts_with("       "));
+    app.dispatch("/copy".into()).unwrap();
+    key(&mut app, 40, 0);
+    key(&mut app, 13, 0);
+    app.poll().unwrap();
+    assert_eq!(
+        app.copied_text.as_deref(),
+        Some(format!("{code}\n").as_str())
+    );
     assert!(fixture.finish().is_empty());
 }

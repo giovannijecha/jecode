@@ -1,9 +1,10 @@
 # Scrolling and resize
 
-The interactive TUI uses the terminal's alternate screen. The conversation
-scrolls above a composer anchored at the bottom. `--plain`, single prompts,
-and piped input keep line-oriented output. Use a VT-capable terminal; if
-Jecode cannot initialize one, its error points to `jecode --plain`.
+The interactive TUI uses the terminal's alternate screen and keeps the
+terminal's own background outside its surfaces. The conversation, opened by
+the header, scrolls above a dock anchored at the bottom. `--plain`, single
+prompts and piped input keep line-oriented output. Use a VT-capable terminal;
+if Jecode cannot initialize one, its error points to `jecode --plain`.
 
 ## Reading and following
 
@@ -14,14 +15,18 @@ output. `Esc` returns to the bottom while reading, after any open panel,
 draft edit, history, or tool inspection has been closed.
 
 Scrolling up pauses following. New response text and tool results can arrive
-without moving the page you are reading. A Back to bottom badge appears while
-the viewport is away from the tail. Scroll down to the end, press `Alt+End`,
-or use `Esc` in the ordinary reading view to resume following.
+without moving the page you are reading. While the view is away from the
+tail, the row above the dock reads `↓ N rows below`, adding `· new output`
+once output arrived after you scrolled away; a resize reflow alone does not
+count. Its keycap names the way back: `Esc back to bottom`, or `Alt+End` while
+a panel or a draft edit holds Esc. The keycap drops first when narrow. Scroll
+down to the end, press `Alt+End`, use `Esc` in the ordinary reading view, or
+send a new prompt to resume following.
 
 `Up`/`Down` edit the draft instead of scrolling the conversation. An open
 selector, information panel, or process view receives its own navigation and
-wheel input first. Mouse clicks and selection are not supported by Jecode;
-use [`/copy`](../usage/COPY.md) to copy completed original text.
+wheel input first. Mouse clicks are not supported and Jecode draws no
+selection; use [`/copy`](../usage/COPY.md) to copy completed original text.
 
 ## Resize lifecycle
 
@@ -29,7 +34,8 @@ When the terminal changes size, the composer and open panel adapt to the
 latest dimensions while the conversation reflows after a short pause in
 resize events. Typing and generation continue during this work. Width changes
 rebuild wrapped text and tables from the original response; height changes
-adjust how many rows are visible. A temporary reflow hint may appear.
+adjust how many rows are visible. The row above the dock may read
+`Reflowing conversation…` meanwhile.
 
 If you are reading older content, Jecode anchors the page to the source text
 near its top rather than jumping to the latest output. Repeated width changes
@@ -50,11 +56,21 @@ conversations remain available through `/resume`; see
 ## Entering and leaving
 
 Entering the TUI leaves the caller's main screen and scrollback in place.
-`Ctrl+Q` cancels active work, saves the draft, and exits. On normal exit,
-Jecode restores the caller's screen, cursor, and terminal modes before
-printing a short prompt/tool count. If the conversation was saved, it also
-prints a `jecode resume ID` command. An empty unsaved conversation has no
-resume command; a save failure is reported instead.
+`Ctrl+Q` saves the draft and exits; while a turn or background process runs,
+it first asks to stop that work (see
+[Composer and controls](COMPOSER.md#reading-quitting-and-feedback)). On normal
+exit, Jecode resets attributes, restores the caller's screen, cursor, and
+terminal modes, then prints a summary in the terminal's own colours:
+
+```text
+>_ jecode closed · 3 prompts · 12 tools · 4m 12s
+   jecode resume 7f3a9c2e
+```
+
+`>_` is ANSI magenta, `jecode` bold and the facts dim; the resume command uses
+the default foreground and appears only after a successful save of a
+conversation with at least one prompt. When saving failed, `· autosave failed`
+joins the facts and no resume command is printed.
 
 Conversation messages and tool results remain in the saved session and
 [export](../usage/EXPORT.md); the fullscreen display is not dumped into the

@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::theme::{BODY, CODE_TEXT};
+use crate::tui::theme::{BAD, BODY, CODE_TEXT};
 use std::time::Duration;
 
 fn object<const N: usize>(fields: [(&str, &str); N]) -> Value {
@@ -48,23 +48,23 @@ fn expanded_streams_keep_blank_lines_styles_complete_command_and_closing_facts()
         let rows = card(tool("bash", &args, &result, &shown), columns, false).rows;
         let text = plain(&rows);
         assert!(text.iter().any(|row| row.contains("complete_command_tail")));
-        let body = text.iter().position(|row| row == "    stdout").unwrap();
+        let body = text.iter().position(|row| row == "  │ stdout").unwrap();
         assert_eq!(
             text[body..],
             [
-                "    stdout",
-                "    ",
-                "    first",
-                "    ",
-                "    last",
-                "    stderr",
-                "    note",
-                "    exit 0 · 7.9s"
+                "  │ stdout",
+                "  │ ",
+                "  │ first",
+                "  │ ",
+                "  │ last",
+                "  │ stderr",
+                "  │ note",
+                "  └ exit 0 · 7.9s"
             ]
         );
         for (label, style) in [
-            ("stdout", TOOL_DIM),
-            ("stderr", TOOL_DIM),
+            ("stdout", DIM),
+            ("stderr", DIM),
             ("first", CODE_TEXT),
             ("last", CODE_TEXT),
             ("note", MUTED),
@@ -84,7 +84,7 @@ fn expanded_streams_keep_blank_lines_styles_complete_command_and_closing_facts()
     ]);
     assert!(
         plain(&card(tool("process", &args, &process, &shown), 40, false).rows)
-            .ends_with(&["    exit 42 · 7.9s".into()])
+            .ends_with(&["  └ exit 42 · 7.9s".into()])
     );
     let browser = card(
         tool(
@@ -96,7 +96,7 @@ fn expanded_streams_keep_blank_lines_styles_complete_command_and_closing_facts()
         40,
         false,
     );
-    assert_eq!(browser.rows.last().unwrap().plain(), "    7.9s");
+    assert_eq!(browser.rows.last().unwrap().plain(), "  └ 7.9s");
     let with_notice = Value::object([
         ("exit_code", Value::number(0)),
         (
@@ -110,7 +110,7 @@ fn expanded_streams_keep_blank_lines_styles_complete_command_and_closing_facts()
             .iter()
             .any(|row| row.contains("Checkpoint partial"))
     );
-    assert_eq!(rows.last().unwrap().plain(), "    exit 0 · 7.9s");
+    assert_eq!(rows.last().unwrap().plain(), "  └ exit 0 · 7.9s");
 }
 
 #[test]
@@ -131,7 +131,10 @@ fn new_file_preview_uses_retained_source_not_mutated_arguments_and_expands_all_l
             call.change = Some(&change);
             let rendered = card(call, columns, false);
             let rows = plain(&rendered.rows);
-            assert_eq!(rows[1], "  ⎿ New file · 16 lines");
+            // The fact joins the one-row title; the preview hangs below.
+            assert_eq!(rows[0], " WRITE  src/new.rs  New file · 16 lines");
+            assert!(rows[1].starts_with("  │ "), "{rows:#?}");
+            assert!(rows[1].ends_with("1   let captured_1 = 1;"), "{rows:#?}");
             assert!(rows.iter().any(|row| row.contains("captured_6")));
             assert_eq!(rows.iter().any(|row| row.contains("captured_16")), expanded);
             assert!(
@@ -142,7 +145,7 @@ fn new_file_preview_uses_retained_source_not_mutated_arguments_and_expands_all_l
             assert!(rendered.rows.iter().all(|row| row.background.is_none()));
             assert_eq!(rendered.hidden, !expanded);
             if !expanded {
-                assert_eq!(rows.last().unwrap(), "    +10 lines");
+                assert_eq!(rows.last().unwrap(), "  └ +10 lines");
             }
         }
     }
@@ -160,12 +163,13 @@ fn file_paths_use_body_and_read_facts_do_not_repeat_the_verb() {
     ]);
     let shown = Presentation::default();
     let rows = card(tool("read", &args, &result, &shown), 80, false).rows;
-    assert_eq!(rows[1].plain(), "  ⎿ 9 lines · from line 33");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].plain(), " READ  src/a.rs  9 lines · from line 33");
     assert!(
         rows[0]
             .spans
             .iter()
-            .any(|span| span.text == "src/a.rs" && span.style == BODY)
+            .any(|span| span.text.trim() == "src/a.rs" && span.style == BODY)
     );
     let skill = card(
         tool(
@@ -178,8 +182,8 @@ fn file_paths_use_body_and_read_facts_do_not_repeat_the_verb() {
         false,
     );
     assert_eq!(
-        skill.rows[1].plain(),
-        "  ⎿ Loaded skill · 9 lines · from line 33"
+        skill.rows[0].plain(),
+        " SKILL  rust  Loaded skill · 9 lines · from line 33"
     );
 }
 
@@ -195,10 +199,21 @@ fn expanded_command_errors_keep_the_complete_error_without_a_stdout_payload() {
         ..Presentation::default()
     };
     let rows = card(tool("bash", &args, &result, &shown), 40, false).rows;
-    let message = rows
+    let error: Vec<_> = rows
         .iter()
         .filter(|row| row.origin.is_some_and(|origin| origin.line == 3))
-        .map(|row| row.plain().trim().to_owned())
+        .map(Line::plain)
+        .collect();
+    // The wrapped error hangs on the tree and closes the card.
+    assert!(
+        error[..error.len() - 1]
+            .iter()
+            .all(|row| row.starts_with("  │ "))
+    );
+    assert!(error.last().unwrap().starts_with("  └ "));
+    let message = error
+        .iter()
+        .map(|row| row.chars().skip(4).collect::<String>().trim().to_owned())
         .collect::<Vec<_>>()
         .join(" ");
     assert_eq!(message, "Could not launch the command: executable missing");
@@ -207,4 +222,29 @@ fn expanded_command_errors_keep_the_complete_error_without_a_stdout_payload() {
             .flat_map(|row| &row.spans)
             .any(|span| span.style == BAD && span.text.contains("Could not launch"))
     );
+}
+
+#[test]
+fn new_file_lines_keep_two_rows_until_expanded() {
+    let long = "    const targets = document.querySelectorAll('.intro > p, .stats > div, .services > h2, .card-grid > a, footer');";
+    let captured = format!("{long}\nlet done = true;\n");
+    let change = Change::between(None, &captured).unwrap();
+    let args = object([("path", "site/script.js"), ("content", &captured)]);
+    let result = object([]);
+    for (expanded, code) in [(false, 2), (true, 3)] {
+        let shown = Presentation {
+            expanded,
+            ..Presentation::default()
+        };
+        let mut call = tool("write", &args, &result, &shown);
+        call.change = Some(&change);
+        let rows = plain(&card(call, 60, false).rows);
+        let first: Vec<_> = rows[1..rows.len() - 1].to_vec();
+        assert_eq!(first.len(), code, "{rows:#?}");
+        assert!(rows.iter().all(|row| text::cells(row) <= 60));
+        // Continuations hang under the code's indentation, past the number gutter.
+        assert!(first[1].starts_with("  │        "), "{rows:#?}");
+        assert_eq!(first[1].ends_with('…'), !expanded, "{rows:#?}");
+        assert!(rows.last().unwrap().ends_with("2   let done = true;"));
+    }
 }

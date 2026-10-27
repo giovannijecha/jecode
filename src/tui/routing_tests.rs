@@ -155,21 +155,29 @@ fn routing_focuses_the_current_choice_and_applies_from_the_next_request() {
     assert_eq!(menu.options[2].badge, Some(selector::Badge::Current));
     assert!(menu.options[3].fact.starts_with("no tools"));
     let displayed = shown(&app);
-    for expected in [
-        "Pinned to two/fp8 without fallbacks",
-        "$/M after discounts",
-        "$0.3/$1.2",
-    ] {
+    for expected in ["$/M after discounts", "$0.3/$1.2"] {
         assert!(
             displayed.contains(expected),
             "missing {expected}:\n{displayed}"
         );
     }
-    assert!(!displayed.contains("kept draft"));
+    // The composer above the panel keeps showing the draft.
+    assert!(displayed.contains("› kept draft"), "{displayed}");
+    let row = |displayed: &str, name: &str| {
+        displayed
+            .lines()
+            .find(|line| line.chars().skip(2).collect::<String>().starts_with(name))
+            .map(str::to_owned)
+            .unwrap_or_default()
+    };
+    let current = row(&displayed, "two/fp8");
+    assert!(current.starts_with("› ") && current.ends_with(" current   "));
     // Moving focus keeps the current marker on the choice in effect.
     app.state.selector.as_mut().unwrap().selected = 0;
     let displayed = shown(&app);
-    assert!(displayed.contains("Native routing with fallbacks · too little fresh performance"));
+    assert!(row(&displayed, "Auto — Best balance").starts_with("› "));
+    let current = row(&displayed, "two/fp8");
+    assert!(current.starts_with("  ") && current.ends_with(" current   "));
     assert_eq!(
         app.state.selector.as_ref().unwrap().options[2].badge,
         Some(selector::Badge::Current)
@@ -221,13 +229,7 @@ fn without_a_listing_auto_and_the_current_pin_remain_and_blocked_endpoints_keep_
         .iter()
         .map(|option| (option.name.as_str(), option.fact.as_str()))
         .collect();
-    assert_eq!(
-        rows,
-        [
-            ("Auto — Best balance", ""),
-            ("two/fp8", "listing unavailable"),
-        ]
-    );
+    assert_eq!(rows, [("Auto — Best balance", ""), ("two/fp8", ""),]);
     assert!(shown(&app).contains("Endpoint listing unavailable · "));
     assert!(shown(&app).contains("HTTP 500"));
     app.close_selector();
@@ -393,19 +395,27 @@ fn routing_menus_fit_narrow_and_short_terminals_and_keep_the_draft() {
             assert_eq!(app.state.editor, draft);
         }
     }
-    // Short windows drop the detail strip, then spacing, then the column
-    // header, then options far from the focus.
+    // Short windows drop spacing, then the draft row, then the column
+    // header, then options far from the focus; the title, the focused
+    // option and the keys stay.
     app.state.width = 80;
     for height in [3, 4, 6, 8, 12, 24] {
         app.state.height = height;
         let displayed = shown(&app);
-        assert!(displayed.contains("› two/fp8"), "{displayed}");
+        for expected in ["› two/fp8", "─ Routing · fixture/model", "Esc  close"] {
+            assert!(displayed.contains(expected), "{height}: {displayed}");
+        }
     }
-    app.state.height = 4;
-    assert!(!shown(&app).contains("Pinned to two/fp8"));
+    app.state.height = 6;
+    let displayed = shown(&app);
+    assert!(!displayed.contains("kept 🙂 draft") && !displayed.contains("Endpoint"));
+    app.state.height = 8;
+    let displayed = shown(&app);
+    assert!(!displayed.contains("kept 🙂 draft"), "{displayed}");
+    assert!(displayed.contains("Endpoint"), "{displayed}");
     app.state.height = 24;
     let displayed = shown(&app);
-    assert!(displayed.contains("Pinned to two/fp8"), "{displayed}");
+    assert!(displayed.contains("› kept 🙂 draft"), "{displayed}");
     assert!(displayed.contains("Endpoint"), "{displayed}");
     fixture.finish();
 }

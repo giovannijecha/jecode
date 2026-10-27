@@ -13,6 +13,9 @@ use crate::{
 #[path = "activity_tests.rs"]
 mod activity_tests;
 
+#[path = "card_tests.rs"]
+mod card_tests;
+
 #[path = "native_direct_input.rs"]
 mod native_direct_input;
 
@@ -27,7 +30,7 @@ fn native_pty_source() -> String {
         )
         .replace(
             "JECODE_WARNING_SURFACE",
-            &format!("\\x1b[{}m", crate::tui::theme::USER_SURFACE),
+            &format!("\\x1b[{}m", crate::tui::theme::PILL_SURFACE),
         )
 }
 
@@ -143,7 +146,7 @@ fn native_windows_input_to_vt_latency() {
 
 fn probe() -> String {
     let script = format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeConsoleProbe]::Snapshot()",
+        "Add-Type -TypeDefinition @'\n{}\n'@\n$bytes = [Text.Encoding]::UTF8.GetBytes([JecodeConsoleProbe]::Snapshot()); [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)",
         include_str!("native_probe.cs")
     );
     let result = Command::new("powershell.exe")
@@ -161,6 +164,7 @@ fn probe() -> String {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    // Write UTF-8 to the pipe without changing the console's output code page.
     String::from_utf8(result.stdout).unwrap()
 }
 
@@ -207,154 +211,6 @@ fn full_width_console(bash: &std::path::Path) {
     io::stdout().flush().unwrap();
     let snapshot = probe();
     assert_eq!(snapshot.lines().nth(1).unwrap(), rows.concat());
-    drop(terminal);
-}
-
-fn tool_cards_console(bash: &std::path::Path) {
-    use crate::{events::Event, json::Value, tui::state::State};
-    let terminal = Terminal::open(bash).unwrap();
-    let (width, height) = terminal.size;
-    let mut state = State {
-        width,
-        height,
-        ..State::default()
-    };
-    state.begin_tool_turn();
-    state.event(Event::ToolStarted {
-        id: "update".into(),
-        name: "edit".into(),
-        arguments: Value::object([("path", Value::string("src/limit.rs"))]),
-    });
-    state.event(Event::ToolChanged {
-        id: "update".into(),
-        change: crate::file_change::Change::between(
-            Some("let limit = 10;\n"),
-            "let limit = LOGIN_LIMIT;\n",
-        )
-        .unwrap(),
-    });
-    state.event(Event::ToolFinished {
-        id: "update".into(),
-        name: "edit".into(),
-        summary: "wrote file".into(),
-        result: Value::object([("bytes_written", Value::number(25))]),
-    });
-    state.event(Event::ToolStarted {
-        id: "verify".into(),
-        name: "bash".into(),
-        arguments: Value::object([("command", Value::string("cargo test --locked --offline"))]),
-    });
-    let result = Value::object([
-        ("exit_code", Value::number(0)),
-        (
-            "checkpoint",
-            Value::object([("status", Value::string("partial"))]),
-        ),
-    ]);
-    state.event(Event::ToolFinished {
-        id: "verify".into(),
-        name: "bash".into(),
-        summary: crate::events::tool_summary("bash", &result),
-        result,
-    });
-    for (id, name, arguments, result) in [
-        (
-            "fetch",
-            "web",
-            Value::object([
-                ("action", Value::string("fetch")),
-                ("url", Value::string("https://example.org/")),
-            ]),
-            Value::object([
-                ("status", Value::number(200)),
-                ("bytes", Value::number(12)),
-                ("path", Value::string("tmp:web/fetches/page.body")),
-            ]),
-        ),
-        (
-            "capture",
-            "browser",
-            Value::object([
-                ("action", Value::string("screenshot")),
-                ("tab_id", Value::string("tab-1")),
-            ]),
-            Value::object([
-                ("tab_id", Value::string("tab-1")),
-                (
-                    "screenshot_path",
-                    Value::string("tmp:browser/screenshot.png"),
-                ),
-            ]),
-        ),
-    ] {
-        state.event(Event::ToolStarted {
-            id: id.into(),
-            name: name.into(),
-            arguments,
-        });
-        state.event(Event::ToolFinished {
-            id: id.into(),
-            name: name.into(),
-            summary: crate::events::tool_summary(name, &result),
-            result,
-        });
-    }
-    let rows: Vec<_> = state.rows().into_iter().flatten().collect();
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("1 −  let limit = 10;"))
-    );
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("1 +  let limit = LOGIN_LIMIT;"))
-    );
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("Activity  3 calls"))
-    );
-    assert!(rows.iter().any(|row| row.plain().contains("1 screenshot")));
-    state.finish_tool_turn();
-    assert_eq!(state.toggle_tools(), Some((true, 4)));
-    let rows: Vec<_> = state.rows().into_iter().flatten().collect();
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("Checkpoint partial")),
-        "expanded Bash details lost the partial checkpoint status"
-    );
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("Web(fetch https://example.org/)"))
-    );
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("Browser(screenshot)"))
-    );
-    assert!(rows.iter().any(|row| row.plain().contains("⎿ tab-1")));
-    assert!(rows.iter().any(|row| {
-        row.plain()
-            .contains("\"screenshot_path\": \"tmp:browser/screenshot.png\"")
-    }));
-    let expected: String = (0..height)
-        .map(|index| {
-            let text = rows.get(index).map_or_else(String::new, |row| row.plain());
-            format!(
-                "{text}{}",
-                " ".repeat(width.saturating_sub(crate::tui::text::cells(&text)))
-            )
-        })
-        .collect();
-    let frame = crate::tui::view::Frame {
-        header: vec![],
-        history: vec![],
-        live: rows,
-        cursor: None,
-        composer: height - 1,
-    };
-    let output = crate::tui::render::Renderer::new().paint(&frame, width, height);
-    write!(io::stdout(), "{output}").unwrap();
-    io::stdout().flush().unwrap();
-    let snapshot = probe();
-    assert_eq!(snapshot.lines().nth(1).unwrap(), expected);
     drop(terminal);
 }
 
@@ -434,7 +290,7 @@ fn native_console_fixture() {
     }
     full_width_console(&bash);
     restored(&path);
-    tool_cards_console(&bash);
+    card_tests::console(&bash);
     restored(&path);
     activity_tests::console(&bash);
     restored(&path);

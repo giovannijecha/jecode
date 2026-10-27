@@ -202,7 +202,15 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
     let mut resumed = app(&home, &directory, "http://127.0.0.1:1/chat/completions");
     assert!(resumed.state.items.is_empty());
     assert_eq!(resumed.archive.messages.lock().unwrap().len(), 1);
-    assert!(resumed.state.notice.as_ref().unwrap().action == Some(("/resume", "open")));
+    // The startup space offers the saved session until the first prompt.
+    let recent: Vec<_> = resumed
+        .state
+        .opening
+        .recent
+        .iter()
+        .map(|recent| recent.title.as_str())
+        .collect();
+    assert_eq!(recent, ["First saved request"]);
     submit(&mut resumed, "/resume");
     assert!(matches!(
         resumed.state.selector.as_ref().unwrap().purpose,
@@ -245,8 +253,7 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rows.contains("Answer preserved"));
-    assert!(rows.contains("● Write(file.txt)"));
-    assert!(rows.contains("⎿ New file · 1 line"));
+    assert!(rows.contains(" WRITE  file.txt  New file · 1 line"));
     assert!(rows.contains("original"));
     assert!(resumed.state.items.iter().any(|item| matches!(item, state::Item::Tool { name, change: Some(change), .. } if name == "write" && change.created && change.added == 1)));
     assert!(

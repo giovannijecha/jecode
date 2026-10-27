@@ -31,61 +31,25 @@ fn footer(state: &State) -> String {
 fn the_footer_meters_the_projection_toward_auto_compaction() {
     let mut state = with_status(61_000, Some(100_000));
     let idle = frame(&state, "provider/model", r"C:\project");
-    assert_eq!(idle.live.len(), 4);
+    assert_eq!(idle.live.len(), 5);
     let line = idle.live.last().unwrap();
     assert!(line.plain().starts_with(r"C:\project"));
     // 61% of an 80% threshold fills six of eight cells.
     assert!(
         line.plain()
-            .ends_with("━━━━━━── 61% · provider/model · default")
+            .ends_with(" provider/model · default   ▰▰▰▰▰▰▱▱ 61%")
     );
     let styles = |line: &Line, glyph: &str| -> Vec<_> {
         let spans = line.spans.iter().filter(|span| span.text.contains(glyph));
         spans.map(|span| span.style).collect()
     };
-    assert_eq!(styles(line, "━"), [METER_FILL]);
-    assert_eq!(styles(line, "──"), [METER_TRACK]);
+    assert_eq!(styles(line, "▰"), [METER_FILL]);
+    assert_eq!(styles(line, "▱▱"), [METER_TRACK]);
     state.activity = Some(Activity::new());
-    assert!(footer(&state).contains("━━━━━━── 61%"));
-    assert!(footer(&with_status(5, Some(1_000_000))).contains("──────── <1%"));
-    // Without an engine status the footer keeps the model and effort.
-    assert!(footer(&State::default()).ends_with("  provider/model · default"));
-}
-
-#[test]
-fn chatgpt_account_uses_only_spare_footer_width() {
-    let mut state = with_status(10_000, Some(100_000));
-    state.chatgpt_account = Some(crate::tui::state::ChatGptAccount::Active(
-        "fixture@example.test".into(),
-    ));
-    state.width = 140;
-    let wide = frame(&state, "gpt-fixture", r"C:\project")
-        .live
-        .last()
-        .unwrap()
-        .plain();
-    assert!(wide.contains("Using ChatGPT plan · fixture@example.test"));
-    state.chatgpt_account = Some(crate::tui::state::ChatGptAccount::SignedOut);
-    let signed_out = frame(&state, "gpt-fixture", r"C:\project")
-        .live
-        .last()
-        .unwrap()
-        .plain();
-    assert!(signed_out.contains("ChatGPT · signed out"));
-    assert!(!signed_out.contains("Using ChatGPT plan"));
-    state.chatgpt_account = Some(crate::tui::state::ChatGptAccount::Active(
-        "fixture@example.test".into(),
-    ));
-    for width in [80, 44] {
-        state.width = width;
-        let narrow = frame(&state, "gpt-fixture", r"C:\project")
-            .live
-            .last()
-            .unwrap()
-            .plain();
-        assert!(!narrow.contains("fixture@example.test"));
-        assert!(narrow.contains("gpt-fixture"));
-    }
+    assert!(footer(&state).contains("▰▰▰▰▰▰▱▱ 61%"));
+    assert!(footer(&with_status(5, Some(1_000_000))).contains("▱▱▱▱▱▱▱▱ <1%"));
+    // Without an engine status the footer keeps the model chip.
+    assert!(footer(&State::default()).ends_with("  provider/model · default "));
 }
 
 #[test]
@@ -93,17 +57,17 @@ fn the_meter_turns_gold_near_the_threshold_and_stays_empty_when_unknown() {
     let state = with_status(78_000, Some(100_000));
     let near = frame(&state, "provider/model", r"C:\project");
     let line = near.live.last().unwrap();
-    assert!(line.plain().contains("━━━━━━━━ 78%"));
+    assert!(line.plain().contains("▰▰▰▰▰▰▰▰ 78%"));
     let warning = line.spans.iter().filter(|span| span.style == WARNING);
     assert_eq!(
         warning.map(|span| span.text.trim()).collect::<Vec<_>>(),
-        ["━━━━━━━━ 78%"]
+        ["▰▰▰▰▰▰▰▰ 78%"]
     );
     let mut unknown = with_status(5000, None);
     for width in [80, 30, 12] {
         unknown.width = width;
         let line = footer(&unknown);
-        assert!(line.contains("──────── ?"), "{width}: {line}");
+        assert!(line.contains("▱▱▱▱▱▱▱▱ ?"), "{width}: {line}");
         assert!(!line.contains('%') && text::cells(&line) <= width);
     }
 }
@@ -133,11 +97,17 @@ fn a_low_auto_compact_threshold_is_not_warned_at_zero_percent() {
 #[test]
 fn narrow_footers_shorten_the_directory_and_model_before_the_meter() {
     let mut state = with_status(61_000, Some(100_000));
+    let full = " provider/model · default   ▰▰▰▰▰▰▱▱ 61%";
+    let detailed = " model · default   ▰▰▰▰▰▰▱▱ 61%";
+    let short = " model   ▰▰▰▰▰▰▱▱ 61%";
     for (width, left, right) in [
-        (51, r"C:\project", "━━━━━━── 61% · provider/model · default"),
-        (50, "project", "━━━━━━── 61% · model · default"),
-        (38, "", "━━━━━━── 61% · model"),
-        (19, "", "━━━━━━── 61%"),
+        (52, r"C:\project", full),
+        (51, r"C:\project", detailed),
+        (43, r"C:\project", detailed),
+        (42, "project", detailed),
+        (39, "project", short),
+        (29, "", short),
+        (20, "", "▰▰▰▰▰▰▱▱ 61%"),
     ] {
         state.width = width;
         let gap = " ".repeat(width - text::cells(left) - text::cells(right));
@@ -191,38 +161,45 @@ fn short_viewports_keep_the_input_and_caret_before_the_footer() {
 }
 
 #[test]
-fn open_panels_keep_the_footer_on_the_terminal_surface_when_space_permits() {
-    for menu in [
-        Selector::settings(
-            "provider/model",
-            Effort::Default,
-            80,
-            &crate::backend::openrouter::Routing::Auto,
-            std::path::Path::new("fixture/config.json"),
+fn open_panels_replace_the_footer_on_the_terminal_surface() {
+    // At twelve rows the settings body shrinks to three options.
+    for (menu, keys, short) in [
+        (
+            Selector::settings(
+                "provider/model",
+                Effort::Default,
+                80,
+                &crate::backend::openrouter::Routing::Auto,
+                std::path::Path::new("fixture/config.json"),
+            ),
+            "   ↑↓  move    Enter  change    Esc  close",
+            "Default routing",
         ),
-        Selector::auto_compact(80),
+        (
+            Selector::auto_compact(80),
+            "   Enter  save    Esc  back",
+            "Auto-compact at",
+        ),
     ] {
         let mut state = with_status(61_000, Some(100_000));
+        let idle = footer(&state);
+        assert!(idle.ends_with(" provider/model · default   ▰▰▰▰▰▰▱▱ 61%"));
         state.selector = Some(menu);
-        let open = frame(&state, "provider/model", r"C:\project");
-        let (last, panel) = open.live.split_last().unwrap();
-        assert!(last.plain().contains("━━━━━━── 61% · provider"));
-        assert_eq!(last.background, None);
-        assert!(panel.iter().all(|line| line.background.is_some()));
-        assert!(
-            panel
-                .iter()
-                .any(|line| line.plain().contains("Auto-compact at"))
-        );
-        state.height = 12;
-        let short = frame(&state, "provider/model", r"C:\project");
-        assert!(short.live.iter().all(|line| line.background.is_some()));
-        assert!(
-            short
-                .live
-                .iter()
-                .any(|line| line.plain().contains("Auto-compact at"))
-        );
+        for height in [24, 12] {
+            state.height = height;
+            let open = frame(&state, "provider/model", r"C:\project");
+            let rows: Vec<_> = open.live.iter().map(|line| line.plain()).collect();
+            // The panel's keys take the footer's place as the last row.
+            assert_eq!(rows.last().unwrap().trim_end(), keys, "{rows:#?}");
+            assert!(!rows.iter().any(|row| row.contains("61%") || *row == idle));
+            assert!(open.live.iter().all(|line| line.background.is_none()));
+            let shown = if height == 12 {
+                short
+            } else {
+                "Auto-compact at"
+            };
+            assert!(rows.iter().any(|row| row.contains(shown)), "{rows:#?}");
+        }
     }
     let mut state = with_status(61_000, Some(100_000));
     state.selector = Some(Selector::auto_compact(80));
@@ -232,15 +209,15 @@ fn open_panels_keep_the_footer_on_the_terminal_surface_when_space_permits() {
         .iter()
         .map(|line| line.plain())
         .collect::<Vec<_>>();
-    let (row, _) = open.cursor.unwrap();
-    assert!(rows[row].contains("80"));
-    assert!(
-        rows.iter().any(|row| row.contains("less room for")),
-        "{rows:#?}"
-    );
-    assert!(
-        rows.iter()
-            .any(|row| row.contains(" Enter  save    Esc  back"))
-    );
-    assert!(text::cells(&rows[rows.len() - 1]) <= state.width);
+    // The value is the composer's field with the caret after it; a form
+    // without body rows has no blank row before its keys.
+    let (row, column) = open.cursor.unwrap();
+    assert_eq!(rows[row], "› 80% of the context window");
+    assert_eq!(column, 4);
+    assert!(rows[row - 1].starts_with("─ Threshold ─"));
+    assert!(rows[row + 1].starts_with("─ Settings › Auto-compact at "));
+    assert!(rows[row + 1].ends_with(" this and new conversations ─"));
+    assert_eq!(rows[row + 2], "   Enter  save    Esc  back");
+    assert_eq!(rows.len(), row + 3);
+    assert!(rows.iter().all(|row| text::cells(row) <= state.width));
 }

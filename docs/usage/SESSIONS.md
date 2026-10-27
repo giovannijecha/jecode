@@ -16,9 +16,10 @@ jecode --plain resume SESSION_ID
 
 `jecode resume` opens a folder-scoped picker. In the TUI, `/resume` opens the
 same picker and `/resume ID` opens a specific session. The picker shows the
-most recently updated sessions first, with the first request as the title,
-backend, model, age and ID. Once saved, the active session appears as `current`;
-selecting it returns to the composer. A session already open in another
+most recently updated sessions first, each with the first request as the title
+and a compact age (`5m`, `2h`, `3d`); typing filters by title, backend, model
+or ID. The plain picker lists all of them on each row. Once saved, the active
+session appears as `current`; selecting it returns to the composer. A session already open in another
 process cannot be resumed at the same time.
 
 The exit summary prints `jecode resume SESSION_ID` after a successful save.

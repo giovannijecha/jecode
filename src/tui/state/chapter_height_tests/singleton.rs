@@ -104,6 +104,6 @@ fn pending_browser_singleton_keeps_height_when_next_browser_starts() {
             height(&state, false),
             shown(&state)
         );
-        assert!(shown(&state).contains("Browser  snapshot"));
+        assert!(shown(&state).contains("BROWSER snapshot"));
     }
 }

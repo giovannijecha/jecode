@@ -90,7 +90,7 @@ fn control_o_keeps_the_tail_and_a_reading_page_in_place() {
         "scroll did not enter the answer"
     );
     assert!(
-        scrolled.contains("Back to bottom"),
+        scrolled.contains("back to bottom"),
         "reading mode was not entered"
     );
     key(&mut app, 79, 4);
@@ -141,9 +141,9 @@ fn tool_toggle_preserves_the_draft_and_source_and_returns_to_editing() {
         .flatten()
         .map(|row| row.plain())
         .collect();
-    assert!(rows.iter().any(|row| row == "    one"));
-    assert!(rows.iter().any(|row| row == "    "));
-    assert!(rows.iter().any(|row| row == "    third output"));
+    assert!(rows.iter().any(|row| row == "  │ one"));
+    assert!(rows.iter().any(|row| row == "  │ "));
+    assert!(rows.iter().any(|row| row == "  │ third output"));
     assert_eq!(app.state.generation, generation);
     assert_eq!(app.state.editor.text, "kept draft");
     assert_eq!(app.state.editor.cursor, caret);

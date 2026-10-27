@@ -139,7 +139,7 @@ fn unknown_temporary_arguments_show_an_error_and_preserve_the_area() {
         .map(|row| row.plain())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rows.contains("Usage: /tmp [clean]"));
+    assert!(rows.contains(" ✕  Usage   /tmp [clean]"));
     let matches = crate::session::commands::suggestions("/TM");
     assert_eq!(
         crate::session::commands::COMMANDS[matches[0].index].name,

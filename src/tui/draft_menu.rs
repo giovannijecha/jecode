@@ -116,6 +116,7 @@ impl App {
             self.warn("The draft is empty. Edit it or discard it in /drafts.");
             return Ok(false);
         }
+        self.state.sent();
         let busy = self.busy();
         if busy && let Err(error) = self.state.queue.push(text.clone()) {
             self.warn(&error);

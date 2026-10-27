@@ -85,14 +85,13 @@ impl App {
                 &self.archive.model
             },
         );
+        // The account the catalog came from rides the rule title.
         if let Some(detail) = self
             .catalog_services
             .as_ref()
             .and_then(|services| self.provider_account_detail(services))
         {
-            for option in &mut menu.options {
-                option.prose = detail.clone();
-            }
+            menu.context = format!("{} · {detail}", menu.context);
         }
         if self.provider_parent.is_some() {
             menu.parent = Some("Provider");
@@ -134,14 +133,14 @@ impl App {
                 );
                 for (option, service) in menu.options.iter_mut().zip(&services) {
                     if let Some(detail) = self.provider_account_detail(service) {
-                        option.prose = detail;
+                        option.fact = detail;
                         if active.id() == "openai"
                             && active.account() != service.account()
                             && let Some(current) = self.provider_account_detail(&active)
                         {
                             option
-                                .prose
-                                .push_str(&format!(" · Current conversation: {current}"));
+                                .fact
+                                .push_str(&format!(" · this conversation: {current}"));
                         }
                     }
                 }

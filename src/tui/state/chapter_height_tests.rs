@@ -151,7 +151,7 @@ fn failed_command_and_read_do_not_repeat_chapter_facts_or_lose_height() {
                     "{columns} columns, {phase}: {text}"
                 );
                 assert!(
-                    text.matches("Read  missing.rs").count() <= 1,
+                    text.matches("READ missing.rs").count() <= 1,
                     "{columns} columns, {phase}: {text}"
                 );
             }
@@ -350,7 +350,7 @@ fn first_ordinary_call_that_fails_keeps_error_detail_without_duplicate_activity(
         ]),
     );
     let running = height(&state, false);
-    assert!(shown(&state).contains("Read  missing.rs"));
+    assert!(shown(&state).contains("READ missing.rs"));
     finish(
         &mut state,
         "read",
@@ -359,7 +359,7 @@ fn first_ordinary_call_that_fails_keeps_error_detail_without_duplicate_activity(
     );
     assert!(height(&state, false) >= running);
     let failed = shown(&state);
-    assert_eq!(failed.matches("Read  missing.rs").count(), 1);
+    assert_eq!(failed.matches("READ missing.rs").count(), 1);
     assert!(failed.contains("failed"));
     assert!(failed.contains("permission denied"));
     state.close_tools();

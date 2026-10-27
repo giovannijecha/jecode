@@ -1,5 +1,5 @@
-use super::{CODE_STRING, CODE_SURFACE, CODE_TEXT, KEYWORD, Line, MUTED, quote_end};
-use crate::tui::theme::EMPHASIS;
+use super::{CODE_STRING, CODE_SURFACE, CODE_TEXT, KEYWORD, Line, MUTED, closer, quote_end};
+use crate::tui::theme::STRONG;
 
 #[derive(Clone, Default)]
 pub(super) struct Markup {
@@ -19,7 +19,7 @@ impl Markup {
                 self.comment = end.is_none();
                 (end.unwrap_or(tail.len()), MUTED)
             } else if let Some(quote) = self.quote {
-                let (length, closed) = quote_end(tail, quote, false);
+                let (length, closed) = quote_end(tail, closer(quote, false), None);
                 if closed {
                     self.quote = None;
                 }
@@ -31,7 +31,7 @@ impl Markup {
                 } else {
                     1
                 };
-                (prefix + identifier(&tail[prefix..]), EMPHASIS)
+                (prefix + identifier(&tail[prefix..]), STRONG)
             } else if self.tag && (tail.starts_with("/>") || tail.starts_with("?>")) {
                 self.tag = false;
                 (2, CODE_TEXT)
@@ -40,7 +40,7 @@ impl Markup {
                 (1, CODE_TEXT)
             } else if self.tag && (tail.starts_with('"') || tail.starts_with('\'')) {
                 let quote = tail.chars().next().unwrap();
-                let (length, closed) = quote_end(&tail[1..], quote, false);
+                let (length, closed) = quote_end(&tail[1..], closer(quote, false), None);
                 if !closed {
                     self.quote = Some(quote);
                 }

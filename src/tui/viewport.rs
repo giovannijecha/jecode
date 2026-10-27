@@ -19,16 +19,27 @@ struct Anchor {
 pub(super) struct Viewport {
     anchor: Option<Anchor>,
     requests: Vec<Scroll>,
+    fresh: bool,
 }
 
 pub(super) struct Slice {
     pub lines: Vec<Line>,
     pub reading: bool,
+    /// Rows under the page while reading.
+    pub below: usize,
+    /// Output arrived after the reader scrolled away.
+    pub fresh: bool,
 }
 
 impl Viewport {
     pub fn following(&self) -> bool {
         self.anchor.is_none()
+    }
+    /// Mark model output received while the reader was away from the tail.
+    pub fn new_output(&mut self) {
+        if self.anchor.is_some() {
+            self.fresh = true;
+        }
     }
     pub fn scroll(&mut self, request: Scroll) {
         if matches!(request, Scroll::Rows(0)) {
@@ -63,6 +74,8 @@ impl Viewport {
             return Slice {
                 lines: vec![],
                 reading: false,
+                below: 0,
+                fresh: false,
             };
         }
         let blocks: Vec<_> = blocks.iter().chain(pending).collect();
@@ -158,9 +171,19 @@ impl Viewport {
         } else if following {
             self.anchor = None;
         }
+        let reading = self.anchor.is_some();
+        if !reading {
+            self.fresh = false;
+        }
         Slice {
             lines,
-            reading: self.anchor.is_some(),
+            reading,
+            below: if reading {
+                total.saturating_sub(top + height)
+            } else {
+                0
+            },
+            fresh: self.fresh,
         }
     }
 }

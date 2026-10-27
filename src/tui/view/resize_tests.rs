@@ -38,6 +38,7 @@ fn short_command_suggestions_keep_the_selected_item_and_caret_in_view() {
     for height in [2, 3, 4, 6, 12] {
         state.height = height;
         let frame = frame(&state, "fixture/model", "fixture directory");
+        let rows: Vec<_> = frame.live.iter().map(Line::plain).collect();
         assert!(frame.live.len() <= height);
         let (row, _) = frame.cursor.unwrap();
         assert!(
@@ -45,12 +46,14 @@ fn short_command_suggestions_keep_the_selected_item_and_caret_in_view() {
                 .paint(state.width)
                 .contains(&CURSOR.to_string())
         );
-        assert!(
-            frame
-                .live
-                .iter()
-                .any(|line| focused(line) && line.plain().contains(selected))
-        );
+        // The caret's row and the panel's title come first, then the
+        // selected command.
+        assert!(rows[row + 1].starts_with("─ Commands"), "{rows:#?}");
+        let shown = frame
+            .live
+            .iter()
+            .any(|line| focused(line) && line.plain().starts_with(&format!("› {selected}")));
+        assert_eq!(shown, height >= 3, "{height}: {rows:#?}");
         assert_eq!(state.editor.text, "/");
     }
 }

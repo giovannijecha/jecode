@@ -90,7 +90,8 @@ fn table_measurement_yields_and_a_resize_discards_the_partial_width_layout() {
     complete(&mut layout, &state, 40);
     let wide = layout.blocks.last().unwrap();
     assert_eq!(wide, &prose::render(&source, 40));
-    assert_eq!(wide.len(), 602);
+    // Top, header, then 600 records each closed by a rule.
+    assert_eq!(wide.len(), 1203);
     assert_eq!(
         wide.iter()
             .filter(|row| row.plain().contains("item599"))

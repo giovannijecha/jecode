@@ -102,6 +102,10 @@ impl App {
                     self.renderer.reset((self.state.width, self.state.height));
                 }
                 self.saved_sessions.retain(|entry| entry.id != job.id);
+                // The startup space no longer offers the deleted conversation.
+                let sessions = std::mem::take(&mut self.saved_sessions);
+                self.offer_recent(&sessions);
+                self.saved_sessions = sessions;
                 let text = crate::session::delete::message(&job.title, &report, current);
                 self.agent.as_ref().unwrap().record_local_details(
                     &format!("/resume · delete {}", job.id),

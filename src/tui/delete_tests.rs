@@ -2,7 +2,7 @@ use super::*;
 use crate::{backend::openrouter::OpenRouter, json::Value, test_support::Directory, tools::Tools};
 use selector::Purpose;
 
-fn app(home: &Directory, directory: &Directory) -> App {
+pub(super) fn app(home: &Directory, directory: &Directory) -> App {
     let mut agent = Agent::new(
         OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
         Tools::new(directory.path()).unwrap(),
@@ -10,7 +10,7 @@ fn app(home: &Directory, directory: &Directory) -> App {
     agent.enable_sessions(home.path()).unwrap();
     App::new(agent, tests::config(directory), None)
 }
-fn seed(app: &mut App, title: &str) {
+pub(super) fn seed(app: &mut App, title: &str) {
     for (role, text) in [("user", title), ("assistant", "Retained answer")] {
         app.archive.messages.lock().unwrap().push(Value::object([
             ("role", Value::string(role)),
@@ -48,7 +48,7 @@ fn select(app: &mut App, id: &str) {
         .position(|hit| hit.index == index)
         .unwrap();
 }
-fn confirm(app: &mut App, id: &str) {
+pub(super) fn confirm(app: &mut App, id: &str) {
     if app.state.selector.is_none() {
         app.dispatch("/resume".into()).unwrap();
     }

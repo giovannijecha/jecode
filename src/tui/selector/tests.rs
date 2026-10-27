@@ -179,3 +179,18 @@ fn draft_search_keeps_queued_and_paused_statuses() {
     menu.refresh();
     assert_eq!(menu.filtered.len(), 8);
 }
+
+#[test]
+fn model_rows_drop_a_listing_name_that_only_restates_the_id() {
+    assert!(restates(
+        "anthropic/claude-opus-5.5",
+        "Anthropic: Claude Opus 5.5"
+    ));
+    assert!(restates("openai/gpt-6", "OpenAI: GPT-6"));
+    assert!(restates("deepseek/deepseek-v4", "DeepSeek: V4"));
+    assert!(!restates(
+        "openai/gpt-6.1-sol",
+        "GPT-6.1 Sol (ChatGPT plan)"
+    ));
+    assert!(!restates("openrouter/auto", "Auto Router"));
+}

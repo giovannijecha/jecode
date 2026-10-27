@@ -3,7 +3,11 @@ use crate::tui::{activity::Activity, selector::Selector};
 
 #[test]
 fn composer_navigation_updates_one_border_and_erases_the_range_when_all_text_fits() {
-    let mut state = State::default();
+    // Fifteen rows give the draft its smallest window, five rows.
+    let mut state = State {
+        height: 15,
+        ..State::default()
+    };
     state.editor.insert(
         "draft one\ndraft two\ndraft three\ndraft four\ndraft five\ndraft six\ndraft seven",
     );
@@ -40,8 +44,9 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
         state.editor.replace(command.into());
         state.suggestions.refresh(command);
         let opened = update(&mut renderer, &mut screen, &mut state);
-        assert!(opened.contains(&crate::tui::theme::USER_SURFACE.to_string()));
-        assert!(screen.visible().contains("Commands"));
+        // The panel paints its keycaps (and any focused row) when it opens.
+        assert!(opened.contains(&crate::tui::theme::SELECTED_SURFACE.to_string()));
+        assert!(screen.visible().contains("─ Commands"));
         state.selector = Some(Selector::settings(
             "fixture/model",
             crate::effort::Effort::High,
@@ -56,7 +61,8 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
         state.suggestions.dismiss();
         update(&mut renderer, &mut screen, &mut state);
         assert!(!screen.visible().contains("Settings · saved defaults"));
-        assert!(!screen.visible().contains("Tab complete"));
+        assert!(!screen.visible().contains("Tab  complete"));
+        assert!(!screen.visible().contains("─ Commands"));
         assert!(screen.visible().contains(command));
     }
     state.editor.take();

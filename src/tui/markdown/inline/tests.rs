@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::theme::{BODY, INLINE_CODE};
+use crate::tui::theme::{BODY, DIM, INLINE_CODE};
 
 fn spans(value: &str) -> Vec<(String, Style)> {
     render(value, BODY)
@@ -19,24 +19,24 @@ fn common_emphasis_and_strike_combine_without_dropping_text() {
             (" ".into(), BODY),
             ("quiet".into(), BODY.italic()),
             (" ".into(), BODY),
-            ("loud".into(), EMPHASIS.bold()),
+            ("loud".into(), STRONG.bold()),
             (" ".into(), BODY),
-            ("firm".into(), EMPHASIS.bold()),
+            ("firm".into(), STRONG.bold()),
             (" ".into(), BODY),
-            ("old".into(), BODY.strike()),
+            ("old".into(), DIM.strike()),
             (" ".into(), BODY),
-            ("both".into(), EMPHASIS.bold().italic()),
+            ("both".into(), STRONG.bold().italic()),
             (".".into(), BODY),
         ]
     );
     assert_eq!(
         spans("**bold _and italic_** / ~~gone *softly*~~"),
         vec![
-            ("bold ".into(), EMPHASIS.bold()),
-            ("and italic".into(), EMPHASIS.bold().italic()),
+            ("bold ".into(), STRONG.bold()),
+            ("and italic".into(), STRONG.bold().italic()),
             (" / ".into(), BODY),
-            ("gone ".into(), BODY.strike()),
-            ("softly".into(), BODY.italic().strike()),
+            ("gone ".into(), DIM.strike()),
+            ("softly".into(), DIM.italic().strike()),
         ]
     );
 }
@@ -48,10 +48,7 @@ fn code_spans_override_markers_and_escapes_protect_punctuation() {
             "**bold \\*star\\* and \\\u{0060}tick\\\u{0060}** / \u{0060}*raw* \\_ \\[link](x)\u{0060}"
         ),
         vec![
-            (
-                "bold *star* and \u{0060}tick\u{0060}".into(),
-                EMPHASIS.bold()
-            ),
+            ("bold *star* and \u{0060}tick\u{0060}".into(), STRONG.bold()),
             (" / ".into(), BODY),
             ("*raw* \\_ \\[link](x)".into(), INLINE_CODE),
         ]
@@ -60,17 +57,25 @@ fn code_spans_override_markers_and_escapes_protect_punctuation() {
 }
 
 #[test]
-fn links_keep_destinations_visible_and_style_labels() {
+fn links_show_their_host_and_style_labels() {
     assert_eq!(
         spans("See [the *notes*](https://example.test/a_(b)) today."),
         vec![
             ("See ".into(), BODY),
             ("the ".into(), LINK),
             ("notes".into(), LINK.italic()),
-            (" (https://example.test/a_(b))".into(), LINK_DESTINATION),
+            (" (example.test)".into(), LINK_DESTINATION),
             (" today.".into(), BODY),
         ]
     );
+    for (destination, shown) in [
+        ("https://user@docs.rs:443/crate?q=1#top", "docs.rs:443"),
+        ("http://localhost:5173", "localhost:5173"),
+        ("docs/SETUP.md", "docs/SETUP.md"),
+        ("mailto:team@example.test", "mailto:team@example.test"),
+    ] {
+        assert_eq!(host(destination), shown);
+    }
     assert_eq!(
         render("![logo](image.png) [broken]( ) [open](url", BODY).plain(),
         "![logo](image.png) [broken]( ) [open](url"

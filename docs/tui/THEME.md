@@ -1,210 +1,280 @@
 # TUI theme
 
-Jecode's interactive TUI is designed for a dark terminal. It inherits the
-terminal's ordinary text and background, then applies semantic foreground
-roles and component surfaces. It emits true-color VT styling; the terminal
-chooses the font and controls how bold, italic, underline, and strikethrough
-appear. The palette and style aliases live in
-[`theme.rs`](../../src/tui/theme.rs).
+The interactive TUI runs on the terminal's alternate screen. Cells without a
+surface keep the terminal's own background (`BASE` is SGR 49); text, marks and
+surfaces use the palette below, which assumes a dark terminal theme. Colour is
+always 24-bit; `NO_COLOR` is ignored. The terminal still chooses the font and how bold, italic, underline
+and strikethrough look. Tokens live in [`theme.rs`](../../src/tui/theme.rs).
 
-## Colour roles
+## Tokens
 
-| Role | Colour | Current use |
+Text roles, with WCAG contrast on the reference dark background `#17161F`.
+Tests hold every text role at 4.5 or more and `FAINT` at 3 or more from
+`#0C0C0C` to `#1E1E1E`; lighter dark themes such as One Half Dark (`#282C34`)
+bring `DIM` and `FAINT` below those floors.
+
+| Role | Value | Contrast | Use |
+| --- | --- | --- | --- |
+| `STRONG` | `#E2E8F0` | 14.5 | Requests, drafts, the product name, titles, labels, option names, keycap keys. |
+| `LIT` | `#E2D9FC` | 13.3 | The caret's blinking `_`, chips, background badge names, command names in Work chapters, `new output`. |
+| `BODY` | `#D4D4D4` | 12.1 | Assistant prose, tool targets, diagnostics. |
+| `CODE_TEXT` | `#C9D1D9` | 11.6 | Default code, inline code, command output, diff context. |
+| `GOOD` | `#9ECE6A` | 9.8 | The `Done` and `✓` marks, added lines, `☑`, code strings. |
+| `ACCENT` | `#C3B1FA` | 9.4 | The `>_` mark, `›` and `●` markers, composer rules, matches, level 1 headings, links. |
+| `KEYWORD` | `#E0A6F2` | 9.3 | Code keywords. |
+| `WARNING` | `#E0AF68` | 9.0 | Retry, stopped and warning glyphs, `paused`, code numbers, the gauge near the limit. |
+| `BAD` | `#EF8B8B` | 7.5 | Failures, removed lines, destructive questions. |
+| `MUTED` | `#9AA4B2` | 7.1 | Secondary facts, key labels, link hosts, quotes, list markers, the footer chip. |
+| `DIM` | `#8E8AAE` | 5.5 | Status-row facts, the footer path, tree gutters, group headings, line numbers, struck text. |
+| `FAINT` | `#6B6796` | 3.4 | Marks only, never text: rules while working, table borders, tracks. |
+
+The activity shimmer uses `S0` `#A99BE6`, `S1` `#D9CBFB` and `S2` `#FBF8FF`
+over `S_BASE` `#6E64A0`. Tool badge labels use `BADGE_TEXT` `#F2F5FC`; the
+software caret is `#1A1B26` on `#C0CAF5`.
+
+Surfaces, 1.2–1.6 contrast steps above a dark terminal background:
+
+| Surface | Value | Use |
 | --- | --- | --- |
-| `BODY` | Inherited | Assistant prose, draft text, tool output. |
-| `STRONG` | `#E2E8F0` | User text, panel titles, menu names. |
-| `EMPHASIS` | `#DCE4F0` | Level 2 Markdown headings and strong text. |
-| `CODE_TEXT` | `#C9D1D9` | Unhighlighted fenced code and inline code. |
-| `MUTED` | `#9AA4B2` | Secondary text, footer, quotes, link destinations, information and notice details. |
-| `TOOL_DIM` | `#879AAA` | Tool `⎿` guides, activity time, column headers and command groups. |
-| `ACCENT` | `#7AA2F7` | Jecode mark, composer rules, focus, matches, links, level 1 headings and reading tool names. |
-| `TOOL_ACCENT` | `#99B8D4` | Running and background tool markers, and command tool names. |
-| `KEYWORD` | `#BB9AF7` | Code keywords and file-change tool names. |
-| `GOOD` | `#9ECE6A` | Successful tools, added lines and code strings. |
-| `BAD` | `#EF8B8B` | Failed tools, destructive choices and removed lines. |
-| `WARNING` | `#E0AF68` | Warnings, stopped tools and code numbers. |
+| `BASE` | terminal default | Every cell without its own surface; never painted. |
+| `USER_SURFACE` | `#29283F` | Sent requests. |
+| `PILL_SURFACE` | `#27263B` | The status-row pill and the footer model chip. |
+| `SELECTED_SURFACE` | `#383656` | The focused option row and keycaps. |
+| `CODE_SURFACE` | `#20252C` | Code cards, inline code, process output. |
+| `DIFF_ADDED_SURFACE` / `DIFF_REMOVED_SURFACE` | `#1E2E23` / `#312026` | Added and removed diff rows. |
+| `DIFF_ADDED_STRONG` / `DIFF_REMOVED_STRONG` | `#2C4A33` / `#523039` | Paired changed fragments. |
 
-Weight and slant are applied by the component: tool names and Markdown
-headings are bold. Links use the accent with underline. The palette does not replace the terminal's global colors.
+Tool badges carry the family colour when done and the state otherwise:
 
-## Surfaces
-
-| Surface | Colour | Current use |
+| Badge surface | Value | Use |
 | --- | --- | --- |
-| Terminal | Inherited | Conversation and result notices. |
-| `USER_SURFACE` | `#282E39` | Sent requests, warning and error banners, and command, selector, information and process panels. |
-| `SELECTED_SURFACE` | `#353D4B` | Selected menu/process rows and Back to bottom badge. |
-| `CODE_SURFACE` | `#20252C` | Fenced code and inline code. |
-| `DIFF_ADDED_SURFACE` | `#1E2E23` | Full tint on added rows beyond the four-cell indent. |
-| `DIFF_REMOVED_SURFACE` | `#312026` | Full tint on removed rows beyond the four-cell indent. |
-| `DIFF_ADDED_STRONG` | `#2C4A33` | Paired changed fragments on added rows. |
-| `DIFF_REMOVED_STRONG` | `#523039` | Paired changed fragments on removed rows. |
-| `CURSOR` | `#1A1B26` on `#C0CAF5` | Software caret, including in shaded panels. |
+| `BADGE_READ` | `#4C4AB2` | Read, Skill, Web, Browser. |
+| `BADGE_EDIT` | `#7A3F9E` | Update, Write. |
+| `BADGE_SHELL` | `#3D58A3` | Bash, Exec, Process. |
+| `BADGE_OTHER` | `#4C4AB2` | Checkpoint and any other tool. |
+| `BADGE_IDLE` | `#34324F` | Running and background badges, `WORK`, attachment and ` current ` chips. |
+| `BADGE_BAD` | `#7A2E3A` | Failed calls. |
+| `BADGE_WARN` | `#6B5222` | Stopped or timed-out calls. |
 
-## Conversation and tool cards
+## Screen and grid
 
-The conversation has one neutral row between visible blocks. Sent user
-messages have a two-cell indent and shaded padding; assistant Markdown starts
-with a neutral `●` in `BODY`, then hangs every later row two cells in. It joins
-soft-wrapped lines into paragraphs and keeps blank rows. Headings differ by
-level and keep one row before the text they introduce. Fenced code spans the
-indented response width with one cell of padding; inline code sits on the same surface.
-See [Markdown responses](MARKDOWN.md) for the display subset.
+From the top: the header, the conversation, one gap row, then the dock. The
+header is the start of the conversation and scrolls away with it; the dock is
+anchored to the bottom. Markers (`›`, `●`, `✕`) and badges sit at column 0,
+text starts at column 2, and right-hand facts end two cells before the edge.
+One blank row separates conversation blocks. Chips, badges, pills and keycaps
+have one cell of padding.
 
-Individual calls use `●` and an indented `⎿` result. The display
-names are Read, Skill (a `read` of a skill's `SKILL.md`), Update (the `edit`
-tool), Write, Bash, Process, Checkpoint, Web and Browser. The `●` marker
-carries the status: success green, failure red, stopped or timed-out work
-gold, and running or background work the tool accent. Bold names carry their
-family colour: reading tools (Read, Skill, Web, Browser) use `ACCENT`, file
-changes (Update, Write, Checkpoint) `KEYWORD`, and commands (Bash, Process)
-`TOOL_ACCENT`. Read, Update and Write keep family-coloured parentheses but use
-`BODY` paths; routine parentheses and targets also use `BODY`, except the
-muted Browser action. One neutral row
-separates visible blocks.
+The dock holds, top to bottom: queued drafts, the status row, the composer
+(top rule, draft, bottom rule) and the footer, key hints or an open panel. See
+[Composer and controls](COMPOSER.md).
 
-File titles wrap on words and continue under the open parenthesis, or two cells
-in when fewer than 24 columns would remain.
-A compact file title keeps three rows and closes with `…)`; expansion
-retains it in full. Routine titles stay on one row. Bash and Process prefer optional canonical `description`
-arguments for `● Bash  description`; without one they show the command or
-target. The command follows at `  ⎿ $ `, shell-coloured and limited to two
-compact rows; Ctrl+O shows it in full. Process adds a bold tool-accent ` &`.
-Browser uses `Browser(action)` with the action muted and a JavaScript-coloured
-payload below, also limited to two compact rows. Result continuations and
-output use four cells.
+The header reads `>_ jecode <version>`, with `>_` bold `ACCENT`, `jecode`
+bold `STRONG` and the version `MUTED`, shortened from the right. The model,
+effort and folder sit in the footer, so each appears once on screen.
+Until the conversation shows its first item, the space below lists
+`Recent in this folder` in `DIM`: up to three other conversations of this
+folder with compact ages such as `2h`, then a ` /resume ` keycap for all
+conversations. Deleting one through `/resume` updates the list at once. With
+none saved, on a first run or after deleting the last, one key row shows instead:
+`/ commands · Alt+V image · Ctrl+O expand · Ctrl+Q quit`. Both key rows drop
+keys from the right when narrow.
 
-The result names what came back as `Subject · detail`:
+## Status row and motion
+
+The status row sits above the composer and is always one row. Every state has
+the same shape: a pill on `PILL_SURFACE` (` glyph label `), `DIM` facts joined
+by ` · ` and dropped from the right, then an optional keycap ending two cells
+from the edge, which drops after the facts.
+
+| State | Glyph | Label | Facts |
+| --- | --- | --- | --- |
+| Idle | — | empty row | — |
+| Working | blinking `>_` | activity, shimmering | `Esc interrupt · turn time · ↓ tokens` |
+| Retry | blinking `>_` in `WARNING` | `Retrying in 4s` in `WARNING` | `Esc interrupt · turn time · attempt N · reason` |
+| Done | static `>_` in `GOOD` | `Done` | `turn time · N tools · ↓ tokens`, then the serving provider when reported |
+| Stopped | `■` in `WARNING` | `Stopped` | `time · your next message continues from here` |
+| Failed | `✕` in `BAD` | `Failed` | `time · prompt restored` and a fixing keycap |
+| Result | `✓` in `GOOD` | subject, such as `Copied` | detail; a setting reads `old → new` with the new value `STRONG` |
+| Warning | `▲` in `WARNING` | subject | detail and a fixing keycap |
+| Error | `✕` in `BAD` | subject | detail and a fixing keycap |
+
+`Esc interrupt` appears only while Esc would stop the turn. The Working label
+is the running call's `description` when given, else a verb and a short
+target: `Reading`, `Editing`, `Writing` a file; `Running` a command;
+`Starting` an `exec` program; `Fetching` or `Browsing` a host;
+`Loading skill`; `Saving a checkpoint`. Between calls it names the phase, such
+as `Thinking`, `Working` or `Waiting for your edit`; `Stopping` takes priority
+after cancellation. Compaction and attachment progress take the label while
+they run. Composer rules turn `FAINT` while a turn works.
+
+One motion frame is 100 ms. The caret keeps `>` in `ACCENT` and blinks `_` in
+`LIT`, 400 ms on and 400 ms off. One shimmer band, `S0 S1 S2 S1 S0` moving one
+cell per frame over `S_BASE`, runs through the status label, running badges
+and running Work chapters.
+
+## Conversation
+
+A sent request is a full-row `USER_SURFACE` block with one padding row above
+and below: `› ` in bold `ACCENT` at column 0 and the text in `STRONG` at
+column 2, wrapped rows hanging under it. Request text stays plain, apart from
+attachment labels, which become ` 1 Image ` or ` 2 wake.log ` chips in `LIT`
+on `BADGE_IDLE`.
+
+An answer opens with `●` in `ACCENT`, prose at column 2; see
+[Markdown responses](MARKDOWN.md). Reasoning stays hidden. A failed turn keeps
+its diagnostic as the turn's last row: `✕` in bold `BAD`, then the text in
+`BODY`.
+
+## Tool rows
+
+Each call opens with a badge, ` NAME ` in bold at natural width, then the
+target one space after in `BODY`. There is no separate status dot: a finished
+call keeps its family colour, a running one shimmers on `BADGE_IDLE`, a
+background one shows a `LIT` name on `BADGE_IDLE`, a failed one turns
+`BADGE_BAD` and a stopped one `BADGE_WARN`. The names are READ, SKILL (a
+`read` of a skill's `SKILL.md`), UPDATE (the `edit` tool), WRITE, BASH, EXEC,
+PROCESS, CHECKPOINT, WEB and BROWSER.
+
+Result rows hang under the title on a `DIM` tree: `│` on every row, `└` on the
+last, wrapped continuations included. Diffs run from column 2 without a tree.
+
+File titles show the path, wrap on words under it, or at column 2 when fewer
+than 24 columns would remain, and keep three rows with a closing `…` until
+expanded. When the result fits beside a one-row title it joins that row;
+otherwise it hangs below. Bash, Exec and Process prefer the optional
+`description` argument as the target; the command then follows on the tree as
+`$ command`, shell-highlighted, or `> program args` for Exec, limited to two
+compact rows. Without a description the command or process target is the
+title's target. A Bash or Process title ends in a bold `LIT` ` &` only while
+its process runs in the background. Browser shows its action as the target and
+the JavaScript-coloured payload below; an action without one, such as
+`snapshot` or `stop`, opens its result on the first tree row, never on an
+empty one.
+
+The result names what came back as `Subject · detail`, `MUTED` once finished
+and `DIM` while running:
 
 | Call | Result |
 | --- | --- |
-| Running | A fixed `●` title marker pulses through `TOOL_PULSE` every 240 ms; the result row keeps the elapsed time and any note, such as the [checkpoint](../usage/CHECKPOINTS.md) `checkpoint rc-ID` recorded before a Bash call. |
-| Read | One compact result: `9 lines · from line 33 of 212` when the total is known, or `9 lines · from line 33 · more from 42` when another page exists and the total is unknown. At narrow widths the start clause yields to `9 lines · more from 42`; split lines retain `continues at byte N`. No separate compact pagination notice. Skill says `Loaded skill`. |
-| Update, existing-file Write | `+N −M lines` in green and red, or explicit text for no-op edits, final newlines and line endings. |
-| New Write | `New file · N lines`, followed by the first six numbered source rows; Ctrl+O shows every row. |
-| Checkpoint | One quiet result with the hidden row count; Ctrl+O opens the labeled details. |
-| Bash, Process | A muted lead gives the last stdout line and duration; `TOOL_DIM` adds `+N lines · no checkpoint` inline. Expanded cards retain full output. |
-| Failed command | A decoded `BAD` message on at most two rows, a muted position and up to two more `BAD` stderr rows. |
-| Stopped command | A muted `Cancelled after …` or `Timed out after …` lead with an inline hidden-line count. The status dot stays gold; Ctrl+O opens the retained partial output. |
-| Background | A tool-accent `ID running` lead with the latest output line; Process reports `stopping`, `stopped` or `status unknown`. A Process list shows one compact count; expansion opens the list. |
+| Running | The elapsed time, after `Running` for routine calls, and any note, such as the [checkpoint](../usage/CHECKPOINTS.md) `checkpoint rc-ID` recorded before a Bash call. |
+| Read | `9 lines · from line 33 of 212`, or `9 lines · from line 33 · more from 42` when the total is unknown. Narrow rows drop the start clause; split lines keep `continues at byte N`. Skill reads `Loaded skill · …`. |
+| Update, existing-file Write | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
+| New Write | `New file · N lines`, then the first six numbered source rows. |
+| Checkpoint | One quiet result with the hidden row count. |
+| Bash, Exec, Process | The last output line with the duration from one second, `Done in 1.2s`, or `Done`; `+N lines · no checkpoint` follows in `DIM`. |
+| Failed command | `Exit N · first line` in `BAD` on at most two rows, a muted position, up to two more `BAD` stderr rows. |
+| Stopped command | `Cancelled after 6.0s` or `Timed out after …`, `· partial output` when some was captured, and the hidden line count. |
+| Background | `p3 running · latest line`; Process reports `stopping`, `stopped` or `status unknown`. A process list shows one count. |
 | Web | The page title, size and host. |
 | Browser | Where it landed or what it saved, such as `Screenshot 1280×720 · path`. |
 | Error | The decoded message in `BAD`; a missing path reads `Not found`. |
 
-Tool cards retain the result reported when a call returned. `/terminal` shows
-the current active processes and removes them from its list when they finish.
+Compact cards skip blank output lines and fold the hidden count into the
+result. Capture limits stay visible as muted notes, such as `stdout trimmed to
+the last 64 KiB of 89 KiB · full output saved`. Checkpoint saves are quiet:
+partial coverage shows a warning; missing coverage joins a routine call's
+result, while file cards keep their warning.
 
-Compact routine cards skip blank output lines and fold the hidden count into
-the `+N lines` result suffix. New files use a `+N lines` source notice and
-long diffs name hidden hunks and rows. The last
-hidden card or Work chapter in the latest finished turn names
-`Ctrl+O expand` as a keycap on its summary row; a chapter instead keeps that
-keycap at the right edge of its title. Expansion shows the full
-command and exact output, blank rows included. Stdout uses `CODE_TEXT`,
-successful stderr `MUTED`, and stream labels `TOOL_DIM` when both exist.
-Bash and Process close with `exit N · duration` if an exit code exists, or
-the duration alone. Text Read output stays numbered; an expanded image Read
-uses an `Opened image` fact with dimensions and bytes when available, without
-attachment JSON. Web and Browser retain raw results and attachment metadata.
-Capture limits stay
-visible in either state as upright muted notes, such as `stdout trimmed to the
-last 64 KiB of 89 KiB · full output saved`. Checkpoint saves are otherwise
-quiet: partial coverage shows a warning; missing coverage on routine calls
-joins the compact result line, while file cards keep their warning. Expansion adds the
-call's `Checkpoint rc-ID` reference. Checkpoint calls show one compact result;
-expansion opens the labeled rows. Standalone previews stay visible when the next call starts.
+`Ctrl+O` expands every call of the latest finished turn into its full card:
+the full command and exact output, numbered source for Read, all diff hunks,
+and `exit N · duration` for commands. Stdout uses `CODE_TEXT`, successful
+stderr `MUTED`, and stream labels `DIM` when both streams exist. An expanded
+image Read shows an `Opened image` fact with dimensions and bytes; Web and
+Browser keep their raw results. Expansion adds a call's `Checkpoint rc-ID`
+reference. The last card of that turn with hidden content carries a
+` Ctrl+O ` keycap with `expand` in `DIM` at the right of the row reporting it;
+expanded, the turn's first card names `collapse` on its title. Tool cards keep the result reported when the call returned;
+`/terminal` shows the live process list.
 
-Two or more adjacent `read`, `bash`, `process`, `web` and `browser` calls share a
-Work chapter when their normalized `work` labels and execution turn match. A
-single eligible call keeps its normal compact card and full expansion. Skill reads,
-assistant narration and other tools break the chapter. Missing or blank labels
-display as **Activity**, including in older sessions. The displayed label
-collapses whitespace to one line and is ellipsized to at most 60 terminal cells;
-the saved label stays unchanged and grouping compares the full normalized label
-before display truncation. The chapter has one status dot, a bold tool-accent
-label, a dim call count and an optional `BAD` failed count, without parentheses.
-An available `Ctrl+O expand` keycap sits at the right edge of the title row;
-the title and facts clip before it, and it never adds a row.
-An `⎿` summary counts successful work: unique files read, other reads,
-web calls, browser captures and actions, commands and
-process calls. It also counts running, background and stopped calls when
-needed, but omits failures already counted in the title. The facts row
-always remains, reading `0 completed` when it has no other fact. Each Bash
-or Process member keeps one compact `Name  description` row, falling back to
-the command. Running time and a failed `exit N` sit inline; process IDs,
-captured output and raw HTTP logs wait for Ctrl+O. A tool error can add two
-bounded message rows only for non-command members; Bash and Process failures
-stay on one member row. A former singleton can retain an outcome receipt at
-the chapter foot when needed to preserve compact height. A failed command uses
-its first nonempty stderr line or captured-output count instead of repeating
-the exit status already shown on its member. Other exceptional calls
-keep a primary row and bounded errors when useful. Ordinary Read, Web and
-Browser calls share one activity row at the bottom. It names the latest
-call without dedicated error detail, with a two-space gap after the name and
-freezes its timer when done. Failed calls stay in their exception rows and do
-not repeat in activity. Stopped and background states remain named. A
-compact chapter never loses height, including when a new turn starts; it uses
-meaningful content or the retained activity receipt instead of empty internal
-padding. A second related call turns an eligible singleton into a chapter.
-Every Bash command keeps its one compact row after success, even in older
-turns. Full output remains available through latest-turn `Ctrl+O`.
-The summary does not add durations across calls. `Ctrl+O` shows each
-call's existing complete card inline for the latest finished turn, then restores
-the compact view; it adds no panel or separate shortcut.
+### Work chapters
+
+Two or more adjacent Read, Bash, Exec, Process, Web and Browser calls share a
+Work chapter when their normalized `work` labels and execution turn match.
+Skill reads, assistant text and other tools break the chapter; a single call
+keeps its normal card. A missing label displays as **Activity**; the label is
+collapsed to one line and ellipsized to 60 cells for display only.
+
+The title is a ` WORK ` badge, the label in bold `STRONG`, `N calls` in `DIM`
+and `· N failed` in `BAD`. The badge carries the chapter's state: `STRONG` on
+`BADGE_IDLE` when done, shimmering while running, red or amber on failure or
+stop. When the chapter carries the turn's ` Ctrl+O ` keycap, it sits at the
+title's right edge and the title clips before it.
+
+One tree runs from the title to the chapter's last row. The first row counts
+successful work: unique files read, other reads, web calls, screenshots,
+snapshots, browser actions, commands and process calls, plus running,
+background and stopped calls; it reads `0 completed` when it has nothing else.
+Each command keeps one row with its family-coloured name and description or
+command, with running time or a failed `exit N` inline. Other failed or
+unusual calls keep a row and bounded errors. The latest ordinary Read, Web or
+Browser call stays at the foot, with its time frozen when done. A chapter
+that replaced a single card keeps at least that card's height. Expanded, the
+title's tree closes on its facts, every call follows as its full card, and the
+foot row is dropped.
+
+### Diffs
 
 Update and existing-file Write show contextual diffs with three surrounding
-source lines, original coordinates on removals and resulting coordinates on
-additions and context. Context is dim and unshaded. Each changed row is tinted
-from its coordinate through the right edge; the first four cells stay on the
-terminal surface. Paired changed fragments alone use bold `BAD`/`GOOD` on the
-stronger removed/added surface. Unpaired code keeps its syntax colours on the
-row tint without whole-line bold. Adjacent removed/added runs pair by
-position. Wrapped code keeps an empty number gutter. Up to 14 logical diff
-rows remain compact; longer changes report a dim hidden fact such as
-`+1 hunk · 6 rows`. Expanded hunks are separated by a dim ellipsis under the
-sign column.
-Expansion reveals all retained hunks; collapse restores the preview. Empty
-creations, no-op edits, final newlines and line-ending conversions have
-explicit text. Failed file calls never display a success diff.
+lines: original coordinates on removals, resulting coordinates on additions
+and context. Rows run from column 2 to the edge; added and removed rows are
+tinted, context rows stay on the base in `CODE_TEXT`. Line numbers are `DIM`,
+marks `GOOD` `+` and `BAD` `−`. Paired changed fragments alone use bold
+`GOOD`/`BAD` on the stronger surface; other changed code keeps its syntax
+colours; fragments snap to whole words, and in markup to whole tags and
+entities. Wrapped code breaks at token boundaries, as in
+[Markdown](MARKDOWN.md) code cards, and keeps an empty number gutter.
+Collapsed, a context line keeps one row and a changed line two, cut with a
+`DIM` `…`; when the changed fragment would fall past them, both partner rows
+open with `…` at one shared start about 12 cells before it, so the change
+stays visible and aligned; a window's second row hangs two cells, as the
+window hides the indentation. A new file's preview keeps two rows per line.
+`Ctrl+O` shows every line complete. Up to 14 lines stay
+compact; longer changes show the first hunk, shorten long runs to
+`… N added lines` and report the rest as `+1 hunk · 6 rows`. Expanded hunks
+are separated by a `DIM` `⋮`. Empty creations, no-op edits, final newlines
+and line-ending conversions have explicit text; failed file calls never show a
+diff.
 
 Captured changes persist as local session events, outside provider messages
-and tool results. Replay uses those captured coordinates and content, without
-rereading the file. Old sessions show tinted replacement snippets without
-inventing file coordinates; writes with unavailable previous text use a neutral content
-preview. Size and alignment limits also use this fallback without affecting
-the file operation. See [Tools](../usage/TOOLS.md) for the execution boundary.
+and tool results, so replay never rereads the file. Older sessions show tinted
+replacement snippets without file coordinates; writes without the previous
+text, and changes past the size or alignment limits, use a neutral content
+preview. See [Tools](../usage/TOOLS.md) for the execution boundary.
 
-`Ctrl+O` expands or collapses every call in the latest finished execution turn.
-Opening and closing preserve the reading position; following the tail stays at
-the tail. It is ignored while a turn runs, and a new accepted prompt resets the old expansion.
-No tool title opens details individually. See [Composer and controls](COMPOSER.md)
-for the complete interaction map and [Tools](../usage/TOOLS.md) for tool behavior.
+## Panels
 
-## Panels and feedback
+Panels open below the composer in place of the footer. The title rides the
+composer's bottom rule as `Parent › Title · context`: parent and context
+`MUTED`, title bold `STRONG`, an aside such as `3 of 12 models` on the right.
+Typed input stays in the composer, whose top rule names the field.
 
-Commands, selectors, information, and process views share the user surface.
-At 12 columns or wider, content has two-cell side margins. Headers put the
-title in bold `STRONG` with muted context and aside; a `SCANNER_REST` rule or
-section tabs with an `ACCENT` underline sit below. Search, key and number
-inputs, and process output, use `CODE_SURFACE` insets. The selected row uses a
-lighter surface and an accent `›` marker; current values carry a green `●`.
-Column headers and command groups use `TOOL_DIM`. Key hints are keycaps on
-`SELECTED_SURFACE`, and long lists show a `┃` thumb on a `│` track. Delete
-and discard confirmations replace the key hints in red and turn the target
-name red until confirmed or canceled.
+Option rows put `›` in `ACCENT` at column 0 on the selected row, which takes
+`SELECTED_SURFACE` across the whole row. Names are `STRONG` at column 2 with
+matched characters in bold `ACCENT`; a `MUTED` fact column follows at the
+widest name plus two, at most three fifths of the width. Badges and ages end
+on the right; the current item carries a ` current ` chip in `LIT` on
+`BADGE_IDLE`. Group headings are `DIM`. A `┃` thumb in `MUTED` on a `│` track
+in `FAINT` takes the last column when the list overflows.
 
-Notices follow their lifetime. A result is a line on the terminal background
-with no icon and both subject and detail in `MUTED`;
-a change reads `Subject old → new · scope` with the new value
-strong. Warnings and errors are banners on the user surface with a `▌`
-stripe and subject in `WARNING` or `BAD`; an error's cause after a colon
-keeps `BAD`, while trailing context stays muted. Their next step is a keycap
-at the right. Progress has no row of its own: it rides the composer's upper
-rule, which carries the activity scanner (`▰` lit, `▱` resting), muted
-elapsed time while a turn runs, and the progress subject in `STRONG`, or
-`WARNING` with a countdown while a request waits to retry. Without progress,
-the rule names the current turn phase; `Stopping` takes priority when cancellation
-is requested. Queue previews appear above notices and the
-composer. The footer stays muted, including below an open panel; its context
-meter draws filled `━` cells in `SCANNER_LIT` on a `─` track in
-`SCANNER_REST`, and both meter and share turn `WARNING` near auto-compaction.
+Tabs show names in `MUTED`, the active one bold `STRONG` over an `ACCENT` `━`
+on a `FAINT` divider, with an optional mode word on the right. Process output
+sits on `CODE_SURFACE` from column 2 to the edge.
+
+Keycaps are ` key ` in `STRONG` on `SELECTED_SURFACE` with the label in
+`MUTED`, three cells apart. A confirmation replaces the keys with its question
+in `BAD`, and the marked row turns `BAD` until confirmed or cancelled.
+
+## Reading back and exit
+
+While you read older output, the gap row above the dock shows
+`↓ N rows below`, with `· new output` in `LIT` once output arrived after you
+scrolled away; the arrow is `ACCENT` then, `DIM` otherwise. A keycap
+`Esc back to bottom` ends two cells from the edge, or `Alt+End` while a panel
+or a draft edit holds Esc; it drops first when narrow. While a resize reflows
+the conversation, the gap row may show `Reflowing conversation…`.
+
+After the alternate screen closes, the normal screen keeps the terminal's own
+colours. The exit summary uses only ANSI magenta for `>_`, bold for `jecode`,
+SGR dim for the facts and the default foreground for the resume command; see
+[Scrolling and resize](RESIZE.md#entering-and-leaving).

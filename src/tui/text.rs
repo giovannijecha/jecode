@@ -131,6 +131,10 @@ pub fn clip(text: &str, columns: usize) -> String {
 pub fn cells(value: &str) -> usize {
     glyphs(value).map(|glyph| glyph.cells).sum()
 }
+/// `1 call`, `3 calls`: a count with its regular plural.
+pub fn counted(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
 pub fn ellipsize(value: &str, columns: usize) -> String {
     if cells(value) <= columns {
         return value.into();

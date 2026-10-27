@@ -5,7 +5,7 @@ use crate::tui::{
     cards,
     line::Line,
     prose, text,
-    theme::{STRONG, USER_SURFACE},
+    theme::{ACCENT, BAD, BADGE_IDLE, BODY, LIT, STRONG, USER_SURFACE},
 };
 
 #[cfg(test)]
@@ -121,6 +121,9 @@ pub(in crate::tui) fn tool_card(
         }
     };
     let mut detail = if tool.presentation.expanded {
+        // Expanded, the title's tree closes on its facts; each full card
+        // below carries its own.
+        cards::hang(&mut chapter.rows, true);
         let rows = cards::card(tool, columns, false).rows;
         if first {
             chapter.rows.push(Line::default());
@@ -159,12 +162,64 @@ pub(in crate::tui) fn tool_card(
                     .into_iter()
                     .take(singleton.saturating_sub(chapter_height)),
             );
-        }
-        if let Some(activity) = activity {
-            chapter.rows.push(activity);
+            // Expanded chapters skip it: every call shows as its full card.
+            chapter.rows.extend(activity);
         }
     }
+    // Collapsed, one tree runs from the WORK title through the members and
+    // closes on the chapter's last row.
+    if !tool.presentation.expanded {
+        let titled = usize::from(first).min(chapter.rows.len());
+        cards::hang(&mut chapter.rows[titled..], last);
+    }
     (!chapter.rows.is_empty()).then_some(chapter)
+}
+
+/// The sent request: `› ` on the full-row user surface between two padding
+/// rows, the text hanging at column 2 and attachment labels drawn as chips.
+fn request(value: &str, columns: usize) -> Vec<Line> {
+    let mut line = chips(&text::clean(value)).at_source(0);
+    line.background = Some(USER_SURFACE);
+    let pad = || Line {
+        background: Some(USER_SURFACE),
+        ..Line::default()
+    };
+    let mut lines = vec![pad()];
+    lines.extend(
+        line.wrap(columns.saturating_sub(4), true)
+            .into_iter()
+            .enumerate()
+            .map(|(index, line)| line.indent(if index == 0 { "› " } else { "  " }, ACCENT.bold())),
+    );
+    lines.push(pad());
+    lines
+}
+
+/// `[1# Image]` and `[2# File: wake.log]` become ` 1 Image ` and ` 2 wake.log `
+/// in LIT on the quiet badge surface; inner spaces never break.
+fn chips(value: &str) -> Line {
+    let mut line = Line::default();
+    let mut rest = value;
+    while let Some(start) = rest.find('[') {
+        let tail = &rest[start + 1..];
+        let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+        let label = tail[digits..]
+            .strip_prefix("# ")
+            .and_then(|label| label.find(']').map(|end| &label[..end]))
+            .filter(|label| digits > 0 && !label.is_empty());
+        let Some(label) = label else {
+            line.push(&rest[..start + 1], STRONG);
+            rest = tail;
+            continue;
+        };
+        line.push(&rest[..start], STRONG);
+        let name = label.strip_prefix("File: ").unwrap_or(label);
+        let chip = format!(" {} {name} ", &tail[..digits]).replace(' ', "\u{a0}");
+        line.push_on(&chip, LIT, BADGE_IDLE);
+        rest = &tail[digits + 2 + label.len() + 1..];
+    }
+    line.push(rest, STRONG);
+    line
 }
 
 impl Rows {
@@ -189,28 +244,21 @@ impl Rows {
             Item::Text {
                 kind: Kind::User,
                 text,
-            } => {
-                let mut line = Line::new(&text::clean(text), STRONG).at_source(0);
-                line.background = Some(USER_SURFACE);
-                let mut lines = vec![Line {
-                    background: Some(USER_SURFACE),
-                    ..Line::default()
-                }];
-                lines.extend(
-                    line.wrap(columns.saturating_sub(4), true)
-                        .into_iter()
-                        .map(|line| line.indent("  ", STRONG)),
-                );
-                lines.push(Line {
-                    background: Some(USER_SURFACE),
-                    ..Line::default()
-                });
-                lines
-            }
+            } => request(text, columns),
             Item::Text {
                 kind: Kind::Assistant,
                 text,
             } => prose::render(text, columns),
+            Item::Text {
+                kind: Kind::Error,
+                text,
+            } => Line::new(&text::clean(text), BODY)
+                .at_source(0)
+                .wrap(columns.saturating_sub(2), true)
+                .into_iter()
+                .enumerate()
+                .map(|(index, line)| line.indent(if index == 0 { "✕ " } else { "  " }, BAD.bold()))
+                .collect(),
             Item::Local { .. } | Item::Text { .. } => Vec::new(),
             Item::Tool { .. } => {
                 tool_card(items, index, columns, keycap).map_or_else(Vec::new, |card| card.rows)

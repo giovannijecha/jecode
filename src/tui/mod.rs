@@ -14,7 +14,6 @@ mod draft_menu;
 mod drafts;
 mod editor;
 mod feedback;
-mod hint;
 mod information;
 mod input;
 mod inspection;
@@ -23,11 +22,13 @@ mod key_settings;
 mod keys;
 mod line;
 mod markdown;
+mod motion;
 mod persistence;
 mod poll;
 mod processes;
 mod prose;
 mod providers;
+mod quit;
 mod recovery;
 mod render;
 mod resize;
@@ -65,6 +66,7 @@ pub(crate) struct StartupNotice {
 }
 
 struct App {
+    started: Instant,
     agent: Option<Agent>,
     worker: Option<Worker>,
     submission: Option<recovery::Submission>,
@@ -113,6 +115,7 @@ impl App {
         };
         let persistence = agent.sessions();
         let mut app = Self {
+            started: Instant::now(),
             archive: agent.archive(),
             process_observer: agent.processes(),
             agent: Some(agent),
@@ -148,7 +151,7 @@ impl App {
             #[cfg(test)]
             clipboard_image: None,
         };
-        app.session_hint();
+        app.recent_sessions();
         app.refresh_context();
         app
     }
@@ -158,34 +161,6 @@ impl App {
     fn refresh_context(&mut self) {
         if let Some(agent) = &self.agent {
             self.state.context = Some(agent.context_status());
-            self.state.chatgpt_account = if agent.backend_id() == "openai" {
-                let identity = agent.services().account();
-                let account = crate::auth::openai::Store::new(
-                    self.config
-                        .store
-                        .path()
-                        .parent()
-                        .expect("configuration directory")
-                        .to_path_buf(),
-                )
-                .accounts()
-                .ok()
-                .and_then(|accounts| {
-                    accounts.into_iter().find(|account| {
-                        identity.as_deref()
-                            == Some(format!("{}:{}", account.client_id, account.subject).as_str())
-                    })
-                });
-                Some(match account {
-                    Some(account) if account.enabled => {
-                        state::ChatGptAccount::Active(account.email)
-                    }
-                    Some(_) => state::ChatGptAccount::SignedOut,
-                    None => state::ChatGptAccount::Unavailable,
-                })
-            } else {
-                None
-            };
         }
     }
 
@@ -258,13 +233,12 @@ pub(crate) fn launch(
         }
         dirty |= app.persist_input(false);
         if dirty || app.renderer.needs_draw(&app.state, Instant::now()) {
-            app.renderer.draw(
-                &app.state,
-                &app.archive.redactor.text(&app.archive.model),
-                &app.archive
-                    .redactor
-                    .text(&app.archive.directory.to_string_lossy()),
-            )?;
+            let model = app.archive.redactor.text(&app.archive.model);
+            let directory = app
+                .archive
+                .redactor
+                .text(&app.archive.directory.to_string_lossy());
+            app.renderer.draw(&app.state, &model, &directory)?;
             dirty = false;
         }
         match app.terminal.as_ref().unwrap().input.recv_timeout({
@@ -280,8 +254,7 @@ pub(crate) fn launch(
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
             } else if loading(&app.state) {
-                // The scanner advances every 120 ms.
-                delay.min(Duration::from_millis(120))
+                delay.min(motion::FRAME)
             } else if app.state.processes.is_some() {
                 delay.min(processes::REFRESH)
             } else {
@@ -423,6 +396,8 @@ mod measurement_tests;
 mod persistence_smoke;
 #[cfg(test)]
 mod persistence_tests;
+#[cfg(test)]
+mod recent_tests;
 #[cfg(test)]
 mod routing_tests;
 #[cfg(test)]

@@ -1,12 +1,10 @@
-use super::{
-    line::Line,
-    theme::{SCANNER_LIT, SCANNER_REST, TOOL_DIM},
-};
 use std::time::{Duration, Instant};
 
 pub struct Activity {
     pub started: Instant,
     pub tools: usize,
+    /// Tokens the turn's responses generated, as they reported them.
+    pub generated: usize,
     pub stopping: bool,
 }
 impl Activity {
@@ -14,35 +12,10 @@ impl Activity {
         Self {
             started: Instant::now(),
             tools: 0,
+            generated: 0,
             stopping: false,
         }
     }
-    /// The scanner and the whole turn's elapsed time, as the composer rule shows them.
-    pub fn line(&self, time: bool) -> Line {
-        Self::at(self.started.elapsed(), time)
-    }
-    fn at(elapsed: Duration, time: bool) -> Line {
-        let mut line = indicator((elapsed.as_millis() / 120) as usize);
-        if time {
-            line.push(&format!(" {}", duration(elapsed)), TOOL_DIM);
-        }
-        line
-    }
-}
-
-/// Two lit blocks sweeping across six cells and back.
-pub(super) fn indicator(frame: usize) -> Line {
-    const CELLS: usize = 6;
-    let lit = 4 - (frame % 8).abs_diff(4);
-    let mut line = Line::default();
-    for cell in 0..CELLS {
-        if cell == lit || cell == lit + 1 {
-            line.push("▰", SCANNER_LIT);
-        } else {
-            line.push("▱", SCANNER_REST);
-        }
-    }
-    line
 }
 
 pub fn duration(elapsed: Duration) -> String {
@@ -56,17 +29,26 @@ pub fn duration(elapsed: Duration) -> String {
     }
 }
 
+/// `↓ 640`, `↓ 1.2k`, `↓ 128k`, `↓ 1.4M`: generated tokens, absent at zero.
+pub fn generated(tokens: usize) -> Option<String> {
+    let value = match tokens {
+        0 => return None,
+        1..1000 => tokens.to_string(),
+        1000..100_000 => format!("{:.1}k", tokens as f64 / 1000.0),
+        100_000..1_000_000 => format!("{}k", tokens / 1000),
+        _ => format!("{:.1}M", tokens as f64 / 1_000_000.0),
+    };
+    Some(format!("↓ {value}"))
+}
+
+/// `1 tool`, `4 tools`, absent at zero.
+pub fn tools(count: usize) -> Option<String> {
+    (count > 0).then(|| format!("{count} {}", if count == 1 { "tool" } else { "tools" }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn scanner_sweeps_two_blocks_across_six_cells() {
-        let frames: Vec<_> = (0..8).map(|frame| indicator(frame).plain()).collect();
-        assert_eq!(frames[0], "▰▰▱▱▱▱");
-        assert_eq!(frames[4], "▱▱▱▱▰▰");
-        assert_eq!(frames[7], "▱▰▰▱▱▱");
-        assert_eq!(indicator(8).plain(), frames[0]);
-    }
 
     #[test]
     fn duration_moves_from_tenths_to_minutes_to_hours() {
@@ -74,10 +56,17 @@ mod tests {
         assert_eq!(duration(Duration::from_secs(64)), "1m 04s");
         assert_eq!(duration(Duration::from_secs(70 * 60 + 52)), "1h 10m");
         assert_eq!(duration(Duration::from_secs(3600 + 5 * 60)), "1h 05m");
-        assert_eq!(
-            Activity::at(Duration::from_millis(3200), true).plain(),
-            "▱▱▰▰▱▱ 3.2s"
-        );
-        assert_eq!(Activity::at(Duration::ZERO, false).plain(), "▰▰▱▱▱▱");
+    }
+
+    #[test]
+    fn generated_tokens_and_tools_read_compactly_and_hide_at_zero() {
+        assert_eq!(generated(0), None);
+        assert_eq!(generated(640).as_deref(), Some("↓ 640"));
+        assert_eq!(generated(1234).as_deref(), Some("↓ 1.2k"));
+        assert_eq!(generated(128_400).as_deref(), Some("↓ 128k"));
+        assert_eq!(generated(1_420_000).as_deref(), Some("↓ 1.4M"));
+        assert_eq!(tools(0), None);
+        assert_eq!(tools(1).as_deref(), Some("1 tool"));
+        assert_eq!(tools(4).as_deref(), Some("4 tools"));
     }
 }

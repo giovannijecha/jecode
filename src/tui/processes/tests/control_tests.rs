@@ -44,14 +44,18 @@ fn the_list_excludes_finished_commands_and_keeps_an_open_final_log() {
     });
     assert_eq!(logs(&app).id, id);
     assert!(stream(&app).text().ends_with("ready\nfinal\n"));
-    assert!(frame(&app).join("\n").contains("exited 7"));
+    assert!(frame(&app).iter().any(|line| line.trim() == "final"));
+    // The long command title takes the bottom rule first; with room the
+    // final status shows as its aside.
+    app.state.width = 160;
+    let rule = frame(&app)
+        .into_iter()
+        .find(|line| line.starts_with("─ Processes"));
+    assert!(rule.is_some_and(|rule| rule.contains(&format!("exited 7 · {id} ─"))));
+    app.state.width = 80;
     key(&mut app, ESC, 0);
     assert!(panel(&app).logs.is_none());
-    assert!(
-        frame(&app)
-            .join("\n")
-            .contains("No active background processes in this conversation")
-    );
+    assert!(frame(&app).join("\n").contains("Nothing running"));
     assert_eq!(fixture.finish().len(), 2);
 }
 

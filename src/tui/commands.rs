@@ -36,6 +36,7 @@ impl App {
         if prompt.is_empty() {
             return Ok(false);
         }
+        self.state.sent();
         if (self.worker.is_none() || self.state.suggestions.chosen().is_some_and(immediate))
             && self.state.suggestions.visible
             && prompt.attachments.is_empty()
@@ -79,7 +80,9 @@ impl App {
             return Ok(false);
         }
         self.capture_input();
+        // Automatic dispatch keeps unread errors; only a send clears them.
         self.state.clear_notice();
+        self.state.ending = None;
         self.state.information = None;
         if !command || init {
             let input = self.agent.as_ref().unwrap().input_checkpoint();

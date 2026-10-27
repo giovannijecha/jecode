@@ -108,7 +108,7 @@ fn block_transitions_have_one_neutral_separator_plus_their_own_panel_padding() {
 }
 
 #[test]
-fn panels_keep_their_padding_and_text_without_a_sent_prompt_marker() {
+fn requests_keep_their_padding_and_hang_their_text_after_the_request_marker() {
     let mut state = State::default();
     state.message(Kind::User, "one\ntwo\nthree");
     state.message(Kind::Assistant, "answer");
@@ -121,10 +121,11 @@ fn panels_keep_their_padding_and_text_without_a_sent_prompt_marker() {
     );
     assert_eq!(blocks[0][0].plain(), "");
     assert_eq!(blocks[0][4].plain(), "");
-    assert_eq!(blocks[0][1].plain(), "  one");
+    assert_eq!(blocks[0][1].plain(), "› one");
+    assert_eq!(blocks[0][2].plain(), "  two");
     assert_eq!(blocks[1][0], Line::default());
     assert_eq!(blocks[1][1].plain(), "● answer");
-    assert_eq!(blocks[1][1].spans[0].style, super::theme::BODY);
+    assert_eq!(blocks[1][1].spans[0].style, super::theme::ACCENT);
 }
 
 #[test]
@@ -151,17 +152,17 @@ fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
     state.finish_tool_turn();
     let rows = state.rows();
     assert!(rows[1].is_empty());
-    assert!(rows[0][0].plain().starts_with("● Bash(first)"));
+    assert!(rows[0][0].plain().starts_with(" BASH  first"));
     assert!(rows[0][1].plain().contains("five"));
-    assert!(!rows[0].iter().any(|row| row.plain() == "    one"));
+    assert!(!rows[0].iter().any(|row| row.plain() == "  │ one"));
     assert_eq!(rows[2][0], Line::default());
-    assert!(rows[2][1].plain().starts_with("● Bash(second)"));
+    assert!(rows[2][1].plain().starts_with(" BASH  second"));
     assert!(
         rows[2]
             .iter()
             .any(|row| row.plain().contains("second output"))
     );
-    assert!(!rows[2].iter().any(|row| row.plain() == "    second output"));
+    assert!(!rows[2].iter().any(|row| row.plain() == "  │ second output"));
     // Earlier results remain available when the completed turn expands.
     state.toggle_tools();
     let expanded = state
@@ -170,10 +171,10 @@ fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
         .flatten()
         .map(|row| row.plain())
         .collect::<Vec<_>>();
-    let first_output = expanded.iter().position(|row| row == "    one").unwrap();
+    let first_output = expanded.iter().position(|row| row == "  │ one").unwrap();
     assert_eq!(
         &expanded[first_output..first_output + 3],
-        &["    one", "    ", "    three"]
+        &["  │ one", "  │ ", "  │ three"]
     );
     let response = "\n\nanswer\n \n";
     state.event(Event::Streaming {
@@ -203,15 +204,15 @@ fn tool_output_keeps_actual_trailing_empty_rows_only_when_expanded() {
         state.close_tools();
         state.finish_tool_turn();
         let rows = state.rows();
-        assert!(rows[0][0].plain().starts_with("● Bash(fixture)"));
+        assert!(rows[0][0].plain().starts_with(" BASH  fixture"));
         assert!(rows[0][1].plain().contains("line"));
         assert!((2..=3).contains(&rows[0].len()));
-        assert!(!rows[0].iter().any(|row| row.plain() == "    "));
+        assert!(!rows[0].iter().any(|row| row.plain() == "  │ "));
         state.toggle_tools();
         let rows = state.rows();
         let output_row = rows[0]
             .iter()
-            .position(|row| row.plain() == "    line")
+            .position(|row| row.plain() == "  │ line")
             .unwrap();
         assert_eq!(
             rows[0].len(),
@@ -222,9 +223,9 @@ fn tool_output_keeps_actual_trailing_empty_rows_only_when_expanded() {
         assert!(
             rows[0][output_row + 1..output_row + count]
                 .iter()
-                .all(|row| row.plain() == "    ")
+                .all(|row| row.plain() == "  │ ")
         );
-        assert!(rows[0].last().unwrap().plain().contains("exit 0"));
+        assert!(rows[0].last().unwrap().plain().starts_with("  └ exit 0"));
         let Item::Tool {
             result: Some(result),
             ..
@@ -286,7 +287,7 @@ fn complete_code_panels_have_two_colored_frame_rows_and_preserve_blank_code_line
         }
     }
     let wrapped = markdown::render("```\nabcdefghijkl\n```", 8);
-    assert_eq!(wrapped.len(), 4); // Label, two visual code rows, closing row.
+    assert_eq!(wrapped.len(), 5); // Label, three hung code rows, closing row.
     assert!(
         wrapped
             .iter()
@@ -332,7 +333,11 @@ fn the_lower_area_stays_at_the_bottom_with_space_before_notices_activity_and_que
     assert_eq!(frame.live[frame.composer - 1], Line::default());
     assert!(frame.live[frame.composer].plain().contains("next prompt"));
     assert!(frame.live[frame.composer + 1].plain().contains("notice"));
-    assert!(frame.live[frame.composer + 2].plain().starts_with("─ ▰▰"));
+    assert!(
+        frame.live[frame.composer + 2]
+            .plain()
+            .starts_with("─ Drafts 1")
+    );
     state.items.clear();
     let empty = view::frame(&state, "model", "directory");
     assert_eq!(empty.composer, frame.composer);
@@ -359,13 +364,13 @@ fn a_short_viewport_drops_the_gap_before_displacing_input_or_all_visible_content
                 .plain()
                 .contains("draft")
         );
-        if height <= 4 {
+        // The dock is five rows: status, two rules, the draft and the footer.
+        if height <= 5 {
             assert_eq!(frame.composer, 0);
         } else {
-            assert_eq!(frame.composer, height - 4);
-            if height == 6 {
-                assert_eq!(frame.live[frame.composer - 1], Line::default());
-            }
+            // One spare row keeps the answer visible rather than a gap.
+            assert_eq!(frame.composer, height - 5);
+            assert!(frame.live[frame.composer - 1].plain().contains("answer"));
         }
     }
 }

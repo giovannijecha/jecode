@@ -1,5 +1,26 @@
 use super::*;
 
+/// A compact read's facts: after the badge and path when they join the
+/// title row, else the single row hung on `└` below it.
+fn facts(rows: &[Line]) -> Line {
+    let mut fact = match rows {
+        [title] => {
+            let mut fact = title.clone();
+            fact.spans.drain(..2);
+            fact
+        }
+        [_, fact] => {
+            assert!(fact.plain().starts_with("  └ "), "{}", fact.plain());
+            let mut fact = fact.clone();
+            fact.spans.remove(0);
+            fact
+        }
+        _ => panic!("{}", plain(rows)),
+    };
+    fact.origin = None;
+    fact
+}
+
 #[test]
 fn chapter_expansion_keeps_distinct_windows_read_targets() {
     let arguments = [
@@ -50,7 +71,10 @@ fn chapter_expansion_keeps_distinct_windows_read_targets() {
         .collect();
     assert_eq!(
         titles,
-        [r"● Read(C:\shared\mod.rs)", r"● Read(D:\shared\mod.rs)"]
+        [
+            r" READ  C:\shared\mod.rs  1 line",
+            r" READ  D:\shared\mod.rs  1 line"
+        ]
     );
 }
 
@@ -73,8 +97,11 @@ fn read_expansion_preserves_numbered_source_and_syntax() {
         80,
         &Presentation::default(),
     );
-    assert_eq!(compact.len(), 2);
-    assert!(plain(&compact).contains("2 lines · from line 41"));
+    assert_eq!(compact.len(), 1);
+    assert_eq!(
+        plain(&compact),
+        " READ  src/auth.rs  2 lines · from line 41"
+    );
     let rows = draw(
         "read",
         &arguments,
@@ -120,7 +147,7 @@ fn byte_reads_do_not_invent_line_numbers() {
         },
     );
     assert!(plain(&rows).contains("5 bytes · from byte 16"));
-    assert_eq!(rows.last().unwrap().plain(), "    hello");
+    assert_eq!(rows.last().unwrap().plain(), "  └ hello");
 }
 
 #[test]
@@ -154,17 +181,22 @@ fn compact_read_pagination_stays_on_one_quiet_row() {
                 columns,
                 &Presentation::default(),
             );
-            assert_eq!(rows.len(), 2, "{}", plain(&rows));
-            assert!(rows[1].plain().starts_with("  ⎿ 9 lines"));
-            assert!(rows[1].spans.iter().skip(1).all(|span| span.style == MUTED));
+            // Wide, the facts join the title; narrow, they hang on one row.
+            assert_eq!(
+                rows.len(),
+                if columns == 80 { 1 } else { 2 },
+                "{}",
+                plain(&rows)
+            );
+            let fact = facts(&rows);
+            assert!(fact.spans.iter().all(|span| span.style == MUTED));
             assert!(!plain(&rows).contains("More lines available"));
-            assert!(text::cells(&rows[1].plain()) <= columns);
-            if columns == 80 {
-                assert_eq!(rows[1].plain(), format!("  ⎿ {wide}"));
-            } else if wide.contains("more from") {
-                assert_eq!(rows[1].plain(), "  ⎿ 9 lines · more from 42");
+            assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
+            let fact = fact.plain();
+            if columns == 40 && wide.contains("more from") {
+                assert_eq!(fact.trim_start(), "9 lines · more from 42");
             } else {
-                assert_eq!(rows[1].plain(), format!("  ⎿ {wide}"));
+                assert_eq!(fact.trim_start(), wide);
             }
         }
     }
@@ -188,13 +220,13 @@ fn read_byte_and_partial_line_continuations_do_not_invent_totals() {
             columns,
             &Presentation::default(),
         );
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), if columns == 80 { 1 } else { 2 });
         assert_eq!(
-            rows[1].plain(),
+            facts(&rows).plain().trim_start(),
             if columns == 80 {
-                "  ⎿ 5 bytes · from byte 16 · more from 21"
+                "5 bytes · from byte 16 · more from 21"
             } else {
-                "  ⎿ 5 bytes · more from 21"
+                "5 bytes · more from 21"
             }
         );
         assert!(!plain(&rows).contains("of "));
@@ -216,13 +248,13 @@ fn read_byte_and_partial_line_continuations_do_not_invent_totals() {
             columns,
             &Presentation::default(),
         );
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), if columns == 80 { 1 } else { 2 });
         assert_eq!(
-            rows[1].plain(),
+            facts(&rows).plain().trim_start(),
             if columns == 80 {
-                "  ⎿ 1 line · from line 33 · continues at byte 123"
+                "1 line · from line 33 · continues at byte 123"
             } else {
-                "  ⎿ 1 line · continues at byte 123"
+                "1 line · continues at byte 123"
             }
         );
     }

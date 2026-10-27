@@ -1,32 +1,23 @@
+use super::{Status, badge};
 use crate::tui::{
     line::{Line, Origin},
     text,
-    theme::{ACCENT, BODY, EMPHASIS, KEYWORD, MUTED, Style, TOOL_ACCENT},
+    theme::{BODY, MUTED},
 };
 
-/// The tool name takes its family colour: reads blue, changes violet and
-/// commands blue-gray. The marker keeps the status.
-pub(super) fn family(name: &str) -> Style {
-    match name {
-        "Read" | "Skill" | "Web" | "Browser" => ACCENT,
-        "Update" | "Write" | "Checkpoint" => KEYWORD,
-        "Bash" | "Exec" | "Process" => TOOL_ACCENT,
-        _ => EMPHASIS,
-    }
-}
-
-/// File cards retain their original `● Name(path)` grammar. Routine calls use
-/// the rhythm renderer; file targets use BODY and their three-row preview.
+/// File cards open on ` NAME ` and the path in BODY, one space after the
+/// badge; wrapped rows hang under the path while it has room, else at
+/// column 2. Collapsed, the path keeps three rows.
 pub(super) fn rows(
     name: &str,
     target: &str,
-    marker: Style,
+    status: Status,
     columns: usize,
     expanded: bool,
 ) -> Vec<Line> {
-    let named = family(name).bold();
-    let head = format!("{name}(");
-    let hang = 2 + text::cells(&head);
+    let mut head = badge::badge(name, status);
+    head.push(" ", BODY);
+    let hang = text::cells(&head.plain());
     let indent = if columns.saturating_sub(hang) >= 24 {
         hang
     } else {
@@ -38,9 +29,8 @@ pub(super) fn rows(
     let parts: Vec<_> = target.split('\n').collect();
     let mut texts = Vec::new();
     for (index, part) in parts.iter().enumerate() {
-        let closing = if index + 1 == parts.len() { ")" } else { "" };
         let width = if texts.is_empty() { first } else { rest };
-        let mut wrapped: Vec<_> = words(&format!("{part}{closing}"), width, rest)
+        let mut wrapped: Vec<_> = words(part, width, rest)
             .into_iter()
             .map(|row| (row, false))
             .collect();
@@ -66,35 +56,23 @@ pub(super) fn rows(
         .map(|(index, (mut body, newline_after))| {
             let room = if index == 0 { first } else { rest };
             if cut && index + 1 == count {
-                if text::cells(&body) + 2 > room {
+                if text::cells(&body) + 1 > room {
                     body = Line::new(&body, BODY)
                         .shortened(room.saturating_sub(1))
                         .plain();
                     body.pop();
                 }
-                body.push_str("…)");
+                body.push('…');
             }
             let mut line = if index == 0 {
-                Line::new(&head, named)
+                head.clone()
             } else {
-                Line::default()
+                Line::new(&" ".repeat(indent), MUTED)
             };
-            match body.strip_suffix(')').filter(|_| index + 1 == count) {
-                Some(open) => {
-                    line.push(open, BODY);
-                    line.push(")", named);
-                }
-                None => line.push(&body, BODY),
-            }
+            line.push(&body, BODY);
             line.origin = Some(Origin { line: 0, character });
             character += body.chars().count() + usize::from(newline_after);
-            let gutter = if index == 0 {
-                "● ".to_owned()
-            } else {
-                " ".repeat(indent)
-            };
-            line.gutter(&gutter, if index == 0 { marker } else { MUTED })
-                .shortened(columns)
+            line.shortened(columns)
         })
         .collect()
 }

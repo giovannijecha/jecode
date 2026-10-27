@@ -2,6 +2,15 @@ use super::{App, Decoded, Feedback, Kind, selector::Purpose, terminal::Key};
 
 impl App {
     pub(super) fn input(&mut self, decoded: Decoded) -> Result<bool, String> {
+        // The quit question holds every key but reading the conversation.
+        if self.state.quitting.is_some() {
+            match &decoded {
+                Decoded::Key(key) if key.alt() && !key.ctrl() && matches!(key.code, 35 | 36) => {}
+                Decoded::Scroll(_) => {}
+                Decoded::Key(key) => return Ok(self.quit_key(*key)),
+                _ => return Ok(false),
+            }
+        }
         let decoded = match decoded {
             // Terminals deliver a file drop as a paste of its paths.
             // The process panel keeps typed and pasted text out of the hidden
@@ -87,8 +96,7 @@ impl App {
         }
         self.state.feedback_input(false);
         if key.ctrl() && key.code == 81 {
-            self.stop();
-            return Ok(true);
+            return Ok(self.quit());
         }
         if self.deletion_job.is_some() && (key.code == 27 || key.ctrl() && key.code == 67) {
             return Ok(false);
@@ -230,10 +238,9 @@ impl App {
                 self.edited();
             }
             38 | 40 if !key.ctrl() => {
-                self.state.editor.vertical(
-                    key.code == 38,
-                    super::view::input_width(self.state.width, self.state.suggestions.panel),
-                );
+                self.state
+                    .editor
+                    .vertical(key.code == 38, super::view::input_width(self.state.width));
                 self.edited();
             }
             _ => {
@@ -317,7 +324,7 @@ impl App {
             self.archive.redactor.text(text),
         ));
     }
-    fn stop(&mut self) {
+    pub(super) fn stop(&mut self) {
         if let Some(worker) = &self.worker {
             worker.cancel();
             if let Some(activity) = &mut self.state.activity {

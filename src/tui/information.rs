@@ -45,7 +45,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ),
             ("Ctrl+O", "Expand/collapse the last finished turn's tools"),
             ("Esc · Ctrl+C", "Stop work · close panel / clear draft"),
-            ("Ctrl+Q", "Cancel work and quit"),
+            ("Ctrl+Q", "Quit, asking first while work runs"),
         ],
     ),
     (

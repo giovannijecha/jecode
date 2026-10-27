@@ -97,11 +97,11 @@ fn controls_and_terminal_lifetime() {
     terminal.send(b"5");
     let providers = terminal.wait_after("Credentials", settings);
     terminal.send(b"2");
-    let api_keys = terminal.wait_after("OpenRouter key, kept", providers);
+    let api_keys = terminal.wait_after("Providers › API keys", providers);
     terminal.send(b"1");
     let key = terminal.wait_after("Enter  validate and save", api_keys);
     terminal.send(b"\x03");
-    let api_keys = terminal.wait_after("OpenRouter key, kept", key);
+    let api_keys = terminal.wait_after("Providers › API keys", key);
     terminal.send(b"\x03");
     let providers = terminal.wait_after("Credentials", api_keys);
     terminal.send(b"\x03");
@@ -116,11 +116,11 @@ fn controls_and_terminal_lifetime() {
     terminal.send(b"\r");
     terminal.wait_file("command-started");
     terminal.send(b"queued follow-up\rkept draft\x03");
-    terminal.wait("Interrupted");
+    terminal.wait("Stopped");
     terminal.send(b"\x03second prompt\r");
     terminal.wait("Native second answer");
     terminal.send(b"\x1b[<64;10;5M");
-    terminal.wait("Back to bottom");
+    terminal.wait("back to bottom");
     terminal.send(b"\x1b[5~\x1b[6~\x1b[A\x1b[B");
     terminal.send("\x1b[200~unsent β🙂\nkept\x1b[201~".as_bytes());
     terminal.send(b"\x11");
@@ -130,7 +130,7 @@ fn controls_and_terminal_lifetime() {
     let manage = terminal.wait("PTY_PHASE_MANAGE");
     terminal.wait_after("Ctrl+D  delete", manage);
     terminal.send(b"\x04");
-    let armed = terminal.wait_after("Delete this conversation?", manage);
+    let armed = terminal.wait_after("Delete this conversation and its files?", manage);
     terminal.send(b"\x03");
     let cancelled = terminal.wait_after("Ctrl+D  delete", armed);
     terminal.send(b"\x04\r");

@@ -1,5 +1,5 @@
 use super::{
-    line::{Line, Span},
+    line::Line,
     render::Renderer,
     resize::Resize,
     state::{self, State},
@@ -24,6 +24,9 @@ pub(super) struct Display {
     expanded_turn: Option<Range<usize>>,
     visible: Vec<Line>,
     working: bool,
+    output_revision: Option<u64>,
+    below: usize,
+    fresh: bool,
 }
 
 impl Display {
@@ -37,6 +40,9 @@ impl Display {
             expanded_turn: None,
             visible: vec![],
             working: true,
+            output_revision: None,
+            below: 0,
+            fresh: false,
         }
     }
 
@@ -127,7 +133,15 @@ impl Display {
             self.expanded_turn = None;
             self.visible.clear();
             self.generation = Some(state.generation);
+            self.output_revision = None;
         }
+        if self
+            .output_revision
+            .is_some_and(|previous| previous != state.output_revision)
+        {
+            self.viewport.new_output();
+        }
+        self.output_revision = Some(state.output_revision);
         let columns = state.width;
         let was_reading = !self.viewport.following();
         let mut chrome = view::chrome(state, model, directory, was_reading);
@@ -146,6 +160,7 @@ impl Display {
                         .view(&self.layout.blocks, self.layout.pending_blocks(), capacity);
                 self.visible = slice.lines;
                 reading = slice.reading;
+                (self.below, self.fresh) = (slice.below, slice.fresh);
             }
         }
         // Keep the current reading page during reflow. Layout runs between input
@@ -165,7 +180,12 @@ impl Display {
         if frame.composer >= 2 {
             let gap = &mut frame.live[frame.composer - 1];
             if reading || !self.viewport.following() {
-                *gap = back_to_bottom_line(columns, back_to_bottom_uses_alt_end(state));
+                *gap = view::reading_row(
+                    columns,
+                    self.below,
+                    self.fresh,
+                    back_to_bottom_uses_alt_end(state),
+                );
             } else if dragging || self.working {
                 *gap = Line::new(
                     &super::text::ellipsize("Reflowing conversation…", columns),
@@ -178,41 +198,7 @@ impl Display {
 }
 
 fn back_to_bottom_uses_alt_end(state: &State) -> bool {
-    state.queue.is_editing()
-        || state.history.is_browsing()
-        || state.selector.is_some()
-        || state.suggestions.panel
-        || state.information.is_some()
-}
-
-fn back_to_bottom_line(columns: usize, alt_end: bool) -> Line {
-    const ESC_LABELS: [&str; 4] = [
-        " ↓ Back to bottom · esc ",
-        " ↓ Bottom · esc ",
-        " ↓ esc ",
-        "↓",
-    ];
-    const ALT_END_LABELS: [&str; 4] = [
-        " ↓ Back to bottom · alt+end ",
-        " ↓ Bottom · alt+end ",
-        " ↓ alt+end ",
-        "↓",
-    ];
-    let labels = if alt_end { ALT_END_LABELS } else { ESC_LABELS };
-    let label = labels
-        .into_iter()
-        .find(|label| super::text::cells(label) <= columns)
-        .unwrap_or("");
-    let margin = (columns.saturating_sub(super::text::cells(label))) / 2;
-    let mut line = Line::new(&" ".repeat(margin), super::theme::BODY);
-    if !label.is_empty() {
-        line.spans.push(Span {
-            text: label.into(),
-            style: super::theme::ACCENT,
-            background: Some(super::theme::SELECTED_SURFACE),
-        });
-    }
-    line
+    state.queue.is_editing() || state.history.is_browsing() || super::view::panel_open(state)
 }
 
 #[cfg(test)]

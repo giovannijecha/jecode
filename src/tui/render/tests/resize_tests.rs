@@ -60,7 +60,7 @@ pub(super) fn owned_transcript(
     let mut result = Vec::new();
     for _ in 0..20_000 {
         let status: String = screen.rows[capacity].iter().collect();
-        if !status.contains("Back to bottom") && !status.contains("Bottom") {
+        if !status.starts_with("↓") {
             result.extend(
                 screen.rows[..capacity]
                     .iter()
@@ -229,7 +229,7 @@ fn hidden_local_commands_and_new_conversations_survive_later_reconstructions() {
     assert!(!text.contains("/model fixture/new"));
     assert!(!text.contains("Model set to fixture/new"));
     assert_eq!(text.matches("Current conversation.").count(), 1);
-    assert_eq!(text.matches("Jecode").count(), 1);
+    assert_eq!(text.matches(">_ jecode").count(), 1);
     assert!(!text.contains("Applying selection"));
     assert_eq!(state.items.len(), 2);
 }

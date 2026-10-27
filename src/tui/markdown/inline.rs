@@ -1,6 +1,6 @@
 use crate::tui::{
     line::Line,
-    theme::{BODY, EMPHASIS, INLINE_CODE, INLINE_CODE_SURFACE, LINK, LINK_DESTINATION, Style},
+    theme::{BODY, DIM, INLINE_CODE, INLINE_CODE_SURFACE, LINK, LINK_DESTINATION, STRONG, Style},
 };
 
 const BOLD: u8 = 1;
@@ -10,8 +10,8 @@ const LINKED: u8 = 8;
 const MAX_DEPTH: usize = 8;
 
 pub fn render(value: &str, base: Style) -> Line {
-    let mut parser = Parser::new(value, EMPHASIS);
-    parser.segment(value, base, u8::from(base == EMPHASIS.bold()) * BOLD, 0);
+    let mut parser = Parser::new(value, STRONG);
+    parser.segment(value, base, u8::from(base == STRONG.bold()) * BOLD, 0);
     parser.line
 }
 
@@ -89,8 +89,9 @@ impl Parser {
                 let label = &tail[1..label_end];
                 let destination = &tail[label_end + 2..destination_end];
                 self.segment(label, base, flags | LINKED, depth + 1);
+                // The host only; the full address stays in the source /copy reads.
                 self.line.push(" (", LINK_DESTINATION);
-                self.line.push(destination, LINK_DESTINATION);
+                self.line.push(host(destination), LINK_DESTINATION);
                 self.line.push(")", LINK_DESTINATION);
                 position = start + destination_end + 1;
                 continue;
@@ -285,13 +286,28 @@ fn inside_word(before: Option<char>, after: Option<char>) -> bool {
     before.is_some_and(char::is_alphanumeric) && after.is_some_and(char::is_alphanumeric)
 }
 
+/// `https://docs.rs/crate/x` → `docs.rs`; a relative or bare target stays whole.
+fn host(destination: &str) -> &str {
+    let Some((_, rest)) = destination.split_once("://") else {
+        return destination;
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..end];
+    authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host)
+}
+
 fn style(base: Style, flags: u8, strong: Style) -> Style {
     if flags == 0 {
         return base;
     }
-    // Links keep their colour; bold text takes the strong role; other marks inherit.
+    // Links keep their colour; struck text recedes to DIM; bold text takes the
+    // strong role; other marks inherit.
     let mut style = if flags & LINKED != 0 {
         LINK
+    } else if flags & DELETED != 0 {
+        DIM
     } else if flags & BOLD != 0 {
         strong
     } else {

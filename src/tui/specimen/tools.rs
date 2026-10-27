@@ -8,7 +8,7 @@ use crate::tui::{
     cards::{self, Presentation, Tool},
     line::Line,
     prose,
-    theme::{EMPHASIS, MUTED},
+    theme::{MUTED, STRONG},
 };
 
 mod states;
@@ -278,6 +278,10 @@ fn group(calls: &[Call], columns: usize, keycap: bool) -> Vec<Line> {
         .map(|(call, summary)| tool(call, summary))
         .collect();
     let mut rows = cards::chapter_header(&tools, columns, keycap).rows;
+    let expanded = tools.iter().any(|tool| tool.presentation.expanded);
+    if expanded {
+        cards::hang(&mut rows[1..], true);
+    }
     for tool in &tools {
         if tool.presentation.expanded {
             rows.push(Line::default());
@@ -286,10 +290,9 @@ fn group(calls: &[Call], columns: usize, keycap: bool) -> Vec<Line> {
             rows.extend(cards::chapter_exception(tool, columns));
         }
     }
-    if !tools.iter().any(|tool| tool.presentation.expanded)
-        && let Some(activity) = cards::chapter_activity(&tools, columns)
-    {
-        rows.push(activity);
+    if !expanded {
+        rows.extend(cards::chapter_activity(&tools, columns));
+        cards::hang(&mut rows[1..], true);
     }
     rows
 }
@@ -316,7 +319,7 @@ fn turn(rows: &mut Vec<(Line, usize)>, columns: usize) {
 
 fn heading(rows: &mut Vec<(Line, usize)>, title: &str) {
     rows.push((Line::default(), WIDE));
-    rows.push((Line::new(title, EMPHASIS.bold()), WIDE));
+    rows.push((Line::new(title, STRONG.bold()), WIDE));
     rows.push((Line::default(), WIDE));
 }
 
@@ -329,7 +332,7 @@ fn tools() {
         &format!("Tool cards  ·  one turn at {WIDE} columns"),
     );
     turn(&mut rows, WIDE);
-    heading(&mut rows, "Tool activity  ·  quiet pulse colour frames");
+    heading(&mut rows, "Tool activity  ·  running durations");
     for frame in 0..4 {
         let call = Call {
             name: "bash",

@@ -2,7 +2,7 @@ use super::{horizontal_rule, inline, list_item, opening_fence};
 use crate::tui::{
     line::{Line, Wrapped},
     text,
-    theme::{BODY, EMPHASIS, MUTED, Style},
+    theme::{BODY, FAINT, MUTED, STRONG, Style},
 };
 use std::collections::VecDeque;
 
@@ -11,6 +11,15 @@ enum Alignment {
     Left,
     Center,
     Right,
+}
+
+/// The box rules: above the header, after the header and every record but
+/// the last, and below the table.
+#[derive(Clone, Copy)]
+enum Border {
+    Top,
+    Between,
+    Bottom,
 }
 
 // Measure one source row per step, then lay out rows using the completed
@@ -26,7 +35,8 @@ pub(super) struct Table {
     stacked: bool,
     body_seen: bool,
     active: Option<Row>,
-    rule: bool,
+    opening: Option<Border>,
+    closing: Option<Border>,
     origin: usize,
     character: usize,
 }
@@ -74,7 +84,8 @@ impl Table {
             stacked: false,
             body_seen: false,
             active: None,
-            rule: false,
+            opening: None,
+            closing: None,
             origin,
             character: 0,
         })
@@ -85,7 +96,7 @@ impl Table {
     }
 
     pub fn step(&mut self, value: &str) -> Option<Vec<Line>> {
-        if self.active.is_some() || self.rule {
+        if self.active.is_some() || self.opening.is_some() || self.closing.is_some() {
             return Some(self.take_rows());
         }
         if self.end.is_none() {
@@ -103,10 +114,11 @@ impl Table {
             self.end = Some(self.scan.min(value.len()));
             self.fit();
             if !self.stacked {
-                self.active = Some(self.start_row(&self.headers, EMPHASIS.bold(), false));
-                self.rule = true;
+                self.active = Some(self.start_row(&self.headers, STRONG.bold(), false));
+                self.opening = Some(Border::Top);
+                self.closing = Some(self.after());
             } else if self.emission >= self.end() {
-                self.active = Some(self.start_row(&self.headers, EMPHASIS.bold(), false));
+                self.active = Some(self.start_row(&self.headers, STRONG.bold(), false));
             }
             return Some(self.take_rows());
         }
@@ -119,8 +131,40 @@ impl Table {
         self.emission = next;
         let row = self.row(source);
         self.active = Some(self.start_row(&row, BODY, true));
+        if !self.stacked {
+            self.closing = Some(self.after());
+        }
         self.body_seen = true;
         Some(self.take_rows())
+    }
+
+    /// The rule after the row just started: another record follows, or the
+    /// table ends.
+    fn after(&self) -> Border {
+        if self.emission >= self.end() {
+            Border::Bottom
+        } else {
+            Border::Between
+        }
+    }
+
+    fn border(&self, border: Border) -> Line {
+        let (left, middle, right) = match border {
+            Border::Top => ("┌", "┬", "┐"),
+            Border::Between => ("├", "┼", "┤"),
+            Border::Bottom => ("└", "┴", "┘"),
+        };
+        let mut line = Line::new(left, FAINT);
+        for (index, width) in self.widths.iter().enumerate() {
+            if index > 0 {
+                line.push(middle, FAINT);
+            }
+            line.push(&"─".repeat(width + 2), FAINT);
+        }
+        line.push(right, FAINT);
+        let mut line = line.at_source(self.origin);
+        line.origin.as_mut().unwrap().character = self.character;
+        line
     }
 
     fn take_rows(&mut self) -> Vec<Line> {
@@ -128,12 +172,16 @@ impl Table {
         // visual output before yielding to the transcript's pass allowance.
         let mut output = Vec::new();
         while output.len() < 32 {
+            if let Some(border) = self.opening.take() {
+                output.push(self.border(border));
+                continue;
+            }
             if let Some(active) = &mut self.active {
                 if let Some(line) = active.next(&self.widths, &self.alignments) {
                     let count = line
                         .plain()
                         .chars()
-                        .filter(|ch| !ch.is_whitespace())
+                        .filter(|ch| !ch.is_whitespace() && *ch != '│')
                         .count();
                     let mut line = line.at_source(self.origin);
                     line.origin.as_mut().unwrap().character = self.character;
@@ -143,18 +191,8 @@ impl Table {
                 }
                 self.active = None;
             }
-            if self.rule {
-                self.rule = false;
-                let mut rule = Line::default();
-                for (index, width) in self.widths.iter().enumerate() {
-                    if index > 0 {
-                        rule.push("  ", MUTED);
-                    }
-                    rule.push(&"─".repeat(*width), MUTED);
-                }
-                let mut rule = rule.at_source(self.origin);
-                rule.origin.as_mut().unwrap().character = self.character;
-                output.push(rule);
+            if let Some(border) = self.closing.take() {
+                output.push(self.border(border));
             }
             break;
         }
@@ -173,9 +211,8 @@ impl Table {
     }
 
     fn fit(&mut self) {
-        let available = self
-            .columns
-            .saturating_sub(self.widths.len().saturating_sub(1) * 2);
+        // `│ ` before every cell, ` │` after the last: three cells each, plus one.
+        let available = self.columns.saturating_sub(self.widths.len() * 3 + 1);
         let minimum: Vec<_> = self
             .widths
             .iter()
@@ -232,7 +269,7 @@ impl Table {
                     .map(|(cell, header)| {
                         let mut line = Line::default();
                         if labeled {
-                            append(&mut line, &inline::render(header, EMPHASIS.bold()));
+                            append(&mut line, &inline::render(header, STRONG.bold()));
                             line.push(": ", MUTED);
                         }
                         append(&mut line, &inline::render(cell, style));
@@ -269,12 +306,11 @@ impl Row {
                 None
             }
             Self::Columns(cells) => {
-                let mut line = Line::default();
+                let mut line = Line::new("│ ", FAINT);
                 let mut visible = false;
-                let last = cells.len() - 1;
                 for (index, column) in cells.iter_mut().enumerate() {
                     if index > 0 {
-                        line.push("  ", BODY);
+                        line.push(" │ ", FAINT);
                     }
                     let cell = column.next();
                     visible |= cell.is_some();
@@ -287,10 +323,9 @@ impl Row {
                     };
                     line.push(&" ".repeat(left), BODY);
                     append(&mut line, &cell);
-                    if index < last {
-                        line.push(&" ".repeat(padding - left), BODY);
-                    }
+                    line.push(&" ".repeat(padding - left), BODY);
                 }
+                line.push(" │", FAINT);
                 visible.then_some(line)
             }
         }

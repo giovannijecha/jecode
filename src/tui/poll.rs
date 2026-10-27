@@ -1,4 +1,4 @@
-use super::{App, Feedback, Kind, activity};
+use super::{App, Feedback, Kind, activity, feedback::Ending};
 use crate::{attachments::Prompt, backend::FailureReason, events::Event};
 use std::time::Instant;
 
@@ -39,17 +39,15 @@ impl App {
                         let served = agent
                             .charges()
                             .describe()
-                            .map(|served| format!(" · {}", agent.redact(&served)))
-                            .unwrap_or_default();
-                        self.state.notify(Feedback::result(
-                            Kind::Notice,
-                            format!(
-                                "Complete · {} · {} {}{served}",
-                                activity::duration(activity.started.elapsed()),
-                                activity.tools,
-                                if activity.tools == 1 { "tool" } else { "tools" }
-                            ),
-                        ));
+                            .map(|served| agent.redact(&served));
+                        let facts = [
+                            Some(activity::duration(activity.started.elapsed())),
+                            activity::tools(activity.tools),
+                            activity::generated(activity.generated),
+                            served,
+                        ];
+                        self.state
+                            .notify(Feedback::ending(Ending::Done, joined(facts)));
                     }
                 }
                 result => {
@@ -63,36 +61,40 @@ impl App {
                             backend_failure.as_ref(),
                             Some((FailureReason::RejectedKey, _))
                         );
-                    let mut message = if cancelled {
-                        "Interrupted".into()
-                    } else {
-                        agent.redact(
-                            backend_failure
-                                .as_ref()
-                                .map_or(error.as_str(), |(_, diagnostic)| diagnostic.as_str()),
-                        )
-                    };
-                    if returned {
-                        message.push_str(" · prompt restored");
-                        if let Some(error) = &self.save_error {
-                            message.push_str(&format!(" · {error}"));
-                        }
+                    if !cancelled {
+                        let diagnostic = backend_failure
+                            .as_ref()
+                            .map_or(error.as_str(), |(_, diagnostic)| diagnostic.as_str());
+                        self.state.diagnostic(&agent.redact(diagnostic));
                     }
                     let paused = self.state.queue.len();
-                    if paused > 0 {
-                        message.push_str(&format!(
-                            " · {paused} {} paused",
-                            if paused == 1 { "draft" } else { "drafts" }
-                        ));
-                    }
-                    self.state.status = "Turn interrupted".into();
-                    let mut notice = Feedback::result(
-                        if cancelled {
-                            Kind::Warning
+                    let facts = [
+                        activity
+                            .as_ref()
+                            .map(|activity| activity::duration(activity.started.elapsed())),
+                        if returned {
+                            Some("prompt restored".into())
+                        } else if cancelled {
+                            Some("your next message continues from here".into())
                         } else {
-                            Kind::Error
+                            None
                         },
-                        message,
+                        self.save_error.clone().filter(|_| returned),
+                        (paused > 0).then(|| {
+                            format!(
+                                "{paused} {} paused",
+                                if paused == 1 { "draft" } else { "drafts" }
+                            )
+                        }),
+                    ];
+                    self.state.status = "Turn interrupted".into();
+                    let mut notice = Feedback::ending(
+                        if cancelled {
+                            Ending::Stopped
+                        } else {
+                            Ending::Failed
+                        },
+                        joined(facts),
                     );
                     if key {
                         notice = notice.action("/settings", "update key");
@@ -128,7 +130,14 @@ impl App {
         dirty |= self.refresh_processes(false);
         Ok(dirty)
     }
+}
 
+/// The facts present, joined as the status row reads them.
+fn joined<const N: usize>(facts: [Option<String>; N]) -> String {
+    facts.into_iter().flatten().collect::<Vec<_>>().join(" · ")
+}
+
+impl App {
     fn next_event(&self) -> Option<Event> {
         self.worker.as_ref()?.events.try_recv().ok()
     }

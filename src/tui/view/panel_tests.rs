@@ -5,9 +5,9 @@ use crate::{
     effort::Effort,
     sessions::Summary,
     tui::{
-        selector::Selector,
+        selector::{Purpose, Selector},
         state::Kind,
-        theme::{CURSOR, SELECTED_SURFACE, USER_SURFACE},
+        theme::{BADGE_IDLE, CURSOR, LIT, USER_SURFACE},
     },
 };
 
@@ -33,8 +33,10 @@ fn sessions() -> Vec<Summary> {
         .collect()
 }
 
+mod field_tests;
+
 #[test]
-fn every_menu_has_the_same_padded_surface_without_composer_borders_or_draft_text() {
+fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
     let models: Vec<_> = (0..12).map(model).collect();
     let mut key = Selector::key();
     key.editor.insert("isolated-fixture-key");
@@ -60,14 +62,42 @@ fn every_menu_has_the_same_padded_surface_without_composer_borders_or_draft_text
         };
         state.editor.insert("kept private draft");
         let draft = state.editor.clone();
+        let menu = state.selector.as_ref().unwrap();
+        let form = matches!(menu.purpose, Purpose::Key);
+        let typed = menu.searchable || form;
+        let title = menu.title.clone();
         let frame = frame(&state, "fixture/model", "directory");
-        assert_eq!(frame.live.first().unwrap().plain().trim(), "");
-        assert_eq!(frame.live.last().unwrap().plain().trim(), "");
+        let rows: Vec<_> = frame.live.iter().map(Line::plain).collect();
+        // Status row, top rule, one input row, then the title's bottom rule.
+        assert_eq!(rows[0].trim(), "", "{rows:#?}");
+        assert!(rows[1].starts_with('─'), "{rows:#?}");
+        assert!(
+            rows[3].starts_with("─ ") && rows[3].contains(&title),
+            "{title}: {rows:#?}"
+        );
+        if typed {
+            // A typed field takes the input row and the caret.
+            assert_eq!(frame.cursor.map(|(row, _)| row), Some(2), "{rows:#?}");
+            assert!(!rows.iter().any(|row| row.contains("kept private draft")));
+        } else {
+            // Otherwise the draft stays visible, without a caret.
+            assert_eq!(frame.cursor, None);
+            assert_eq!(rows[2].trim_end(), "› kept private draft");
+        }
+        // The keys end the panel after one blank row; a form without body
+        // rows puts them right below its title.
+        let (keys, body) = rows.split_last().unwrap();
+        assert!(keys.starts_with("   ") && keys.contains("Esc"), "{rows:#?}");
+        if form {
+            assert_eq!(body.len(), 4, "{rows:#?}");
+        } else {
+            assert!(
+                body.len() > 5 && body.last().unwrap().is_empty(),
+                "{rows:#?}"
+            );
+        }
         assert!(frame.live.iter().all(|line| {
-            line.background == Some(USER_SURFACE)
-                && !line.plain().starts_with('─')
-                && !line.plain().contains("kept private draft")
-                && !line.plain().contains("isolated-fixture-key")
+            line.background.is_none() && !line.plain().contains("isolated-fixture-key")
         }));
         if let Some((row, column)) = frame.cursor {
             let line = &frame.live[row];
@@ -123,29 +153,31 @@ fn slash_arguments_keep_the_panel_and_escape_restores_the_draft_and_caret() {
     assert!(!state.suggestions.visible);
     let draft = state.editor.clone();
     let commands = frame(&state, "fixture/model", "directory");
+    let rows: Vec<_> = commands.live.iter().map(Line::plain).collect();
     assert!(
         commands
             .live
             .iter()
-            .all(|line| line.background == Some(USER_SURFACE))
+            .all(|line| line.background != Some(USER_SURFACE))
     );
+    // The draft keeps its caret in the composer, the panel's title below it
+    // and the command's description as a muted row.
+    let caret = Some((2, text::cells(&draft.text) + 2));
+    assert_eq!(commands.cursor, caret, "{rows:#?}");
+    assert_eq!(rows[2].trim_end(), "› /tmp clean");
+    assert!(rows[3].starts_with("─ Commands"), "{rows:#?}");
     assert!(
-        commands
-            .live
-            .iter()
-            .any(|line| line.plain().contains("/tmp clean"))
+        rows[4].starts_with("  ") && rows[4].contains("temporary"),
+        "{rows:#?}"
     );
-    assert!(
-        !commands
-            .live
-            .iter()
-            .any(|line| line.plain().contains("No matching command"))
-    );
+    assert!(!rows.iter().any(|row| row.contains("No matching command")));
     state.suggestions.dismiss();
     let normal = frame(&state, "fixture/model", "directory");
-    assert!(normal.live.iter().any(|line| line.plain().starts_with('─')));
+    let rows: Vec<_> = normal.live.iter().map(Line::plain).collect();
+    assert!(!rows.iter().any(|row| row.starts_with("─ Commands")));
+    assert!(rows.iter().any(|row| row.starts_with('─')));
     assert_eq!(state.editor, draft);
-    assert_eq!(normal.cursor, Some((1, text::cells(&draft.text) + 2)));
+    assert_eq!(normal.cursor, caret);
     state.suggestions.refresh(&state.editor.text);
     assert!(state.suggestions.panel);
 }
@@ -173,61 +205,6 @@ fn searchable_menus_keep_the_title_and_count_separate_from_the_query() {
 }
 
 #[test]
-fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_resize() {
-    let mut key = Selector::key();
-    key.editor.insert("fixture🙂key");
-    let mut search = Selector::sessions(&sessions(), "1234-56-0");
-    search.editor.insert("request");
-    search.refresh();
-    for menu in [
-        None,
-        Some(key),
-        Some(search),
-        Some(Selector::settings(
-            "fixture/model",
-            Effort::High,
-            80,
-            &crate::backend::openrouter::Routing::Auto,
-            std::path::Path::new("fixture/config.json"),
-        )),
-    ] {
-        let mut state = State {
-            selector: menu,
-            ..State::default()
-        };
-        state
-            .editor
-            .insert("/resume long🙂identifier\ncontinued arguments");
-        state.suggestions.refresh(&state.editor.text);
-        let draft = state.editor.clone();
-        for width in [2, 3, 6, 8, 12, 18, 40, 80] {
-            for height in [1, 2, 3, 4, 6, 12, 24] {
-                state.width = width;
-                state.height = height;
-                let frame = frame(&state, "fixture/model", "directory");
-                assert!(frame.live.len() <= height);
-                assert!(
-                    frame.live.iter().all(|line| {
-                        text::cells(&line.plain()) <= width
-                            && matches!(line.background, Some(USER_SURFACE | SELECTED_SURFACE))
-                    }),
-                    "{width}x{height}"
-                );
-                if state.selector.as_ref().is_none_or(|menu| {
-                    menu.searchable || matches!(menu.purpose, crate::tui::selector::Purpose::Key)
-                }) {
-                    let (row, column) = frame.cursor.unwrap();
-                    assert!(row < frame.live.len());
-                    assert!(column < width, "caret must fit {width}x{height}");
-                    assert!(frame.live[row].paint(width).contains(&CURSOR.to_string()));
-                }
-                assert_eq!(state.editor, draft);
-            }
-        }
-    }
-}
-
-#[test]
 fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
     let mut state = State {
         height: 6,
@@ -246,12 +223,17 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
     };
     let original = state.selector.as_ref().unwrap().selected;
     let frame = frame(&state, "fixture/model", "directory");
+    let rows: Vec<_> = frame.live.iter().map(Line::plain).collect();
+    // The notice takes the status row, above the panel's title.
+    assert_eq!(rows.len(), 6, "{rows:#?}");
+    assert_eq!(
+        rows[0].trim_end(),
+        " ✕  Could not save settings",
+        "{rows:#?}"
+    );
     assert!(
-        frame
-            .live
-            .iter()
-            .any(|line| line.plain() == "▌ Could not save settings"
-                && line.background == Some(USER_SURFACE))
+        rows[1].starts_with("─ Settings · saved defaults"),
+        "{rows:#?}"
     );
     assert!(frame.live.iter().any(focused));
     assert_eq!(state.selector.as_ref().unwrap().selected, original);
@@ -265,7 +247,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
 }
 
 #[test]
-fn routing_detail_keeps_figures_when_the_table_columns_do_not_fit() {
+fn narrow_routing_tables_drop_latency_then_speed_then_price_within_the_width() {
     use crate::backend::{Entry, Metrics, Routing};
 
     let current = Routing::Endpoint("alpha".into());
@@ -285,29 +267,41 @@ fn routing_detail_keeps_figures_when_the_table_columns_do_not_fit() {
     }];
     let menu = Selector::routing("provider/model", false, entries, &current, vec![]);
     let mut state = State {
-        width: 30,
         height: 30,
         selector: Some(menu),
         ..State::default()
     };
-    let narrow: String = frame(&state, "provider/model", "directory")
-        .live
-        .iter()
-        .map(|line| line.plain())
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(narrow.contains("$0.216/$0.72"), "{narrow}");
-    assert!(narrow.contains("48 tok/s"), "{narrow}");
-    assert!(narrow.contains("0.9 s"), "{narrow}");
-
-    state.width = 80;
-    let wide: String = frame(&state, "provider/model", "directory")
-        .live
-        .iter()
-        .map(|line| line.plain())
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert_eq!(wide.matches("$0.216/$0.72").count(), 1, "{wide}");
+    // Narrower tables drop latency, then speed, then price; the endpoint
+    // and its current chip stay.
+    for (width, price, speed, latency) in [
+        (80, true, true, true),
+        (52, true, true, false),
+        (44, true, false, false),
+        (30, false, false, false),
+    ] {
+        state.width = width;
+        let rows: Vec<_> = frame(&state, "provider/model", "directory")
+            .live
+            .iter()
+            .map(|line| line.plain())
+            .collect();
+        assert!(
+            rows.iter().all(|row| text::cells(row) <= width),
+            "{rows:#?}"
+        );
+        let alpha = rows.iter().find(|row| row.starts_with("› alpha")).unwrap();
+        assert!(alpha.trim_end().ends_with(" current"), "{alpha}");
+        let header = rows.iter().find(|row| row.starts_with("  Endpoint"));
+        let heading = |name: &str| header.is_some_and(|header| header.contains(name));
+        assert_eq!(heading("$/M in/out"), price, "{rows:#?}");
+        assert_eq!(alpha.contains("$0.216/$0.72"), price, "{alpha}");
+        assert_eq!(heading("tok/s"), speed, "{rows:#?}");
+        assert_eq!(alpha.contains(" 48 "), speed, "{alpha}");
+        assert_eq!(heading("latency"), latency, "{rows:#?}");
+        assert_eq!(alpha.contains("0.9 s"), latency, "{alpha}");
+        // The figures never repeat outside the table.
+        assert!(rows.iter().filter(|row| row.contains("$0.216")).count() <= 1);
+    }
 }
 
 #[test]
@@ -367,13 +361,25 @@ fn narrow_panels_keep_the_keyboard_controls_readable_instead_of_cutting_the_foot
     assert!(controls.contains(" Ctrl+D  delete"), "{controls}");
     assert!(controls.contains(" Esc  close"), "{controls}");
     assert!(!controls.contains('…'));
-    state.width = 60;
+    // The key form's keys end the dock whole, wrapping when they must.
     state.selector = Some(Selector::key());
-    let key = frame(&state, "fixture/model", "directory");
+    for width in [30, 40, 60] {
+        state.width = width;
+        let key = frame(&state, "fixture/model", "directory");
+        let rows: Vec<_> = key.live.iter().map(Line::plain).collect();
+        let title = key.cursor.unwrap().0 + 1;
+        assert!(rows[title].starts_with("─ Providers"), "{rows:#?}");
+        let controls = rows[title + 1..].concat();
+        assert!(controls.contains(" Enter  validate and save"), "{rows:#?}");
+        assert!(controls.contains(" Esc  back"), "{rows:#?}");
+        assert!(!controls.contains('…'), "{rows:#?}");
+    }
+    // With room, the bottom rule names where the key is stored.
     assert!(
-        key.live
+        frame(&state, "fixture/model", "directory")
+            .live
             .iter()
-            .any(|line| line.plain().contains("plain text") && !line.plain().contains('…'))
+            .any(|line| line.plain().ends_with(" ~/.jecode/config.json ─"))
     );
 }
 
@@ -397,11 +403,8 @@ fn options_align_facts_in_one_column_and_mark_the_current_choice() {
         ..State::default()
     };
     state.selector = Some(Selector::models(&models, false, "fixture/b"));
-    let rows: Vec<_> = frame(&state, "fixture/model", "directory")
-        .live
-        .iter()
-        .map(Line::plain)
-        .collect();
+    let live = frame(&state, "fixture/model", "directory").live;
+    let rows: Vec<_> = live.iter().map(Line::plain).collect();
     let options: Vec<_> = rows.iter().filter(|row| row.contains("fixture/")).collect();
     assert_eq!(options.len(), 3, "{rows:#?}");
     // Facts share one column after the widest name.
@@ -411,8 +414,22 @@ fn options_align_facts_in_one_column_and_mark_the_current_choice() {
         .map(|(row, description)| text::cells(&row[..row.find(description).unwrap()]))
         .collect();
     assert!(starts.iter().all(|start| *start == starts[0]), "{rows:#?}");
-    assert!(options[2].contains("fixture/b") && options[2].ends_with("● current"));
-    assert!(!rows.iter().any(|row| row.contains('✓')));
+    // Names start at column 2; the current choice ends with its chip two
+    // cells before the edge.
+    assert!(options.iter().all(|row| row.chars().nth(2) == Some('f')));
+    assert!(options[2].contains("fixture/b") && options[2].ends_with(" current   "));
+    let current = live
+        .iter()
+        .find(|line| line.plain().contains("fixture/b"))
+        .unwrap();
+    assert!(current.spans.iter().any(|span| {
+        span.text == " current " && span.style == LIT && span.background == Some(BADGE_IDLE)
+    }));
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains('✓') || row.contains('●'))
+    );
 
     // Too narrow for both: names stay whole and descriptions give way.
     state.width = 40;

@@ -13,9 +13,20 @@ fn draft() -> State {
     state
 }
 
+/// The composer's bottom rule, below the caret's row, carries the panel's
+/// title and count.
+fn title(frame: &Frame) -> String {
+    let (row, _) = frame.cursor.unwrap();
+    let rule = frame.live[row + 1].plain();
+    assert!(rule.starts_with("─ "), "{rule}");
+    rule
+}
+
 #[test]
 fn composer_position_tracks_the_caret_and_wrapping_without_changing_the_draft() {
     let mut state = draft();
+    // Fifteen rows give the draft its smallest window, five rows.
+    state.height = 15;
     let original = state.editor.text.clone();
     for (cursor, range, first) in [
         (0, "1–5 / 7", "one"),
@@ -24,10 +35,10 @@ fn composer_position_tracks_the_caret_and_wrapping_without_changing_the_draft() 
     ] {
         state.editor.cursor = cursor;
         let frame = composer_frame(&state, "model", "directory");
-        assert!(frame.live[0].plain().contains(range));
-        assert_eq!(frame.live[1].plain().trim_end(), format!("› {first}"));
+        assert!(frame.live[1].plain().contains(range));
+        assert_eq!(frame.live[2].plain().trim_end(), format!("› {first}"));
         let (row, column) = frame.cursor.unwrap();
-        assert!((1..=5).contains(&row));
+        assert!((2..=6).contains(&row));
         assert!(column < state.width);
         assert!(
             frame.live[row]
@@ -38,10 +49,11 @@ fn composer_position_tracks_the_caret_and_wrapping_without_changing_the_draft() 
     }
     state.editor.replace("x".repeat(14));
     state.width = 10;
-    assert_eq!(composer_frame(&state, "model", "dir").live.len(), 6);
+    // Status, two rules, three wrapped rows with the caret's own, and the footer.
+    assert_eq!(composer_frame(&state, "model", "dir").live.len(), 7);
     state.width = 80;
     let wide = composer_frame(&state, "model", "dir");
-    assert_eq!(wide.live[0].plain(), "─".repeat(80));
+    assert_eq!(wide.live[1].plain(), "─".repeat(80));
     assert_eq!(state.editor.text, "x".repeat(14));
 }
 
@@ -50,10 +62,10 @@ fn short_composers_keep_a_continuous_window_and_an_accurate_range() {
     let mut state = draft();
     state.height = 6;
     let frame = composer_frame(&state, "model", "directory");
+    // The status row keeps its place, so two draft rows remain.
     assert_eq!(frame.live.len(), 6);
-    assert!(frame.live[0].plain().contains("5–7 / 7"));
-    assert_eq!(frame.live[1].plain(), "› five");
-    assert_eq!(frame.live[2].plain(), "  six");
+    assert!(frame.live[1].plain().contains("6–7 / 7"));
+    assert_eq!(frame.live[2].plain(), "› six");
     assert_eq!(frame.live[3].plain(), "  seven ");
 }
 
@@ -75,7 +87,7 @@ fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results()
     for selected in [0, 9, 11] {
         state.selector.as_mut().unwrap().selected = selected;
         let frame = composer_frame(&state, "model", "directory");
-        assert!(frame.live[1].plain().contains("12 models"));
+        assert!(title(&frame).contains("12 models"));
         let focus = format!("› fixture/model-{selected} ");
         assert!(
             frame
@@ -96,7 +108,7 @@ fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results()
     menu.editor.insert("model-10");
     menu.refresh();
     let filtered = composer_frame(&state, "model", "directory");
-    assert!(filtered.live[1].plain().contains("1 of 12 models"));
+    assert!(title(&filtered).contains("1 of 12 models"));
     assert!(
         filtered
             .live
@@ -113,7 +125,7 @@ fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results()
             .iter()
             .any(|row| row.plain().contains("No matching option"))
     );
-    assert!(empty.live[1].plain().contains("0 of 12 models"));
+    assert!(title(&empty).contains("0 of 12 models"));
 }
 
 #[test]
@@ -128,15 +140,15 @@ fn queue_overflow_uses_its_first_preview_without_displacing_the_next_message() {
     let frame = composer_frame(&state, "model", "directory");
     assert_eq!(frame.live.len(), 11);
     assert!(frame.live[0].plain().starts_with("› queued request 0"));
-    assert!(frame.live[0].plain().ends_with("queued 1–7 / 8"));
-    assert!(frame.live[6].plain().starts_with("› queued request 6"));
+    assert!(frame.live[0].plain().ends_with("queued 1–6 / 8"));
+    assert!(frame.live[5].plain().starts_with("› queued request 5"));
     assert!(
         !frame
             .live
             .iter()
             .any(|row| row.plain().contains("more queued"))
     );
-    state.height = 5;
+    state.height = 6;
     let short = composer_frame(&state, "model", "directory");
     assert!(short.live[0].plain().starts_with("› queued request 0"));
     assert!(short.live[0].plain().ends_with("queued 1–1 / 8"));
@@ -157,7 +169,7 @@ fn command_panels_group_a_bare_slash_and_keep_a_multiline_caret() {
     state.suggestions.refresh(&state.editor.text);
     let commands = composer_frame(&state, "model", "directory");
     let count = format!("{} commands", crate::session::commands::COMMANDS.len());
-    assert!(commands.live[1].plain().contains(&count));
+    assert!(title(&commands).contains(&count));
     // A bare slash lists commands under their groups.
     assert!(
         commands
@@ -179,18 +191,70 @@ six"
     state.suggestions.refresh(&state.editor.text);
     let multiline = composer_frame(&state, "model", "directory");
     let (row, _) = multiline.cursor.unwrap();
-    assert!(multiline.live[row].plain().contains("six"));
+    // The caret stays on the draft's last row in the composer.
+    assert_eq!(multiline.live[row].plain().trim_end(), "  six");
     assert!(
         multiline.live[row]
             .spans
             .iter()
-            .any(|span| span.background == Some(crate::tui::theme::CODE_SURFACE))
+            .any(|span| span.style == CURSOR)
     );
-    // The typed command keeps its description below the field.
+    assert!(multiline.live[row - 6].plain().starts_with("› /tmp clean"));
+    assert!(title(&multiline).starts_with("─ Commands"));
+    // The typed command keeps its description below the composer.
+    let description = multiline
+        .live
+        .iter()
+        .position(|line| line.plain().contains("temporary"))
+        .unwrap();
+    assert_eq!(description, row + 2);
+}
+
+#[test]
+fn single_counts_read_singular_and_narrow_rows_keep_their_marker_before_a_chip() {
+    let models = vec![Model {
+        id: "fixture/only".into(),
+        name: "Only".into(),
+        prompt_price: None,
+        completion_price: None,
+        efforts: vec![Effort::Default],
+    }];
+    let mut state = State {
+        selector: Some(Selector::models(&models, false, "fixture/only")),
+        ..State::default()
+    };
+    let frame = composer_frame(&state, "model", "directory");
+    let rows: Vec<_> = frame.live.iter().map(Line::plain).collect();
     assert!(
-        multiline
+        rows.iter().any(|row| row.ends_with("1 model ─")),
+        "{rows:#?}"
+    );
+    assert!(
+        frame
             .live
             .iter()
-            .any(|row| row.plain().contains("temporary"))
+            .any(|line| line.plain().contains(" current "))
+    );
+    state.width = 8;
+    let narrow = composer_frame(&state, "model", "directory");
+    let focused = narrow.live.iter().find(|line| focused(line)).unwrap();
+    assert!(focused.plain().starts_with("› fix"), "{}", focused.plain());
+    assert!(!focused.plain().contains("current"));
+}
+
+#[test]
+fn the_placeholder_shortens_with_an_ellipsis_inside_the_input_width() {
+    let state = State {
+        width: 12,
+        ..State::default()
+    };
+    let frame = composer_frame(&state, "model", "directory");
+    let (row, _) = frame.cursor.unwrap();
+    assert_eq!(frame.live[row].plain(), "› Ask anyt…");
+    assert!(
+        frame
+            .live
+            .iter()
+            .all(|line| text::cells(&line.plain()) <= 12)
     );
 }

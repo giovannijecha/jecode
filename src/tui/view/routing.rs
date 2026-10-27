@@ -1,13 +1,13 @@
 //! Routing endpoints as a table: price, speed and latency columns with the
 //! best measured value of each in green. Narrow panels drop latency, then
-//! speed, then price; the detail strip keeps any figures the table drops.
+//! speed, then price.
 
 use super::panel;
 use crate::{
     backend::{Entry, Metrics, price},
     tui::{
         line::Line,
-        theme::{GOOD, MUTED, STRONG, TOOL_DIM},
+        theme::{DIM, GOOD, MUTED, STRONG},
     },
 };
 
@@ -91,27 +91,6 @@ impl Columns {
     pub fn measured(&self) -> bool {
         self.metrics() > 0
     }
-    /// Figures hidden by this width, for the focused choice's detail strip.
-    pub fn hidden(&self, entry: &Entry) -> String {
-        let Some(metrics) = entry.metrics.as_ref() else {
-            return String::new();
-        };
-        let mut parts = Vec::new();
-        if self.price == 0 {
-            parts.push(prices(metrics));
-        }
-        if !self.speed
-            && let Some(speed) = metrics.throughput
-        {
-            parts.push(format!("{} tok/s", speed.round()));
-        }
-        if !self.latency
-            && let Some(latency) = metrics.latency
-        {
-            parts.push(format!("{latency:.1} s"));
-        }
-        parts.join(" · ")
-    }
     fn metrics(&self) -> usize {
         [
             self.price,
@@ -144,41 +123,33 @@ impl Columns {
         line
     }
     pub fn header(&self) -> Line {
-        let mut line = panel::fit(Line::new("Endpoint", TOOL_DIM), self.name, None);
+        let mut line = panel::fit(Line::new("Endpoint", DIM), self.name, None);
         if self.metrics() > 0 {
-            line.push("  ", TOOL_DIM);
+            line.push("  ", DIM);
             let mut cells = self.cells([
                 (PRICE_HEADING.into(), false),
                 ("tok/s".into(), false),
                 ("latency".into(), false),
             ]);
             for span in &mut cells.spans {
-                span.style = TOOL_DIM;
+                span.style = DIM;
             }
             line = line.append(cells);
         }
         line
     }
     /// One endpoint row without the focus marker, `width` cells wide.
-    pub fn row(&self, entry: &Entry, current: bool, width: usize) -> Line {
+    pub fn row(&self, entry: &Entry, width: usize) -> Line {
         let style = if entry.problem.is_some() {
             MUTED
         } else {
             STRONG
         };
-        let mut name = Line::new(&entry.name, style);
+        let name = Line::new(&entry.name, style);
         let Some(metrics) = &entry.metrics else {
             // Auto and unlisted choices state their nature where the figures go.
-            let right = if current {
-                super::menus::badge(Some(&crate::tui::selector::Badge::Current))
-            } else {
-                Line::new(&entry.facts, MUTED)
-            };
-            return panel::spread(name, right, width, None);
+            return panel::spread(name, Line::new(&entry.facts, MUTED), width, None);
         };
-        if current {
-            name.push(" ●", GOOD);
-        }
         let mut line = panel::fit(name, self.name, None);
         if self.metrics() == 0 {
             return line;
