@@ -19,27 +19,9 @@ pub(super) fn execute(
     let size = crate::pty::size(arguments)?;
     let wait = processes::wait_argument(arguments)?.unwrap_or(Duration::ZERO);
     let output_limit = processes::output_limit(arguments)?;
-    let timeout = arguments
-        .get("timeout_seconds")
-        .map(|value| {
-            value
-                .as_usize()
-                .filter(|n| *n > 0)
-                .map(|n| Duration::from_secs(n as u64))
-                .ok_or("timeout_seconds must be a positive integer")
-        })
-        .transpose()?;
+    let timeout = shell::timeout_argument(arguments)?;
     let logs = context.outputs.create()?;
-    let streams = [
-        processes::Stream {
-            path: context.outputs.resolve(&logs.stdout_ref)?,
-            reference: logs.stdout_ref,
-        },
-        processes::Stream {
-            path: context.outputs.resolve(&logs.stderr_ref)?,
-            reference: logs.stderr_ref,
-        },
-    ];
+    let streams = shell::streams(context.outputs, [&logs.stdout_ref, &logs.stderr_ref])?;
     let (started, control) = match crate::pty::start(
         &command,
         size,

@@ -7,6 +7,8 @@ pub(super) fn transcript(raw: &str) -> String {
     const CSI: u8 = 2;
     const OSC: u8 = 3;
     const OSC_ESCAPE: u8 = 4;
+    const ESCAPE_INTERMEDIATE: u8 = 5;
+    const CSI_INTERMEDIATE: u8 = 6;
 
     let mut output = String::with_capacity(raw.len());
     let mut line = Vec::<char>::new();
@@ -25,7 +27,9 @@ pub(super) fn transcript(raw: &str) -> String {
                 '\r' => cursor = 0,
                 '\x08' => cursor = cursor.saturating_sub(1),
                 '\t' => {
-                    for _ in 0..4 {
+                    let prefix: String = line.iter().take(cursor).collect();
+                    let spaces = 8 - super::text::cells(&prefix) % 8;
+                    for _ in 0..spaces {
                         put(&mut line, &mut cursor, ' ');
                     }
                 }
@@ -41,6 +45,16 @@ pub(super) fn transcript(raw: &str) -> String {
                         CSI
                     }
                     ']' => OSC,
+                    ' '..='/' => ESCAPE_INTERMEDIATE,
+                    '\x1b' => ESCAPE,
+                    _ => GROUND,
+                };
+            }
+            ESCAPE_INTERMEDIATE => {
+                state = match character {
+                    ' '..='/' => ESCAPE_INTERMEDIATE,
+                    '0'..='~' => GROUND,
+                    '\x1b' => ESCAPE,
                     _ => GROUND,
                 };
             }
@@ -57,9 +71,23 @@ pub(super) fn transcript(raw: &str) -> String {
                         }
                     }
                     state = GROUND;
-                } else if csi.len() < 128 {
+                } else if ('\u{30}'..='\u{3f}').contains(&character) && csi.len() < 128 {
                     csi.push(character);
+                } else if ('\u{20}'..='\u{2f}').contains(&character) {
+                    state = CSI_INTERMEDIATE;
+                } else if character == '\x1b' {
+                    state = ESCAPE;
+                } else if !('\u{30}'..='\u{3f}').contains(&character) {
+                    state = GROUND;
                 }
+            }
+            CSI_INTERMEDIATE => {
+                state = match character {
+                    ' '..='/' => CSI_INTERMEDIATE,
+                    '@'..='~' => GROUND,
+                    '\x1b' => ESCAPE,
+                    _ => GROUND,
+                };
             }
             OSC => {
                 if character == '\x07' {
@@ -111,5 +139,26 @@ mod tests {
             "1".repeat(300)
         );
         assert_eq!(transcript(&raw), "beforemiddleend\n");
+    }
+
+    #[test]
+    fn escape_intermediates_consume_their_final_byte() {
+        assert_eq!(transcript("\x1b(Bplain\x1b)0\x1b#8end\n"), "plainend\n");
+        assert_eq!(transcript("\x1b(B\x1b[0m\x1b[?25l\x1b[1 qready"), "ready");
+    }
+
+    #[test]
+    fn tabs_use_eight_cell_stops_after_wide_and_combining_glyphs() {
+        assert_eq!(
+            transcript("a\tX\n界\tY\ne\u{301}\tZ\n"),
+            "a       X\n界      Y\ne\u{301}       Z\n"
+        );
+        assert_eq!(transcript("12345678\tX\n"), "12345678        X\n");
+    }
+
+    #[test]
+    fn controls_preserve_overwrites_and_hide_osc_payloads() {
+        let raw = "old\rnew\x1b[K\nAB\x08!\n\x1b]0;private\x1b\\visible\n";
+        assert_eq!(transcript(raw), "new\nA!\nvisible\n");
     }
 }

@@ -13,6 +13,10 @@ const WAIT: Duration = Duration::from_secs(10);
 #[path = "interactive_tests/validation.rs"]
 mod validation;
 
+#[cfg(windows)]
+#[path = "interactive_tests/windows.rs"]
+mod windows;
+
 fn fixture() -> &'static Path {
     static FIXTURE: OnceLock<(Directory, PathBuf)> = OnceLock::new();
     FIXTURE
@@ -421,7 +425,7 @@ fn native_terminal_resizes_and_interrupts_through_model_and_local_controls() {
     );
     let waiting = collect_until(&tools, &id, &mut output, "WAITING");
     assert_eq!(text(&waiting, "status"), "running");
-    let interrupted = action(&tools, &id, "interrupt", &[]);
+    let interrupted = action(&tools, &id, "write", &[("key", Value::string("Ctrl+C"))]);
     output.push_str(text(&interrupted, "stdout"));
     let ended = finish(&tools, &id, &mut output);
     assert_eq!(text(&ended, "status"), "exited");

@@ -39,7 +39,7 @@ pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> 
         if id.is_empty() || id.split_whitespace().count() != 1 {
             return Err("Usage: /terminal interrupt PROCESS_ID".into());
         }
-        observer.write_direct(id, &[3])?;
+        observer.interrupt_direct(id)?;
         format!("Interrupt sent to {id}.\n")
     } else if let Some(rest) = action(arguments, "resize") {
         let fields: Vec<_> = rest.split_whitespace().collect();

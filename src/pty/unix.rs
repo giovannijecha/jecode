@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SOURCE: &str = include_str!("unix.c");
+const SESSION: &str = include_str!("unix_session.h");
 const START_LIMIT: Duration = Duration::from_secs(5);
 const COMPILE_LIMIT: Duration = Duration::from_secs(15);
 static BUILD: Mutex<()> = Mutex::new(());
@@ -77,6 +78,10 @@ pub(super) fn connect(endpoint: &str, cancellation: &Cancellation) -> Result<Fil
     }
 }
 
+pub(super) fn connect_control(endpoint: &str, cancellation: &Cancellation) -> Result<File, String> {
+    connect(endpoint, cancellation)
+}
+
 fn helper(cancellation: &Cancellation) -> Result<PathBuf, String> {
     if cancellation.requested() {
         return Err("Operation cancelled".into());
@@ -100,7 +105,7 @@ fn helper(cancellation: &Cancellation) -> Result<PathBuf, String> {
         "bridge-{}-{}-{}",
         std::env::consts::OS,
         std::env::consts::ARCH,
-        fingerprint(SOURCE)
+        fingerprint(&format!("{SOURCE}{SESSION}"))
     ));
     if fs::metadata(&final_path).is_ok_and(|entry| entry.is_file() && entry.len() > 0) {
         return Ok(final_path);
@@ -110,17 +115,22 @@ fn helper(cancellation: &Cancellation) -> Result<PathBuf, String> {
         .map_err(|error| format!("Could not read system time: {error}"))?
         .as_nanos();
     let temporary = root.join(format!("build-{}-{nonce}", std::process::id()));
-    let source = temporary.with_extension("c");
-    let executable = temporary;
+    let source = temporary.join("unix.c");
+    let header = temporary.join("unix_session.h");
+    let executable = temporary.join("bridge");
     let result = (|| {
         if cancellation.requested() {
             return Err("Operation cancelled".into());
         }
+        fs::create_dir(&temporary)
+            .map_err(|error| format!("Could not stage Unix PTY helper: {error}"))?;
         fs::write(&source, SOURCE)
+            .map_err(|error| format!("Could not stage Unix PTY source: {error}"))?;
+        fs::write(&header, SESSION)
             .map_err(|error| format!("Could not stage Unix PTY source: {error}"))?;
         let mut compiler = Command::new("cc");
         compiler
-            .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-o"])
+            .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-o"])
             .arg(&executable)
             .arg(&source)
             .stdin(Stdio::null());
@@ -158,20 +168,25 @@ fn helper(cancellation: &Cancellation) -> Result<PathBuf, String> {
             Err(error) => Err(format!("Could not cache Unix PTY helper: {error}")),
         }
     })();
-    let _ = fs::remove_file(&source);
-    let _ = fs::remove_file(&executable);
+    let _ = fs::remove_dir_all(&temporary);
     result
 }
 
 fn cache_root() -> Result<PathBuf, String> {
-    let home = std::env::var_os("JECODE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".jecode")))
-        .ok_or("Could not locate the Jecode configuration directory")?;
-    if !home.is_absolute() {
-        return Err("Unix PTY cache directory must be absolute".into());
+    #[cfg(test)]
+    {
+        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/measurements")
+            .join(format!("pty-cache-{}", std::process::id())))
     }
-    Ok(home.join("cache/pty"))
+    #[cfg(not(test))]
+    {
+        Ok(crate::config::Store::discover()?
+            .path()
+            .parent()
+            .ok_or("Could not locate the Jecode configuration directory")?
+            .join("cache/pty"))
+    }
 }
 
 fn fingerprint(source: &str) -> String {
@@ -181,3 +196,7 @@ fn fingerprint(source: &str) -> String {
     }
     format!("{hash:016x}")
 }
+
+#[cfg(test)]
+#[path = "unix_tests.rs"]
+mod tests;

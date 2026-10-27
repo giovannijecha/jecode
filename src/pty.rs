@@ -3,6 +3,7 @@ use crate::{cancel::Cancellation, process};
 use std::fs::File;
 use std::io::Write;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -26,9 +27,17 @@ struct Message {
 
 pub(crate) struct Control {
     sender: Mutex<Option<mpsc::SyncSender<Message>>>,
+    controls: Mutex<Option<mpsc::SyncSender<Message>>>,
     failure: Arc<Mutex<Option<String>>>,
+    closed: Arc<AtomicBool>,
     size: Mutex<(u16, u16)>,
     _endpoint: Endpoint,
+}
+
+impl Drop for Control {
+    fn drop(&mut self) {
+        self.closed.store(true, Ordering::Relaxed);
+    }
 }
 
 struct Endpoint {
@@ -86,8 +95,18 @@ pub(crate) fn start(
     let mut bridge =
         platform::command(command, &endpoint.name, size.0, size.1, cancellation).map_err(before)?;
     let started = process::start_logged(&mut bridge, cancellation, spools)?;
-    let file = match platform::connect(&endpoint.name, cancellation) {
-        Ok(file) => file,
+    #[cfg(windows)]
+    let connection = platform::connect(&endpoint.name, started.bridge_pid(), cancellation)
+        .and_then(|input| {
+            platform::connect_control(&endpoint.name, started.bridge_pid(), cancellation)
+                .map(|control| (input, control))
+        });
+    #[cfg(unix)]
+    let connection = platform::connect(&endpoint.name, cancellation).and_then(|input| {
+        platform::connect_control(&endpoint.name, cancellation).map(|control| (input, control))
+    });
+    let files = match connection {
+        Ok(files) => files,
         Err(error) => {
             let stop = Cancellation::default();
             stop.cancel();
@@ -106,34 +125,49 @@ pub(crate) fn start(
         }
     };
     let (sender, receiver) = mpsc::sync_channel::<Message>(16);
+    let (controls, control_receiver) = mpsc::sync_channel::<Message>(16);
     let failure = Arc::new(Mutex::new(None));
+    let closed = Arc::new(AtomicBool::new(false));
     let failed = Arc::clone(&failure);
-    thread::spawn(move || writer(file, receiver, failed));
+    let shutdown = Arc::clone(&closed);
+    thread::spawn(move || writer(files.0, receiver, failed, shutdown));
+    let failed = Arc::clone(&failure);
+    let shutdown = Arc::clone(&closed);
+    thread::spawn(move || writer(files.1, control_receiver, failed, shutdown));
     Ok((
         started,
         Arc::new(Control {
             sender: Mutex::new(Some(sender)),
+            controls: Mutex::new(Some(controls)),
             failure,
+            closed,
             size: Mutex::new(size),
             _endpoint: endpoint,
         }),
     ))
 }
 
-fn writer(mut file: File, receiver: mpsc::Receiver<Message>, failure: Arc<Mutex<Option<String>>>) {
+fn writer(
+    mut file: File,
+    receiver: mpsc::Receiver<Message>,
+    failure: Arc<Mutex<Option<String>>>,
+    closed: Arc<AtomicBool>,
+) {
     for message in receiver {
-        let deadline = Instant::now() + DELIVERY;
+        if closed.load(Ordering::Relaxed) {
+            break;
+        }
         let mut bytes = message.bytes.as_slice();
         let result = (|| {
             while !bytes.is_empty() {
+                if closed.load(Ordering::Relaxed) {
+                    return Err("Terminal has ended".into());
+                }
                 match file.write(bytes) {
                     Ok(0) => return Err("Terminal control channel closed".to_string()),
                     Ok(n) => bytes = &bytes[n..],
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        if Instant::now() >= deadline {
-                            return Err("Terminal input delivery timed out".into());
-                        }
                         thread::sleep(Duration::from_millis(5));
                     }
                     Err(error) => return Err(format!("Terminal input failed: {error}")),
@@ -168,37 +202,49 @@ impl Control {
     }
 
     pub fn close(&self) {
+        self.closed.store(true, Ordering::Relaxed);
         self.sender.lock().unwrap().take();
+        self.controls.lock().unwrap().take();
     }
 
     fn enqueue(
         &self,
         bytes: Vec<u8>,
+        control: bool,
         receipt: Option<mpsc::SyncSender<Result<(), String>>>,
     ) -> Result<(), String> {
         if let Some(error) = &*self.failure.lock().unwrap() {
             return Err(error.clone());
         }
-        self.sender
-            .lock()
-            .unwrap()
-            .as_ref()
-            .ok_or("Terminal has ended")?
-            .try_send(Message { bytes, receipt })
-            .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => {
-                    "Terminal input queue is full; poll before sending more".into()
-                }
-                mpsc::TrySendError::Disconnected(_) => "Terminal control channel closed".into(),
-            })
+        (if control {
+            &self.controls
+        } else {
+            &self.sender
+        })
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or("Terminal has ended")?
+        .try_send(Message { bytes, receipt })
+        .map_err(|error| match error {
+            mpsc::TrySendError::Full(_) => {
+                "Terminal input queue is full; poll before sending more".into()
+            }
+            mpsc::TrySendError::Disconnected(_) => "Terminal control channel closed".into(),
+        })
     }
 
-    fn deliver(&self, bytes: Vec<u8>, cancellation: &Cancellation) -> Result<(), String> {
+    fn deliver(
+        &self,
+        bytes: Vec<u8>,
+        control: bool,
+        cancellation: &Cancellation,
+    ) -> Result<(), String> {
         if cancellation.requested() {
             return Err("Operation cancelled".into());
         }
         let (sender, receiver) = mpsc::sync_channel(1);
-        self.enqueue(bytes, Some(sender))?;
+        self.enqueue(bytes, control, Some(sender))?;
         let deadline = Instant::now() + DELIVERY;
         loop {
             match receiver.recv_timeout(Duration::from_millis(20)) {
@@ -227,31 +273,44 @@ impl Control {
     }
 
     pub fn write(&self, bytes: &[u8], cancellation: &Cancellation) -> Result<(), String> {
-        self.deliver(Self::input_packet(bytes)?, cancellation)
+        self.deliver(Self::input_packet(bytes)?, false, cancellation)
     }
 
     /// Local user input is not a tool call or a conversation message.
     pub fn write_direct(&self, bytes: &[u8]) -> Result<(), String> {
-        self.enqueue(Self::input_packet(bytes)?, None)
+        self.enqueue(Self::input_packet(bytes)?, false, None)
     }
 
     pub fn resize(&self, size: (u16, u16), cancellation: &Cancellation) -> Result<(), String> {
+        validate_size(size)?;
         let payload = [size.0.to_le_bytes(), size.1.to_le_bytes()].concat();
-        self.deliver(frame(2, &payload), cancellation)?;
+        self.deliver(frame(2, &payload), true, cancellation)?;
         *self.size.lock().unwrap() = size;
         Ok(())
     }
 
     pub fn resize_direct(&self, size: (u16, u16)) -> Result<(), String> {
+        validate_size(size)?;
         let payload = [size.0.to_le_bytes(), size.1.to_le_bytes()].concat();
-        self.enqueue(frame(2, &payload), None)?;
+        self.enqueue(frame(2, &payload), true, None)?;
         *self.size.lock().unwrap() = size;
         Ok(())
     }
 
     pub fn interrupt(&self, cancellation: &Cancellation) -> Result<(), String> {
-        self.deliver(frame(3, &[]), cancellation)
+        self.deliver(frame(3, &[]), true, cancellation)
     }
+
+    pub fn interrupt_direct(&self) -> Result<(), String> {
+        self.enqueue(frame(3, &[]), true, None)
+    }
+}
+
+pub(crate) fn validate_size(size: (u16, u16)) -> Result<(), String> {
+    if !(1..=1000).contains(&size.0) || !(1..=1000).contains(&size.1) {
+        return Err("Terminal dimensions must be from 1 to 1000".into());
+    }
+    Ok(())
 }
 
 pub(crate) fn size(arguments: &crate::json::Value) -> Result<(u16, u16), String> {
@@ -285,3 +344,7 @@ pub(crate) fn key(name: &str) -> Result<&'static [u8], String> {
         _ => return Err(format!("Unknown terminal key {name}")),
     })
 }
+
+#[cfg(test)]
+#[path = "pty/tests.rs"]
+mod tests;

@@ -163,10 +163,6 @@ impl App {
                 logs.interactive = true;
                 dirty = true;
             }
-            if !logs.process.as_ref().is_some_and(Process::active) && logs.input_mode {
-                logs.input_mode = false;
-                dirty = true;
-            }
             dirty |= follow(&self.process_observer, logs);
         }
         if let Some((id, size)) = self.direct_resize_target()

@@ -55,6 +55,20 @@ impl App {
             }
             return;
         }
+        if key.character == 3 || key.ctrl() && key.code == 67 {
+            let id = self
+                .state
+                .processes
+                .as_ref()
+                .and_then(|p| p.logs.as_ref())
+                .map(|l| l.id.clone());
+            if let Some(id) = id
+                && let Err(error) = self.process_observer.interrupt_direct(&id)
+            {
+                self.leave_direct_input(&error);
+            }
+            return;
+        }
         if let Some(bytes) = key_bytes(key) {
             self.send_direct(&bytes);
         }
@@ -132,7 +146,6 @@ fn key_bytes(key: Key) -> Option<Vec<u8>> {
         65..=90 if key.ctrl() => (code - 64) as u8,
         32 if key.ctrl() => 0,
         220 if key.ctrl() => 28,
-        221 if key.ctrl() => 29,
         54 if key.ctrl() => 30,
         189 if key.ctrl() => 31,
         _ if (1..=31).contains(&key.character) => key.character as u8,

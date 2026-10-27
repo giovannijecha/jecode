@@ -102,10 +102,11 @@ impl Observer {
         self.terminal(id)?.write_direct(bytes)
     }
 
+    pub fn interrupt_direct(&self, id: &str) -> Result<(), String> {
+        self.terminal(id)?.interrupt_direct()
+    }
+
     pub fn resize_direct(&self, id: &str, size: (u16, u16)) -> Result<(), String> {
-        if size.0 == 0 || size.1 == 0 || size.0 > 1000 || size.1 > 1000 {
-            return Err("Terminal dimensions must be from 1 to 1000".into());
-        }
         self.terminal(id)?.resize_direct(size)
     }
 

@@ -83,6 +83,49 @@ fn run(root: &Path, arguments: &Value) -> Result<Value, String> {
 }
 
 #[test]
+fn command_label_matches_the_event_target_and_exact_arguments() {
+    let directory = Directory::new();
+    for (arguments, expected) in [
+        (
+            Value::object([("executable", Value::string("tool"))]),
+            "tool",
+        ),
+        (
+            Value::object([
+                ("executable", Value::string("tool")),
+                (
+                    "args",
+                    Value::Array(vec![
+                        Value::string("a b"),
+                        Value::string("\"quoted\""),
+                        Value::string(""),
+                    ]),
+                ),
+            ]),
+            "tool [\"a b\",\"\\\"quoted\\\"\",\"\"]",
+        ),
+    ] {
+        let (built, _, label) = command(directory.path(), None, &arguments).unwrap();
+        assert_eq!(label, expected);
+        assert_eq!(label, crate::events::target("exec", &arguments));
+        let expected_args: Vec<_> = arguments
+            .get("args")
+            .and_then(Value::as_array)
+            .unwrap_or(&[])
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            built
+                .get_args()
+                .map(|arg| arg.to_str().unwrap())
+                .collect::<Vec<_>>(),
+            expected_args
+        );
+    }
+}
+
+#[test]
 fn nul_in_an_argument_is_rejected_without_launching_the_target() {
     let root = Directory::new();
     let result = run(

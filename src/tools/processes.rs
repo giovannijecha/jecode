@@ -199,7 +199,11 @@ impl Registry {
                         (None, Some(Value::String(key))) => crate::pty::key(key)?,
                         _ => return Err("write needs either text or key".into()),
                     };
-                    terminal.write(bytes, cancellation)?;
+                    if arguments.get("key").and_then(Value::as_str) == Some("Ctrl+C") {
+                        terminal.interrupt(cancellation)?;
+                    } else {
+                        terminal.write(bytes, cancellation)?;
+                    }
                 }
                 "resize" => {
                     if arguments.get("cols").is_none() || arguments.get("rows").is_none() {

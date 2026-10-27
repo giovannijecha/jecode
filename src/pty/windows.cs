@@ -66,9 +66,8 @@ public static class JecodePty {
     static extern IntPtr GetStdHandle(int kind);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetStdHandle(int kind, IntPtr handle);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "SearchPathW")]
-    static extern uint SearchPath(string path, string file, string extension, uint length,
-        StringBuilder result, IntPtr filePart);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint processId);
 
     static void Check(bool success, string operation) {
         if (!success) throw new IOException(operation + " failed (Windows error " + Marshal.GetLastWin32Error() + ")");
@@ -79,35 +78,10 @@ public static class JecodePty {
     static void Close(ref IntPtr handle) {
         if (handle != IntPtr.Zero) { CloseHandle(handle); handle = IntPtr.Zero; }
     }
-    static string ResolveProgram(string program) {
-        if (!string.IsNullOrEmpty(Path.GetDirectoryName(program))) return program;
-        var result = new StringBuilder(32768);
-        uint length = SearchPath(null, program, ".exe", (uint)result.Capacity, result, IntPtr.Zero);
-        if (length == 0 || length >= result.Capacity)
-            throw new IOException("SearchPath failed (Windows error " + Marshal.GetLastWin32Error() + ")");
-        return result.ToString();
-    }
-    static string Quote(string value) {
-        var result = new StringBuilder("\"");
-        int slashes = 0;
-        foreach (char c in value) {
-            if (c == '\\') { slashes++; continue; }
-            if (c == '"') {
-                result.Append('\\', slashes * 2 + 1).Append('"');
-                slashes = 0;
-                continue;
-            }
-            result.Append('\\', slashes);
-            slashes = 0;
-            result.Append(c);
-        }
-        result.Append('\\', slashes * 2);
-        return result.Append('"').ToString();
-    }
     static ProcessInfo StartChild(string program, string[] arguments, IntPtr console) {
-        string executable = ResolveProgram(program);
-        var command = new StringBuilder(Quote(program));
-        foreach (string argument in arguments) command.Append(' ').Append(Quote(argument));
+        string executable = JecodeWindowsCommand.ResolveProgram(program);
+        var command = new StringBuilder(JecodeWindowsCommand.Quote(program));
+        foreach (string argument in arguments) command.Append(' ').Append(JecodeWindowsCommand.Quote(argument));
         IntPtr bytes = IntPtr.Zero;
         InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref bytes);
         if (bytes == IntPtr.Zero) throw new IOException("Could not size ConPTY startup attributes");
@@ -162,20 +136,28 @@ public static class JecodePty {
         }
         return true;
     }
+    static void InputLoop(Stream source, FileStream input) {
+        byte[] header = new byte[5];
+        while (ReadExact(source, header)) {
+            uint length = BitConverter.ToUInt32(header, 1);
+            if (length > 4096) throw new InvalidDataException("PTY input frame is too large");
+            byte[] payload = new byte[length];
+            if (!ReadExact(source, payload)) throw new EndOfStreamException("Incomplete PTY input payload");
+            if (header[0] != 1) throw new InvalidDataException("Unknown PTY input operation");
+            if (payload.Length > 0) {
+                input.Write(payload, 0, payload.Length);
+                input.Flush();
+            }
+        }
+    }
     static void ControlLoop(Stream source, FileStream input, ConsoleState state) {
         byte[] header = new byte[5];
         while (ReadExact(source, header)) {
             uint length = BitConverter.ToUInt32(header, 1);
-            if (length > 1024 * 1024) throw new InvalidDataException("PTY control frame is too large");
+            if (length > 4096) throw new InvalidDataException("PTY control frame is too large");
             byte[] payload = new byte[length];
             if (!ReadExact(source, payload)) throw new EndOfStreamException("Incomplete PTY control payload");
             switch (header[0]) {
-                case 1:
-                    if (payload.Length > 0) {
-                        input.Write(payload, 0, payload.Length);
-                        input.Flush();
-                    }
-                    break;
                 case 2:
                     if (payload.Length != 4) throw new InvalidDataException("Invalid PTY resize frame");
                     ushort cols = BitConverter.ToUInt16(payload, 0), rows = BitConverter.ToUInt16(payload, 2);
@@ -191,10 +173,6 @@ public static class JecodePty {
                     input.WriteByte(3); // ConPTY delivers Ctrl-C to the console client.
                     input.Flush();
                     break;
-                case 4:
-                    if (payload.Length != 0) throw new InvalidDataException("Invalid PTY EOF frame");
-                    input.Dispose();
-                    return;
                 default:
                     throw new InvalidDataException("Unknown PTY control operation");
             }
@@ -214,15 +192,22 @@ public static class JecodePty {
         } catch (Exception ex) { failure(ex); }
     }
     public static int Main(string[] args) {
+        if (args.Length == 2 && args[0] == "--verify-pipe") {
+            uint expected;
+            uint actual;
+            return uint.TryParse(args[1], out expected)
+                && GetNamedPipeServerProcessId(GetStdHandle(-10), out actual)
+                && actual == expected ? 0 : 125;
+        }
         IntPtr inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero;
         IntPtr outputRead = IntPtr.Zero, outputWrite = IntPtr.Zero, console = IntPtr.Zero;
         ProcessInfo child = new ProcessInfo();
         FileStream input = null, output = null;
-        NamedPipeServerStream control = null;
+        NamedPipeServerStream control = null, inputChannel = null;
         Thread reader = null;
         object gate = new object();
         var state = new ConsoleState();
-        Exception outputFailure = null, controlFailure = null;
+        Exception outputFailure = null, controlFailure = null, inputFailure = null;
         bool finished = false;
         try {
             if (args.Length < 4) throw new InvalidDataException("Missing PTY host arguments");
@@ -250,13 +235,24 @@ public static class JecodePty {
             reader.Start();
             if (ResumeThread(child.Thread) == Infinite) throw new IOException("ResumeThread failed");
             // The endpoint appears only after the target was successfully started.
-            control = ControlPipe(name);
+            inputChannel = ControlPipe(name);
+            control = ControlPipe(name + "-control");
+            inputChannel.WaitForConnection();
             control.WaitForConnection();
+            var inputReader = new Thread(() => {
+                try { InputLoop(inputChannel, input); }
+                catch (Exception ex) {
+                    lock (gate) inputFailure = ex;
+                    TerminateProcess(child.Process, 125);
+                }
+            });
+            inputReader.IsBackground = true;
+            inputReader.Start();
             var controller = new Thread(() => {
                 try { ControlLoop(control, input, state); }
                 catch (Exception ex) {
                     lock (gate) controlFailure = ex;
-                    TerminateProcess(child.Process, 1);
+                    TerminateProcess(child.Process, 125);
                 }
             });
             controller.IsBackground = true;
@@ -269,12 +265,13 @@ public static class JecodePty {
             lock (gate) {
                 if (outputFailure != null) throw new IOException("ConPTY output forwarding failed", outputFailure);
                 if (controlFailure != null) throw new IOException("ConPTY control failed", controlFailure);
+                if (inputFailure != null) throw new IOException("ConPTY input failed", inputFailure);
             }
             finished = true;
             return unchecked((int)exitCode);
         } catch (Exception ex) {
             Console.Error.WriteLine("Windows PTY bridge: " + ex.Message);
-            return 1;
+            return 125;
         } finally {
             if (child.Process != IntPtr.Zero) {
                 if (!finished) TerminateProcess(child.Process, 1);
@@ -286,6 +283,7 @@ public static class JecodePty {
                 state.Handle = IntPtr.Zero;
             }
             if (control != null) control.Dispose();
+            if (inputChannel != null) inputChannel.Dispose();
             if (input != null) input.Dispose();
             if (output != null) output.Dispose();
             Close(ref inputRead); Close(ref inputWrite); Close(ref outputRead); Close(ref outputWrite);

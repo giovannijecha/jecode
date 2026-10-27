@@ -36,14 +36,19 @@ by `avanti`, incomplete stdin diagnostics and Windows child environment override
 
 `exec` launches literal executable arguments through the existing process
 supervisor. With `tty:true`, an owned native bridge supplies a pseudo-terminal:
-Windows uses ConPTY and a current-user-only named pipe; Linux and macOS use
-POSIX PTYs and a private Unix-domain socket. Input is carried over the control
+Windows uses ConPTY and current-user-only named pipes, with the opened server
+handle checked against the launched bridge PID before any input is sent.
+Linux and macOS use POSIX PTYs and private Unix-domain sockets. Input and control
+have separate connections, so a full input queue cannot block Unix resize or
+foreground-process-group interrupts. Input is carried over the control
 channel and is not staged in regular files. Terminal output combines stdout
 and stderr and remains available through the normal saved-output references.
 
 Windows requires its existing PowerShell/.NET compiler and Windows 10+ ConPTY.
 Unix first use compiles the owned bridge with system `cc`, caches it under the
-Jecode home, and uses `/bin/ps` to clean up interactive job-control groups.
+Jecode home. Linux enumerates `/proc` to clean up interactive job-control groups;
+macOS uses its system `/bin/ps`. Runtime compilation accepts compiler warnings;
+development checks also compile the bridge with warnings denied.
 Control sockets need a native Unix temporary filesystem; WSL's Windows-backed
 mounts do not support them. Local input bypasses model messages and tool-call
 history, while output that the target echoes remains visible and retained.

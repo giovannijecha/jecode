@@ -101,6 +101,7 @@ pub fn run_leaf(
     .map_err(|error| error.message)
 }
 
+#[cfg(test)]
 pub fn run_logged(
     command: &mut Command,
     timeout: Option<Duration>,
@@ -204,6 +205,8 @@ pub struct Started {
     writer: Option<JoinHandle<std::io::Result<()>>>,
     #[cfg(windows)]
     completion: Option<JoinHandle<Result<i32, String>>>,
+    #[cfg(windows)]
+    target_pid: u32,
     #[cfg(unix)]
     owner: unix::Owner,
     started: Instant,
@@ -238,6 +241,7 @@ fn start(
         stdout: child_stdout,
         writer: stdin_writer,
         completion,
+        target_pid,
     } = if options.leaf {
         windows::spawn_leaf(command, input)?
     } else {
@@ -275,6 +279,8 @@ fn start(
         writer,
         #[cfg(windows)]
         completion,
+        #[cfg(windows)]
+        target_pid,
         #[cfg(unix)]
         owner,
         started,
@@ -283,6 +289,11 @@ fn start(
 }
 
 impl Started {
+    #[cfg(windows)]
+    pub(crate) fn bridge_pid(&self) -> u32 {
+        self.target_pid
+    }
+
     /// Waits for completion, for `timeout` measured from launch, or for
     /// `cancellation`; the latter two terminate the supervised boundary.
     pub fn supervise(
@@ -300,6 +311,8 @@ impl Started {
             writer,
             #[cfg(windows)]
             completion,
+            #[cfg(windows)]
+                target_pid: _,
             #[cfg(unix)]
                 owner: _owner,
             started,

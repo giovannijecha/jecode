@@ -11,6 +11,11 @@ use super::CREATE_NO_WINDOW;
 use crate::cancel::Cancellation;
 
 const SOURCE: &str = include_str!("../windows.cs");
+const COMMAND_SOURCE: &str = include_str!("../windows_command.cs");
+
+pub(crate) fn owned_source(source: &str) -> String {
+    format!("{source}\n{COMMAND_SOURCE}")
+}
 const COMPILE_LIMIT: Duration = Duration::from_secs(15);
 static SUPERVISOR: Mutex<State> = Mutex::new(State::Uninitialized);
 
@@ -73,16 +78,12 @@ fn root() -> Result<PathBuf, String> {
     }
     #[cfg(not(test))]
     {
-        let home = std::env::var_os("JECODE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join(".jecode"))
-            })
-            .ok_or("Could not locate the user configuration directory")?;
-        if !home.is_absolute() {
-            return Err("Supervisor cache directory must be absolute".into());
-        }
-        Ok(home.join("cache/process"))
+        let config = crate::config::Store::discover()?;
+        Ok(config
+            .path()
+            .parent()
+            .ok_or("Could not locate the user configuration directory")?
+            .join("cache/process"))
     }
 }
 
@@ -100,12 +101,12 @@ fn fingerprint(source: &str) -> String {
 
 fn compile(cancellation: &Cancellation) -> Result<PathBuf, CompileError> {
     let root = root().map_err(|_| CompileError::Failed)?;
-    build(root, "supervisor-v1", SOURCE, cancellation)
+    build(root, "supervisor-v1", &owned_source(SOURCE), cancellation)
 }
 
 /// Compiles another owned helper into the same cache.
 pub(crate) fn helper(name: &str, source: &str, cancellation: &Cancellation) -> Option<PathBuf> {
-    build(root().ok()?, name, source, cancellation).ok()
+    build(root().ok()?, name, &owned_source(source), cancellation).ok()
 }
 
 fn build(
@@ -233,7 +234,12 @@ mod tests {
         let cancellation = Cancellation::default();
         cancellation.cancel();
         assert_eq!(
-            build(cache.clone(), "supervisor-v1", SOURCE, &cancellation),
+            build(
+                cache.clone(),
+                "supervisor-v1",
+                &owned_source(SOURCE),
+                &cancellation
+            ),
             Err(CompileError::Cancelled)
         );
         assert!(!cache.exists());

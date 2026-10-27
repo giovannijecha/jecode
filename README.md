@@ -23,7 +23,7 @@ Build from this repository with Rust 1.95.0 and a native linker.
 | Platform | System requirements |
 | --- | --- |
 | Windows 10+ | Git Bash, HTTPS-enabled curl 8.3+, Windows PowerShell with `Add-Type`. |
-| Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`, `ps`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. An installed `cc` is needed on first interactive `exec` use. |
+| Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. Interactive `exec` needs system `cc` on first use, plus `/proc` on Linux or `/bin/ps` on macOS for descendant cleanup. |
 
 ChatGPT sign-in additionally uses .NET cryptography through Windows PowerShell,
 or the installed `openssl` executable on Linux and macOS. Browser sign-in uses

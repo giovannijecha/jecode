@@ -79,12 +79,12 @@ fn chat_inner(
         }
         let (name, arguments) = commands::split(line).unwrap_or(("", ""));
         let name = commands::canonical(name).to_ascii_lowercase();
-        let terminal_arguments = if name == "/terminal"
+        let direct_write = name == "/terminal"
             && arguments
                 .split_whitespace()
                 .next()
-                .is_some_and(|action| action.eq_ignore_ascii_case("write"))
-        {
+                .is_some_and(|action| action.eq_ignore_ascii_case("write"));
+        let terminal_arguments = if direct_write {
             raw_line
                 .trim_end_matches(['\r', '\n'])
                 .trim_start()
@@ -199,11 +199,6 @@ fn chat_inner(
         let result = result.and(agent.save_session());
         if let Err(error) = result {
             if line.starts_with('/') {
-                let direct_write = name == "/terminal"
-                    && arguments
-                        .split_whitespace()
-                        .next()
-                        .is_some_and(|action| action.eq_ignore_ascii_case("write"));
                 if direct_write {
                     agent.record_local_details(
                         "/terminal write [direct input]",

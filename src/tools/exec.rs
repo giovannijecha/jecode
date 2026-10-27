@@ -130,9 +130,6 @@ pub(super) fn command(
         Some(Value::String(text)) => Some(text.as_bytes().to_vec()),
         Some(_) => return Err("stdin must be a string".into()),
     };
-    let label = format!(
-        "{executable} {}",
-        Value::Array(args.into_iter().map(Value::string).collect()).encode()
-    );
+    let label = crate::events::target("exec", arguments);
     Ok((command, input, label))
 }
