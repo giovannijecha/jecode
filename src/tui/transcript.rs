@@ -5,7 +5,6 @@ use super::{
         Item, Kind, State,
         rows::{self, Rows},
     },
-    theme::{ACCENT, EMPHASIS},
 };
 
 enum Source<'a> {
@@ -30,7 +29,7 @@ fn render(
 ) -> Vec<Line> {
     let Some(index) = block.checked_sub(1) else {
         *context = Rows::default();
-        return header(columns);
+        return super::view::opening::rows(state, columns);
     };
     context.render_at(&state.items, index, columns, keycap == Some(index))
 }
@@ -52,20 +51,20 @@ fn keycap_key(state: &State, columns: usize) -> KeycapKey {
 }
 
 fn keycap(state: &State, columns: usize) -> Option<usize> {
-    if state.tool_details.expanded || !state.tool_details_available() {
+    if !state.tool_details_available() {
         return None;
+    }
+    if state.tool_details.expanded {
+        // Expanded, the turn's first card names the way back: `collapse`.
+        return state
+            .tool_details
+            .turn
+            .clone()?
+            .find(|&index| state.items[index].tool().is_some());
     }
     state.tool_details.turn.clone()?.rev().find(|&index| {
         rows::tool_card(&state.items, index, columns, false).is_some_and(|card| card.hidden)
     })
-}
-
-pub(super) fn header(columns: usize) -> Vec<Line> {
-    let mut title = Line::new(">_ ", ACCENT);
-    title.push("Jecode", EMPHASIS.bold());
-    let mut lines = title.wrap(columns, true);
-    lines.push(Line::default());
-    lines
 }
 
 // Settled blocks are laid out in bounded passes. Mutable blocks are rebuilt
@@ -128,6 +127,11 @@ impl Layout {
             self.pending_revision = None;
             self.pending_stream = None;
             self.tools = state.tool_revision;
+        }
+        // The header follows the model and effort, and the startup space
+        // leaves with the first prompt.
+        if let Some(header) = self.blocks.first_mut() {
+            *header = super::view::opening::rows(state, columns);
         }
         self.refresh_keycap(state);
         let end = state.settled_len() + 1;

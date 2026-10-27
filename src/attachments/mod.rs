@@ -57,6 +57,15 @@ impl Attachment {
         }
     }
 
+    /// ` 1 Image `, ` 2 wake.log `: the chip the interface draws in place of
+    /// the marker, its padding included.
+    pub fn chip(&self, number: usize) -> String {
+        match self.kind() {
+            Kind::Image => format!(" {number} Image "),
+            _ => format!(" {number} {} ", self.name),
+        }
+    }
+
     /// A reference the read tool resolves to this attachment.
     pub fn reference(&self) -> String {
         format!("attachment:{}", self.id)

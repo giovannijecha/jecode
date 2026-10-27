@@ -2,9 +2,9 @@
 // a native terminal: cargo test --locked --offline specimen::messages -- --ignored --nocapture
 use crate::tui::{
     line::Line,
-    state::{Item, Kind, rows::Rows},
+    state::{Item, Kind, State, rows::Rows},
     theme::STRONG,
-    transcript,
+    view,
 };
 
 const WIDE: usize = 80;
@@ -93,7 +93,11 @@ fn messages() {
     let mut rows = Vec::new();
     for columns in [NARROW, WIDE, EXTRA_WIDE] {
         heading(&mut rows, &format!("Messages  ·  {columns} columns"));
-        for line in transcript::header(columns) {
+        let state = State {
+            items: conversation(),
+            ..State::default()
+        };
+        for line in view::opening::rows(&state, columns) {
             rows.push((line, columns));
         }
         let mut context = Rows::default();

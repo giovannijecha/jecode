@@ -1,13 +1,11 @@
 use super::{
     line::{Line, Span},
     text,
-    theme::{
-        BAD, GOOD, MUTED, SELECTED_SURFACE, STRONG, Style, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE,
-        WARNING,
-    },
+    theme::{DIM, MUTED, SELECTED_SURFACE, STRONG, Style},
 };
 use crate::{file_change::Change, json::Value};
 
+mod badge;
 mod chapter;
 mod content;
 mod diff;
@@ -18,6 +16,7 @@ mod rhythm;
 mod streams;
 mod summary;
 mod title;
+pub(in crate::tui) use badge::hang;
 pub use chapter::{
     activity as chapter_activity, exception as chapter_exception, groupable as chapter_groupable,
     header as chapter_header, label as chapter_label, receipts as chapter_receipts,
@@ -73,14 +72,6 @@ impl Status {
             Self::Done
         }
     }
-    fn style(self) -> Style {
-        match self {
-            Self::Running | Self::Background => TOOL_ACCENT,
-            Self::Stopped => WARNING,
-            Self::Failed => BAD,
-            Self::Done => GOOD,
-        }
-    }
 }
 
 pub(super) struct Body {
@@ -108,9 +99,20 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
 
 /// One card. `keycap` names Ctrl+O on the row that counts hidden lines.
 pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
-    if !matches!(tool.name, "read" | "write" | "edit") {
-        return rhythm::card(tool, columns, keycap);
+    let mut card = if matches!(tool.name, "read" | "write" | "edit") {
+        file_card(tool, columns, keycap)
+    } else {
+        rhythm::card(tool, columns, keycap)
+    };
+    // An expanded turn names the way back on its first title row.
+    if keycap && tool.presentation.expanded && !card.rows.is_empty() {
+        let title = card.rows.remove(0);
+        card.rows.splice(0..0, hint(title, "collapse", columns));
     }
+    card
+}
+
+fn file_card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
     let expanded = tool.presentation.expanded;
     // Diff limits leave only the supplied replacements; file coordinates
@@ -123,26 +125,25 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         .or(legacy.as_ref())
         .filter(|_| status == Status::Done);
     let (name, target) = heading(&tool);
-    let marker = if status == Status::Running {
-        let elapsed = tool.presentation.duration().unwrap_or_default();
-        TOOL_PULSE[((elapsed.as_millis() / 240) % TOOL_PULSE.len() as u128) as usize]
-    } else {
-        status.style()
-    };
-    let mut rows = title::rows(name, &target, marker, columns, expanded);
-    let lead = if status == Status::Failed {
-        BAD
-    } else {
-        TOOL_DIM
-    };
+    let mut rows = title::rows(name, &target, status, columns, expanded);
+    let titled = rows.len();
     let summary = summary::line(&tool, status, change);
-    let summary = if tool.name == "read" && !expanded {
+    let fact = if tool.name == "read" && !expanded {
         summary::compact_read(summary, columns.saturating_sub(4))
     } else {
         preview(summary, columns.saturating_sub(4), expanded)
     };
-    rows.extend(line_rows(&summary, columns, 1, "  ⎿ ", "    ", lead));
+    // The facts join a one-row title when they fit; otherwise they hang.
+    match rows.as_mut_slice() {
+        [title] if text::cells(&title.plain()) + 2 + text::cells(&fact.plain()) <= columns => {
+            title.push("  ", MUTED);
+            title.spans.extend(fact.spans);
+        }
+        _ => rows.extend(line_rows(&fact, columns, 1, "  ⎿ ", "    ", DIM)),
+    }
+    let facts = rows.len();
     let mut hidden = false;
+    let mut diff = false;
     if let Some(result) = tool.result {
         let mut body =
             if result.get("error").is_some() || (tool.name == "edit" && status != Status::Done) {
@@ -150,6 +151,7 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
             } else if let Some(change) = change.filter(|change| change.created) {
                 content::created(change, field(tool.arguments, "path"), columns, expanded)
             } else if let Some(change) = change {
+                diff = true;
                 diff::render(change, field(tool.arguments, "path"), columns, expanded)
             } else {
                 content::render(&tool, result, status, columns, expanded)
@@ -183,13 +185,15 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
             } else {
                 format!("+{} {unit}", body.hidden)
             };
+            // A diff runs from column 2, so its count does too.
+            let gutter = if diff { "  " } else { "    " };
             let mut more = line_rows(
-                &Line::new(&label, TOOL_DIM),
+                &Line::new(&label, DIM),
                 columns,
                 origin,
-                "    ",
-                "    ",
-                TOOL_DIM,
+                gutter,
+                gutter,
+                DIM,
             );
             if keycap && let Some(last) = more.pop() {
                 more.extend(hint(last, "expand", columns));
@@ -199,6 +203,9 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         rows.extend(body.rows);
         rows.extend(content::notices(tool.name, result, columns, expanded));
     }
+    // A diff runs from column 2 below its facts, outside the tree.
+    let hung = if diff { facts } else { rows.len() };
+    badge::hang(&mut rows[titled..hung], true);
     Card { rows, hidden }
 }
 
@@ -237,7 +244,7 @@ fn hint(row: Line, label: &str, columns: usize) -> Vec<Line> {
         style: STRONG,
         background: Some(SELECTED_SURFACE),
     });
-    cap.push(&format!(" {label}"), MUTED);
+    cap.push(&format!(" {label}"), DIM);
     let used = text::cells(&row.plain());
     let room = text::cells(&cap.plain());
     if used + 2 + room <= columns {
@@ -307,7 +314,7 @@ fn wrapped(
         .into_iter()
         .enumerate()
         .map(|(index, row)| {
-            row.gutter(if index == 0 { first } else { rest }, MUTED)
+            row.gutter(if index == 0 { first } else { rest }, DIM)
                 .shortened(columns)
         })
         .collect()

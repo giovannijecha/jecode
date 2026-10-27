@@ -9,6 +9,8 @@ use crate::{
 };
 use std::{thread, time::Instant};
 
+mod provider_tests;
+
 #[test]
 fn a_newly_configured_default_provider_is_available_to_new_conversations() {
     let directory = Directory::new();
@@ -99,126 +101,11 @@ fn backend_command_uses_the_selected_chatgpt_account_without_changing_defaults()
     assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openai");
     assert_eq!(app.archive.model, "fixture-chatgpt-model");
     assert_eq!(app.config.settings.backend_id, "openrouter");
-    assert!(matches!(app.state.chatgpt_account,
-        Some(state::ChatGptAccount::Active(ref email)) if email == "fixture@example.test"));
-    assert!(fixture.finish().is_empty());
-}
-
-#[test]
-fn two_configured_providers_choose_provider_then_model_and_effort_for_this_conversation() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![(
-        200,
-        Value::object([(
-            "models",
-            Value::Array(vec![Value::object([
-                ("slug", Value::string("fixture-chatgpt-model")),
-                ("display_name", Value::string("Fixture ChatGPT model")),
-                ("visibility", Value::string("list")),
-                ("context_window", Value::number(500_000)),
-                (
-                    "supported_reasoning_levels",
-                    Value::Array(
-                        ["low", "medium", "high", "xhigh", "max", "ultra"]
-                            .into_iter()
-                            .map(|effort| Value::object([("effort", Value::string(effort))]))
-                            .collect(),
-                    ),
-                ),
-            ])]),
-        )]),
-    )]);
-    let store = Store::new(directory.path().join("config"));
-    let settings =
-        Settings::new("isolated-fixture-key".into(), "fixture/router-model".into()).unwrap();
-    store.save(&settings).unwrap();
-    let home = store.path().parent().unwrap().to_path_buf();
-    crate::auth::openai::Store::fixture_account(home.clone(), "fixture-chatgpt-token").unwrap();
-    let session = crate::auth::openai::Store::new(home)
-        .active()
-        .unwrap()
-        .unwrap();
-    let services = crate::backend::Services::from_service(crate::backend::openai::Api::fixture(
-        session,
-        fixture.endpoint.strip_suffix("/chat/completions").unwrap(),
-    ));
-    let agent = Agent::with_backend(
-        services.create("fixture/original".into()).unwrap(),
-        Tools::new(directory.path()).unwrap(),
-    );
-    let mut app = App::new(
-        agent,
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
-        None,
-    );
-    app.dispatch("/model".into()).unwrap();
-    let menu = app.state.selector.as_ref().unwrap();
-    assert!(matches!(
-        menu.purpose,
-        selector::Purpose::Providers { defaults: false }
-    ));
-    let index = menu
-        .options
-        .iter()
-        .position(|row| matches!(row.choice, selector::Choice::Provider("openai")))
-        .unwrap();
-    assert!(menu.options[index].prose.contains("fixture@example.test"));
-    app.choose(selector::Choice::Provider("openai")).unwrap();
-    assert!(index < 2);
-    assert!(app.job.is_some());
-    wait(&mut app);
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        selector::Purpose::Models { defaults: false }
-    ));
-    assert!(
-        app.state.selector.as_ref().unwrap().options[0]
-            .prose
-            .contains("fixture@example.test")
-    );
-    app.state.width = 44;
-    assert!(
-        view::frame(&app.state, "fixture/original", "directory")
-            .live
-            .iter()
-            .any(|row| row.plain().contains("fixture@example.test"))
-    );
-    enter(&mut app);
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        selector::Purpose::Efforts {
-            defaults: false,
-            ..
-        }
-    ));
-    assert!(
-        app.state
-            .selector
-            .as_ref()
-            .unwrap()
-            .options
-            .iter()
-            .any(|row| matches!(row.choice, selector::Choice::Effort(Effort::Ultra)))
-    );
-    app.input(Decoded::Text("4".into())).unwrap();
-    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openai");
-    assert_eq!(app.agent.as_ref().unwrap().effort(), Effort::High);
     assert_eq!(
-        app.agent.as_ref().unwrap().context_status().capacity,
-        Some(500_000)
+        app.agent.as_ref().unwrap().services().account().as_deref(),
+        Some("fixture-client:fixture-subject")
     );
-    assert_eq!(app.archive.model, "fixture-chatgpt-model");
-    assert_eq!(app.config.settings.backend_id, "openrouter");
-    assert!(
-        fixture
-            .finish()
-            .iter()
-            .any(|request| request.headers[0].starts_with("GET /models "))
-    );
+    assert!(fixture.finish().is_empty());
 }
 
 #[test]
@@ -401,12 +288,17 @@ fn a_missing_tool_finish_event_is_reconciled_from_retained_protocol_results() {
         .find(|block| {
             block
                 .iter()
-                .any(|line| line.plain().contains("Read(missing)"))
+                .any(|line| line.plain().contains(" READ  missing"))
         })
         .unwrap();
-    assert!(
-        tool.iter()
-            .any(|line| line.plain().contains("● Read(missing)"))
+    // Reconciled as finished: the badge shows the failure, not a running shimmer.
+    let title = tool
+        .iter()
+        .find(|line| line.plain().starts_with(" READ  missing"))
+        .unwrap();
+    assert_eq!(
+        title.spans[0].background,
+        Some(crate::tui::theme::BADGE_BAD)
     );
     assert!(tool.iter().any(|line| line.plain().contains("Not found")));
     assert!(app.state.items.iter().any(|item| matches!(item,

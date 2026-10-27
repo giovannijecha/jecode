@@ -1,12 +1,12 @@
 //! A compact header for related routine tool calls. Individual cards stay in
 //! the normal renderer and are shown by the caller when expanded.
 
-use super::{Card, Status, Tool, content, failure, field, heading, rhythm, summary, title};
+use super::{Card, Status, Tool, badge, content, failure, field, heading, rhythm, summary};
 use crate::tui::{
     activity as timer,
     line::{Line, Span},
     text,
-    theme::{BODY, MUTED, SELECTED_SURFACE, STRONG, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE},
+    theme::{BAD, BODY, DIM, MUTED, SELECTED_SURFACE, STRONG},
 };
 use std::collections::BTreeSet;
 
@@ -34,53 +34,37 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
     for tool in tools {
         outcomes.add(Status::of(tool));
     }
-    let state = outcomes.primary();
-    let marker = if state == Status::Running {
-        let elapsed = tools
-            .iter()
-            .find(|tool| Status::of(tool) == Status::Running)
-            .and_then(|tool| tool.presentation.duration())
-            .unwrap_or_default();
-        TOOL_PULSE[((elapsed.as_millis() / 240) % TOOL_PULSE.len() as u128) as usize]
-    } else {
-        state.style()
-    };
-
+    // The WORK badge carries the chapter's state; only failures are counted.
+    let mut title = badge::badge("Work", outcomes.primary());
+    title.push(" ", BODY);
     let label = tools.first().map_or_else(|| "Activity".into(), label);
-    let mut title = Line::new(&text::ellipsize(&label, 60), TOOL_ACCENT.bold());
-    title.push(&format!("  {}", counted(tools.len(), "call")), TOOL_DIM);
-    let state_text = match state {
-        Status::Failed => format!("{} failed", outcomes.failed),
-        Status::Running => "running".into(),
-        Status::Background => "background".into(),
-        Status::Stopped => "stopped".into(),
-        Status::Done => String::new(),
-    };
-    if !state_text.is_empty() {
-        title.push(" · ", TOOL_DIM);
-        title.push(&state_text, marker);
+    title.push(&text::ellipsize(&label, 60), STRONG.bold());
+    title.push(&format!("  {}", text::counted(tools.len(), "call")), DIM);
+    if outcomes.failed > 0 {
+        title.push(&format!(" · {} failed", outcomes.failed), BAD);
     }
-    let hidden = tools.iter().any(|tool| tool.result.is_some())
-        && !tools.iter().any(|tool| tool.presentation.expanded);
-    let title = if keycap && hidden {
-        title_with_keycap(title, columns, marker)
+    let expanded = tools.iter().any(|tool| tool.presentation.expanded);
+    let hidden = tools.iter().any(|tool| tool.result.is_some()) && !expanded;
+    let title = if keycap && (hidden || expanded) {
+        title_with_keycap(title, columns, if expanded { "collapse" } else { "expand" })
     } else {
-        rhythm::one(title, columns, "● ", marker, 0)
+        title.shortened(columns)
     };
-    let mut rows = vec![title];
-
+    let mut rows = vec![title.at_source(0)];
     rows.push(rhythm::one(
         facts(tools, &outcomes),
         columns,
         "  ⎿ ",
-        TOOL_DIM,
+        DIM,
         1,
     ));
+    // The tree stays open; the caller closes it on the chapter's last row.
+    badge::hang(&mut rows[1..], false);
 
     Card { rows, hidden }
 }
 
-fn title_with_keycap(title: Line, columns: usize, marker: crate::tui::theme::Style) -> Line {
+fn title_with_keycap(title: Line, columns: usize, action: &str) -> Line {
     let mut cap = Line::default();
     cap.spans.push(Span {
         text: " Ctrl+O ".into(),
@@ -88,14 +72,20 @@ fn title_with_keycap(title: Line, columns: usize, marker: crate::tui::theme::Sty
         background: Some(SELECTED_SURFACE),
     });
     if columns >= 19 {
-        cap.push(" expand", MUTED);
+        cap.push(&format!(" {action}"), DIM);
     }
     let cap_width = text::cells(&cap.plain());
     let left_width = columns.saturating_sub(cap_width + 1);
-    let mut line = rhythm::one(title, left_width, "● ", marker, 0);
+    let mut line = title.shortened(left_width);
     let gap = columns.saturating_sub(text::cells(&line.plain()) + cap_width);
     line.push(&" ".repeat(gap), MUTED);
     line.append(cap).shortened(columns)
+}
+
+/// A member's name in its family colour, uppercase like its badge.
+fn named(tool: &Tool<'_>) -> Line {
+    let (name, _) = heading(tool);
+    Line::new(&name.to_uppercase(), badge::ink(name).bold())
 }
 
 /// The latest ordinary call without separate error detail stays at the foot.
@@ -103,10 +93,10 @@ pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
     let tool = tools.iter().rev().find(|tool| {
         matches!(tool.name, "read" | "web" | "browser") && Status::of(tool) != Status::Failed
     })?;
-    let (name, target) = heading(tool);
-    let mut line = Line::new(name, title::family(name).bold());
+    let (_, target) = heading(tool);
+    let mut line = named(tool);
     if !target.is_empty() {
-        line.push(&format!("  {}", text::clean(&target)), BODY);
+        line.push(&format!(" {}", text::clean(&target)), BODY);
     }
     let status = Status::of(tool);
     let elapsed = tool
@@ -131,9 +121,9 @@ pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
     }
     if !suffix.is_empty() {
         line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
-        line.push(&suffix, TOOL_DIM);
+        line.push(&suffix, DIM);
     }
-    Some(rhythm::one(line, columns, "  ⎿ ", TOOL_DIM, 4))
+    Some(rhythm::one(line, columns, "  ⎿ ", DIM, 4))
 }
 
 /// Facts retained from the former singleton while a new chapter takes shape.
@@ -165,10 +155,10 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         };
         if let Some(outcome) = outcome {
             rows.push(rhythm::one(
-                Line::new(&outcome, TOOL_DIM),
+                Line::new(&outcome, DIM),
                 columns,
                 "  ⎿ ",
-                TOOL_DIM,
+                DIM,
                 3,
             ));
         }
@@ -179,20 +169,20 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
             .count();
         if output_lines > 0 {
             rows.push(rhythm::one(
-                Line::new(&format!("{output_lines} output lines captured"), TOOL_DIM),
+                Line::new(&format!("{output_lines} output lines captured"), DIM),
                 columns,
                 "  ⎿ ",
-                TOOL_DIM,
+                DIM,
                 4,
             ));
         }
         let command = rhythm::payload(tool);
         if !rhythm::description(tool).is_empty() && !command.is_empty() {
             rows.push(rhythm::one(
-                Line::new(&format!("Command: {}", text::clean(&command)), TOOL_DIM),
+                Line::new(&format!("Command: {}", text::clean(&command)), DIM),
                 columns,
                 "  ⎿ ",
-                TOOL_DIM,
+                DIM,
                 5,
             ));
         }
@@ -201,7 +191,7 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
             summary::line(tool, Status::of(tool), None),
             columns,
             "  ⎿ ",
-            TOOL_DIM,
+            DIM,
             3,
         ));
         rows.extend(content::notices(tool.name, result, columns, false));
@@ -213,9 +203,8 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
 pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     let state = Status::of(tool);
     if matches!(tool.name, "bash" | "exec" | "process") {
-        let (name, _) = heading(tool);
-        let mut line = Line::new(name, title::family(name).bold());
-        line.push("  ", BODY);
+        let mut line = named(tool);
+        line.push(" ", BODY);
         let description = rhythm::description(tool);
         let target = if !description.is_empty() {
             text::clean(description)
@@ -252,21 +241,20 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         if let Some(detail) = detail {
             let suffix = format!("  {detail}");
             line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
-            line.push(&suffix, TOOL_DIM);
+            line.push(&suffix, DIM);
         }
-        return vec![rhythm::one(line, columns, "  ⎿ ", TOOL_DIM, 2)];
+        return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
     }
     if matches!(tool.name, "read" | "web" | "browser")
         && matches!(state, Status::Running | Status::Done)
     {
         return Vec::new();
     }
-    let (name, _) = heading(tool);
-    let mut title = Line::new(name, title::family(name).bold());
+    let mut title = named(tool);
     if tool.name == "browser" {
         title.push(&format!(" {}", field(tool.arguments, "action")), MUTED);
     }
-    title.push("  ", BODY);
+    title.push(" ", BODY);
     let description = rhythm::description(tool);
     if !description.is_empty() {
         title.push(&text::clean(description), BODY);
@@ -286,9 +274,9 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     if let Some(detail) = detail {
         let suffix = format!("  {detail}");
         title = title.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
-        title.push(&suffix, TOOL_DIM);
+        title.push(&suffix, DIM);
     }
-    let mut rows = vec![rhythm::one(title, columns, "  ⎿ ", TOOL_DIM, 2)];
+    let mut rows = vec![rhythm::one(title, columns, "  ⎿ ", DIM, 2)];
     if state == Status::Failed {
         rows.extend(failure::rows(tool, columns, "    "));
     }
@@ -389,29 +377,25 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
         (processes, "process call"),
     ] {
         if count > 0 {
-            parts.push(counted(count, noun));
+            parts.push(text::counted(count, noun));
         }
     }
-    let mut line = Line::new(&parts.join(" · "), TOOL_DIM);
+    let mut line = Line::new(&parts.join(" · "), DIM);
     for (count, label, style) in [
-        (outcomes.stopped, "stopped", TOOL_DIM),
-        (outcomes.running, "running", TOOL_DIM),
-        (outcomes.background, "in background", TOOL_DIM),
+        (outcomes.stopped, "stopped", DIM),
+        (outcomes.running, "running", DIM),
+        (outcomes.background, "in background", DIM),
     ] {
         if count > 0 {
             if !line.spans.is_empty() {
-                line.push(" · ", TOOL_DIM);
+                line.push(" · ", DIM);
             }
             line.push(&format!("{count} {label}"), style);
         }
     }
     if line.spans.is_empty() {
-        Line::new(&format!("{} completed", outcomes.done), TOOL_DIM)
+        Line::new(&format!("{} completed", outcomes.done), DIM)
     } else {
         line
     }
-}
-
-fn counted(count: usize, noun: &str) -> String {
-    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }

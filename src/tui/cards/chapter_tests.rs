@@ -1,4 +1,7 @@
 use super::*;
+use crate::tui::theme::{
+    BADGE_BAD, BADGE_IDLE, BADGE_TEXT, BADGE_WARN, LIT, S_BASE, STRONG, Style, Surface,
+};
 use std::time::Duration;
 
 fn object<const N: usize>(fields: [(&str, &str); N]) -> Value {
@@ -19,6 +22,16 @@ fn tool<'a>(
         change: None,
         presentation,
     }
+}
+
+/// The WORK badge's name span: its ink and surface.
+fn badge(card: &Card) -> (Style, Option<Surface>) {
+    let name = card.rows[0]
+        .spans
+        .iter()
+        .find(|span| span.text.contains("WORK"))
+        .unwrap();
+    (name.style, name.background)
 }
 
 fn plain(card: &Card) -> String {
@@ -80,7 +93,7 @@ fn exec_joins_work_chapters_and_counts_as_a_command() {
     assert!(plain(&header).contains("2 commands"));
     assert!(plain(&header).contains("Verify"));
     let exception = chapter::exception(&calls[0], 80);
-    assert!(exception[0].plain().contains("Exec  Run tests"));
+    assert!(exception[0].plain().contains("EXEC Run tests"));
     let receipts = chapter::receipts(&calls[0], 80);
     assert!(
         receipts
@@ -110,7 +123,7 @@ fn displayed_work_label_is_one_line_and_bounded_without_changing_arguments() {
             .collect::<Vec<_>>();
         assert_eq!(title.len(), 1, "{title:?}");
         let label = title[0]
-            .strip_prefix("● ")
+            .strip_prefix(" WORK  ")
             .unwrap()
             .split("  2 calls")
             .next()
@@ -211,20 +224,22 @@ fn status_priority_counts_every_outcome_without_summing_durations() {
     ];
     let card = chapter::header(&tools, 200, false);
     let text = plain(&card);
-    assert_eq!(card.rows[0].spans[0].style, BAD);
+    assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_BAD)));
     assert!(text.contains("5 calls · 1 failed"));
     assert!(text.contains("1 command · 1 stopped · 1 running · 1 in background"));
     assert!(!card.rows[1].plain().contains("failed"));
     assert!(!text.contains("6s") && !text.contains('▶'));
 
     let running = chapter::header(&tools[1..], 200, false);
-    assert_eq!(running.rows[0].spans[0].style, TOOL_PULSE[1]);
+    // Running shimmers across the name on the quiet surface; frame 0 rests.
+    assert_eq!(badge(&running), (S_BASE.bold(), Some(BADGE_IDLE)));
+    assert_eq!(running.rows[0].spans[1].text, "WORK");
     let background = chapter::header(&tools[2..], 200, false);
-    assert_eq!(background.rows[0].spans[0].style, TOOL_ACCENT);
+    assert_eq!(badge(&background), (LIT.bold(), Some(BADGE_IDLE)));
     let stopped = chapter::header(&tools[3..], 200, false);
-    assert_eq!(stopped.rows[0].spans[0].style, WARNING);
+    assert_eq!(badge(&stopped), (BADGE_TEXT.bold(), Some(BADGE_WARN)));
     let done = chapter::header(&tools[4..], 200, false);
-    assert_eq!(done.rows[0].spans[0].style, GOOD);
+    assert_eq!(badge(&done), (STRONG.bold(), Some(BADGE_IDLE)));
 
     let cancelled_exit = Value::object([
         ("cancelled", Value::Bool(true)),
@@ -235,10 +250,11 @@ fn status_priority_counts_every_outcome_without_summing_durations() {
         80,
         false,
     );
-    assert_eq!(stopped.rows[0].spans[0].style, WARNING);
+    assert_eq!(badge(&stopped), (BADGE_TEXT.bold(), Some(BADGE_WARN)));
     assert!(plain(&stopped).contains("stopped"));
     assert_eq!(stopped.rows.len(), 2);
-    assert_eq!(stopped.rows[1].plain(), "  ⎿ 1 stopped");
+    // The header leaves its tree open for the chapter's later rows.
+    assert_eq!(stopped.rows[1].plain(), "  │ 1 stopped");
 }
 
 #[test]
@@ -283,8 +299,25 @@ fn unicode_titles_wrap_under_two_cells_and_keycap_only_hints_hidden_calls() {
             columns,
             true,
         );
+        // Expanded, the keycap names the way back instead of hidden calls.
         assert!(!open.hidden);
-        assert!(!plain(&open).contains("Ctrl+O"));
+        assert!(open.rows[0].plain().contains("Ctrl+O"));
+        assert!(!plain(&open).contains("expand"));
+        assert!(
+            open.rows[1..]
+                .iter()
+                .all(|row| !row.plain().contains("Ctrl+O"))
+        );
+        assert!(open.rows[0].plain().trim_end().ends_with(if columns >= 19 {
+            "collapse"
+        } else {
+            "Ctrl+O"
+        }));
+        assert!(
+            open.rows
+                .iter()
+                .all(|row| text::cells(&row.plain()) <= columns)
+        );
     }
     let pending = chapter::header(&[tool("read", &args, None, &collapsed)], 40, true);
     assert!(!pending.hidden);
@@ -309,18 +342,18 @@ fn visible_exceptions_have_target_and_result_without_a_second_dot() {
     ] {
         let rows = chapter::exception(&tool("bash", &args, result, &shown), 40);
         let text = rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n");
-        assert!(text.starts_with("  ⎿ Bash  cargo test"), "{text}");
+        assert!(text.starts_with("  ⎿ BASH cargo test"), "{text}");
         assert!(text.contains(expected), "{text}");
         assert_eq!(rows.len(), 1, "{text}");
         assert!(!text.contains("p1") && !text.contains("missing import"));
         assert!(!text.contains('●') && !text.contains('▶'));
-        assert_eq!(rows[0].spans[1].style, TOOL_ACCENT.bold());
+        assert_eq!(rows[0].spans[1].style, LIT.bold());
         assert_eq!(rows[0].spans[2].style, crate::tui::theme::BODY);
         assert!(rows.iter().all(|row| text::cells(&row.plain()) <= 40));
     }
     let ok = Value::object([("exit_code", Value::number(0))]);
     let rows = chapter::exception(&tool("bash", &args, Some(&ok), &shown), 40);
-    assert_eq!(rows[0].plain(), "  ⎿ Bash  cargo test");
+    assert_eq!(rows[0].plain(), "  ⎿ BASH cargo test");
     assert_eq!(rows.len(), 1);
     assert!(chapter::exception(&tool("read", &args, Some(&ok), &shown), 40).is_empty());
 }
@@ -336,7 +369,7 @@ fn compact_process_hides_streams_and_activity_skips_a_visible_failure() {
     let shown = Presentation::default();
     let rows = chapter::exception(&tool("process", &args, Some(&result), &shown), 80);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].plain(), "  ⎿ Process  poll  background");
+    assert_eq!(rows[0].plain(), "  ⎿ PROCESS poll  background");
     assert!(!rows[0].plain().contains("private-pid"));
     assert!(!rows[0].plain().contains("raw process output"));
 
@@ -349,7 +382,7 @@ fn compact_process_hides_streams_and_activity_skips_a_visible_failure() {
         tool("read", &last, Some(&failed), &shown),
     ];
     let activity = chapter::activity(&calls, 80).unwrap().plain();
-    assert!(activity.contains("Read  src/good.rs"), "{activity}");
+    assert!(activity.contains("READ src/good.rs"), "{activity}");
     assert!(!activity.contains("src/missing.rs"), "{activity}");
     assert!(!activity.contains("failed"), "{activity}");
     assert!(chapter::activity(&calls[1..], 80).is_none());
@@ -365,14 +398,17 @@ fn facts_omit_repeated_uniform_states_but_keep_mixed_outcomes() {
     let card = chapter::header(&calls, 80, false);
     assert_eq!(
         plain(&card),
-        "● Verify  2 calls · 2 failed\n  ⎿ 0 completed"
+        " WORK  Verify  2 calls · 2 failed\n  │ 0 completed"
     );
     let mixed = chapter::header(
         &[calls[0], tool("bash", &args, Some(&stopped), &shown)],
         80,
         false,
     );
-    assert_eq!(plain(&mixed), "● Verify  2 calls · 1 failed\n  ⎿ 1 stopped");
+    assert_eq!(
+        plain(&mixed),
+        " WORK  Verify  2 calls · 1 failed\n  │ 1 stopped"
+    );
 }
 
 #[test]
@@ -393,7 +429,7 @@ fn compact_commands_keep_notices_as_receipts_when_content_height_needs_them() {
         let call = tool("bash", &args, Some(&result), &shown);
         let rows = chapter::exception(&call, 80);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].plain(), "  ⎿ Bash  cargo test");
+        assert_eq!(rows[0].plain(), "  ⎿ BASH cargo test");
         let receipts = chapter::receipts(&call, 80);
         let text = receipts
             .iter()

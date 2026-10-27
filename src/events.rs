@@ -41,6 +41,10 @@ pub enum Event {
     InputHeld,
     /// The projected next request changed: input, usage, tools, reduction or capacity.
     Context(crate::context::Status),
+    /// A response reported how many tokens it generated, reasoning included.
+    Generated {
+        tokens: usize,
+    },
     ToolStarted {
         id: String,
         name: String,

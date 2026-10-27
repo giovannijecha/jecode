@@ -97,6 +97,13 @@ impl Agent {
                 Ok(Some(completion)) => {
                     let input_end = self.messages.lock().unwrap().len();
                     self.context.observe(completion.usage.as_ref(), input_end);
+                    if let Some(tokens) = completion
+                        .usage
+                        .as_ref()
+                        .and_then(|usage| usage.output_tokens)
+                    {
+                        emit(Event::Generated { tokens })?;
+                    }
                     self.context.calibrate(
                         self.context_bytes(&messages)
                             .saturating_add(crate::tools::encoded_size()),

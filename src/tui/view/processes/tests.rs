@@ -10,9 +10,12 @@ fn process(status: &'static str) -> Process {
     }
 }
 
+fn render(panel: &Panel, width: usize, height: usize) -> Vec<Line> {
+    super::super::composer::panel_rows(&sheet(panel, width), width, height)
+}
+
 fn plain(panel: &Panel, width: usize, height: usize) -> String {
     render(panel, width, height)
-        .0
         .iter()
         .map(Line::plain)
         .collect::<Vec<_>>()
@@ -31,6 +34,24 @@ fn logs(stream: usize) -> Logs {
 }
 
 #[test]
+fn long_output_commands_leave_room_for_the_exit_status() {
+    let mut panel = Panel::new(vec![]);
+    let mut output = logs(0);
+    output.id = "process-1793119373364-13804-6".into();
+    let process = output.process.as_mut().unwrap();
+    process.command = format!("powershell.exe {}", "long arguments ".repeat(20));
+    process.status = "exited";
+    process.exit_code = Some(0);
+    panel.logs = Some(output);
+    let text = plain(&panel, 80, 12);
+    assert!(text.contains("Processes › powershell"), "{text}");
+    assert!(
+        text.contains("exited 0 · process-1793119373364-13804-6"),
+        "{text}"
+    );
+}
+
+#[test]
 fn one_row_stop_confirmation_keeps_its_question_visible() {
     let mut panel = Panel::new(vec![process("running")]);
     panel.confirm_stop = Some(process("running"));
@@ -46,7 +67,7 @@ fn list_is_a_standard_menu_with_status_command_id_and_empty_message() {
     assert!(active.contains("process-1"), "{active}");
     assert!(active.contains(" Ctrl+D  stop"), "{active}");
     let empty = plain(&Panel::new(vec![]), 80, 8);
-    assert!(empty.contains("No active background processes in this conversation"));
+    assert!(empty.contains("Nothing running"));
     assert!(empty.contains(" Esc  close"));
 }
 
@@ -54,7 +75,7 @@ fn list_is_a_standard_menu_with_status_command_id_and_empty_message() {
 fn stop_confirmation_replaces_the_key_row_and_marks_the_target() {
     let mut panel = Panel::new(vec![process("running")]);
     panel.confirm_stop = Some(process("running"));
-    let rows = render(&panel, 80, 10).0;
+    let rows = render(&panel, 80, 10);
     let text = plain(&panel, 80, 10);
     assert!(text.contains("Stop this process?"), "{text}");
     assert!(text.contains(" Enter  stop"));
@@ -84,13 +105,13 @@ fn output_has_breadcrumb_status_stream_tabs_and_follow_mode() {
     panel.logs = Some(logs(1));
     let view = plain(&panel, 80, 12);
     assert!(view.contains("Processes › printf catalog"), "{view}");
-    assert!(view.contains("● running · process-1"), "{view}");
+    assert!(view.contains("running · process-1"), "{view}");
     assert!(view.contains("Output   Errors"), "{view}");
     assert!(view.contains("following"));
     assert!(view.contains("No output yet"));
     assert!(view.contains(" Tab  Output"));
     assert!(view.contains(" Esc  back"));
-    let rows = render(&panel, 80, 12).0;
+    let rows = render(&panel, 80, 12);
     let underline = rows.iter().find(|row| row.plain().contains('━')).unwrap();
     // The active section's underline sits under "Errors".
     let start = underline.plain().chars().position(|c| c == '━').unwrap();

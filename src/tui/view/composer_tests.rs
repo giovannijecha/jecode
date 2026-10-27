@@ -7,12 +7,15 @@ use crate::{
     tui::{
         activity::Activity,
         selector::Selector,
-        theme::{ACCENT, CODE_SURFACE, CURSOR, MUTED, SELECTED_SURFACE, STRONG, USER_SURFACE},
+        theme::{
+            ACCENT, CURSOR, DIM, FAINT, MUTED, PILL_SURFACE, SELECTED_SURFACE, STRONG,
+            USER_SURFACE, WARNING,
+        },
     },
 };
 
 #[test]
-fn turn_phases_and_waiting_for_an_edit_are_visible_in_the_rule() {
+fn turn_phases_and_waiting_for_an_edit_label_the_status_row() {
     let mut state = State {
         activity: Some(Activity::new()),
         ..State::default()
@@ -31,9 +34,12 @@ fn turn_phases_and_waiting_for_an_edit_are_visible_in_the_rule() {
             Event::ToolStarted {
                 id: "phase".into(),
                 name: "read".into(),
-                arguments: crate::json::Value::object([]),
+                arguments: crate::json::Value::object([(
+                    "path",
+                    crate::json::Value::string("src/auth.rs"),
+                )]),
             },
-            "Working",
+            "Reading auth.rs",
         ),
         (
             Event::ToolFinished {
@@ -52,21 +58,20 @@ fn turn_phases_and_waiting_for_an_edit_are_visible_in_the_rule() {
         ),
     ] {
         state.event(event);
-        assert!(
-            frame(&state, "model", "dir").live[0]
-                .plain()
-                .contains(label)
-        );
+        let status = frame(&state, "model", "dir").live[0].plain();
+        assert!(status.starts_with(&format!(" >_ {label} ")), "{status}");
+        assert!(status.contains("Esc interrupt · 0."), "{status}");
     }
     state.queue.push("a draft").unwrap();
     let slot = state.queue.slot(0).unwrap();
     state.queue.begin_edit(slot, &mut state.editor).unwrap();
     state.event(Event::InputHeld);
-    let rule = frame(&state, "model", "dir").live[0].plain();
-    assert!(
-        rule.contains("Waiting for your edit") && rule.contains("Editing draft 1/1"),
-        "{rule}"
-    );
+    let live = frame(&state, "model", "dir").live;
+    let status = live[0].plain();
+    assert!(status.contains("Waiting for your edit"), "{status}");
+    // The draft edit holds Esc, so the row does not offer it.
+    assert!(!status.contains("Esc"), "{status}");
+    assert!(live[1].plain().starts_with("─ Editing draft 1/1 ─"));
     state.activity.as_mut().unwrap().stopping = true;
     state.event(Event::Recovering {
         attempt: 1,
@@ -74,24 +79,27 @@ fn turn_phases_and_waiting_for_an_edit_are_visible_in_the_rule() {
         error: "fixture".into(),
         reason: None,
     });
-    let rule = frame(&state, "model", "dir").live[0].plain();
+    let status = frame(&state, "model", "dir").live[0].plain();
     assert!(
-        rule.contains("Stopping") && !rule.contains("Reconnecting"),
-        "{rule}"
+        status.contains("Stopping") && !status.contains("Retrying"),
+        "{status}"
     );
-    assert!(!rule.contains("esc"));
 }
 
 #[test]
-fn idle_composer_has_four_rows_a_caret_over_placeholder_and_one_gray_footer() {
+fn the_idle_dock_has_an_empty_status_row_accent_rules_and_a_dim_path() {
     let state = State::default();
     let frame = frame(&state, "provider/model", r"C:\project");
-    assert_eq!(frame.live.len(), 4);
-    assert_eq!(frame.live[0].plain(), "─".repeat(state.width));
-    assert_eq!(frame.live[0].spans[0].style, ACCENT);
-    assert_eq!(frame.live[2].spans[0].style, ACCENT);
+    assert_eq!(frame.live.len(), 5);
+    assert_eq!(frame.live[0].plain(), "");
+    assert_eq!(frame.live[1].plain(), "─".repeat(state.width));
+    assert_eq!(frame.live[1].spans[0].style, ACCENT);
+    assert_eq!(frame.live[3].spans[0].style, ACCENT);
+    let input = &frame.live[2];
+    assert_eq!(input.spans[0].text, "› ");
+    assert_eq!(input.spans[0].style, ACCENT.bold());
     assert_eq!(
-        frame.live[1]
+        input
             .spans
             .iter()
             .find(|span| span.style == CURSOR)
@@ -99,41 +107,40 @@ fn idle_composer_has_four_rows_a_caret_over_placeholder_and_one_gray_footer() {
             .text,
         "A"
     );
-    let footer = frame.live[3].plain();
-    assert!(footer.starts_with(r"C:\project"));
-    assert!(footer.ends_with("provider/model · default"));
-    assert!(frame.live[3].spans.iter().all(|span| span.style == MUTED));
+    assert_eq!(frame.cursor, Some((2, 2)));
+    let footer = &frame.live[4];
+    assert!(footer.plain().starts_with(r"C:\project"));
+    // The footer alone names the model, with its provider while it fits.
+    assert!(footer.plain().ends_with(" provider/model · default "));
+    assert_eq!(footer.spans[0].style, DIM);
+    let chip = footer.spans.last().unwrap();
+    assert_eq!((chip.style, chip.background), (MUTED, Some(PILL_SURFACE)));
 }
 
 #[test]
-fn long_drafts_show_five_contiguous_rows_and_a_position_in_the_top_border() {
+fn long_drafts_show_a_third_of_the_screen_centred_on_the_caret() {
     let mut state = State::default();
-    state
-        .editor
-        .insert("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7");
+    let lines: Vec<_> = (1..=12).map(|line| format!("line {line}")).collect();
+    state.editor.insert(&lines.join("\n"));
     let at_end = frame(&state, "model", "directory");
     let rows: Vec<_> = at_end.live.iter().map(Line::plain).collect();
-    assert_eq!(
-        &rows[1..6],
-        ["› line 3", "  line 4", "  line 5", "  line 6", "  line 7 "]
-    );
-    assert!(rows[0].contains("3–7 / 7"));
-    assert_eq!(text::cells(&rows[0]), state.width);
+    // Twenty-four rows give a window of eight.
+    assert_eq!(rows[2], "› line 5");
+    assert_eq!(rows[9], "  line 12 ");
+    assert!(rows[1].ends_with(" 5–12 / 12 ─"), "{}", rows[1]);
+    assert_eq!(text::cells(&rows[1]), state.width);
     assert!(
-        at_end.live[0]
+        at_end.live[1]
             .spans
             .iter()
-            .any(|span| span.style == MUTED && span.text.contains("3–7 / 7"))
+            .any(|span| span.style == MUTED && span.text == "5–12 / 12")
     );
-    assert_eq!(at_end.live.len(), 8);
-    state.editor.cursor = "line 1\nline 2\nline 3\nli".len();
+    assert_eq!(at_end.live.len(), 12);
+    state.editor.cursor = lines[..5].join("\n").len() + 3;
     let middle = frame(&state, "model", "directory");
     let rows: Vec<_> = middle.live.iter().map(Line::plain).collect();
-    assert!(rows[0].contains("2–6 / 7"));
-    assert_eq!(
-        &rows[1..6],
-        ["› line 2", "  line 3", "  line 4", "  line 5", "  line 6"]
-    );
+    assert!(rows[1].contains(" 2–9 / 12 "), "{}", rows[1]);
+    assert_eq!(rows[2], "› line 2");
     assert_eq!(middle.live.len(), at_end.live.len());
     assert_eq!(
         middle.live[middle.cursor.unwrap().0]
@@ -144,41 +151,48 @@ fn long_drafts_show_five_contiguous_rows_and_a_position_in_the_top_border() {
             .text,
         "n"
     );
+    // Short screens keep five rows; tall ones stop at ten.
+    for (height, window) in [(12, 5), (60, 10)] {
+        state.height = height;
+        let rows = frame(&state, "model", "directory").live.len();
+        assert_eq!(rows, window + 4, "{height}");
+    }
+    state.height = 24;
     state.editor.replace("abcdef".repeat(7));
     state.width = 10;
     let wrapped = frame(&state, "model", "dir");
-    assert_eq!(wrapped.live.len(), 8);
-    assert!(
-        !wrapped
-            .live
-            .iter()
-            .any(|row| row.plain().contains("more lines"))
-    );
+    assert!(wrapped.live.len() <= 12);
     assert_eq!(state.editor.text, "abcdef".repeat(7));
 }
 
 #[test]
-fn active_borders_are_gray_and_queued_messages_precede_notices_and_the_working_rule() {
+fn working_rules_turn_faint_and_queued_drafts_precede_the_status_row() {
     let mut state = State {
         activity: Some(Activity::new()),
         ..State::default()
     };
     state.event(Event::Reasoning);
     state.queue.push("one\ntwo").unwrap();
+    state.queue.push("paused").unwrap();
+    state.queue.pause();
     state.notice = Some(crate::tui::Feedback::result(Kind::Warning, "queue notice"));
     let frame = frame(&state, "model", "dir");
-    assert!(frame.live[0].plain().starts_with("› one…"));
-    assert!(frame.live[0].plain().ends_with("queued"));
-    assert!(frame.live[1].plain().contains("queue notice"));
-    assert!(frame.live[2].plain().starts_with("─ ▰▰▱▱▱▱ "));
-    assert!(frame.live[2].plain().contains(" · Drafts 1 · Alt+↑ "));
+    let queued = &frame.live[0];
+    assert!(queued.plain().starts_with("› one…"));
+    assert!(queued.plain().ends_with("paused"));
+    // Labels end two cells from the edge.
+    assert_eq!(text::cells(&queued.plain()), state.width - 2);
+    assert_eq!(queued.spans.last().unwrap().style, WARNING);
+    assert!(frame.live[1].plain().ends_with("paused"));
+    assert!(frame.live[2].plain().starts_with(" ▲  queue notice "));
+    assert!(frame.live[3].plain().starts_with("─ Drafts 2 · Alt+↑ ─"));
     let borders: Vec<_> = frame
         .live
         .iter()
         .filter(|line| line.plain().starts_with('─'))
         .collect();
     assert_eq!(borders.len(), 2);
-    assert!(borders.iter().all(|line| line.spans[0].style == MUTED));
+    assert!(borders.iter().all(|line| line.spans[0].style == FAINT));
     assert!(
         frame.live[frame.cursor.unwrap().0]
             .spans
@@ -188,7 +202,30 @@ fn active_borders_are_gray_and_queued_messages_precede_notices_and_the_working_r
 }
 
 #[test]
-fn slash_commands_replace_the_composer_with_one_panel_and_a_distinct_selection() {
+fn queued_drafts_name_their_state_in_dim_and_their_range_when_some_are_hidden() {
+    let mut state = State {
+        height: 8,
+        ..State::default()
+    };
+    for index in 0..3 {
+        state.queue.push(format!("draft {index}")).unwrap();
+    }
+    let rows: Vec<_> = frame(&state, "model", "dir").live;
+    // Eight rows leave three for drafts beside the dock's five.
+    assert_eq!(rows.len(), 8);
+    assert!(rows[0].plain().ends_with(" queued"));
+    assert_eq!(rows[0].spans.last().unwrap().style, DIM);
+    state.height = 7;
+    let rows = frame(&state, "model", "dir").live;
+    assert!(
+        rows[0].plain().ends_with("queued 1–2 / 3"),
+        "{}",
+        rows[0].plain()
+    );
+}
+
+#[test]
+fn slash_commands_open_one_panel_below_the_draft_with_a_distinct_selection() {
     let mut state = State::default();
     state.editor.insert("/mo");
     state.suggestions.refresh(&state.editor.text);
@@ -200,21 +237,20 @@ fn slash_commands_replace_the_composer_with_one_panel_and_a_distinct_selection()
             .find(|line| line.plain().contains(text))
             .unwrap()
     };
-    assert!(row("Commands").plain().contains("1 match"));
-    // The draft is the search field, inset on the code surface.
-    let field = row(" /mo");
+    assert!(row("─ Commands").plain().ends_with(" 1 match ─"));
+    // The draft stays in the composer as the search field and keeps the caret.
+    let (caret, column) = frame.cursor.unwrap();
+    let field = &frame.live[caret];
+    assert_eq!(field.plain().trim_end(), "› /mo");
+    assert_eq!(column, 5);
     assert!(
         field
             .spans
             .iter()
             .any(|span| span.style == STRONG && span.text.contains("/mo"))
     );
-    assert!(
-        field
-            .spans
-            .iter()
-            .any(|span| span.background == Some(CODE_SURFACE))
-    );
+    assert!(field.spans.iter().any(|span| span.style == CURSOR));
+    assert!(frame.live[caret - 1].plain().chars().all(|c| c == '─'));
     let selected = row("› /model");
     assert!(focused(selected));
     assert!(
@@ -225,22 +261,31 @@ fn slash_commands_replace_the_composer_with_one_panel_and_a_distinct_selection()
     let matched: String = selected
         .spans
         .iter()
-        .filter(|span| span.style == ACCENT)
+        .filter(|span| span.style == ACCENT.bold())
         .map(|span| span.text.as_str())
         .collect();
     assert!(matched.contains("/mo"), "{matched}");
+    // The status row stays above the composer; the panel sits on the
+    // terminal surface below the composer's bottom rule.
+    assert_eq!(frame.live[0].plain(), "");
     assert!(
         frame
             .live
             .iter()
-            .all(|line| line.background == Some(USER_SURFACE))
+            .all(|line| line.background != Some(USER_SURFACE))
     );
-    assert!(!frame.live.iter().any(|line| line.plain().starts_with('─')));
-    // The detail strip describes the focused command.
-    assert!(frame.live.iter().any(|line| {
-        line.plain()
+    let title = frame
+        .live
+        .iter()
+        .position(|line| line.plain().starts_with("─ Commands"))
+        .unwrap();
+    assert_eq!(title, caret + 1);
+    // Each command row carries its description in the fact column.
+    assert!(
+        selected
+            .plain()
             .contains("Choose the model for this conversation")
-    }));
+    );
     assert!(
         !frame
             .live
@@ -258,7 +303,7 @@ fn slash_commands_replace_the_composer_with_one_panel_and_a_distinct_selection()
 }
 
 #[test]
-fn selectors_replace_all_composer_rows_but_keep_the_draft_and_mask_keys() {
+fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
     let mut state = State::default();
     state.editor.insert("private draft");
     state.selector = Some(Selector::settings(
@@ -273,15 +318,29 @@ fn selectors_replace_all_composer_rows_but_keep_the_draft_and_mask_keys() {
         selection
             .live
             .iter()
-            .any(|row| row.plain().contains("Settings"))
+            .any(|row| row.plain().starts_with("─ Settings · saved defaults"))
     );
-    assert!(
-        !selection
-            .live
-            .iter()
-            .any(|row| row.plain().contains("private draft"))
-    );
+    // The composer shows the draft, without a caret, above the panel.
+    let draft: Vec<_> = selection
+        .live
+        .iter()
+        .filter(|row| row.plain().contains("private draft"))
+        .collect();
+    assert_eq!(draft.len(), 1);
+    assert_eq!(draft[0].plain().trim_end(), "› private draft");
+    assert!(!draft[0].spans.iter().any(|span| span.style == CURSOR));
+    assert_eq!(selection.cursor, None);
     state.selector = Some(Selector::key());
+    // The rule names the empty field once; the field holds only the caret.
+    let empty = frame(&state, "model", "directory");
+    let named = empty
+        .live
+        .iter()
+        .filter(|row| row.plain().contains("Paste your key"))
+        .count();
+    assert_eq!(named, 1);
+    let (row, _) = empty.cursor.unwrap();
+    assert_eq!(empty.live[row].plain().trim_end(), "›");
     state
         .selector
         .as_mut()
@@ -294,12 +353,25 @@ fn selectors_replace_all_composer_rows_but_keep_the_draft_and_mask_keys() {
             .iter()
             .any(|row| row.plain().contains("isolated-fixture-key"))
     );
-    assert!(key.live.iter().any(|row| row.plain().contains("********")));
+    // The key replaces the draft in the composer, one bullet per character,
+    // with the caret after it.
+    let (row, column) = key.cursor.unwrap();
+    assert_eq!(
+        key.live[row].plain().trim_end(),
+        format!("› {}", "•".repeat(20))
+    );
+    assert_eq!(column, 22);
+    assert!(key.live[row - 1].plain().starts_with("─ Paste your key ─"));
+    assert!(
+        !key.live
+            .iter()
+            .any(|row| row.plain().contains("private draft"))
+    );
     assert_eq!(state.editor.text, "private draft");
 }
 
 #[test]
-fn draft_contexts_add_a_hint_row_and_retain_the_directory_footer() {
+fn draft_contexts_replace_the_footer_with_key_hints() {
     let mut state = State {
         activity: Some(Activity::new()),
         ..State::default()
@@ -308,89 +380,101 @@ fn draft_contexts_add_a_hint_row_and_retain_the_directory_footer() {
     state.queue.push("later fix").unwrap();
     let slot = state.queue.slot(0).unwrap();
     state.queue.begin_edit(slot, &mut state.editor).unwrap();
-    let rows: Vec<_> = frame(&state, "model", "dir")
-        .live
-        .iter()
-        .map(Line::plain)
-        .collect();
-    // The later message, then the composer: the edited message leaves the
-    // queue previews while it is open, and its own hint row names Esc.
+    let frame_rows = frame(&state, "model", "dir").live;
+    let rows: Vec<_> = frame_rows.iter().map(Line::plain).collect();
+    // The later message, then the dock: the edited message leaves the queue
+    // previews while it is open, and its keys take the footer's row.
     assert_eq!(rows.len(), 6, "{rows:#?}");
     assert!(rows[0].starts_with("› later fix") && rows[0].ends_with("queued"));
-    assert!(rows[1].starts_with("─ ▰▰▱▱▱▱ 0.") && rows[1].contains(" · Editing draft 1/2 "));
-    assert!(!rows[1].contains("esc"));
-    assert!(rows[2].starts_with("› queued fix"));
-    assert_eq!(rows[4], "Enter save · Esc cancel");
-    assert!(rows[5].starts_with("dir"));
-    assert!(rows[5].ends_with("model · default"));
+    assert!(rows[1].starts_with(" >_ Working ") && !rows[1].contains("Esc"));
+    assert!(rows[2].starts_with("─ Editing draft 1/2 ─"));
+    assert!(rows[3].starts_with("› queued fix"));
+    assert_eq!(rows[5], "   Enter  save    Esc  cancel");
+    let keycap = frame_rows[5]
+        .spans
+        .iter()
+        .find(|span| span.text == " Enter ")
+        .unwrap();
+    assert_eq!(
+        (keycap.style, keycap.background),
+        (STRONG, Some(SELECTED_SURFACE))
+    );
 
-    let mut state = State {
-        activity: Some(Activity::new()),
-        ..State::default()
-    };
-    state.editor.insert("draft");
+    let mut state = State::default();
+    state
+        .history
+        .record(crate::attachments::Prompt::plain("earlier"));
+    state.history.navigate(&mut state.editor, true);
     let rows: Vec<_> = frame(&state, "model", "dir")
         .live
         .iter()
         .map(Line::plain)
         .collect();
-    assert_eq!(rows.len(), 4, "{rows:#?}");
-    assert!(rows[0].ends_with(" esc ─"));
-    assert!(rows[1].contains("draft"));
-    assert!(rows[3].ends_with("model · default"));
+    assert!(rows[1].starts_with("─ Prompt history ─"));
+    assert!(rows[4].contains(" Enter  send") && rows[4].contains(" Esc  back"));
 }
 
 #[test]
-fn a_reconnect_rides_the_working_rule_and_counts_down_without_a_row_of_its_own() {
+fn a_retry_counts_down_in_warning_with_its_attempt_and_cause() {
     let mut state = State {
         activity: Some(Activity::new()),
+        width: 100,
         ..State::default()
     };
-    state.progress = Some(
-        crate::tui::Feedback::progress(Kind::Warning, "Rate limited · HTTP 429 · attempt 2")
-            .until(std::time::Instant::now() + std::time::Duration::from_millis(3500)),
-    );
+    state.event(Event::Recovering {
+        attempt: 2,
+        delay: std::time::Duration::from_millis(3500),
+        error: "HTTP 429".into(),
+        reason: Some(crate::backend::FailureReason::RateLimited),
+    });
     let frame = frame(&state, "model", "dir");
-    assert_eq!(frame.live.len(), 4);
-    let rule = frame.live[0].plain();
-    assert!(rule.starts_with("─ ▰▰▱▱▱▱ 0."), "{rule}");
+    assert_eq!(frame.live.len(), 5);
+    let status = &frame.live[0];
     assert!(
-        rule.contains("Rate limited · HTTP 429 · attempt 2 in 4s"),
-        "{rule}"
+        status
+            .plain()
+            .starts_with(" >_ Retrying in 4s   Esc interrupt · 0."),
+        "{}",
+        status.plain()
     );
-    assert!(rule.ends_with(" esc ─"));
+    assert!(
+        status
+            .plain()
+            .ends_with(" · attempt 2 · Rate limited · HTTP 429"),
+        "{}",
+        status.plain()
+    );
+    assert_eq!(status::style_of(status, "Retrying"), Some(WARNING));
+    assert_eq!(status::style_of(status, ">"), Some(WARNING.bold()));
+    assert_eq!(frame.live[1].spans[0].style, FAINT);
 }
 
 #[test]
-fn the_working_rule_drops_detail_before_the_scanner() {
+fn the_status_row_drops_facts_from_the_right_before_the_pill() {
     let mut activity = Activity::new();
     activity.started -= std::time::Duration::from_secs(70 * 60 + 52);
+    activity.generated = 1234;
     let mut state = State {
         activity: Some(activity),
         ..State::default()
     };
-    state.queue.push("dammi il sito").unwrap();
-    let top = |state: &mut State, columns| {
+    state.event(Event::Reasoning);
+    let status = |state: &mut State, columns| {
         state.width = columns;
-        let frame = frame(state, "model", "dir");
-        let rule = frame
-            .live
-            .iter()
-            .map(Line::plain)
-            .find(|row| row.starts_with("─ "))
-            .unwrap();
-        assert_eq!(text::cells(&rule), columns);
-        rule
+        let row = frame(state, "model", "dir").live[0].plain();
+        assert!(text::cells(&row) <= columns);
+        row
     };
-    let wide = top(&mut state, 80);
-    assert!(wide.starts_with("─ ") && wide.contains(" 1h 10m · Drafts 1 · Alt+↑ ─"));
-    assert!(wide.ends_with("─ esc ─"));
-    let narrow = top(&mut state, 36);
-    assert!(narrow.contains(" 1h 10m · Drafts 1 ─"), "{narrow}");
-    assert!(narrow.ends_with(" esc ─"));
-    let tiny = top(&mut state, 16);
-    assert!(!tiny.contains("Drafts") && !tiny.contains("esc"), "{tiny}");
-    assert!(tiny.contains("▰▰"));
+    assert_eq!(
+        status(&mut state, 80),
+        " >_ Thinking   Esc interrupt · 1h 10m · ↓ 1.2k"
+    );
+    assert_eq!(
+        status(&mut state, 40),
+        " >_ Thinking   Esc interrupt · 1h 10m"
+    );
+    assert_eq!(status(&mut state, 30), " >_ Thinking   Esc interrupt");
+    assert_eq!(status(&mut state, 16), " >_ Thinking ");
     state.activity.as_mut().unwrap().stopping = true;
-    assert!(!top(&mut state, 80).contains("esc"));
+    assert_eq!(status(&mut state, 80), " >_ Stopping   1h 10m");
 }

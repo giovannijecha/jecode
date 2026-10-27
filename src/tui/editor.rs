@@ -113,7 +113,7 @@ impl Editor {
             .attachments
             .iter()
             .enumerate()
-            .map(|(index, attachment)| attachment.label(index + 1))
+            .map(|(index, attachment)| attachment.chip(index + 1))
             .collect::<Vec<_>>();
         self.layout
             .borrow_mut()
@@ -123,7 +123,7 @@ impl Editor {
     pub fn viewport(&self, columns: usize, secret: bool) -> (String, usize) {
         let columns = columns.max(1);
         let display = if secret {
-            "*".repeat(self.text.chars().count())
+            "•".repeat(self.text.chars().count())
         } else {
             text::clean(&self.display()).replace('\n', " ")
         };

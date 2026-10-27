@@ -76,7 +76,7 @@ fn a_blank_model_request_adds_no_rows_between_tool_blocks() {
         .unwrap();
     let second = rows
         .iter()
-        .position(|row| row.starts_with("● Bash(second)"))
+        .position(|row| row.starts_with(" BASH  second"))
         .unwrap();
     assert!(second > first + 1);
     assert_eq!(rows[second - 1].trim(), "");

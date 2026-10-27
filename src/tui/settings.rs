@@ -439,7 +439,7 @@ impl App {
                 .is_some_and(|services| !services.validates_effort())
         {
             for option in &mut menu.options {
-                option.prose = "The provider chooses the level. /effort NAME requests a specific level; the provider validates it.".into();
+                option.fact = "the provider chooses · /effort NAME requests a level".into();
             }
         }
         self.state.selector = Some(menu);

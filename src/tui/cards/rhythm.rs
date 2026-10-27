@@ -1,12 +1,13 @@
-//! Direction 10: quiet routine work, with purpose above the command.
+//! Routine work: the badge and its purpose, the command on the tree, then
+//! one quiet result.
 use super::{
-    Card, Status, Tool, content, failure, field, heading, hint, line_rows, summary, title,
+    Card, Status, Tool, badge, content, failure, field, heading, hint, line_rows, summary,
 };
 use crate::tui::{
     line::Line,
     syntax::Highlighter,
     text,
-    theme::{BAD, BODY, CODE_TEXT, MUTED, Style, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE},
+    theme::{BAD, BODY, CODE_TEXT, DIM, LIT, MUTED, Style},
 };
 
 pub(super) fn description<'a>(tool: &Tool<'a>) -> &'a str {
@@ -76,7 +77,7 @@ pub(super) fn limited(
     limit: usize,
     source: usize,
 ) -> Vec<Line> {
-    let mut rows = line_rows(line, columns, source, prefix, "    ", TOOL_DIM);
+    let mut rows = line_rows(line, columns, source, prefix, "    ", DIM);
     if rows.len() > limit {
         rows.truncate(limit);
         let last = rows.last_mut().unwrap();
@@ -86,40 +87,44 @@ pub(super) fn limited(
     rows
 }
 
-fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, &'static str) {
+/// ` NAME ` and the description or target in BODY; commands follow as
+/// `$ command` on the tree. Returns the rows, how many belong to the title,
+/// and the gutter the result row takes.
+fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, &'static str) {
     let (name, target) = heading(tool);
-    let marker = if status == Status::Running {
-        let elapsed = tool.presentation.duration().unwrap_or_default();
-        TOOL_PULSE[((elapsed.as_millis() / 240) % TOOL_PULSE.len() as u128) as usize]
-    } else {
-        status.style()
-    };
     let command_tool = matches!(tool.name, "bash" | "exec" | "process");
-    let command = tool.name == "browser" || command_tool && !description(tool).is_empty();
-    let mut head = Line::new(name, title::family(name).bold());
-    if command_tool && command {
-        head.push("  ", BODY);
-        head.push(&inline(description(tool)), BODY);
+    // Actions without a payload, such as snapshot or stop, have no command row.
+    let command = if tool.name == "browser" {
+        !payload(tool).is_empty()
     } else {
-        let target = if tool.name == "browser" {
-            field(tool.arguments, "action")
-        } else {
-            &target
-        };
-        head.push("(", if tool.name == "browser" { MUTED } else { BODY });
-        head.push(
-            &inline(target),
-            if tool.name == "browser" { MUTED } else { BODY },
-        );
-        head.push(")", if tool.name == "browser" { MUTED } else { BODY });
+        command_tool && !description(tool).is_empty()
+    };
+    let mut head = badge::badge(name, status);
+    head.push(" ", BODY);
+    let target = if command_tool && command {
+        description(tool)
+    } else if tool.name == "browser" {
+        field(tool.arguments, "action")
+    } else {
+        &target
+    };
+    head.push(&inline(target), BODY);
+    // A call still running in the background ends its target in a bold ` &`.
+    if status == Status::Background {
+        head.push(" &", LIT.bold());
     }
     let mut rows = if tool.presentation.expanded && !command {
-        line_rows(&head, columns, 0, "● ", "  ", marker)
+        let mut wrapped = head.at_source(0).into_wrapped(columns.max(1), true);
+        let mut rows: Vec<_> = wrapped.next().into_iter().collect();
+        wrapped.set_columns(columns.saturating_sub(2).max(1));
+        rows.extend(wrapped.map(|row| row.indent("  ", BODY)));
+        rows
     } else {
-        vec![one(head, columns, "● ", marker, 0)]
+        vec![head.at_source(0).shortened(columns)]
     };
+    let titled = rows.len();
     if command {
-        let mut command = Line::new(
+        let command = Line::new(
             if tool.name == "exec" {
                 "> "
             } else if command_tool {
@@ -127,28 +132,38 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, &'stati
             } else {
                 ""
             },
-            MUTED,
+            DIM,
         )
         .append(code(tool));
-        if tool.name == "process" {
-            command.push(" &", TOOL_ACCENT.bold());
-        }
         rows.extend(if tool.presentation.expanded {
-            line_rows(&command, columns, 1, "  ⎿ ", "    ", TOOL_DIM)
+            line_rows(&command, columns, 1, "  ⎿ ", "    ", DIM)
         } else {
             limited(&command, columns, "  ⎿ ", 2, 1)
         });
     }
-    (rows, if command { "    " } else { "  ⎿ " })
+    (rows, titled, if command { "    " } else { "  ⎿ " })
 }
 
 pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
-    let expanded = tool.presentation.expanded;
-    let (mut rows, guide) = title(&tool, columns, status);
-    if expanded {
-        return expanded_card(tool, columns, status, rows);
-    }
+    let (rows, titled, guide) = title(&tool, columns, status);
+    let mut card = if tool.presentation.expanded {
+        expanded_card(tool, columns, status, rows)
+    } else {
+        collapsed_card(tool, columns, keycap, status, rows, guide)
+    };
+    badge::hang(&mut card.rows[titled..], true);
+    card
+}
+
+fn collapsed_card(
+    tool: Tool<'_>,
+    columns: usize,
+    keycap: bool,
+    status: Status,
+    mut rows: Vec<Line>,
+    guide: &str,
+) -> Card {
     if status == Status::Failed {
         rows.extend(failure::rows(&tool, columns, guide));
         let hidden = tool.result.is_some();
@@ -166,10 +181,9 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         .map(|result| content::render(&tool, result, status, columns, false));
     let mut lead = summary::line(&tool, status, None);
     for span in &mut lead.spans {
-        span.style = if status == Status::Background {
-            TOOL_ACCENT
-        } else if status == Status::Running {
-            TOOL_DIM
+        // Running and background facts stay quiet; the badge carries the state.
+        span.style = if matches!(status, Status::Running | Status::Background) {
+            DIM
         } else {
             MUTED
         };
@@ -189,12 +203,12 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         suffix.push("no checkpoint".into());
     }
     if !suffix.is_empty() {
-        let suffix = Line::new(&format!("  {}", suffix.join(" · ")), TOOL_DIM);
+        let suffix = Line::new(&format!("  {}", suffix.join(" · ")), DIM);
         lead = lead
             .shortened(columns.saturating_sub(4 + text::cells(&suffix.plain())))
             .append(suffix);
     }
-    let mut result_rows = vec![one(lead, columns, guide, TOOL_DIM, 2)];
+    let mut result_rows = vec![one(lead, columns, guide, DIM, 2)];
     if keycap
         && hidden
         && let Some(last) = result_rows.pop()
@@ -221,7 +235,7 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
                 3,
                 "    ",
                 "    ",
-                TOOL_DIM,
+                DIM,
             ));
         } else {
             rows.extend(content::render(&tool, result, status, columns, true).rows);
@@ -233,13 +247,13 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
                 .get("exit_code")
                 .filter(|code| **code != crate::json::Value::Null)
         {
-            footer.push(&format!("exit {}", code.encode()), TOOL_DIM);
+            footer.push(&format!("exit {}", code.encode()), DIM);
         }
         if let Some(elapsed) = tool.presentation.duration() {
             if !footer.spans.is_empty() {
-                footer.push(" · ", TOOL_DIM);
+                footer.push(" · ", DIM);
             }
-            footer.push(&crate::tui::activity::duration(elapsed), TOOL_DIM);
+            footer.push(&crate::tui::activity::duration(elapsed), DIM);
         }
         if !footer.spans.is_empty() {
             rows.extend(line_rows(
@@ -248,7 +262,7 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
                 usize::MAX - 110,
                 "    ",
                 "    ",
-                TOOL_DIM,
+                DIM,
             ));
         }
     } else {
@@ -256,7 +270,7 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
             summary::line(&tool, status, None),
             columns,
             "    ",
-            TOOL_DIM,
+            DIM,
             2,
         ));
     }

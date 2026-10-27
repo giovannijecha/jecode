@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 
 use crate::tui::{
     activity::Activity,
-    feedback::Feedback,
+    feedback::{Ending, Feedback},
     line::Line,
     selector::Selector,
-    state::{Kind, State},
+    state::{Kind, Recent, State},
     theme::{MUTED, STRONG},
     view,
 };
@@ -31,7 +31,7 @@ fn noticed(columns: usize, kind: Kind, text: &str) -> State {
 
 fn with(columns: usize, notice: Feedback) -> State {
     let mut state = state(columns);
-    state.notice = Some(notice);
+    state.notify(notice);
     state
 }
 
@@ -53,11 +53,19 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         "Compacting context · anthropic/claude-sonnet-5.5 · original conversation kept",
     ));
 
-    let mut both = noticed(columns, Kind::Notice, "Complete · 48s · 6 tools");
+    let done = with(columns, Feedback::ending(Ending::Done, "48s · 6 tools"));
+
+    let mut both = noticed(columns, Kind::Notice, "Checkpoint saved · rc-12");
     both.copy_notice = Some(Feedback::result(
         Kind::Notice,
         "Copied Response 3 to clipboard",
     ));
+
+    let mut startup = state(columns);
+    startup.opening.recent.push(Recent {
+        title: "Rate limiting for /login".into(),
+        age: "yesterday".into(),
+    });
 
     let mut turn = noticed(
         columns,
@@ -68,7 +76,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
 
     let mut reconnecting = state(columns);
     working(&mut reconnecting, 64.0);
-    reconnecting.progress = Some(
+    reconnecting.recovery = Some(
         Feedback::progress(
             Kind::Warning,
             "Rate limited · attempt 2 · OpenRouter HTTP 429: rate limit exceeded",
@@ -92,32 +100,32 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     vec![
         (
             "Result",
-            noticed(columns, Kind::Notice, "Complete · 48s · 6 tools"),
+            noticed(columns, Kind::Notice, "Checkpoint saved · rc-12"),
         ),
+        ("Done", done),
         (
             "Setting changed",
-            noticed(
+            with(
                 columns,
-                Kind::Notice,
-                "Auto-compact: 80% → 55% · this and new conversations",
+                Feedback::result(
+                    Kind::Notice,
+                    "Auto-compact: 80% → 55% · this and new conversations",
+                )
+                .change(),
             ),
         ),
         (
             "Model changed",
-            noticed(
-                columns,
-                Kind::Notice,
-                "Model: anthropic/claude-sonnet-5.5 (high) → openai/gpt-5.5 (medium) · this conversation",
-            ),
-        ),
-        (
-            "Startup",
             with(
                 columns,
-                Feedback::result(Kind::Notice, "Previous session: Rate limiting for /login")
-                    .action("/resume", "open"),
+                Feedback::result(
+                    Kind::Notice,
+                    "Model: anthropic/claude-sonnet-5.5 (high) → openai/gpt-5.5 (medium) · this conversation",
+                )
+                .change(),
             ),
         ),
+        ("Startup · recent", startup),
         ("Progress", progress),
         (
             "Tool details confirmation",
@@ -125,22 +133,18 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         ("Compacting", compacting),
         (
-            "Interrupted",
+            "Stopped",
             with(
                 columns,
-                Feedback::result(
-                    Kind::Warning,
-                    "Interrupted · prompt restored · 2 drafts paused",
-                )
-                .action("Alt+↑", "review"),
+                Feedback::ending(Ending::Stopped, "17s · your next message continues from here"),
             ),
         ),
         (
             "Error",
             with(
                 columns,
-                Feedback::result(
-                    Kind::Error,
+                Feedback::ending(
+                    Ending::Failed,
                     "OpenRouter HTTP 401: User not found. · prompt restored",
                 )
                 .action("/settings", "update key"),
@@ -176,7 +180,17 @@ fn notices() {
         for (title, state) in states(columns) {
             rows.push((Line::new(title, MUTED), columns));
             rows.push((Line::default(), columns));
-            for line in view::composer_frame(&state, MODEL, DIRECTORY).live {
+            let lines = if state.opening.recent.is_empty() {
+                view::composer_frame(&state, MODEL, DIRECTORY).live
+            } else {
+                let frame = view::frame(&state, MODEL, DIRECTORY);
+                frame
+                    .header
+                    .into_iter()
+                    .chain(frame.live.into_iter().skip(frame.composer))
+                    .collect()
+            };
+            for line in lines {
                 rows.push((line, columns));
             }
             rows.push((Line::default(), columns));

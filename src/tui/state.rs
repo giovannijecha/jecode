@@ -20,10 +20,15 @@ pub enum Kind {
     Warning,
     Error,
 }
-pub enum ChatGptAccount {
-    Active(String),
-    SignedOut,
-    Unavailable,
+/// Header facts and the conversations offered until the first prompt.
+#[derive(Default)]
+pub struct Opening {
+    /// Up to three other conversations in this folder, newest first.
+    pub recent: Vec<Recent>,
+}
+pub struct Recent {
+    pub title: String,
+    pub age: String,
 }
 pub enum Item {
     Streaming {
@@ -60,7 +65,7 @@ impl Item {
             } => !text.trim().is_empty(),
             Self::Local { .. }
             | Self::Text {
-                kind: Kind::Notice | Kind::Warning | Kind::Error,
+                kind: Kind::Notice | Kind::Warning,
                 ..
             } => false,
             _ => true,
@@ -73,6 +78,8 @@ pub struct State {
     pub status: String,
     pub generation: u64,
     pub revision: u64,
+    /// Visible conversation output, independent of presentation-only reflow.
+    pub output_revision: u64,
     pub tool_revision: u64,
     pub tool_details: tools::ToolDetails,
     pub width: usize,
@@ -87,14 +94,18 @@ pub struct State {
     pub progress: Option<Feedback>,
     /// A retry temporarily overlays maintenance without replacing its clock.
     pub recovery: Option<Feedback>,
+    /// How the last turn ended, until the next send.
+    pub ending: Option<Feedback>,
     pub backend_failure: Option<(FailureReason, String)>,
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
     /// The engine's latest projection for the footer; None renders no indicator.
     pub context: Option<crate::context::Status>,
-    /// The current backend's ChatGPT plan identity, shown only when the footer has room.
-    pub chatgpt_account: Option<ChatGptAccount>,
+    /// The recent conversations offered before the first prompt.
+    pub opening: Opening,
+    /// The quit guard is open: the background processes by command and id.
+    pub quitting: Option<Vec<(String, String)>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -104,6 +115,7 @@ impl Default for State {
             status: "Ready".into(),
             generation: 0,
             revision: 0,
+            output_revision: 0,
             tool_revision: 0,
             tool_details: tools::ToolDetails::default(),
             width: 80,
@@ -117,12 +129,14 @@ impl Default for State {
             copy_notice: None,
             progress: None,
             recovery: None,
+            ending: None,
             backend_failure: None,
             information: None,
             selector: None,
             processes: None,
             context: None,
-            chatgpt_account: None,
+            opening: Opening::default(),
+            quitting: None,
         }
     }
 }
@@ -137,8 +151,19 @@ impl State {
             return;
         }
         self.changed();
+        self.output_changed();
         self.items.push(Item::Text {
             kind,
+            text: text.into(),
+        });
+    }
+    /// A failed turn keeps its diagnostic as the turn's last transcript row.
+    pub fn diagnostic(&mut self, text: &str) {
+        self.close_tools();
+        self.changed();
+        self.output_changed();
+        self.items.push(Item::Text {
+            kind: Kind::Error,
             text: text.into(),
         });
     }
@@ -217,6 +242,11 @@ impl State {
             // The application shows accepted input with its prompt history.
             Event::Accepted { .. } => {}
             Event::Context(status) => self.context = Some(status),
+            Event::Generated { tokens } => {
+                if let Some(activity) = &mut self.activity {
+                    activity.generated += tokens;
+                }
+            }
             Event::Streaming { text } => {
                 self.status = "Writing the response…".into();
                 // Updates contain the entire response so far. Its leading whitespace
@@ -225,18 +255,26 @@ impl State {
                     return;
                 }
                 if let Some(Item::Streaming { text: current }) = self.items.last_mut() {
-                    *current = text;
+                    if *current != text {
+                        *current = text;
+                        self.output_changed();
+                    }
                 } else {
                     self.close_tools();
                     self.items.push(Item::Streaming { text });
+                    self.output_changed();
                 }
             }
             Event::Message { text } => {
-                if matches!(self.items.last(), Some(Item::Streaming { .. })) {
+                if let Some(Item::Streaming { text: current }) = self.items.last() {
+                    let changed = *current != text;
                     *self.items.last_mut().unwrap() = Item::Text {
                         kind: Kind::Assistant,
                         text,
                     };
+                    if changed {
+                        self.output_changed();
+                    }
                 } else {
                     self.message(Kind::Assistant, &text);
                 }
@@ -264,6 +302,7 @@ impl State {
                     presentation: Presentation { turn_id: self.tool_details.turn_id, ..Presentation::live() },
                 });
                 let index = self.items.len() - 1;
+                self.output_changed();
                 self.cache_chapter(index);
                 self.update_chapters(&[index]);
             }
@@ -272,11 +311,13 @@ impl State {
                     |item| matches!(item, Item::Tool { id: current, result: None, .. } if *current == id),
                 ) {
                     presentation.note = Some(text);
+                    self.output_changed();
                 }
             }
             Event::ToolChanged { id, change } => {
                 if let Some(Item::Tool { change: captured, .. }) = self.items.iter_mut().rev().find(|item| matches!(item, Item::Tool { id: current, result: None, .. } if *current == id)) {
                     *captured = Some(Box::new(change));
+                    self.output_changed();
                 }
             }
             Event::ToolFinished {
@@ -298,6 +339,7 @@ impl State {
                     *current = summary;
                     *captured = Some(result);
                     presentation.finish();
+                    self.output_changed();
                     self.update_chapters(&[index]);
                 }
             }
@@ -325,6 +367,7 @@ impl State {
         self.status = "Ready".into();
         self.clear_notice();
         self.clear_copy_notice();
+        self.ending = None;
         self.clear_progress();
         self.backend_failure = None;
         self.information = None;
@@ -397,10 +440,16 @@ impl State {
             }
         }
         drop(messages);
+        if !settled.is_empty() {
+            self.output_changed();
+        }
         self.update_chapters(&settled);
     }
     pub fn changed(&mut self) {
         self.revision = self.revision.wrapping_add(1);
+    }
+    fn output_changed(&mut self) {
+        self.output_revision = self.output_revision.wrapping_add(1);
     }
 }
 

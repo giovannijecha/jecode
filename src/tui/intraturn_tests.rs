@@ -341,9 +341,9 @@ fn a_save_failure_pauses_the_message_and_reports_the_error() {
     assert_eq!(app.state.queue.paused[0].text, "queued");
     assert!(
         app.state
-            .notice
+            .ending
             .as_ref()
-            .is_some_and(|notice| notice.text.contains("1 draft paused"))
+            .is_some_and(|ending| ending.text.contains("1 draft paused"))
     );
     assert_eq!(app.state.history.snapshot(), ["active"]);
     assert_eq!(fixture.finish().len(), 1);

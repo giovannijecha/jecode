@@ -5,7 +5,6 @@ use crate::{
     session::commands::match_text,
 };
 use std::path::Path;
-use std::time::Instant;
 
 mod providers;
 
@@ -51,8 +50,6 @@ pub struct OptionRow {
     /// Searchable detail that does not need space in the row.
     pub search: String,
     pub badge: Option<Badge>,
-    /// The focused option's prose, shown in the detail strip.
-    pub prose: String,
     pub choice: Choice,
 }
 pub struct Hit {
@@ -111,7 +108,6 @@ pub struct Selector {
     pub parent: Option<&'static str>,
     /// What a waiting panel is doing.
     pub message: String,
-    pub opened: Instant,
     pub purpose: Purpose,
     pub options: Vec<OptionRow>,
     pub filtered: Vec<Hit>,
@@ -126,9 +122,23 @@ fn row(name: impl Into<String>, fact: impl Into<String>, choice: Choice) -> Opti
         fact: fact.into(),
         search: String::new(),
         badge: None,
-        prose: String::new(),
         choice,
     }
+}
+
+/// A listing name that only restates the id, `Anthropic: Claude Opus 5.5`
+/// beside `anthropic/claude-opus-5.5`, adds nothing to its row.
+fn restates(id: &str, name: &str) -> bool {
+    let key = |value: &str| {
+        value
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|ch| ch.to_ascii_lowercase())
+            .collect::<String>()
+    };
+    let tail = key(id.rsplit('/').next().unwrap_or(id));
+    let short = name.split_once(": ").map_or(name, |(_, rest)| rest);
+    [name, short].into_iter().any(|name| key(name) == tail)
 }
 
 const SETTINGS: &str = "Settings";
@@ -141,7 +151,6 @@ impl Selector {
             context: String::new(),
             parent: None,
             message: String::new(),
-            opened: Instant::now(),
             purpose,
             options,
             filtered: vec![],
@@ -169,15 +178,12 @@ impl Selector {
             .map(|(index, target)| {
                 let preview = crate::copy::preview(&target.text);
                 OptionRow {
-                    prose: preview.clone(),
                     search: preview,
                     ..row(super::text::clip(&target.name, 64), "", Choice::Copy(index))
                 }
             })
             .collect();
-        let mut menu = Self::new("Copy to clipboard", Purpose::Copy, options);
-        "last response".clone_into(&mut menu.context);
-        menu
+        Self::new("Copy to clipboard", Purpose::Copy, options)
     }
     pub fn drafts(queue: &super::drafts::Queue) -> Self {
         let options = queue
@@ -193,7 +199,6 @@ impl Selector {
                         super::drafts::Slot::Queued(_) => Badge::Queued,
                         super::drafts::Slot::Paused(_) => Badge::Paused,
                     }),
-                    prose: text.split_whitespace().collect::<Vec<_>>().join(" "),
                     search: match slot {
                         super::drafts::Slot::Queued(_) => "Queued",
                         super::drafts::Slot::Paused(_) => "Paused",
@@ -213,9 +218,8 @@ impl Selector {
                 badge: Some(if session.id == current {
                     Badge::Current
                 } else {
-                    Badge::Note(session.age())
+                    Badge::Note(session.elapsed())
                 }),
-                prose: session.origin(),
                 search: session.description(),
                 ..row(session.title.clone(), "", Choice::Session(index))
             })
@@ -242,7 +246,16 @@ impl Selector {
             .enumerate()
             .map(|(index, model)| OptionRow {
                 badge: (model.id == current).then_some(Badge::Current),
-                ..row(model.id.clone(), model.name.clone(), Choice::Model(index))
+                search: model.name.clone(),
+                ..row(
+                    model.id.clone(),
+                    if restates(&model.id, &model.name) {
+                        String::new()
+                    } else {
+                        model.name.clone()
+                    },
+                    Choice::Model(index),
+                )
             })
             .collect();
         let mut menu = Self::new(
@@ -288,10 +301,8 @@ impl Selector {
         routing: &Routing,
         _config_path: &Path,
     ) -> Self {
-        let setting = |name: &str, value: String, prose: &str, setting| OptionRow {
-            prose: prose.into(),
-            ..row(name, value, Choice::Setting(setting))
-        };
+        let setting =
+            |name: &str, value: String, setting| row(name, value, Choice::Setting(setting));
         let mut menu = Self::new(
             SETTINGS,
             Purpose::Settings,
@@ -303,33 +314,16 @@ impl Selector {
                     } else {
                         model.into()
                     },
-                    "Model for new conversations. /model changes only the current one.",
                     Setting::Model,
                 ),
-                setting(
-                    "Default effort",
-                    effort.name().into(),
-                    "Reasoning effort for new conversations.",
-                    Setting::Effort,
-                ),
-                setting(
-                    "Default routing",
-                    routing.label(),
-                    "How OpenRouter picks an endpoint for the default model.",
-                    Setting::Routing,
-                ),
+                setting("Default effort", effort.name().into(), Setting::Effort),
+                setting("Default routing", routing.label(), Setting::Routing),
                 setting(
                     "Auto-compact at",
                     format!("{auto_compact}%"),
-                    "Compact when the next request reaches this share of the context window.",
                     Setting::AutoCompact,
                 ),
-                setting(
-                    "Providers",
-                    String::new(),
-                    "Manage ChatGPT accounts and OpenRouter API keys.",
-                    Setting::Providers,
-                ),
+                setting("Providers", String::new(), Setting::Providers),
             ],
         );
         "saved defaults".clone_into(&mut menu.context);
@@ -358,12 +352,6 @@ impl Selector {
             .map(|(index, entry)| OptionRow {
                 badge: (entry.routing == *current).then_some(Badge::Current),
                 search: entry.description.clone(),
-                // The table shows the figures; the strip keeps the other facts.
-                prose: if entry.metrics.is_some() && !entry.facts.is_empty() {
-                    format!("{} · {}", entry.help, entry.facts)
-                } else {
-                    entry.help.clone()
-                },
                 ..row(
                     entry.name.clone(),
                     entry.facts.clone(),

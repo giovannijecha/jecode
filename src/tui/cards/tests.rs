@@ -1,5 +1,7 @@
 use super::*;
-use crate::tui::theme::{CODE_TEXT, DIFF_ADDED_SURFACE, KEYWORD};
+use crate::tui::theme::{
+    BADGE_IDLE, BADGE_SHELL, BADGE_TEXT, CODE_TEXT, DIFF_ADDED_SURFACE, KEYWORD,
+};
 
 mod files;
 mod reads;
@@ -44,7 +46,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
                 ("url", Value::string("https://example.org/")),
             ]),
             Value::object([("status", Value::number(200)), ("bytes", Value::number(42))]),
-            "Web(fetch https://example.org/)",
+            " WEB  fetch https://example.org/",
             "HTTP 200 · 42 B",
         ),
         (
@@ -54,7 +56,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
                 ("tab_id", Value::string("tab-1")),
             ]),
             Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]),
-            "Browser(screenshot)",
+            " BROWSER  screenshot",
             "Screenshot · tmp:browser/shot.png",
         ),
     ];
@@ -71,10 +73,11 @@ fn web_and_browser_cards_show_action_target_and_result() {
             80,
         );
         let text = plain(&rows);
-        assert!(text.contains(title), "{text}");
+        assert!(text.starts_with(title), "{text}");
         assert!(text.contains(outcome), "{text}");
+        assert!(rows.last().unwrap().plain().starts_with("  └ "), "{text}");
         if name == "browser" {
-            assert_eq!(rows[1].plain(), "  ⎿ tab-1");
+            assert_eq!(rows[1].plain(), "  │ tab-1");
         }
     }
 }
@@ -91,15 +94,13 @@ fn title_and_result_are_left_aligned_without_a_tree_or_status_column() {
     );
     assert_eq!(
         rows.iter().map(Line::plain).collect::<Vec<_>>(),
-        ["● Bash(cargo test)", "  ⎿ Done"]
+        [" BASH  cargo test", "  └ Done"]
     );
-    assert_eq!(rows[0].spans[0].style, GOOD);
-    assert!(
-        rows[0]
-            .spans
-            .iter()
-            .any(|span| span.text == "Bash" && span.style == TOOL_ACCENT.bold())
-    );
+    // Done is the badge on the shell family surface; no status dot.
+    assert_eq!(rows[0].spans[0].text, " BASH ");
+    assert_eq!(rows[0].spans[0].style, BADGE_TEXT.bold());
+    assert_eq!(rows[0].spans[0].background, Some(BADGE_SHELL));
+    assert!(!plain(&rows).contains('●'));
     assert!(rows[0].background.is_none());
 }
 
@@ -122,15 +123,14 @@ fn expanded_titles_keep_long_unicode_commands_and_fit_narrow_views() {
             .iter()
             .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
             .collect();
-        assert!(title[0].plain().starts_with("● Bash(cargo"));
+        assert!(title[0].plain().starts_with(" BASH  cargo"));
         assert!(!title.iter().any(|row| row.plain().contains('…')));
-        let retained = title
-            .iter()
-            .map(|row| row.plain().chars().skip(2).collect::<String>())
-            .collect::<String>();
+        // Wrapped rows hang two cells in, under the badge.
+        assert!(title[1..].iter().all(|row| row.plain().starts_with("  ")));
+        let retained = title.iter().map(|row| row.plain()).collect::<String>();
         assert_eq!(
             retained.split_whitespace().collect::<String>(),
-            format!("Bash({command})")
+            format!("BASH {command}")
                 .split_whitespace()
                 .collect::<String>()
         );
@@ -151,7 +151,7 @@ fn expanded_titles_keep_long_unicode_commands_and_fit_narrow_views() {
 
 #[test]
 fn multiline_title_origins_include_line_breaks() {
-    let rows = title::rows("Bash", "one\ntwo\nthree", TOOL_ACCENT, 80, true);
+    let rows = title::rows("Bash", "one\ntwo\nthree", Status::Done, 80, true);
     let offsets: Vec<_> = rows
         .iter()
         .map(|row| row.origin.expect("title origin").character)
@@ -213,8 +213,11 @@ fn running_states_stay_explicit_without_a_selection_mode() {
         },
     );
     assert!(rows[0].background.is_none());
-    assert_eq!(rows[0].spans[0].style, crate::tui::theme::TOOL_PULSE[2]);
-    assert!(plain(&rows).contains("⎿ Running · 2.4s"));
+    // Running is the quiet badge with the shimmer across its name.
+    assert_eq!(rows[0].spans[0].background, Some(BADGE_IDLE));
+    assert_eq!(rows[0].spans[1].text, "BASH");
+    assert_eq!(rows[0].spans[1].background, Some(BADGE_IDLE));
+    assert!(plain(&rows).contains("└ Running · 2.4s"));
     assert!(rows[1..].iter().all(|row| row.background.is_none()));
 }
 
@@ -239,8 +242,8 @@ fn failed_commands_prioritize_errors_and_expand_both_streams() {
     );
     let text = plain(&compact);
     assert!(
-        text.contains("⎿ Exit 101 · error 1")
-            && text.contains("    error 3")
+        text.contains("  │ Exit 101 · error 1")
+            && text.contains("  └ error 3")
             && !text.contains("error 4")
             && !text.contains("more lines")
     );
@@ -294,12 +297,12 @@ fn capture_notices_survive_collapse_and_expansion() {
         );
         let text = plain(&rows);
         assert!(text.contains("last") && text.contains("full output saved"));
-        assert_eq!(text.contains("    old"), expanded);
+        assert_eq!(text.contains("  │ old"), expanded);
         if expanded {
-            assert!(!text.contains("⎿ Done"));
-            assert!(text.contains("exit 0"));
+            assert!(!text.contains("Done"));
+            assert!(text.contains("└ exit 0"));
         } else {
-            assert!(text.contains("⎿ last"));
+            assert!(text.contains("  │ last"));
         }
         assert_eq!(text.contains("+2 lines"), !expanded);
     }
@@ -312,10 +315,10 @@ fn process_states_and_lists_name_their_actual_outcomes() {
         ("process_id", Value::string("p1")),
     ]);
     for (status, expected) in [
-        ("running", "⎿ p1 running"),
-        ("stopping", "⎿ p1 stopping"),
-        ("stopped", "⎿ p1 stopped"),
-        ("unknown", "⎿ p1 status unknown"),
+        ("running", "└ p1 running"),
+        ("stopping", "└ p1 stopping"),
+        ("stopped", "└ p1 stopped"),
+        ("unknown", "└ p1 status unknown"),
     ] {
         let result = Value::object([
             ("process_id", Value::string("p1")),
@@ -329,7 +332,16 @@ fn process_states_and_lists_name_their_actual_outcomes() {
             80,
             &Presentation::default(),
         );
-        assert_eq!(rows[0].plain(), "● Process(poll p1)");
+        // Only a process still in the background ends its target in `&`.
+        let background = matches!(status, "running" | "stopping");
+        assert_eq!(
+            rows[0].plain(),
+            if background {
+                " PROCESS  poll p1 &"
+            } else {
+                " PROCESS  poll p1"
+            }
+        );
         assert!(plain(&rows).contains(expected));
     }
     let list = Value::object([(
@@ -420,7 +432,7 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
         80,
         &Presentation::default(),
     );
-    assert!(plain(&rows).contains("⎿ Wrote 1 line"));
+    assert!(plain(&rows).starts_with(" WRITE  notes.txt  Wrote 1 line"));
     assert!(rows.iter().all(|row| row.background.is_none()));
     let change = Change::between(None, "").unwrap();
     let rows = draw(
@@ -431,6 +443,7 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
         80,
         &Presentation::default(),
     );
-    assert_eq!(rows.len(), 2);
-    assert!(plain(&rows).contains("New file · 0 lines"));
+    // The fact joins the title and no preview rows are invented.
+    assert_eq!(rows.len(), 1);
+    assert_eq!(plain(&rows), " WRITE  notes.txt  New file · 0 lines");
 }

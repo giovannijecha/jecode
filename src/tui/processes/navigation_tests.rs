@@ -167,6 +167,30 @@ fn short_panel_keeps_a_log_row_visible() {
 }
 
 #[test]
+fn short_log_arrows_reach_middle_rows_before_following() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    open_output(&mut app, "row-0\nrow-1\nrow-2\nrow-3");
+    app.state.height = 3;
+    assert!(frame(&app).iter().any(|line| line.contains("row-0")));
+    for number in 1..=2 {
+        app.process_key(terminal::Key {
+            code: 40,
+            modifiers: 0,
+            character: 0,
+        })
+        .unwrap();
+        let rows = frame(&app);
+        assert!(
+            rows.iter()
+                .any(|line| line.contains(&format!("row-{number}"))),
+            "{rows:?}"
+        );
+    }
+}
+
+#[test]
 fn resizing_paused_output_preserves_the_reading_position() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);

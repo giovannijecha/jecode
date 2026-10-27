@@ -1,5 +1,8 @@
 use super::*;
-use crate::tui::theme::{BODY, CODE_STRING, KEYWORD};
+use crate::tui::theme::{
+    BAD, BADGE_BAD, BADGE_IDLE, BADGE_SHELL, BADGE_TEXT, BODY, CODE_STRING, KEYWORD, LIT, Style,
+    Surface,
+};
 
 fn object<const N: usize>(fields: [(&str, &str); N]) -> Value {
     Value::object(fields.map(|(key, value)| (key, Value::string(value))))
@@ -23,6 +26,11 @@ fn draw<'a>(
         columns,
         false,
     )
+}
+/// The title badge: its ink and surface.
+fn badge(card: &Card) -> (Style, Option<Surface>) {
+    let badge = &card.rows[0].spans[0];
+    (badge.style, badge.background)
 }
 fn plain(card: &Card) -> String {
     card.rows
@@ -55,14 +63,16 @@ fn described_commands_use_shell_colours_two_rows_and_quiet_inline_result() {
             &Presentation::default(),
             columns,
         );
-        assert_eq!(card.rows[0].plain(), "● Bash  Inspect the renderer");
+        assert_eq!(card.rows[0].plain(), " BASH  Inspect the renderer");
+        assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_SHELL)));
         assert!(
             card.rows[1]
                 .plain()
-                .starts_with("  ⎿ $ printf 'two  spaces'")
+                .starts_with("  │ $ printf 'two  spaces'")
         );
+        assert!(card.rows[2].plain().starts_with("  │ "));
         assert!(card.rows[2].plain().ends_with('…'));
-        assert_eq!(card.rows[3].plain(), "    ready  +2 lines · no checkpoint");
+        assert_eq!(card.rows[3].plain(), "  └ ready  +2 lines · no checkpoint");
         assert_eq!(card.rows.len(), 4);
         assert!(card.hidden);
         assert!(
@@ -91,8 +101,8 @@ fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
     for description in ["", "  \n "] {
         let args = object([("command", "cargo test"), ("description", description)]);
         let card = draw("bash", &args, Some(&result), &Presentation::default(), 80);
-        assert_eq!(plain(&card), "● Bash(cargo test)\n  ⎿ Done");
-        assert_eq!(card.rows[0].spans[1].style, TOOL_ACCENT.bold());
+        assert_eq!(plain(&card), " BASH  cargo test\n  └ Done");
+        assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_SHELL)));
         assert_eq!(card.rows[0].spans.last().unwrap().style, BODY);
     }
     let args = object([
@@ -112,15 +122,24 @@ fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
         &Presentation::default(),
         80,
     );
-    assert_eq!(card.rows[1].plain(), "  ⎿ $ node preview.js &");
-    assert_eq!(card.rows[1].spans.last().unwrap().style, TOOL_ACCENT.bold());
+    // The background call ends its title target in a bold `&`.
+    assert_eq!(card.rows[0].plain(), " PROCESS  Serve preview &");
+    assert_eq!(card.rows[0].spans.last().unwrap().text, " &");
+    assert_eq!(card.rows[0].spans.last().unwrap().style, LIT.bold());
+    assert_eq!(badge(&card), (LIT.bold(), Some(BADGE_IDLE)));
+    assert_eq!(card.rows[1].plain(), "  │ $ node preview.js");
+    // Background facts stay quiet; the badge carries the state.
+    assert!(card.rows[2].plain().starts_with("  └ "));
     assert!(
         card.rows[2]
             .spans
             .iter()
             .skip(1)
-            .all(|span| span.style == TOOL_ACCENT)
+            .all(|span| span.style == DIM)
     );
+    let done = Value::object([("exit_code", Value::number(0))]);
+    let finished = draw("process", &args, Some(&done), &Presentation::default(), 80);
+    assert!(!finished.rows[0].plain().contains('&'));
 }
 
 #[test]
@@ -136,7 +155,8 @@ fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
     )]);
     let shown = Presentation::default();
     let card = draw("browser", &args, Some(&result), &shown, 80);
-    assert_eq!(card.rows[0].plain(), "● Browser(evaluate)");
+    assert_eq!(card.rows[0].plain(), " BROWSER  evaluate");
+    assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_BAD)));
     assert!(
         card.rows[1]
             .spans
@@ -168,7 +188,7 @@ fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
         },
         80,
     );
-    assert_eq!(rows[0].plain(), "  ⎿ Browser evaluate  Read title");
+    assert_eq!(rows[0].plain(), "  ⎿ BROWSER evaluate Read title");
     assert!(rows[1].plain().starts_with("    TypeError"));
 }
 
@@ -191,7 +211,7 @@ fn expanded_output_and_checkpoint_notice_remain_complete() {
         ..Presentation::default()
     };
     let card = draw("bash", &args, Some(&result), &shown, 40);
-    assert!(plain(&card).contains("    first\n    \n    last"));
+    assert!(plain(&card).contains("  │ first\n  │ \n  │ last"));
     assert!(plain(&card).contains("Checkpoint none · No changes"));
     assert!(!card.hidden);
 }
@@ -273,7 +293,7 @@ fn exec_cards_keep_structured_target_and_command_status_across_states() {
     assert!(
         pending.rows[0]
             .plain()
-            .starts_with("● Exec(cargo [\"test\",\"a b\"])")
+            .starts_with(" EXEC  cargo [\"test\",\"a b\"]")
     );
     let success = Value::object([
         ("exit_code", Value::number(0)),
@@ -287,7 +307,7 @@ fn exec_cards_keep_structured_target_and_command_status_across_states() {
     ]);
     let failed_card = draw("exec", &args, Some(&failed), &collapsed, 80);
     assert!(plain(&failed_card).contains("failed step"));
-    assert_eq!(failed_card.rows[0].spans[0].style, BAD);
+    assert_eq!(badge(&failed_card), (BADGE_TEXT.bold(), Some(BADGE_BAD)));
     let background = object([("status", "running"), ("process_id", "process-fixture")]);
     let running = draw("exec", &args, Some(&background), &collapsed, 80);
     assert!(plain(&running).contains("process-fixture"));
@@ -304,6 +324,39 @@ fn exec_cards_keep_structured_target_and_command_status_across_states() {
         ("description", Value::string("Run checks")),
     ]);
     let card = draw("exec", &described, Some(&success), &collapsed, 80);
-    assert_eq!(card.rows[0].plain(), "● Exec  Run checks");
+    assert_eq!(card.rows[0].plain(), " EXEC  Run checks");
     assert!(card.rows[1].plain().contains("> cargo [\"test\"]"));
+}
+
+#[test]
+fn browser_actions_without_a_payload_open_their_result_on_the_first_tree_row() {
+    let result = Value::object([
+        ("title", Value::string("Example Domain")),
+        ("url", Value::string("https://example.com/")),
+        ("text", Value::string("{\n  \"elements\": []\n}")),
+    ]);
+    for action in ["snapshot", "stop"] {
+        let args = object([("action", action)]);
+        for expanded in [false, true] {
+            let shown = Presentation {
+                expanded,
+                ..Presentation::default()
+            };
+            let card = draw("browser", &args, Some(&result), &shown, 80);
+            assert_eq!(card.rows[0].plain(), format!(" BROWSER  {action}"));
+            // No empty command row opens the tree; this result has no blank line.
+            let empty = |row: &Line| row.plain().trim_start_matches([' ', '│', '└']).is_empty();
+            assert!(!card.rows[1..].iter().any(empty), "{}", plain(&card));
+        }
+    }
+    // A payload still shows as the command on the tree.
+    let args = object([("action", "open"), ("url", "https://example.com/")]);
+    let card = draw(
+        "browser",
+        &args,
+        Some(&result),
+        &Presentation::default(),
+        80,
+    );
+    assert!(card.rows[1].plain().contains("https://example.com/"));
 }

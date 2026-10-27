@@ -1,15 +1,18 @@
-use super::{Body, plural, preview, wrapped};
+use super::{Body, plural, wrapped};
 use crate::{
     file_change::{Change, Entry, Kind},
     tui::{
-        line::Line,
+        line::{Fold, Line},
         syntax::Highlighter,
         text,
-        theme::{BAD, DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, GOOD, MUTED, Style, TOOL_DIM},
+        theme::{BAD, CODE_TEXT, DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, DIM, GOOD, MUTED},
     },
 };
 
+use std::ops::Range;
+
 mod fragments;
+mod window;
 
 pub(super) fn summary(change: &Change) -> String {
     if change.created && change.added == 0 {
@@ -33,28 +36,34 @@ pub(super) fn summary(change: &Change) -> String {
     )
 }
 
+/// Code rows behind a `label` (line number, diff mark), wrapped at token
+/// boundaries under `fold`; continuation rows keep the label's width blank.
 pub(super) fn code_rows(
     mut code: Line,
-    label: &str,
-    style: Style,
+    label: &Line,
+    gutter: &str,
     columns: usize,
     source: usize,
+    fold: Fold,
 ) -> Vec<Line> {
+    let width = text::cells(&label.plain());
     code.background = None;
     code.at_source(source)
-        .wrap(columns.saturating_sub(4 + text::cells(label)).max(1), false)
+        .code(
+            columns.saturating_sub(text::cells(gutter) + width).max(1),
+            fold,
+        )
         .into_iter()
         .enumerate()
         .map(|(part, code)| {
-            let gutter = if part == 0 {
-                label.to_owned()
+            let mut row = if part == 0 {
+                label.clone()
             } else {
-                " ".repeat(text::cells(label))
+                Line::new(&" ".repeat(width), DIM)
             };
-            let mut row = Line::new(&gutter, style);
             row.origin = code.origin;
             row.spans.extend(code.spans);
-            row.gutter("    ", MUTED).shortened(columns)
+            row.gutter(gutter, DIM).shortened(columns)
         })
         .collect()
 }
@@ -94,15 +103,22 @@ fn render_inner(
         }
         if index > 0 {
             rows.push(
-                Line::new(&format!("{} ⋮", " ".repeat(digits)), TOOL_DIM)
+                Line::new(&format!("{} ⋮", " ".repeat(digits + 2)), DIM)
                     .at_source(origin)
-                    .gutter("    ", TOOL_DIM)
+                    .gutter("  ", DIM)
                     .shortened(columns),
             );
         }
-        let mut old_lexer = Highlighter::for_path(path);
-        let mut new_lexer = Highlighter::for_path(path);
         let partners = fragments::partners(hunk);
+        let lines = highlighted(hunk, &partners, path);
+        let folds = window::folds(
+            hunk,
+            &partners,
+            &lines,
+            columns.saturating_sub(7 + digits).max(1),
+            expanded,
+            Highlighter::for_path(path).markup(),
+        );
         let mut pending_removed = hunk
             .iter()
             .filter(|entry| entry.kind == Kind::Removed)
@@ -122,32 +138,21 @@ fn render_inner(
             let take = if compact && end - at > 6 { 3 } else { end - at };
             let mut run_shown = 0;
             for (offset, entry) in hunk[at..end].iter().enumerate() {
-                let source = text::clean(&entry.text);
-                let old = (entry.kind != Kind::Added).then(|| old_lexer.line(&source));
-                let new = (entry.kind != Kind::Removed).then(|| new_lexer.line(&source));
                 let reserved = match entry.kind {
                     Kind::Context => pending_removed + pending_added,
                     Kind::Removed => pending_added,
                     Kind::Added => pending_removed,
                 };
                 if !compact || offset < take && preview_rows < 14 - reserved {
-                    let code = if entry.kind == Kind::Removed {
-                        old.unwrap()
-                    } else {
-                        new.unwrap()
-                    };
-                    let code = if entry.kind == Kind::Context {
-                        Line::new(&source, TOOL_DIM)
-                    } else {
-                        fragments::highlight(
-                            code,
-                            &source,
-                            partners[at + offset].map(|index| hunk[index].text.as_str()),
-                            entry.kind,
-                        )
-                    };
-                    let code = preview(code, columns.saturating_sub(8 + digits), expanded);
-                    rows.extend(entry_rows(entry, code, digits, columns, origin));
+                    let line = at + offset;
+                    rows.extend(entry_rows(
+                        entry,
+                        lines[line].0.clone(),
+                        digits,
+                        columns,
+                        origin,
+                        folds[line],
+                    ));
                     shown += 1;
                     preview_rows += 1;
                     run_shown += 1;
@@ -238,27 +243,52 @@ fn render_inner(
     }
 }
 
+/// Each line's code, and for a paired change its fragment: context stays
+/// plain, changes keep their syntax under the fragment's emphasis.
+fn highlighted(
+    hunk: &[Entry],
+    partners: &[Option<usize>],
+    path: &str,
+) -> Vec<(Line, Option<Range<usize>>)> {
+    let mut old_lexer = Highlighter::for_path(path);
+    let mut new_lexer = Highlighter::for_path(path);
+    let markup = old_lexer.markup();
+    hunk.iter()
+        .zip(partners)
+        .map(|(entry, partner)| {
+            let source = text::clean(&entry.text);
+            let old = (entry.kind != Kind::Added).then(|| old_lexer.line(&source));
+            let new = (entry.kind != Kind::Removed).then(|| new_lexer.line(&source));
+            if entry.kind == Kind::Context {
+                return (Line::new(&source, CODE_TEXT), None);
+            }
+            let range = partner
+                .map(|other| fragments::changed(&source, &text::clean(&hunk[other].text), markup));
+            let code = old.or(new).unwrap();
+            (fragments::highlight(code, range.clone(), entry.kind), range)
+        })
+        .collect()
+}
+
 fn entry_rows(
     entry: &Entry,
     code: Line,
     digits: usize,
     columns: usize,
     source: usize,
+    fold: Fold,
 ) -> Vec<Line> {
     let (mark, style, number) = match entry.kind {
         Kind::Removed => ('−', BAD, entry.old_line),
         Kind::Added => ('+', GOOD, entry.new_line),
-        Kind::Context => (' ', TOOL_DIM, entry.new_line),
+        Kind::Context => (' ', DIM, entry.new_line),
     };
-    let coordinate =
-        number.map_or_else(|| " ".repeat(digits), |number| format!("{number:>digits$}"));
-    let mut rows = code_rows(
-        code,
-        &format!("{coordinate} {mark}  "),
-        style,
-        columns,
-        source,
-    );
+    // From column 2: the number in DIM at least four cells wide, then the mark.
+    let width = digits + 2;
+    let coordinate = number.map_or_else(|| " ".repeat(width), |number| format!("{number:>width$}"));
+    let mut label = Line::new(&format!("{coordinate} "), DIM);
+    label.push(&format!("{mark} "), style);
+    let mut rows = code_rows(code, &label, "  ", columns, source, fold);
     if let Some(surface) = match entry.kind {
         Kind::Removed => Some(DIFF_REMOVED_SURFACE),
         Kind::Added => Some(DIFF_ADDED_SURFACE),

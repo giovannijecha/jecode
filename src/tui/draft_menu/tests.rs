@@ -84,8 +84,9 @@ fn editing_and_discarding_one_of_five_equal_drafts_keeps_the_composer_separate()
     let original = app.state.editor.clone();
     key(&mut app, 38, 1);
     assert!(app.draft_menu_open());
-    // Five rows, and the focused draft again in the detail strip.
-    assert_eq!(frame_text(&app).matches("same draft").count(), 6);
+    // Five rows only: the composer keeps its own text, not a draft.
+    assert_eq!(frame_text(&app).matches("same draft").count(), 5);
+    assert!(frame_text(&app).contains("original composer"));
     key(&mut app, 13, 0);
     assert!(app.state.queue.is_editing());
     assert!(frame_text(&app).contains("Editing draft 1/5"));
@@ -407,7 +408,7 @@ fn interruption_while_editing_changes_the_slot_to_paused_without_replacing_the_c
     assert_eq!(app.state.queue.edit_index(), Some(1));
     assert_eq!(app.state.editor, edited);
     assert_eq!(app.state.queue.paused.len(), 2);
-    assert!(frame_text(&app).contains("Ctrl+S send"));
+    assert!(frame_text(&app).contains("Ctrl+S  send"));
     key(&mut app, 13, 0);
     assert!(app.draft_menu_open());
     assert_eq!(app.state.editor, main);

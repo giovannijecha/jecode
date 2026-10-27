@@ -4,7 +4,7 @@ use crate::{
     tui::{
         line::Line,
         terminal_output, text,
-        theme::{BODY, CODE_TEXT, MUTED, TOOL_DIM},
+        theme::{BODY, CODE_TEXT, DIM, MUTED},
     },
 };
 
@@ -104,7 +104,7 @@ pub(super) fn render(
     for (index, entry) in &entries[range.clone()] {
         if expanded && both && previous != entry.stream {
             rows.extend(line_rows(
-                &Line::new(entry.stream, TOOL_DIM),
+                &Line::new(entry.stream, DIM),
                 columns,
                 index * 2 + 2,
                 "    ",

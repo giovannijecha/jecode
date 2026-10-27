@@ -5,10 +5,10 @@ mod table;
 pub(super) use stream::Stream;
 
 use super::{
-    line::Line,
+    line::{Fold, Line},
     syntax::Highlighter,
     text,
-    theme::{ACCENT, BODY, CODE_SURFACE, CODE_TEXT, EMPHASIS, MUTED, Style},
+    theme::{ACCENT, BODY, CODE_SURFACE, CODE_TEXT, FAINT, GOOD, MUTED, STRONG, Style},
 };
 use std::borrow::Cow;
 
@@ -92,12 +92,16 @@ impl Iterator for Rows {
                 output.push(Line::default().on(CODE_SURFACE).at_source(origin));
                 self.fenced = None;
             } else {
+                let fold = Fold {
+                    markup: fence.highlighter.markup(),
+                    ..Fold::default()
+                };
                 output.extend(
                     fence
                         .highlighter
                         .line(source)
                         .at_source(origin)
-                        .wrap(padded(columns), false)
+                        .code(padded(columns), fold)
                         .into_iter()
                         .map(|row| pad(row, columns)),
                 );
@@ -128,7 +132,7 @@ impl Iterator for Rows {
         let indentation = &source[..source.len() - trimmed.len()];
         let level = trimmed.bytes().take_while(|&byte| byte == b'#').count();
         if horizontal_rule(trimmed) {
-            output.push(Line::new(&"─".repeat(columns), MUTED).at_source(origin));
+            output.push(Line::new(&"─".repeat(columns), FAINT).at_source(origin));
         } else if (1..=6).contains(&level) && trimmed.as_bytes().get(level) == Some(&b' ') {
             let body = heading_body(&trimmed[level + 1..]);
             output.extend(heading(
@@ -154,7 +158,10 @@ impl Iterator for Rows {
             let body = joined(&self.value, body, &mut self.position, columns, false, false);
             output.extend(prefixed(
                 &body,
-                (&format!("{indentation}{marker}"), MUTED),
+                (
+                    &format!("{indentation}{marker}"),
+                    if marker == "☑ " { GOOD } else { MUTED },
+                ),
                 columns,
                 false,
                 BODY,
@@ -215,7 +222,7 @@ fn heading(
 ) -> Vec<Line> {
     let colour = match level {
         1 => ACCENT,
-        2 => EMPHASIS,
+        2 => STRONG,
         _ => BODY,
     };
     let mut rows = inline::heading(body, colour)
@@ -429,5 +436,7 @@ fn prefixed(
         .collect()
 }
 
+#[cfg(test)]
+mod code_tests;
 #[cfg(test)]
 mod tests;

@@ -60,9 +60,12 @@ fn fullscreen_hides_and_restores_the_shell_and_keeps_the_composer_at_the_bottom(
     screen.feed(crate::tui::terminal::LEAVE);
     assert_eq!(screen.visible(), shell);
     assert_eq!((screen.x, screen.y), position);
-    screen.feed("Jecode closed\r\nResume: jecode resume fixture-id\r\n");
+    screen.feed(concat!(
+        "\x1b[35m>_\x1b[0m \x1b[1mjecode\x1b[0m \x1b[2mclosed · 1 prompt\x1b[0m\r\n",
+        "   jecode resume fixture-id\r\n"
+    ));
     assert!(!screen.visible().contains("A readable answer."));
-    assert!(screen.visible().contains("Jecode closed"));
+    assert!(screen.visible().contains(">_ jecode closed · 1 prompt"));
 }
 
 #[test]
@@ -104,7 +107,7 @@ fn out_of_order_tool_results_remain_in_source_order_and_never_duplicate_cards() 
     let visible = screen.visible();
     assert!(visible.find("first output").unwrap() < visible.find("second output").unwrap());
     assert_eq!(visible.matches("first output").count(), 1);
-    assert!(visible.contains("● Bash(second)"));
+    assert_eq!(visible.matches(" BASH  second").count(), 1);
     assert!(screen.history.is_empty());
 }
 
@@ -153,6 +156,7 @@ fn full_width_rows_and_the_bottom_right_cell_never_scroll_or_leak_into_shell_his
         let mut renderer = Renderer::new();
         screen.feed(&renderer.paint(&frame, width, height));
         assert_eq!(screen.visible(), rows.join("\n"));
+        assert_eq!(screen.painted(), vec![]);
         assert_eq!((screen.x, screen.y), (width - 1, height - 1));
         assert!(screen.history.is_empty());
         frame.live[height - 1] = Line::new("X", crate::tui::theme::BODY);
@@ -162,6 +166,12 @@ fn full_width_rows_and_the_bottom_right_cell_never_scroll_or_leak_into_shell_his
             screen.rows[height - 1].iter().collect::<String>(),
             format!("X{}", " ".repeat(width - 1))
         );
+        assert_eq!(screen.painted(), vec![]);
+        // A shorter frame repaints the rows it no longer covers on the base.
+        frame.live.truncate(1);
+        screen.feed(&renderer.paint(&frame, width, height));
+        assert_eq!(screen.painted(), vec![]);
+        assert!(screen.rows[height - 1].iter().all(|cell| *cell == ' '));
         screen.feed(crate::tui::terminal::LEAVE);
         assert_eq!(screen.visible(), shell);
         assert!(screen.history.is_empty());

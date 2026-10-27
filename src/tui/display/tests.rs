@@ -1,6 +1,6 @@
 use super::*;
 use crate::tui::state::Kind;
-use crate::tui::theme::{ACCENT, BODY, SELECTED_SURFACE};
+use crate::tui::theme::{ACCENT, BODY, DIM, LIT, SELECTED_SURFACE};
 use crate::{events::Event, json::Value};
 
 fn work_read(state: &mut State, id: &str, work: &str, content: &str) {
@@ -58,33 +58,47 @@ fn read_at(display: &mut Display, text: &str) {
 }
 
 #[test]
-fn back_to_bottom_badge_is_centered_and_uses_the_blue_palette() {
-    let line = back_to_bottom_line(40, false);
-    assert_eq!(
-        line.plain(),
-        format!("{} ↓ Back to bottom · esc ", " ".repeat(8))
-    );
-    assert_eq!(line.spans[0].style, BODY);
-    assert_eq!(line.spans[0].background, None);
-    assert_eq!(line.spans[1].style, ACCENT);
-    assert_eq!(line.spans[1].background, Some(SELECTED_SURFACE));
+fn the_reading_row_counts_the_rows_below_and_ends_its_key_two_cells_from_the_edge() {
+    let line = view::reading_row(40, 16, false, false);
+    let plain = line.plain();
+    assert_eq!(super::super::text::cells(&plain), 38);
+    assert!(plain.starts_with("↓ 16 rows below "));
+    assert!(plain.ends_with(" Esc  back to bottom"));
+    assert_eq!(line.spans[0].style, DIM.bold());
     assert!(
-        line.paint(40)
-            .contains(&format!("\x1b[{SELECTED_SURFACE}m"))
+        line.spans
+            .iter()
+            .any(|span| { span.text.contains("Esc") && span.background == Some(SELECTED_SURFACE) })
+    );
+    assert!(
+        view::reading_row(40, 1, false, false)
+            .plain()
+            .starts_with("↓ 1 row below ")
+    );
+
+    let fresh = view::reading_row(60, 3, true, true);
+    assert_eq!(fresh.spans[0].style, ACCENT.bold());
+    assert!(fresh.plain().starts_with("↓ 3 rows below · new output "));
+    assert!(fresh.plain().ends_with(" Alt+End  back to bottom"));
+    assert!(
+        fresh
+            .spans
+            .iter()
+            .any(|span| span.text == "new output" && span.style == LIT)
     );
 }
 
 #[test]
-fn back_to_bottom_badge_fits_small_widths() {
+fn the_reading_row_drops_its_key_first_and_fits_small_widths() {
     for alt_end in [false, true] {
-        for width in 0..30 {
-            let line = back_to_bottom_line(width, alt_end);
-            assert!(super::super::text::cells(&line.plain()) <= width);
+        for width in 3..60 {
+            let line = view::reading_row(width, 120, true, alt_end);
+            assert!(super::super::text::cells(&line.plain()) <= width - 2);
         }
     }
-    assert_eq!(back_to_bottom_line(1, false).plain(), "↓");
-    assert_eq!(back_to_bottom_line(7, false).plain(), " ↓ esc ");
-    assert_eq!(back_to_bottom_line(11, true).plain(), " ↓ alt+end ");
+    let narrow = view::reading_row(32, 16, true, false).plain();
+    assert!(narrow.starts_with("↓ 16 rows below · new output"));
+    assert!(!narrow.contains("Esc"));
 }
 
 #[test]
@@ -103,12 +117,15 @@ fn contextual_escape_actions_use_alt_end_in_the_badge() {
     state.suggestions.panel = true;
     assert!(back_to_bottom_uses_alt_end(&state));
     state.suggestions.panel = false;
+    state.quitting = Some(Vec::new());
+    assert!(back_to_bottom_uses_alt_end(&state));
+    state.quitting = None;
     state.tool_details.expanded = true;
     assert!(!back_to_bottom_uses_alt_end(&state));
     assert!(
-        back_to_bottom_line(40, true)
+        view::reading_row(60, 1, false, true)
             .plain()
-            .contains("Back to bottom · alt+end")
+            .contains("Alt+End  back to bottom")
     );
 }
 
@@ -139,17 +156,104 @@ fn badge_appears_above_the_composer_only_while_reading() {
     let mut display = Display::new((state.width, state.height));
     let now = Instant::now();
     let initial = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(!initial.contains("Back to bottom"));
+    assert!(!initial.contains("back to bottom"));
     display.scroll(Scroll::Page(true));
     let reading = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(reading.contains("Back to bottom · esc"));
+    assert!(reading.contains(" Esc ") && reading.contains(" back to bottom"));
     state.history.record("saved prompt");
     state.history.navigate(&mut state.editor, true);
     let contextual = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(contextual.contains("Back to bottom · alt+end"));
+    assert!(contextual.contains(" Alt+End ") && contextual.contains(" back to bottom"));
     assert!(display.back_to_bottom());
     let following = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(!following.contains("Back to bottom"));
+    assert!(!following.contains("back to bottom"));
+}
+
+#[test]
+fn the_reading_row_marks_new_output_but_not_a_reflow() {
+    let mut state = State::default();
+    state.message(
+        Kind::Assistant,
+        &(0..60)
+            .map(|index| format!("Row {index:02}  \n"))
+            .collect::<String>(),
+    );
+    let mut display = Display::new((state.width, state.height));
+    let now = Instant::now();
+    display.update(&state, "fixture/model", "fixture directory", now);
+    display.scroll(Scroll::Page(true));
+    let reading = display.update(&state, "fixture/model", "fixture directory", now);
+    assert!(reading.contains(" rows below"));
+    assert!(!reading.contains("new output"));
+    assert!(display.below > 0);
+    let below = display.below;
+
+    state.width += 7;
+    let reflowed = display.update(&state, "fixture/model", "fixture directory", now);
+    assert!(!reflowed.contains("new output"));
+    assert!(!display.fresh);
+
+    state.message(Kind::Assistant, "A later answer.");
+    let fresh = display.update(&state, "fixture/model", "fixture directory", now);
+    assert!(fresh.contains("new output"));
+    assert!(display.fresh && display.below > below);
+
+    assert!(display.back_to_bottom());
+    display.update(&state, "fixture/model", "fixture directory", now);
+    display.scroll(Scroll::Page(true));
+    let again = display.update(&state, "fixture/model", "fixture directory", now);
+    assert!(!again.contains("new output"));
+}
+
+#[test]
+fn expanding_existing_tools_does_not_mark_new_output_while_reading() {
+    let mut state = State::default();
+    state.message(Kind::User, "Read a file");
+    state.begin_tool_turn();
+    work_read(
+        &mut state,
+        "file",
+        "Inspect file",
+        &"source line\n".repeat(20),
+    );
+    state.close_tools();
+    state.finish_tool_turn();
+    state.message(Kind::Assistant, &"Later answer.\n".repeat(80));
+
+    let mut display = Display::new((state.width, state.height));
+    ready(&mut display, &state);
+    display.scroll(Scroll::Page(true));
+    ready(&mut display, &state);
+    assert!(!display.fresh);
+
+    for expanded in [true, false, true] {
+        assert_eq!(state.toggle_tools().map(|(value, _)| value), Some(expanded));
+        ready(&mut display, &state);
+        assert!(!display.fresh, "presentation reflow is not new output");
+        assert!(!display.viewport.following());
+    }
+}
+
+#[test]
+fn streaming_more_text_on_the_same_row_marks_new_output_while_reading() {
+    let mut state = State::default();
+    state.message(Kind::Assistant, &"Earlier answer.\n".repeat(80));
+    state.event(Event::Streaming {
+        text: "first".into(),
+    });
+    let mut display = Display::new((state.width, state.height));
+    ready(&mut display, &state);
+    display.scroll(Scroll::Page(true));
+    ready(&mut display, &state);
+    let below = display.below;
+    assert!(!display.fresh);
+
+    state.event(Event::Streaming {
+        text: "first more".into(),
+    });
+    ready(&mut display, &state);
+    assert_eq!(display.below, below);
+    assert!(display.fresh);
 }
 
 #[test]
@@ -161,7 +265,7 @@ fn short_conversations_do_not_show_a_badge_after_scroll_start() {
     display.update(&state, "fixture/model", "fixture directory", now);
     display.scroll(Scroll::Start);
     let output = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(!output.contains("Back to bottom"));
+    assert!(!output.contains("back to bottom"));
     assert!(!display.back_to_bottom());
 }
 

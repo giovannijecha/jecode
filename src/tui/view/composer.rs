@@ -1,14 +1,21 @@
-use super::{fitted, footer, information, menus, notices, panel, processes};
+use super::{
+    footer, information, menus,
+    panel::{self, Part, Sheet},
+    processes, status,
+};
 use crate::tui::{
-    activity,
-    feedback::Feedback,
-    hint,
+    drafts::Slot,
     line::Line,
     state::State,
     text,
-    theme::{ACCENT, BODY, CURSOR, MUTED, Style},
+    theme::{ACCENT, BADGE_IDLE, CURSOR, DIM, FAINT, LIT, MUTED, STRONG, Style, WARNING},
 };
 
+/// Queued drafts shown above the status row at most.
+const QUEUE_ROWS: usize = 8;
+
+/// The dock: queued drafts, the status row, then the composer with the
+/// footer, its key hints or an open panel below.
 pub(super) fn render(
     state: &State,
     model: &str,
@@ -17,277 +24,373 @@ pub(super) fn render(
     height: usize,
     back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
-    let is_panel = super::panel_open(state);
-    let notice_rows = feedback(state.notice.as_ref(), columns);
-    let copy_rows = feedback(state.copy_notice.as_ref(), columns);
-    // Activity and progress ride the composer rule; an open panel gives them a row.
-    let activity_row = is_panel.then(|| status(state)).flatten();
-    let bottom_count = notice_rows.len() + copy_rows.len() + usize::from(activity_row.is_some());
-    let reserve = if is_panel {
-        bottom_count.min(height.saturating_sub(3))
-    } else {
-        0
-    };
-    let panel_height = height.saturating_sub(reserve);
-    let footer_rows = if is_panel {
-        footer::panel_rows(state, panel_height)
-    } else {
-        0
-    };
-    let panel_height = panel_height - footer_rows;
-    let (mut composer, mut cursor) = if let Some(panel) = &state.processes {
-        processes::render(panel, columns, panel_height)
-    } else if let Some(info) = &state.information {
-        information::render(info, columns, panel_height)
-    } else if let Some(selector) = &state.selector {
-        menus::selector(selector, columns, panel_height)
-    } else if state.suggestions.panel {
-        super::commands::render(state, columns, panel_height)
-    } else {
-        draft(state, model, directory, columns, height, back_to_bottom)
-    };
-    if footer_rows > 0 {
-        // The footer stays on the terminal surface below an open panel.
-        composer.push(footer::line(state, model, directory, columns));
-    }
-    if composer.len() > height {
-        // On very short terminals retain the input/caret rather than overflow the viewport.
-        let focus = cursor.map_or(0, |(row, _)| row);
-        let start = focus.saturating_sub(height.saturating_sub(2));
-        let end = (start + height).min(composer.len());
-        composer = composer.drain(start..end).collect();
-        cursor = cursor
-            .filter(|(row, _)| *row >= start && *row < end)
-            .map(|(row, col)| (row - start, col));
-    }
-    let remaining = height.saturating_sub(composer.len());
-    let extra_columns = if is_panel {
-        panel::width(columns)
-    } else {
-        columns
-    };
-    // Only contextual rows join an open panel; feedback keeps the terminal surface.
-    let extra_row = |line| {
-        if is_panel {
-            panel::row(line, columns)
-        } else {
-            line
+    let contextual = state.queue.is_editing() || state.history.is_browsing();
+    let sheet = sheet(state, columns);
+    // Esc interrupts only where nothing else holds it.
+    let escape = sheet.is_none() && !contextual && !back_to_bottom;
+    let status = status::row(state, columns, escape);
+    let (lines, cursor) = match sheet {
+        Some(sheet) => docked(state, &sheet, status, columns, height),
+        None => {
+            let (draft, cursor) = draft(state, model, directory, columns, height.saturating_sub(1));
+            let mut lines = vec![status];
+            lines.extend(draft);
+            let mut cursor = cursor.map(|(row, column)| (row + 1, column));
+            if lines.len() > height {
+                // On very short terminals retain the input/caret rather than overflow the viewport.
+                let focus = cursor.map_or(0, |(row, _)| row);
+                let start = focus.saturating_sub(height.saturating_sub(2));
+                let end = (start + height).min(lines.len());
+                lines = lines.drain(start..end).collect();
+                cursor = cursor
+                    .filter(|(row, _)| *row >= start && *row < end)
+                    .map(|(row, col)| (row - start, col));
+            }
+            (lines, cursor)
         }
     };
-    // Pending drafts precede the feedback and activity chrome.
-    let mut extra = Vec::new();
+    let mut lines = lines;
     let draft_menu = state
         .selector
         .as_ref()
         .is_some_and(|menu| matches!(menu.purpose, crate::tui::selector::Purpose::Drafts { .. }));
-    let queue_budget = if draft_menu {
+    let budget = if draft_menu {
         0
     } else {
-        remaining.saturating_sub(bottom_count).min(8)
+        height.saturating_sub(lines.len()).min(QUEUE_ROWS)
     };
-    let mut drafts = state.queue.drafts();
-    drafts.retain(|(slot, _)| Some(*slot) != state.queue.editing());
-    let pending = drafts.len();
-    let visible = pending.min(queue_budget);
-    let entries = drafts.into_iter().map(|(slot, text)| {
-        (
-            text,
-            match slot {
-                crate::tui::drafts::Slot::Queued(_) => "queued",
-                crate::tui::drafts::Slot::Paused(_) => "paused",
-            },
-        )
-    });
-    for (index, (message, status)) in entries.take(visible).enumerate() {
-        let first = message.lines().next().unwrap_or("");
-        let preview = format!(
-            "› {}{}",
-            first,
-            if message.contains('\n') { "…" } else { "" }
-        );
-        let label = if index == 0 && visible < pending {
-            format!("{status} {}", panel::position(0, visible, pending))
-        } else {
-            status.into()
-        };
-        let preview = text::clean(&preview);
-        let label = [label.as_str(), status]
-            .into_iter()
-            .find(|label| text::cells(label) + text::cells(&preview).min(10) + 2 <= extra_columns)
-            .unwrap_or("");
-        let row = if label.is_empty() {
-            Line::new(&text::ellipsize(&preview, extra_columns), MUTED)
-        } else {
-            fitted(&preview, label, extra_columns)
-        };
-        extra.push(extra_row(row));
-    }
-    extra.extend(notice_rows);
-    if let Some(status) = activity_row {
-        // Panels name their own Esc action.
-        extra.push(extra_row(status.shortened(extra_columns)));
-    }
-    extra.extend(copy_rows);
-    if extra.len() > remaining {
-        extra.drain(..extra.len() - remaining);
-    }
-    let offset = extra.len();
-    extra.append(&mut composer);
-    (extra, cursor.map(|(row, col)| (row + offset, col)))
+    let mut rows = queue(state, columns, budget);
+    let offset = rows.len();
+    rows.append(&mut lines);
+    (rows, cursor.map(|(row, col)| (row + offset, col)))
 }
 
-/// `─ ▰▰▱▱▱▱ 1h 10m · Drafts 1 · Alt+↑ ──── 3/7 · esc ─`. As columns shrink,
-/// the draft range leaves first, then the context takes a shorter form,
-/// shortens and leaves, then `esc`, then the time; the scanner stays.
-/// `contexts` lists the context's forms, longest first; `scanner` draws the
-/// scanner with or without the time.
-fn working_rule(
-    scanner: &dyn Fn(bool) -> Line,
-    contexts: &[Line],
-    position: &str,
-    escape: bool,
-    style: Style,
-    columns: usize,
-) -> Line {
-    let (mut range, mut escape, mut time) = (position, escape, true);
-    loop {
-        let mut line = Line::new("─ ", style);
-        for span in scanner(time).spans {
-            line.push(&span.text, span.style);
-        }
-        let right = [range, if escape { "esc" } else { "" }]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
-        let right = if right.is_empty() {
-            right
-        } else {
-            format!(" {right} ─")
-        };
-        // A space after the scanner group and at least three rule cells.
-        let fixed = text::cells(&line.plain()) + 4 + text::cells(&right);
-        let room = columns.saturating_sub(fixed);
-        let full = contexts
-            .first()
-            .map_or(0, |context| 3 + panel::cells(context));
-        if !range.is_empty() && (fixed > columns || full > room) {
-            range = "";
-            continue;
-        }
-        if fixed > columns && escape {
-            escape = false;
-            continue;
-        }
-        if fixed > columns && time {
-            time = false;
-            continue;
-        }
-        let whole = contexts
-            .iter()
-            .find(|context| 3 + panel::cells(context) <= room);
-        if let Some(context) = whole.or(contexts.last()).filter(|_| room >= 9) {
-            line.push(" · ", MUTED);
-            line = line.append(context.shortened(room - 3));
-        }
-        line.push(" ", style);
-        line.push(
-            &"─".repeat(columns.saturating_sub(text::cells(&line.plain()) + text::cells(&right))),
-            style,
-        );
-        line.push(&right, MUTED);
-        return line.shortened(columns);
-    }
-}
-
-/// Key hints for the current draft context, shown in place of the directory.
-fn hints(state: &State) -> Option<&'static [&'static str]> {
-    if matches!(
-        state.queue.editing(),
-        Some(crate::tui::drafts::Slot::Paused(_))
-    ) {
-        Some(&[
-            "Enter save · Ctrl+S send · Esc cancel",
-            "↵ save · ^S send · Esc",
-            "↵ · ^S · Esc",
-        ])
-    } else if state.queue.is_editing() {
-        Some(&["Enter save · Esc cancel", "↵ save · Esc", "↵ · Esc"])
-    } else if state.history.is_browsing() {
-        Some(&[
-            "Enter send · Ctrl+P/N history · Esc back",
-            "↵ send · ^P/N · Esc",
-            "↵ · ^P/N · Esc",
-        ])
+/// The open panel, if any.
+fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
+    if let Some(work) = &state.quitting {
+        Some(super::quit::sheet(state, work, columns))
+    } else if let Some(panel) = &state.processes {
+        Some(processes::sheet(panel, columns))
+    } else if let Some(info) = &state.information {
+        Some(information::sheet(info, columns))
+    } else if let Some(selector) = &state.selector {
+        Some(menus::sheet(selector, columns))
+    } else if state.suggestions.panel {
+        Some(super::commands::sheet(state, columns))
     } else {
         None
     }
 }
 
-/// Result and banner rows; progress belongs to the rule.
-fn feedback(notice: Option<&Feedback>, columns: usize) -> Vec<Line> {
-    notice
-        .filter(|notice| !notice.in_progress())
-        .map_or_else(Vec::new, |notice| notices::lines(notice, columns))
-}
-
-/// The scanner beside progress that has no turn, for its frame.
-fn scanner(progress: &Feedback) -> Line {
-    let started = progress.started().unwrap_or_else(std::time::Instant::now);
-    activity::indicator((started.elapsed().as_millis() / 120) as usize)
-}
-
-/// The scanner, the turn's time and any progress, as one row.
-fn status(state: &State) -> Option<Line> {
-    let progress = state.current_progress().filter(|_| !stopping(state));
-    let mut line = match (&state.activity, progress) {
-        (Some(activity), _) => activity.line(true),
-        (None, Some(progress)) => scanner(progress),
-        (None, None) => return None,
-    };
-    if let Some(progress) = progress {
-        line.push(
-            if state.activity.is_some() {
-                " · "
-            } else {
-                " "
-            },
-            MUTED,
-        );
-        line = line.append(notices::progress(progress));
-    } else if let Some(phase) = phase(state) {
-        line.push(" · ", MUTED);
-        line = line.append(phase);
-    }
-    Some(line)
-}
-
-fn stopping(state: &State) -> bool {
-    state
-        .activity
-        .as_ref()
-        .is_some_and(|activity| activity.stopping)
-}
-
-/// Phase text belongs to the rule, below maintenance and retry feedback.
-fn phase(state: &State) -> Option<Line> {
-    state.activity.as_ref()?;
-    let label = if stopping(state) {
-        "Stopping"
+/// The status row and the composer above a panel: the field or the draft
+/// between the rules, the panel's title on the bottom rule.
+fn top(state: &State, sheet: &Sheet, status: Line, columns: usize) -> Rows {
+    let style = rule_style(state);
+    let mut parts = vec![(status, Part::Chrome)];
+    let mut caret = None;
+    if let Some(field) = &sheet.field {
+        let label = [Line::new(&field.label, MUTED)];
+        parts.push((rule(columns, style, &label, &Line::default()), Part::Chrome));
+        // At extreme widths the field needs every cell, as the draft does.
+        let prefix = if columns < 7 { "" } else { "› " };
+        let mut line = Line::new(prefix, ACCENT.bold());
+        if field.value.is_empty() {
+            line.push(field.placeholder, MUTED);
+        } else {
+            line.push(&field.value, STRONG);
+        }
+        line.push(field.suffix, MUTED);
+        let column = (text::cells(prefix) + field.caret).min(columns.saturating_sub(1));
+        caret = Some((parts.len(), column));
+        parts.push((line.shortened(columns).caret(column, CURSOR), Part::Focus));
     } else {
-        state.status.trim_end_matches(['.', '…'])
-    };
-    (!matches!(label, "" | "Ready")).then(|| Line::new(label, MUTED))
+        let input = input(
+            state,
+            columns,
+            ACCENT,
+            STRONG,
+            window(state),
+            sheet.draft_caret,
+        );
+        let position = Line::new(&input.position, MUTED);
+        parts.push((
+            rule(columns, style, &draft_label(state), &position),
+            Part::Chrome,
+        ));
+        if sheet.draft_caret {
+            caret = Some((parts.len() + input.cursor.0, input.cursor.1));
+        }
+        parts.extend(input.lines.into_iter().map(|line| (line, Part::Draft)));
+    }
+    parts.push((rule(columns, style, &sheet.title, &sheet.aside), Part::Keep));
+    Rows { parts, caret }
 }
 
-pub(super) fn information_height(state: &State) -> usize {
+struct Rows {
+    parts: Vec<(Line, Part)>,
+    caret: Option<(usize, usize)>,
+}
+
+/// Rows the panel's body gets below `top` rows within `height`.
+fn room(state: &State, sheet: &Sheet, top: usize, height: usize) -> usize {
+    let fixed = top + sheet.head.len() + 1 + (sheet.tail)(true).len();
+    panel::room(state.height, height, fixed)
+}
+
+/// The rows an open panel's body shows at once.
+pub(super) fn panel_room(state: &State) -> usize {
     let columns = state.width.max(1);
-    let feedback_rows = feedback(state.notice.as_ref(), columns).len()
-        + feedback(state.copy_notice.as_ref(), columns).len();
-    let activity = usize::from(state.activity.is_some() || state.current_progress().is_some());
-    let height = super::chrome_height(state);
-    let height = height.saturating_sub((feedback_rows + activity).min(height.saturating_sub(3)));
-    height - footer::panel_rows(state, height)
+    sheet(state, columns).map_or(0, |sheet| {
+        measured(
+            state,
+            &sheet,
+            Line::default(),
+            columns,
+            super::chrome_height(state).min(state.height),
+        )
+        .1
+    })
+}
+
+/// The dock with a panel: the composer, then the panel's head, body, one
+/// blank row and its keys, fitted to `height` by what matters most.
+fn docked(
+    state: &State,
+    sheet: &Sheet,
+    status: Line,
+    columns: usize,
+    height: usize,
+) -> (Vec<Line>, Option<(usize, usize)>) {
+    let (rows, _) = measured(state, sheet, status, columns, height);
+    panel::fitted(rows.parts, rows.caret, height)
+}
+
+/// Use the fitter's own retained body rows as the panel's visible capacity.
+/// A shorter body or wrapped keys may free or take rows; recompute until the
+/// body window and its navigation use the same capacity.
+fn measured(
+    state: &State,
+    sheet: &Sheet,
+    status: Line,
+    columns: usize,
+    height: usize,
+) -> (Rows, usize) {
+    let top = top(state, sheet, status.clone(), columns).parts.len();
+    let mut capacity = room(state, sheet, top, height);
+    loop {
+        let (rows, body) = dock_parts(state, sheet, status.clone(), columns, capacity);
+        let visible = panel::kept_indices(&rows.parts, rows.caret, height)
+            .into_iter()
+            .filter(|index| body.contains(index))
+            .count()
+            .min(capacity);
+        if visible >= capacity || visible == 0 {
+            return (rows, visible);
+        }
+        capacity = visible;
+    }
+}
+
+fn dock_parts(
+    state: &State,
+    sheet: &Sheet,
+    status: Line,
+    columns: usize,
+    capacity: usize,
+) -> (Rows, std::ops::Range<usize>) {
+    let Rows { mut parts, caret } = top(state, sheet, status, columns);
+    let body = (sheet.body)(capacity);
+    let overflow = sheet.total.is_none_or(|total| total > capacity);
+    let spaced = !(sheet.head.is_empty() && body.is_empty());
+    parts.extend(sheet.head.iter().cloned().map(|line| (line, Part::Header)));
+    let first = parts.len();
+    parts.extend(body);
+    let body = first..parts.len();
+    if spaced {
+        parts.push((Line::default(), Part::Space));
+    }
+    let tail = if sheet.confirming {
+        Part::Focus
+    } else {
+        Part::Keep
+    };
+    // Wrapped keys keep their last row first: it holds the way out.
+    let keys = (sheet.tail)(overflow);
+    let last = keys.len().saturating_sub(1);
+    parts.extend(keys.into_iter().enumerate().map(|(index, line)| {
+        let part = if index == last || sheet.confirming {
+            tail
+        } else {
+            Part::Row(0)
+        };
+        (panel::indent(line, columns), part)
+    }));
+    (Rows { parts, caret }, body)
+}
+
+/// A panel's dock alone, below an empty composer, for panel tests.
+#[cfg(test)]
+pub(super) fn panel_rows(sheet: &Sheet, columns: usize, height: usize) -> Vec<Line> {
+    let state = State {
+        width: columns,
+        height,
+        ..State::default()
+    };
+    docked(&state, sheet, Line::default(), columns, height).0
+}
+
+/// The rules turn faint while a turn works or retries.
+fn rule_style(state: &State) -> Style {
+    if state.activity.is_some() {
+        FAINT
+    } else {
+        ACCENT
+    }
+}
+
+/// The top rule's label: the draft being edited, the history, or the drafts.
+fn draft_label(state: &State) -> Vec<Line> {
+    if let Some(index) = state.queue.edit_index() {
+        vec![Line::new(
+            &format!("Editing draft {}/{}", index + 1, state.queue.len()),
+            MUTED,
+        )]
+    } else if state.history.is_browsing() {
+        vec![Line::new("Prompt history", MUTED)]
+    } else if !state.queue.is_empty() {
+        let drafts = state.queue.len();
+        vec![
+            Line::new(&format!("Drafts {drafts} · Alt+↑"), MUTED),
+            Line::new(&format!("Drafts {drafts}"), MUTED),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
+/// `› first line…` in `muted`, `queued` in `dim` or `paused` in `warning`
+/// ending two cells from the edge; the first label carries the range when
+/// not every draft fits.
+fn queue(state: &State, columns: usize, budget: usize) -> Vec<Line> {
+    let mut drafts = state.queue.drafts();
+    drafts.retain(|(slot, _)| Some(*slot) != state.queue.editing());
+    let pending = drafts.len();
+    let visible = pending.min(budget);
+    let end = columns.saturating_sub(2);
+    drafts
+        .into_iter()
+        .take(visible)
+        .enumerate()
+        .map(|(index, (slot, message))| {
+            let (status, style) = match slot {
+                Slot::Queued(_) => ("queued", DIM),
+                Slot::Paused(_) => ("paused", WARNING),
+            };
+            let first = message.lines().next().unwrap_or("");
+            let more = if message.contains('\n') { "…" } else { "" };
+            let preview = text::clean(&format!("› {first}{more}"));
+            let ranged = (index == 0 && visible < pending)
+                .then(|| format!("{status} {}", panel::position(0, visible, pending)));
+            let label = ranged
+                .iter()
+                .map(String::as_str)
+                .chain([status])
+                .find(|label| text::cells(label) + text::cells(&preview).min(10) + 2 <= end)
+                .unwrap_or("");
+            if label.is_empty() {
+                return Line::new(&text::ellipsize(&preview, columns), MUTED);
+            }
+            let room = end - text::cells(label) - 2;
+            let preview = text::ellipsize(&preview, room);
+            let mut row = Line::new(&preview, MUTED);
+            row.push(
+                &" ".repeat(end - text::cells(&preview) - text::cells(label)),
+                MUTED,
+            );
+            row.push(label, style);
+            row
+        })
+        .collect()
+}
+
+/// A full-width rule with an optional `─ label` and an aside before ` ─` on
+/// the right; the aside drops first, then the label shortens.
+pub(super) fn rule(columns: usize, style: Style, label: &[Line], aside: &Line) -> Line {
+    let tail = |aside: &Line| {
+        if aside.spans.is_empty() {
+            Line::default()
+        } else {
+            let mut line = Line::new(" ", style);
+            line = line.append(aside.clone());
+            line.push(" ─", style);
+            line
+        }
+    };
+    let head = |label: &Line| {
+        let mut line = Line::new("─ ", style);
+        line = line.append(label.clone());
+        line.push(" ", style);
+        line
+    };
+    let fits = |head: &Line, tail: &Line| panel::cells(head) + panel::cells(tail) + 2 <= columns;
+    let finish = |head: Line, tail: Line| {
+        let fill = columns.saturating_sub(panel::cells(&head) + panel::cells(&tail));
+        let mut line = head;
+        line.push(&"─".repeat(fill), style);
+        line.append(tail).shortened(columns)
+    };
+    if label.is_empty() {
+        let tail = tail(aside);
+        return if fits(&Line::default(), &tail) {
+            finish(Line::default(), tail)
+        } else {
+            Line::new(&"─".repeat(columns), style)
+        };
+    }
+    // The aside drops before the label loses detail.
+    for head in label.iter().map(head) {
+        for tail in [tail(aside), Line::default()] {
+            if fits(&head, &tail) {
+                return finish(head, tail);
+            }
+        }
+    }
+    let last = label.last().unwrap();
+    let room = columns.saturating_sub(5);
+    if room < 3 {
+        return Line::new(&"─".repeat(columns), style);
+    }
+    finish(head(&last.shortened(room)), Line::default())
+}
+
+/// The draft's window: a third of the screen, five to ten rows.
+fn window(state: &State) -> usize {
+    (state.height / 3).clamp(5, 10)
+}
+
+/// Key hints in place of the footer while a draft edit or the prompt
+/// history holds the composer.
+fn hints(state: &State) -> Option<&'static [panel::Key<'static>]> {
+    const PAUSED: &[panel::Key] = &[
+        panel::key("Enter", "save"),
+        panel::key("Ctrl+S", "send"),
+        panel::key("Esc", "cancel"),
+    ];
+    const EDITING: &[panel::Key] = &[panel::key("Enter", "save"), panel::key("Esc", "cancel")];
+    const HISTORY: &[panel::Key] = &[
+        panel::key("Enter", "send"),
+        panel::key("Ctrl+P/N", "history").optional(),
+        panel::key("Esc", "back"),
+    ];
+    if matches!(state.queue.editing(), Some(Slot::Paused(_))) {
+        Some(PAUSED)
+    } else if state.queue.is_editing() {
+        Some(EDITING)
+    } else if state.history.is_browsing() {
+        Some(HISTORY)
+    } else {
+        None
+    }
 }
 
 fn draft(
@@ -296,112 +399,27 @@ fn draft(
     directory: &str,
     columns: usize,
     height: usize,
-    back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
-    let style = if state.activity.is_some() {
-        MUTED
-    } else {
-        ACCENT
-    };
-    let border = "─".repeat(columns);
-    let editing = state.queue.edit_index();
-    let contextual = state.queue.is_editing() || state.history.is_browsing();
-    let limit = height.saturating_sub(2 + usize::from(columns >= 7) + usize::from(contextual));
-    let input = input(state, columns, style, BODY, limit);
-    let badge = text::cells(&input.position);
-    let context = if let Some(index) = editing {
-        format!("Editing draft {}/{}", index + 1, state.queue.len())
-    } else if state.history.is_browsing() {
-        "Prompt history".into()
-    } else if !state.queue.is_empty() {
-        format!("Drafts {} · Alt+↑", state.queue.len())
-    } else {
-        String::new()
-    };
-    let progress = state.current_progress().filter(|_| !stopping(state));
-    let contexts = contexts(
-        progress,
-        phase(state),
-        &context,
-        state.queue.len(),
-        contextual,
-    );
-    let top = if let Some(activity) = state.activity.as_ref().filter(|_| columns >= 7) {
-        // Esc names itself only while it stops the turn.
-        let escape = !activity.stopping && !contextual && !back_to_bottom;
-        let scanner = |time| activity.line(time);
-        working_rule(&scanner, &contexts, &input.position, escape, style, columns)
-    } else if let Some(progress) = progress.filter(|_| columns >= 7) {
-        let scanner = |_| scanner(progress);
-        working_rule(&scanner, &contexts, &input.position, false, style, columns)
-    } else if !context.is_empty() && columns >= 7 {
-        let range = if badge > 0 && badge + text::cells(&context) + 7 <= columns {
-            format!(" {} ─", input.position)
-        } else {
-            String::new()
-        };
-        let label = text::ellipsize(&context, columns.saturating_sub(text::cells(&range) + 4));
-        let mut line = Line::new("─ ", style);
-        line.push(&label, MUTED);
-        line.push(" ", style);
-        line.push(
-            &"─".repeat(columns.saturating_sub(text::cells(&line.plain()) + text::cells(&range))),
-            style,
-        );
-        line.push(&range, MUTED);
-        line
-    } else if badge > 0 && badge + 6 <= columns {
-        let mut line = Line::new(&"─".repeat(columns - badge - 3), style);
-        line.push(&format!(" {} ", input.position), MUTED);
-        line.push("─", style);
-        line
-    } else {
-        Line::new(&border, style)
-    };
-    let mut lines = vec![top];
+    let style = rule_style(state);
+    let limit = height.saturating_sub(2 + usize::from(columns >= 7));
+    let input = input(state, columns, ACCENT, STRONG, limit, true);
+    let position = Line::new(&input.position, MUTED);
+    let mut lines = vec![rule(columns, style, &draft_label(state), &position)];
     lines.extend(input.lines);
-    lines.push(Line::new(&border, style));
-    if contextual {
-        lines.push(Line::new(
-            &hint::choose(hints(state).unwrap_or(&[]), columns),
-            MUTED,
-        ));
-    }
+    lines.push(Line::new(&"─".repeat(columns), style));
     if columns >= 7 {
-        lines.push(footer::line(state, model, directory, columns));
+        lines.push(match hints(state) {
+            Some(keys) => {
+                let keys = panel::keys(keys, columns.saturating_sub(4), false);
+                keys.into_iter()
+                    .next()
+                    .unwrap_or_default()
+                    .indent("  ", MUTED)
+            }
+            None => footer::line(state, model, directory, columns),
+        });
     }
     (lines, Some((input.cursor.0 + 1, input.cursor.1)))
-}
-
-/// The rule's context forms, longest first: progress, then the draft context.
-fn contexts(
-    progress: Option<&Feedback>,
-    phase: Option<Line>,
-    context: &str,
-    drafts: usize,
-    contextual: bool,
-) -> Vec<Line> {
-    let context = (!context.is_empty()).then(|| Line::new(context, MUTED));
-    let short = context
-        .as_ref()
-        .filter(|_| !contextual)
-        .map(|_| Line::new(&format!("Drafts {drafts}"), MUTED));
-    let progress_line = progress.map(notices::progress).or(phase);
-    let Some(progress_line) = progress_line else {
-        return context.into_iter().chain(short).collect();
-    };
-    let joined = |tail: &Line| {
-        let mut line = progress_line.clone();
-        line.push(" · ", MUTED);
-        line.append(tail.clone())
-    };
-    context
-        .iter()
-        .chain(short.iter())
-        .map(joined)
-        .chain([progress_line.clone()])
-        .chain(progress.into_iter().flat_map(notices::progress_forms))
-        .collect()
 }
 
 pub(super) struct Input {
@@ -410,22 +428,34 @@ pub(super) struct Input {
     pub position: String,
 }
 
+/// `› ` bold on the first visible row, the draft in `foreground` with
+/// attachment chips, the caret's row centred in the window. The caret shows
+/// only while the draft has the focus.
 pub(super) fn input(
     state: &State,
     columns: usize,
-    style: Style,
+    marker: Style,
     foreground: Style,
     limit: usize,
+    focused: bool,
 ) -> Input {
+    let caret = |line: Line, column: usize| {
+        if focused {
+            line.caret(column, CURSOR)
+        } else {
+            line
+        }
+    };
     if columns < 7 {
         // At extreme widths the editor gets the entire row, including its caret.
         // The logical draft/caret are unchanged and regain multiline layout later.
-        let (value, caret) = state.editor.viewport(columns, false);
+        let (value, column) = state.editor.viewport(columns, false);
         let line = if state.editor.text.is_empty() {
-            Line::new(&text::clip("Ask anything…", columns), MUTED).caret(0, CURSOR)
+            caret(Line::new(&text::clip("Ask anything…", columns), MUTED), 0)
         } else {
-            Line::new(&value, foreground).caret(caret, CURSOR)
+            caret(Line::new(&value, foreground), column)
         };
+        let caret = column;
         return Input {
             lines: vec![line],
             cursor: (0, caret),
@@ -434,7 +464,7 @@ pub(super) fn input(
     }
     let layout = state.editor.layout(columns.saturating_sub(3));
     let total = layout.rows.len();
-    let limit = limit.clamp(1, 5);
+    let limit = limit.clamp(1, window(state));
     let start = layout
         .cursor
         .0
@@ -444,22 +474,26 @@ pub(super) fn input(
     let mut lines = Vec::new();
     let mut cursor = (0, 0);
     for index in start..end {
-        let mut line = Line::new(if index == start { "› " } else { "  " }, style);
+        let mut line = if index == start {
+            Line::new("› ", marker.bold())
+        } else {
+            Line::new("  ", marker)
+        };
         if state.editor.text.is_empty() {
-            line.push("Ask anything…", MUTED);
+            line.push(&text::ellipsize("Ask anything…", columns - 3), MUTED);
         } else {
             let row = &layout.rows[index];
             let mut at = 0;
             for label in &row.labels {
                 line.push(&row.text[at..label.start], foreground);
-                line.push(&row.text[label.clone()], ACCENT);
+                line.push_on(&row.text[label.clone()], LIT, BADGE_IDLE);
                 at = label.end;
             }
             line.push(&row.text[at..], foreground);
         }
         if index == layout.cursor.0 {
             let column = layout.cursor.1 + 2;
-            line = line.caret(column, CURSOR);
+            line = caret(line, column);
             cursor = (lines.len(), column);
         }
         lines.push(line);

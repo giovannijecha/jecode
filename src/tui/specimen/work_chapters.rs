@@ -203,7 +203,12 @@ fn work_chapters() {
                 assert!(state.toggle_tools().is_some());
             }
             let output = plain(&state);
-            let unwrapped = output.split_whitespace().collect::<Vec<_>>().join(" ");
+            // The tree gutter repeats on wrapped rows; read the text without it.
+            let unwrapped = output
+                .replace(['│', '└'], " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
             assert!(
                 unwrapped.contains("Inspect the parser"),
                 "{title} at {columns}: {output}"
@@ -228,7 +233,7 @@ fn work_chapters() {
                     );
                 }
             }
-            assert!(unwrapped.contains("Update") && unwrapped.contains("Write"));
+            assert!(unwrapped.contains("UPDATE") && unwrapped.contains("WRITE"));
             assert!(
                 unwrapped.contains(if expanded { "exit 101" } else { "Exit 101" }),
                 "{title} at {columns}: {output}"

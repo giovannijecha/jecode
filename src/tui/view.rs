@@ -3,11 +3,15 @@ mod composer;
 mod footer;
 mod information;
 mod menus;
-mod notices;
+pub(super) mod opening;
 mod panel;
 pub(super) mod processes;
+mod quit;
 mod routing;
-use super::{line::Line, state::State, text, theme::MUTED};
+mod status;
+#[cfg(test)]
+use super::text;
+use super::{line::Line, state::State};
 
 pub struct Frame {
     #[cfg(test)]
@@ -52,7 +56,7 @@ pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
         state,
         model,
         directory,
-        super::transcript::header(state.width.max(2))
+        opening::rows(state, state.width.max(2))
             .into_iter()
             .chain(history.iter().flatten().cloned())
             .chain(pending.into_iter().flatten())
@@ -60,7 +64,7 @@ pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
         state.height,
         false,
     );
-    frame.header = super::transcript::header(state.width.max(2));
+    frame.header = opening::rows(state, state.width.max(2));
     frame.history = history;
     frame
 }
@@ -125,7 +129,8 @@ pub(super) fn lower_with_chrome(mut live: Vec<Line>, height: usize, mut chrome: 
 }
 
 pub(super) fn panel_open(state: &State) -> bool {
-    state.processes.is_some()
+    state.quitting.is_some()
+        || state.processes.is_some()
         || state.selector.is_some()
         || state.information.is_some()
         || state.suggestions.panel
@@ -144,49 +149,60 @@ pub(super) fn capacity(state: &State, model: &str, directory: &str) -> usize {
     chrome(state, model, directory, false).capacity(state.height)
 }
 
-pub(super) fn fitted(left: &str, right: &str, columns: usize) -> Line {
-    let right = text::ellipsize(&text::clean(right), columns.saturating_sub(2));
-    let budget = columns.saturating_sub(text::cells(&right) + 2);
-    let left = text::ellipsize(&text::clean(left), budget);
-    let gap = columns.saturating_sub(text::cells(&left) + text::cells(&right));
-    Line::new(&format!("{left}{}{right}", " ".repeat(gap)), MUTED)
-}
-
-pub(super) fn input_width(width: usize, command_panel: bool) -> usize {
-    let columns = width;
-    let columns = if command_panel {
-        panel::width(columns)
-    } else {
-        columns
-    };
-    columns.saturating_sub(3).max(1)
+/// The draft's wrapping width in the composer.
+pub(super) fn input_width(width: usize) -> usize {
+    width.saturating_sub(3).max(1)
 }
 
 /// Log text width of the open process stream.
 pub(super) fn process_width(state: &State) -> usize {
-    processes::text_width(panel::width(state.width.max(1)))
+    processes::text_width(state.width.max(1))
 }
 
 /// Process list entries visible at once.
 pub(super) fn process_capacity(state: &State) -> usize {
-    processes::list_capacity(composer::information_height(state))
+    composer::panel_room(state)
 }
 
 /// Total and visible rows of the open process stream.
 pub(super) fn process_log_rows(state: &State) -> (usize, usize) {
     state.processes.as_ref().map_or((0, 0), |panel| {
-        processes::metrics(
-            panel,
-            panel::width(state.width.max(1)),
-            composer::information_height(state),
-        )
+        processes::metrics(panel, state.width.max(1), composer::panel_room(state))
     })
 }
 
+/// The gap row while reading back: `↓` at column 0, in ACCENT once output
+/// arrived after scrolling away, the rows below, and the way back as a
+/// keycap ending two cells from the edge; the keycap drops first.
+pub(super) fn reading_row(columns: usize, below: usize, fresh: bool, alt_end: bool) -> Line {
+    use super::theme::{ACCENT, DIM, LIT, MUTED};
+    let mut line = Line::new("↓ ", if fresh { ACCENT } else { DIM }.bold());
+    line.push(
+        &format!("{below} row{} below", if below == 1 { "" } else { "s" }),
+        DIM,
+    );
+    if fresh {
+        line.push(" · ", DIM);
+        line.push("new output", LIT);
+    }
+    let mut key = panel::keycap(if alt_end { "Alt+End" } else { "Esc" });
+    key.push(" back to bottom", MUTED);
+    let end = columns.saturating_sub(2);
+    let (left, right) = (
+        super::text::cells(&line.plain()),
+        super::text::cells(&key.plain()),
+    );
+    if left + 2 + right > end {
+        return line.shortened(end.max(1));
+    }
+    line.push(&" ".repeat(end - left - right), DIM);
+    line.append(key)
+}
+
 pub(super) fn scroll_information(state: &mut State, code: u16) {
-    let height = composer::information_height(state);
+    let room = composer::panel_room(state);
     if let Some(info) = &mut state.information {
-        information::scroll(info, code, state.width.max(1), height);
+        information::scroll(info, code, state.width.max(1), room);
     }
 }
 
@@ -212,5 +228,7 @@ mod navigation_tests;
 mod panel_tests;
 #[cfg(test)]
 mod resize_tests;
+#[cfg(test)]
+mod startup_tests;
 #[cfg(test)]
 mod tests;

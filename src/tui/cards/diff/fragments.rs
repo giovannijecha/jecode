@@ -33,41 +33,94 @@ pub(super) fn partners(entries: &[Entry]) -> Vec<Option<usize>> {
     partners
 }
 
-/// A contiguous changed range, keeping combining sequences and emoji intact.
-fn changed(source: &str, other: &str) -> Range<usize> {
-    let source_glyphs: Vec<_> = text::glyphs(source).map(|glyph| glyph.text).collect();
-    let other_glyphs: Vec<_> = text::glyphs(other).map(|glyph| glyph.text).collect();
-    let prefix = source_glyphs
-        .iter()
-        .zip(&other_glyphs)
-        .take_while(|(a, b)| a == b)
+/// Display tokens: in markup a whole tag `<…>`, comment or entity `&…;`;
+/// elsewhere a word, a run of whitespace or one other glyph.
+fn tokens(source: &str, markup: bool) -> Vec<&str> {
+    let mut starts: Vec<usize> = text::glyphs(source)
+        .scan(0, |at, glyph| {
+            let start = *at;
+            *at += glyph.text.len();
+            Some(start)
+        })
+        .collect();
+    starts.push(source.len());
+    let class = |index: usize| {
+        let character = source[starts[index]..].chars().next().unwrap();
+        if character.is_whitespace() {
+            1
+        } else if character.is_alphanumeric() || character == '_' {
+            2
+        } else {
+            0
+        }
+    };
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    while index + 1 < starts.len() {
+        let next = match markup
+            .then(|| markup_token(&source[starts[index]..]))
+            .flatten()
+        {
+            Some(length) => starts.partition_point(|&start| start < starts[index] + length),
+            None => {
+                let kind = class(index);
+                let mut next = index + 1;
+                while kind != 0 && next + 1 < starts.len() && class(next) == kind {
+                    next += 1;
+                }
+                next
+            }
+        };
+        tokens.push(&source[starts[index]..starts[next]]);
+        index = next;
+    }
+    tokens
+}
+
+fn markup_token(tail: &str) -> Option<usize> {
+    if tail.starts_with("<!--") {
+        return Some(tail.find("-->").map_or(tail.len(), |end| end + 3));
+    }
+    if let Some(inner) = tail.strip_prefix('<') {
+        return Some(inner.find(['<', '>']).map_or(tail.len(), |end| {
+            end + 1 + usize::from(inner[end..].starts_with('>'))
+        }));
+    }
+    let entity = tail.strip_prefix('&')?;
+    let name = entity.strip_prefix('#').unwrap_or(entity);
+    let word = name
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
         .count();
-    let suffix = source_glyphs[prefix..]
+    (word > 0 && name[word..].starts_with(';')).then(|| tail.len() - name.len() + word + 1)
+}
+
+/// The changed range of `source` against `other`, keeping whole tokens: the
+/// common prefix and suffix are counted in tokens, so the range only grows
+/// past a character comparison and both partners keep one shared prefix.
+pub(super) fn changed(source: &str, other: &str, markup: bool) -> Range<usize> {
+    let ours = tokens(source, markup);
+    let theirs = tokens(other, markup);
+    let prefix = ours.iter().zip(&theirs).take_while(|(a, b)| a == b).count();
+    let suffix = ours[prefix..]
         .iter()
         .rev()
-        .zip(other_glyphs[prefix..].iter().rev())
+        .zip(theirs[prefix..].iter().rev())
         .take_while(|(a, b)| a == b)
         .count();
-    let start = source_glyphs[..prefix]
+    let start = ours[..prefix].iter().map(|token| token.len()).sum();
+    let tail: usize = ours[ours.len() - suffix..]
         .iter()
-        .map(|glyph| glyph.len())
-        .sum();
-    let tail: usize = source_glyphs[source_glyphs.len() - suffix..]
-        .iter()
-        .map(|glyph| glyph.len())
+        .map(|token| token.len())
         .sum();
     start..source.len() - tail
 }
 
 /// Keep syntax outside the changed fragment; the fragment owns its surface.
-pub(super) fn highlight(code: Line, source: &str, other: Option<&str>, kind: Kind) -> Line {
-    let Some(other) = other else {
+pub(super) fn highlight(code: Line, range: Option<Range<usize>>, kind: Kind) -> Line {
+    let Some(range) = range.filter(|range| !range.is_empty()) else {
         return code;
     };
-    let range = changed(source, &text::clean(other));
-    if range.is_empty() {
-        return code;
-    }
     let (style, background) = if kind == Kind::Removed {
         (BAD.bold(), DIFF_REMOVED_STRONG)
     } else {

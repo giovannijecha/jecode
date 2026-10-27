@@ -47,7 +47,7 @@ fn singleton_command_keeps_its_existing_card_preview_in_older_turns() {
     state.close_tools();
     state.finish_tool_turn();
     let before = visible(&state);
-    assert!(before.contains("● Bash(printf actual-command)"), "{before}");
+    assert!(before.contains(" BASH  printf actual-command"), "{before}");
     assert!(before.contains("preview output"), "{before}");
     assert!(!before.contains("Read docs") && !before.contains("1 call"));
     state.begin_tool_turn();
@@ -153,7 +153,7 @@ fn a_second_matching_call_converts_the_singleton_and_invalidates_its_cached_prev
             .blocks
             .iter()
             .flatten()
-            .any(|row| row.plain().contains("Bash(printf first)"))
+            .any(|row| row.plain().contains(" BASH  printf first"))
     );
     command(&mut state, "two", "printf second", Some("Inspect"));
     state.close_tools();
@@ -165,13 +165,13 @@ fn a_second_matching_call_converts_the_singleton_and_invalidates_its_cached_prev
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rows.contains("● Inspect  2 calls"), "{rows}");
+    assert!(rows.contains(" WORK  Inspect  2 calls"), "{rows}");
     assert!(
-        rows.contains("Bash  printf first") && rows.contains("Bash  printf second"),
+        rows.contains("BASH printf first") && rows.contains("BASH printf second"),
         "{rows}"
     );
     assert!(
-        !rows.contains("Bash(printf first)") && !rows.contains("preview output"),
+        !rows.contains(" BASH  printf first") && !rows.contains("preview output"),
         "{rows}"
     );
 }
@@ -197,11 +197,16 @@ fn whitespace_equivalent_labels_share_one_chapter_without_rewriting_arguments() 
     state.close_tools();
     let text = visible(&state);
     assert_eq!(
-        text.matches("● Inspect parser  4 calls").count(),
+        text.matches(" WORK  Inspect parser  4 calls").count(),
         1,
         "{text}"
     );
-    assert_eq!(text.matches("● ").count(), 1, "{text}");
+    // One title row: every other row hangs on the chapter's tree.
+    let titles = text
+        .lines()
+        .filter(|row| row.starts_with(' ') && row.chars().nth(1).is_some_and(char::is_uppercase))
+        .count();
+    assert_eq!(titles, 1, "{text}");
     for (item, original) in state.items.iter().zip(labels) {
         let Item::Tool { arguments, .. } = item else {
             panic!("expected a tool")

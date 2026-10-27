@@ -24,12 +24,19 @@ impl Summary {
         format!("{} · {}", self.age(), self.origin())
     }
     pub fn age(&self) -> String {
+        match self.elapsed() {
+            now if now == "just now" => now,
+            elapsed => format!("{elapsed} ago"),
+        }
+    }
+    /// The compact age: `just now`, `5m`, `2h`, `3d`.
+    pub fn elapsed(&self) -> String {
         let age = super::now().saturating_sub(self.updated) / 1000;
         match age {
             0..60 => "just now".into(),
-            60..3600 => format!("{}m ago", age / 60),
-            3600..86400 => format!("{}h ago", age / 3600),
-            _ => format!("{}d ago", age / 86400),
+            60..3600 => format!("{}m", age / 60),
+            3600..86400 => format!("{}h", age / 3600),
+            _ => format!("{}d", age / 86400),
         }
     }
     /// Backend, model and ID.

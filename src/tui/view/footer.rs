@@ -4,27 +4,24 @@ use crate::{
         line::Line,
         state::State,
         text,
-        theme::{METER_FILL, METER_TRACK, MUTED, Style, WARNING},
+        theme::{DIM, METER_FILL, METER_TRACK, MUTED, PILL_SURFACE, Style, WARNING},
     },
 };
 use std::sync::OnceLock;
 
-/// Panels keep the footer below them from this many rows.
-const PANEL_MIN: usize = 10;
 /// Cells in the context meter.
 const METER_CELLS: usize = 8;
 /// The meter and share turn gold this many points before auto-compaction.
 const NEAR: usize = 3;
 static USER_HOME: OnceLock<Option<String>> = OnceLock::new();
 
-/// The footer: the home-relative directory on the left; the context meter and
-/// share, model and effort on the right. Narrow rows fall back to the project
-/// name and the model without its provider, then drop them.
+/// The footer: the home-relative path in `dim` on the left; on the right the
+/// model id and effort on a chip, two cells, then the context gauge. Narrow
+/// rows drop the provider, fall back to the project name, then drop effort,
+/// the path and the chip.
 pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) -> Line {
-    let home = USER_HOME
-        .get_or_init(|| std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok());
+    let path = path(directory);
     let directory = text::clean(directory.strip_prefix(r"\\?\").unwrap_or(directory));
-    let path = home_relative(&directory, home.as_deref());
     let project = directory
         .rsplit(['\\', '/'])
         .find(|part| !part.is_empty())
@@ -33,34 +30,30 @@ pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) 
     let short = model.rsplit('/').next().unwrap_or(&model);
     let effort = &state.effort;
     let gauge = state.context.as_ref().map(gauge);
-    let right = |detail: &str| {
-        let mut line = gauge.clone().unwrap_or_default();
-        let separator = if gauge.is_some() { " · " } else { "" };
-        line.push(&format!("{separator}{detail}"), MUTED);
-        line
+    let right = |chip: Option<&str>| {
+        let mut line = Line::default();
+        if let Some(chip) = chip {
+            line.push_on(&format!(" {chip} "), MUTED, PILL_SURFACE);
+        }
+        match &gauge {
+            Some(gauge) if chip.is_some() => {
+                line.push("  ", MUTED);
+                line.append(gauge.clone())
+            }
+            Some(gauge) => gauge.clone(),
+            None => line,
+        }
     };
-    let mut variants = Vec::new();
-    if let Some(account) = &state.chatgpt_account {
-        let status = match account {
-            crate::tui::state::ChatGptAccount::Active(email) => {
-                format!("Using ChatGPT plan · {email}")
-            }
-            crate::tui::state::ChatGptAccount::SignedOut => "ChatGPT · signed out".into(),
-            crate::tui::state::ChatGptAccount::Unavailable => {
-                "ChatGPT · account unavailable".into()
-            }
-        };
-        variants.push((
-            path.as_str(),
-            right(&format!("{model} · {effort} · {status}")),
-        ));
-    }
-    variants.extend([
-        (path.as_str(), right(&format!("{model} · {effort}"))),
-        (project, right(&format!("{short} · {effort}"))),
-        ("", right(short)),
-        ("", gauge.clone().unwrap_or_else(|| Line::new(short, MUTED))),
-    ]);
+    let full = format!("{model} · {effort}");
+    let detailed = format!("{short} · {effort}");
+    let variants = [
+        (path.as_str(), right(Some(&full))),
+        (path.as_str(), right(Some(&detailed))),
+        (project, right(Some(&detailed))),
+        (project, right(Some(short))),
+        ("", right(Some(short))),
+        ("", gauge.clone().unwrap_or_else(|| right(Some(short)))),
+    ];
     let last = variants.len() - 1;
     for (index, (left, right)) in variants.into_iter().enumerate() {
         let (left_cells, right_cells) = (text::cells(left), text::cells(&right.plain()));
@@ -68,21 +61,19 @@ pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) 
         if left_cells + gap + right_cells > columns && index < last {
             continue;
         }
-        let mut line = Line::new(left, MUTED);
+        let mut line = Line::new(left, DIM);
         line.push(
             &" ".repeat(columns.saturating_sub(left_cells + right_cells)),
-            MUTED,
+            DIM,
         );
-        for span in right.spans {
-            line.push(&span.text, span.style);
-        }
-        return line.shortened(columns);
+        return line.append(right).shortened(columns);
     }
     unreachable!("the last variant always renders")
 }
 
-/// `━━━━━━── 25%`: eight cells filling toward the auto-compact threshold, gold
-/// when close to it. Unknown capacity leaves the track empty with `?`.
+/// `▰▰▰▰▱▱▱▱ 52%`: eight cells filling toward the auto-compact threshold,
+/// `warning` within three points of it. Unknown capacity leaves the track
+/// empty with `?`.
 fn gauge(status: &Status) -> Line {
     let threshold = usize::from(status.auto_compact).max(1);
     let percent = status.percent();
@@ -92,8 +83,8 @@ fn gauge(status: &Status) -> Line {
         (percent.min(threshold) * METER_CELLS * 2 + threshold) / (threshold * 2)
     });
     let mut line = Line::default();
-    line.push(&"━".repeat(filled), fill);
-    line.push(&"─".repeat(METER_CELLS - filled), METER_TRACK);
+    line.push(&"▰".repeat(filled), fill);
+    line.push(&"▱".repeat(METER_CELLS - filled), METER_TRACK);
     let share = match percent {
         None => "?".into(),
         Some(0) if status.tokens > 0 => "<1%".into(),
@@ -101,6 +92,14 @@ fn gauge(status: &Status) -> Line {
     };
     line.push(&format!(" {share}"), if near { WARNING } else { MUTED });
     line
+}
+
+/// The working directory as shown, relative to the user's home.
+pub(super) fn path(directory: &str) -> String {
+    let home = USER_HOME
+        .get_or_init(|| std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok());
+    let directory = text::clean(directory.strip_prefix(r"\\?\").unwrap_or(directory));
+    home_relative(&directory, home.as_deref())
 }
 
 /// `C:\Users\me\Projects\app` → `~\Projects\app` when it lies inside `home`.
@@ -118,10 +117,4 @@ pub(super) fn home_relative(directory: &str, home: Option<&str>) -> String {
         (same && (rest.is_empty() || rest.starts_with(['\\', '/']))).then_some(rest)
     });
     split.map_or_else(|| directory.into(), |rest| format!("~{rest}"))
-}
-
-/// Rows a panel of `height` gives to the footer: one when the engine status
-/// is known and the panel keeps its input, selection and controls.
-pub(super) fn panel_rows(state: &State, height: usize) -> usize {
-    usize::from(state.context.is_some() && state.width >= 7 && height >= PANEL_MIN)
 }

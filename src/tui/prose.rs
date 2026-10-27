@@ -1,10 +1,10 @@
-//! Assistant voice uses a neutral marker and a two-cell hanging gutter.
-use super::{line::Line, markdown, theme::BODY};
+//! Assistant voice opens with an accent marker and hangs two cells.
+use super::{line::Line, markdown, theme::ACCENT};
 
 fn gutter(lines: &mut [Line], start: usize, columns: usize) {
     for (index, line) in lines.iter_mut().enumerate() {
         *line = std::mem::take(line)
-            .gutter(if start + index == 0 { "● " } else { "  " }, BODY)
+            .gutter(if start + index == 0 { "● " } else { "  " }, ACCENT)
             .shortened(columns);
     }
 }
@@ -76,14 +76,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn voice_has_one_neutral_dot_and_every_paragraph_hangs_two_cells() {
+    fn voice_has_one_accent_dot_and_every_paragraph_hangs_two_cells() {
         for columns in [40, 80] {
             let lines = render(
                 "A long assistant paragraph that wraps onto another line at narrow widths.\n\nThe second paragraph keeps the same indent.",
                 columns,
             );
             assert!(lines[0].plain().starts_with("● A long"));
-            assert_eq!(lines[0].spans[0].style, BODY);
+            assert_eq!(lines[0].spans[0].style, crate::tui::theme::ACCENT);
             assert!(lines[1..].iter().all(|line| line.plain().starts_with("  ")));
             assert_eq!(
                 lines

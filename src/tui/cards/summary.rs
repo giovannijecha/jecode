@@ -6,7 +6,7 @@ use crate::{
         activity,
         line::Line,
         text,
-        theme::{BAD, BODY, GOOD, MUTED, STRONG, TOOL_ACCENT, TOOL_DIM, WARNING},
+        theme::{BAD, BODY, DIM, GOOD, LIT, MUTED, STRONG, WARNING},
     },
 };
 use std::time::Duration;
@@ -57,7 +57,7 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         );
     }
     if let Some((state, style)) = process.and_then(|process| match process {
-        "running" => Some((" running", TOOL_ACCENT)),
+        "running" => Some((" running", LIT)),
         "stopping" => Some((" stopping", WARNING)),
         "stopped" => Some((" stopped", WARNING)),
         "unknown" => Some((" status unknown", MUTED)),
@@ -109,13 +109,13 @@ fn running(tool: &Tool<'_>) -> Line {
     let mut line = if matches!(tool.name, "read" | "write" | "edit") {
         Line::default()
     } else {
-        Line::new("Running", TOOL_DIM)
+        Line::new("Running", DIM)
     };
     if let Some(elapsed) = tool.presentation.duration() {
         if !line.spans.is_empty() {
-            line.push(" · ", TOOL_DIM);
+            line.push(" · ", DIM);
         }
-        line.push(&activity::duration(elapsed), TOOL_DIM);
+        line.push(&activity::duration(elapsed), DIM);
     }
     if let Some(note) = &tool.presentation.note {
         if !line.spans.is_empty() {

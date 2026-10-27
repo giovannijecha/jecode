@@ -1,4 +1,9 @@
-use super::{App, Feedback, Kind, editor::Editor, selector::Selector, state::Item};
+use super::{
+    App, Feedback, Kind,
+    editor::Editor,
+    selector::Selector,
+    state::{Item, Recent},
+};
 use crate::{
     events::Event,
     sessions::{Input, Record},
@@ -33,7 +38,7 @@ impl App {
         self.persist_input(true);
     }
 
-    pub(super) fn session_hint(&mut self) {
+    pub(super) fn recent_sessions(&mut self) {
         let Some(handle) = &self.persistence else {
             return;
         };
@@ -52,20 +57,27 @@ impl App {
                         )
                         .action("/resume", "details"),
                     );
-                } else if let Some(session) = listing
-                    .sessions
-                    .iter()
-                    .find(|session| session.id != handle.id())
-                {
-                    let title = self.archive.redactor.text(&session.title);
-                    self.state.notify(
-                        Feedback::result(Kind::Notice, format!("Previous session: {title}"))
-                            .action("/resume", "open"),
-                    );
                 }
+                self.offer_recent(&listing.sessions);
             }
             Err(error) => self.warn(&error),
         }
+    }
+
+    /// The startup space offers other conversations until the first prompt.
+    pub(super) fn offer_recent(&mut self, sessions: &[crate::sessions::Summary]) {
+        let Some(handle) = &self.persistence else {
+            return;
+        };
+        self.state.opening.recent = sessions
+            .iter()
+            .filter(|session| session.id != handle.id())
+            .take(3)
+            .map(|session| Recent {
+                title: self.archive.redactor.text(&session.title),
+                age: session.elapsed(),
+            })
+            .collect();
     }
 
     pub(super) fn capture_input(&self) {

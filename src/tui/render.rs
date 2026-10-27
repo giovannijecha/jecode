@@ -1,4 +1,8 @@
-use super::{line::Line, view::Frame};
+use super::{
+    line::Line,
+    theme::{BASE, BODY},
+    view::Frame,
+};
 
 // Paint the full alternate screen by absolute position. Each cursor move
 // cancels delayed wrapping after a row, including the bottom-right cell.
@@ -21,20 +25,30 @@ impl Renderer {
         }
         let columns = width.max(1);
         let mut output = String::from("\x1b[?25l");
+        // Erasing fills with the current background only on terminals with
+        // BCE, so rows are painted cell by cell; the erase just drops stale
+        // glyphs a mis-measured row could leave behind.
+        let erase = format!("\x1b[0m\x1b[{BODY};{BASE}m\x1b[2K");
         if resized {
-            output.push_str("\x1b[0m\x1b[2J");
+            output.push_str(&format!("\x1b[0m\x1b[{BODY};{BASE}m\x1b[2J"));
         }
         for (row, line) in frame.live.iter().enumerate().take(height) {
             if resized || self.previous.get(row) != Some(line) {
                 output.push_str(&format!(
-                    "\x1b[{};1H\x1b[0m\x1b[2K{}",
+                    "\x1b[{};1H{erase}{}",
                     row + 1,
                     line.paint(columns)
                 ));
             }
         }
-        for row in frame.live.len()..self.previous.len().min(height) {
-            output.push_str(&format!("\x1b[{};1H\x1b[0m\x1b[2K", row + 1));
+        let stale = if resized {
+            height
+        } else {
+            self.previous.len().min(height)
+        };
+        let blank = Line::default().paint(columns);
+        for row in frame.live.len()..stale {
+            output.push_str(&format!("\x1b[{};1H{erase}{blank}", row + 1));
         }
         let (row, column) = frame.cursor.unwrap_or((frame.composer, 0));
         output.push_str(&format!(

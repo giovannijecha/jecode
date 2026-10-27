@@ -6,10 +6,10 @@ use crate::{
     file_change::Change,
     json::Value,
     tui::{
-        line::Line,
+        line::{Fold, Line},
         syntax::Highlighter,
         text,
-        theme::{CODE_TEXT, MUTED, Style, WARNING},
+        theme::{CODE_TEXT, DIM, MUTED, Style, WARNING},
     },
 };
 
@@ -91,6 +91,10 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
         .max()
         .map_or(0, |number| number.to_string().len());
     let mut lexer = Highlighter::for_path(field(arguments, "path"));
+    let fold = Fold {
+        markup: lexer.markup(),
+        ..Fold::default()
+    };
     entries
         .into_iter()
         .enumerate()
@@ -103,7 +107,14 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
                     |number| format!("{number:>digits$}   "),
                 )
             };
-            diff::code_rows(lexer.line(source), &label, MUTED, columns, index + 2)
+            diff::code_rows(
+                lexer.line(source),
+                &Line::new(&label, DIM),
+                "    ",
+                columns,
+                index + 2,
+                fold,
+            )
         })
         .collect()
 }
@@ -136,6 +147,12 @@ fn source(lines: &[String], path: &str, columns: usize, expanded: bool) -> Body 
     };
     let digits = count.max(1).to_string().len();
     let mut lexer = Highlighter::for_path(path);
+    // Collapsed, each line keeps at most two rows.
+    let fold = Fold {
+        rows: (!expanded).then_some(2),
+        markup: lexer.markup(),
+        ..Fold::default()
+    };
     let rows = lines
         .iter()
         .take(count)
@@ -143,10 +160,11 @@ fn source(lines: &[String], path: &str, columns: usize, expanded: bool) -> Body 
         .flat_map(|(index, line)| {
             diff::code_rows(
                 lexer.line(line),
-                &format!("{:>digits$}   ", index + 1),
-                MUTED,
+                &Line::new(&format!("{:>digits$}   ", index + 1), DIM),
+                "    ",
                 columns,
                 index + 2,
+                fold,
             )
         })
         .collect();

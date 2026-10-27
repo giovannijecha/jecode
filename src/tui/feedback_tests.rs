@@ -59,10 +59,19 @@ fn clipped_rejected_key_diagnostic_still_offers_settings() {
     let mut app = app(&home, &project, &fixture.endpoint);
     app.dispatch("Check the account".into()).unwrap();
     tests::finish(&mut app);
-    let notice = app.state.notice.as_ref().unwrap();
-    assert_eq!(notice.action, Some(("/settings", "update key")));
-    assert!(notice.text.contains("[provider diagnostic truncated]"));
-    assert!(!notice.text.contains("jecode setup"));
+    let ending = app.state.ending.as_ref().unwrap();
+    assert_eq!(ending.ending, Some(crate::tui::feedback::Ending::Failed));
+    assert_eq!(ending.action, Some(("/settings", "update key")));
+    // The diagnostic stays as the turn's last transcript row.
+    let Some(crate::tui::state::Item::Text {
+        kind: Kind::Error,
+        text,
+    }) = app.state.items.last()
+    else {
+        panic!("the failed turn ends with its diagnostic");
+    };
+    assert!(text.contains("[provider diagnostic truncated]"));
+    assert!(!text.contains("jecode setup"));
     fixture.finish();
 }
 
@@ -146,7 +155,7 @@ fn automatic_queue_dispatch_and_catalog_loading_keep_an_unread_error() {
 }
 
 #[test]
-fn autosave_recovery_clears_bookkeeping_but_keeps_the_error_until_input() {
+fn autosave_recovery_clears_bookkeeping_but_keeps_the_error_until_the_next_send() {
     let home = Directory::new();
     let project = Directory::new();
     let mut app = app(&home, &project, "http://127.0.0.1:1/chat/completions");
@@ -176,6 +185,8 @@ fn autosave_recovery_clears_bookkeeping_but_keeps_the_error_until_input() {
     assert!(app.save_error.is_none());
     assert_eq!(app.state.notice.as_ref().unwrap().text, message);
     key(&mut app, 37, 0);
+    assert_eq!(app.state.notice.as_ref().unwrap().text, message);
+    app.state.sent();
     assert!(app.state.notice.is_none());
 }
 
@@ -340,7 +351,10 @@ fn expired_feedback_is_redrawn_while_idle_and_typing_dismisses_both_result_slots
         !app.state
             .expire_feedback(Instant::now() + Duration::from_secs(60))
     );
+    // Errors outlast keys and wait for the next send.
     key(&mut app, 37, 0);
+    assert!(app.state.notice.as_ref().unwrap().text.contains("Usage:"));
+    app.state.sent();
     assert!(app.state.notice.is_none());
     assert_eq!(app.state.editor.text, "draft");
 }

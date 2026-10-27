@@ -24,12 +24,12 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .lines()
         .find(|line| line.contains("fixture command"))
         .unwrap();
-    assert!(header.contains("● Bash(fixture command)"));
+    assert!(header.starts_with(" BASH  fixture command"));
     let summary = visible
         .lines()
         .find(|line| {
             line.trim()
-                .strip_prefix("⎿ Running · ")
+                .strip_prefix("└ Running · ")
                 .map(str::trim)
                 .unwrap_or_default()
                 .strip_suffix('s')
@@ -38,7 +38,7 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .unwrap();
     let seconds: f64 = summary
         .trim()
-        .strip_prefix("⎿ Running · ")
+        .strip_prefix("└ Running · ")
         .unwrap()
         .trim_end_matches('s')
         .parse()
@@ -46,11 +46,12 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
     assert!(seconds >= 12.0);
     assert!(!header.contains('▰'));
     assert!(!summary.contains(['▰', '▱']));
-    assert_eq!(visible.matches("▰▰").count(), 1); // Only the composer rule.
+    // Only the footer may carry the context gauge.
+    let rows: Vec<_> = visible.lines().collect();
     assert!(
-        visible
-            .lines()
-            .any(|line| line.starts_with("─ ") && line.contains("▰▰"))
+        rows[..rows.len() - 1]
+            .iter()
+            .all(|line| !line.contains(['▰', '▱']))
     );
     assert_eq!(state.revision, revision);
 
@@ -92,15 +93,15 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     display.scroll(Scroll::Start);
     display.scroll(Scroll::Rows(2));
     step(&mut display, &mut screen, &state, now);
-    assert!(screen.visible().starts_with("● Activity  2 calls"));
-    assert!(!screen.visible().contains("    one"));
+    assert!(screen.visible().starts_with(" WORK  Activity  2 calls"));
+    assert!(!screen.visible().contains("  │ one"));
     let generation = state.generation;
     state.toggle_tools();
     step(&mut display, &mut screen, &state, now);
     assert_eq!(state.generation, generation);
-    assert!(screen.visible().starts_with("● Activity  2 calls"));
-    assert!(screen.visible().contains("    one"));
-    assert_eq!(screen.visible().matches("● Bash(first)").count(), 1);
+    assert!(screen.visible().starts_with(" WORK  Activity  2 calls"));
+    assert!(screen.visible().contains("  │ one"));
+    assert_eq!(screen.visible().matches(" BASH  first").count(), 1);
 
     geometry(&mut screen, &mut state, &mut display, 40, 20, now);
     drain(
@@ -109,8 +110,11 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
         &state,
         now + Duration::from_millis(100),
     );
-    assert!(screen.visible().starts_with("● Activity  2 calls"));
-    assert!(screen.visible().contains("    one"));
+    // At 40 columns the collapse keycap shortens the expanded title.
+    let title = screen.visible().lines().next().unwrap().to_owned();
+    assert!(title.starts_with(" WORK  Activity  2 ca"), "{title}");
+    assert!(title.trim_end().ends_with("Ctrl+O  collapse"), "{title}");
+    assert!(screen.visible().contains("  │ one"));
     state.toggle_tools();
     step(
         &mut display,
@@ -118,7 +122,7 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
         &state,
         now + Duration::from_millis(100),
     );
-    assert!(!screen.visible().contains("    one"));
+    assert!(!screen.visible().contains("  │ one"));
     assert!(screen.history.is_empty());
 }
 
@@ -140,9 +144,9 @@ fn tail_rows_above_a_growing_work_chapter_never_move_down() {
             step(&mut display, &mut screen, state, now);
             drain(&mut display, &mut screen, state, now);
             let title = if state.items.len() == 2 {
-                "● Bash(printf one)"
+                " BASH  printf one"
             } else {
-                "● Inspect sources"
+                " WORK  Inspect sources"
             };
             let current = screen
                 .visible()
@@ -280,6 +284,8 @@ fn resizing_inside_expanded_tool_output_keeps_the_logical_source_line() {
             .lines()
             .next()
             .unwrap()
+            .trim_start()
+            .trim_start_matches(['│', '└'])
             .trim_start()
             .split(':')
             .next()

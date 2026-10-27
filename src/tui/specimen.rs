@@ -2,7 +2,6 @@
 // terminal: cargo test --locked --offline specimen::specimen -- --ignored --nocapture
 // Each component phase adds its own specimen beside this one, such as tools.
 use super::{
-    activity,
     line::{Line, Span},
     text,
     theme::*,
@@ -14,35 +13,49 @@ const FOREGROUNDS: &[(&str, &[(&str, Style)])] = &[
     (
         "Text",
         &[
-            ("EMPHASIS", EMPHASIS),
             ("STRONG", STRONG),
+            ("BODY", BODY),
             ("CODE_TEXT", CODE_TEXT),
             ("MUTED", MUTED),
-            ("TOOL_DIM", TOOL_DIM),
+            ("DIM", DIM),
+            ("FAINT", FAINT),
         ],
     ),
     (
         "Interaction",
         &[
             ("ACCENT", ACCENT),
-            ("TOOL_ACCENT", TOOL_ACCENT),
+            ("LIT", LIT),
             ("KEYWORD", KEYWORD),
+            ("BADGE_TEXT", BADGE_TEXT),
         ],
     ),
     (
         "Outcome",
         &[("GOOD", GOOD), ("BAD", BAD), ("WARNING", WARNING)],
     ),
+    (
+        "Shimmer",
+        &[("S0", S0), ("S1", S1), ("S2", S2), ("S_BASE", S_BASE)],
+    ),
 ];
 
 const BACKGROUNDS: &[(&str, Surface)] = &[
+    ("BASE", BASE),
     ("USER_SURFACE", USER_SURFACE),
+    ("PILL_SURFACE", PILL_SURFACE),
     ("SELECTED_SURFACE", SELECTED_SURFACE),
     ("CODE_SURFACE", CODE_SURFACE),
     ("DIFF_ADDED_SURFACE", DIFF_ADDED_SURFACE),
     ("DIFF_REMOVED_SURFACE", DIFF_REMOVED_SURFACE),
     ("DIFF_ADDED_STRONG", DIFF_ADDED_STRONG),
     ("DIFF_REMOVED_STRONG", DIFF_REMOVED_STRONG),
+    ("BADGE_READ", BADGE_READ),
+    ("BADGE_EDIT", BADGE_EDIT),
+    ("BADGE_SHELL", BADGE_SHELL),
+    ("BADGE_IDLE", BADGE_IDLE),
+    ("BADGE_BAD", BADGE_BAD),
+    ("BADGE_WARN", BADGE_WARN),
 ];
 
 const ATTRIBUTES: &[(&str, Style)] = &[
@@ -208,15 +221,18 @@ fn attributes(rows: &mut Vec<Line>) {
 }
 
 fn scanner(rows: &mut Vec<Line>) {
-    heading(rows, "Activity scanner  ·  8 frames at 120 ms");
+    heading(rows, "Motion  ·  caret and shimmer, one frame per 100 ms");
     let mut line = Line::new("    ", BODY);
-    for frame in 0..8 {
-        for span in activity::indicator(frame).spans {
-            line.push(&span.text, span.style);
-        }
+    for frame in [0, 4] {
+        line = line.append(super::motion::caret(frame, None));
         line.push("  ", BODY);
     }
     rows.push(line);
+    for frame in (0..15).step_by(2) {
+        let mut line = Line::new("    ", BODY);
+        line = line.append(super::motion::shimmer("Reading auth.rs", frame, false));
+        rows.push(line);
+    }
 }
 
 fn glyphs(rows: &mut Vec<Line>) {
@@ -263,6 +279,7 @@ fn specimen() {
 
 mod chapter_live;
 mod composer;
+mod diffs;
 mod menus;
 mod messages;
 mod notices;

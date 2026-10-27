@@ -90,14 +90,15 @@ fn reflow_of_a_wrapped_table_header_keeps_its_text_instead_of_the_separator() {
     let wide = vec![markdown::render(source, 30)];
     view.scroll(Scroll::Start);
     view.view(&wide, &[], 1);
-    view.scroll(Scroll::Rows(1));
+    // Row 0 is the top border, row 1 the header's first wrapped row.
+    view.scroll(Scroll::Rows(2));
     let before = view.view(&wide, &[], 1);
     let origin = before.lines[0].origin.unwrap();
-    assert!(origin.character > 0 && before.lines[0].plain().contains("delta"));
+    assert!(origin.character > 0 && before.lines[0].plain().starts_with("│ charlie delta"));
     let narrow = vec![markdown::render(source, 18)];
     let after = view.view(&narrow, &[], 1);
     assert_eq!(after.lines[0].origin, Some(origin));
-    assert!(after.lines[0].plain().contains("delta"));
+    assert!(after.lines[0].plain().starts_with("│ charli"));
 }
 
 #[test]

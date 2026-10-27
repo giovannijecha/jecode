@@ -137,7 +137,7 @@ fn list_items_keep_their_marker_and_hanging_indentation_when_wrapped() {
         rows[0]
             .spans
             .iter()
-            .any(|span| span.text == "One" && span.style == EMPHASIS.bold())
+            .any(|span| span.text == "One" && span.style == STRONG.bold())
     );
 }
 
@@ -203,17 +203,26 @@ fn quotes_and_narrow_code_preserve_visible_content_and_widths() {
         let rows = render(source, columns);
         assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
         assert!(rows[0].plain().starts_with("│ A"));
+        // Continuations hang; each row is still the source from its origin.
+        let line = "    let città = \"🙂\";";
         let code: String = rows
             .iter()
             .filter(|row| row.background == Some(CODE_SURFACE))
             .skip(1)
             .take_while(|row| !row.plain().is_empty())
-            .map(|row| row.plain().strip_prefix(' ').unwrap().to_owned())
+            .enumerate()
+            .map(|(part, row)| {
+                let plain = row.plain();
+                let code = plain.strip_prefix(' ').unwrap();
+                let code = if part == 0 { code } else { code.trim_start() };
+                let from: String = line.chars().skip(row.origin.unwrap().character).collect();
+                assert!(from.starts_with(code), "{code:?} at {columns}");
+                code.to_owned()
+            })
             .collect();
-        assert_eq!(code, "    let città = \"🙂\";");
+        assert_eq!(code.replace(' ', ""), line.replace(' ', ""));
     }
 }
-
 #[test]
 fn headings_tasks_and_inline_formatting_keep_their_visible_text() {
     let source = "## Title ##\nSubtitle\n===\n- [ ] **pending**\n- [x] _done_\n>~~old~~ and [docs](https://example.test/a)";
@@ -227,14 +236,16 @@ fn headings_tasks_and_inline_formatting_keep_their_visible_text() {
             "",
             "☐ pending",
             "☑ done",
-            "│ old and docs (https://example.test/a)"
+            "│ old and docs (example.test)"
         ]
     );
-    // Levels: H1 accent, H2 emphasis, H3 and below body, all bold.
-    assert_eq!(rows[0].spans[0].style, EMPHASIS.bold());
+    // Levels: H1 accent, H2 strong, H3 and below body, all bold; a done task
+    // is good.
+    assert_eq!(rows[5].spans[0].style, crate::tui::theme::GOOD);
+    assert_eq!(rows[0].spans[0].style, STRONG.bold());
     assert_eq!(rows[2].spans[0].style, ACCENT.bold());
     assert_eq!(render("### Small", 60)[0].spans[0].style, BODY.bold());
-    assert_eq!(render("Top\n--", 60)[0].spans[0].style, EMPHASIS.bold());
+    assert_eq!(render("Top\n--", 60)[0].spans[0].style, STRONG.bold());
     assert_eq!(render("## Last", 60).len(), 1);
     assert_eq!(render("## C#\nLiteral snake_case", 60)[0].plain(), "C#");
     assert!(source.contains("~~old~~"));
@@ -252,7 +263,7 @@ fn partial_table_delimiters_remain_visible_until_a_valid_table_exists() {
             .iter()
             .map(Line::plain)
             .collect::<Vec<_>>(),
-        ["A   B", "──  ──"]
+        ["┌────┬────┐", "│ A  │ B  │", "└────┴────┘"]
     );
 }
 
@@ -296,7 +307,7 @@ fn soft_breaks_join_paragraphs_and_hard_breaks_keep_rows() {
     assert_eq!(plain("A\n=\nB\ntitle\n---", 80), ["A", "", "B title"]);
     assert_eq!(
         plain("text\n| A | B |\n|---|---|", 80),
-        ["text", "A   B", "──  ──"]
+        ["text", "┌────┬────┐", "│ A  │ B  │", "└────┴────┘"]
     );
 }
 
@@ -307,7 +318,7 @@ fn setext_heading_spans_the_whole_preceding_paragraph() {
         rows.iter().map(Line::plain).collect::<Vec<_>>(),
         ["bar bar"]
     );
-    assert_eq!(rows[0].spans[0].style, EMPHASIS.bold());
+    assert_eq!(rows[0].spans[0].style, STRONG.bold());
     assert_eq!(rows[0].origin.unwrap().line, 0);
     let rows = render("bar\nbar\n- i", 80);
     assert_eq!(
@@ -450,30 +461,6 @@ fn streamed_backslash_boundaries_match_full_render() {
     }
     assert_eq!(lines, render(&completed, 80));
 }
-
-#[test]
-fn code_panels_pad_one_cell_on_the_code_surface() {
-    let rows = render("```text\nabcdefghij\n```", 10);
-    let plain: Vec<_> = rows.iter().map(Line::plain).collect();
-    assert_eq!(plain, [" text", " abcdefgh", " ij", ""]);
-    assert!(rows.iter().all(|row| row.background == Some(CODE_SURFACE)));
-}
-
-#[test]
-fn narrow_code_panels_keep_every_glyph_visible() {
-    for (columns, expected) in [
-        (2, vec!["ab", "界", "c"]),
-        (3, vec!["ab", "界c"]),
-        (4, vec![" ab", " 界", " c"]),
-    ] {
-        let rows = render("```\nab界c\n```", columns);
-        let content: Vec<_> = rows[1..rows.len() - 1].iter().map(Line::plain).collect();
-        assert_eq!(content, expected, "width {columns}");
-        assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
-        assert!(rows.iter().all(|row| row.background == Some(CODE_SURFACE)));
-    }
-}
-
 #[test]
 fn empty_prose_and_blank_code_lines_match_source_rows() {
     let empty = render("", 40);

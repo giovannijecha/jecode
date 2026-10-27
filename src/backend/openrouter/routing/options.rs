@@ -67,7 +67,8 @@ pub fn entries(endpoints: Option<&Endpoints>, current: &Routing, reasoning: bool
                 name: tag.clone(),
                 description: mark(current, fact.into()),
                 metrics: None,
-                facts: fact.into(),
+                // The TUI explains a missing listing on its own row.
+                facts: if endpoints.is_some() { fact } else { "" }.into(),
                 help: explain(current, None),
                 problem: None,
             });

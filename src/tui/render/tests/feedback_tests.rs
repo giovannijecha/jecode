@@ -63,9 +63,14 @@ fn feedback_and_information_panels_are_erased_and_never_return_in_resized_histor
         step(&mut display, &mut screen, &state, settled);
         drain(&mut display, &mut screen, &state, settled);
         let text = owned_transcript(&mut display, &mut screen, &state, settled);
-        for hidden in ["Temporary", "Historical", "old detail", "key 0"] {
-            assert!(!text.contains(hidden), "{hidden} returned after resize");
+        for hidden in ["Temporary", "Historical help", "old detail", "key 0"] {
+            assert!(
+                !text.contains(hidden),
+                "{hidden} returned after resize\n{text}"
+            );
         }
+        // A UI error is a transcript row (`✕`), not a panel: kept exactly once.
+        assert_eq!(text.matches("✕ Historical UI error").count(), 1, "{text}");
         assert_eq!(text.matches("Saved conversation row").count(), 30);
         assert_eq!(text.matches("Next saved row").count(), 4);
     }

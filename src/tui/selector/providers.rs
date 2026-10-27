@@ -6,14 +6,8 @@ impl Selector {
             "Providers",
             Purpose::ProviderSettings,
             vec![
-                OptionRow {
-                    prose: "Continue with ChatGPT and manage OpenAI accounts.".into(),
-                    ..row("Credentials", "OpenAI", Choice::Credentials)
-                },
-                OptionRow {
-                    prose: "Store a personal OpenRouter key for API access.".into(),
-                    ..row("API keys", "OpenRouter", Choice::ApiKeys)
-                },
+                row("Credentials", "OpenAI", Choice::Credentials),
+                row("API keys", "OpenRouter", Choice::ApiKeys),
             ],
         );
         menu.parent = Some(SETTINGS);
@@ -25,7 +19,6 @@ impl Selector {
             Purpose::Credentials,
             vec![OptionRow {
                 badge: configured.then_some(Badge::Note("configured".into())),
-                prose: "Continue with ChatGPT. Use your ChatGPT plan and account.".into(),
                 ..row("OpenAI", "ChatGPT", Choice::Provider("openai"))
             }],
         );
@@ -38,7 +31,6 @@ impl Selector {
             Purpose::ApiKeys,
             vec![OptionRow {
                 badge: configured.then_some(Badge::Note("configured".into())),
-                prose: "OpenRouter key, kept in plain text in ~/.jecode/config.json.".into(),
                 ..row("OpenRouter", "API key", Choice::OpenRouterKey)
             }],
         );
@@ -57,14 +49,6 @@ impl Selector {
                 } else {
                     None
                 },
-                prose: if account.enabled {
-                    format!("{} · Using ChatGPT plan", account.email)
-                } else {
-                    format!(
-                        "{} · Sign in again to restore ChatGPT plan access.",
-                        account.email
-                    )
-                },
                 search: account.email.clone(),
                 ..row(
                     account.label.clone(),
@@ -73,10 +57,7 @@ impl Selector {
                 )
             })
             .collect();
-        options.push(OptionRow {
-            prose: "Open a browser to continue with ChatGPT on another account.".into(),
-            ..row("Add account", "", Choice::AddAccount)
-        });
+        options.push(row("Add account", "", Choice::AddAccount));
         let mut menu = Self::new("OpenAI", Purpose::Accounts, options);
         menu.parent = Some("Credentials");
         menu.context = "ChatGPT accounts".into();
@@ -91,17 +72,10 @@ impl Selector {
             vec![
                 OptionRow {
                     badge: active.then_some(Badge::Current),
-                    prose: "Use this account for new OpenAI model selections.".into(),
                     ..row("Use account", &account.email, Choice::Account(0))
                 },
-                OptionRow {
-                    prose: "Open ChatGPT's usage page in your browser.".into(),
-                    ..row("Manage usage", "", Choice::ManageUsage)
-                },
-                OptionRow {
-                    prose: "Remove this account's saved credentials from Jecode.".into(),
-                    ..row("Sign out", "", Choice::SignOut)
-                },
+                row("Manage usage", "", Choice::ManageUsage),
+                row("Sign out", "", Choice::SignOut),
             ],
         );
         menu.parent = Some("OpenAI");
@@ -118,10 +92,10 @@ impl Selector {
             .iter()
             .map(|service| {
                 let id = service.id();
-                let name = match id {
-                    "openrouter" => "OpenRouter",
-                    "openai" => "OpenAI",
-                    _ => id,
+                let (name, fact) = match id {
+                    "openrouter" => ("OpenRouter", "API key"),
+                    "openai" => ("OpenAI", "ChatGPT plan"),
+                    _ => (id, ""),
                 };
                 OptionRow {
                     badge: if id == current {
@@ -131,13 +105,7 @@ impl Selector {
                     } else {
                         None
                     },
-                    prose: if id == "openai" {
-                        "Use your ChatGPT plan and active account."
-                    } else {
-                        "Use your OpenRouter API key."
-                    }
-                    .into(),
-                    ..row(name, "", Choice::Provider(id))
+                    ..row(name, fact, Choice::Provider(id))
                 }
             })
             .collect();

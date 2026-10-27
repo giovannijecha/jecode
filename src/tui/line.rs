@@ -1,7 +1,10 @@
 use super::{
     text,
-    theme::{BODY, INLINE_CODE, INLINE_CODE_SURFACE, Style, Surface},
+    theme::{BASE, BODY, INLINE_CODE, INLINE_CODE_SURFACE, Style, Surface},
 };
+
+mod code;
+pub(in crate::tui) use code::{Code, Fold, Row};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
@@ -40,6 +43,11 @@ struct StyledGlyph {
     newline: bool,
     whitespace: bool,
     breakable: bool,
+}
+
+/// Wrapping breaks at whitespace except U+00A0, which holds a chip together.
+fn spacing(character: char) -> bool {
+    character.is_whitespace() && character != '\u{a0}'
 }
 
 struct StyledLine {
@@ -111,13 +119,13 @@ impl Line {
         self
     }
     pub fn gutter(mut self, prefix: &str, style: Style) -> Self {
-        // A tree guide inherits the terminal surface, even beside shaded diffs.
+        // A tree guide stays on the base, even beside shaded diffs.
         self.spans.insert(
             0,
             Span {
                 text: prefix.into(),
                 style,
-                background: Some(Surface::TERMINAL),
+                background: Some(BASE),
             },
         );
         self
@@ -146,8 +154,8 @@ impl Line {
                     end,
                     cells: glyph.cells,
                     newline: glyph.text == "\n",
-                    whitespace: glyph.text.chars().next().is_some_and(char::is_whitespace),
-                    breakable: glyph.text.chars().next().is_some_and(char::is_whitespace)
+                    whitespace: glyph.text.chars().next().is_some_and(spacing),
+                    breakable: glyph.text.chars().next().is_some_and(spacing)
                         && (characters[start].1, characters[start].2)
                             != (INLINE_CODE, Some(INLINE_CODE_SURFACE)),
                 };
@@ -228,6 +236,8 @@ impl Line {
         }
         line
     }
+    // Every cell gets an explicit colour: the span's surface, else the
+    // line's, else the terminal's own, padded to the right edge.
     pub fn paint(&self, columns: usize) -> String {
         let mut output = String::from("\x1b[0m");
         let mut cells = 0;
@@ -240,19 +250,19 @@ impl Line {
             cells += glyph.cells;
             painted.push_glyph(&styled.characters, glyph, None);
         }
+        let surface = self.background.unwrap_or(BASE);
         for span in &painted.spans {
             output.push_str(&format!("\x1b[0m\x1b[{}m", span.style));
             // The software caret carries its own background, even inside a panel.
-            if let Some(background) = span.background.or(self.background)
-                && !span.style.has_fill()
-            {
+            if !span.style.has_fill() {
+                let background = span.background.unwrap_or(surface);
                 output.push_str(&format!("\x1b[{background}m"));
             }
             output.push_str(&span.text);
         }
-        if let Some(style) = self.background {
+        if cells < columns {
             output.push_str(&format!(
-                "\x1b[0m\x1b[{style}m{}",
+                "\x1b[0m\x1b[{BODY};{surface}m{}",
                 " ".repeat(columns - cells)
             ));
         }

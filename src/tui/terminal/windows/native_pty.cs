@@ -343,9 +343,9 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("Ask anything");
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native row 099");
-                pty.Wait("Complete ·");
+                pty.Wait("Done");
                 int chapter = pty.Mark(); pty.Send("\x1b[1;3H");
-                pty.Wait("Read(drop me.txt)", chapter);
+                pty.Wait("READ  drop me.txt", chapter);
                 pty.Wait("1 line", chapter);
                 pty.Send("\x1b");
                 int expanded = pty.Mark(); pty.Send("\x0f");
@@ -364,10 +364,10 @@ public sealed class JecodeTestPty : IDisposable {
                 // Routing at normal, narrow and short sizes; focus starts on the current row.
                 pty.Send("/routing"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Routing · fixture/model");
-                pty.Wait("no routing preferences are sent");
+                pty.Wait("no routing preferences");
                 pty.Wait("$/M after discounts");
-                // The detail strip leaves first as the height shrinks; selection stays.
-                int pinned = pty.Mark(); pty.Send("\x1b[A"); pty.Wait("Pinned to two/fp8", pinned);
+                // Focus moves while the panel shrinks; the draft and column header leave first.
+                int pinned = pty.Mark(); pty.Send("\x1b[A"); pty.Wait("› two/fp8", pinned);
                 int narrow = pty.Mark(); pty.Resize(40, 12); pty.Send("\x1b[A"); pty.Wait("› one/fp8", narrow);
                 int shortened = pty.Mark(); pty.Resize(44, 6); pty.Send("\x1b[A"); pty.Wait("› Auto", shortened);
                 // Esc closes quietly; the draft below only reaches an open composer.
@@ -377,7 +377,7 @@ public sealed class JecodeTestPty : IDisposable {
                 // Windows Terminal delivers a file drop as a paste of its quoted path.
                 pty.Send("\x1b[200~\"" + System.IO.Path.Combine(directory, "drop me.txt") + "\"\x1b[201~");
                 pty.Wait("Attached 1 item");
-                pty.Send("\x1b[<64;10;5M"); pty.Wait("Back to bottom");
+                pty.Send("\x1b[<64;10;5M"); pty.Wait("back to bottom");
                 pty.Send("\x1b"); Thread.Sleep(150);
                 pty.Send("\x10"); pty.Wait("Prompt history");
                 pty.Send("\x0e"); Thread.Sleep(150);
@@ -388,8 +388,8 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Send("\x1b[A"); Thread.Sleep(100); pty.Send("\x1b[B");
                 pty.Resize(40, 12); pty.Resize(5, 2); pty.Resize(80, 24);
                 pty.Send("\x11");
-                pty.Wait("Jecode closed: 1 prompts, 2 tools");
-                pty.Wait("Resume: jecode resume");
+                pty.Wait("jecode closed · 1 prompt · 2 tools");
+                pty.Wait("   jecode resume ");
                 pty.Wait("NATIVE_RESTORED");
                 pty.Finish(true);
             } else if (scenario == "input-recovery") {
@@ -406,7 +406,7 @@ public sealed class JecodeTestPty : IDisposable {
                 int openSaved = pty.Mark(); pty.Send("/resume"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("native delete request", openSaved);
                 int confirmDelete = pty.Mark(); pty.Send("\x04");
-                pty.Wait("Delete this conversation?", confirmDelete);
+                pty.Wait("Delete this conversation and its files?", confirmDelete);
                 int deleted = pty.Mark(); pty.Send("\r");
                 pty.Wait("No saved conversations", deleted);
                 int afterDelete = pty.Mark(); pty.Send("\x1b");

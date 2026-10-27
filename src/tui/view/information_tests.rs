@@ -1,11 +1,6 @@
 use super::composer_frame as frame;
 use super::*;
-use crate::tui::{
-    Feedback,
-    information::Information,
-    state::Kind,
-    theme::{BAD, USER_SURFACE, WARNING},
-};
+use crate::tui::{Feedback, information::Information, state::Kind, theme::USER_SURFACE};
 
 fn info() -> Information {
     Information::new(
@@ -40,9 +35,11 @@ fn information_scrolls_by_visual_rows_and_reaches_every_entry_after_resize() {
     };
     state.editor.replace("unsent draft".into());
     assert!(plain(&state).contains("/command-0"));
-    // A page is the seven rows beside the title and the key row.
+    assert!(plain(&state).contains("› unsent draft"));
+    // A page is the three body rows left below the composer and its title,
+    // above the blank row and the keys.
     scroll_information(&mut state, 34);
-    assert_eq!(state.information.as_ref().unwrap().offset, 7);
+    assert_eq!(state.information.as_ref().unwrap().offset, 3);
     scroll_information(&mut state, 35);
     assert!(plain(&state).contains("Description 29"));
     state.width = 80;
@@ -59,7 +56,7 @@ fn information_scrolls_by_visual_rows_and_reaches_every_entry_after_resize() {
 }
 
 #[test]
-fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_control() {
+fn information_fits_tiny_viewports_on_the_terminal_surface_and_keeps_its_close_control() {
     for width in [2, 5, 12, 24, 80] {
         for height in [1, 2, 3, 6, 12, 24] {
             let mut state = State {
@@ -73,12 +70,13 @@ fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_contro
             assert!(rendered.live.len() <= height);
             assert!(rendered.cursor.is_none());
             assert!(rendered.history.is_empty());
-            assert!(
-                rendered
-                    .live
-                    .iter()
-                    .all(|line| line.background == Some(USER_SURFACE))
-            );
+            assert!(rendered.live.iter().all(|line| {
+                line.background.is_none()
+                    && line
+                        .spans
+                        .iter()
+                        .all(|span| span.background != Some(USER_SURFACE))
+            }));
             assert!(
                 rendered
                     .live
@@ -103,56 +101,45 @@ fn information_fits_tiny_viewports_and_keeps_one_shaded_surface_and_close_contro
 }
 
 #[test]
-fn results_are_muted_lines_and_warnings_and_errors_are_upright_banners() {
-    for (kind, lead, style, surface) in [
-        (Kind::Notice, "", MUTED, None),
-        (Kind::Warning, "▌ ", WARNING, Some(USER_SURFACE)),
-        (Kind::Error, "▌ ", BAD, Some(USER_SURFACE)),
+fn notices_take_the_status_row_without_moving_the_draft() {
+    let mut idle = State::default();
+    idle.editor.insert("kept draft");
+    let before = frame(&idle, "fixture", "fixture");
+    for (kind, glyph) in [
+        (Kind::Notice, "✓"),
+        (Kind::Warning, "▲"),
+        (Kind::Error, "✕"),
     ] {
-        let state = State {
-            notice: Some(Feedback::result(kind, "A brief result")),
-            ..State::default()
-        };
+        let mut state = State::default();
+        state.editor.insert("kept draft");
+        state.notice = Some(Feedback::result(kind, "A brief result"));
         let rendered = frame(&state, "fixture", "fixture");
-        let row = &rendered.live[0];
-        assert_eq!(row.plain(), format!("{lead}A brief result"));
-        assert_eq!(row.spans[0].style, style);
-        assert_eq!(row.background, surface);
-        assert!(row.spans.iter().all(|span| span.style != style.italic()));
+        assert_eq!(
+            rendered.live[0].plain(),
+            format!(" {glyph}  A brief result ")
+        );
+        assert_eq!(rendered.live.len(), before.live.len());
+        assert_eq!(rendered.cursor, before.cursor);
+        assert_eq!(rendered.live[1..], before.live[1..]);
     }
 }
 
 #[test]
-fn long_errors_wrap_without_losing_the_actionable_text_or_moving_the_draft() {
+fn long_errors_shorten_within_the_status_row() {
     let mut state = State {
         width: 40,
         notice: Some(Feedback::result(
             Kind::Error,
-            "Could not write /a/very/long/session/path: read-only. Session kept in memory.",
+            "Could not write: read-only · session kept in memory",
         )),
         ..State::default()
     };
     state.editor.replace("kept draft".into());
     state.editor.cursor = 2;
     let rendered = frame(&state, "fixture", "fixture");
-    assert!(plain(&state).contains("read-only"));
-    let notices: Vec<_> = rendered
-        .live
-        .iter()
-        .take_while(|line| !line.plain().starts_with('─'))
-        .collect();
-    assert!(notices.len() > 1);
-    assert!(
-        notices
-            .iter()
-            .all(|line| line.background == Some(USER_SURFACE))
-    );
-    assert!(notices[0].plain().starts_with("▌ Could"));
-    assert!(
-        notices[1..]
-            .iter()
-            .all(|line| line.plain().starts_with("  "))
-    );
+    let status = rendered.live[0].plain();
+    assert_eq!(status, " ✕  Could not write   read-only");
+    assert!(rendered.live[1].plain().starts_with('─'));
     assert!(
         rendered.live[rendered.cursor.unwrap().0]
             .plain()

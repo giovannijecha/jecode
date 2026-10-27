@@ -77,7 +77,7 @@ fn selection_follows_process_identity_and_the_draft_survives() {
     assert!(
         frame(&app)
             .iter()
-            .any(|line| line.contains("No active background processes in this conversation"))
+            .any(|line| line.contains("Nothing running"))
     );
     key(&mut app, 13, 0);
     key(&mut app, 40, 0);

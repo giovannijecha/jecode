@@ -23,7 +23,7 @@ fn the_steady_caret_follows_a_multiline_draft_when_a_tool_finishes() {
     });
     let end = frame(&state, "fixture", "folder");
     let (row, column) = end.cursor.unwrap();
-    assert_eq!(row, end.composer + 2);
+    assert_eq!(row, end.composer + 3);
     assert_eq!(column, 9);
     assert_eq!(end.live[row].spans.last().unwrap().style, CURSOR);
     state.editor.cursor = "first\nci".len();
@@ -35,7 +35,7 @@ fn the_steady_caret_follows_a_multiline_draft_when_a_tool_finishes() {
     });
     let middle = frame(&state, "fixture", "folder");
     let (row, column) = middle.cursor.unwrap();
-    assert_eq!(row, middle.composer + 2);
+    assert_eq!(row, middle.composer + 3);
     assert_eq!(column, 4);
     assert_eq!(
         middle.live[row]
@@ -58,10 +58,13 @@ fn the_composer_stays_at_the_bottom_below_a_short_transcript() {
     let frame = frame(&state, "fixture/model", "fixture folder");
     assert_eq!(frame.history.len(), 2);
     assert_eq!(frame.history[1].last().unwrap().plain(), "● response");
-    assert_eq!(frame.composer, state.height - 4);
+    assert_eq!(frame.composer, state.height - 5);
     assert_eq!(frame.live[frame.composer - 1], Line::default());
     assert_eq!(frame.live.len(), state.height);
-    assert_eq!(frame.live[0].plain(), ">_ Jecode");
+    assert_eq!(
+        frame.live[0].plain(),
+        format!(">_ jecode {}", env!("CARGO_PKG_VERSION"))
+    );
     let (row, column) = frame.cursor.unwrap();
     assert!(frame.live[row].plain().contains("next draft"));
     assert_eq!(column, 12);
@@ -84,7 +87,8 @@ fn pending_tools_and_following_notices_remain_live_until_the_result_arrives() {
         pending
             .live
             .iter()
-            .any(|line| line.plain().contains("⎿ ") && !line.plain().contains(['▰', '▱']))
+            .any(|line| line.plain().starts_with("  └ Running")
+                && !line.plain().contains(['▰', '▱']))
     );
     assert!(
         pending
@@ -104,14 +108,9 @@ fn pending_tools_and_following_notices_remain_live_until_the_result_arrives() {
         completed
             .live
             .iter()
-            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .any(|line| line.plain().starts_with(" BASH  fixture-command"))
     );
-    assert!(
-        completed
-            .live
-            .iter()
-            .any(|line| line.plain().contains("⎿ Done"))
-    );
+    assert!(completed.live.iter().any(|line| line.plain() == "  └ Done"));
     assert!(
         matches!(&state.items[1], crate::tui::state::Item::Tool { result: Some(result), .. }
         if result.get("exit_code") == Some(&Value::number(0)))
@@ -140,10 +139,23 @@ fn help_uses_a_temporary_panel_and_keeps_the_draft() {
     assert!(text(&open).contains("/export"));
     assert!(text(&open).contains("PgUp/PgDn and wheel"));
     assert!(text(&open).contains("conversation scrolling"));
-    assert!(!text(&open).contains("Ctrl+O"));
+    // The startup space names Ctrl+O; the panel itself does not.
+    assert!(
+        !open.live[open.composer..]
+            .iter()
+            .any(|line| line.plain().contains("Ctrl+O"))
+    );
     assert!(state.items.is_empty());
+    // The composer keeps showing the draft above the panel, without a caret.
     assert!(open.cursor.is_none());
-    assert!(!text(&open).contains("first"));
+    let draft = open.composer + 2;
+    assert_eq!(open.live[draft].plain().trim_end(), "› first");
+    assert_eq!(open.live[draft + 1].plain().trim_end(), "  second");
+    assert!(
+        open.live[draft + 2]
+            .plain()
+            .starts_with("─ Commands and controls ─")
+    );
     state.information = None;
     let closed = frame(&state, "fixture", "folder");
     assert!(closed.history.is_empty());
@@ -198,7 +210,7 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
         provisional
             .live
             .iter()
-            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .any(|line| line.plain().starts_with(" BASH  fixture-command"))
     );
     state.event(Event::Waiting {
         model: "fixture".into(),
@@ -209,7 +221,7 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
         waiting
             .live
             .iter()
-            .any(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .any(|line| line.plain().starts_with(" BASH  fixture-command"))
     );
     state.message(Kind::Assistant, "Finished.");
     let settled = frame(&state, "fixture", "folder");
@@ -217,19 +229,19 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
     assert!(
         settled.history[0][0]
             .plain()
-            .starts_with("● Bash(fixture-command)")
+            .starts_with(" BASH  fixture-command")
     );
     assert_eq!(
         settled.history[0],
         provisional.live[provisional
             .live
             .iter()
-            .position(|line| line.plain().starts_with("● Bash(fixture-command)"))
+            .position(|line| line.plain().starts_with(" BASH  fixture-command"))
             .unwrap()..]
             .iter()
             .take(2)
             .cloned()
             .collect::<Vec<_>>()
     );
-    assert_eq!(settled.composer, state.height - 4);
+    assert_eq!(settled.composer, state.height - 5);
 }

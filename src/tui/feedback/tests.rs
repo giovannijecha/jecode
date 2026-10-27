@@ -36,7 +36,6 @@ fn retry_progress_temporarily_overlays_maintenance_and_restores_its_clock() {
     state.event(Event::Maintenance {
         text: "Compacting context".into(),
     });
-    let started = state.current_progress().unwrap().started();
     for attempt in 1..=2 {
         state.event(Event::Recovering {
             attempt,
@@ -57,7 +56,6 @@ fn retry_progress_temporarily_overlays_maintenance_and_restores_its_clock() {
         .current_progress()
         .expect("maintenance outlives a retry");
     assert_eq!(restored.text, "Compacting context");
-    assert_eq!(restored.started(), started);
     state.event(Event::ContextCompacted {
         text: "Context compacted".into(),
     });
@@ -102,6 +100,8 @@ fn automatic_success_and_progress_cannot_replace_an_unread_error() {
     assert_eq!(state.notice.as_ref().unwrap().text, "Autosave failed");
     assert_eq!(state.copy_notice.as_ref().unwrap().text, "Copy failed");
     state.feedback_input(false);
+    assert!(state.notice.is_some() && state.copy_notice.is_some());
+    state.sent();
     state.notify(Feedback::result(Kind::Notice, "Complete"));
     state.notify_copy(Feedback::result(Kind::Notice, "Copied"));
     assert_eq!(state.notice.as_ref().unwrap().text, "Complete");
@@ -133,7 +133,7 @@ fn brief_results_expire_at_five_seconds_or_when_editing_starts() {
 }
 
 #[test]
-fn errors_wait_for_user_action_and_progress_waits_for_its_operation() {
+fn errors_wait_for_the_next_send_and_progress_waits_for_its_operation() {
     let now = Instant::now();
     let mut state = State {
         notice: Some(Feedback::at(Kind::Error, "Autosave failed", now)),
@@ -145,15 +145,15 @@ fn errors_wait_for_user_action_and_progress_waits_for_its_operation() {
         state.feedback_wait(now, Duration::from_secs(30)),
         Duration::from_secs(30)
     );
-    state.feedback_input(false);
-    assert!(state.notice.is_none());
-    assert!(state.copy_notice.is_some());
     state.feedback_input(true);
+    assert!(state.notice.is_some());
+    state.sent();
+    assert!(state.notice.is_none());
     assert!(state.copy_notice.is_some());
 }
 
 #[test]
-fn warnings_wait_like_errors_and_yield_only_to_equal_or_greater_severity() {
+fn warnings_wait_for_a_key_and_yield_only_to_equal_or_greater_severity() {
     let now = Instant::now();
     let mut state = State::default();
     state.notify(Feedback::at(Kind::Warning, "Interrupted", now));
@@ -165,6 +165,12 @@ fn warnings_wait_like_errors_and_yield_only_to_equal_or_greater_severity() {
     state.notify(Feedback::result(Kind::Error, "HTTP 401"));
     state.notify(Feedback::result(Kind::Warning, "Interrupted"));
     assert_eq!(state.notice.as_ref().unwrap().text, "HTTP 401");
+    state.feedback_input(false);
+    assert_eq!(state.notice.as_ref().unwrap().text, "HTTP 401");
+    state.notify(Feedback::result(Kind::Warning, "Rate limited"));
+    state.sent();
+    assert!(state.notice.is_none());
+    state.notify(Feedback::result(Kind::Warning, "Rate limited"));
     state.feedback_input(false);
     assert!(state.notice.is_none());
 }

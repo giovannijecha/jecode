@@ -66,7 +66,7 @@ fn search_viewport_keeps_the_insertion_cell_visible_with_wide_characters() {
     assert_eq!(visible, "bc界");
     assert_eq!(cursor, 4);
     let (masked, cursor) = editor.viewport(4, true);
-    assert_eq!(masked, "****");
+    assert_eq!(masked, "••••");
     assert_eq!(cursor, 3);
 }
 
@@ -130,7 +130,7 @@ fn assert_fresh_layout(editor: &Editor, width: usize) {
         .attachments
         .iter()
         .enumerate()
-        .map(|(index, attachment)| attachment.label(index + 1))
+        .map(|(index, attachment)| attachment.chip(index + 1))
         .collect::<Vec<_>>();
     let expected = Layout::new(&editor.text, editor.cursor, width, &labels);
     let actual = editor.layout(width);
