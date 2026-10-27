@@ -3,7 +3,7 @@ use crate::{
     json::Value,
     tui::{
         line::Line,
-        text,
+        terminal_output, text,
         theme::{BODY, CODE_TEXT, MUTED, TOOL_DIM},
     },
 };
@@ -13,10 +13,19 @@ pub(super) struct Entry {
     pub stream: &'static str,
 }
 
+fn display(result: &Value, stream: &str) -> String {
+    let raw = field(result, stream);
+    if stream == "stdout" && result.get("tty") == Some(&Value::Bool(true)) {
+        terminal_output::transcript(raw)
+    } else {
+        raw.to_owned()
+    }
+}
+
 /// Non-blank output lines. A failure leads with stderr.
 pub(super) fn entries(result: &Value, failed: bool) -> Vec<Entry> {
     let lines = |stream: &'static str| {
-        text::clean(field(result, stream))
+        text::clean(&display(result, stream))
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(|line| Entry {
@@ -45,7 +54,7 @@ fn exact(result: &Value, failed: bool) -> Vec<Entry> {
     order
         .into_iter()
         .flat_map(|stream| {
-            content::payload(field(result, stream))
+            content::payload(&display(result, stream))
                 .into_iter()
                 .map(move |text| Entry { text, stream })
         })
@@ -129,5 +138,24 @@ pub(super) fn render(
         hidden: entries.len() - range.len(),
         hidden_hunks: 0,
         unit: "lines",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tty_stdout_cards_show_a_clean_transcript_in_both_views() {
+        let stdout = "\x1b]0;private title\x07\x1b[31mREADY\x1b[0m\n";
+        let result = Value::object([
+            ("tty", Value::Bool(true)),
+            ("stdout", Value::string(stdout)),
+        ]);
+        assert_eq!(entries(&result, false)[0].text, "READY");
+        assert_eq!(exact(&result, false)[0].text, "READY");
+        assert_eq!(field(&result, "stdout"), stdout);
+        let ordinary = Value::object([("stdout", Value::string(stdout))]);
+        assert!(entries(&ordinary, false)[0].text.contains("[ESC]"));
     }
 }

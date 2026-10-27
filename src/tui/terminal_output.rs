@@ -1,5 +1,5 @@
-//! Converts PTY control output to a readable, safe log transcript. It does
-//! not emulate a screen: cursor-addressed full-screen programs remain logs.
+//! Converts PTY control output to a readable, safe TUI transcript. Saved
+//! bytes remain raw. Cursor-addressed full-screen programs remain logs.
 
 pub(super) fn transcript(raw: &str) -> String {
     const GROUND: u8 = 0;

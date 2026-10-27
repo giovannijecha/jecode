@@ -1,6 +1,9 @@
 //! Bounded saved-stream windows and their display positions.
-use super::{Stream, ansi};
-use crate::{tools::processes::Page, tui::text};
+use super::Stream;
+use crate::{
+    tools::processes::Page,
+    tui::{terminal_output, text},
+};
 use std::collections::VecDeque;
 
 /// Loaded log text stays within this many saved bytes.
@@ -26,7 +29,7 @@ impl Stream {
     pub fn display_text(&self, terminal: bool) -> String {
         let text = self.text();
         if terminal {
-            ansi::transcript(&text)
+            terminal_output::transcript(&text)
         } else {
             text
         }
@@ -46,7 +49,7 @@ impl Stream {
 
     pub(super) fn display_chars(text: &str, terminal: bool) -> usize {
         let visible = if terminal {
-            ansi::transcript(text)
+            terminal_output::transcript(text)
         } else {
             text.to_owned()
         };

@@ -176,7 +176,13 @@ public sealed class JecodeTestPty : IDisposable {
         lock (gate) {
             string plain = System.Text.RegularExpressions.Regex.Replace(
                 received.ToString(after, received.Length - after), "\x1b\\[[0-?]*[ -/]*[@-~]", "");
-            if (plain.Contains(text)) throw new IOException("ConPTY unexpectedly showed " + text);
+            int found = plain.IndexOf(text, StringComparison.Ordinal);
+            if (found >= 0) {
+                if (text != "[ESC]") throw new IOException("ConPTY unexpectedly showed " + text);
+                int start = Math.Max(0, found - 100), end = Math.Min(plain.Length, found + 160);
+                throw new IOException("ConPTY unexpectedly showed [ESC] near: " +
+                    plain.Substring(start, end - start).Replace("\r", " ").Replace("\n", " "));
+            }
         }
     }
 
@@ -315,6 +321,7 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("i  input");
                 int started = pty.Mark(); pty.Send("i");
                 pty.Wait("Ctrl+]  back", started);
+                pty.Wait("NATIVE_PASSWORD_READY");
                 pty.Send("NATIVE_SECRET_42\uD83D\uDE42\r");
                 pty.Wait("NATIVE_PTY_DONE", started);
                 pty.EnsureNoText("NATIVE_SECRET_42", started);
@@ -322,6 +329,7 @@ public sealed class JecodeTestPty : IDisposable {
                 int detached = pty.Mark(); pty.Send("\x1d");
                 pty.Wait("i  input", detached);
                 pty.Send("i"); pty.Wait("Ctrl+]  back", detached);
+                pty.Wait("NATIVE_SECOND_READY");
                 pty.Send("finish\r");
                 pty.Wait("NATIVE_PTY_END", detached);
                 pty.Wait("exited 0", detached);

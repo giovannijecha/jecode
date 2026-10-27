@@ -30,6 +30,9 @@ pub(super) fn command(
     if executable.trim().is_empty() {
         return Err("executable must not be empty".into());
     }
+    if executable.contains('\0') {
+        return Err("executable must not contain NUL characters".into());
+    }
     let args = match arguments.get("args") {
         None => Vec::new(),
         Some(Value::Array(values)) => values
@@ -43,6 +46,9 @@ pub(super) fn command(
             .collect::<Result<Vec<_>, _>>()?,
         Some(_) => return Err("args must be a list of strings".into()),
     };
+    if args.iter().any(|argument| argument.contains('\0')) {
+        return Err("args must not contain NUL characters".into());
+    }
     let cwd = match arguments.get("cwd") {
         None => root.to_path_buf(),
         Some(Value::String(path)) if !path.is_empty() => {

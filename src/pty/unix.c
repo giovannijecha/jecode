@@ -120,7 +120,7 @@ static int stop_session(pid_t leader) {
     return -1;
 }
 
-static void target(int master, const char *slave_name, int owner_read,
+static void target(int master, int slave, int owner_read,
                    int owner_write, int status_write, int control, char **argv) {
     close(master);
     close(owner_read);
@@ -133,8 +133,7 @@ static void target(int master, const char *slave_name, int owner_read,
     signal(SIGTERM, SIG_DFL);
     signal(SIGHUP, SIG_DFL);
     signal(SIGPIPE, SIG_DFL);
-    int slave = open(slave_name, O_RDWR);
-    if (slave < 0 || ioctl(slave, TIOCSCTTY, 0) < 0) _exit(126);
+    if (ioctl(slave, TIOCSCTTY, 0) < 0) _exit(126);
     if (dup2(slave, STDIN_FILENO) < 0 || dup2(slave, STDOUT_FILENO) < 0 ||
         dup2(slave, STDERR_FILENO) < 0) _exit(126);
     if (slave > STDERR_FILENO) close(slave);
@@ -142,7 +141,7 @@ static void target(int master, const char *slave_name, int owner_read,
     _exit(errno == ENOENT ? 127 : 126);
 }
 
-static void watch_child(int master, const char *slave_name, int owner_read,
+static void watch_child(int master, int slave, int owner_read,
                         int owner_write, int status_read, int status_write,
                         int control, char **argv) {
     close(master);
@@ -163,8 +162,9 @@ static void watch_child(int master, const char *slave_name, int owner_read,
     pid_t child = fork();
     if (child < 0) _exit(125);
     if (child == 0)
-        target(master, slave_name, owner_read, owner_write, status_write,
+        target(master, slave, owner_read, owner_write, status_write,
                control, argv);
+    close(slave);
 
     int status = 0;
     for (;;) {
@@ -201,12 +201,12 @@ static void watch_child(int master, const char *slave_name, int owner_read,
     _exit(0);
 }
 
-static int terminal_size(int master, uint16_t columns, uint16_t rows) {
+static int terminal_size(int slave, uint16_t columns, uint16_t rows) {
     struct winsize size;
     memset(&size, 0, sizeof(size));
     size.ws_col = columns;
     size.ws_row = rows;
-    return ioctl(master, TIOCSWINSZ, &size);
+    return ioctl(slave, TIOCSWINSZ, &size);
 }
 
 /* One socket frame: opcode, little-endian u32 length, payload. Input frames
@@ -219,7 +219,7 @@ struct frame {
     size_t sent;
 };
 
-static int read_frame(int control, struct frame *frame, int master) {
+static int read_frame(int control, struct frame *frame, int slave) {
     ssize_t count = read(control, frame->bytes + frame->have,
                          frame->need - frame->have);
     if (count == 0) return -1;
@@ -246,7 +246,7 @@ static int read_frame(int control, struct frame *frame, int master) {
         const unsigned char *payload = frame->bytes + 5;
         uint16_t columns = (uint16_t)(payload[0] | (payload[1] << 8));
         uint16_t rows = (uint16_t)(payload[2] | (payload[3] << 8));
-        if (!columns || !rows || terminal_size(master, columns, rows) < 0)
+        if (!columns || !rows || terminal_size(slave, columns, rows) < 0)
             return -2;
     } else {
         frame->bytes[5] = 3;
@@ -260,7 +260,8 @@ static int read_frame(int control, struct frame *frame, int master) {
     return 0;
 }
 
-static int bridge(int master, int control, int owner_write, int status_read) {
+static int bridge(int master, int *slave, int control, int owner_write,
+                  int status_read) {
     struct frame frame;
     memset(&frame, 0, sizeof(frame));
     frame.need = 5;
@@ -270,31 +271,42 @@ static int bridge(int master, int control, int owner_write, int status_read) {
         if (stopping) return 125;
         struct pollfd events[3] = {
             { master, POLLIN | (frame.pending ? POLLOUT : 0), 0 },
-            { control, frame.pending ? 0 : POLLIN, 0 },
-            { status_read, child_done ? 0 : POLLIN, 0 },
+            { child_done ? -1 : control, frame.pending ? 0 : POLLIN, 0 },
+            { child_done ? -1 : status_read, POLLIN, 0 },
         };
         int ready = poll(events, 3, child_done ? 100 : 1000);
         if (ready < 0) {
             if (errno == EINTR) continue;
+            fprintf(stderr, "Unix PTY poll failed: %s\n", strerror(errno));
             return 125;
         }
-        if (events[2].revents) {
+        if (!child_done && events[2].revents) {
             ssize_t count = read(status_read, &child_status, sizeof(child_status));
-            if (count != (ssize_t)sizeof(child_status)) return 125;
+            if (count != (ssize_t)sizeof(child_status)) {
+                fprintf(stderr, "Unix PTY watcher status was incomplete\n");
+                return 125;
+            }
             if (child_status == -1) {
                 fprintf(stderr, "Could not confirm Unix PTY session cleanup\n");
                 return 125;
             }
             child_done = 1;
+            frame.pending = 0;
+            close(*slave);
+            *slave = -1;
         }
         if (events[0].revents & (POLLIN | POLLHUP | POLLERR)) {
             unsigned char output[8192];
             ssize_t count = read(master, output, sizeof(output));
             if (count > 0) {
-                if (write_all(STDOUT_FILENO, output, (size_t)count) < 0) return 125;
+                if (write_all(STDOUT_FILENO, output, (size_t)count) < 0) {
+                    fprintf(stderr, "Unix PTY output write failed: %s\n", strerror(errno));
+                    return 125;
+                }
             } else if (count == 0 || errno == EIO) {
                 if (child_done) break;
             } else if (errno != EINTR && errno != EAGAIN) {
+                fprintf(stderr, "Unix PTY master read failed: %s\n", strerror(errno));
                 return 125;
             }
         }
@@ -309,17 +321,27 @@ static int bridge(int master, int control, int owner_write, int status_read) {
                     frame.need = 5;
                 }
             } else if (count < 0 && errno != EINTR && errno != EAGAIN) {
+                fprintf(stderr, "Unix PTY master write failed: %s\n", strerror(errno));
                 return 125;
             }
         }
-        if (events[1].revents) {
-            if (read_frame(control, &frame, master) < 0) return 125;
+        if (!child_done && events[1].revents) {
+            int result = read_frame(control, &frame, *slave);
+            if (result < 0) {
+                if (result == -2)
+                    fprintf(stderr, "Unix PTY control frame or resize was invalid\n");
+                else
+                    fprintf(stderr, "Unix PTY control read failed: %s\n",
+                            strerror(errno));
+                return 125;
+            }
         }
         if (child_done && ready == 0) break;
     }
     close(owner_write);
     if (WIFEXITED(child_status)) return WEXITSTATUS(child_status);
     if (WIFSIGNALED(child_status)) return 128 + WTERMSIG(child_status);
+    fprintf(stderr, "Unix PTY child status was invalid\n");
     return 125;
 }
 
@@ -338,35 +360,47 @@ int main(int argc, char **argv) {
         return 125;
     }
     strcpy(endpoint.sun_path, argv[1]);
-    int listener = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (listener < 0 || bind(listener, (struct sockaddr *)&endpoint,
-                             sizeof(endpoint)) < 0 || chmod(argv[1], 0600) < 0 ||
-        listen(listener, 1) < 0) {
-        fprintf(stderr, "Could not listen on Unix PTY endpoint: %s\n",
-                strerror(errno));
-        return 125;
+    int listener = -1, control = -1, master = -1, slave = -1;
+    int owner[2] = { -1, -1 }, status[2] = { -1, -1 };
+    int bound = 0;
+    const char *failure = NULL;
+    listener = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (listener < 0) { failure = "socket"; goto setup_error; }
+    if (bind(listener, (struct sockaddr *)&endpoint, sizeof(endpoint)) < 0) {
+        failure = "bind"; goto setup_error;
     }
-    int control = accept(listener, NULL, NULL);
+    bound = 1;
+    if (chmod(argv[1], 0600) < 0) { failure = "chmod"; goto setup_error; }
+    if (listen(listener, 1) < 0) { failure = "listen"; goto setup_error; }
+    control = accept(listener, NULL, NULL);
+    if (control < 0) { failure = "accept"; goto setup_error; }
     close(listener);
-    if (control < 0) return 125;
-    int master = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
-    if (control < 0 || master < 0 || grantpt(master) < 0 || unlockpt(master) < 0 ||
-        terminal_size(master, (uint16_t)columns, (uint16_t)rows) < 0) {
-        fprintf(stderr, "Could not initialize Unix PTY: %s\n", strerror(errno));
-        return 125;
-    }
+    listener = -1;
+    master = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (master < 0) { failure = "posix_openpt"; goto setup_error; }
+    if (grantpt(master) < 0) { failure = "grantpt"; goto setup_error; }
+    if (unlockpt(master) < 0) { failure = "unlockpt"; goto setup_error; }
     char *slave_name = ptsname(master);
-    if (!slave_name) return 125;
-    int owner[2], status[2];
-    if (pipe(owner) < 0 || pipe(status) < 0) return 125;
+    if (!slave_name) { failure = "ptsname"; goto setup_error; }
+    slave = open(slave_name, O_RDWR | O_NOCTTY);
+    if (slave < 0) { failure = "open slave"; goto setup_error; }
+    if (terminal_size(slave, (uint16_t)columns, (uint16_t)rows) < 0) {
+        failure = "TIOCSWINSZ slave"; goto setup_error;
+    }
+    if (pipe(owner) < 0) { failure = "owner pipe"; goto setup_error; }
+    if (pipe(status) < 0) { failure = "status pipe"; goto setup_error; }
     pid_t watcher = fork();
-    if (watcher < 0) return 125;
+    if (watcher < 0) { failure = "watcher fork"; goto setup_error; }
     if (watcher == 0)
-        watch_child(master, slave_name, owner[0], owner[1], status[0], status[1],
+        watch_child(master, slave, owner[0], owner[1], status[0], status[1],
                     control, argv + 4);
     close(owner[0]);
+    owner[0] = -1;
     close(status[1]);
-    if (set_nonblocking(control) < 0) return 125;
+    status[1] = -1;
+    if (set_nonblocking(control) < 0) {
+        failure = "control nonblocking"; goto setup_error;
+    }
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     action.sa_handler = stop;
@@ -375,11 +409,27 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &action, NULL);
     sigaction(SIGHUP, &action, NULL);
     signal(SIGPIPE, SIG_IGN);
-    int result = bridge(master, control, owner[1], status[0]);
+    int result = bridge(master, &slave, control, owner[1], status[0]);
     close(owner[1]);
     close(status[0]);
     close(control);
     close(master);
+    if (slave >= 0) close(slave);
     unlink(argv[1]);
     return result;
+
+setup_error:;
+    int saved_errno = errno;
+    fprintf(stderr, "Could not initialize Unix PTY (%s): %s\n",
+            failure, strerror(saved_errno));
+    if (listener >= 0) close(listener);
+    if (control >= 0) close(control);
+    if (master >= 0) close(master);
+    if (slave >= 0) close(slave);
+    if (owner[0] >= 0) close(owner[0]);
+    if (owner[1] >= 0) close(owner[1]);
+    if (status[0] >= 0) close(status[0]);
+    if (status[1] >= 0) close(status[1]);
+    if (bound) unlink(argv[1]);
+    return 125;
 }

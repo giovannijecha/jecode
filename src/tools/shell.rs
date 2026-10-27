@@ -31,6 +31,9 @@ pub(super) fn execute(
     if text.trim().is_empty() {
         return Err("command must not be empty".into());
     }
+    if text.contains('\0') {
+        return Err("command must not contain NUL characters".into());
+    }
     let command = command(context.bash, context.root, text, context.temporary);
     execute_command(context, arguments, cancellation, command, None, text)
 }

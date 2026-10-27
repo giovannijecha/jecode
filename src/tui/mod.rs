@@ -40,6 +40,7 @@ mod syntax;
 #[cfg(test)]
 mod temporary_tests;
 mod terminal;
+mod terminal_output;
 mod text;
 mod theme;
 mod transcript;

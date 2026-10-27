@@ -424,7 +424,6 @@ fn follow(observer: &Observer, logs: &mut Logs) -> bool {
     }
 }
 
-mod ansi;
 mod control;
 mod input;
 mod stream;
