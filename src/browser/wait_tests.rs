@@ -120,6 +120,29 @@ fn missing_text_names_the_text_and_where_it_was_searched() {
 }
 
 #[test]
+fn missing_selector_keeps_the_requested_text_in_the_diagnostic() {
+    let (endpoint, server) = page(state(false, false));
+    let mut browser = browser(&endpoint);
+    let error = wait(
+        &mut browser,
+        vec![
+            ("selector", Value::string("#missing")),
+            ("text", Value::string("Saved")),
+            ("timeout_ms", Value::number(300)),
+        ],
+        &Cancellation::default(),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("no element matched selector \"#missing\""),
+        "{error}"
+    );
+    assert!(error.contains("text \"Saved\""), "{error}");
+    drop(browser);
+    server.join().unwrap();
+}
+
+#[test]
 fn unanswered_final_check_preserves_the_last_completed_observation() {
     use std::sync::{
         Arc,

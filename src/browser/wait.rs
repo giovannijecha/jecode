@@ -100,7 +100,11 @@ impl Condition<'_> {
             (Some(state), Some(selector), _)
                 if state.get("element") != Some(&Value::Bool(true)) =>
             {
-                format!("no element matched selector {}", quote(selector))
+                let text = self
+                    .text
+                    .map(|text| format!(" while waiting for text {}", quote(text)))
+                    .unwrap_or_default();
+                format!("no element matched selector {}{text}", quote(selector))
             }
             (_, selector, Some(text)) => format!(
                 "text {} not found in {}",

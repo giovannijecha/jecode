@@ -211,6 +211,7 @@ impl EventLog {
                     .and_then(|trace| trace.get("callFrames"))
                     .and_then(Value::as_array)
                     .and_then(|frames| frames.first())
+                    .filter(|frame| !text(frame, &["url"]).is_empty())
                     .map(|frame| location(frame, "url"));
                 ("console", level, message, source)
             }

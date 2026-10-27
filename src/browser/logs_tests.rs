@@ -112,6 +112,29 @@ fn texts(entries: &[Value]) -> Vec<String> {
 }
 
 #[test]
+fn console_source_is_omitted_for_anonymous_scripts() {
+    for (url, source) in [
+        ("", None),
+        (
+            "http://site.test/app.js",
+            Some("http://site.test/app.js:1:1"),
+        ),
+    ] {
+        let raw = format!(
+            r#"{{"method":"Runtime.consoleAPICalled","params":{{"stackTrace":{{"callFrames":[{{"url":{}}}]}}}}}}"#,
+            Value::string(url).encode()
+        );
+        let mut log = EventLog::default();
+        log.push(crate::json::parse(&raw).unwrap());
+        let page = log.page(Filter::Console, 1, None).unwrap();
+        assert_eq!(
+            page.entries[0].get("source").and_then(Value::as_str),
+            source
+        );
+    }
+}
+
+#[test]
 fn default_filter_keeps_console_exceptions_and_failures_only() {
     let page = mixed().page(Filter::Default, 50, None).unwrap();
     assert_eq!(
