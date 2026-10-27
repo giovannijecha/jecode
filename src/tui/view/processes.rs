@@ -210,6 +210,9 @@ pub(in crate::tui) fn row_at(starts: &[usize], anchor: usize) -> usize {
 }
 
 fn keys(process: Option<&Process>, logs: &Logs) -> Vec<Key<'static>> {
+    if logs.input_mode {
+        return vec![key("Ctrl+]", "back"), key("Ctrl+C", "interrupt")];
+    }
     let other = STREAMS[1 - logs.stream];
     let mut keys = vec![key("↑↓", "scroll").scrolling(), key("Tab", other)];
     keys.push(if logs.views[logs.stream].follow {
@@ -219,6 +222,9 @@ fn keys(process: Option<&Process>, logs: &Logs) -> Vec<Key<'static>> {
     });
     keys.push(key("PgUp/PgDn", "page").scrolling().optional());
     if process.is_some_and(Process::active) {
+        if logs.interactive {
+            keys.push(key("i", "input"));
+        }
         keys.push(key("Ctrl+D", "stop"));
     }
     keys.push(key("Esc", "back"));
@@ -246,7 +252,11 @@ pub(in crate::tui) fn metrics(panel: &Panel, width: usize, height: usize) -> (us
         return (0, list_capacity(height));
     };
     (
-        rows(&logs.views[logs.stream].text(), text_width(width)).len(),
+        rows(
+            &logs.views[logs.stream].display_text(logs.interactive && logs.stream == 0),
+            text_width(width),
+        )
+        .len(),
         capacity(panel, logs, width, height),
     )
 }
@@ -255,7 +265,10 @@ fn output(panel: &Panel, logs: &Logs, width: usize, height: usize) -> Rows {
     let process = panel.selected_process();
     let view = &logs.views[logs.stream];
     let limit = capacity(panel, logs, width, height);
-    let all = rows(&view.text(), text_width(width));
+    let all = rows(
+        &view.display_text(logs.interactive && logs.stream == 0),
+        text_width(width),
+    );
     let total = all.len();
     let bottom = total.saturating_sub(limit);
     let offset = if view.follow {
@@ -286,7 +299,9 @@ fn output(panel: &Panel, logs: &Logs, width: usize, height: usize) -> Rows {
         panel::header(Some("Processes"), &title, "", aside, width),
         Part::Title,
     );
-    let mode = if view.follow {
+    let mode = if logs.input_mode {
+        Line::new("input", GOOD)
+    } else if view.follow {
         Line::new("following", MUTED)
     } else {
         Line::new("paused", WARNING)

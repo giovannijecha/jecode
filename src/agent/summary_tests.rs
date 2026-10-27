@@ -209,9 +209,12 @@ fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
         ),
         (200, completion("Verified inspection complete.", vec![])),
     ]);
-    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(24000, Some(4096));
-    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let capacity = agent.fixture_capacity(8_192, crate::context::AUTO_COMPACT_DEFAULT);
+    agent.client.fixture_limits(capacity, Some(4096));
     agent
         .run_turn("Inspect source; preserve protected.txt", &mut |event| {
             if matches!(event, Event::Recovering { .. }) {
@@ -273,7 +276,6 @@ fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
 
 #[test]
 fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
-    let capacity = 40000;
     let directory = Directory::new();
     std::fs::write(
         directory.path().join("source"),
@@ -284,12 +286,15 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
         "Continue existing work. Constraints: {}end.",
         "Preserve detailed constraint; ".repeat(400)
     );
-    assert!(memory.len() > capacity / 4 && memory.len() < capacity / 2);
     let mut first = large_read();
     if let Value::Object(fields) = &mut first {
+        // Budget-relative synthetic usage keeps compaction at the post-read boundary as the catalog grows.
         fields.insert(
             "usage".into(),
-            Value::object([("prompt_tokens", Value::number(10000))]),
+            Value::object([(
+                "prompt_tokens",
+                Value::number(10000 + crate::tools::encoded_size()),
+            )]),
         );
     }
     let fixture = HttpFixture::new(vec![
@@ -297,10 +302,15 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
         (200, completion(&memory, vec![])),
         (200, completion("Finished.", vec![])),
     ]);
-    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(capacity, Some(4096));
-    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
     agent.prepare_turn("Continue existing work").unwrap();
+    let capacity =
+        agent.fixture_capacity(memory.len() + 1_024, crate::context::AUTO_COMPACT_DEFAULT);
+    assert!(memory.len() > capacity / 4 && memory.len() < capacity / 2);
+    agent.client.fixture_limits(capacity, Some(4096));
     agent.context.from = 2;
     agent.context.summary = memory.clone();
     agent

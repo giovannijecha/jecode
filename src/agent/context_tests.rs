@@ -41,7 +41,7 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
     {
         // Compaction estimates an already locked history; instructions borrow it.
         let history = agent.messages.lock().unwrap();
-        assert!(agent.context_estimate(&history) < 21000);
+        assert!(agent.context_estimate(&history) < agent.fixture_capacity(1_024, 100));
     }
     assert!(
         text(&agent.transport_messages())

@@ -180,7 +180,7 @@ fn build_definitions() -> Value {
         ),
         routine(
             "process",
-            "Manage this conversation's persistent Bash processes. list recovers IDs, status, commands and saved-output refs. poll waits up to wait_ms (default 0) and returns status plus the next unread window. output_mode defaults to next; tail jumps to the newest unread bytes for readiness/status checks and reports skipped bytes, still readable from the saved file. stop requests termination of the process and descendants, waits up to 10 seconds, and may return stopping; poll to confirm. Windows are 16 KiB per stream by default; output_limit_bytes sets a positive budget capped at 256 KiB; larger requests are clamped. <stream>_offset and <stream>_next_offset track consecutive saved bytes; _remaining_bytes counts unread saved data; _skipped_bytes is zero in next mode. Poll until drained, or read <stream>_file with byte_offset. Empty output says nothing about readiness; check status. exit_code appears after exit; finished processes remain listed. wait_cancelled interrupts the wait, not the process or a prior stop. Processes end on conversation change or Jecode exit; old IDs fail but saved output remains readable.",
+            "Manage conversation-owned Bash and exec processes. list recovers IDs, status, commands and output refs. poll waits up to wait_ms (default 0) and returns the next unread output window; output_mode:tail jumps to the newest unread bytes and reports skipped bytes, still readable from the saved file. stop terminates the process and descendants; poll if it returns stopping. For tty exec, write sends text or one key (see key enum), resize changes cols/rows and interrupt sends Ctrl+C. write accepts at most 64 KiB; protect saves declared workspace paths before input or control. A write receipt confirms control-pipe delivery, not command completion; unconfirmed input may still arrive, so inspect before retrying. Output windows default to 16 KiB per stream; output_limit_bytes is capped at 256 KiB. Poll until drained or read the saved file with byte_offset. Empty output does not prove readiness; check status. exit_code appears after exit. wait_cancelled interrupts only the wait. Processes end on conversation change or Jecode exit; saved output remains readable.",
             Value::object([
                 (
                     "action",
@@ -188,11 +188,48 @@ fn build_definitions() -> Value {
                         ("type", Value::string("string")),
                         (
                             "enum",
-                            Value::Array(["list", "poll", "stop"].map(Value::string).into()),
+                            Value::Array(
+                                ["list", "poll", "stop", "write", "resize", "interrupt"]
+                                    .map(Value::string)
+                                    .into(),
+                            ),
                         ),
                     ]),
                 ),
                 ("process_id", string()),
+                ("text", string()),
+                (
+                    "key",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(
+                                [
+                                    "Enter",
+                                    "Tab",
+                                    "Escape",
+                                    "Backspace",
+                                    "Up",
+                                    "Down",
+                                    "Left",
+                                    "Right",
+                                    "Home",
+                                    "End",
+                                    "Delete",
+                                    "Ctrl+C",
+                                    "Ctrl+D",
+                                    "Ctrl+Z",
+                                ]
+                                .map(Value::string)
+                                .into(),
+                            ),
+                        ),
+                    ]),
+                ),
+                ("cols", integer(1, Some(1000))),
+                ("rows", integer(1, Some(1000))),
+                ("protect", strings()),
                 ("wait_ms", integer(0, None)),
                 (
                     "output_limit_bytes",
@@ -213,7 +250,7 @@ fn build_definitions() -> Value {
         ),
         tool(
             "checkpoint",
-            "List, inspect or restore before-state snapshots from modifying calls. write/edit save their file; Bash saves only declared protect paths. Refs expire 24 hours after capture. inspect returns an expected token for the selected current paths; omit paths for the saved call scope. restore needs that token for the same paths or expected set to latest to acknowledge live state. preview:true plans without writing; a real restore saves an undo. A receipt describes captured preimages, not command success.",
+            "List, inspect or restore before-state snapshots from modifying calls. write/edit save their file; Bash and exec save only declared protect paths. Refs expire 24 hours after capture. inspect returns an expected token for the selected current paths; omit paths for the saved call scope. restore needs that token for the same paths or expected set to latest to acknowledge live state. preview:true plans without writing; a real restore saves an undo. A receipt describes captured preimages, not command success.",
             Value::object([
                 (
                     "action",
@@ -295,7 +332,7 @@ fn build_definitions() -> Value {
         ),
         routine(
             "browser",
-            "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives element refs such as @1; selector accepts refs or CSS. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
+            "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). width+height set the page viewport on open (before url) or screenshot. Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives elements with refs such as @1, role, name and state; selector accepts refs or CSS. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. logs pages events (default console and errors); pass next_cursor as cursor; missed counts evicted events. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
             Value::object([
                 (
                     "action",
@@ -345,10 +382,62 @@ fn build_definitions() -> Value {
                     "delta_y",
                     Value::object([("type", Value::string("integer"))]),
                 ),
-                ("width", integer(1, None)),
-                ("height", integer(1, None)),
+                ("width", integer(1, Some(10_000))),
+                ("height", integer(1, Some(10_000))),
+                (
+                    "filter",
+                    Value::object([
+                        ("type", Value::string("string")),
+                        (
+                            "enum",
+                            Value::Array(
+                                ["default", "console", "errors", "network", "all"]
+                                    .map(Value::string)
+                                    .into(),
+                            ),
+                        ),
+                    ]),
+                ),
+                ("limit", integer(1, Some(200))),
+                ("cursor", string()),
             ]),
             &["action"],
+        ),
+        routine(
+            "exec",
+            "Run an executable with literal argv and no implicit shell. A bare name uses PATH, including any shim found there; Jecode does not bypass it. cwd defaults to the project directory; relative cwd uses the project root, and executable paths with a directory use cwd. env strings set variables and null removes them after inherited provider credentials are stripped. stdin sends a string then closes; omitted means EOF. tty:true rejects stdin and always returns a process_id; use process write/resize/interrupt. Terminal stdout combines child streams; stderr holds bridge diagnostics. Without tty, wait_ms returns a process_id; omitted waits for exit. timeout_seconds bounds execution. protect saves declared workspace paths before launch, independent of cwd. Previews and saved refs follow Bash.",
+            Value::object([
+                ("executable", string()),
+                ("args", strings()),
+                ("cwd", string()),
+                (
+                    "env",
+                    Value::object([
+                        ("type", Value::string("object")),
+                        (
+                            "additionalProperties",
+                            Value::object([(
+                                "type",
+                                Value::Array(
+                                    [Value::string("string"), Value::string("null")].into(),
+                                ),
+                            )]),
+                        ),
+                    ]),
+                ),
+                ("stdin", string()),
+                ("tty", boolean()),
+                ("cols", integer(1, Some(1000))),
+                ("rows", integer(1, Some(1000))),
+                ("protect", strings()),
+                ("wait_ms", integer(0, None)),
+                ("timeout_seconds", integer(1, None)),
+                (
+                    "output_limit_bytes",
+                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
+                ),
+            ]),
+            &["executable"],
         ),
     ])
 }

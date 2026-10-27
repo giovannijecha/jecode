@@ -6,7 +6,7 @@ use crate::tui::{
     line::Line,
     syntax::Highlighter,
     text,
-    theme::{BAD, BODY, MUTED, Style, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE},
+    theme::{BAD, BODY, CODE_TEXT, MUTED, Style, TOOL_ACCENT, TOOL_DIM, TOOL_PULSE},
 };
 
 pub(super) fn description<'a>(tool: &Tool<'a>) -> &'a str {
@@ -50,8 +50,11 @@ pub(super) fn payload(tool: &Tool<'_>) -> String {
 }
 
 pub(super) fn code(tool: &Tool<'_>) -> Line {
-    let mut line =
-        Highlighter::new(if tool.name == "browser" { "js" } else { "sh" }).line(&payload(tool));
+    let mut line = if tool.name == "exec" {
+        Line::new(&payload(tool), CODE_TEXT)
+    } else {
+        Highlighter::new(if tool.name == "browser" { "js" } else { "sh" }).line(&payload(tool))
+    };
     line.background = None;
     for span in &mut line.spans {
         span.background = None;
@@ -91,10 +94,10 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, &'stati
     } else {
         status.style()
     };
-    let shell = matches!(tool.name, "bash" | "process");
-    let command = tool.name == "browser" || shell && !description(tool).is_empty();
+    let command_tool = matches!(tool.name, "bash" | "exec" | "process");
+    let command = tool.name == "browser" || command_tool && !description(tool).is_empty();
     let mut head = Line::new(name, title::family(name).bold());
-    if shell && command {
+    if command_tool && command {
         head.push("  ", BODY);
         head.push(&inline(description(tool)), BODY);
     } else {
@@ -116,7 +119,17 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, &'stati
         vec![one(head, columns, "● ", marker, 0)]
     };
     if command {
-        let mut command = Line::new(if shell { "$ " } else { "" }, MUTED).append(code(tool));
+        let mut command = Line::new(
+            if tool.name == "exec" {
+                "> "
+            } else if command_tool {
+                "$ "
+            } else {
+                ""
+            },
+            MUTED,
+        )
+        .append(code(tool));
         if tool.name == "process" {
             command.push(" &", TOOL_ACCENT.bold());
         }
@@ -215,7 +228,7 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
         }
         rows.extend(content::notices(tool.name, result, columns, true));
         let mut footer = Line::default();
-        if matches!(tool.name, "bash" | "process")
+        if matches!(tool.name, "bash" | "exec" | "process")
             && let Some(code) = result
                 .get("exit_code")
                 .filter(|code| **code != crate::json::Value::Null)

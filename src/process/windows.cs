@@ -160,9 +160,6 @@ public static class JecodeProcess {
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool WriteFile(IntPtr handle, byte[] data, int length, out int written, IntPtr overlapped);
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "SearchPathW")]
-    static extern uint SearchPath(string path, string file, string extension, uint length,
-        StringBuilder result, IntPtr filePart);
 
     static Exception Failure(string operation) {
         return new IOException(operation + " failed (Windows error " + Marshal.GetLastWin32Error() + ")");
@@ -174,34 +171,6 @@ public static class JecodeProcess {
         byte[] bytes = input.ReadBytes(checked(length * 2));
         if (bytes.Length != length * 2) throw new EndOfStreamException("Incomplete command field");
         return Encoding.Unicode.GetString(bytes);
-    }
-
-    static string ResolveProgram(string program) {
-        if (Path.GetDirectoryName(program) != null && Path.GetDirectoryName(program).Length > 0)
-            return program;
-        var result = new StringBuilder(32768);
-        uint length = SearchPath(null, program, ".exe", (uint)result.Capacity, result, IntPtr.Zero);
-        if (length == 0 || length >= result.Capacity) throw Failure("SearchPath");
-        return result.ToString();
-    }
-
-    static string Quote(string value) {
-        var result = new StringBuilder("\"");
-        int slashes = 0;
-        foreach (char c in value) {
-            if (c == '\\') { slashes++; continue; }
-            if (c == '"') {
-                result.Append('\\', slashes * 2 + 1);
-                result.Append('"');
-                slashes = 0;
-                continue;
-            }
-            result.Append('\\', slashes);
-            slashes = 0;
-            result.Append(c);
-        }
-        result.Append('\\', slashes * 2);
-        return result.Append('"').ToString();
     }
 
     static IntPtr InheritedStdHandle(int kind) {
@@ -274,11 +243,11 @@ public static class JecodeProcess {
                 PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             pendingConnection = completion.BeginWaitForConnection(null, null);
             string program = ReadString(protocol);
-            string executable = ResolveProgram(program);
+            string executable = JecodeWindowsCommand.ResolveProgram(program);
             int count = protocol.ReadInt32();
             if (count < 0 || count > 100000) throw new InvalidDataException("Invalid argument count");
-            var commandLine = new StringBuilder(Quote(program));
-            for (int i = 0; i < count; i++) commandLine.Append(' ').Append(Quote(ReadString(protocol)));
+            var commandLine = new StringBuilder(JecodeWindowsCommand.Quote(program));
+            for (int i = 0; i < count; i++) commandLine.Append(' ').Append(JecodeWindowsCommand.Quote(ReadString(protocol)));
 
             job = CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw Failure("CreateJobObject");
@@ -319,6 +288,8 @@ public static class JecodeProcess {
                 throw Failure("CreateProcess");
             Stream readyStream = Console.OpenStandardOutput();
             readyStream.WriteByte(1);
+            byte[] childId = BitConverter.GetBytes(process.ProcessId);
+            readyStream.Write(childId, 0, childId.Length);
             readyStream.Flush();
             ready = true;
             completion.EndWaitForConnection(pendingConnection);

@@ -83,6 +83,7 @@ impl Parser {
             9 => (9, false),
             13 => (13, false),
             1..=26 => (u16::from(byte) + 64, true),
+            29 => (221, true), // Ctrl+] leaves direct terminal input.
             0 | 28..=31 => return vec![],
             _ => (u16::from(byte.to_ascii_uppercase()), false),
         };

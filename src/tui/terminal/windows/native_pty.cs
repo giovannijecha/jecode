@@ -176,9 +176,16 @@ public sealed class JecodeTestPty : IDisposable {
         lock (gate) {
             string plain = System.Text.RegularExpressions.Regex.Replace(
                 received.ToString(after, received.Length - after), "\x1b\\[[0-?]*[ -/]*[@-~]", "");
-            if (plain.Contains(text)) throw new IOException("ConPTY unexpectedly showed " + text);
+            int found = plain.IndexOf(text, StringComparison.Ordinal);
+            if (found >= 0) {
+                if (text != "[ESC]") throw new IOException("ConPTY unexpectedly showed " + text);
+                int start = Math.Max(0, found - 100), end = Math.Min(plain.Length, found + 160);
+                throw new IOException("ConPTY unexpectedly showed [ESC] near: " +
+                    plain.Substring(start, end - start).Replace("\r", " ").Replace("\n", " "));
+            }
         }
     }
+
 
     static int ReadCount(string path) {
         for (int attempt = 0; attempt < 20; attempt++) {
@@ -304,6 +311,34 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Finish(true);
             } else if (scenario == "latency-idle" || scenario == "latency-active") {
                 pty.Latency(directory, scenario == "latency-active");
+            } else if (scenario == "direct-input") {
+                pty.Wait("Ask anything");
+                pty.Send("start terminal"); Thread.Sleep(150); pty.Send("\r");
+                pty.Wait("Native terminal started.");
+                pty.Send("/terminal"); Thread.Sleep(150); pty.Send("\r");
+                pty.Wait("1 running");
+                pty.Send("\r");
+                pty.Wait("i  input");
+                int started = pty.Mark(); pty.Send("i");
+                pty.Wait("Ctrl+]  back", started);
+                pty.Wait("NATIVE_PASSWORD_READY");
+                pty.Send("NATIVE_SECRET_42\uD83D\uDE42\r");
+                pty.Wait("NATIVE_PTY_DONE", started);
+                pty.EnsureNoText("NATIVE_SECRET_42", started);
+                pty.EnsureNoText("[ESC]", started);
+                int detached = pty.Mark(); pty.Send("\x1d");
+                pty.Wait("i  input", detached);
+                pty.Send("i"); pty.Wait("Ctrl+]  back", detached);
+                pty.Wait("NATIVE_SECOND_READY");
+                pty.Send("finish\r");
+                pty.Wait("NATIVE_PTY_END", detached);
+                pty.Wait("exited 0", detached);
+                pty.EnsureNoText("[ESC]", detached);
+                pty.Send("\x1b"); Thread.Sleep(150); pty.Send("\x1b"); Thread.Sleep(150);
+                pty.Send("kept draft"); pty.Wait("kept draft");
+                pty.Send("\x11");
+                pty.Wait("NATIVE_DIRECT_INPUT_RESTORED");
+                pty.Finish(true);
             } else if (scenario == "interactive") {
                 pty.Wait("Ask anything");
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");

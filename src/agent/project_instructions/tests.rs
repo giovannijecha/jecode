@@ -365,6 +365,7 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     ]);
     let mut agent = agent(&directory, &fixture);
     agent.enable_sessions(home.path()).unwrap();
+    agent.set_auto_compact(90);
     let temporary = agent.tools.temporary_instructions();
     let prompt = "original objective ".repeat(1500);
     let original = agent.messages.lock().unwrap().clone();

@@ -49,7 +49,7 @@ fn labels_are_trimmed_and_skill_reads_stay_outside_chapters() {
         chapter::label(&tool("read", &missing, None, &shown)),
         "Activity"
     );
-    for name in ["read", "bash", "process", "web", "browser"] {
+    for name in ["read", "bash", "exec", "process", "web", "browser"] {
         assert!(chapter::groupable(&tool(name, &missing, None, &shown)));
     }
     let skill = object([("path", "skill:review/SKILL.md")]);
@@ -57,6 +57,36 @@ fn labels_are_trimmed_and_skill_reads_stay_outside_chapters() {
     for name in ["write", "edit", "checkpoint"] {
         assert!(!chapter::groupable(&tool(name, &missing, None, &shown)));
     }
+}
+
+#[test]
+fn exec_joins_work_chapters_and_counts_as_a_command() {
+    let shown = Presentation::default();
+    let args = Value::object([
+        ("executable", Value::string("cargo")),
+        ("args", Value::Array(vec![Value::string("test")])),
+        ("work", Value::string("Verify")),
+        ("description", Value::string("Run tests")),
+    ]);
+    let result = Value::object([
+        ("exit_code", Value::number(0)),
+        ("stdout", Value::string("ok\n")),
+    ]);
+    let calls = [
+        tool("exec", &args, Some(&result), &shown),
+        tool("exec", &args, Some(&result), &shown),
+    ];
+    let header = chapter::header(&calls, 80, false);
+    assert!(plain(&header).contains("2 commands"));
+    assert!(plain(&header).contains("Verify"));
+    let exception = chapter::exception(&calls[0], 80);
+    assert!(exception[0].plain().contains("Exec  Run tests"));
+    let receipts = chapter::receipts(&calls[0], 80);
+    assert!(
+        receipts
+            .iter()
+            .any(|line| line.plain().contains("Command: cargo [\"test\"]"))
+    );
 }
 
 #[test]

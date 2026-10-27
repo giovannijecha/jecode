@@ -101,8 +101,21 @@ pub fn run_leaf(
     .map_err(|error| error.message)
 }
 
+#[cfg(test)]
 pub fn run_logged(
     command: &mut Command,
+    timeout: Option<Duration>,
+    output_limit: usize,
+    cancellation: &Cancellation,
+    spools: [crate::output::Spool; 2],
+) -> Result<Output, RunError> {
+    run_logged_input(command, None, timeout, output_limit, cancellation, spools)
+}
+
+/// Runs a supervised command while saving both streams and sending optional stdin.
+pub fn run_logged_input(
+    command: &mut Command,
+    input: Option<Vec<u8>>,
     timeout: Option<Duration>,
     output_limit: usize,
     cancellation: &Cancellation,
@@ -111,7 +124,7 @@ pub fn run_logged(
     let [stdout, stderr] = spools;
     run_inner(
         command,
-        None,
+        input,
         timeout,
         cancellation,
         &mut |_| Ok(()),
@@ -155,10 +168,20 @@ pub fn start_logged(
     cancellation: &Cancellation,
     spools: [crate::output::Spool; 2],
 ) -> Result<Started, RunError> {
+    start_logged_input(command, None, cancellation, spools)
+}
+
+/// Starts a logged command with optional stdin for conversation-owned processes.
+pub fn start_logged_input(
+    command: &mut Command,
+    input: Option<Vec<u8>>,
+    cancellation: &Cancellation,
+    spools: [crate::output::Spool; 2],
+) -> Result<Started, RunError> {
     let [stdout, stderr] = spools;
     start(
         command,
-        None,
+        input,
         cancellation,
         CaptureOptions {
             // Output lives in the spools; nothing is kept in memory.
@@ -182,6 +205,8 @@ pub struct Started {
     writer: Option<JoinHandle<std::io::Result<()>>>,
     #[cfg(windows)]
     completion: Option<JoinHandle<Result<i32, String>>>,
+    #[cfg(windows)]
+    target_pid: u32,
     #[cfg(unix)]
     owner: unix::Owner,
     started: Instant,
@@ -216,6 +241,7 @@ fn start(
         stdout: child_stdout,
         writer: stdin_writer,
         completion,
+        target_pid,
     } = if options.leaf {
         windows::spawn_leaf(command, input)?
     } else {
@@ -253,6 +279,8 @@ fn start(
         writer,
         #[cfg(windows)]
         completion,
+        #[cfg(windows)]
+        target_pid,
         #[cfg(unix)]
         owner,
         started,
@@ -261,6 +289,11 @@ fn start(
 }
 
 impl Started {
+    #[cfg(windows)]
+    pub(crate) fn bridge_pid(&self) -> u32 {
+        self.target_pid
+    }
+
     /// Waits for completion, for `timeout` measured from launch, or for
     /// `cancellation`; the latter two terminate the supervised boundary.
     pub fn supervise(
@@ -278,6 +311,8 @@ impl Started {
             writer,
             #[cfg(windows)]
             completion,
+            #[cfg(windows)]
+                target_pid: _,
             #[cfg(unix)]
                 owner: _owner,
             started,

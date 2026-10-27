@@ -26,49 +26,47 @@ pub(super) fn execute(
     arguments: &Value,
     cancellation: &Cancellation,
 ) -> Result<Value, String> {
-    let Context {
-        bash,
-        root,
-        outputs,
-        temporary,
-        processes,
-    } = context;
     let text = required_string(arguments, "command")?;
     let _ = protect_paths(arguments)?;
     if text.trim().is_empty() {
         return Err("command must not be empty".into());
     }
+    if text.contains('\0') {
+        return Err("command must not contain NUL characters".into());
+    }
+    let command = command(context.bash, context.root, text, context.temporary);
+    execute_command(context, arguments, cancellation, command, None, text)
+}
+
+/// Shared output and process lifecycle for Bash and direct executable calls.
+pub(super) fn execute_command(
+    context: Context<'_>,
+    arguments: &Value,
+    cancellation: &Cancellation,
+    mut command: Command,
+    input: Option<Vec<u8>>,
+    label: &str,
+) -> Result<Value, String> {
+    let Context {
+        outputs, processes, ..
+    } = context;
     let wait = super::processes::wait_argument(arguments)?;
     let output_limit = super::processes::output_limit(arguments)?;
-    let timeout = arguments
-        .get("timeout_seconds")
-        .map(|value| {
-            value
-                .as_usize()
-                .filter(|value| *value > 0)
-                .map(|value| Duration::from_secs(value as u64))
-                .ok_or("timeout_seconds must be a positive integer")
-        })
-        .transpose()?;
+    let timeout = timeout_argument(arguments)?;
     let logs = outputs.create()?;
     let stdout_ref = logs.stdout_ref;
     let stderr_ref = logs.stderr_ref;
-    let mut command = command(bash, root, text, temporary);
     if let Some(wait) = wait {
-        let streams = [
-            super::processes::Stream {
-                path: outputs.resolve(&stdout_ref)?,
-                reference: stdout_ref,
-            },
-            super::processes::Stream {
-                path: outputs.resolve(&stderr_ref)?,
-                reference: stderr_ref,
-            },
-        ];
+        let streams = streams(outputs, [&stdout_ref, &stderr_ref])?;
         // The turn cancellation applies only to launch; the registry owns the process.
-        return match process::start_logged(&mut command, cancellation, [logs.stdout, logs.stderr]) {
+        return match process::start_logged_input(
+            &mut command,
+            input,
+            cancellation,
+            [logs.stdout, logs.stderr],
+        ) {
             Ok(started) => processes.adopt(
-                text,
+                label,
                 streams,
                 started,
                 super::processes::Adoption {
@@ -85,13 +83,15 @@ pub(super) fn execute(
             )),
         };
     }
-    let output = match process::run_logged(
+    let run = process::run_logged_input(
         &mut command,
+        input,
         timeout,
         0,
         cancellation,
         [logs.stdout, logs.stderr],
-    ) {
+    );
+    let output = match run {
         Ok(output) => output,
         Err(error) if !error.started => return Err(error.message),
         Err(error) => return Ok(unknown_outcome(&error.message, [stdout_ref, stderr_ref])),
@@ -137,6 +137,32 @@ pub(super) fn execute(
         );
     }
     Ok(result)
+}
+
+pub(super) fn timeout_argument(arguments: &Value) -> Result<Option<Duration>, String> {
+    arguments
+        .get("timeout_seconds")
+        .map(|value| {
+            value
+                .as_usize()
+                .filter(|value| *value > 0)
+                .map(|value| Duration::from_secs(value as u64))
+                .ok_or_else(|| "timeout_seconds must be a positive integer".to_string())
+        })
+        .transpose()
+}
+
+pub(super) fn streams(
+    outputs: &crate::output::Store,
+    references: [&str; 2],
+) -> Result<[super::processes::Stream; 2], String> {
+    let make = |reference: &str| -> Result<super::processes::Stream, String> {
+        Ok(super::processes::Stream {
+            path: outputs.resolve(reference)?,
+            reference: reference.to_owned(),
+        })
+    };
+    Ok([make(references[0])?, make(references[1])?])
 }
 
 /// Reads only the model preview from the completed, redacted output file.

@@ -74,8 +74,9 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
         (200, completion("Inspection finished.", vec![])),
     ]);
     let (mut agent, original) = measured_growth_agent(&directory, &fixture);
-    // The provider's tightened ceiling still needs room for the native tools.
-    agent.set_auto_compact(90);
+    // The learned ceiling is much smaller than the fixture's advertised window.
+    // Keep enough of it for the expanded native tool catalog during recovery.
+    agent.set_auto_compact(99);
     agent
         .run_turn("Continue the current inspection", &mut |_| Ok(()))
         .unwrap();
@@ -131,6 +132,7 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
+    agent.set_auto_compact(90);
     agent
         .run_turn(&prompt, &mut |event| {
             if matches!(event, Event::Recovering { .. }) {
@@ -185,9 +187,13 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
         )],
     );
     if let Value::Object(fields) = &mut first {
+        // Budget-relative synthetic usage keeps compaction at the post-read boundary as the catalog grows.
         fields.insert(
             "usage".into(),
-            Value::object([("prompt_tokens", Value::number(6000))]),
+            Value::object([(
+                "prompt_tokens",
+                Value::number(6000 + crate::tools::encoded_size()),
+            )]),
         );
     }
     let fixture = HttpFixture::new(vec![
@@ -200,10 +206,11 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
             ),
         ),
     ]);
-    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(24000, Some(4096));
+    let client = OpenRouter::fixture(fixture.endpoint.clone());
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent.enable_sessions(home.path()).unwrap();
+    let capacity = agent.fixture_capacity(6_000, 80);
+    agent.client.fixture_limits(capacity, Some(4096));
     agent.prepare_turn("Inspect").unwrap();
     let handle = agent.sessions().unwrap();
     let bucket = std::fs::read_dir(home.path().join("sessions"))
@@ -226,6 +233,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
             Ok(())
         })
         .unwrap_err();
+    assert!(original_permissions.is_some(), "{error}");
     std::fs::set_permissions(&path, original_permissions.unwrap()).unwrap();
     assert!(error.contains("read-only"));
     assert_eq!(agent.context.from, 1);
@@ -266,9 +274,9 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
         Tools::new(directory.path()).unwrap(),
     );
     agent.context.summary = memory;
-    // Leave room for the native tool catalog as well as the carried summary.
-    const WINDOW: usize = 36000;
-    agent.client.fixture_limits(WINDOW, Some(4096));
+    // Preserve room for this >8 KiB carried memory within the active context.
+    let capacity = agent.fixture_capacity(agent.context.summary.len() + 4_096, 80);
+    agent.client.fixture_limits(capacity, Some(4096));
     agent.messages.lock().unwrap().extend([
         Value::object([
             ("role", Value::string("user")),
@@ -295,7 +303,7 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
         &[Value::string(constraint)]
     );
     assert!(agent.context.summary.len() > 8192);
-    assert!(agent.context_status().tokens < WINDOW);
+    assert!(agent.context_status().tokens < capacity);
     assert_eq!(agent.messages.lock().unwrap().len(), 6);
     assert_eq!(
         agent

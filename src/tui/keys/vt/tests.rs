@@ -13,6 +13,15 @@ fn decoded_keys(bytes: &[u8]) -> Vec<Key> {
 }
 
 #[test]
+fn ctrl_right_bracket_reaches_direct_terminal_mode() {
+    let keys = decoded_keys(&[0x1d]);
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].code, 221);
+    assert!(keys[0].ctrl());
+    assert_eq!(keys[0].character, 29);
+}
+
+#[test]
 fn mouse_wheel_is_scroll_only_and_clicks_releases_and_invalid_reports_are_ignored() {
     let mut decoder = Decoder::default();
     let events = decoder.bytes(

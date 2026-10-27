@@ -22,6 +22,7 @@ pub(super) struct Spawned {
     pub writer: JoinHandle<io::Result<()>>,
     /// The supervisor's completion report; None for a directly started leaf.
     pub completion: Option<JoinHandle<Result<i32, String>>>,
+    pub target_pid: u32,
 }
 
 pub(super) fn spawn(
@@ -29,6 +30,15 @@ pub(super) fn spawn(
     input: Option<Vec<u8>>,
     cancellation: &Cancellation,
 ) -> Result<Spawned, RunError> {
+    // The supervisor serializes argv instead of calling Command::spawn on
+    // the target. Preserve the native API's rejection of embedded NULs.
+    let contains_nul = |value: &OsStr| value.encode_wide().any(|unit| unit == 0);
+    if contains_nul(command.get_program()) || command.get_args().any(contains_nul) {
+        return Err(RunError {
+            started: false,
+            message: "Executable and arguments must not contain NUL characters".into(),
+        });
+    }
     let executable = cache::supervisor(cancellation);
     if cancellation.requested() {
         return Err(RunError {
@@ -90,7 +100,7 @@ pub(super) fn spawn(
     let started = Instant::now();
     loop {
         match receiver.recv_timeout(Duration::from_millis(20)) {
-            Ok((stdout, Ok(()))) => {
+            Ok((stdout, Ok(target_pid))) => {
                 let _ = handshake.join();
                 let mut completion_file = connect_completion(&mut child, &pipe_name, cancellation)?;
                 let completion = thread::spawn(move || read_completion(&mut completion_file));
@@ -99,6 +109,7 @@ pub(super) fn spawn(
                     stdout,
                     writer,
                     completion: Some(completion),
+                    target_pid,
                 });
             }
             Ok((_, Err(message))) => {
@@ -154,6 +165,7 @@ pub(super) fn spawn_leaf(command: &Command, input: Option<Vec<u8>>) -> Result<Sp
     });
     let stdout = child.stdout.take().unwrap();
     Ok(Spawned {
+        target_pid: child.id(),
         child,
         stdout,
         writer,
@@ -162,8 +174,10 @@ pub(super) fn spawn_leaf(command: &Command, input: Option<Vec<u8>>) -> Result<Sp
 }
 
 fn dynamic_supervisor() -> Command {
-    let script =
-        include_str!("windows.ps1").replace("__JECODE_NATIVE_SOURCE__", include_str!("windows.cs"));
+    let script = include_str!("windows.ps1").replace(
+        "__JECODE_NATIVE_SOURCE__",
+        &cache::owned_source(include_str!("windows.cs")),
+    );
     let mut helper = Command::new("powershell.exe");
     helper.args([
         "-NoLogo",
@@ -281,13 +295,21 @@ fn write_string(data: &mut Vec<u8>, value: &OsStr) {
     }
 }
 
-fn read_handshake(stdout: &mut ChildStdout) -> Result<(), String> {
+fn read_handshake(stdout: &mut ChildStdout) -> Result<u32, String> {
     let mut flag = [0];
     stdout
         .read_exact(&mut flag)
         .map_err(|_| "Windows process supervisor stopped before the command started".to_string())?;
     if flag[0] == 1 {
-        return Ok(());
+        let mut id = [0; 4];
+        stdout.read_exact(&mut id).map_err(|_| {
+            "Windows process supervisor sent an incomplete process identity".to_string()
+        })?;
+        let id = u32::from_le_bytes(id);
+        if id == 0 {
+            return Err("Windows process supervisor sent an invalid process identity".into());
+        }
+        return Ok(id);
     }
     if flag[0] != 0 {
         return Err("Windows process supervisor sent an invalid response".into());

@@ -111,13 +111,15 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         ),
         (200, completion("Finished.", vec![])),
     ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(&workspace).unwrap(),
+    );
     let limits = Limits {
-        context: 36000,
+        context: agent.fixture_capacity(12_288, 80),
         output: Some(4096),
     };
-    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(limits.context, limits.output);
-    let mut agent = Agent::new(client, Tools::new(&workspace).unwrap());
+    agent.client.fixture_limits(limits.context, limits.output);
     agent
         .prepare_turn("Continue the current inspection.")
         .unwrap();

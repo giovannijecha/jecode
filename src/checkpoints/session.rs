@@ -139,8 +139,9 @@ impl Session {
         }
     }
 
-    pub fn command_scoped_cancellable(
+    pub fn command_scoped_named_cancellable(
         &self,
+        kind: &str,
         paths: &[String],
         cancellation: &Cancellation,
     ) -> CommandGuard {
@@ -158,7 +159,7 @@ impl Session {
                     None => store.leases.acquire_all_cancellable(cancellation),
                 }
                 .map_err(|error| error.to_string())?;
-                let capture = store.capture("bash", &self.origin(), paths, cancellation);
+                let capture = store.capture(kind, &self.origin(), paths, cancellation);
                 drop(lease);
                 capture
             })

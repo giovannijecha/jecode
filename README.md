@@ -5,12 +5,13 @@
 A terminal coding agent in Rust.
 
 Jecode connects to OpenRouter with an API key or to OpenAI through your ChatGPT
-account. It works in your project through eight tools: `read`, `write`,
-`edit`, `bash`, `process`, `checkpoint`, `web` and `browser`.
+account. It works in your project through nine tools: `read`, `write`,
+`edit`, `bash`, `exec`, `process`, `checkpoint`, `web` and `browser`.
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
 One Cargo package, the Rust standard library, no external crates. Installed system
-tools provide HTTPS, Bash execution and native terminal support.
+tools provide HTTPS, Bash execution and native terminal support. `exec` runs a
+program with separate arguments and can open a controllable terminal session.
 `web` uses local curl for HTTP retrieval and crawling. `browser` controls an
 already installed Chromium-based browser through its local DevTools interface;
 set `JECODE_BROWSER` to its executable path if auto-discovery does not find it.
@@ -22,7 +23,7 @@ Build from this repository with Rust 1.95.0 and a native linker.
 | Platform | System requirements |
 | --- | --- |
 | Windows 10+ | Git Bash, HTTPS-enabled curl 8.3+, Windows PowerShell with `Add-Type`. |
-| Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. |
+| Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. Interactive `exec` needs system `cc` on first use, plus `/proc` on Linux or `/bin/ps` on macOS for descendant cleanup. |
 
 ChatGPT sign-in additionally uses .NET cryptography through Windows PowerShell,
 or the installed `openssl` executable on Linux and macOS. Browser sign-in uses
@@ -139,7 +140,7 @@ fits the task. `/skills` lists the library without making a model request.
 
 Jecode saves local preimages of modifying tool calls in
 [checkpoints](docs/usage/CHECKPOINTS.md). It saves a file's previous state
-before `write` and `edit` change it. Bash saves declared files and recursive
+before `write` and `edit` change it. Bash and Exec save declared files and recursive
 directories through `protect`; use `"."` to opt into the whole eligible
 workspace. Startup and turns do not scan the project. You or the model can
 inspect and restore saved states; restores can be undone. Jecode manages packs

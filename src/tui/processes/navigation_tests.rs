@@ -50,8 +50,46 @@ fn open_output(app: &mut App, output: &str) {
         process: Some(process),
         stream: 0,
         views: [stream, Stream::default()],
+        interactive: false,
+        input_mode: false,
     });
     app.state.processes = Some(panel);
+}
+
+#[test]
+fn direct_escape_returns_to_log_navigation_without_touching_the_draft() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.state.editor.insert("unsent draft");
+    let history = app.state.history.snapshot();
+    open_output(&mut app, "output");
+    app.state
+        .processes
+        .as_mut()
+        .unwrap()
+        .logs
+        .as_mut()
+        .unwrap()
+        .input_mode = true;
+    app.input(Decoded::Key(terminal::Key {
+        code: 221,
+        modifiers: 4,
+        character: 29,
+    }))
+    .unwrap();
+    assert!(
+        !app.state
+            .processes
+            .as_ref()
+            .unwrap()
+            .logs
+            .as_ref()
+            .unwrap()
+            .input_mode
+    );
+    assert_eq!(app.state.editor.prompt().text, "unsent draft");
+    assert_eq!(app.state.history.snapshot(), history);
 }
 
 fn frame(app: &App) -> Vec<String> {

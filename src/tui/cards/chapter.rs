@@ -11,8 +11,10 @@ use crate::tui::{
 use std::collections::BTreeSet;
 
 pub fn groupable(tool: &Tool<'_>) -> bool {
-    matches!(tool.name, "read" | "bash" | "process" | "web" | "browser")
-        && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
+    matches!(
+        tool.name,
+        "read" | "bash" | "exec" | "process" | "web" | "browser"
+    ) && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
 }
 
 pub fn label(tool: &Tool<'_>) -> String {
@@ -143,7 +145,7 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
             .collect();
     };
     let mut rows = Vec::new();
-    if matches!(tool.name, "bash" | "process") {
+    if matches!(tool.name, "bash" | "exec" | "process") {
         rows.extend(content::notices(tool.name, result, columns, false));
         let outcome = match Status::of(tool) {
             // Exit status already appears on the member. Keep a distinct
@@ -184,14 +186,10 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
                 4,
             ));
         }
-        let command = result
-            .get("command")
-            .and_then(crate::json::Value::as_str)
-            .filter(|command| !command.is_empty())
-            .unwrap_or_else(|| field(tool.arguments, "command"));
+        let command = rhythm::payload(tool);
         if !rhythm::description(tool).is_empty() && !command.is_empty() {
             rows.push(rhythm::one(
-                Line::new(&format!("Command: {}", text::clean(command)), TOOL_DIM),
+                Line::new(&format!("Command: {}", text::clean(&command)), TOOL_DIM),
                 columns,
                 "  ⎿ ",
                 TOOL_DIM,
@@ -214,7 +212,7 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
 /// One primary row for commands and exceptional calls; errors add detail below.
 pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     let state = Status::of(tool);
-    if matches!(tool.name, "bash" | "process") {
+    if matches!(tool.name, "bash" | "exec" | "process") {
         let (name, _) = heading(tool);
         let mut line = Line::new(name, title::family(name).bold());
         line.push("  ", BODY);
@@ -272,7 +270,7 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     let description = rhythm::description(tool);
     if !description.is_empty() {
         title.push(&text::clean(description), BODY);
-    } else if matches!(tool.name, "bash" | "process" | "browser") {
+    } else if matches!(tool.name, "bash" | "exec" | "process" | "browser") {
         title = title.append(rhythm::code(tool));
     } else {
         title.push(&rhythm::payload(tool), BODY);
@@ -358,7 +356,7 @@ fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
                     files.insert(path);
                 }
             }
-            "bash" => commands += 1,
+            "bash" | "exec" => commands += 1,
             "process" => processes += 1,
             "web" => web += 1,
             "browser" => {

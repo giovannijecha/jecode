@@ -2,6 +2,23 @@ use super::*;
 use crate::test_support::Directory;
 
 #[test]
+fn nul_in_a_shell_command_is_rejected_before_execution() {
+    let root = Directory::new();
+    let tools = Tools::new(root.path()).unwrap();
+    let result = tools.execute(
+        "bash",
+        &Value::object([("command", Value::string("printf before\0printf after"))]).encode(),
+    );
+    assert!(
+        result
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|error| error.contains("NUL")),
+        "{result:?}"
+    );
+}
+
+#[test]
 fn saved_large_output_can_be_read_in_full_and_cannot_be_modified_by_file_tools() {
     let workspace = Directory::new();
     let home = Directory::new();

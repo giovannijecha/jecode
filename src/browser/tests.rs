@@ -57,26 +57,101 @@ fn devtools_http_discovery_preserves_port_in_host() {
 }
 
 pub(super) fn read_client_frame(stream: &mut std::net::TcpStream) -> (u8, Vec<u8>) {
+    try_read_client_frame(stream).expect("client frame")
+}
+
+/// Reads one masked client frame, or `None` once the client has gone away.
+pub(super) fn try_read_client_frame(stream: &mut std::net::TcpStream) -> Option<(u8, Vec<u8>)> {
     let mut header = [0; 2];
-    stream.read_exact(&mut header).unwrap();
+    stream.read_exact(&mut header).ok()?;
     assert_ne!(header[1] & 0x80, 0, "client frames must be masked");
     let len = match header[1] & 0x7f {
         n @ 0..=125 => n as usize,
         126 => {
             let mut n = [0; 2];
-            stream.read_exact(&mut n).unwrap();
+            stream.read_exact(&mut n).ok()?;
             u16::from_be_bytes(n) as usize
         }
         _ => panic!("unexpected test frame"),
     };
     let mut mask = [0; 4];
-    stream.read_exact(&mut mask).unwrap();
+    stream.read_exact(&mut mask).ok()?;
     let mut payload = vec![0; len];
-    stream.read_exact(&mut payload).unwrap();
+    stream.read_exact(&mut payload).ok()?;
     for (i, b) in payload.iter_mut().enumerate() {
         *b ^= mask[i % 4];
     }
-    (header[0] & 0xf, payload)
+    Some((header[0] & 0xf, payload))
+}
+
+/// Accepts one DevTools client and completes its WebSocket handshake.
+pub(super) fn accept_websocket(listener: &TcpListener) -> std::net::TcpStream {
+    let (mut stream, _) = listener.accept().unwrap();
+    let mut request = Vec::new();
+    let mut byte = [0];
+    while !request.ends_with(b"\r\n\r\n") {
+        stream.read_exact(&mut byte).unwrap();
+        request.push(byte[0]);
+    }
+    let request = String::from_utf8(request).unwrap();
+    let key = request
+        .lines()
+        .find_map(|line| line.strip_prefix("Sec-WebSocket-Key: "))
+        .unwrap()
+        .trim();
+    let accept = base64(&super::transport::sha1(
+        format!("{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11").as_bytes(),
+    ));
+    write!(
+        stream,
+        "HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+    )
+    .unwrap();
+    stream
+}
+
+/// Serves a fake page target: each request gets the handler's result, or no
+/// reply when it returns `None`. Events queued by `events` precede the reply.
+pub(super) fn fake_page<F>(handler: F) -> (String, thread::JoinHandle<()>)
+where
+    F: Fn(&str, &Value) -> (Vec<Value>, Option<Value>) + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = accept_websocket(&listener);
+        while let Some((opcode, payload)) = try_read_client_frame(&mut stream) {
+            if opcode != 1 {
+                continue;
+            }
+            let request = crate::json::parse(&String::from_utf8(payload).unwrap()).unwrap();
+            let id = request.get("id").cloned().unwrap();
+            let method = request.get("method").and_then(Value::as_str).unwrap();
+            let params = request.get("params").cloned().unwrap_or(Value::Null);
+            let (events, reply) = handler(method, &params);
+            for event in events {
+                if stream
+                    .write_all(&frame(1, true, event.encode().as_bytes()))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            if let Some(result) = reply {
+                let response = Value::object([("id", id), ("result", result)]);
+                if stream
+                    .write_all(&frame(1, true, response.encode().as_bytes()))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+    });
+    (
+        format!("ws://127.0.0.1:{port}/devtools/page/fixture"),
+        server,
+    )
 }
 
 #[test]

@@ -63,7 +63,7 @@ impl Status {
         {
             Self::Stopped
         } else if result.get("error").is_some()
-            || matches!(tool.name, "bash" | "process")
+            || matches!(tool.name, "bash" | "exec" | "process")
                 && result
                     .get("exit_code")
                     .is_some_and(|code| code != &Value::number(0) && code != &Value::Null)
@@ -212,6 +212,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         "write" => "Write",
         "edit" => "Update",
         "bash" => "Bash",
+        "exec" => "Exec",
         "process" => "Process",
         "checkpoint" => "Checkpoint",
         "web" => "Web",
@@ -220,7 +221,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
-        "process" | "checkpoint" | "web" | "browser" => {
+        "exec" | "process" | "checkpoint" | "web" | "browser" => {
             crate::events::target(tool.name, tool.arguments)
         }
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),

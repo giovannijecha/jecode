@@ -234,7 +234,7 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         return match status {
             "running" => format!(
                 "{} · {id}",
-                if name == "bash" {
+                if matches!(name, "bash" | "exec") {
                     "started in background"
                 } else {
                     "running at last check"
@@ -251,7 +251,7 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             status => status.into(),
         };
     }
-    if name == "bash" {
+    if matches!(name, "bash" | "exec") {
         let mut summary = if result.get("cancelled") == Some(&Value::Bool(true)) {
             "cancelled".into()
         } else if result.get("timed_out") == Some(&Value::Bool(true)) {
@@ -416,6 +416,7 @@ mod tests {
                 "src/lib.rs (from line 1, up to 200 lines)",
             ),
             ("bash", "command", "cargo test", "cargo test"),
+            ("exec", "executable", "cargo", "cargo"),
             ("process", "action", "list", "list"),
             ("web", "action", "fetch", "fetch"),
             ("browser", "action", "tabs", "tabs"),
@@ -440,5 +441,31 @@ mod tests {
             let arguments = Value::object([(key, Value::string(command))]);
             assert_eq!(description(name, &arguments), fallback, "{name}");
         }
+    }
+
+    #[test]
+    fn exec_summary_uses_command_exit_and_background_contract() {
+        let done = Value::object([
+            ("exit_code", Value::number(3)),
+            ("truncated", Value::Bool(true)),
+            ("stdout_file", Value::string("output:fixture:stdout")),
+        ]);
+        assert_eq!(tool_summary("exec", &done), "exit 3; full output saved");
+        let background = Value::object([
+            ("process_id", Value::string("process-fixture")),
+            ("status", Value::string("running")),
+        ]);
+        assert_eq!(
+            tool_summary("exec", &background),
+            "started in background · process-fixture"
+        );
+        let arguments = Value::object([
+            ("executable", Value::string("cargo")),
+            (
+                "args",
+                Value::Array(vec![Value::string("test"), Value::string("a b")]),
+            ),
+        ]);
+        assert_eq!(target("exec", &arguments), "cargo [\"test\",\"a b\"]");
     }
 }

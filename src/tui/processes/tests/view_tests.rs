@@ -1,6 +1,51 @@
 use super::*;
 
 #[test]
+fn finished_terminal_keeps_clean_log_and_leaves_direct_input() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let running = Process {
+        id: "terminal-1".into(),
+        command: "example".into(),
+        status: "running",
+        exit_code: None,
+        error: None,
+    };
+    let raw = "\x1b]0;private title\x07hello\rDONE\x1b[31m\n";
+    let mut output = Stream::default();
+    output.pages.push_back(Page {
+        text: raw.into(),
+        start: 0,
+        end: raw.len() as u64,
+        length: raw.len() as u64,
+    });
+    let mut panel = Panel::new(vec![running.clone()]);
+    panel.logs = Some(Logs {
+        id: running.id.clone(),
+        process: Some(running.clone()),
+        stream: 0,
+        views: [output, Stream::default()],
+        interactive: true,
+        input_mode: true,
+    });
+    app.state.processes = Some(panel);
+    let finished = Process {
+        status: "exited",
+        exit_code: Some(0),
+        ..running
+    };
+    assert!(app.state.processes.as_mut().unwrap().update(vec![finished]));
+    let logs = app.state.processes.as_ref().unwrap().logs.as_ref().unwrap();
+    assert!(!logs.input_mode);
+    assert!(logs.interactive);
+    let rendered = frame(&app).join("\n");
+    assert!(rendered.contains("DONEo"), "{rendered}");
+    assert!(!rendered.contains("[ESC]"), "{rendered}");
+    assert!(!rendered.contains("i  input"), "{rendered}");
+}
+
+#[test]
 fn selection_follows_process_identity_and_the_draft_survives() {
     let process = |id: &str, status| Process {
         id: id.into(),
@@ -101,6 +146,8 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
         }),
         stream: 0,
         views: [output, Stream::default()],
+        interactive: false,
+        input_mode: false,
     });
     let details = frame(&app).join("\n");
     assert!(
@@ -129,6 +176,8 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
         process: panel.processes.first().cloned(),
         stream: 0,
         views: [output, Stream::default()],
+        interactive: false,
+        input_mode: false,
     });
     for (width, height) in [(24, 12), (12, 8), (80, 30)] {
         app.state.width = width;
@@ -151,6 +200,8 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
                 process: panel.processes.first().cloned(),
                 stream: 1,
                 views: Default::default(),
+                interactive: false,
+                input_mode: false,
             });
         }
     }

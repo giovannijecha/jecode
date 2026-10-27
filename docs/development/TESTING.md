@@ -66,6 +66,8 @@ cargo test --locked --offline backend::openrouter::calls::tests::
 cargo test --locked --offline auth::openai::
 cargo test --locked --offline backend::openai::
 cargo test --locked --offline tools::processes::tests::
+cargo test --locked --offline tools::exec::tests::
+cargo test --locked --offline tools::interactive::tests::
 cargo test --locked --offline sessions::journal_tests::
 cargo test --locked --offline checkpoint
 ```
@@ -80,6 +82,19 @@ verified the change. Use `-- --list` to inspect available names.
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
+| Browser | `browser::` tests use loopback DevTools fixtures for waits, log paging, eviction and reconnection, plus the installed-browser fixtures below. |
+
+Installed Chrome or Edge fixtures serve a loopback site and use isolated
+profiles under `target` or ignored `.tmp/`. Run them one at a time after
+browser changes; the last one briefly opens a visible window:
+
+```text
+cargo test --locked --offline browser::tests::live_chromium_localhost_interaction_and_profile_persistence -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::live_tests::live_chromium_viewport_dimensions_and_validation -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::live_tests::live_chromium_snapshot_semantics_logs_and_wait_diagnostics -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::snapshot::tests::live_chromium_snapshot_values_text_and_refs -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::live_tests::live_chromium_visible_viewport -- --exact --ignored --test-threads=1
+```
 
 Work chapters have focused card, state and viewport tests, including a 10,000-call
 replay and latest-turn expansion. To paint the actual compact and expanded cards
@@ -143,6 +158,29 @@ The Unix installer accepts an absolute root: `sh INSTALL.sh /absolute/test/root`
 Both installers build offline and print the installed executable's version.
 
 ## Native and manual checks
+
+Interactive execution tests use original Rust fixtures and isolated native
+terminals. Unix PTY tests require `cc` on first use, plus `/proc` on Linux or
+`/bin/ps` on macOS for session cleanup. The compiled helper cache is reused
+across test runs under `target/measurements/pty-cache`, keyed by platform and
+source contents. They check input, resize, interrupt, owner loss, job-control groups,
+saved output and per-control checkpoints. Password-entry checks use synthetic
+values with the target's echo disabled.
+
+Unix interrupt probes also use system `stty` and `od` to check synthetic bytes,
+terminal modes and queued input. They cover raw input, remapped or disabled
+`VINTR`, `NOFLSH`, delayed input frames, saturated connections and input/resize
+after a client detaches its controlling terminal.
+The Linux-only blocked raw-input probe also uses system `tty` and `kill`.
+The `TIOCNOTTY` detachment fixture is Linux-only; both Unix platforms check
+no-foreground handling on a newly opened PTY before terminal acquisition.
+
+The Windows direct-input fixture drives the real Rust renderer and verifies
+that local terminal input, including emoji, stays outside conversation history:
+
+```text
+cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
+```
 
 [Platform verification](PLATFORMS.md) contains native ConPTY/PTY commands,
 local coverage and physical host checks. Use those fixtures for input, resize,

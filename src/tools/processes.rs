@@ -55,6 +55,7 @@ struct Entry {
     state: Mutex<State>,
     changed: Condvar,
     monitor: Mutex<Option<JoinHandle<()>>>,
+    terminal: Option<Arc<crate::pty::Control>>,
 }
 
 #[derive(Default)]
@@ -95,6 +96,28 @@ impl Registry {
         started: Started,
         adoption: Adoption<'_>,
     ) -> Result<Value, String> {
+        self.adopt_control(command, streams, started, adoption, None)
+    }
+
+    pub(super) fn adopt_terminal(
+        &self,
+        command: &str,
+        streams: [Stream; 2],
+        started: Started,
+        adoption: Adoption<'_>,
+        terminal: Arc<crate::pty::Control>,
+    ) -> Result<Value, String> {
+        self.adopt_control(command, streams, started, adoption, Some(terminal))
+    }
+
+    fn adopt_control(
+        &self,
+        command: &str,
+        streams: [Stream; 2],
+        started: Started,
+        adoption: Adoption<'_>,
+        terminal: Option<Arc<crate::pty::Control>>,
+    ) -> Result<Value, String> {
         let Adoption {
             timeout,
             wait,
@@ -109,6 +132,7 @@ impl Registry {
             state: Mutex::default(),
             changed: Condvar::new(),
             monitor: Mutex::new(None),
+            terminal,
         });
         // Register before waiting so an interrupted wait leaves a discoverable process.
         let scope = self.scope();
@@ -116,6 +140,9 @@ impl Registry {
         let owner = Arc::clone(&entry);
         let monitor = thread::spawn(move || {
             let result = started.supervise(timeout, &owner.stop, &mut |_| Ok(()));
+            if let Some(terminal) = &owner.terminal {
+                terminal.close();
+            }
             let mut state = owner.state.lock().unwrap();
             state.outcome = Some(Outcome::from(result));
             drop(state);
@@ -135,10 +162,13 @@ impl Registry {
         if action == "list" {
             return Ok(self.list());
         }
-        if !matches!(action, "poll" | "stop") {
-            return Err("action must be list, poll or stop".into());
+        if !matches!(action, "poll" | "stop" | "write" | "resize" | "interrupt") {
+            return Err("action must be list, poll, stop, write, resize or interrupt".into());
         }
         let id = required_string(arguments, "process_id")?;
+        if matches!(action, "write" | "resize" | "interrupt") {
+            let _ = super::shell::protect_paths(arguments)?;
+        }
         let output_limit = output_limit(arguments)?;
         let output_mode = OutputMode::parse(arguments)?;
         let entry = self
@@ -154,6 +184,36 @@ impl Registry {
                     "No process {id} belongs to this conversation runtime. Processes end when Jecode exits or the conversation changes and are never restarted; their saved output references remain readable. Use action list for current processes."
                 )
             })?;
+        if matches!(action, "write" | "resize" | "interrupt") {
+            if entry.state.lock().unwrap().outcome.is_some() || entry.stop.requested() {
+                return Err("The process has ended or is stopping".into());
+            }
+            let terminal = entry
+                .terminal
+                .as_ref()
+                .ok_or("This process has no interactive terminal")?;
+            match action {
+                "write" => {
+                    let bytes = match (arguments.get("text"), arguments.get("key")) {
+                        (Some(Value::String(text)), None) => text.as_bytes(),
+                        (None, Some(Value::String(key))) => crate::pty::key(key)?,
+                        _ => return Err("write needs either text or key".into()),
+                    };
+                    if arguments.get("key").and_then(Value::as_str) == Some("Ctrl+C") {
+                        terminal.interrupt(cancellation)?;
+                    } else {
+                        terminal.write(bytes, cancellation)?;
+                    }
+                }
+                "resize" => {
+                    if arguments.get("cols").is_none() || arguments.get("rows").is_none() {
+                        return Err("resize needs cols and rows".into());
+                    }
+                    terminal.resize(crate::pty::size(arguments)?, cancellation)?;
+                }
+                _ => terminal.interrupt(cancellation)?,
+            }
+        }
         let interrupted = if action == "stop" {
             entry.stop.cancel();
             entry.wait(STOP_WAIT, cancellation)
@@ -242,6 +302,12 @@ impl Entry {
         let mut fields = BTreeMap::new();
         fields.insert("process_id".into(), Value::string(&self.id));
         fields.insert("status".into(), Value::string(self.status_name(state)));
+        if let Some(terminal) = &self.terminal {
+            let (cols, rows) = terminal.size();
+            fields.insert("tty".into(), Value::Bool(true));
+            fields.insert("cols".into(), Value::number(cols));
+            fields.insert("rows".into(), Value::number(rows));
+        }
         if let Some(outcome) = &state.outcome {
             if outcome.exit_code.is_some() || outcome.status == "exited" {
                 fields.insert(

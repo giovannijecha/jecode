@@ -1,6 +1,8 @@
 mod attachment;
 pub(crate) mod edit;
+mod exec;
 mod files;
+mod interactive;
 mod network;
 pub mod processes;
 mod schema;
@@ -205,12 +207,24 @@ impl Tools {
         let command = self
             .checkpoints
             .as_ref()
-            .filter(|_| name == "bash")
+            .filter(|_| matches!(name, "bash" | "exec" | "process"))
             .and_then(|session| {
                 let arguments = json::parse(arguments).ok()?;
-                arguments.get("command")?.as_str()?;
+                match name {
+                    "bash" => {
+                        arguments.get("command")?.as_str()?;
+                    }
+                    "exec" => {
+                        arguments.get("executable")?.as_str()?;
+                    }
+                    _ if matches!(
+                        arguments.get("action").and_then(Value::as_str),
+                        Some("write" | "resize" | "interrupt")
+                    ) => {}
+                    _ => return None,
+                }
                 let paths = shell::protect_paths(&arguments).ok()?;
-                Some(session.command_scoped_cancellable(&paths, cancellation))
+                Some(session.command_scoped_named_cancellable(name, &paths, cancellation))
             });
         Begun { command }
     }
@@ -287,23 +301,33 @@ impl Tools {
                             (value, change)
                         })
                     }
-                    "bash" => {
+                    "bash" | "exec" | "process" => {
                         let temporary = self
                             .temporary
                             .as_ref()
+                            .filter(|_| name != "process")
                             .map(|area| area.ensure())
                             .transpose()?;
-                        let mut result = shell::execute(
-                            shell::Context {
-                                bash: &self.bash,
-                                root: &self.root,
-                                outputs: &self.outputs,
-                                temporary: temporary.as_deref(),
-                                processes: &self.processes,
+                        let context = shell::Context {
+                            bash: &self.bash,
+                            root: &self.root,
+                            outputs: &self.outputs,
+                            temporary: temporary.as_deref(),
+                            processes: &self.processes,
+                        };
+                        let mut result = match name {
+                            "bash" => shell::execute(context, &arguments, cancellation),
+                            "process" => self.processes.execute(&arguments, cancellation),
+                            _ => match arguments.get("tty") {
+                                None | Some(Value::Bool(false)) => {
+                                    exec::execute(context, &arguments, cancellation)
+                                }
+                                Some(Value::Bool(true)) => {
+                                    interactive::execute(context, &arguments, cancellation)
+                                }
+                                _ => Err("tty must be a boolean".into()),
                             },
-                            &arguments,
-                            cancellation,
-                        )
+                        }
                         .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
                         if let Some(command) = begun.command {
                             let checkpoint = command.finish();
@@ -313,10 +337,6 @@ impl Tools {
                         }
                         Ok((result, None))
                     }
-                    "process" => self
-                        .processes
-                        .execute(&arguments, cancellation)
-                        .map(|value| (value, None)),
                     "checkpoint" => self
                         .checkpoint(&arguments, cancellation)
                         .map(|value| (value, None)),

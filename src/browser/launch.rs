@@ -56,6 +56,7 @@ pub(super) fn start(
         lease,
         port: 0,
         tabs: std::collections::BTreeMap::new(),
+        viewports: std::collections::BTreeMap::new(),
         id: String::new(),
     };
     let deadline = Instant::now() + Duration::from_secs(15);

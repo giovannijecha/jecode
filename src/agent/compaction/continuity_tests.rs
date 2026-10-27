@@ -242,6 +242,7 @@ fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
     };
     let result = agent.execute_tool(&call);
     agent.tool_result(&call, &result);
+    let capacity = agent.fixture_capacity(8_192, 80);
     agent.messages.lock().unwrap().extend([
         Value::object([
             ("role", Value::string("assistant")),
@@ -258,7 +259,7 @@ fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
     agent
         .compact_if_needed(
             Some(crate::backend::openrouter::Limits {
-                context: 28000,
+                context: capacity,
                 output: Some(4096),
             }),
             true,

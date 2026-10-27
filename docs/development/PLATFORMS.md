@@ -32,6 +32,39 @@ Windows runs, along with ConPTY and Linux PTY checks. Loopback regressions cover
 requests above 10 MiB, literal `@` data, exact image bytes, a native write followed
 by `avanti`, incomplete stdin diagnostics and Windows child environment overrides.
 
+## Interactive command boundary
+
+`exec` launches literal executable arguments through the existing process
+supervisor. With `tty:true`, an owned native bridge supplies a pseudo-terminal:
+Windows uses ConPTY and current-user-only named pipes, with the opened server
+handle checked against the launched bridge PID before any input is sent.
+Linux and macOS use POSIX PTYs and private Unix-domain sockets. Input and control
+have separate connections, so bridge input backpressure cannot block resize
+or delivery of an interrupt request. Input travels over its dedicated
+connection and is not staged in regular files. Terminal output combines stdout
+and stderr and remains available through the normal saved-output references.
+
+Unix interrupts pass through the terminal line discipline. The configured
+`VINTR` character produces signals only while `ISIG` is enabled; otherwise the
+application receives literal ETX input. `NOFLSH` preserves pending input. When
+flushing is enabled, input generations prevent older bytes still in the Rust
+writer or socket from being replayed after the interrupt, while preserving later input.
+Without a foreground process group, including after a client detaches its
+controlling terminal, an interrupt is consumed as a no-op without flushing input.
+Only a temporarily full master keeps the request queued. Raw ETX intentionally
+has priority over data still buffered in the bridge.
+
+Windows requires its existing PowerShell/.NET compiler and Windows 10+ ConPTY.
+Unix first use compiles the owned bridge with system `cc`, caches it under the
+Jecode home. Linux enumerates `/proc` to clean up interactive job-control groups;
+macOS uses its system `/bin/ps`. Runtime compilation accepts compiler warnings;
+development checks also compile the bridge with warnings denied.
+Control sockets need a native Unix temporary filesystem; WSL's Windows-backed
+mounts do not support them. Local input bypasses model messages and tool-call
+history, while output that the target echoes remains visible and retained.
+The fullscreen terminal panel displays a transcript rather than emulating
+cursor-addressed full-screen applications.
+
 ## Local web and browser tools
 
 The web HTTP, crawl recovery and WebSocket fixtures run in the ordinary suite.

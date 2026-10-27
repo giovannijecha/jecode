@@ -46,7 +46,7 @@ pub(super) fn render(
         "edit" => edit_fallback::body(arguments, result, columns, expanded)
             .unwrap_or_else(|| Body::new(Vec::new())),
         _ if result.get("processes").is_some() => processes(result, columns, expanded),
-        "bash" | "process" => {
+        "bash" | "exec" | "process" => {
             let failed = status == Status::Failed;
             let skip = (status != Status::Stopped)
                 .then(|| streams::headline(&streams::entries(result, failed), failed))
@@ -225,7 +225,7 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
     {
         notices.push((MUTED, note.into()));
     }
-    if matches!(name, "bash" | "process") {
+    if matches!(name, "bash" | "exec" | "process") {
         for stream in ["stdout", "stderr"] {
             let skipped = number(&format!("{stream}_skipped_bytes"));
             if skipped > 0 {

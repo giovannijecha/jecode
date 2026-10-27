@@ -58,13 +58,28 @@ fn partial_frame_timeout_reconnects_tab_before_next_action() {
         .unwrap();
         let (mut second, _) = listener.accept().unwrap();
         handshake(&mut second);
-        for id in 1..=3 {
+        second
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        for (index, method) in [
+            "Page.enable",
+            "Runtime.enable",
+            "Network.enable",
+            "Emulation.setDeviceMetricsOverride",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let id = index + 1;
             let (_, request) = read_client_frame(&mut second);
-            assert!(
-                String::from_utf8(request)
-                    .unwrap()
-                    .contains(&format!("\"id\":{id}"))
-            );
+            let request = crate::json::parse(&String::from_utf8(request).unwrap()).unwrap();
+            assert_eq!(request.get("id"), Some(&Value::number(id)));
+            assert_eq!(request.get("method").and_then(Value::as_str), Some(*method));
+            if *method == "Emulation.setDeviceMetricsOverride" {
+                let params = request.get("params").unwrap();
+                assert_eq!(params.get("width"), Some(&Value::number(1100)));
+                assert_eq!(params.get("height"), Some(&Value::number(760)));
+            }
             second
                 .write_all(&frame(
                     1,
@@ -81,8 +96,10 @@ fn partial_frame_timeout_reconnects_tab_before_next_action() {
         lease: None,
         port,
         tabs: std::collections::BTreeMap::new(),
+        viewports: std::collections::BTreeMap::new(),
         id: "fixture".into(),
     };
+    browser.viewports.insert("fixture".into(), (1100, 760));
     browser
         .tabs
         .insert("fixture".into(), Cdp::connect(&endpoint).unwrap());
@@ -102,10 +119,16 @@ fn partial_frame_timeout_reconnects_tab_before_next_action() {
             .contains("timed out")
     );
     assert!(!browser.tabs.get("fixture").unwrap().usable());
-    assert!(
-        super::actions::tab(&mut browser, "fixture", &cancellation)
-            .unwrap()
-            .usable()
+    let connection = super::actions::tab(&mut browser, "fixture", &cancellation).unwrap();
+    assert!(connection.usable());
+    let page = connection
+        .events
+        .page(super::logs::Filter::Default, 10, None)
+        .unwrap();
+    assert_eq!(page.entries.len(), 1, "the tab's log continues with a gap");
+    assert_eq!(
+        page.entries[0].get("kind").and_then(Value::as_str),
+        Some("gap")
     );
     server.join().unwrap();
 }

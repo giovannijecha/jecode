@@ -6,6 +6,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) use crate::attachments::base64::encode as base64;
 
+/// Whether a `Cdp::call` error came from its deadline rather than the page.
+pub(super) fn timed_out(error: &str) -> bool {
+    error.starts_with("DevTools ") && error.ends_with(" timed out")
+}
+
 pub(super) fn http_get(port: u16, path: &str) -> Result<Value, String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     stream
@@ -52,7 +57,7 @@ pub(super) struct Cdp {
     stream: TcpStream,
     next_id: u64,
     usable: bool,
-    pub events: Vec<Value>,
+    pub events: super::logs::EventLog,
 }
 
 impl Cdp {
@@ -116,12 +121,16 @@ impl Cdp {
             stream,
             next_id: 0,
             usable: true,
-            events: Vec::new(),
+            events: super::logs::EventLog::default(),
         })
     }
 
     pub fn usable(&self) -> bool {
         self.usable
+    }
+
+    pub fn invalidate(&mut self) {
+        self.usable = false;
     }
 
     pub fn call(
@@ -164,6 +173,14 @@ impl Cdp {
                 Some(message) => message,
                 None => continue,
             };
+            if cancellation.requested() {
+                self.usable = false;
+                return Err("Operation cancelled".into());
+            }
+            if Instant::now() >= deadline {
+                self.usable = false;
+                return Err(format!("DevTools {method} timed out"));
+            }
             let text = String::from_utf8(message).map_err(|_| {
                 self.usable = false;
                 "Invalid DevTools UTF-8".to_string()
@@ -179,9 +196,6 @@ impl Cdp {
             }
             if value.get("method").is_some() {
                 self.events.push(value);
-                if self.events.len() > 1000 {
-                    self.events.drain(..500);
-                }
             }
         }
     }
@@ -287,9 +301,13 @@ impl Cdp {
             if cancellation.requested() {
                 return Err("Operation cancelled".into());
             }
-            if Instant::now() >= deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
                 return Err("DevTools read timed out".into());
             }
+            self.stream
+                .set_read_timeout(Some(remaining.min(Duration::from_millis(200))))
+                .map_err(|error| error.to_string())?;
             match self.stream.read(&mut buf[done..]) {
                 Ok(0) => return Err("DevTools connection closed".into()),
                 Ok(n) => done += n,

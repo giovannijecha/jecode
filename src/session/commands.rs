@@ -19,7 +19,7 @@ impl Command {
     }
     pub fn description(&self, tui: bool) -> &'static str {
         match (tui, self.name) {
-            (false, "/terminal") => "List active processes, or show saved output by ID",
+            (false, "/terminal") => "List processes, inspect output or send local input",
             (false, "/help") => "Show commands",
             (false, "/exit") => "Quit",
             _ => self.description,
@@ -114,7 +114,7 @@ pub const COMMANDS: [Command; 17] = [
     },
     Command {
         name: "/terminal",
-        description: "Inspect or stop this conversation's background processes",
+        description: "Inspect, stop or type into a background process",
         tui_usage: "/terminal [ID]",
         plain_usage: Some("/terminal [ID]"),
     },
@@ -132,8 +132,8 @@ pub const COMMANDS: [Command; 17] = [
     },
 ];
 
-const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Cancel active work and quit\nCtrl+D        In /terminal, mark stop; in /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
-const PLAIN_CONTROLS: &str = "/terminal stop ID Request a stop for a background process\n\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
+const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Cancel active work and quit\nCtrl+D        In /terminal, mark stop; in /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\ni             In active terminal output, enter direct input mode\nCtrl+]       Leave direct input; Ctrl+C sends an interrupt there\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
+const PLAIN_CONTROLS: &str = "/terminal write ID TEXT   Send one line directly to an interactive process\n/terminal interrupt ID    Send Ctrl+C to an interactive process\n/terminal resize ID C R   Resize its terminal to C columns and R rows\n/terminal stop ID         Request a stop for a background process\n\nUse fullscreen direct input for hidden password entry.\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
 
 pub fn help(tui: bool) -> String {
     let mut rows = COMMANDS
