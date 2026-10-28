@@ -195,9 +195,13 @@ impl Input {
 pub struct Pending {
     pub active: bool,
     pub tool: Option<String>,
-    /// Legacy journal name for every call in a parallel read-only batch,
-    /// including web acquisitions and checkpoint/process inspections.
+    /// Legacy journal field for parallel calls. Explicit batch IDs mirror here
+    /// so older readers still treat interrupted modifying calls as unknown.
     pub reads: Vec<String>,
+    /// Calls launched together. Results may complete before earlier calls.
+    pub batch: Vec<String>,
+    /// Durable completed calls awaiting source-order transcript insertion.
+    pub completed: Vec<Value>,
     pub partial: String,
 }
 
@@ -326,6 +330,11 @@ impl Document {
                         "reads",
                         Value::Array(self.pending.reads.iter().map(Value::string).collect()),
                     ),
+                    (
+                        "batch",
+                        Value::Array(self.pending.batch.iter().map(Value::string).collect()),
+                    ),
+                    ("completed", Value::Array(self.pending.completed.clone())),
                     ("partial_text", Value::string(&self.pending.partial)),
                 ]),
             ),
@@ -405,18 +414,12 @@ impl Document {
                     Value::String(id) if !id.is_empty() => Some(id.clone()),
                     _ => return Err("Invalid pending tool".into()),
                 },
-                reads: match pending.get("reads") {
+                reads: pending_ids(pending, "reads")?,
+                batch: pending_ids(pending, "batch")?,
+                completed: match pending.get("completed") {
                     None => Vec::new(),
-                    Some(Value::Array(reads)) => reads
-                        .iter()
-                        .map(|id| {
-                            id.as_str()
-                                .filter(|id| !id.is_empty())
-                                .map(str::to_owned)
-                                .ok_or_else(|| "Invalid pending read".to_owned())
-                        })
-                        .collect::<Result<_, _>>()?,
-                    _ => return Err("Invalid pending reads".into()),
+                    Some(Value::Array(completed)) => completed.clone(),
+                    _ => return Err("Invalid pending completed calls".into()),
                 },
                 partial: string(pending, "partial_text")?.into(),
             },
@@ -430,6 +433,22 @@ impl Document {
                 .unwrap_or(Routing::Default),
         };
         Ok(document)
+    }
+}
+
+fn pending_ids(pending: &Value, key: &str) -> Result<Vec<String>, String> {
+    match pending.get(key) {
+        None => Ok(Vec::new()),
+        Some(Value::Array(ids)) => ids
+            .iter()
+            .map(|id| {
+                id.as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| format!("Invalid pending {key} call"))
+            })
+            .collect(),
+        _ => Err(format!("Invalid pending {key}")),
     }
 }
 

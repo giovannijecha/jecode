@@ -7,6 +7,62 @@ fn tool_catalog_and_encoded_size_are_reused() {
 }
 
 #[test]
+fn every_tool_advertises_optional_parallel_boolean() {
+    let tools = definitions().as_array().unwrap();
+    assert_eq!(tools.len(), 12);
+    for tool in tools {
+        let name = tool.get("name").and_then(Value::as_str).unwrap();
+        let parameters = tool.get("parameters").unwrap();
+        let parallel = parameters
+            .get("properties")
+            .unwrap()
+            .get("parallel")
+            .unwrap();
+        assert_eq!(
+            parallel.get("type"),
+            Some(&Value::string("boolean")),
+            "{name}"
+        );
+        assert!(
+            parallel
+                .get("description")
+                .and_then(Value::as_str)
+                .is_some()
+        );
+        assert!(
+            !parameters
+                .get("required")
+                .and_then(Value::as_array)
+                .unwrap()
+                .contains(&Value::string("parallel")),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn malformed_parallel_metadata_does_not_execute_a_write() {
+    let directory = crate::test_support::Directory::new();
+    let tools = crate::tools::Tools::new(directory.path()).unwrap();
+    for value in [Value::string("true"), Value::Null] {
+        let result = tools.execute(
+            "write",
+            &Value::object([
+                ("path", Value::string("must-not-exist.txt")),
+                ("content", Value::string("not written")),
+                ("parallel", value),
+            ])
+            .encode(),
+        );
+        assert_eq!(
+            result.get("error").and_then(Value::as_str),
+            Some("parallel must be a boolean")
+        );
+        assert!(!directory.path().join("must-not-exist.txt").exists());
+    }
+}
+
+#[test]
 fn work_and_description_are_optional_only_for_routine_tools() {
     for tool in definitions().as_array().unwrap() {
         let name = tool.get("name").and_then(Value::as_str).unwrap();

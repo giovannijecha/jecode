@@ -20,8 +20,9 @@ mod summary;
 mod title;
 pub(in crate::tui) use badge::hang;
 pub use chapter::{
-    activity as chapter_activity, exception as chapter_exception, groupable as chapter_groupable,
-    header as chapter_header, label as chapter_label, receipts as chapter_receipts,
+    activities as chapter_activities, exception as chapter_exception,
+    groupable as chapter_groupable, header as chapter_header, label as chapter_label,
+    receipts as chapter_receipts,
 };
 pub use presentation::Presentation;
 

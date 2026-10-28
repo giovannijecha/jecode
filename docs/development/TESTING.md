@@ -71,6 +71,9 @@ cargo test --locked --offline tools::interactive::tests::
 cargo test --locked --offline tools::schema::tests::map_is_appended_as_a_bounded_routine_tool
 cargo test --locked --offline project_map::
 cargo test --locked --offline agent::map_tests::
+cargo test --locked --offline agent::execution::scheduling::tests::
+cargo test --locked --offline agent::execution::declared::tests::
+cargo test --locked --offline sessions::tool_batch_tests::
 cargo test --locked --offline sessions::journal_tests::
 cargo test --locked --offline checkpoint
 ```
@@ -84,6 +87,7 @@ verified the change. Use `-- --list` to inspect available names.
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
 | Native discovery | `tools::discovery` covers filtering, paging, literal matches, UTF-8/long lines, bounds and cancellation. `path_filter::tests` retains checkpoint ignore-rule coverage; `agent::discovery_tests` exercises both provider wrappers and session resume. |
 | Project map | `project_map::` covers on-demand survey, Rust/Markdown outlines, note persistence, full-file freshness and paging. `agent::map_tests::` exercises OpenRouter and OpenAI tool receipts, source changes, resume and a new conversation using the same project notes. `tools::schema::tests::map_is_appended_as_a_bounded_routine_tool` checks the provider-facing argument shape. |
+| Parallel tool calls | `agent::execution::scheduling::tests::` covers explicit, automatic and serial boundaries. `agent::execution::declared::tests::` covers overlapping commands, joined workers and unknown outcomes after a worker failure. `sessions::tool_batch_tests::` covers out-of-order saved results, recovery, redaction, legacy readers and malformed batch state. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |

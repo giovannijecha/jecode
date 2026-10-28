@@ -115,8 +115,11 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(&workspace).unwrap(),
     );
+    let update = "updated requirement ".repeat(900);
+    // The arriving request must fit after its second summary, while a recent
+    // assistant tail still makes that second reduction necessary.
     let limits = Limits {
-        context: agent.fixture_capacity(12_288, 80),
+        context: agent.fixture_capacity(update.len() + 2048, 80),
         output: Some(4096),
     };
     agent.client.fixture_limits(limits.context, limits.output);
@@ -127,7 +130,14 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         ("role", Value::string("assistant")),
         (
             "content",
-            Value::string("Recorded inspection result ".repeat(750)),
+            Value::string("Recorded inspection result ".repeat(900)),
+        ),
+    ]));
+    agent.messages.lock().unwrap().push(Value::object([
+        ("role", Value::string("assistant")),
+        (
+            "content",
+            Value::string("Recent inspection detail ".repeat(200)),
         ),
     ]));
     agent.context.observe(
@@ -142,7 +152,6 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
             >= crate::context::threshold(limits.context, crate::context::AUTO_COMPACT_DEFAULT)
     );
     let inbox = agent.inbox();
-    let update = "updated requirement ".repeat(900);
     let mut sent = false;
     let mut summaries_started = 0;
     agent

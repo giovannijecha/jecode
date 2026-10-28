@@ -39,12 +39,16 @@ Paths are relative to `src/`.
    translates that canonical transcript and neutral tool catalog into its wire
    request, then streams text and progress through agent events.
 4. The agent saves tool boundaries, executes calls and records their results.
-   Up to four adjacent eligible calls run together after the complete model
-   response: directory listings, text searches, file reads, checkpoint list/inspect, process list, and web
-   fetch/download using GET or HEAD without a body. History and skill reads,
-   process cursors, crawls and modifying calls break the batch. Results and
-   checkpoints keep model call order. Follow-up messages
-   from the shared inbox join before the next model request.
+   Up to four adjacent eligible reads run together automatically after the
+   complete model response: listings, searches, file reads, map overviews,
+   checkpoint list/inspect, process list and web fetch/download using GET or
+   HEAD without a body. History and skill reads remain ordered. An explicit
+   `parallel: true` on adjacent calls declares independence, including for
+   modifications; bounded waves keep at most four workers active. `false`
+   forces serial execution, and omitted modifying calls remain serial.
+   Explicit and automatic groups do not merge. The agent does not infer
+   independence from paths. Follow-up messages from the shared inbox join
+   before the next model request.
 5. Completion, cancellation or failure checkpoints the conversation. The interface
    renders the result and keeps unsent input available.
 
@@ -80,8 +84,8 @@ native host boundaries.
 
 File writes and exact edits capture contextual changes at execution time.
 `file_change.rs` owns their text alignment and serializable hunks, independently
-of terminal rendering. A local `tool_change` event is saved with the tool-result
-checkpoint and replayed to the TUI; it is excluded from provider messages and
+of terminal rendering. A local `tool_change` event is saved beside its canonical
+tool result and replayed to the TUI; it is excluded from provider messages and
 context estimates. The model-facing tool result remains unchanged.
 Optional capture bounds input size and alignment work; unavailable diffs never
 reject an otherwise valid write or edit. Local `turn_start` events preserve
@@ -124,7 +128,8 @@ atomically replace the project file so concurrent conversations preserve
 independent notes. Checkpoints and map storage share original fingerprint,
 file-lock and synced replacement helpers in `disk/`. Neither startup nor the
 system message scans or injects the map. The tool's overview is eligible for
-existing read batches and Work chapters; remember/forget execute in order.
+existing read batches and Work chapters; remember/forget execute in order
+unless explicitly declared independent.
 
 ### Context and compaction
 
@@ -200,9 +205,19 @@ saved immediately; later streaming updates and TUI input use a 250 ms save
 interval. Periodic saves serialize disk access in a worker; explicit saves and
 clean exit flush synchronously. The session journal calls these saves
 checkpoints; they are unrelated to the workspace checkpoints below.
-An in-progress parallel batch records its call IDs in the legacy `pending.reads`
-field until all results are saved in call order. Earlier journals without this
-field load with an empty list.
+Automatic batches record call IDs in `pending.reads` until their results are
+saved in source order. Explicit batches also mirror their IDs into this legacy
+field, so an older reader treats interrupted modifying calls as unknown. They
+record IDs in `pending.batch` and save each completed result, timing and
+optional diff in `pending.completed` before announcing it to the interface.
+Command checkpoint preparation and its running notes happen before workers
+start; each modifying call retains its own recovery scope and receipt.
+The controller joins all workers, then inserts canonical tool results, timing
+and diff events in source order in one checkpoint. A crash restores saved
+completions, marks started calls without a durable outcome unknown, marks
+unstarted calls not executed, and never replays a call. Older readers may lose
+the completed detail but conservatively mark the batch calls unknown. Earlier
+journals without these fields remain readable.
 
 | Condition | Recovery |
 | --- | --- |

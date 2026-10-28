@@ -89,14 +89,44 @@ fn named(tool: &Tool<'_>) -> Line {
     Line::new(&name.to_uppercase(), badge::ink(name).bold())
 }
 
-/// The latest ordinary call without separate error detail stays at the foot.
+fn ordinary(tool: &Tool<'_>) -> bool {
+    matches!(
+        tool.name,
+        "read" | "list" | "search" | "map" | "web" | "browser"
+    )
+}
+
+/// Keep the latest completed targets at the foot, up to the call concurrency
+/// limit. A running target takes one of those rows, so finishing it cannot
+/// shorten a live chapter or move earlier transcript down.
+pub fn activities(tools: &[Tool<'_>], columns: usize) -> Vec<Line> {
+    const VISIBLE: usize = 4;
+    let running = tools
+        .iter()
+        .filter(|tool| ordinary(tool) && Status::of(tool) == Status::Running)
+        .count();
+    let keep = VISIBLE.saturating_sub(running);
+    let mut completed = tools
+        .iter()
+        .filter(|tool| {
+            ordinary(tool) && matches!(Status::of(tool), Status::Done | Status::Background)
+        })
+        .rev()
+        .take(keep)
+        .collect::<Vec<_>>();
+    completed.reverse();
+    completed
+        .into_iter()
+        .map(|tool| activity_line(tool, columns))
+        .collect()
+}
+
+/// The last ordinary activity, also used as a singleton's retained receipt.
 pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
-    let tool = tools.iter().rev().find(|tool| {
-        matches!(
-            tool.name,
-            "read" | "list" | "search" | "map" | "web" | "browser"
-        ) && Status::of(tool) != Status::Failed
-    })?;
+    activities(tools, columns).pop()
+}
+
+fn activity_line(tool: &Tool<'_>, columns: usize) -> Line {
     let (_, target) = heading(tool);
     let mut line = named(tool);
     if !target.is_empty() {
@@ -127,7 +157,7 @@ pub fn activity(tools: &[Tool<'_>], columns: usize) -> Option<Line> {
         line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
         line.push(&suffix, DIM);
     }
-    Some(rhythm::one(line, columns, "  ⎿ ", DIM, 4))
+    rhythm::one(line, columns, "  ⎿ ", DIM, 4)
 }
 
 /// Facts retained from the former singleton while a new chapter takes shape.
@@ -206,6 +236,24 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
 /// One primary row for commands and exceptional calls; errors add detail below.
 pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
     let state = Status::of(tool);
+    if matches!(
+        tool.name,
+        "read" | "list" | "search" | "map" | "web" | "browser"
+    ) && state == Status::Running
+    {
+        let (_, target) = heading(tool);
+        let mut line = named(tool);
+        if !target.is_empty() {
+            line.push(&format!(" {}", text::clean(&target)), BODY);
+        }
+        let suffix = format!(
+            "  Running · {}",
+            timer::duration(tool.presentation.duration().unwrap_or_default())
+        );
+        line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
+        line.push(&suffix, DIM);
+        return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
+    }
     if matches!(tool.name, "list" | "search" | "map")
         && let Some(result) = tool.result
         && (result.get("complete") == Some(&crate::json::Value::Bool(false))

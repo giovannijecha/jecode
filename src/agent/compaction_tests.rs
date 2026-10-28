@@ -77,10 +77,34 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
         ),
         (200, completion("Inspection finished.", vec![])),
     ]);
-    let (mut agent, original) = measured_growth_agent(&directory, &fixture);
-    // The learned ceiling is much smaller than the fixture's advertised window.
-    // Keep enough of it for the expanded native tool catalog during recovery.
+    let (mut agent, _) = measured_growth_agent(&directory, &fixture);
+    // A rejected request learns 75% of the uncalibrated estimate. Keep that
+    // ceiling near the advertised window so the fixed native catalog leaves
+    // summary room, while the previous assistant history can be compacted.
+    let raw = {
+        let mut uncalibrated = agent.context.clone();
+        uncalibrated.calibration = None;
+        let messages = agent.messages.lock().unwrap();
+        let measured = uncalibrated
+            .measured_input(&messages, agent.client.inputs())
+            .unwrap();
+        uncalibrated.estimate_growth(&messages, measured, agent.client.inputs())
+    };
+    let extra = 45_000usize.saturating_sub(raw).saturating_add(512);
+    const NOTE: &str = "Earlier inspection note. ";
+    agent.messages.lock().unwrap().insert(
+        2,
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "content",
+                Value::string(NOTE.repeat(extra.div_ceil(NOTE.len()))),
+            ),
+        ]),
+    );
+    let original = agent.messages.lock().unwrap().clone();
     agent.set_auto_compact(99);
+    assert!(agent.context_estimate(&original) < crate::context::threshold(45_000, 99));
     agent
         .run_turn("Continue the current inspection", &mut |_| Ok(()))
         .unwrap();

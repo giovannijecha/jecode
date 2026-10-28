@@ -2,6 +2,7 @@ use super::*;
 use crate::{effort::Effort, json::Value, test_support::Directory};
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Barrier};
 
 fn document(project: &Path) -> crate::sessions::Document {
     crate::sessions::Document::new(
@@ -80,6 +81,55 @@ fn owned_outputs_are_lazy_and_cross_session_references_survive_reconfiguration()
         "output:1:2:other",
     ] {
         assert!(second_store.resolve(reference).is_err(), "{reference}");
+    }
+}
+
+#[test]
+fn cloned_stores_can_create_first_owned_outputs_concurrently() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let owner = document(project.path());
+    let store = Store::for_session(
+        home.path().join("outputs"),
+        project.path().to_path_buf(),
+        &owner.id,
+        Redactor::new("private-token".into()),
+    )
+    .unwrap();
+    let barrier = Arc::new(Barrier::new(4));
+    let references = std::thread::scope(|scope| {
+        let workers = (0..4)
+            .map(|_| {
+                let store = store.clone();
+                let barrier = Arc::clone(&barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    let mut logs = store.create().unwrap();
+                    logs.stdout.write(b"private-").unwrap();
+                    logs.stdout.write(b"token").unwrap();
+                    logs.stdout.finish().unwrap();
+                    logs.stderr.finish().unwrap();
+                    logs.stdout_ref
+                })
+            })
+            .collect::<Vec<_>>();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        references
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4
+    );
+    for reference in references {
+        assert_eq!(
+            fs::read_to_string(store.resolve(&reference).unwrap()).unwrap(),
+            "[redacted]"
+        );
     }
 }
 

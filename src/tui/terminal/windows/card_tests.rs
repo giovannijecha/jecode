@@ -148,7 +148,84 @@ pub(super) fn console(bash: &std::path::Path) {
     let snapshot = probe();
     assert_eq!(snapshot.lines().nth(1).unwrap(), expected);
     discovery_console(&terminal);
+    concurrent_cards(&terminal);
     drop(terminal);
+}
+
+/// Verify native cells while a later read finishes before its earlier peer.
+fn concurrent_cards(terminal: &Terminal) {
+    use crate::{events::Event, json::Value, tui::state::State};
+
+    let (physical_width, height) = terminal.size;
+    for columns in [40, 80] {
+        let mut state = State {
+            width: columns,
+            height,
+            ..State::default()
+        };
+        state.begin_tool_turn();
+        for (id, path) in [("first", "src/first.rs"), ("second", "src/second.rs")] {
+            state.event(Event::ToolStarted {
+                id: id.into(),
+                name: "read".into(),
+                arguments: Value::object([
+                    ("path", Value::string(path)),
+                    ("work", Value::string("Inspect sources")),
+                ]),
+            });
+        }
+        for phase in 0..3 {
+            if phase > 0 {
+                state.event(Event::ToolFinished {
+                    id: if phase == 1 { "second" } else { "first" }.into(),
+                    name: "read".into(),
+                    summary: "1 line".into(),
+                    result: Value::object([("lines_returned", Value::number(1))]),
+                });
+            }
+            let rows: Vec<_> = state.rows().into_iter().flatten().collect();
+            let plain: Vec<_> = rows.iter().map(crate::tui::line::Line::plain).collect();
+            let all = plain.join("\n");
+            assert!(all.contains(" WORK  Inspect sources  2 calls"), "{all}");
+            if phase == 0 {
+                assert!(
+                    all.contains("first.rs") && all.contains("second.rs"),
+                    "{all}"
+                );
+                assert!(all.contains("2 running"), "{all}");
+            } else if phase == 1 {
+                assert!(
+                    all.contains("first.rs") && all.contains("second.rs"),
+                    "{all}"
+                );
+                assert!(all.contains("1 running"), "{all}");
+            }
+            let expected: String = (0..height)
+                .map(|index| {
+                    let line = plain.get(index).map_or("", String::as_str);
+                    format!(
+                        "{line}{}",
+                        " ".repeat(physical_width.saturating_sub(crate::tui::text::cells(line)))
+                    )
+                })
+                .collect();
+            let frame = crate::tui::view::Frame {
+                header: vec![],
+                history: vec![],
+                live: rows,
+                cursor: None,
+                composer: height - 1,
+            };
+            let output = crate::tui::render::Renderer::new().paint(&frame, columns, height);
+            write!(io::stdout(), "{output}").unwrap();
+            io::stdout().flush().unwrap();
+            assert_eq!(
+                probe().lines().nth(1).unwrap(),
+                expected,
+                "{columns} columns, phase {phase}"
+            );
+        }
+    }
 }
 
 /// Exercise discovery cards through the native console and the full frame renderer.

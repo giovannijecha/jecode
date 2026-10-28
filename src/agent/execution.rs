@@ -9,6 +9,13 @@ use crate::{
 };
 use std::time::Instant;
 
+mod declared;
+mod scheduling;
+use scheduling::{Mode, mode};
+
+#[cfg(test)]
+use scheduling::parallel_call;
+
 const MAX_PARALLEL_CALLS: usize = 4;
 
 impl Agent {
@@ -23,14 +30,23 @@ impl Agent {
                 self.cancel_calls(&calls[index..]);
                 return Err("Operation cancelled".into());
             }
-            let end = calls[index..]
-                .iter()
-                .take(MAX_PARALLEL_CALLS)
-                .take_while(|call| parallel_call(call))
-                .count()
-                + index;
+            let selected = mode(&calls[index]);
+            let end = if selected == Mode::Serial {
+                index + 1
+            } else {
+                index
+                    + calls[index..]
+                        .iter()
+                        .take(MAX_PARALLEL_CALLS)
+                        .take_while(|call| mode(call) == selected)
+                        .count()
+            };
             if end - index >= 2 {
-                self.execute_parallel_batch(&calls[index..end], &calls[end..], events)?;
+                if selected == Mode::Declared {
+                    self.execute_declared_batch(&calls[index..end], &calls[end..], events)?;
+                } else {
+                    self.execute_parallel_batch(&calls[index..end], &calls[end..], events)?;
+                }
                 index = end;
             } else {
                 self.execute_one(&calls[index], &calls[index + 1..], events)?;
@@ -78,15 +94,7 @@ impl Agent {
         self.record_tool_timing(call, timing);
         let change = outcome.change.map(|change| change.redacted(&self.redactor));
         if let Some(change) = &change {
-            self.events.lock().unwrap().push(Value::object([
-                ("type", Value::string("tool_change")),
-                (
-                    "after_message",
-                    Value::number(self.messages.lock().unwrap().len()),
-                ),
-                ("tool_call_id", Value::string(self.redact(&call.id))),
-                ("change", change.value()),
-            ]));
+            self.record_tool_change(call, change);
         }
         if let Err(error) = self.checkpoint(Stage::ToolFinished) {
             self.cancel_calls(remaining);
@@ -180,6 +188,18 @@ impl Agent {
         }
     }
 
+    fn record_tool_change(&self, call: &ToolCall, change: &crate::file_change::Change) {
+        self.events.lock().unwrap().push(Value::object([
+            ("type", Value::string("tool_change")),
+            (
+                "after_message",
+                Value::number(self.messages.lock().unwrap().len()),
+            ),
+            ("tool_call_id", Value::string(self.redact(&call.id))),
+            ("change", change.value()),
+        ]));
+    }
+
     fn finished_event(&self, call: &ToolCall, result: &Value) -> Event {
         Event::ToolFinished {
             id: self.redact(&call.id),
@@ -187,34 +207,6 @@ impl Agent {
             summary: self.redact(&tool_summary(&call.name, result)),
             result: self.redactor.value(result),
         }
-    }
-}
-
-fn parallel_call(call: &ToolCall) -> bool {
-    let Ok(arguments) = json::parse(&call.arguments) else {
-        return false;
-    };
-    let action = arguments.get("action").and_then(Value::as_str);
-    match call.name.as_str() {
-        "list" | "search" => true,
-        "map" => matches!(action, None | Some("overview")),
-        // History depends on preceding results; skills keep a per-turn snapshot.
-        "read" => arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| !path.starts_with("history:") && !path.starts_with("skill:")),
-        "checkpoint" => matches!(action, Some("list" | "inspect")),
-        "process" => action == Some("list"),
-        "web" => {
-            let method = arguments
-                .get("method")
-                .and_then(Value::as_str)
-                .unwrap_or("GET");
-            matches!(action, Some("fetch" | "download"))
-                && matches!(method, "GET" | "HEAD")
-                && arguments.get("body").is_none()
-        }
-        _ => false,
     }
 }
 
@@ -254,6 +246,8 @@ fn run_parallel_calls(
     })
 }
 
+#[cfg(test)]
+mod provider_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

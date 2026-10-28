@@ -271,10 +271,9 @@ fn countdown(until: Option<Instant>) -> String {
     }
 }
 
-/// The latest running call's `description` verbatim, else a family verb
-/// and a short target; between calls, the turn's phase.
+/// Name the running calls, or the turn's phase between calls.
 pub(super) fn verb(state: &State) -> String {
-    let running = state.items.iter().rev().find_map(|item| match item {
+    let mut running = state.items.iter().rev().filter_map(|item| match item {
         Item::Tool {
             name,
             arguments,
@@ -283,8 +282,19 @@ pub(super) fn verb(state: &State) -> String {
         } => Some((name.as_str(), arguments)),
         _ => None,
     });
-    if let Some((name, arguments)) = running {
-        return tool_label(name, arguments);
+    if let Some((name, arguments)) = running.next() {
+        return if running.next().is_some() {
+            format!(
+                "{} tools running",
+                state
+                    .items
+                    .iter()
+                    .filter(|item| matches!(item, Item::Tool { result: None, .. }))
+                    .count()
+            )
+        } else {
+            tool_label(name, arguments)
+        };
     }
     match state.status.trim_end_matches(['.', '…']) {
         "" | "Ready" => "Working".into(),

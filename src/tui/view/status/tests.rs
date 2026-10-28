@@ -334,3 +334,32 @@ fn tool_labels_prefer_the_description_then_a_verb_and_a_short_target() {
         8 + TARGET
     );
 }
+
+#[test]
+fn multiple_live_tools_show_a_count_until_only_one_remains() {
+    use crate::events::Event;
+    let mut state = State {
+        activity: Some(Activity::new()),
+        ..State::default()
+    };
+    for (id, path) in [("a", "src/first.rs"), ("b", "src/second.rs")] {
+        state.event(Event::ToolStarted {
+            id: id.into(),
+            name: "read".into(),
+            arguments: Value::object([("path", Value::string(path))]),
+        });
+    }
+    assert_eq!(verb(&state), "2 tools running");
+    for columns in [40, 80] {
+        let line = shown(&state, columns);
+        assert!(line.plain().contains("2 tools running"), "{}", line.plain());
+        assert!(text::cells(&line.plain()) <= columns);
+    }
+    state.event(Event::ToolFinished {
+        id: "b".into(),
+        name: "read".into(),
+        summary: "done".into(),
+        result: Value::object([]),
+    });
+    assert_eq!(verb(&state), "Reading first.rs");
+}

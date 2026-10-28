@@ -35,7 +35,26 @@ fn build_definitions() -> Value {
     Value::Array(tools)
 }
 
-pub(super) fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+pub(super) fn tool(
+    name: &str,
+    description: &str,
+    mut properties: Value,
+    required: &[&str],
+) -> Value {
+    if let Value::Object(fields) = &mut properties {
+        fields.insert(
+            "parallel".into(),
+            Value::object([
+                ("type", Value::string("boolean")),
+                (
+                    "description",
+                    Value::string(
+                        "True declares independence from adjacent parallel calls (up to four); false requires serial execution.",
+                    ),
+                ),
+            ]),
+        );
+    }
     Value::object([
         ("name", Value::string(name)),
         ("description", Value::string(description)),

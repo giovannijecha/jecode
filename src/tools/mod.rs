@@ -249,6 +249,7 @@ impl Tools {
                 if !matches!(arguments, Value::Object(_)) {
                     return Err("Tool arguments must be a JSON object".into());
                 }
+                parallel(&arguments)?;
                 match name {
                     "list" | "search" => {
                         discovery::execute(&self.root, name, &arguments, cancellation)
@@ -412,6 +413,14 @@ impl Tools {
     ) -> Result<Value, String> {
         let session = self.enabled_checkpoints()?;
         show::read(session.store()?, path, arguments, cancellation)
+    }
+}
+
+pub(crate) fn parallel(arguments: &Value) -> Result<Option<bool>, String> {
+    match arguments.get("parallel") {
+        None => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(_) => Err("parallel must be a boolean".into()),
     }
 }
 

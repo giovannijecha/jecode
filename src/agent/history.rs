@@ -17,6 +17,14 @@ impl Agent {
         call: &ToolCall,
         begun: crate::tools::Begun,
     ) -> crate::tools::Execution {
+        if let Ok(arguments) = json::parse(&call.arguments)
+            && let Err(error) = crate::tools::parallel(&arguments)
+        {
+            return crate::tools::Execution {
+                result: Value::object([("error", Value::string(error))]),
+                change: None,
+            };
+        }
         if call.name == "read"
             && let Ok(arguments) = json::parse(&call.arguments)
             && arguments

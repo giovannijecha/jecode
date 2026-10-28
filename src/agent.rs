@@ -260,10 +260,13 @@ impl Agent {
         for call in calls {
             self.tool_result(
                 call,
-                &Value::object([(
-                    "error",
-                    Value::string("Tool was not executed because the turn was interrupted"),
-                )]),
+                &Value::object([
+                    (
+                        "error",
+                        Value::string("Tool was not executed because the turn was interrupted"),
+                    ),
+                    ("outcome", Value::string("not_executed")),
+                ]),
             );
         }
     }

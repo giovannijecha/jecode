@@ -76,3 +76,5 @@ mod read_batch_tests;
 mod routing_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tool_batch_tests;

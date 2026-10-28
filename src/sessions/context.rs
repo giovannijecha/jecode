@@ -104,6 +104,30 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
     {
         return Err("Pending reads do not match the saved context".into());
     }
+    if !document.pending.batch.is_empty()
+        && (!document.pending.active
+            || document.pending.tool.is_some()
+            || (!document.pending.reads.is_empty()
+                && document.pending.reads != document.pending.batch)
+            || document
+                .pending
+                .batch
+                .iter()
+                .any(|id| !outstanding.contains(id))
+            || document.pending.batch.iter().collect::<BTreeSet<_>>().len()
+                != document.pending.batch.len())
+    {
+        return Err("Pending batch does not match the saved context".into());
+    }
+    let batch: BTreeSet<_> = document.pending.batch.iter().map(String::as_str).collect();
+    let mut completed = BTreeSet::new();
+    for receipt in &document.pending.completed {
+        validate_batch_receipt(receipt)?;
+        let id = string(receipt, "id")?;
+        if !batch.contains(id) || !completed.insert(id) {
+            return Err("Completed batch call does not match the pending batch".into());
+        }
+    }
     for event in document.events.iter().skip(validated.events) {
         if let Some(kind) = event.get("kind")
             && !matches!(kind.as_str(), Some("notice" | "warning" | "error"))
@@ -183,6 +207,23 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
     Ok(())
 }
 
+pub(super) fn validate_batch_receipt(receipt: &Value) -> Result<(), String> {
+    if string(receipt, "id")?.is_empty()
+        || !matches!(receipt.get("result"), Some(Value::Object(_)))
+        || !matches!(receipt.get("timing"), Some(Value::Object(_) | Value::Null))
+    {
+        return Err("Invalid completed batch call".into());
+    }
+    match receipt.get("change") {
+        Some(Value::Object(_)) => {
+            crate::file_change::Change::from_value(receipt.get("change").unwrap())?;
+        }
+        Some(Value::Null) => {}
+        _ => return Err("Invalid completed batch change".into()),
+    }
+    Ok(())
+}
+
 impl Document {
     pub(super) fn recover(&mut self) -> bool {
         let interrupted = self.pending.active;
@@ -210,8 +251,43 @@ impl Document {
                 if answered.contains(id) {
                     continue;
                 }
+                if let Some(receipt) = self
+                    .pending
+                    .completed
+                    .iter()
+                    .find(|receipt| receipt.get("id").and_then(Value::as_str) == Some(id))
+                {
+                    let result = receipt.get("result").unwrap();
+                    self.messages.push(Value::object([
+                        ("role", Value::string("tool")),
+                        ("tool_call_id", Value::string(id)),
+                        ("content", Value::string(result.encode())),
+                    ]));
+                    let after_message = Value::number(self.messages.len());
+                    if let Some(Value::Object(timing)) = receipt.get("timing") {
+                        let mut timing = timing.clone();
+                        timing.insert("type".into(), Value::string("tool_timing"));
+                        timing.insert("tool_call_id".into(), Value::string(id));
+                        timing.insert(
+                            "name".into(),
+                            Value::string(ToolCall::parse(&call).unwrap().name),
+                        );
+                        timing.insert("after_message".into(), after_message.clone());
+                        self.events.push(Value::Object(timing));
+                    }
+                    if let Some(Value::Object(change)) = receipt.get("change") {
+                        self.events.push(Value::object([
+                            ("type", Value::string("tool_change")),
+                            ("after_message", after_message),
+                            ("tool_call_id", Value::string(id)),
+                            ("change", Value::Object(change.clone())),
+                        ]));
+                    }
+                    continue;
+                }
                 let unknown = self.pending.tool.as_deref() == Some(id)
-                    || self.pending.reads.iter().any(|read| read == id);
+                    || self.pending.reads.iter().any(|read| read == id)
+                    || self.pending.batch.iter().any(|started| started == id);
                 let result = Value::object([
                     (
                         "error",

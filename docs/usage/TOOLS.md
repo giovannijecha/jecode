@@ -4,14 +4,18 @@ Jecode offers twelve tools to the model. An assistant message describing a comma
 or file change does not execute it; only a native tool call can do that. Check
 the tool result or resulting state before treating a change as complete. Calls
 run only after the complete model response arrives; streamed partial calls never
-execute. Up to four adjacent independent calls run together: `list`, `search`, `read` except
-`history:`/`skill:`, `checkpoint list`/`inspect`, `process list`, and
-`web fetch`/`download` with GET or HEAD and no body. Other calls end the batch,
-including process polling, crawls and workspace modifications. Results enter the
-conversation and saved session in call order before the next batch or tool runs.
-Tool errors return as results so the model can correct the call.
+execute. Adjacent eligible reads run together automatically, up to four at a
+time: `list`, `search`, `read` except `history:`/`skill:`, `map overview`,
+`checkpoint list`/`inspect`, `process list`, and `web fetch`/`download` with GET
+or HEAD and no body. The model can also declare adjacent calls independent with
+`parallel: true`, including writes and commands. Results enter the conversation
+and saved session in call order. Tool errors return as individual results so the
+model can correct the call.
 
 ## Tool arguments
+
+All twelve tools also accept an optional boolean `parallel` argument. The table
+lists their other arguments.
 
 | Tool | Required arguments | Optional arguments | Result or constraint |
 | --- | --- | --- | --- |
@@ -27,6 +31,36 @@ Tool errors return as results so the model can correct the call.
 | `list` | None | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Lists project entries, optionally as a recursive tree, with types and workspace-relative paths. |
 | `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Finds literal text in UTF-8 project files; returns line numbers, context and byte offsets. |
 | `map` | None | `action`, `path`, `query`, `pattern`, `offset`, `limit`, `include_hidden`, `include_ignored`, `id`, `title`, `summary`, `sources`, `work`, `description` | Surveys the project on demand and manages source-backed project notes. `action` defaults to `overview`; `remember` requires `title`, `summary` and `sources` at execution. |
+
+## Parallel calls
+
+Set `parallel: true` on each adjacent call whose inputs and effects are
+independent. Jecode runs at most four at once; longer runs proceed in bounded
+waves. A call without `parallel: true` ends that declared group and waits for it
+to finish. `parallel: false` always runs in order. With the argument omitted,
+eligible reads keep their automatic batching and modifying calls run in order.
+Declared groups and automatic read groups never merge. `history:` and `skill:`
+reads remain ordered even with `parallel: true`.
+
+The model must consider shared files, interfaces, generated output, processes
+and external state before declaring independence. Different paths alone do not
+establish it; Jecode does not infer it from paths. Each call has its own result.
+Workspace checkpoints belong to individual modifying calls; commands save only
+declared `protect` paths. One failure does not undo another call or make a
+multi-file operation atomic. A `bash` or
+`exec` result with `process_id` only confirms launch or the end of its requested
+wait; poll the process before work
+that depends on its completion.
+
+For concurrent commands, use focused `protect` paths for each command's
+recovery scope. Restoring a broad scope can also undo another operation's
+changes. In explicitly declared groups, completed calls appear individually as
+they finish. Their
+results are saved before display; the next model request receives all results
+in original call order. If Jecode closes mid-group, saved completions retain
+their results and diffs, started calls without a saved result have an unknown
+outcome, and calls not started are marked not executed. None are automatically
+replayed; inspect current state before deciding what to retry.
 
 `work` is an optional short label chosen by the assistant for related `read`,
 `list`, `search`, `map`, `bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls

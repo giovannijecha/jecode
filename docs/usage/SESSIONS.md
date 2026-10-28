@@ -70,10 +70,15 @@ editing, while the TUI remains the place to manage paused drafts.
 If the initial save fails, Jecode does not start the provider request or a
 tool. Restore storage access, review the retained drafts and send the intended
 work again. If Jecode stops after a tool starts but before its result is saved,
-its effect is **unknown**: inspect project files before deciding whether to
-retry. Calls that had not started are marked **not executed**. Recovery does
-not rerun either kind. Partial streamed text is retained as incomplete
-evidence; the conversation reopens ready for a new request. A forced exit can
+its effect is **unknown**: inspect project files and external state before
+deciding whether to retry. In an independent parallel group, each completed
+call is saved separately before its result appears in the interface. Recovery
+keeps those known results and file diffs in original call order, even if they
+finished out of order. Started calls without saved results remain **unknown**;
+calls that had not started are marked **not executed**. Recovery does not rerun
+any of them. A returned `process_id` may still have work running; poll it
+before treating the command as finished. Partial streamed text is retained as
+incomplete evidence; the conversation reopens ready for a new request. A forced exit can
 lose the latest unsaved draft edit or streaming tail.
 
 An incomplete final journal transaction is recovered from the last complete

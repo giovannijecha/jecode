@@ -37,8 +37,11 @@ pub enum Stage {
     Completion,
     Tool(String),
     ReadBatch(Vec<String>),
+    ToolBatch(Vec<String>),
+    ToolBatchResult(crate::json::Value),
     ToolFinished,
     ReadBatchFinished,
+    ToolBatchFinished,
     Ready,
     Preserve,
     /// A backend selection must either be saved in full or leave its old state.
@@ -98,6 +101,18 @@ impl Handle {
             .into_iter()
             .map(|id| redactor.text(&id))
             .collect();
+        document.pending.batch = document
+            .pending
+            .batch
+            .into_iter()
+            .map(|id| redactor.text(&id))
+            .collect();
+        document.pending.completed = document
+            .pending
+            .completed
+            .iter()
+            .map(|receipt| redactor.value(receipt))
+            .collect();
         context::validate(&document)?;
         let interrupted = document.recover();
         context::validate(&document)?;
@@ -144,6 +159,9 @@ impl Handle {
         has_model: bool,
         stage: Stage,
     ) -> Result<(), String> {
+        if let Stage::ToolBatchResult(receipt) = &stage {
+            context::validate_batch_receipt(receipt)?;
+        }
         let messages = archive.messages.lock().unwrap();
         let events = archive.events.lock().unwrap();
         let _io = self.0.io.lock().unwrap();
@@ -159,7 +177,11 @@ impl Handle {
         }
         let selection = matches!(stage, Stage::Selection)
             .then(|| (live.document.clone(), live.validated.clone()));
-        let preparation = matches!(stage, Stage::Begin | Stage::Accept(_)).then(|| {
+        let preparation = matches!(
+            stage,
+            Stage::Begin | Stage::Accept(_) | Stage::ToolBatchResult(_)
+        )
+        .then(|| {
             (
                 live.document.messages.len(),
                 live.document.events.len(),
@@ -205,8 +227,22 @@ impl Handle {
             Stage::ReadBatch(ids) => {
                 live.document.pending.reads = ids.iter().map(|id| live.redactor.text(id)).collect();
             }
+            Stage::ToolBatch(ids) => {
+                live.document.pending.batch = ids.iter().map(|id| live.redactor.text(id)).collect();
+                live.document.pending.reads = live.document.pending.batch.clone();
+                live.document.pending.completed.clear();
+            }
+            Stage::ToolBatchResult(receipt) => {
+                let receipt = live.redactor.value(&receipt);
+                live.document.pending.completed.push(receipt);
+            }
             Stage::ToolFinished => live.document.pending.tool = None,
             Stage::ReadBatchFinished => live.document.pending.reads.clear(),
+            Stage::ToolBatchFinished => {
+                live.document.pending.reads.clear();
+                live.document.pending.batch.clear();
+                live.document.pending.completed.clear();
+            }
             Stage::Ready => live.document.pending = Pending::default(),
             Stage::Accept(_) | Stage::Preserve | Stage::Selection => {}
         }

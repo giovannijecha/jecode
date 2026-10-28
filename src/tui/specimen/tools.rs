@@ -291,7 +291,7 @@ fn group(calls: &[Call], columns: usize, keycap: bool) -> Vec<Line> {
         }
     }
     if !expanded {
-        rows.extend(cards::chapter_activity(&tools, columns));
+        rows.extend(cards::chapter_activities(&tools, columns));
         cards::hang(&mut rows[1..], true);
     }
     rows

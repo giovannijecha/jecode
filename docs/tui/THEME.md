@@ -211,11 +211,23 @@ snapshots, browser actions, commands and process calls, plus running,
 background and stopped calls; it reads `0 completed` when it has nothing else.
 Each command keeps one row with its family-coloured name and description or
 command, with running time or a failed `exit N` inline. Other failed or
-unusual calls keep a row and bounded errors. The latest ordinary Read, Web or
-Browser call stays at the foot, with its time frozen when done. A chapter
-that replaced a single card keeps at least that card's height. Expanded, the
-title's tree closes on its facts, every call follows as its full card, and the
-foot row is dropped.
+unusual calls keep a row and bounded errors. Up to four latest completed
+ordinary Read, List, Search, Map, Web or Browser calls stay at the foot in
+source order, with their times frozen when done. Running ordinary calls take
+these rows while active. A chapter that replaced a single card keeps at least
+that card's height. Expanded, the title's tree closes on its facts, every call
+follows as its full card, and the foot rows are dropped.
+
+While several calls run together, each running Read, List, Search, Map, Web or
+Browser member keeps a compact target and elapsed-time row in source order.
+The chapter facts count running calls; the latest completed ordinary call
+remains last. As results arrive, the corresponding running rows become
+completed foot rows without shrinking the chapter. Earlier completed rows
+leave the four-row window as further calls start. The chapter updates in place
+even when completion order differs from source order. The status pill reads
+`N tools running` while more than one call
+is active and returns to the remaining call's normal activity label when one
+is left. `Ctrl+O` still applies to the latest finished turn.
 
 ### Diffs
 
