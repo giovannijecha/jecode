@@ -286,6 +286,8 @@ mod lifecycle_tests;
 #[cfg(test)]
 mod lock_tests;
 #[cfg(test)]
+mod reclaim_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod resume_tests;

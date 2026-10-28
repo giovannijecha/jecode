@@ -181,9 +181,16 @@ evidence before deciding what to retry. Closed assignments are not restored to
 the active list or repeated in the model's current collaborator context. Their
 historical receipts and saved child histories remain on disk. An unavailable copy
 is reported rather than preventing the
-parent conversation from opening. An interrupted workspace setup can be retried
-only after verifying ownership of the incomplete copy. Complete copies and
-foreign directories are preserved.
+parent conversation from opening.
+
+An isolated copy is prepared just before the receipt that records its
+assignment. If Jecode stops in between, no assignment owns the copy. Resuming
+that conversation removes such copies and their Git registrations, removing
+links inside without following them. Only the resumed conversation's own
+collaborator storage is examined, while its session lock keeps other
+conversations out, and copies of its saved assignments stay. A copy whose
+ownership marker does not name this project and assignment is left in place
+and reported in the resume status; new assignments skip its number.
 
 Deleting a parent conversation retains its collaborator files, child histories
 and a recovery record at the location reported by the deletion result. This

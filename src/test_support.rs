@@ -54,6 +54,22 @@ impl Drop for Directory {
     }
 }
 
+/// A directory link: a symbolic link on Unix, a junction on Windows.
+pub fn link_directory(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let created = std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{created:?}");
+    }
+}
+
 /// A prior exchange large enough to make a synthetic provider rejection
 /// recoverable without shrinking the original user request under test.
 pub fn prior_compactable_exchange(bytes: usize) -> [Value; 2] {

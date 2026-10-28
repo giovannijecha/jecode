@@ -82,6 +82,11 @@ impl Store {
         &self.bucket
     }
 
+    /// The canonical project directory these sessions belong to.
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     pub fn temporary_area(&self, id: &str) -> Result<crate::scratch::Area, String> {
         crate::scratch::Area::new(self.temporary.join(id), self.directory.clone(), id)
     }

@@ -177,7 +177,10 @@ Both installers build offline and print the installed executable's version.
 Collaborator fixtures use isolated session homes, synthetic model services and
 local Git repositories. They cover provider catalogs, in-flight assignment
 updates, late returns resuming the main model, review, cancellation, recovery,
-dirty worktree baselines, conflict-aware integration and owned cleanup. The TUI
+dirty worktree baselines, conflict-aware integration and owned cleanup. A
+subprocess fixture stops after preparing an isolated copy and before its
+`created` receipt; resume reclaims the copy only once that session is no longer
+live. The TUI
 suite covers read-only inspection, stable selection, draft/caret restoration,
 visible activity, readback and summary layout. No personal credentials or live
 provider inference are needed.

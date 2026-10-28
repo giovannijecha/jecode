@@ -172,6 +172,12 @@ impl Handle {
         self.0.live.lock().unwrap().document.pending.active
     }
 
+    /// Whether this handle holds the session's exclusive writer lease, which
+    /// keeps every other conversation out of the session's own storage.
+    pub fn leased(&self) -> bool {
+        self.0.live.lock().unwrap().lease.is_some()
+    }
+
     pub fn checkpoint(
         &self,
         archive: &Archive,

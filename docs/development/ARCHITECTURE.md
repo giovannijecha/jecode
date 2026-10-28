@@ -268,6 +268,11 @@ replacing the observer. Interrupted running work restores as unknown and is
 never replayed. Successful close joins the worker, releases its tool resources,
 saves a final `closed` receipt and removes the live record. Restore excludes
 already closed records, including legacy records with `workspace_closed=true`.
+An isolated copy is prepared before the `created` receipt that owns it. Binding
+a resumed session under its exclusive lease (`collaboration/restore.rs`)
+removes copies in that session's storage that no restored record names, through
+the owner-verified, link-safe close path. Copies it cannot verify stay, are
+reported in the resume status and keep their numbers out of new IDs.
 A monotonic counter reconstructed from receipts keeps IDs unique after removal.
 The active snapshot and repeated model context therefore depend on open work;
 the durable chronological archive still grows with the conversation. Closing a

@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_support::Directory;
+use crate::test_support::{Directory, link_directory};
 use std::process::Command;
 
 fn git(root: &Path, args: &[&str]) {
@@ -375,11 +375,12 @@ fn interrupted_owned_preparation_is_recovered_before_reusing_id() {
 }
 
 #[test]
-fn completed_and_foreign_workspaces_are_preserved_on_id_collision() {
+fn unowned_complete_copy_is_reclaimed_and_foreign_entries_are_preserved() {
     let (_temp, project, storage) = fixture();
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
     let marker = storage.join("a1/baseline.json");
     let ready = fs::read_to_string(&marker).unwrap();
+    // Preparation cannot tell whether a saved record owns a complete copy.
     assert!(Workspace::prepare(&project, &storage, "a1", Mode::Isolated).is_err());
     assert!(workspace.root().join("tracked.txt").exists());
     fs::write(
@@ -388,9 +389,37 @@ fn completed_and_foreign_workspaces_are_preserved_on_id_collision() {
     )
     .unwrap();
     assert!(Workspace::prepare(&project, &storage, "a1", Mode::Isolated).is_err());
+    assert!(Workspace::reclaim(&project, &storage, "a1").is_err());
     assert!(workspace.root().join("tracked.txt").exists());
     fs::write(&marker, ready).unwrap();
-    workspace.close().unwrap();
+    // A copy no saved record owns, as after a stop before its `created`
+    // receipt, is removed with its Git registration.
+    let canonical = fs::canonicalize(&project).unwrap();
+    assert!(git::registered(&canonical, workspace.root()).unwrap());
+    Workspace::reclaim(&project, &storage, "a1").unwrap();
+    assert!(!storage.join("a1").exists());
+    assert!(!git::registered(&canonical, workspace.root()).unwrap());
+    // A stop before or while writing the marker leaves an empty directory or
+    // a staging file; anything else without a marker stays.
+    fs::create_dir(storage.join("a2")).unwrap();
+    Workspace::reclaim(&project, &storage, "a2").unwrap();
+    fs::create_dir(storage.join("a3")).unwrap();
+    fs::write(
+        crate::disk::temporary_beside(&storage.join("a3/baseline.json")),
+        "{",
+    )
+    .unwrap();
+    Workspace::reclaim(&project, &storage, "a3").unwrap();
+    assert!(!storage.join("a2").exists() && !storage.join("a3").exists());
+    fs::create_dir(storage.join("a4")).unwrap();
+    fs::write(storage.join("a4/notes.txt"), "keep\n").unwrap();
+    assert!(Workspace::reclaim(&project, &storage, "a4").is_err());
+    assert_eq!(
+        fs::read_to_string(storage.join("a4/notes.txt")).unwrap(),
+        "keep\n"
+    );
+    let reused = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    reused.close().unwrap();
 }
 
 #[test]
@@ -403,21 +432,6 @@ fn interrupted_worktree_with_missing_tree_can_retry_same_id() {
     fs::remove_dir_all(workspace.root()).unwrap();
     let recovered = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
     recovered.close().unwrap();
-}
-
-fn link_directory(target: &Path, link: &Path) {
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(target, link).unwrap();
-    #[cfg(windows)]
-    {
-        let created = Command::new("cmd.exe")
-            .args(["/c", "mklink", "/J"])
-            .arg(link.to_string_lossy().replace('/', "\\"))
-            .arg(target.to_string_lossy().replace('/', "\\"))
-            .output()
-            .unwrap();
-        assert!(created.status.success(), "{created:?}");
-    }
 }
 
 #[test]

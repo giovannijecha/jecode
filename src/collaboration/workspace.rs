@@ -188,6 +188,60 @@ impl Workspace {
         Ok(Value::object([("closed", Value::Bool(true))]))
     }
 
+    /// Remove an isolated copy that no saved assignment record owns, such as
+    /// one prepared just before Jecode stopped. The caller establishes that no
+    /// record owns `id`. A present marker must name this project, this location
+    /// and `id` before anything is touched; removal is `close`, so links inside
+    /// the copy are removed without being followed. Without a marker, only
+    /// Jecode's staging files and the then empty directory are removed.
+    pub fn reclaim(project_root: &Path, storage_root: &Path, id: &str) -> Result<(), String> {
+        valid_id(id)?;
+        let project = fs::canonicalize(project_root)
+            .map_err(|error| format!("Could not resolve project: {error}"))?;
+        let storage = fs::canonicalize(storage_root)
+            .map_err(|error| format!("Could not resolve collaboration storage: {error}"))?
+            .join(id);
+        if !crate::disk::ordinary_directory(
+            &fs::symlink_metadata(&storage).map_err(|error| error.to_string())?,
+        ) {
+            return Err("Assignment storage is not an ordinary directory".into());
+        }
+        let workspace = Self {
+            project,
+            root: storage.join("tree"),
+            storage: storage.clone(),
+            id: id.into(),
+            mode: Mode::Isolated,
+            baseline: BTreeMap::new(),
+        };
+        let marker = storage.join("baseline.json");
+        if crate::disk::metadata_if_present(&marker)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            workspace.verify_owner()?;
+        }
+        // A stop while saving the marker leaves its staging file; a stop
+        // before it leaves only the empty directory.
+        let mut empty = true;
+        for entry in fs::read_dir(&storage).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
+            if metadata.is_file()
+                && !crate::disk::linked(&metadata)
+                && crate::disk::temporary_name(&entry.file_name().to_string_lossy())
+            {
+                fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
+            } else {
+                empty = false;
+            }
+        }
+        if empty {
+            return fs::remove_dir(&storage).map_err(|error| error.to_string());
+        }
+        workspace.close().map(|_| ())
+    }
+
     pub fn value(&self) -> Value {
         Value::object([
             ("project", Value::string(self.project.to_string_lossy())),

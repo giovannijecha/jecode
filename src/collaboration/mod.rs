@@ -1,6 +1,7 @@
 //! Session-scoped collaborator receipts and live workers.
 
 mod log;
+mod restore;
 mod runtime;
 #[cfg(test)]
 mod tests;
@@ -392,77 +393,6 @@ impl Observer {
             .and_then(|event| event.get("sequence"))
             .and_then(Value::as_usize)
             .unwrap_or(0)
-    }
-
-    pub fn bind(&self, archive: Archive, handle: Option<Handle>) -> Result<(), String> {
-        let mut state = self.0.state.lock().unwrap();
-        let mut parent = self.0.parent.lock().unwrap();
-        *parent = Some((archive.clone(), handle));
-        state.records.clear();
-        state.receipts.clear();
-        state.last_number = 0;
-        let mut latest = None;
-        for event in archive.events.lock().unwrap().iter() {
-            if event.get("type").and_then(Value::as_str) == Some("collaboration") {
-                state.receipts.push(event.clone());
-                state.last_number = state
-                    .last_number
-                    .max(event.get("number").and_then(Value::as_usize).unwrap_or(0));
-                if let Some(records) = event.get("records").and_then(Value::as_array) {
-                    for record in records {
-                        state.last_number = state
-                            .last_number
-                            .max(record.get("number").and_then(Value::as_usize).unwrap_or(0));
-                    }
-                }
-                latest = event
-                    .get("records")
-                    .and_then(Value::as_array)
-                    .map(<[Value]>::to_vec);
-            }
-        }
-        let mut interrupted = Vec::new();
-        if let Some(latest) = latest {
-            interrupted = latest
-                .iter()
-                .filter(|record| {
-                    matches!(
-                        record.get("state").and_then(Value::as_str),
-                        Some("running" | "stopping")
-                    )
-                })
-                .filter_map(|record| record.get("id").and_then(Value::as_str).map(str::to_owned))
-                .collect();
-            state.records = latest
-                .iter()
-                .filter(|record| record.get("workspace_closed") != Some(&Value::Bool(true)))
-                .map(Record::from_value)
-                .collect::<Result<_, _>>()?;
-        }
-        let unknown = state
-            .records
-            .iter()
-            .filter(|record| interrupted.contains(&record.id))
-            .map(|record| {
-                (
-                    record.id.clone(),
-                    record.received_version,
-                    record.title.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        drop(state);
-        drop(parent);
-        for (id, version, title) in unknown {
-            self.receipt(
-                "unknown",
-                Some(&id),
-                version,
-                &title,
-                vec!["Previous collaborator execution has no confirmed result".into()],
-            )?;
-        }
-        Ok(())
     }
 
     pub fn stop_all(&self) {

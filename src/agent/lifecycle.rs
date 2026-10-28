@@ -178,7 +178,8 @@ impl Agent {
         self.cancellation.reset();
         self.persistence = Some(handle);
         self.sync_conversation();
-        self.collaboration
+        let reclaimed = self
+            .collaboration
             .bind(self.archive(), self.persistence.clone())?;
         self.questions
             .bind(self.archive(), self.persistence.clone());
@@ -195,7 +196,10 @@ impl Agent {
             self.redactor.clone(),
         )?;
         self.tools.configure_temporary(temporary);
-        Ok(status)
+        Ok(match reclaimed {
+            Some(note) => format!("{status} {note}"),
+            None => status,
+        })
     }
 
     #[cfg(test)]
