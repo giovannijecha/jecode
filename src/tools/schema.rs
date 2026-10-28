@@ -1,6 +1,7 @@
 use crate::json::Value;
 use std::sync::OnceLock;
 mod collaboration;
+mod web;
 mod work;
 
 /// Executable tools in Jecode's neutral name, description and parameters shape.
@@ -48,23 +49,33 @@ pub fn encoded_size_for(delegation: bool) -> usize {
     }
 }
 
+fn string() -> Value {
+    Value::object([("type", Value::string("string"))])
+}
+
+fn integer(min: usize, max: Option<usize>) -> Value {
+    let mut value = Value::object([
+        ("type", Value::string("integer")),
+        ("minimum", Value::number(min)),
+    ]);
+    if let Some(max) = max
+        && let Value::Object(fields) = &mut value
+    {
+        fields.insert("maximum".into(), Value::number(max));
+    }
+    value
+}
+
+fn boolean() -> Value {
+    Value::object([("type", Value::string("boolean"))])
+}
+
+fn strings() -> Value {
+    Value::object([("type", Value::string("array")), ("items", string())])
+}
+
 fn build_definitions() -> Value {
-    let string = || Value::object([("type", Value::string("string"))]);
-    let integer = |min, max: Option<usize>| {
-        let mut value = Value::object([
-            ("type", Value::string("integer")),
-            ("minimum", Value::number(min)),
-        ]);
-        if let Some(max) = max
-            && let Value::Object(fields) = &mut value
-        {
-            fields.insert("maximum".into(), Value::number(max));
-        }
-        value
-    };
-    let boolean = || Value::object([("type", Value::string("boolean"))]);
-    let strings = || Value::object([("type", Value::string("array")), ("items", string())]);
-    let mut tools = base_definitions(string, integer, boolean, strings);
+    let mut tools = base_definitions();
     tools.extend(super::discovery::definitions());
     tools.extend(crate::project_map::definitions());
     tools.push(collaboration::definition());
@@ -147,12 +158,7 @@ pub(crate) fn routine(
     tool(name, description, properties, required)
 }
 
-fn base_definitions(
-    string: impl Fn() -> Value,
-    integer: impl Fn(usize, Option<usize>) -> Value,
-    boolean: impl Fn() -> Value,
-    strings: impl Fn() -> Value,
-) -> Vec<Value> {
+fn base_definitions() -> Vec<Value> {
     vec![
         routine(
             "read",
@@ -372,113 +378,8 @@ fn base_definitions(
             ]),
             &["action"],
         ),
-        routine(
-            "web",
-            "Use local curl for HTTP(S) fetch, raw download or link crawl. fetch returns status, final_url, MIME, raw/text paths and preview; extraction stops at 4 MiB (see extraction_truncated). HTML returns 100 links at most; links_count/links_path cover all. download saves raw bytes. fetch/download need url and accept method, headers, body; headers stay at the requested origin on redirects. crawl uses GET without body: start with urls or resume with crawl_id and unchanged saved seed headers, timeout_seconds and max_bytes. Defaults: same_origin true, max_depth 1, max_pages 20 per call. Returns page summaries plus manifest_path for full JSONL records; page with read. max_bytes limits each response only when set. Use browser for rendered pages or search sites.",
-            Value::object([
-                (
-                    "action",
-                    Value::object([
-                        ("type", Value::string("string")),
-                        (
-                            "enum",
-                            Value::Array(["fetch", "download", "crawl"].map(Value::string).into()),
-                        ),
-                    ]),
-                ),
-                ("url", string()),
-                ("urls", strings()),
-                ("crawl_id", string()),
-                ("method", string()),
-                (
-                    "headers",
-                    Value::object([
-                        ("type", Value::string("object")),
-                        ("additionalProperties", string()),
-                    ]),
-                ),
-                ("body", string()),
-                ("timeout_seconds", integer(1, None)),
-                ("max_bytes", integer(1, None)),
-                ("max_pages", integer(1, None)),
-                ("max_depth", integer(0, None)),
-                ("same_origin", boolean()),
-            ]),
-            &["action"],
-        ),
-        routine(
-            "browser",
-            "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). width+height set the page viewport on open (before url) or screenshot. Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives elements with refs such as @1, role, name and state; selector accepts refs or CSS. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. logs pages events (default console and errors); pass next_cursor as cursor; missed counts evicted events. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
-            Value::object([
-                (
-                    "action",
-                    Value::object([
-                        ("type", Value::string("string")),
-                        (
-                            "enum",
-                            Value::Array(
-                                [
-                                    "open",
-                                    "tabs",
-                                    "navigate",
-                                    "snapshot",
-                                    "click",
-                                    "fill",
-                                    "press",
-                                    "scroll",
-                                    "wait",
-                                    "screenshot",
-                                    "evaluate",
-                                    "cdp",
-                                    "logs",
-                                    "close",
-                                    "stop",
-                                ]
-                                .map(Value::string)
-                                .into(),
-                            ),
-                        ),
-                    ]),
-                ),
-                ("url", string()),
-                ("visible", boolean()),
-                ("profile", string()),
-                ("browser_id", string()),
-                ("tab_id", string()),
-                ("selector", string()),
-                ("text", string()),
-                ("key", string()),
-                ("expression", string()),
-                ("method", string()),
-                ("params", Value::object([("type", Value::string("object"))])),
-                ("timeout_ms", integer(1, None)),
-                ("x", integer(0, None)),
-                ("y", integer(0, None)),
-                (
-                    "delta_y",
-                    Value::object([("type", Value::string("integer"))]),
-                ),
-                ("width", integer(1, Some(10_000))),
-                ("height", integer(1, Some(10_000))),
-                (
-                    "filter",
-                    Value::object([
-                        ("type", Value::string("string")),
-                        (
-                            "enum",
-                            Value::Array(
-                                ["default", "console", "errors", "network", "all"]
-                                    .map(Value::string)
-                                    .into(),
-                            ),
-                        ),
-                    ]),
-                ),
-                ("limit", integer(1, Some(200))),
-                ("cursor", string()),
-            ]),
-            &["action"],
-        ),
+        web::web(),
+        web::browser(),
         routine(
             "exec",
             "Run an executable with literal argv and no implicit shell. A bare name uses PATH, including any shim found there; Jecode does not bypass it. cwd defaults to the project directory; relative cwd uses the project root, and executable paths with a directory use cwd. env strings set variables and null removes them after inherited provider credentials are stripped. stdin sends a string then closes; omitted means EOF. tty:true rejects stdin and always returns a process_id; use process write/resize/interrupt. Terminal stdout combines child streams; stderr holds bridge diagnostics. Without tty, wait_ms returns a process_id; omitted waits for exit. timeout_seconds bounds execution. protect saves declared workspace paths before launch, independent of cwd. Previews and saved refs follow Bash.",
@@ -520,3 +421,5 @@ fn base_definitions(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod web_tests;
