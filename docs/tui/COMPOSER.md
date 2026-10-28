@@ -179,9 +179,11 @@ active work. `Ctrl+C` also stops work, closes a panel, or clears an idle
 draft; it never quits. See [Scrolling and resize](RESIZE.md) for reflow and
 terminal restoration.
 
-`Ctrl+Q` quits at once when idle. While a turn runs or a background process is
-active, it opens `Quit · work is running`, listing the current turn and each
-process, with `Stop it and quit?` (`both` or `all` for more). `Enter` or a
+`Ctrl+Q` quits at once when idle. While a turn runs, a background process is
+active or a collaborator is still on its assignment, it opens
+`Quit · work is running`, listing the current turn, each process and each
+working agent, with `Stop it and quit?` (`both` or `all` for more). A stopped
+collaborator resumes with an unknown outcome. `Enter` or a
 second `Ctrl+Q` stops the work and quits; `Esc` or `Ctrl+C` cancels. Quitting
 saves input in an existing saved session.
 

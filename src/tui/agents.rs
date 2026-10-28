@@ -52,6 +52,11 @@ pub(super) fn failed_check(record: &Value) -> bool {
         .any(|check| check.to_ascii_lowercase().contains("fail"))
 }
 
+/// A collaborator still on its assignment, which quitting would interrupt.
+pub(super) fn working(record: &Value) -> bool {
+    matches!(status(record), "running" | "stopping" | "queued")
+}
+
 pub(super) fn status(record: &Value) -> &'static str {
     match value(record, "state") {
         "running" => "running",

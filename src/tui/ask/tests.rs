@@ -185,7 +185,12 @@ fn own_words_wrap_under_the_fact_column_with_the_caret_at_the_end() {
     assert!(rows[own + 1].starts_with(&" ".repeat(18)));
     let (row, column) = frame.cursor.unwrap();
     assert!(row > own && column > 18 && column < 38, "{row} {column}");
-    assert!(rows.iter().rev().take(2).any(|row| row.contains("Enter  send")));
+    assert!(
+        rows.iter()
+            .rev()
+            .take(2)
+            .any(|row| row.contains("Enter  send"))
+    );
 }
 
 #[test]

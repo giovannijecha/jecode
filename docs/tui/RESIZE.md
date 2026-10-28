@@ -56,7 +56,8 @@ conversations remain available through `/resume`; see
 ## Entering and leaving
 
 Entering the TUI leaves the caller's main screen and scrollback in place.
-`Ctrl+Q` saves the draft and exits; while a turn or background process runs,
+`Ctrl+Q` saves the draft and exits; while a turn, background process or
+collaborator runs,
 it first asks to stop that work (see
 [Composer and controls](COMPOSER.md#reading-quitting-and-feedback)). On normal
 exit, Jecode resets attributes, restores the caller's screen, cursor, and
