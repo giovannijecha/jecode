@@ -5,6 +5,7 @@ use crate::{
     tui::{
         line::Line,
         state::State,
+        text,
         theme::{BADGE_IDLE, SELECTED_SURFACE},
         view,
     },
@@ -135,7 +136,7 @@ fn the_question_takes_the_composer_place_with_marks_facts_and_chip() {
             "  ○ All rows      Ignore filters",
             "  ○ Other         Type your own answer",
             &"─".repeat(60),
-            "   Enter  choose    ↑↓  move    Esc  back to chat",
+            "   Enter  choose    Esc  back to chat    Ctrl+D  dismiss",
         ]
     );
     assert_eq!(
@@ -184,7 +185,7 @@ fn own_words_wrap_under_the_fact_column_with_the_caret_at_the_end() {
     assert!(rows[own + 1].starts_with(&" ".repeat(18)));
     let (row, column) = frame.cursor.unwrap();
     assert!(row > own && column > 18 && column < 38, "{row} {column}");
-    assert!(rows.last().unwrap().contains("Enter  send"));
+    assert!(rows.iter().rev().take(2).any(|row| row.contains("Enter  send")));
 }
 
 #[test]
@@ -201,9 +202,31 @@ fn several_questions_show_a_step_row_and_free_text_input() {
     assert_eq!(rows[5], "› Type your answer");
     assert_eq!(
         rows.last().unwrap(),
-        "   Enter  send    Ctrl+J  new line    ←→  questions",
-        "keys that do not fit are left out"
+        "   Enter  send    Esc  back to chat    Ctrl+D  dismiss",
+        "the movement hints leave first"
     );
+}
+
+#[test]
+fn leaving_keys_always_show_and_wrap_when_narrow() {
+    let request = request(SEVERAL);
+    let panel = Panel::new(&request, None);
+    for width in [80, 60, 40, 24] {
+        let rows = plain(&dock(&request, &panel, width, 30));
+        let keys = rows
+            .iter()
+            .skip_while(|row| !row.contains("Enter"))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            keys.contains("Esc  back to chat") && keys.contains("Ctrl+D  dismiss"),
+            "{width}: {rows:#?}"
+        );
+        assert!(rows.iter().all(|row| text::cells(row) <= width));
+    }
+    let wide = plain(&dock(&request, &panel, 100, 30));
+    assert!(wide.last().unwrap().contains("←→  questions"));
 }
 
 #[test]

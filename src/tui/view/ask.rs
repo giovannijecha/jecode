@@ -39,7 +39,8 @@ struct Layout {
 fn layout(request: &Request, panel: &Panel, columns: usize, height: usize) -> Layout {
     let question = &request.questions[panel.step];
     let entry = panel.entry();
-    let fixed = 4 + usize::from(request.questions.len() > 1);
+    let fixed =
+        3 + key_rows(request, panel, columns).len() + usize::from(request.questions.len() > 1);
     let room = height.saturating_sub(fixed).max(1);
     let mut body = body::body(question, entry, columns);
     let overflow = body.rows.len() > room && columns >= 7;
@@ -121,11 +122,22 @@ pub(super) fn block(
         .filter(|(row, _)| (start..end).contains(row))
         .map(|(row, column)| (first + row - start, column));
     parts.push((rule, Part::Chrome));
-    if columns >= 7 {
-        let keys = panel::row(&keys(request, panel), columns - 4).indent("  ", MUTED);
+    for keys in key_rows(request, panel, columns) {
         parts.push((keys, Part::Keep));
     }
     panel::fitted(parts, caret, height)
+}
+
+/// The keys where the footer was. When narrow, the movement hints leave
+/// first and what still does not fit wraps, so Esc and Ctrl+D always show.
+fn key_rows(request: &Request, panel: &Panel, columns: usize) -> Vec<Line> {
+    if columns < 7 {
+        return Vec::new();
+    }
+    panel::keys(&keys(request, panel), columns - 4, false)
+        .into_iter()
+        .map(|row| row.indent("  ", MUTED))
+        .collect()
 }
 
 /// `☑` before each answered title, the current one in bold `accent`, and
@@ -179,16 +191,17 @@ fn keys(request: &Request, panel: &Panel) -> Vec<Key<'static>> {
     }
     keys.push(key("Enter", verb));
     if free {
-        keys.push(key("Ctrl+J", "new line"));
+        keys.push(key("Ctrl+J", "new line").optional());
     }
     if several {
-        keys.push(if typing && !entry.editor.text.is_empty() {
+        let switch = if typing && !entry.editor.text.is_empty() {
             key("Tab", "questions")
         } else {
             key("←→", "questions")
-        });
+        };
+        keys.push(switch.optional());
     } else if !free {
-        keys.push(key("↑↓", "move"));
+        keys.push(key("↑↓", "move").optional());
     }
     keys.push(key("Esc", "back to chat"));
     keys.push(key("Ctrl+D", "dismiss"));
