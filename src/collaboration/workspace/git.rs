@@ -4,7 +4,10 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn run(project: &Path, arguments: &[&str]) -> Result<Output, String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    command.arg("-c").arg("core.longpaths=true");
+    let output = command
         .arg("-C")
         .arg(project)
         .args(arguments)
@@ -33,12 +36,77 @@ pub(super) fn require_repository(project: &Path) -> Result<(), String> {
 }
 
 pub(super) fn create_worktree(project: &Path, root: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    let root_fs = root;
     let root = git_path(root)?;
-    run(
-        project,
-        &["worktree", "add", "--detach", "--", &root, "HEAD"],
-    )?;
-    Ok(())
+    #[cfg(not(windows))]
+    {
+        run(
+            project,
+            &["worktree", "add", "--detach", "--", &root, "HEAD"],
+        )?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        run(
+            project,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--no-checkout",
+                "--",
+                &root,
+                "HEAD",
+            ],
+        )?;
+        // Git's checkout child receives an absolute GIT_DIR derived from the
+        // long worktree path and can reject it before reading config.
+        // Address the linked Git directory directly for the checkout.
+        let gitdir = linked_gitdir(root_fs)?;
+        let gitdir_arg = git_path(&gitdir)?;
+        run(
+            project,
+            &[
+                "--git-dir",
+                &gitdir_arg,
+                "--work-tree",
+                &root,
+                "reset",
+                "--hard",
+                "--no-recurse-submodules",
+            ],
+        )
+        .map_err(|error| {
+            if error.contains("Filename too long") {
+                format!(
+                    "Git for Windows cannot prepare isolated workspace {root}: its path is too long for Git even with core.longpaths=true ({error})"
+                )
+            } else {
+                error
+            }
+        })?;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn linked_gitdir(root: &Path) -> Result<std::path::PathBuf, String> {
+    let gitfile = std::fs::read_to_string(root.join(".git"))
+        .map_err(|error| format!("Could not read linked worktree Git file: {error}"))?;
+    let gitdir = gitfile
+        .trim_end()
+        .strip_prefix("gitdir: ")
+        .ok_or("Invalid linked worktree Git file")?;
+    let gitdir = Path::new(gitdir);
+    let gitdir = if gitdir.is_absolute() {
+        gitdir.to_path_buf()
+    } else {
+        root.join(gitdir)
+    };
+    std::fs::canonicalize(gitdir)
+        .map_err(|error| format!("Could not resolve linked worktree Git directory: {error}"))
 }
 
 pub(super) fn remove_worktree(project: &Path, root: &Path) -> Result<(), String> {
@@ -90,16 +158,40 @@ fn git_path(path: &Path) -> Result<String, String> {
 }
 
 pub(super) fn inventory(root: &Path) -> Result<BTreeSet<String>, String> {
-    let output = run(
-        root,
-        &[
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ],
-    )?;
+    let arguments = [
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    ];
+    #[cfg(windows)]
+    let output = if root.join(".git").is_file() {
+        let gitdir = linked_gitdir(root)?;
+        let gitdir_arg = git_path(&gitdir)?;
+        let root_arg = git_path(root)?;
+        let mut linked = vec![
+            "--git-dir",
+            gitdir_arg.as_str(),
+            "--work-tree",
+            root_arg.as_str(),
+        ];
+        linked.extend(arguments);
+        run(&gitdir, &linked).map_err(|error| {
+            if error.contains("Filename too long") {
+                format!(
+                    "Git for Windows cannot inventory isolated workspace {}: its path is too long for Git even with core.longpaths=true ({error})",
+                    root.display()
+                )
+            } else {
+                error
+            }
+        })?
+    } else {
+        run(root, &arguments)?
+    };
+    #[cfg(not(windows))]
+    let output = run(root, &arguments)?;
     let mut names = BTreeSet::new();
     for bytes in output
         .stdout

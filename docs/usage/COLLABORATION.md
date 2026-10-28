@@ -89,6 +89,11 @@ starting files are retained separately for comparison; no commit or branch is
 created. Native Git must be available, and the project must be a Git repository
 root with an existing `HEAD`.
 
+Very deep Windows paths can still exceed Git's own directory limits. Jecode
+reports the native failure and any incomplete cleanup; it does not start a
+worker with a partially prepared copy. Shared work remains available when an
+isolated copy cannot be prepared.
+
 This is file isolation, not an operating-system sandbox. Commands and browser
 operations retain ordinary system access. A worktree shares its repository's Git
 administration; coordinate repository operations and other external effects.

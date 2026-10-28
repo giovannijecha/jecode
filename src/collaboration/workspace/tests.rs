@@ -50,6 +50,66 @@ fn changed(review: &Value) -> Vec<String> {
         .collect()
 }
 
+#[cfg(windows)]
+#[test]
+fn isolated_windows_path_reports_git_limit_and_cleans_up() {
+    for length in [240, 300] {
+        let (_temp, project, mut storage) = fixture();
+        while storage.join("a1/tree").to_string_lossy().len() < length {
+            let remaining = length - storage.join("a1/tree").to_string_lossy().len();
+            storage.push("s".repeat(remaining.saturating_sub(1).clamp(1, 24)));
+        }
+        assert!(storage.join("a1/tree").to_string_lossy().len() >= length);
+        let workspace = match Workspace::prepare(&project, &storage, "a1", Mode::Isolated) {
+            Ok(workspace) => workspace,
+            Err(error) if length == 300 => {
+                assert!(
+                    error.contains("cannot prepare isolated workspace")
+                        || error.contains("cannot inventory isolated workspace"),
+                    "{error}"
+                );
+                assert!(error.contains("core.longpaths=true"), "{error}");
+                assert_eq!(
+                    fs::read_to_string(project.join("tracked.txt")).unwrap(),
+                    "head\n"
+                );
+                assert!(!storage.join("a1").exists());
+                assert!(!super::git::registered(&project, &storage.join("a1/tree")).unwrap());
+                continue;
+            }
+            Err(error) => panic!("240-character workspace should work: {error}"),
+        };
+        assert_eq!(
+            fs::read_to_string(workspace.root().join("tracked.txt")).unwrap(),
+            "head\n"
+        );
+        fs::write(
+            workspace.root().join("tracked.txt"),
+            "changed in isolated copy\n",
+        )
+        .unwrap();
+        let review = workspace.inspect().unwrap();
+        assert_eq!(changed(&review), vec!["tracked.txt"]);
+        let page = workspace.inspect_file("tracked.txt", 0, 64).unwrap();
+        assert_eq!(
+            page.get("before").unwrap().get("content").unwrap().as_str(),
+            Some("head\n")
+        );
+        assert_eq!(
+            page.get("after").unwrap().get("content").unwrap().as_str(),
+            Some("changed in isolated copy\n")
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("tracked.txt")).unwrap(),
+            "head\n"
+        );
+        workspace.close().unwrap();
+        assert!(!workspace.root().exists());
+        assert!(!storage.join("a1").exists());
+        assert!(!super::git::registered(&project, &storage.join("a1/tree")).unwrap());
+    }
+}
+
 #[test]
 fn dirty_baseline_and_untracked_files_are_copied() {
     let (_temp, project, storage) = fixture();
