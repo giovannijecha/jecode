@@ -89,19 +89,21 @@ impl Agent {
         }
         let previous_context = self.context.clone();
         let previous_boundary = self.compatible_from;
-        let event_boundary = self.events.lock().unwrap().len();
+        let mut recorded = None;
         if changed {
             self.compatible_from = self.messages.lock().unwrap().len();
             self.context.reset_usage();
             if had_model {
-                self.events.lock().unwrap().push(Value::object([
+                let event = Value::object([
                     ("type", Value::string("backend_changed")),
                     ("from_backend", Value::string(previous_identity.backend)),
                     ("from_model", Value::string(previous_identity.model)),
                     ("backend", Value::string(&identity.backend)),
                     ("model", Value::string(&identity.model)),
                     ("after_message", Value::number(self.compatible_from)),
-                ]));
+                ]);
+                self.events.lock().unwrap().push(event.clone());
+                recorded = Some(event);
             }
         }
         if changed || changed_effort {
@@ -112,7 +114,9 @@ impl Agent {
             self.client = previous;
             self.context = previous_context;
             self.compatible_from = previous_boundary;
-            self.events.lock().unwrap().truncate(event_boundary);
+            if let Some(event) = &recorded {
+                self.withdraw_event(event);
+            }
             return Err(error);
         }
         self.register_backend(self.client.services());

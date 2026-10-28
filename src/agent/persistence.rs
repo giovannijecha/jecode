@@ -101,19 +101,29 @@ impl Agent {
         self.refresh_project_instructions()?;
         self.refresh_skills();
         let before = self.messages.lock().unwrap().len();
-        let previous_events = self.events.lock().unwrap().len();
-        self.events.lock().unwrap().push(Value::object([
+        let start = Value::object([
             ("type", Value::string("turn_start")),
             ("after_message", Value::number(before)),
-        ]));
+        ]);
+        self.events.lock().unwrap().push(start.clone());
         self.messages.lock().unwrap().push(prompt.message());
         if let Err(error) = self.checkpoint(Stage::Begin) {
             self.messages.lock().unwrap().truncate(before);
-            self.events.lock().unwrap().truncate(previous_events);
+            self.withdraw_event(&start);
             return Err(error);
         }
         self.prepared = Some(prompt);
         Ok(())
+    }
+
+    /// Removes an event this agent appended but could not save. Collaborator
+    /// receipts can be inserted meanwhile, so a length-based truncation could
+    /// drop a saved receipt instead.
+    pub(super) fn withdraw_event(&self, event: &Value) {
+        let mut events = self.events.lock().unwrap();
+        if let Some(index) = events.iter().rposition(|candidate| candidate == event) {
+            events.remove(index);
+        }
     }
 
     pub(super) fn record_turn_error(&self, error: &str, partial: &str) {

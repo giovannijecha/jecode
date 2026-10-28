@@ -360,3 +360,32 @@ fn failed_preparation_restores_ready_state_and_retry_submits_the_prompt_once() {
     );
     assert!(!handle.active());
 }
+
+#[test]
+fn withdrawing_an_unsaved_event_keeps_a_receipt_inserted_before_it() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let current = agent(&home, &directory, "http://127.0.0.1:9");
+    let start = Value::object([
+        ("type", Value::string("turn_start")),
+        ("after_message", Value::number(1)),
+    ]);
+    let receipt = Value::object([
+        ("type", Value::string("collaboration")),
+        ("sequence", Value::number(1)),
+    ]);
+    let saved = {
+        let mut events = current.events.lock().unwrap();
+        let saved = events.clone();
+        events.push(start.clone());
+        // A collaborator receipt is saved at the last validated prefix,
+        // ahead of the event that has not been saved yet.
+        let at = events.len() - 1;
+        events.insert(at, receipt.clone());
+        saved
+    };
+    current.withdraw_event(&start);
+    let mut expected = saved;
+    expected.push(receipt);
+    assert_eq!(*current.events.lock().unwrap(), expected);
+}

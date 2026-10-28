@@ -189,6 +189,11 @@ impl Agent {
                             .finish()
                     },
                 );
+                // An interrupted capture has no restorable copy; leave the
+                // project untouched.
+                if self.cancellation.requested() {
+                    return Err("Operation cancelled".into());
+                }
                 let mut result = observer
                     .workspace(id()?)?
                     .integrate(&paths, required(arguments, "expected_review_token")?)?;
