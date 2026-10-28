@@ -94,5 +94,14 @@ fn resume_returns_open_reports_to_main_once_and_closed_history_stays_closed() {
         let requests = fixture.finish();
         assert_eq!(requests.len(), expected_requests);
         assert!(requests[1].body.encode().contains("Original child report"));
+        let continued = requests[1].body.get("messages").and_then(Value::as_array);
+        assert_eq!(
+            continued
+                .and_then(|messages| messages.last())
+                .and_then(|message| message.get("role"))
+                .and_then(Value::as_str),
+            Some("user"),
+            "a continuation request must end with a user turn"
+        );
     }
 }

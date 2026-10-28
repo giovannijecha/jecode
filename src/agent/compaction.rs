@@ -54,7 +54,8 @@ impl Agent {
             // observed during that work before constructing the next request.
             self.reload_restored_instructions();
             let seen = self.collaboration.latest_return_sequence();
-            let messages = self.transport_messages();
+            let mut messages = self.transport_messages();
+            super::continuation::end_with_user_turn(&mut messages);
             self.collaboration_seen = seen;
             let output_tokens = limits.and_then(|limits| {
                 limits.output.map(|_| {
