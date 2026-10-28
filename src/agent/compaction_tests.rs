@@ -27,7 +27,7 @@ fn measured_growth_agent(directory: &Directory, fixture: &HttpFixture) -> (Agent
     // Raw growth crosses the default 80% budget; the calibrated estimate does not.
     let budget = crate::context::threshold(45000, crate::context::AUTO_COMPACT_DEFAULT);
     assert!(16635 + crate::context::bytes(&original[2..]) > budget);
-    assert!(agent.context_estimate(&original) < budget);
+    assert!(agent.context_estimate(&agent.environment(), &original) < budget);
     (agent, original)
 }
 
@@ -106,7 +106,10 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
     );
     let original = agent.messages.lock().unwrap().clone();
     agent.set_auto_compact(99);
-    assert!(agent.context_estimate(&original) < crate::context::threshold(WINDOW, 99));
+    assert!(
+        agent.context_estimate(&agent.environment(), &original)
+            < crate::context::threshold(WINDOW, 99)
+    );
     agent
         .run_turn("Continue the current inspection", &mut |_| Ok(()))
         .unwrap();

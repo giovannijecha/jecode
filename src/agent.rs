@@ -47,7 +47,7 @@ impl Agent {
         // to the conversation whose compaction the test exercises.
         let fixed = self.current_system_message().encode().len()
             + crate::tools::encoded_size()
-            + self.request_environment_for(&[]).len();
+            + self.request_environment_for(&self.environment(), &[]).len();
         (fixed + headroom)
             .saturating_mul(100)
             .div_ceil(usize::from(auto_percent))
@@ -313,9 +313,10 @@ impl Agent {
     }
 
     fn transport_messages(&self) -> Vec<Value> {
+        let environment = self.environment();
         let original = self.messages.lock().unwrap();
         let mut messages = self.projected_context(&self.context, &original);
-        let temporary = self.request_environment_for(&original);
+        let temporary = self.request_environment_for(&environment, &original);
         if !temporary.is_empty()
             && let Some(Value::Object(system)) = messages.first_mut()
         {
@@ -376,14 +377,18 @@ impl Agent {
         crate::context::bytes_for(messages, self.client.inputs())
     }
 
-    fn context_estimate(&self, messages: &[Value]) -> usize {
+    fn context_estimate(
+        &self,
+        environment: &environment::Environment,
+        messages: &[Value],
+    ) -> usize {
         match self.context.measured_input(messages, self.client.inputs()) {
             Some(tokens) => self
                 .context
                 .estimate_growth(messages, tokens, self.client.inputs()),
             None => self
                 .unmeasured_estimate(&self.context, messages)
-                .saturating_add(self.request_environment_for(messages).len()),
+                .saturating_add(self.request_environment_for(environment, messages).len()),
         }
     }
 

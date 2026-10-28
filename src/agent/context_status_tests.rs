@@ -413,5 +413,8 @@ fn retired_view_keeps_the_measurement_less_the_view() {
             .measured_input(&messages, agent.client.inputs()),
         Some(50_000 - 85)
     );
-    assert_eq!(agent.context_estimate(&messages), 50_000 - 85 + 700);
+    assert_eq!(
+        agent.context_estimate(&agent.environment(), &messages),
+        50_000 - 85 + 700
+    );
 }

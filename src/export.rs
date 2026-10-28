@@ -31,6 +31,13 @@ impl Archive {
     }
 
     fn document_at(&self, timestamp: u128) -> Value {
+        // Session writers, including collaborator receipts, lock messages
+        // before events. Take a consistent copy in that same order.
+        let (messages, events) = {
+            let messages = self.messages.lock().unwrap();
+            let events = self.events.lock().unwrap();
+            (messages.clone(), events.clone())
+        };
         self.redactor.value(&Value::object([
             ("format", Value::string("jecode.conversation")),
             ("format_version", Value::number(1)),
@@ -46,15 +53,12 @@ impl Archive {
                     .map_or(Value::Null, crate::conversation::Origin::value),
             ),
             ("effort", Value::string(&self.effort)),
-            ("events", Value::Array(self.events.lock().unwrap().clone())),
+            ("events", Value::Array(events)),
             (
                 "working_directory",
                 Value::string(self.directory.to_string_lossy()),
             ),
-            (
-                "messages",
-                Value::Array(self.messages.lock().unwrap().clone()),
-            ),
+            ("messages", Value::Array(messages)),
         ]))
     }
 

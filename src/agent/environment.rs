@@ -3,6 +3,17 @@ use crate::json::Value;
 
 const PROMPT: &str = include_str!("PROMPT.md");
 
+/// Message-independent request instructions, read before messages are locked.
+pub(super) struct Environment(String);
+
+fn join<const N: usize>(parts: [String; N]) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 impl Agent {
     pub(super) fn system_message(&self) -> Value {
         let environment = Value::object([
@@ -57,21 +68,29 @@ impl Agent {
 
     #[cfg(test)]
     pub(super) fn request_environment(&self) -> String {
+        let environment = self.environment();
         let messages = self.messages.lock().unwrap();
-        self.request_environment_for(&messages)
+        self.request_environment_for(&environment, &messages)
     }
 
-    pub(super) fn request_environment_for(&self, messages: &[Value]) -> String {
-        [
+    /// Reads the request instructions that do not depend on messages. Call it
+    /// before locking `messages`: a collaborator receipt holds collaboration
+    /// state while it appends to this conversation, so the lock order is
+    /// collaboration state, then messages.
+    pub(super) fn environment(&self) -> Environment {
+        Environment(join([
             self.temporary_instructions(),
             self.checkpoint_instructions(),
             self.collaboration_instructions(),
-            self.todo_instructions(messages),
-        ]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
+        ]))
+    }
+
+    pub(super) fn request_environment_for(
+        &self,
+        environment: &Environment,
+        messages: &[Value],
+    ) -> String {
+        join([environment.0.clone(), self.todo_instructions(messages)])
     }
 
     fn todo_instructions(&self, messages: &[Value]) -> String {
