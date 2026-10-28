@@ -290,10 +290,13 @@ fn native_console_fixture() {
     }
     full_width_console(&bash);
     restored(&path);
+    println!("NATIVE_FULL_WIDTH_VERIFIED");
     card_tests::console(&bash);
     restored(&path);
+    println!("NATIVE_CARDS_VERIFIED");
     activity_tests::console(&bash);
     restored(&path);
+    println!("NATIVE_ACTIVITY_VERIFIED");
     std::fs::write(path.join("drop me.txt"), "dropped through ConPTY").unwrap();
     let response = (0..100)
         .map(|i| format!("Native row {i:03}\n"))
