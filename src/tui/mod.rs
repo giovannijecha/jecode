@@ -57,7 +57,7 @@ use feedback::Feedback;
 use jobs::Job;
 use keys::{Decoded, Decoder};
 use state::{Kind, State};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use std::time::Instant;
@@ -107,7 +107,9 @@ struct App {
     todo_message_len: usize,
     collaboration_cursor: usize,
     collaboration_seen: HashSet<usize>,
-    collaboration_receipt_calls: HashSet<String>,
+    /// Running agent calls whose events replace their rows, by id, with
+    /// their work labels.
+    collaboration_receipt_calls: HashMap<String, String>,
     collaboration_return_pending: bool,
     collaboration_auto_resume: bool,
     #[cfg(test)]
@@ -135,7 +137,7 @@ impl App {
             todo_message_len: usize::MAX,
             collaboration_cursor: 0,
             collaboration_seen: HashSet::new(),
-            collaboration_receipt_calls: HashSet::new(),
+            collaboration_receipt_calls: HashMap::new(),
             collaboration_return_pending: false,
             collaboration_auto_resume: true,
             agent: Some(agent),

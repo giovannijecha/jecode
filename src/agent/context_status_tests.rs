@@ -164,7 +164,9 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    let capacity = agent.fixture_capacity(12_000, AUTO_COMPACT_DEFAULT);
+    // Room for one large exchange beside the summary, whether or not the
+    // native overhead lets the recent window keep it verbatim.
+    let capacity = agent.fixture_capacity(24_000, AUTO_COMPACT_DEFAULT);
     agent.client.fixture_limits(capacity, Some(4096));
     agent.messages.lock().unwrap().extend([
         Value::object([

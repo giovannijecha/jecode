@@ -108,6 +108,7 @@ pub(super) fn definition() -> Value {
                 ),
             ),
             ("context", string("Additional relevant context for update.")),
+            ("work", super::work()),
             (
                 "timeout_ms",
                 Value::object([

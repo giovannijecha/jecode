@@ -111,6 +111,17 @@ pub(super) fn tool(
     ])
 }
 
+/// The optional label that groups related calls into one Work chapter.
+pub(super) fn work() -> Value {
+    Value::object([
+        ("type", Value::string("string")),
+        (
+            "description",
+            Value::string("Optional short work label. Repeat it exactly for related calls."),
+        ),
+    ])
+}
+
 pub(crate) fn routine(
     name: &str,
     description: &str,
@@ -120,16 +131,7 @@ pub(crate) fn routine(
     let Value::Object(fields) = &mut properties else {
         unreachable!()
     };
-    fields.insert(
-        "work".into(),
-        Value::object([
-            ("type", Value::string("string")),
-            (
-                "description",
-                Value::string("Optional short work label. Repeat it exactly for related calls."),
-            ),
-        ]),
-    );
+    fields.insert("work".into(), work());
     fields.insert(
             "description".into(),
             Value::object([

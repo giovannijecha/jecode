@@ -93,12 +93,14 @@ reject an otherwise valid write or edit. Local `turn_start` events preserve
 execution-turn grouping across queued follow-ups and resume.
 
 The optional `work` argument on `read`, `list`, `search`, `map`, `bash`, `exec`,
-`process`, `web` and `browser`
+`process`, `web`, `browser` and `agent`
 stays in each tool call's canonical arguments. Both provider adapters replay it
 through their native function-call wire shape, and saved sessions retain it
 without a separate event or metadata envelope. `tui/state/rows.rs` forms a
 chapter from two or more contiguous eligible calls with the same normalized label
-and execution-turn ID (`Presentation.turn_id`); only map overview is eligible.
+and execution-turn ID (`Presentation.turn_id`); only map overview is eligible,
+and of `agent` only its inspection actions and the events it receipts; a lone
+event and `integrate` are not.
 Text and other tools end the
 group. Single eligible calls keep their normal cards. `tui/cards/chapter.rs`
 derives aggregate facts and status from chapter members, omitting a facts row
@@ -232,10 +234,25 @@ The current request environment identifies the main agent as the review owner,
 includes each report's version and assessment state, and names the review and
 close actions. A textual completion does not change collaborator state.
 
+Each record keeps the collaborator's activity as one ordered log
+(`collaboration/log.rs`): received assignments, visible messages, calls and
+returns, referring to the bounded `updates` and the `tools` entries rather than
+copying them. Records saved before the log existed are restored with their
+assignment, calls, messages and outcome in that order. A changed file's call
+also records its `+` / `−` line counts.
+
 Receipts append to the parent session even while its main model is idle. The TUI
 drains worker events and observer receipts with sequence deduplication, keeping
-historical snapshots immutable. Its `/agents` panel reads current snapshots;
-opening a result does not review it. A new live return can start
+historical snapshots immutable. `tui/state/agents.rs` places each receipt as a
+finished `collaboration` tool row whose result is the event, so it joins Work
+chapters, expands with `Ctrl+O` and renders through `tui/cards/agents.rs`. A
+receipt caused by a running agent call takes that call's work label; another
+joins the chapter it follows inside a turn and is otherwise lone. It is
+inserted before streaming prose, the position replay also derives from
+`after_message`; replay gives receipts the label of the agent call saved after
+them. Its `/agents` panel reads current snapshots, and inside an agent
+`tui/agents/conversation.rs` turns the ordered log into transcript items for
+the main renderer; opening a result does not review it. A new live return can start
 `Agent::continue_collaboration` through the ordinary model loop without a
 synthetic user message. Queued input wins, explicit cancellation suppresses the
 continuation. Resume schedules one continuation for returned reports in still-open

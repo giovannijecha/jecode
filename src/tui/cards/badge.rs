@@ -39,29 +39,13 @@ pub(super) fn badge(name: &str, status: Status) -> Line {
         Status::Running => return running(&upper),
         Status::Background => (LIT, BADGE_IDLE),
         Status::Failed => (BADGE_TEXT, BADGE_BAD),
-        Status::Stopped => (BADGE_TEXT, BADGE_WARN),
+        Status::Stopped | Status::Unknown => (BADGE_TEXT, BADGE_WARN),
         Status::Done if name == "Work" => (STRONG, BADGE_IDLE),
         Status::Done => (BADGE_TEXT, family(name)),
     };
     let mut line = Line::default();
     line.push_on(&format!(" {upper} "), style.bold(), surface);
     line
-}
-
-/// An `AGENT N` badge carrying a collaborator's lifecycle in the call-state
-/// grammar: running shimmers, returned takes the family surface, failed is
-/// red, stopped and unknown amber, queued quiet.
-pub(in crate::tui) fn agent(label: &str, lifecycle: &str) -> Line {
-    badge(
-        label,
-        match lifecycle {
-            "running" => Status::Running,
-            "returned" => Status::Done,
-            "failed" => Status::Failed,
-            "stopping" | "stopped" | "unknown" => Status::Stopped,
-            _ => Status::Background,
-        },
-    )
 }
 
 /// The status-row shimmer, same band and speed, across the name only; the

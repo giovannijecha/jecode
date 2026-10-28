@@ -5,6 +5,7 @@ use super::{
 };
 use crate::{file_change::Change, json::Value};
 
+mod agents;
 mod badge;
 mod chapter;
 mod content;
@@ -19,7 +20,7 @@ mod streams;
 mod summary;
 mod title;
 mod work;
-pub(in crate::tui) use badge::{agent as agent_badge, hang};
+pub(in crate::tui) use badge::hang;
 pub use chapter::{
     activities as chapter_activities, exception as chapter_exception,
     groupable as chapter_groupable, header as chapter_header, label as chapter_label,
@@ -49,6 +50,8 @@ enum Status {
     Background,
     Stopped,
     Failed,
+    /// A collaborator's outcome is not confirmed, such as after a restart.
+    Unknown,
     Done,
 }
 
@@ -57,6 +60,9 @@ impl Status {
         let Some(result) = tool.result else {
             return Self::Running;
         };
+        if tool.name == "collaboration" {
+            return agents::status(result);
+        }
         let process = crate::events::process_status(result);
         if matches!(process, Some("running" | "stopping")) {
             Self::Background
@@ -101,12 +107,30 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
     card(tool, columns, false).rows
 }
 
+/// The `/agents` name badge for a collaborator in `state`: shimmering while
+/// it works, red after a failure, amber when stopped, lit on the quiet
+/// surface when unknown.
+pub(in crate::tui) fn agent_badge(name: &str, state: &str) -> Line {
+    badge::badge(
+        name,
+        match state {
+            "running" | "stopping" => Status::Running,
+            "failed" => Status::Failed,
+            "stopped" => Status::Stopped,
+            "unknown" => Status::Background,
+            _ => Status::Done,
+        },
+    )
+}
+
 /// One card. `keycap` names Ctrl+O on the row that counts hidden lines.
 pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let mut card = if tool.name == "ask_user" {
         work::ask(tool, columns)
     } else if tool.name == "todo_list" {
         work::todo(tool, columns)
+    } else if tool.name == "collaboration" {
+        agents::card(tool, columns, keycap)
     } else if matches!(tool.name, "read" | "write" | "edit") {
         file_card(tool, columns, keycap)
     } else {
@@ -236,6 +260,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         "web" => "Web",
         "browser" => "Browser",
         "agent" => "Agents",
+        "collaboration" => field(tool.arguments, "label"),
         other => other,
     };
     let target = match tool.name {

@@ -120,19 +120,36 @@ checkpoint store. Recheck the combined project after integration.
 
 ## Inspect in the terminal
 
-Creation appears as an `AGENTS` group, expandable with the existing `Ctrl+O`
-interaction. Sent updates, received instructions and returned work produce new
-chronological receipts. Earlier receipts retain their original snapshots.
+Agent events are tool rows in the conversation. Creation shows as `AGENTS`,
+the other events under the collaborator's `AGENT N` name: sent and received
+assignments, returns, reviews, stops, closures and unknown outcomes. `agent`
+takes the same optional `work` label as the discovery tools, so its events and
+inspection calls join a Work chapter with related calls; agent members keep one
+row each. An event that arrives during a turn joins the chapter it follows. One
+that arrives outside a turn, or after the turn's prose, is a lone row at its
+position. Events never split prose that is still streaming; they land before
+it, where a resumed conversation also places them. The transcript shows no
+clock times. Failed checks and failed runs are red, unknown outcomes amber and
+routine waiting quiet. `Ctrl+O` opens the latest chapter or row and shows every
+agent event as its full receipt: instruction, working space, changed files with
+`+` and `−` line counts, report and review state. Earlier receipts retain their
+original snapshots.
 
-`/agents` opens a filterable list of open assignments below the composer. Enter opens a record;
-Activity, Assignment and Result tabs show visible progress, tool activity,
-instructions, working space and reported evidence. Activity follows new output;
-scrolling pauses it and End resumes following. Esc returns from detail to list,
-then restores the main draft and caret. The detail hint says `Esc back to agents`;
-the list says `Esc close`. While a panel is open, Esc does not interrupt the main
-turn, and the readback shortcut is Alt+End. There is no child chat or task-control
-UI. If the main agent closes the inspected assignment, the view returns to the
-remaining open assignments.
+`/agents` opens a filterable list of open assignments below the composer. Each
+row names the collaborator with its `AGENT N` badge and title, with its state in
+the fact column: running time, returned or failed work awaiting the main
+agent's review, or an unknown outcome. Enter goes inside the agent: its own
+conversation replaces the main column, drawn like the main conversation and read
+only. It shows each received assignment as a request, then its calls, chapters
+and messages in the order they happened, and the return receipt last. One row
+of keys replaces the composer, status row and footer: `Esc back to agents`,
+`↑↓ scroll` and, while the agent works, `End follow`. The view follows new
+output; scrolling pauses it and End resumes following. Esc returns from the
+agent to the list, then to the main conversation with its draft and caret. The
+list says `Esc close`. While `/agents` is open, Esc does not interrupt the main
+turn, and the readback shortcut is Alt+End. There is no child chat or
+task-control UI. If the main agent closes the inspected assignment, the view
+returns to the remaining open assignments.
 
 While work is running or needs attention, the existing footer shows a quiet
 `AGENTS` badge and counts. Failed and uncertain outcomes remain visible. The

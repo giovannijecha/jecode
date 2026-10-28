@@ -100,6 +100,11 @@ fn work_and_description_are_optional_only_for_routine_tools() {
                     .is_some(),
                 "{name}"
             );
+        } else if name == "agent" {
+            // Agent events join Work chapters by label; their rows describe themselves.
+            let work = properties.get("work").unwrap();
+            assert_eq!(work.get("type"), Some(&Value::string("string")));
+            assert!(properties.get("description").is_none());
         } else {
             assert!(properties.get("work").is_none(), "{name}");
             assert!(properties.get("description").is_none(), "{name}");

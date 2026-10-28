@@ -170,7 +170,12 @@ impl App {
                 name,
                 arguments,
             } if name == "agent" && super::agents::receipt_replaces_tool(&arguments) => {
-                self.collaboration_receipt_calls.insert(id);
+                let work = arguments
+                    .get("work")
+                    .and_then(crate::json::Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                self.collaboration_receipt_calls.insert(id, work);
             }
             Event::ToolFinished {
                 id,
@@ -178,7 +183,7 @@ impl App {
                 summary,
                 result,
                 ..
-            } if name == "agent" && self.collaboration_receipt_calls.remove(&id) => {
+            } if name == "agent" && self.collaboration_receipt_calls.remove(&id).is_some() => {
                 if result
                     .get("error")
                     .and_then(crate::json::Value::as_str)

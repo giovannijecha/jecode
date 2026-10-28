@@ -1,16 +1,31 @@
 //! A compact header for related routine tool calls. Individual cards stay in
 //! the normal renderer and are shown by the caller when expanded.
 
-use super::{Card, Status, Tool, badge, content, failure, field, heading, rhythm, summary};
+use super::{Card, Status, Tool, agents, badge, content, failure, field, heading, rhythm, summary};
 use crate::tui::{
     activity as timer,
     line::{Line, Span},
     text,
     theme::{BAD, BODY, DIM, MUTED, SELECTED_SURFACE, STRONG},
 };
-use std::collections::BTreeSet;
+mod facts;
+use facts::{Outcomes, facts};
 
 pub fn groupable(tool: &Tool<'_>) -> bool {
+    // Agent events and inspection join chapters; a lone event and the
+    // actions that change work, such as integrate, stand alone.
+    match tool.name {
+        "collaboration" => {
+            return tool.arguments.get("lone") != Some(&crate::json::Value::Bool(true));
+        }
+        "agent" => {
+            return matches!(
+                field(tool.arguments, "action"),
+                "list" | "inspect" | "wait" | "diff"
+            );
+        }
+        _ => {}
+    }
     matches!(
         tool.name,
         "read" | "list" | "search" | "map" | "bash" | "exec" | "process" | "web" | "browser"
@@ -163,6 +178,9 @@ fn activity_line(tool: &Tool<'_>, columns: usize) -> Line {
 /// Facts retained from the former singleton while a new chapter takes shape.
 /// The caller uses only as many rows as its content height requires.
 pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
+    if tool.name == "collaboration" {
+        return agents::receipts(tool, columns);
+    }
     let Some(result) = tool.result else {
         return activity(std::slice::from_ref(tool), columns)
             .into_iter()
@@ -186,6 +204,7 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
             Status::Background => Some("Process in background".into()),
             Status::Stopped => Some("Process stopped".into()),
             Status::Running => Some("Command running".into()),
+            Status::Unknown => None,
         };
         if let Some(outcome) = outcome {
             rows.push(rhythm::one(
@@ -235,6 +254,9 @@ pub fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
 
 /// One primary row for commands and exceptional calls; errors add detail below.
 pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
+    if tool.name == "collaboration" {
+        return agents::member(tool, columns);
+    }
     let state = Status::of(tool);
     if matches!(
         tool.name,
@@ -309,6 +331,7 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
             ),
             Status::Background => Some("background".into()),
             Status::Stopped => Some("stopped".into()),
+            Status::Unknown => Some("unknown".into()),
         };
         if let Some(detail) = detail {
             let suffix = format!("  {detail}");
@@ -343,7 +366,7 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
             timer::duration(tool.presentation.duration().unwrap_or_default())
         )),
         Status::Background | Status::Stopped => Some(summary::line(tool, state, None).plain()),
-        Status::Failed | Status::Done => None,
+        Status::Failed | Status::Unknown | Status::Done => None,
     };
     if let Some(detail) = detail {
         let suffix = format!("  {detail}");
@@ -355,130 +378,4 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         rows.extend(failure::rows(tool, columns, "    "));
     }
     rows
-}
-
-#[derive(Default)]
-struct Outcomes {
-    failed: usize,
-    running: usize,
-    background: usize,
-    stopped: usize,
-    done: usize,
-}
-
-impl Outcomes {
-    fn add(&mut self, status: Status) {
-        match status {
-            Status::Failed => self.failed += 1,
-            Status::Running => self.running += 1,
-            Status::Background => self.background += 1,
-            Status::Stopped => self.stopped += 1,
-            Status::Done => self.done += 1,
-        }
-    }
-
-    fn primary(&self) -> Status {
-        if self.failed > 0 {
-            Status::Failed
-        } else if self.running > 0 {
-            Status::Running
-        } else if self.background > 0 {
-            Status::Background
-        } else if self.stopped > 0 {
-            Status::Stopped
-        } else {
-            Status::Done
-        }
-    }
-}
-
-fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
-    let mut files = BTreeSet::new();
-    let mut other_reads = 0;
-    let mut listings = 0;
-    let mut searches = 0;
-    let mut maps = 0;
-    let mut web = 0;
-    let mut screenshots = 0;
-    let mut snapshots = 0;
-    let mut browser = 0;
-    let mut commands = 0;
-    let mut processes = 0;
-    for tool in tools {
-        if Status::of(tool) != Status::Done {
-            continue;
-        }
-        match tool.name {
-            "read" => {
-                let path = field(tool.arguments, "path");
-                if ["history:", "output:", "attachment:", "checkpoint:"]
-                    .iter()
-                    .any(|prefix| path.starts_with(*prefix))
-                    || path.is_empty()
-                {
-                    other_reads += 1;
-                } else if !path.starts_with("skill:") {
-                    files.insert(path);
-                }
-            }
-            "bash" | "exec" => commands += 1,
-            "list" => listings += 1,
-            "search" => searches += 1,
-            "map" => maps += 1,
-            "process" => processes += 1,
-            "web" => web += 1,
-            "browser" => {
-                if field(tool.arguments, "action") == "screenshot" {
-                    screenshots += 1;
-                } else if field(tool.arguments, "action") == "snapshot" {
-                    snapshots += 1;
-                } else {
-                    browser += 1;
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut parts = Vec::new();
-    if !files.is_empty() {
-        parts.push(format!(
-            "{} file{} read",
-            files.len(),
-            if files.len() == 1 { "" } else { "s" }
-        ));
-    }
-    for (count, noun) in [
-        (other_reads, "other read"),
-        (listings, "listing"),
-        (searches, "search"),
-        (maps, "map"),
-        (web, "web call"),
-        (screenshots, "screenshot"),
-        (snapshots, "snapshot"),
-        (browser, "browser action"),
-        (commands, "command"),
-        (processes, "process call"),
-    ] {
-        if count > 0 {
-            parts.push(text::counted(count, noun));
-        }
-    }
-    let mut line = Line::new(&parts.join(" · "), DIM);
-    for (count, label, style) in [
-        (outcomes.stopped, "stopped", DIM),
-        (outcomes.running, "running", DIM),
-        (outcomes.background, "in background", DIM),
-    ] {
-        if count > 0 {
-            if !line.spans.is_empty() {
-                line.push(" · ", DIM);
-            }
-            line.push(&format!("{count} {label}"), style);
-        }
-    }
-    if line.spans.is_empty() {
-        Line::new(&format!("{} completed", outcomes.done), DIM)
-    } else {
-        line
-    }
 }

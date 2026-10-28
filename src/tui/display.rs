@@ -176,6 +176,10 @@ impl Display {
         if was_reading == self.viewport.following() {
             chrome = view::chrome(state, model, directory, !self.viewport.following());
         }
+        // Inside a collaborator in `/agents`, its conversation takes the column.
+        if let Some(frame) = view::agents_inside(state) {
+            return self.renderer.paint(&frame, state.width, state.height);
+        }
         let mut frame = view::lower_with_chrome(lines, state.height, chrome);
         if frame.composer >= 2 {
             let gap = &mut frame.live[frame.composer - 1];

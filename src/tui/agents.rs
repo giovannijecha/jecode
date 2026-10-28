@@ -1,14 +1,17 @@
-//! Read-only inspection state for collaborators in the current conversation.
+//! `/agents`: the collaborators of this conversation, and inside one, its own
+//! conversation, read only.
 
 use super::{App, editor::Editor, terminal::Key};
 use crate::json::Value;
 
+pub(super) mod conversation;
+
 pub(super) struct Panel {
     pub filter: Editor,
     pub selected: usize,
-    pub detail: bool,
-    pub detail_id: Option<String>,
-    pub tab: usize,
+    /// The collaborator whose conversation replaces the main one.
+    pub inside: Option<String>,
+    /// First conversation row shown inside, unless following the end.
     pub offset: usize,
     pub follow: bool,
 }
@@ -41,39 +44,42 @@ pub(super) fn label(record: &Value) -> String {
     format!("AGENT {}", number(record, "number"))
 }
 
+/// A returned report whose checks include a failure.
+pub(super) fn failed_check(record: &Value) -> bool {
+    list(record, "checks")
+        .iter()
+        .filter_map(|check| check.as_str())
+        .any(|check| check.to_ascii_lowercase().contains("fail"))
+}
+
 pub(super) fn status(record: &Value) -> &'static str {
     match value(record, "state") {
-        "running" => "Running",
-        "returned" | "failed" if record.get("reviewed") == Some(&Value::Bool(true)) => "Reviewed",
-        "returned"
-            if list(record, "checks")
-                .iter()
-                .filter_map(|check| check.as_str())
-                .any(|check| check.to_ascii_lowercase().contains("fail")) =>
-        {
-            "Failed check · pending review by main agent"
-        }
-        "returned" => "Pending review by main agent",
-        "failed" => "Failed · pending review by main agent",
-        "stopping" => "Stop requested",
-        "stopped" => "Stopped",
-        "unknown" => "Outcome unknown",
-        _ => "Queued",
+        "running" => "running",
+        "returned" | "failed" if record.get("reviewed") == Some(&Value::Bool(true)) => "reviewed",
+        "returned" if failed_check(record) => "failed check · main review",
+        "returned" => "returned · main review",
+        "failed" => "failed · main review",
+        "stopping" => "stopping",
+        "stopped" => "stopped",
+        "unknown" => "outcome unknown",
+        _ => "queued",
     }
 }
 
 impl Panel {
     fn reconcile(&mut self, records: &[Value]) {
-        if self.detail && self.current(records).is_none() {
-            self.detail = false;
-            self.detail_id = None;
-            self.tab = 0;
-            self.offset = 0;
-            self.follow = true;
+        if self.inside.is_some() && self.current(records).is_none() {
+            self.leave();
         }
         self.selected = self
             .selected
             .min(self.filtered(records).len().saturating_sub(1));
+    }
+
+    fn leave(&mut self) {
+        self.inside = None;
+        self.offset = 0;
+        self.follow = true;
     }
 
     pub fn filtered(&self, records: &[Value]) -> Vec<usize> {
@@ -84,10 +90,9 @@ impl Panel {
             .filter(|(_, record)| {
                 query.is_empty()
                     || format!(
-                        "{} {} {} {} {}",
+                        "{} {} {} {}",
                         label(record),
                         value(record, "title"),
-                        value(record, "state"),
                         status(record),
                         value(record, "activity")
                     )
@@ -98,11 +103,10 @@ impl Panel {
             .collect()
     }
 
+    /// The collaborator shown inside, or the one selected in the list.
     pub fn current<'a>(&self, records: &'a [Value]) -> Option<&'a Value> {
-        if self.detail {
-            return records
-                .iter()
-                .find(|record| Some(value(record, "id")) == self.detail_id.as_deref());
+        if let Some(id) = &self.inside {
+            return records.iter().find(|record| value(record, "id") == id);
         }
         let filtered = self.filtered(records);
         records.get(*filtered.get(self.selected)?)
@@ -114,9 +118,7 @@ impl Default for Panel {
         Self {
             filter: Editor::default(),
             selected: 0,
-            detail: false,
-            detail_id: None,
-            tab: 0,
+            inside: None,
             offset: 0,
             follow: true,
         }
@@ -158,13 +160,21 @@ impl App {
         let mut dirty = self.state.collaboration != records;
         if dirty {
             self.state.collaboration = records;
-            let room = super::view::agents_capacity(&self.state).max(1);
-            let end = super::view::agents_detail_rows(&self.state).saturating_sub(room);
+            let now = std::time::Instant::now();
+            let clocks = &mut self.state.agent_clocks;
+            clocks.retain(|id, _| {
+                self.state
+                    .collaboration
+                    .iter()
+                    .any(|record| value(record, "id") == id && value(record, "state") == "running")
+            });
+            for record in &self.state.collaboration {
+                if value(record, "state") == "running" {
+                    clocks.entry(value(record, "id").into()).or_insert(now);
+                }
+            }
             if let Some(panel) = &mut self.state.agents_panel {
                 panel.reconcile(&self.state.collaboration);
-                if panel.detail && panel.tab == 0 && panel.follow {
-                    panel.offset = end;
-                }
             }
             self.state.changed();
         }
@@ -186,8 +196,10 @@ impl App {
         if value(&event, "kind") == "returned" {
             self.collaboration_return_pending = true;
         }
+        // Agent calls are serialized, so at most one is running.
+        let call = self.collaboration_receipt_calls.values().next().cloned();
         self.state
-            .collaboration_event(self.archive.redactor.value(&event));
+            .collaboration_event(self.archive.redactor.value(&event), call.as_deref());
         true
     }
 
@@ -217,7 +229,7 @@ impl App {
         let Some(panel) = &mut self.state.agents_panel else {
             return;
         };
-        if panel.detail {
+        if panel.inside.is_some() {
             return;
         }
         if panel.filter.insert(text) {
@@ -233,16 +245,17 @@ impl App {
 
     fn agents_move(&mut self, code: u16) {
         let room = super::view::agents_capacity(&self.state).max(1);
-        let total = super::view::agents_detail_rows(&self.state);
+        let (total, inside_room) = super::view::agents_inside_rows(&self.state);
         let Some(panel) = &mut self.state.agents_panel else {
             return;
         };
-        if panel.detail {
+        if panel.inside.is_some() {
+            let room = inside_room.max(1);
             let end = total.saturating_sub(room);
-            let offset = if panel.tab == 0 && panel.follow {
+            let offset = if panel.follow {
                 end
             } else {
-                panel.offset
+                panel.offset.min(end)
             };
             panel.offset = match code {
                 38 => offset.saturating_sub(1),
@@ -250,11 +263,11 @@ impl App {
                 33 => offset.saturating_sub(room),
                 34 => (offset + room).min(end),
                 36 => 0,
-                35 => end,
                 _ => offset,
             };
-            if panel.tab == 0 && matches!(code, 33..=40) {
-                panel.follow = code == 35;
+            if matches!(code, 33..=40) {
+                // End follows; reaching the end by scrolling also does.
+                panel.follow = code == 35 || matches!(code, 34 | 40) && panel.offset == end;
             }
         } else {
             let last = panel
@@ -276,10 +289,8 @@ impl App {
     pub(super) fn agents_key(&mut self, key: Key) {
         if key.code == 27 || key.ctrl() && key.code == 67 {
             if let Some(panel) = &mut self.state.agents_panel {
-                if panel.detail {
-                    panel.detail = false;
-                    panel.detail_id = None;
-                    panel.offset = 0;
+                if panel.inside.is_some() {
+                    panel.leave();
                 } else {
                     self.state.agents_panel = None;
                 }
@@ -292,31 +303,21 @@ impl App {
         let Some(panel) = &mut self.state.agents_panel else {
             return;
         };
-        if panel.detail {
-            if matches!(key.code, 37 | 39 | 9) {
-                panel.tab = if key.code == 37 {
-                    (panel.tab + 2) % 3
-                } else {
-                    (panel.tab + 1) % 3
-                };
-                panel.offset = 0;
-                panel.follow = true;
+        if panel.inside.is_none() {
+            if key.code == 13 {
+                if let Some(record) = panel.current(&self.state.collaboration) {
+                    panel.inside = Some(value(record, "id").to_string());
+                    panel.offset = 0;
+                    panel.follow = true;
+                }
                 return;
             }
-        } else if key.code == 13 && panel.current(&self.state.collaboration).is_some() {
-            panel.detail_id = panel
-                .current(&self.state.collaboration)
-                .map(|record| value(record, "id").to_string());
-            panel.detail = true;
-            panel.tab = 0;
-            panel.offset = 0;
-            panel.follow = true;
-            return;
-        } else if matches!(key.code, 8 | 46) {
-            if panel.filter.key(key) {
-                panel.selected = 0;
+            if matches!(key.code, 8 | 46) {
+                if panel.filter.key(key) {
+                    panel.selected = 0;
+                }
+                return;
             }
-            return;
         }
         self.agents_move(key.code);
     }

@@ -52,6 +52,9 @@ pub(super) fn chrome(state: &State, model: &str, directory: &str, reading: bool)
 
 #[cfg(test)]
 pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
+    if let Some(frame) = agents::inside(state) {
+        return frame;
+    }
     let mut history = state.rows();
     let end = state.settled_len();
     let pending = history.split_off(end);
@@ -183,13 +186,15 @@ pub(super) fn todo_capacity(state: &State) -> usize {
     composer::panel_room(state)
 }
 
-pub(super) fn agents_detail_rows(state: &State) -> usize {
-    let Some(panel) = &state.agents_panel else {
-        return 0;
-    };
-    panel.current(&state.collaboration).map_or(0, |record| {
-        agents::detail_rows(record, panel.tab, panel::text_width(state.width.max(1))).len()
-    })
+/// Rows of the collaborator conversation open in `/agents`, and the rows shown.
+pub(super) fn agents_inside_rows(state: &State) -> (usize, usize) {
+    agents::inside_rows(state)
+}
+
+/// The frame inside a collaborator in `/agents`, which replaces the
+/// conversation column and its chrome.
+pub(super) fn agents_inside(state: &State) -> Option<Frame> {
+    agents::inside(state)
 }
 
 /// Total and visible rows of the open process stream.

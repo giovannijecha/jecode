@@ -204,7 +204,13 @@ impl App {
                 self.collaboration_return_pending = false;
                 self.collaboration_auto_resume = true;
                 let mut turn_recorded = false;
+                // Events recorded since the last other record; an agent call
+                // saved after them gives them its work label.
+                let mut events = Vec::new();
                 for record in document.records() {
+                    if !matches!(record, Record::Collaboration { .. } | Record::Tool { .. }) {
+                        events.clear();
+                    }
                     match record {
                         Record::TurnStart => {
                             self.state.begin_tool_turn();
@@ -240,6 +246,12 @@ impl App {
                             change,
                         } => {
                             if name == "agent" && super::agents::receipt_replaces_tool(&arguments) {
+                                let work = arguments
+                                    .get("work")
+                                    .and_then(crate::json::Value::as_str)
+                                    .unwrap_or("");
+                                self.state
+                                    .adopt_collaboration(&std::mem::take(&mut events), work);
                                 if result
                                     .get("error")
                                     .and_then(crate::json::Value::as_str)
@@ -249,6 +261,7 @@ impl App {
                                 }
                                 continue;
                             }
+                            events.clear();
                             if !self.state.items.iter().any(|item| {
                                 matches!(item,
                                 Item::Tool { id: existing, name: tool, result: None, .. }
@@ -295,7 +308,12 @@ impl App {
                             let sequence = super::agents::number(&event, "sequence");
                             if self.collaboration_seen.insert(sequence) {
                                 self.state
-                                    .collaboration_event(self.archive.redactor.value(&event));
+                                    .collaboration_event(self.archive.redactor.value(&event), None);
+                                if let Some(index) = self.state.items.iter().rposition(|item| {
+                                    matches!(item, Item::Tool { name, .. } if name == "collaboration")
+                                }) {
+                                    events.push(index);
+                                }
                             }
                         }
                     }

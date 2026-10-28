@@ -3,12 +3,15 @@ use crate::{
     agent::Agent,
     backend::openrouter::OpenRouter,
     config::{Settings, Store},
+    events::Event,
     session::SessionConfig,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
     tui::{
         keys::Decoded,
+        line::Line,
         state::{Item, State},
+        theme::{BAD, WARNING},
         view,
     },
 };
@@ -34,15 +37,29 @@ fn record(number: usize, state: &str) -> Value {
         (
             "tools",
             Value::Array(vec![Value::object([
-                ("name", Value::string("read")),
-                ("state", Value::string("complete")),
+                ("id", Value::string("c1")),
+                ("name", Value::string("edit")),
+                ("state", Value::string("done")),
                 ("text", Value::string("src/search.rs")),
+                (
+                    "arguments",
+                    Value::object([("path", Value::string("src/search.rs"))]),
+                ),
+                ("result", Value::object([])),
+                (
+                    "change",
+                    Value::object([
+                        ("added", Value::number(3)),
+                        ("removed", Value::number(1)),
+                        ("created", Value::Bool(false)),
+                    ]),
+                ),
             ])]),
         ),
         ("files", Value::Array(vec![Value::string("src/search.rs")])),
         (
             "checks",
-            Value::Array(vec![Value::string("search check passed")]),
+            Value::Array(vec![Value::string("bash: search check passed")]),
         ),
         (
             "report",
@@ -56,67 +73,95 @@ fn record(number: usize, state: &str) -> Value {
     ])
 }
 
-fn receipt(records: Vec<Value>) -> Value {
+fn event(sequence: usize, kind: &str, number: usize, records: Vec<Value>) -> Value {
+    let id = if number == 0 {
+        Value::Null
+    } else {
+        Value::string(format!("a{number}"))
+    };
+    let details = if kind == "created" {
+        records
+            .iter()
+            .map(|record| record.get("id").unwrap().clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
     Value::object([
         ("type", Value::string("collaboration")),
-        ("sequence", Value::number(1)),
-        ("kind", Value::string("created")),
-        ("title", Value::string("Create agents")),
-        ("summary", Value::string("2 assignments v1")),
-        ("details", Value::Array(vec![])),
+        ("sequence", Value::number(sequence)),
+        ("kind", Value::string(kind)),
+        ("id", id),
+        ("number", Value::number(number)),
+        ("title", Value::string(format!("Search part {number}"))),
+        (
+            "version",
+            Value::number(if kind == "created" { 0 } else { 2 }),
+        ),
+        ("summary", Value::string("Agent summary")),
+        ("details", Value::Array(details)),
         ("records", Value::Array(records)),
     ])
 }
 
+fn receipt(records: Vec<Value>) -> Value {
+    event(1, "created", 0, records)
+}
+
+fn set(record: &mut Value, key: &str, value: Value) {
+    if let Value::Object(fields) = record {
+        fields.insert(key.into(), value);
+    }
+}
+
+fn text(rows: &[Line]) -> String {
+    rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n")
+}
+
+fn all(state: &State) -> String {
+    text(&state.rows().concat())
+}
+
 #[test]
-fn creation_receipt_expands_snapshots_without_changing_prior_content() {
+fn creation_event_is_a_lone_row_that_opens_every_assignment() {
     let original = receipt(vec![record(1, "running"), record(2, "running")]);
     let mut state = State {
         width: 40,
         ..State::default()
     };
-    state.collaboration_event(original.clone());
-    let compact = state
-        .rows()
-        .pop()
-        .unwrap()
-        .iter()
-        .map(crate::tui::line::Line::plain)
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(compact.contains("AGENTS"));
+    state.collaboration_event(original.clone(), None);
+    let compact = all(&state);
+    assert!(
+        compact.contains("AGENTS  2 created · isolated workspaces"),
+        "{compact}"
+    );
     assert!(!compact.contains("AGENT 1"));
-    assert!(state.toggle_collaboration());
-    let expanded = state
-        .rows()
-        .pop()
-        .unwrap()
-        .iter()
-        .map(crate::tui::line::Line::plain)
-        .collect::<Vec<_>>()
-        .join("\n");
+    assert_eq!(state.toggle_tools(), Some((true, 1)));
+    let expanded = all(&state);
     assert!(expanded.contains("AGENT 1") && expanded.contains("AGENT 2"));
-    assert!(expanded.contains("Implement search"));
-    assert!(matches!(&state.items[0], Item::Collaboration { event, .. } if *event == original));
+    assert!(expanded.contains("Implement search"), "{expanded}");
+    assert!(matches!(&state.items[0],
+        Item::Tool { name, result: Some(event), .. } if name == "collaboration" && *event == original));
 }
 
 #[test]
 fn expanded_receipt_wraps_a_long_assignment_name_at_narrow_width() {
     let mut agent = record(1, "running");
-    if let Value::Object(fields) = &mut agent {
-        fields.insert(
-            "title".into(),
-            Value::string(
-                "A long assignment name that has to remain readable through the terminal-marker",
-            ),
-        );
-    }
-    let event = receipt(vec![agent]);
-    let rows = crate::tui::view::agents::receipt(&event, true, 40);
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("terminal-marker"))
+    set(
+        &mut agent,
+        "title",
+        Value::string(
+            "A long assignment name that has to remain readable through the terminal-marker",
+        ),
     );
+    let mut state = State {
+        width: 40,
+        ..State::default()
+    };
+    state.collaboration_event(receipt(vec![agent]), None);
+    state.toggle_tools();
+    let rows = state.rows().concat();
+    assert!(text(&rows).contains("terminal-marker"));
     assert!(
         rows.iter()
             .all(|row| crate::tui::text::cells(&row.plain()) <= 40)
@@ -124,7 +169,40 @@ fn expanded_receipt_wraps_a_long_assignment_name_at_narrow_width() {
 }
 
 #[test]
-fn panel_filter_tabs_and_nested_escape_keep_the_exact_main_draft() {
+fn model_written_titles_reports_and_names_are_sanitized() {
+    let mut agent = record(1, "returned");
+    set(&mut agent, "title", Value::string("Title \u{1b}[31mred"));
+    set(
+        &mut agent,
+        "report",
+        Value::object([
+            ("version", Value::number(1)),
+            ("text", Value::string("Report \u{1b}]0;owned\u{7}")),
+        ]),
+    );
+    let mut returned = event(2, "returned", 1, vec![agent.clone()]);
+    set(&mut returned, "title", Value::string("Title \u{1b}[31mred"));
+    let mut state = State {
+        width: 80,
+        height: 24,
+        collaboration: vec![agent],
+        ..State::default()
+    };
+    state.collaboration_event(returned, None);
+    state.toggle_tools();
+    let rows = all(&state);
+    assert!(
+        rows.contains("Title [ESC][31mred") && rows.contains("Report [ESC]"),
+        "{rows}"
+    );
+    state.agents_panel = Some(Panel::default());
+    let list = text(&view::composer_frame(&state, "fixture/model", "fixture").live);
+    assert!(list.contains("Title [ESC][31mred"), "{list}");
+    assert!(!rows.contains('\u{1b}') && !list.contains('\u{1b}'));
+}
+
+#[test]
+fn panel_list_inside_and_nested_escape_keep_the_exact_main_draft() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
@@ -146,15 +224,13 @@ fn panel_filter_tabs_and_nested_escape_keep_the_exact_main_draft() {
     app.state.activity = Some(crate::tui::activity::Activity::new());
     app.open_agents();
     app.state.collaboration = vec![record(1, "running"), record(2, "returned")];
+    let list = text(&view::composer_frame(&app.state, "fixture/model", "fixture").live);
+    assert!(list.contains("Agents · 2 open"), "{list}");
+    assert!(list.contains("returned · main review"), "{list}");
+    assert!(!list.contains("v1") && !list.contains("v2"), "{list}");
     app.input(Decoded::Text("agent 2".into())).unwrap();
-    assert_eq!(
-        app.state
-            .agents_panel
-            .as_ref()
-            .unwrap()
-            .filtered(&app.state.collaboration),
-        vec![1]
-    );
+    let panel = app.state.agents_panel.as_ref().unwrap();
+    assert_eq!(panel.filtered(&app.state.collaboration), vec![1]);
     let key = |app: &mut App, code| {
         app.input(Decoded::Key(Key {
             code,
@@ -164,48 +240,37 @@ fn panel_filter_tabs_and_nested_escape_keep_the_exact_main_draft() {
         .unwrap();
     };
     key(&mut app, 13);
-    assert!(app.state.agents_panel.as_ref().unwrap().detail);
+    assert_eq!(
+        app.state.agents_panel.as_ref().unwrap().inside.as_deref(),
+        Some("a2")
+    );
     key(&mut app, 38);
     assert!(!app.state.agents_panel.as_ref().unwrap().follow);
     key(&mut app, 35);
     assert!(app.state.agents_panel.as_ref().unwrap().follow);
-    key(&mut app, 39);
-    key(&mut app, 39);
-    assert_eq!(app.state.agents_panel.as_ref().unwrap().tab, 2);
-    let shown = view::composer_frame(&app.state, "fixture/model", "fixture").live;
+    let inside = text(&view::frame(&app.state, "fixture/model", "fixture").live);
+    assert!(inside.contains("Implement search"), "{inside}");
+    assert!(inside.contains("UPDATE  src/search.rs"), "{inside}");
     assert!(
-        shown
-            .iter()
-            .any(|line| line.plain().contains("Search implemented"))
+        inside.contains("AGENT 2  Returned · Search part 2"),
+        "{inside}"
     );
-    let detail = shown
-        .iter()
-        .map(|line| line.plain())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(detail.matches("Esc").count(), 1, "{detail}");
-    assert!(detail.contains("Esc  back to agents"), "{detail}");
-    assert!(!detail.contains("Esc interrupt"), "{detail}");
+    assert_eq!(inside.matches("Esc").count(), 1, "{inside}");
+    assert!(inside.contains("Esc  back to agents"), "{inside}");
+    assert!(!inside.contains("Filter agents") && !inside.contains("Esc interrupt"));
     key(&mut app, 27);
-    assert!(!app.state.agents_panel.as_ref().unwrap().detail);
+    assert!(app.state.agents_panel.as_ref().unwrap().inside.is_none());
     assert!(!app.state.activity.as_ref().unwrap().stopping);
-    let list = view::composer_frame(&app.state, "fixture/model", "fixture")
-        .live
-        .iter()
-        .map(|line| line.plain())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let list = text(&view::composer_frame(&app.state, "fixture/model", "fixture").live);
     assert_eq!(list.matches("Esc").count(), 1, "{list}");
-    assert!(list.contains("Esc  close"), "{list}");
+    assert!(
+        list.contains("Esc  close") && list.contains("Enter  open"),
+        "{list}"
+    );
     key(&mut app, 27);
     assert!(app.state.agents_panel.is_none());
     assert!(!app.state.activity.as_ref().unwrap().stopping);
-    let main = view::composer_frame(&app.state, "fixture/model", "fixture")
-        .live
-        .iter()
-        .map(|line| line.plain())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let main = text(&view::composer_frame(&app.state, "fixture/model", "fixture").live);
     assert!(main.contains("Esc interrupt"), "{main}");
     assert_eq!(app.state.editor, draft);
     let created = receipt(vec![record(1, "running")]);
@@ -215,7 +280,7 @@ fn panel_filter_tabs_and_nested_escape_keep_the_exact_main_draft() {
         app.state
             .items
             .iter()
-            .filter(|item| matches!(item, Item::Collaboration { .. }))
+            .filter(|item| matches!(item, Item::Tool { name, .. } if name == "collaboration"))
             .count(),
         1
     );
@@ -230,16 +295,12 @@ fn returned_report_does_not_become_reviewed_when_opened() {
     };
     state.collaboration = vec![record(1, "returned")];
     state.agents_panel = Some(Panel {
-        detail: true,
-        detail_id: Some("a1".into()),
-        tab: 2,
+        inside: Some("a1".into()),
         ..Panel::default()
     });
-    let rows = view::composer_frame(&state, "fixture/model", "fixture").live;
-    assert!(
-        rows.iter()
-            .any(|line| line.plain().contains("Pending review by main agent"))
-    );
+    let rows = text(&view::frame(&state, "fixture/model", "fixture").live);
+    assert!(rows.contains("src/search.rs  +3 −1"), "{rows}");
+    assert!(rows.contains("pending review by main agent"), "{rows}");
     assert_eq!(
         state.collaboration[0].get("reviewed"),
         Some(&Value::Bool(false))
@@ -281,37 +342,16 @@ fn footer_keeps_context_and_critical_counts_in_its_existing_row() {
 }
 
 #[test]
-fn receipt_during_stream_splits_text_at_its_arrival_position() {
-    let mut state = State::default();
-    state.event(crate::events::Event::Streaming {
-        text: "Before".into(),
-    });
-    state.collaboration_event(receipt(vec![record(1, "running")]));
-    state.event(crate::events::Event::Streaming {
-        text: "Before after".into(),
-    });
-    state.event(crate::events::Event::Message {
-        text: "Before after".into(),
-    });
-    assert!(matches!(&state.items[0], Item::Text { text, .. } if text == "Before"));
-    assert!(matches!(&state.items[1], Item::Collaboration { .. }));
-    assert!(matches!(&state.items[2], Item::Text { text, .. } if text == " after"));
-}
-
-#[test]
 fn inspected_identity_stays_fixed_when_live_state_changes_the_filter() {
     let mut records = vec![record(1, "running"), record(2, "running")];
     let mut panel = Panel::default();
     panel.filter.insert("running");
-    panel.detail = true;
-    panel.detail_id = Some("a1".into());
+    panel.inside = Some("a1".into());
     assert_eq!(
         value(panel.current(&records).unwrap(), "title"),
         "Search part 1"
     );
-    if let Value::Object(fields) = &mut records[0] {
-        fields.insert("state".into(), Value::string("returned"));
-    }
+    set(&mut records[0], "state", Value::string("returned"));
     assert_eq!(panel.filtered(&records), vec![1]);
     assert_eq!(
         value(panel.current(&records).unwrap(), "title"),
@@ -320,20 +360,16 @@ fn inspected_identity_stays_fixed_when_live_state_changes_the_filter() {
 }
 
 #[test]
-fn closed_selected_assignment_returns_to_the_open_list_without_selecting_another_detail() {
+fn closed_inspected_agent_returns_to_the_open_list() {
     let mut records = vec![record(1, "returned"), record(2, "running")];
     let mut panel = Panel {
-        detail: true,
-        detail_id: Some("a1".into()),
-        tab: 2,
+        inside: Some("a1".into()),
         selected: 1,
         ..Panel::default()
     };
     records.remove(0);
     panel.reconcile(&records);
-    assert!(!panel.detail);
-    assert!(panel.detail_id.is_none());
-    assert_eq!(panel.tab, 0);
+    assert!(panel.inside.is_none());
     assert_eq!(panel.selected, 0);
     assert_eq!(value(panel.current(&records).unwrap(), "id"), "a2");
     let mut state = State {
@@ -344,19 +380,14 @@ fn closed_selected_assignment_returns_to_the_open_list_without_selecting_another
         ..State::default()
     };
     state.editor.insert("unsent main instruction");
-    let shown = view::composer_frame(&state, "fixture/model", "fixture")
-        .live
-        .iter()
-        .map(|line| line.plain())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let shown = text(&view::composer_frame(&state, "fixture/model", "fixture").live);
     assert!(shown.contains("Search part 2"), "{shown}");
     assert!(!shown.contains("Search part 1"), "{shown}");
     assert_eq!(state.editor.text, "unsent main instruction");
 }
 
 #[test]
-fn activity_follows_new_rows_until_the_reader_pauses() {
+fn inside_follows_new_rows_until_the_reader_pauses() {
     let mut agent = record(1, "running");
     let tools = (0..30)
         .map(|index| {
@@ -364,12 +395,11 @@ fn activity_follows_new_rows_until_the_reader_pauses() {
                 ("name", Value::string(format!("tool-{index:02}"))),
                 ("state", Value::string("done")),
                 ("text", Value::string("checked")),
+                ("result", Value::object([])),
             ])
         })
         .collect();
-    if let Value::Object(fields) = &mut agent {
-        fields.insert("tools".into(), Value::Array(tools));
-    }
+    set(&mut agent, "tools", Value::Array(tools));
     let mut state = State {
         width: 80,
         height: 24,
@@ -377,28 +407,25 @@ fn activity_follows_new_rows_until_the_reader_pauses() {
         ..State::default()
     };
     state.agents_panel = Some(Panel {
-        detail: true,
-        detail_id: Some("a1".into()),
+        inside: Some("a1".into()),
         ..Panel::default()
     });
-    let following = view::composer_frame(&state, "fixture/model", "fixture").live;
-    assert!(following.iter().any(|row| row.plain().contains("tool-29")));
+    let following = text(&view::frame(&state, "fixture/model", "fixture").live);
+    assert!(following.contains("TOOL-29") && following.contains("End  follow"));
     state.agents_panel.as_mut().unwrap().follow = false;
-    let paused = view::composer_frame(&state, "fixture/model", "fixture").live;
-    assert!(paused.iter().any(|row| row.plain().contains("tool-00")));
-    assert!(!paused.iter().any(|row| row.plain().contains("tool-29")));
+    let paused = text(&view::frame(&state, "fixture/model", "fixture").live);
+    assert!(paused.contains("TOOL-00") && !paused.contains("TOOL-29"));
 }
 
 #[test]
 fn reviewed_open_records_remain_inspectable_without_a_pending_footer() {
     let mut reviewed = record(1, "returned");
-    if let Value::Object(fields) = &mut reviewed {
-        fields.insert("reviewed".into(), Value::Bool(true));
-        fields.insert(
-            "checks".into(),
-            Value::Array(vec![Value::string("search check failed")]),
-        );
-    }
+    set(&mut reviewed, "reviewed", Value::Bool(true));
+    set(
+        &mut reviewed,
+        "checks",
+        Value::Array(vec![Value::string("search check failed")]),
+    );
     let mut state = State {
         width: 80,
         height: 24,
@@ -408,9 +435,11 @@ fn reviewed_open_records_remain_inspectable_without_a_pending_footer() {
     let normal = view::composer_frame(&state, "fixture/model", "fixture").live;
     assert!(!normal.last().unwrap().plain().contains("AGENTS"));
     state.agents_panel = Some(Panel::default());
-    let panel = view::composer_frame(&state, "fixture/model", "fixture").live;
-    assert!(panel.iter().any(|row| row.plain().contains("AGENT 1")));
-    assert!(panel.iter().any(|row| row.plain().contains("Reviewed")));
+    let panel = text(&view::composer_frame(&state, "fixture/model", "fixture").live);
+    assert!(
+        panel.contains("AGENT 1") && panel.contains("reviewed"),
+        "{panel}"
+    );
 }
 
 #[path = "integration_tests.rs"]
@@ -418,6 +447,9 @@ mod integration_tests;
 
 #[path = "replay_tests.rs"]
 mod replay_tests;
+
+#[path = "chapter_tests.rs"]
+mod chapter_tests;
 
 #[test]
 fn only_receipted_agent_actions_replace_tool_cards() {

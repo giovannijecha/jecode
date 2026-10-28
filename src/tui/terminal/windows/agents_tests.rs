@@ -90,13 +90,16 @@ pub(super) fn console(bash: &Path) {
     state.editor.cursor = 4;
     let draft = state.editor.clone();
     let receipt = Value::object([
+        ("type", Value::string("collaboration")),
+        ("sequence", Value::number(1)),
         ("kind", Value::string("created")),
+        ("id", Value::Null),
         ("title", Value::string("Create agents")),
-        ("summary", Value::string("1 assignment v1")),
+        ("details", Value::Array(vec![Value::string("a1")])),
         ("records", Value::Array(vec![record()])),
     ]);
-    state.collaboration_event(receipt);
-    state.toggle_collaboration();
+    state.collaboration_event(receipt, None);
+    assert_eq!(state.toggle_tools(), Some((true, 1)));
     let expanded = crate::tui::view::frame(&state, "fixture/model", "fixture");
     let footer = expanded.live.last().unwrap();
     assert!(
@@ -115,21 +118,38 @@ pub(super) fn console(bash: &Path) {
             .any(|row| row.plain().contains("AGENT 1"))
     );
     paint(expanded.live, width, height);
-    state.agents_panel = Some(crate::tui::agents::Panel {
-        detail: true,
-        detail_id: Some("a1".into()),
-        tab: 2,
-        ..Default::default()
-    });
-    let panel = crate::tui::view::frame(&state, "fixture/model", "fixture");
+    state.agents_panel = Some(crate::tui::agents::Panel::default());
+    let list = crate::tui::view::frame(&state, "fixture/model", "fixture");
+    let shown = list
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(shown.contains("Agents · 1 open") && shown.contains("returned · main review"));
+    paint(list.live, width, height);
+    state.agents_panel.as_mut().unwrap().inside = Some("a1".into());
+    let inside = crate::tui::view::frame(&state, "fixture/model", "fixture");
+    let shown = inside
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(shown.contains("Preserve ordering for empty queries"));
+    assert!(shown.contains("AGENT 1  Returned · Inspect the search view"));
     assert!(
-        panel
+        inside
             .live
-            .iter()
-            .any(|row| row.plain().contains("Search behavior implemented"))
+            .last()
+            .unwrap()
+            .plain()
+            .contains("Esc  back to agents")
     );
+    assert!(!shown.contains("fixture/model") && !shown.contains("34%"));
+    assert_eq!(inside.live.len(), height);
     assert_eq!(state.editor, draft);
-    paint(panel.live, width, height);
+    paint(inside.live, width, height);
     state.agents_panel = None;
     if let Value::Object(fields) = &mut state.collaboration[0] {
         fields.insert("reviewed".into(), Value::Bool(true));

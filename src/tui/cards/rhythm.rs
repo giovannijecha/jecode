@@ -130,7 +130,7 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, 
     let titled = rows.len();
     if command {
         let command = if discovery_note {
-            Line::new(&target, CODE_TEXT)
+            Line::new(&inline(&target), CODE_TEXT)
         } else {
             Line::new(
                 if tool.name == "exec" {

@@ -81,8 +81,8 @@ fn delayed_child_return_restarts_idle_main_without_a_user_message() {
     while started.elapsed() < Duration::from_secs(8) {
         app.poll().unwrap();
         saw_return |= app.state.items.iter().any(|item| {
-            matches!(item, Item::Collaboration { event, .. }
-            if value(event, "kind") == "returned")
+            matches!(item, Item::Tool { name, result: Some(event), .. }
+            if name == "collaboration" && value(event, "kind") == "returned")
         });
         restarted |= saw_return && app.worker.is_some();
         if restarted && app.worker.is_none() {
@@ -152,42 +152,89 @@ fn explicit_main_stop_disables_automatic_collaborator_continuation() {
 }
 
 #[test]
-fn visible_updates_and_failed_tools_remain_in_activity() {
+fn updates_and_calls_appear_inside_in_the_order_they_happened() {
     let mut agent = record(1, "running");
-    if let Value::Object(fields) = &mut agent {
-        fields.insert(
-            "updates".into(),
-            Value::Array(vec![
-                Value::string("Found the first issue"),
-                Value::string("Rechecked after the assignment changed"),
-            ]),
-        );
-        fields.insert("updates_truncated".into(), Value::Bool(true));
-        fields.insert(
-            "tools".into(),
-            Value::Array(vec![Value::object([
-                ("name", Value::string("bash")),
-                ("state", Value::string("failed")),
-                ("text", Value::string("cargo test failed")),
-            ])]),
-        );
-    }
-    let rows = crate::tui::view::agents::detail_rows(&agent, 0, 80);
-    let all = rows
-        .iter()
-        .map(crate::tui::line::Line::plain)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let first = all.find("Found the first issue").unwrap();
-    let second = all.find("Rechecked after the assignment changed").unwrap();
-    assert!(first < second);
-    assert!(all.contains("Earlier updates omitted"));
-    assert!(rows.iter().any(|row| {
-        row.plain().contains("cargo test failed")
-            && row
-                .spans
+    set(
+        &mut agent,
+        "updates",
+        Value::Array(vec![
+            Value::string("Found the first issue"),
+            Value::string("Rechecked after the assignment changed"),
+        ]),
+    );
+    set(
+        &mut agent,
+        "tools",
+        Value::Array(vec![Value::object([
+            ("name", Value::string("bash")),
+            ("state", Value::string("failed")),
+            ("text", Value::string("cargo test failed")),
+            (
+                "arguments",
+                Value::object([("command", Value::string("cargo test"))]),
+            ),
+            (
+                "result",
+                Value::object([("error", Value::string("cargo test failed"))]),
+            ),
+        ])]),
+    );
+    let entry = |pairs: &[(&str, Value)]| {
+        Value::Object(
+            pairs
                 .iter()
-                .any(|span| span.style == crate::tui::theme::BAD)
+                .map(|(key, value)| ((*key).into(), value.clone()))
+                .collect(),
+        )
+    };
+    let kind = |kind: &str| ("kind", Value::string(kind));
+    let index = |index: usize| ("index", Value::number(index));
+    let assignment = |version: usize, text: &str| {
+        entry(&[
+            kind("assignment"),
+            ("version", Value::number(version)),
+            ("instructions", Value::string(text)),
+        ])
+    };
+    set(
+        &mut agent,
+        "log",
+        Value::Array(vec![
+            assignment(1, "Implement search"),
+            // A message that left the bounded updates is skipped.
+            entry(&[kind("message")]),
+            entry(&[kind("message"), index(0)]),
+            entry(&[kind("tool"), index(0)]),
+            assignment(2, "Preserve order"),
+            entry(&[kind("message"), index(1)]),
+        ]),
+    );
+    let mut state = State {
+        width: 80,
+        height: 40,
+        collaboration: vec![agent],
+        ..State::default()
+    };
+    state.agents_panel = Some(Panel {
+        inside: Some("a1".into()),
+        ..Panel::default()
+    });
+    let rows = view::frame(&state, "fixture/model", "fixture").live;
+    let all = text(&rows);
+    let order = [
+        "› Implement search",
+        "Found the first issue",
+        "cargo test failed",
+        "› Preserve order",
+        "Rechecked after the assignment changed",
+    ]
+    .map(|needle| {
+        all.find(needle)
+            .unwrap_or_else(|| panic!("{needle}: {all}"))
+    });
+    assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{all}");
+    assert!(rows.iter().flat_map(|row| &row.spans).any(|span| {
+        span.text.contains("BASH") && span.background == Some(crate::tui::theme::BADGE_BAD)
     }));
 }
 
