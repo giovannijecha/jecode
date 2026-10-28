@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::Event;
 use crate::tui::{
     line::Line,
     theme::{BADGE_BAD, BADGE_IDLE, BADGE_TEXT, STRONG},
