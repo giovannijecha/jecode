@@ -125,15 +125,18 @@ the other events under the collaborator's `AGENT N` name: sent and received
 assignments, returns, reviews, stops, closures and unknown outcomes. `agent`
 takes the same optional `work` label as the discovery tools, so its events and
 inspection calls join a Work chapter with related calls; agent members keep one
-row each. An event that arrives during a turn joins the chapter it follows. One
-that arrives outside a turn, or after the turn's prose, is a lone row at its
-position. Events never split prose that is still streaming; they land before
-it, where a resumed conversation also places them. The transcript shows no
-clock times. Failed checks and failed runs are red, unknown outcomes amber and
-routine waiting quiet. `Ctrl+O` opens the latest chapter or row and shows every
-agent event as its full receipt: instruction, working space, changed files with
-`+` and `−` line counts, report and review state. Earlier receipts retain their
-original snapshots.
+row each. An event written by an agent call joins that call's chapter; another
+event that happens during a turn joins the chapter it follows. One that happens
+outside a turn, such as a return while the main agent is idle or an unknown
+outcome found on resume, or after the turn's prose, is a lone row at its
+position. Each event records these facts when it happens, so its place does not
+depend on when the terminal sees it, and a resumed conversation shows it where
+it was shown live. Events never split prose that is still streaming; they land
+before it. The transcript shows no clock times. Failed checks and failed runs
+are red, unknown outcomes amber and routine waiting quiet. `Ctrl+O` opens the
+latest chapter or row and shows every agent event as its full receipt:
+instruction, working space, changed files with `+` and `−` line counts, report
+and review state. Earlier receipts retain their original snapshots.
 
 `/agents` opens a filterable list of open assignments below the composer. Each
 row names the collaborator with its `AGENT N` badge and title, with its state in
@@ -141,7 +144,10 @@ the fact column: running time, returned or failed work awaiting the main
 agent's review, or an unknown outcome. Enter goes inside the agent: its own
 conversation replaces the main column, drawn like the main conversation and read
 only. It shows each received assignment as a request, then its calls, chapters
-and messages in the order they happened, and the return receipt last. One row
+and messages in the order they happened, and the return receipt last. File
+edits show their hunks as in the main conversation, read from the agent's own
+saved history; if that history is unavailable, the card keeps its `+` and `−`
+line counts. One row
 of keys replaces the composer, status row and footer: `Esc back to agents`,
 `↑↓ scroll` and, while the agent works, `End follow`. The view follows new
 output; scrolling pauses it and End resumes following. Esc returns from the

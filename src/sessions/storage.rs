@@ -93,7 +93,12 @@ impl Store {
 
     #[cfg(test)]
     pub fn fixture_load(&self, id: &str) -> Result<Document, String> {
-        self.load(id).map(|(doc, _)| doc)
+        self.read(id)
+    }
+
+    /// A saved document, read without opening its session or changing files.
+    pub fn read(&self, id: &str) -> Result<Document, String> {
+        self.load(id).map(|(document, _)| document)
     }
 
     pub fn new(home: PathBuf, directory: &Path) -> Result<Self, String> {

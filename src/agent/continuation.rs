@@ -71,6 +71,7 @@ impl Agent {
         self.refresh_skills();
         self.checkpoint(Stage::Continue)?;
         let observer = self.collaboration();
+        let _turn = observer.turn();
         let mut cursor = observer.events_since(0).0;
         let mut partial = String::new();
         let mut result = self.drive_turn(&mut |event| {

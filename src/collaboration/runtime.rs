@@ -53,6 +53,7 @@ impl Observer {
             }
         };
         let child_session = child.sessions().map(|handle| handle.id());
+        let session_events = Some(child.archive().events);
         let inbox = child.inbox();
         let cancellation = child.cancellation();
         let (wake, receive) = mpsc::channel();
@@ -61,6 +62,7 @@ impl Observer {
             number,
             title: title.clone(),
             child_session,
+            session_events,
             state: "running",
             workspace_info: workspace.value(),
             workspace_mode: match workspace.mode() {
@@ -93,7 +95,8 @@ impl Observer {
             error: None,
         };
         self.0.state.lock().unwrap().records.push(record);
-        let observer = self.clone();
+        // The child outlives this call; its receipts carry no call label.
+        let observer = Self(Arc::clone(&self.0), None);
         let thread_id = id.clone();
         let task = thread::Builder::new()
             .name(format!("jecode-agent-{id}"))

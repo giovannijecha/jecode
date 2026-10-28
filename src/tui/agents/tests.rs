@@ -108,6 +108,13 @@ fn receipt(records: Vec<Value>) -> Value {
     event(1, "created", 0, records)
 }
 
+/// The event as an agent call labelled `work` recorded it during a turn.
+fn labelled(mut event: Value, work: &str) -> Value {
+    set(&mut event, "in_turn", Value::Bool(true));
+    set(&mut event, "work", Value::string(work));
+    event
+}
+
 fn set(record: &mut Value, key: &str, value: Value) {
     if let Value::Object(fields) = record {
         fields.insert(key.into(), value);
@@ -129,7 +136,7 @@ fn creation_event_is_a_lone_row_that_opens_every_assignment() {
         width: 40,
         ..State::default()
     };
-    state.collaboration_event(original.clone(), None);
+    state.collaboration_event(original.clone());
     let compact = all(&state);
     assert!(
         compact.contains("AGENTS  2 created · isolated workspaces"),
@@ -158,7 +165,7 @@ fn expanded_receipt_wraps_a_long_assignment_name_at_narrow_width() {
         width: 40,
         ..State::default()
     };
-    state.collaboration_event(receipt(vec![agent]), None);
+    state.collaboration_event(receipt(vec![agent]));
     state.toggle_tools();
     let rows = state.rows().concat();
     assert!(text(&rows).contains("terminal-marker"));
@@ -188,7 +195,7 @@ fn model_written_titles_reports_and_names_are_sanitized() {
         collaboration: vec![agent],
         ..State::default()
     };
-    state.collaboration_event(returned, None);
+    state.collaboration_event(returned);
     state.toggle_tools();
     let rows = all(&state);
     assert!(
@@ -450,6 +457,12 @@ mod replay_tests;
 
 #[path = "chapter_tests.rs"]
 mod chapter_tests;
+
+#[path = "placement_tests.rs"]
+mod placement_tests;
+
+#[path = "inside_tests.rs"]
+mod inside_tests;
 
 #[test]
 fn only_receipted_agent_actions_replace_tool_cards() {

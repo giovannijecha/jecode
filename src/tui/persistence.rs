@@ -204,12 +204,26 @@ impl App {
                 self.collaboration_return_pending = false;
                 self.collaboration_auto_resume = true;
                 let mut turn_recorded = false;
-                // Events recorded since the last other record; an agent call
-                // saved after them gives them its work label.
+                // Older events carry no call label: those recorded since the
+                // last other record take the work label of an agent call
+                // saved after them.
                 let mut events = Vec::new();
+                // Events recorded while a call ran followed its row live, so
+                // they follow its record.
+                let mut running = Vec::new();
                 for record in document.records() {
                     if !matches!(record, Record::Collaboration { .. } | Record::Tool { .. }) {
                         events.clear();
+                    }
+                    let call_row = matches!(&record, Record::Tool { name, arguments, .. }
+                        if name != "agent" || !super::agents::receipt_replaces_tool(arguments));
+                    if !call_row && !matches!(record, Record::Collaboration { .. }) {
+                        resume_collaboration(
+                            &mut self.state,
+                            &mut running,
+                            turn_recorded,
+                            &mut events,
+                        );
                     }
                     match record {
                         Record::TurnStart => {
@@ -262,6 +276,11 @@ impl App {
                                 continue;
                             }
                             events.clear();
+                            if turn_recorded && !self.state.tool_details.active {
+                                // A continuation's calls after an event
+                                // recorded outside a turn.
+                                self.state.begin_tool_turn();
+                            }
                             if !self.state.items.iter().any(|item| {
                                 matches!(item,
                                 Item::Tool { id: existing, name: tool, result: None, .. }
@@ -285,6 +304,12 @@ impl App {
                                 summary,
                                 result,
                             });
+                            resume_collaboration(
+                                &mut self.state,
+                                &mut running,
+                                turn_recorded,
+                                &mut events,
+                            );
                         }
                         Record::Local {
                             command,
@@ -307,17 +332,22 @@ impl App {
                         Record::Collaboration { event } => {
                             let sequence = super::agents::number(&event, "sequence");
                             if self.collaboration_seen.insert(sequence) {
-                                self.state
-                                    .collaboration_event(self.archive.redactor.value(&event), None);
-                                if let Some(index) = self.state.items.iter().rposition(|item| {
-                                    matches!(item, Item::Tool { name, .. } if name == "collaboration")
-                                }) {
-                                    events.push(index);
+                                let event = self.archive.redactor.value(&event);
+                                let follows = follows_call(&event, &document.messages);
+                                running.push(event);
+                                if !follows {
+                                    resume_collaboration(
+                                        &mut self.state,
+                                        &mut running,
+                                        turn_recorded,
+                                        &mut events,
+                                    );
                                 }
                             }
                         }
                     }
                 }
+                resume_collaboration(&mut self.state, &mut running, turn_recorded, &mut events);
                 self.state.close_tools();
                 self.collaboration_observer = agent.collaboration();
                 self.question_observer = agent.questions();
@@ -367,4 +397,40 @@ impl App {
             }
         }
     }
+}
+
+/// Places resumed events as they were placed live. Older events without a
+/// call label are kept for the agent call saved after them.
+fn resume_collaboration(
+    state: &mut super::state::State,
+    running: &mut Vec<crate::json::Value>,
+    turn_recorded: bool,
+    legacy: &mut Vec<usize>,
+) {
+    for event in running.drain(..) {
+        let labelled = event.get("in_turn").is_some();
+        state.resumed_collaboration(event, turn_recorded);
+        if !labelled
+            && let Some(index) = state.items.iter().rposition(
+                |item| matches!(item, Item::Tool { name, .. } if name == "collaboration"),
+            )
+        {
+            legacy.push(index);
+        }
+    }
+}
+
+/// An event recorded by no agent call while a call ran: live it followed
+/// that call's row, whose result is the next message.
+fn follows_call(event: &crate::json::Value, messages: &[crate::json::Value]) -> bool {
+    use crate::json::Value;
+    event.get("in_call") == Some(&Value::Bool(true))
+        && event.get("work").is_none()
+        && event
+            .get("after_message")
+            .and_then(Value::as_usize)
+            .and_then(|after| messages.get(after))
+            .and_then(|message| message.get("role"))
+            .and_then(Value::as_str)
+            == Some("tool")
 }

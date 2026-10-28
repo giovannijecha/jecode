@@ -25,6 +25,7 @@ impl Agent {
                 return self.abort_declared(batch, remaining, error);
             }
         }
+        let running = self.collaboration.call();
         let mut prepared = Vec::with_capacity(batch.len());
         for call in batch {
             if self.cancellation.requested() {
@@ -118,6 +119,7 @@ impl Agent {
 
         // Even after cancellation or a display/save failure, every launched
         // worker is joined and every returned outcome is kept, without replay.
+        drop(running);
         for (call, outcome) in batch.iter().zip(outcomes) {
             let (outcome, timing) = outcome.unwrap_or_else(|| (unknown(), Value::Null));
             self.tool_result(call, &outcome.result);

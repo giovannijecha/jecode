@@ -16,6 +16,7 @@ use crate::{
         theme::{BAD, MUTED, STRONG, Style, WARNING},
     },
 };
+use std::{cell::RefCell, sync::Arc};
 
 /// `4m`, `1h 12m`: how long a collaborator has been running.
 fn age(elapsed: std::time::Duration) -> String {
@@ -156,13 +157,66 @@ pub(super) fn sheet<'a>(state: &'a State, panel_state: &'a Panel, columns: usize
     }
 }
 
+/// The open collaborator's rendered conversation, kept until its record,
+/// changes or width change. Only the live activity line, which the rows do
+/// not show, changes without a redraw.
+#[derive(Default)]
+pub(in crate::tui) struct Cache(RefCell<Option<Cached>>);
+
+struct Cached {
+    columns: usize,
+    record: Value,
+    rows: Arc<Vec<Line>>,
+}
+
+impl Cache {
+    /// Drops the rows, for changes read after they were drawn.
+    pub fn clear(&self) {
+        self.0.take();
+    }
+
+    #[cfg(test)]
+    pub fn rows(&self) -> Option<Arc<Vec<Line>>> {
+        self.0
+            .borrow()
+            .as_ref()
+            .map(|cached| Arc::clone(&cached.rows))
+    }
+}
+
+/// Whether two snapshots draw the same conversation.
+fn same_rows(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Object(left), Value::Object(right)) => {
+            let drawn = |(key, _): &(&String, &Value)| key.as_str() != "activity";
+            left.iter().filter(drawn).eq(right.iter().filter(drawn))
+        }
+        _ => left == right,
+    }
+}
+
 /// The open collaborator's conversation rows, drawn as the main one is.
-fn conversation_rows(record: &Value, columns: usize) -> Vec<Line> {
-    let items = conversation::items(record);
+fn conversation_rows(panel: &Panel, record: &Value, columns: usize) -> Arc<Vec<Line>> {
+    let mut cache = panel.rows.0.borrow_mut();
+    if let Some(cached) = cache.as_ref()
+        && cached.columns == columns
+        && same_rows(&cached.record, record)
+    {
+        return Arc::clone(&cached.rows);
+    }
+    let items = conversation::items(record, &panel.changes.calls);
     let mut rows = Rows::default();
-    (0..items.len())
-        .flat_map(|index| rows.render_at(&items, index, columns, false))
-        .collect()
+    let rows = Arc::new(
+        (0..items.len())
+            .flat_map(|index| rows.render_at(&items, index, columns, false))
+            .collect::<Vec<_>>(),
+    );
+    *cache = Some(Cached {
+        columns,
+        record: record.clone(),
+        rows: Arc::clone(&rows),
+    });
+    rows
 }
 
 /// Conversation rows above the foot: one row of keys and the gap above it.
@@ -182,7 +236,7 @@ pub(super) fn inside_rows(state: &State) -> (usize, usize) {
         .current(&state.collaboration)
         .map_or((0, 0), |record| {
             (
-                conversation_rows(record, state.width.max(2)).len(),
+                conversation_rows(panel, record, state.width.max(2)).len(),
                 room(state.height),
             )
         })
@@ -195,7 +249,7 @@ pub(super) fn inside(state: &State) -> Option<Frame> {
     panel.inside.as_ref()?;
     let record = panel.current(&state.collaboration)?;
     let columns = state.width.max(2);
-    let lines = conversation_rows(record, columns);
+    let lines = conversation_rows(panel, record, columns);
     let room = room(state.height);
     let end = lines.len().saturating_sub(room);
     let start = if panel.follow {
@@ -203,7 +257,7 @@ pub(super) fn inside(state: &State) -> Option<Frame> {
     } else {
         panel.offset.min(end)
     };
-    let shown = lines.into_iter().skip(start).take(room).collect();
+    let shown = lines.iter().skip(start).take(room).cloned().collect();
     let working = matches!(agents::value(record, "state"), "running" | "stopping");
     let mut keys = vec![key("Esc", "back to agents"), key("↑↓", "scroll")];
     if working {

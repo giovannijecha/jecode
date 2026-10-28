@@ -43,6 +43,7 @@ impl Agent {
         let Some(request) = self.questions.current() else {
             return Ok(false);
         };
+        let _turn = self.collaboration().turn();
         let call = self.pending_question_call(&request.id)?;
         let result = match self.questions.saved_reply() {
             Some(reply) => reply.result(),

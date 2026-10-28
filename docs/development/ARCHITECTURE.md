@@ -239,20 +239,31 @@ Each record keeps the collaborator's activity as one ordered log
 returns, referring to the bounded `updates` and the `tools` entries rather than
 copying them. Records saved before the log existed are restored with their
 assignment, calls, messages and outcome in that order. A changed file's call
-also records its `+` / `−` line counts.
+also records its `+` / `−` line counts; its hunks stay only in the child's own
+session events. `collaboration/changes.rs` reads them from the running child's
+events, or from its saved journal under `child-home` once it no longer runs.
 
 Receipts append to the parent session even while its main model is idle. The TUI
 drains worker events and observer receipts with sequence deduplication, keeping
 historical snapshots immutable. `tui/state/agents.rs` places each receipt as a
 finished `collaboration` tool row whose result is the event, so it joins Work
-chapters, expands with `Ctrl+O` and renders through `tui/cards/agents.rs`. A
-receipt caused by a running agent call takes that call's work label; another
-joins the chapter it follows inside a turn and is otherwise lone. It is
-inserted before streaming prose, the position replay also derives from
-`after_message`; replay gives receipts the label of the agent call saved after
-them. Its `/agents` panel reads current snapshots, and inside an agent
-`tui/agents/conversation.rs` turns the ordered log into transcript items for
-the main renderer; opening a result does not review it. A new live return can start
+chapters, expands with `Ctrl+O` and renders through `tui/cards/agents.rs`.
+Placement comes from what the receipt records (`collaboration/placement.rs`),
+not from when the TUI sees it: `work`, the label of the agent call whose
+observer handle wrote it; `in_turn`, whether a main-agent turn was running; and
+`in_call`, whether one of its calls was. A labelled receipt joins its call's
+chapter; another joins the chapter it follows inside a turn; one written outside
+a turn is lone. It is inserted before streaming prose, the position replay also
+derives from `after_message`. Replay closes the open turn before a receipt
+written outside a turn, reopens one for a continuation's later calls, and moves
+a receipt written while a call ran after that call's record, where it was shown
+live. Receipts saved before these fields take the label of the agent call saved
+after them, and their restored unknown outcomes stay lone. Its `/agents` panel
+reads current snapshots, and inside an agent `tui/agents/conversation.rs` turns
+the ordered log into transcript items for the main renderer, with edit hunks
+read from the child's session when the counts still match; the rows are cached
+until the record, apart from its activity line, the width or the read changes
+change. Opening a result does not review it. A new live return can start
 `Agent::continue_collaboration` through the ordinary model loop without a
 synthetic user message. Queued input wins, explicit cancellation suppresses the
 continuation. Resume schedules one continuation for returned reports in still-open

@@ -203,7 +203,7 @@ impl State {
             self.changed();
         }
         match event {
-            Event::Collaboration { event } => self.collaboration_event(event, None),
+            Event::Collaboration { event } => self.collaboration_event(event),
             Event::Recovering {
                 attempt,
                 delay,

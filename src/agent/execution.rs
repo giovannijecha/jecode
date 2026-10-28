@@ -73,6 +73,7 @@ impl Agent {
             self.cancel_calls(remaining);
             return Err(error);
         }
+        let running = self.collaboration.call();
         let begun = self
             .tools
             .begin_cancellable(&call.name, &call.arguments, &self.cancellation);
@@ -102,6 +103,7 @@ impl Agent {
         }
         let timing = clock.finish(executing);
         let result = &outcome.result;
+        drop(running);
         self.tool_result(call, result);
         if call.name == "ask_user" {
             self.questions.complete(&call.id);
@@ -154,6 +156,7 @@ impl Agent {
                 return Err(error);
             }
         }
+        let running = self.collaboration.call();
         // Scoped workers all finish before results or a later, potentially
         // modifying call is handled. Session messages remain in source order.
         let mut results = run_parallel_calls(batch, clock, &|call| {
@@ -164,6 +167,7 @@ impl Agent {
                 &self.cancellation,
             )
         });
+        drop(running);
         for (call, (outcome, timing)) in batch.iter().zip(&mut results) {
             self.tool_result(call, &outcome.result);
             if let Some(timing) = timing.take() {

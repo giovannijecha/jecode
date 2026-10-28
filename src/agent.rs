@@ -185,6 +185,7 @@ impl Agent {
         let prompt = prompt.into();
         let mut partial = String::new();
         let observer = self.collaboration();
+        let _turn = observer.turn();
         let mut receipt_cursor = observer.events_since(0).0;
         let mut result = self.turn(&prompt, &mut |event| {
             let (next, receipts) = observer.events_since(receipt_cursor);

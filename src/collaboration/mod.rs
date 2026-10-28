@@ -1,6 +1,8 @@
 //! Session-scoped collaborator receipts and live workers.
 
+mod changes;
 mod log;
+mod placement;
 mod restore;
 mod runtime;
 #[cfg(test)]
@@ -18,8 +20,10 @@ use std::{
 };
 use workspace::Workspace;
 
+/// Shared collaboration state. A handle made for one agent call carries that
+/// call's work label, which every receipt it writes records.
 #[derive(Clone, Default)]
-pub struct Observer(Arc<Shared>);
+pub struct Observer(Arc<Shared>, Option<String>);
 
 #[derive(Default)]
 struct Shared {
@@ -34,6 +38,10 @@ struct State {
     receipts: Vec<Value>,
     workers: Vec<Worker>,
     last_number: usize,
+    /// Turns and calls of the main agent running now; receipts record
+    /// whether one was.
+    turns: usize,
+    calls: usize,
 }
 
 struct Worker {
@@ -63,6 +71,8 @@ struct Record {
     number: usize,
     title: String,
     child_session: Option<String>,
+    /// The running child's session events, which hold its file changes.
+    session_events: Option<crate::export::Messages>,
     state: &'static str,
     workspace: Option<Workspace>,
     workspace_info: Value,
@@ -216,6 +226,7 @@ impl Record {
                 .get("child_session")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            session_events: None,
             state,
             workspace,
             workspace_info,

@@ -9,7 +9,7 @@ fn receipt_during_stream_keeps_an_open_code_block_whole() {
     state.event(Event::Streaming {
         text: opened.into(),
     });
-    state.collaboration_event(receipt(vec![record(1, "running")]), None);
+    state.collaboration_event(receipt(vec![record(1, "running")]));
     state.event(Event::Streaming {
         text: closed.into(),
     });
@@ -29,7 +29,7 @@ fn agent_events_join_the_chapter_they_follow_and_stand_alone_after_prose() {
     };
     state.begin_tool_turn();
     let sent = event(1, "sent", 1, vec![record(1, "running")]);
-    state.collaboration_event(sent, Some("Update agents"));
+    state.collaboration_event(labelled(sent, "Update agents"));
     state.event(Event::ToolStarted {
         id: "r1".into(),
         name: "read".into(),
@@ -45,7 +45,7 @@ fn agent_events_join_the_chapter_they_follow_and_stand_alone_after_prose() {
         result: Value::object([("content", Value::string("text"))]),
     });
     let received = event(2, "received", 1, vec![record(1, "running")]);
-    state.collaboration_event(received, None);
+    state.collaboration_event(received);
     let chapter = all(&state);
     assert!(
         chapter.contains("WORK  Update agents  3 calls"),
@@ -61,13 +61,13 @@ fn agent_events_join_the_chapter_they_follow_and_stand_alone_after_prose() {
         "{chapter}"
     );
     state.message(crate::tui::state::Kind::Assistant, "Both run.");
-    state.collaboration_event(event(3, "returned", 1, vec![record(1, "returned")]), None);
+    state.collaboration_event(event(3, "returned", 1, vec![record(1, "returned")]));
     let Some(Item::Tool { arguments, .. }) = state.items.last() else {
         panic!("missing event");
     };
     assert_eq!(arguments.get("lone"), Some(&Value::Bool(true)));
     state.finish_tool_turn();
-    state.collaboration_event(event(4, "closed", 1, vec![record(1, "stopped")]), None);
+    state.collaboration_event(event(4, "closed", 1, vec![record(1, "stopped")]));
     assert_eq!(state.toggle_tools(), Some((true, 1)));
     assert!(all(&state).contains("Search part 1 · isolated workspace"));
 }
@@ -79,14 +79,14 @@ fn ctrl_o_opens_every_agent_event_in_the_chapter_as_its_receipt() {
         ..State::default()
     };
     state.begin_tool_turn();
-    state.collaboration_event(
+    state.collaboration_event(labelled(
         event(1, "sent", 1, vec![record(1, "running")]),
-        Some("Work"),
-    );
-    state.collaboration_event(
+        "Work",
+    ));
+    state.collaboration_event(labelled(
         event(2, "returned", 1, vec![record(1, "returned")]),
-        Some("Work"),
-    );
+        "Work",
+    ));
     state.finish_tool_turn();
     let collapsed = all(&state);
     assert!(collapsed.contains("AGENT 1 Returned · 1 file changed  pending review"));
@@ -116,11 +116,11 @@ fn failed_checks_are_bad_and_unknown_outcomes_are_warnings() {
         ..State::default()
     };
     state.begin_tool_turn();
-    state.collaboration_event(event(1, "returned", 2, vec![failed]), Some("Review"));
-    state.collaboration_event(
+    state.collaboration_event(labelled(event(1, "returned", 2, vec![failed]), "Review"));
+    state.collaboration_event(labelled(
         event(2, "unknown", 1, vec![record(1, "unknown")]),
-        Some("Review"),
-    );
+        "Review",
+    ));
     let rows = state.rows().concat();
     let all = text(&rows);
     assert!(all.contains("2 calls · 1 failed"), "{all}");

@@ -151,6 +151,7 @@ impl Observer {
                 Value::number(parent.0.messages.lock().unwrap().len()),
             ),
         ]);
+        self.place(state, &mut event);
         event = parent.0.redactor.value(&event);
         if let Some(handle) = &parent.1 {
             event = handle.append_event(&parent.0, event)?;

@@ -15,7 +15,10 @@ impl Agent {
             .get("action")
             .and_then(Value::as_str)
             .ok_or("action must be a string")?;
-        let observer = self.collaboration();
+        // Receipts from this call join its chapter, wherever they are shown.
+        let observer = self
+            .collaboration()
+            .calling(arguments.get("work").and_then(Value::as_str).unwrap_or(""));
         let id = || {
             arguments
                 .get("id")
@@ -285,6 +288,8 @@ mod integration_tests;
 mod lifecycle_tests;
 #[cfg(test)]
 mod lock_tests;
+#[cfg(test)]
+mod placement_tests;
 #[cfg(test)]
 mod reclaim_tests;
 #[cfg(test)]

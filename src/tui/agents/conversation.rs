@@ -10,6 +10,24 @@ use crate::{
         state::{Item, Kind},
     },
 };
+use std::collections::HashMap;
+
+/// The open collaborator's file changes with their hunks, by call id, read
+/// from its own session when its record counted `counted` changed calls.
+#[derive(Default)]
+pub(in crate::tui) struct Changes {
+    pub id: String,
+    pub counted: usize,
+    pub calls: HashMap<String, Change>,
+}
+
+/// The record's calls that changed a file.
+pub(in crate::tui) fn changed_calls(record: &Value) -> usize {
+    super::list(record, "tools")
+        .iter()
+        .filter(|tool| tool.get("change").is_some())
+        .count()
+}
 
 fn event(record: &Value, kind: &str, version: usize, details: Vec<String>) -> Value {
     Value::object([
@@ -51,20 +69,27 @@ fn receipt(event: Value, turn_id: u64) -> Item {
 
 /// A child call as a finished or running tool row. Calls that never
 /// finished in a collaborator that no longer runs have no confirmed result.
-fn call(tool: &Value, working: bool, turn_id: u64) -> Item {
+/// A change keeps its hunks when the child's session still has them;
+/// otherwise its card shows the counts the record kept.
+fn call(tool: &Value, working: bool, turn_id: u64, changes: &HashMap<String, Change>) -> Item {
     let result = tool.get("result").cloned().or_else(|| {
         (!working || super::value(tool, "state") != "running")
             .then(|| Value::object([("error", Value::string("No confirmed result"))]))
     });
-    let change = tool.get("change").map(|change| {
-        Box::new(Change {
-            added: super::number(change, "added"),
-            removed: super::number(change, "removed"),
-            created: change.get("created") == Some(&Value::Bool(true)),
+    let change = tool.get("change").map(|counts| {
+        let counted = Change {
+            added: super::number(counts, "added"),
+            removed: super::number(counts, "removed"),
+            created: counts.get("created") == Some(&Value::Bool(true)),
             hunks: Vec::new(),
             ending_change: None,
             final_newline: None,
-        })
+        };
+        let full = changes.get(super::value(tool, "id")).filter(|change| {
+            (change.added, change.removed, change.created)
+                == (counted.added, counted.removed, counted.created)
+        });
+        Box::new(full.cloned().unwrap_or(counted))
     });
     Item::Tool {
         id: super::value(tool, "id").into(),
@@ -116,7 +141,7 @@ fn fallback(record: &Value) -> Vec<Value> {
     entries
 }
 
-pub(in crate::tui) fn items(record: &Value) -> Vec<Item> {
+pub(in crate::tui) fn items(record: &Value, changes: &HashMap<String, Change>) -> Vec<Item> {
     let tools = super::list(record, "tools");
     let updates = super::list(record, "updates");
     let state = super::value(record, "state");
@@ -150,7 +175,7 @@ pub(in crate::tui) fn items(record: &Value) -> Vec<Item> {
             }
             "tool" => {
                 if let Some(tool) = index.and_then(|index| tools.get(index)) {
-                    items.push(call(tool, working, turn_id));
+                    items.push(call(tool, working, turn_id, changes));
                 }
             }
             "returned" => {

@@ -14,6 +14,10 @@ pub(super) struct Panel {
     /// First conversation row shown inside, unless following the end.
     pub offset: usize,
     pub follow: bool,
+    /// The open collaborator's file changes with their hunks.
+    pub changes: conversation::Changes,
+    /// The open collaborator's rendered conversation.
+    pub rows: super::view::agents::Cache,
 }
 
 pub(super) fn value<'a>(record: &'a Value, key: &str) -> &'a str {
@@ -85,6 +89,7 @@ impl Panel {
         self.inside = None;
         self.offset = 0;
         self.follow = true;
+        self.rows.clear();
     }
 
     pub fn filtered(&self, records: &[Value]) -> Vec<usize> {
@@ -126,6 +131,8 @@ impl Default for Panel {
             inside: None,
             offset: 0,
             follow: true,
+            changes: conversation::Changes::default(),
+            rows: super::view::agents::Cache::default(),
         }
     }
 }
@@ -190,7 +197,40 @@ impl App {
         for event in events {
             dirty |= self.show_collaboration(event);
         }
-        dirty
+        dirty | self.refresh_agent_changes()
+    }
+
+    /// Reads the open collaborator's changes again when it changed more
+    /// files. Its session holds the hunks; its record keeps only counts.
+    fn refresh_agent_changes(&mut self) -> bool {
+        let Some(panel) = &mut self.state.agents_panel else {
+            return false;
+        };
+        let (Some(id), Some(record)) = (&panel.inside, panel.current(&self.state.collaboration))
+        else {
+            return false;
+        };
+        let counted = conversation::changed_calls(record);
+        if panel.changes.id == *id && panel.changes.counted == counted {
+            return false;
+        }
+        let calls = if counted == 0 {
+            std::collections::HashMap::new()
+        } else {
+            self.collaboration_observer
+                .changes(id)
+                .into_iter()
+                .map(|(call, change)| (call, change.redacted(&self.archive.redactor)))
+                .collect()
+        };
+        panel.changes = conversation::Changes {
+            id: id.clone(),
+            counted,
+            calls,
+        };
+        panel.rows.clear();
+        self.state.changed();
+        true
     }
 
     pub(super) fn show_collaboration(&mut self, event: Value) -> bool {
@@ -201,10 +241,8 @@ impl App {
         if value(&event, "kind") == "returned" {
             self.collaboration_return_pending = true;
         }
-        // Agent calls are serialized, so at most one is running.
-        let call = self.collaboration_receipt_calls.values().next().cloned();
         self.state
-            .collaboration_event(self.archive.redactor.value(&event), call.as_deref());
+            .collaboration_event(self.archive.redactor.value(&event));
         true
     }
 
@@ -315,6 +353,7 @@ impl App {
                     panel.offset = 0;
                     panel.follow = true;
                 }
+                self.refresh_agent_changes();
                 return;
             }
             if matches!(key.code, 8 | 46) {

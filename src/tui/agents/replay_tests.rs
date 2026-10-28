@@ -1,6 +1,6 @@
 use super::*;
 
-fn replay_app(home: &Directory, directory: &Directory) -> App {
+pub(super) fn replay_app(home: &Directory, directory: &Directory) -> App {
     let mut agent = Agent::new(
         OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
         Tools::new(directory.path()).unwrap(),

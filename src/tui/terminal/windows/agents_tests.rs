@@ -98,7 +98,7 @@ pub(super) fn console(bash: &Path) {
         ("details", Value::Array(vec![Value::string("a1")])),
         ("records", Value::Array(vec![record()])),
     ]);
-    state.collaboration_event(receipt, None);
+    state.collaboration_event(receipt);
     assert_eq!(state.toggle_tools(), Some((true, 1)));
     let expanded = crate::tui::view::frame(&state, "fixture/model", "fixture");
     let footer = expanded.live.last().unwrap();
